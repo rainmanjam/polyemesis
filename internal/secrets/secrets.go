@@ -11,7 +11,9 @@
 package secrets
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -78,6 +80,17 @@ func New(key []byte) (*Box, error) {
 	b := &Box{}
 	copy(b.key[:], key)
 	return b, nil
+}
+
+// Derive returns a deterministic 32-byte subkey for a named purpose.
+//
+// Used for the JWT signing key, so that a session cookie cannot be forged by
+// someone who only knows a ciphertext, and so that the two uses of the master
+// key are cryptographically separated rather than sharing bytes.
+func (b *Box) Derive(label string) []byte {
+	h := hmac.New(sha256.New, b.key[:])
+	h.Write([]byte("polyemesis/v1/" + label))
+	return h.Sum(nil)
 }
 
 // Seal encrypts plaintext. The nonce is random per call and prefixed to the
