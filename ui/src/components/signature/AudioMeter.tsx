@@ -50,6 +50,12 @@ interface Palette {
   hold: string;
 }
 
+// The canvas cannot use Tailwind classes, so the meter reads its colours from
+// the same CSS variables the rest of the kit uses. The literals below are
+// last-resort fallbacks for the case where the stylesheet has not applied yet
+// (canvas needs a valid fillStyle; "" would throw). They are NOT a second
+// palette: index.css is authoritative, and changing a colour there changes the
+// meters without touching this file.
 function readPalette(): Palette {
   return {
     low: cssVar("--meter-low", "#3ecf6d"),

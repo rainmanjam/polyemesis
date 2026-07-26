@@ -1,0 +1,65 @@
+# systemd unit for polyemesis.
+#
+#   sudo cp polyemesis /usr/local/bin/
+#   sudo useradd --system --home /var/lib/polyemesis --shell /usr/sbin/nologin polyemesis
+#   sudo mkdir -p /var/lib/polyemesis /etc/polyemesis
+#   sudo chown polyemesis:polyemesis /var/lib/polyemesis
+#   sudo cp config.example.yaml /etc/polyemesis/config.yaml
+#   sudo cp deploy/polyemesis.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now polyemesis
+#   journalctl -u polyemesis -f
+
+[Unit]
+Description=polyemesis restreaming server
+Documentation=https://github.com/rainmanjam/polyemesis
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polyemesis
+Group=polyemesis
+
+ExecStart=/usr/local/bin/polyemesis \
+    --config /etc/polyemesis/config.yaml \
+    --data /var/lib/polyemesis \
+    --addr :8080
+
+# polyemesis shuts its FFmpeg children down in order on SIGTERM, so that a
+# recording is finalised rather than truncated. Give it room to finish.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+# Send the signal to the main process only. polyemesis puts each child in its
+# own process group and tears them down itself; letting systemd kill the whole
+# cgroup first would cut recordings off mid-write.
+KillMode=mixed
+
+Restart=on-failure
+RestartSec=5s
+
+# --- hardening ---
+# polyemesis needs to exec ffmpeg and write to its data directory, and nothing
+# else. NoNewPrivileges is safe because the FFmpeg children need no privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/polyemesis
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# AF_INET/AF_INET6 for HTTP, RTMP and SRT; AF_UNIX for local sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Several FFmpeg processes each hold a handful of descriptors; the default
+# soft limit is fine but headroom costs nothing.
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
