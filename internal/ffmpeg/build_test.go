@@ -656,3 +656,30 @@ func itoa(i int) string {
 	}
 	return string(b)
 }
+
+// A build that lists "srtp" (Secure RTP) but has no SRT support must be
+// rejected. A substring check passes it, and the user then gets
+// "Protocol not found" on their first stream instead of a clear startup error.
+func TestHasProtocolRejectsSubstringMatches(t *testing.T) {
+	// Real output from an FFmpeg 8.x build without libsrt.
+	const withoutSRT = `Supported file protocols:
+Input:
+  file ftp http https rtmp rtmps rtp srtp tcp tls udp
+Output:
+  file ftp http https rtmp rtmps rtp srtp tcp tls udp
+`
+	if hasProtocol(withoutSRT, "srt") {
+		t.Error("srtp must not satisfy a check for srt")
+	}
+	if !hasProtocol(withoutSRT, "srtp") {
+		t.Error("srtp itself should be found")
+	}
+	if !hasProtocol(withoutSRT, "rtmp") {
+		t.Error("rtmp should be found")
+	}
+
+	const withSRT = "Input:\n  file srt srtp udp\nOutput:\n  file srt srtp udp\n"
+	if !hasProtocol(withSRT, "srt") {
+		t.Error("a build that really has srt must be accepted")
+	}
+}

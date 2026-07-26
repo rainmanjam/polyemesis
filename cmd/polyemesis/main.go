@@ -190,6 +190,9 @@ func reportStartup(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffm
 	fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
 	fmt.Printf("  data dir    %s\n", cfg.DataDir)
 	fmt.Printf("  ffmpeg      %s\n", tools.Version)
+	if warn := tools.SRTWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+	}
 	if !hasUser {
 		fmt.Printf("\n  First run: open the web UI to set an admin password.\n")
 	}
