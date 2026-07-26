@@ -1,0 +1,135 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic: polyemesis
+        - generic:
+          - generic: Ingest
+          - generic: reconnecting
+        - generic:
+          - generic: admin
+          - button
+      - generic:
+        - navigation:
+          - link:
+            - /url: /
+            - text: Dashboard
+          - link:
+            - /url: /meters
+            - text: Audio meters
+          - link:
+            - /url: /routing
+            - text: Routing
+          - link:
+            - /url: /recordings
+            - text: Recordings
+          - link:
+            - /url: /monitoring
+            - text: Monitoring
+          - link:
+            - /url: /settings
+            - text: Settings
+        - main:
+          - generic:
+            - generic:
+              - generic:
+                - heading [level=1]: Dashboard
+                - paragraph: Ingest once, fan out with per-destination audio.
+              - generic:
+                - button: Add destination
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - button
+                - generic:
+                  - generic:
+                    - generic: Ingest
+                    - generic: Reconnecting
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: Bitrate
+                        - generic: —
+                      - generic:
+                        - generic: Uptime
+                        - generic: —
+                      - generic:
+                        - generic: Audio tracks
+                        - generic: "3"
+                      - generic:
+                        - generic: Reconnects
+                        - generic: "28"
+                    - generic: h264 1280×720 @ 30.00fps
+                    - generic:
+                      - code: srt://localhost:6000?latency=200000&mode=caller&transtype=live
+                      - button
+                    - generic: "exit status 8: [in#0 @ 0x75fb020140] Error opening input: Protocol not found | Error opening input file srt://0.0.0.0:6000?latency=200000&mode=listener&transtype=live. | Error opening input files: Protocol not found"
+                    - generic:
+                      - text: This FFmpeg build has no SRT support, so multi-track SRT ingest will not work. Install a build with
+                      - code: "--enable-libsrt"
+                      - text: ", or switch the ingest to RTMP in Settings."
+              - generic:
+                - generic:
+                  - generic: Pipeline
+                  - generic:
+                    - generic:
+                      - generic: Recorder
+                      - generic: disabled
+                    - generic:
+                      - generic: Preview
+                      - generic: Live
+                    - generic:
+                      - generic: Meters
+                      - generic: Live
+                    - generic:
+                      - generic: Relay subscribers
+                      - generic: "2"
+            - generic:
+              - generic:
+                - heading [level=2]: Destinations0
+              - generic:
+                - generic:
+                  - paragraph: No destinations yet. Add one, then choose which audio tracks it receives.
+                  - button: Add destination
+    - region "Notifications alt+T":
+      - list:
+        - listitem:
+          - button "Close toast"
+          - generic: "invalid destination: invalid routing profile: no track is enabled with non-zero gain"
+  - dialog [active] [ref=f4e127]:
+    - generic [ref=f4e128]:
+      - heading "Add destination" [level=2] [ref=f4e129]
+      - paragraph [ref=f4e130]: Video is always passed through untouched. Only audio is re-encoded, using this destination's own routing profile.
+    - generic [ref=f4e131]:
+      - generic [ref=f4e132]:
+        - generic [ref=f4e133]: Name
+        - textbox "Name" [ref=f4e134]:
+          - /placeholder: YouTube — main channel
+          - text: Clean mix (tracks 1+2)
+      - generic [ref=f4e135]:
+        - generic [ref=f4e136]:
+          - generic [ref=f4e137]: Platform
+          - combobox [ref=f4e138]:
+            - generic: Custom
+        - generic [ref=f4e141]:
+          - generic [ref=f4e142]: Transport
+          - combobox [ref=f4e143]:
+            - generic: Local file
+      - generic [ref=f4e146]:
+        - generic [ref=f4e147]: Filename
+        - textbox "Filename" [ref=f4e179]:
+          - /placeholder: clean-mix.mkv
+          - text: clean-mix.mkv
+        - generic [ref=f4e180]: Written into the recordings directory. A relative name only — no paths.
+      - generic [ref=f4e152]:
+        - generic [ref=f4e153]: Audio bitrate
+        - generic [ref=f4e154]:
+          - spinbutton "Audio bitrate" [ref=f4e155]: "160"
+          - generic [ref=f4e156]: kbps, AAC stereo
+          - generic [ref=f4e157]: "video: copy"
+      - paragraph [ref=f4e158]: Any RTMP(S) or SRT endpoint.
+    - generic [ref=f4e159]:
+      - button "Cancel" [ref=f4e160]
+      - button "Create" [ref=f4e181]
+    - button "Close" [ref=f4e161]

@@ -1,0 +1,81 @@
+- generic [ref=e2]:
+  - generic [ref=e29]:
+    - banner [ref=e30]:
+      - generic [ref=e31]: polyemesis
+      - generic [ref=e35]:
+        - generic [ref=e38]: Ingest
+        - generic [ref=e39]: reconnecting
+      - generic [ref=e40]:
+        - generic [ref=e41]: admin
+        - button "Sign out" [ref=e42]
+    - generic [ref=e43]:
+      - navigation [ref=e44]:
+        - link "Dashboard" [ref=e45] [cursor=pointer]:
+          - /url: /
+        - link "Audio meters" [ref=e51] [cursor=pointer]:
+          - /url: /meters
+        - link "Routing" [ref=e53] [cursor=pointer]:
+          - /url: /routing
+        - link "Recordings" [ref=e55] [cursor=pointer]:
+          - /url: /recordings
+        - link "Monitoring" [ref=e59] [cursor=pointer]:
+          - /url: /monitoring
+        - link "Settings" [ref=e62] [cursor=pointer]:
+          - /url: /settings
+      - main [ref=e66]:
+        - generic [ref=e67]:
+          - generic [ref=e68]:
+            - generic [ref=e69]:
+              - heading "Dashboard" [level=1] [ref=e70]
+              - paragraph [ref=e71]: Ingest once, fan out with per-destination audio.
+            - button "Add destination" [ref=e73]
+          - generic [ref=e74]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: Waiting for a stream…
+              - generic [ref=e83]:
+                - generic [ref=e84]:
+                  - generic [ref=e85]: Ingest
+                  - generic [ref=e88]: Reconnecting
+                - generic [ref=e89]:
+                  - generic [ref=e90]:
+                    - generic [ref=e91]:
+                      - generic [ref=e92]: Bitrate
+                      - generic [ref=e93]: —
+                    - generic [ref=e94]:
+                      - generic [ref=e95]: Uptime
+                      - generic [ref=e96]: —
+                    - generic [ref=e97]:
+                      - generic [ref=e98]: Audio tracks
+                      - generic [ref=e99]: "6"
+                    - generic [ref=e100]:
+                      - generic [ref=e101]: Reconnects
+                      - generic [ref=e102]: "14"
+                  - generic [ref=e103]:
+                    - code [ref=e110]: srt://localhost:6000?latency=200000&mode=caller&transtype=live
+                    - button "Copy ingest URL" [ref=e111]
+                  - generic [ref=e112]: "exit status 8: [in#0 @ 0x79d6c38140] Error opening input: Protocol not found | Error opening input file srt://0.0.0.0:6000?latency=200000&mode=listener&transtype=live. | Error opening input files: Protocol not found"
+                  - generic [ref=e113]:
+                    - text: This FFmpeg build has no SRT support, so multi-track SRT ingest will not work. Install a build with
+                    - code [ref=e114]: "--enable-libsrt"
+                    - text: ", or switch the ingest to RTMP in Settings."
+            - generic [ref=e116]:
+              - generic [ref=e117]: Pipeline
+              - generic [ref=e119]:
+                - generic [ref=e120]:
+                  - generic [ref=e121]: Recorder
+                  - generic [ref=e125]: disabled
+                - generic [ref=e126]:
+                  - generic [ref=e127]: Preview
+                  - generic [ref=e132]: Live
+                - generic [ref=e133]:
+                  - generic [ref=e134]: Meters
+                  - generic [ref=e139]: Live
+                - generic [ref=e140]:
+                  - generic [ref=e141]: Relay subscribers
+                  - generic [ref=e142]: "2"
+          - generic [ref=e143]:
+            - heading "Destinations0" [level=2] [ref=e145]
+            - generic [ref=e147]:
+              - paragraph [ref=e148]: No destinations yet. Add one, then choose which audio tracks it receives.
+              - button "Add destination" [ref=e149]
+  - region "Notifications alt+T"

@@ -130,6 +130,37 @@ func ParseProbe(raw []byte) (*ProbeResult, error) {
 	return res, nil
 }
 
+// ChannelLayoutName returns the layout name FFmpeg's aformat filter accepts
+// for a given channel count.
+//
+// These are the exact spellings libavutil parses; "4.0" and "quad" are both
+// four channels but only some spellings are accepted in every position, and
+// getting one wrong turns into a filter-graph negotiation failure at runtime
+// rather than a parse error at startup.
+func ChannelLayoutName(channels int) string {
+	switch channels {
+	case 1:
+		return "mono"
+	case 2:
+		return "stereo"
+	case 3:
+		return "3.0"
+	case 4:
+		return "quad"
+	case 5:
+		return "5.0"
+	case 6:
+		return "5.1"
+	case 7:
+		return "6.1"
+	case 8:
+		return "7.1"
+	default:
+		// FFmpeg's "N channels, unspecified layout" spelling.
+		return strconv.Itoa(channels) + "c"
+	}
+}
+
 func layoutName(channels int) string {
 	switch channels {
 	case 1:

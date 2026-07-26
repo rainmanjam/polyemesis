@@ -1,0 +1,77 @@
+- generic [ref=f7e2]:
+  - generic [ref=f7e3]:
+    - banner [ref=f7e4]:
+      - generic [ref=f7e5]: polyemesis
+      - generic [ref=f7e9]:
+        - generic [ref=f7e12]: Ingest
+        - generic [ref=f7e13]: offline
+      - generic [ref=f7e14]:
+        - generic "Live updates are disconnected; retrying" [ref=f7e15]: offline
+        - generic [ref=f7e16]: admin
+        - button "Sign out" [ref=f7e17]
+    - generic [ref=f7e18]:
+      - navigation [ref=f7e19]:
+        - link "Dashboard" [ref=f7e20] [cursor=pointer]:
+          - /url: /
+        - link "Audio meters" [ref=f7e26] [cursor=pointer]:
+          - /url: /meters
+        - link "Routing" [ref=f7e28] [cursor=pointer]:
+          - /url: /routing
+        - link "Recordings" [ref=f7e30] [cursor=pointer]:
+          - /url: /recordings
+        - link "Monitoring" [ref=f7e34] [cursor=pointer]:
+          - /url: /monitoring
+        - link "Settings" [ref=f7e37] [cursor=pointer]:
+          - /url: /settings
+      - main [ref=f7e41]:
+        - generic [ref=f7e42]:
+          - generic [ref=f7e43]:
+            - generic [ref=f7e44]:
+              - heading "Dashboard" [level=1] [ref=f7e45]
+              - paragraph [ref=f7e46]: Ingest once, fan out with per-destination audio.
+            - button "Add destination" [ref=f7e48]
+          - generic [ref=f7e49]:
+            - generic [ref=f7e50]:
+              - generic [ref=f7e51]: Waiting for a stream…
+              - generic [ref=f7e58]:
+                - generic [ref=f7e59]:
+                  - generic [ref=f7e60]: Ingest
+                  - generic [ref=f7e63]: Offline
+                - generic [ref=f7e64]:
+                  - generic [ref=f7e65]:
+                    - generic [ref=f7e66]:
+                      - generic [ref=f7e67]: Bitrate
+                      - generic [ref=f7e68]: —
+                    - generic [ref=f7e69]:
+                      - generic [ref=f7e70]: Uptime
+                      - generic [ref=f7e71]: —
+                    - generic [ref=f7e72]:
+                      - generic [ref=f7e73]: Audio tracks
+                      - generic [ref=f7e74]: "0"
+                    - generic [ref=f7e75]:
+                      - generic [ref=f7e76]: Reconnects
+                      - generic [ref=f7e77]: "0"
+                  - generic [ref=f7e78]:
+                    - code [ref=f7e85]: …
+                    - button "Copy ingest URL" [ref=f7e86]
+            - generic [ref=f7e88]:
+              - generic [ref=f7e89]: Pipeline
+              - generic [ref=f7e91]:
+                - generic [ref=f7e92]:
+                  - generic [ref=f7e93]: Recorder
+                  - generic [ref=f7e97]: disabled
+                - generic [ref=f7e98]:
+                  - generic [ref=f7e99]: Preview
+                  - generic [ref=f7e103]: disabled
+                - generic [ref=f7e104]:
+                  - generic [ref=f7e105]: Meters
+                  - generic [ref=f7e109]: disabled
+                - generic [ref=f7e110]:
+                  - generic [ref=f7e111]: Relay subscribers
+                  - generic [ref=f7e112]: "0"
+          - generic [ref=f7e113]:
+            - heading "Destinations0" [level=2] [ref=f7e115]
+            - generic [ref=f7e117]:
+              - paragraph [ref=f7e118]: No destinations yet. Add one, then choose which audio tracks it receives.
+              - button "Add destination" [ref=f7e119]
+  - region "Notifications alt+T"

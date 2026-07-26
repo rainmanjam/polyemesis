@@ -1,0 +1,120 @@
+- generic [ref=f8e2]:
+  - generic [ref=f8e3]:
+    - banner [ref=f8e4]:
+      - generic [ref=f8e5]: polyemesis
+      - generic [ref=f8e9]:
+        - generic [ref=f8e12]: Ingest
+        - generic [ref=f8e13]: reconnecting
+      - generic [ref=f8e14]:
+        - generic [ref=f8e16]: admin
+        - button "Sign out" [ref=f8e17]
+    - generic [ref=f8e18]:
+      - navigation [ref=f8e19]:
+        - link "Dashboard" [ref=f8e20] [cursor=pointer]:
+          - /url: /
+        - link "Audio meters" [ref=f8e26] [cursor=pointer]:
+          - /url: /meters
+        - link "Routing" [ref=f8e28] [cursor=pointer]:
+          - /url: /routing
+        - link "Recordings" [ref=f8e30] [cursor=pointer]:
+          - /url: /recordings
+        - link "Monitoring" [ref=f8e34] [cursor=pointer]:
+          - /url: /monitoring
+        - link "Settings" [ref=f8e37] [cursor=pointer]:
+          - /url: /settings
+      - main [ref=f8e41]:
+        - generic [ref=f8e42]:
+          - generic [ref=f8e43]:
+            - generic [ref=f8e44]:
+              - heading "Audio routing" [level=1] [ref=f8e45]
+              - paragraph [ref=f8e46]: Choose exactly which ingest tracks each destination receives.
+            - generic [ref=f8e47]:
+              - button "Save" [disabled]
+          - generic [ref=f8e48]:
+            - generic [ref=f8e49]:
+              - generic [ref=f8e50]: Destinations
+              - button "Clean mix (tracks 1+2) Tracks 1, 2 → stereo" [ref=f8e166]:
+                - generic [ref=f8e54]: Clean mix (tracks 1+2)
+                - generic [ref=f8e55]: Tracks 1, 2 → stereo
+            - generic [ref=f8e56]:
+              - generic [ref=f8e57]:
+                - generic [ref=f8e58]: Presets
+                - generic [ref=f8e63]:
+                  - button "Everything" [ref=f8e65]
+                  - generic [ref=f8e66]:
+                    - button "No music" [ref=f8e67]
+                    - combobox [ref=f8e68]:
+                      - generic: Track 1
+                  - generic [ref=f8e71]:
+                    - button "Mic only" [ref=f8e72]
+                    - combobox [ref=f8e73]:
+                      - generic: Track 3
+                  - generic [ref=f8e76]:
+                    - button "5.1 → stereo" [ref=f8e77]
+                    - combobox [ref=f8e78]:
+                      - generic: Track 1
+              - generic [ref=f8e83]:
+                - generic [ref=f8e84]:
+                  - tablist [ref=f8e85]:
+                    - tab "Simple" [selected] [ref=f8e86]
+                    - tab "Mix matrix" [ref=f8e87]
+                  - generic [ref=f8e88]:
+                    - generic [ref=f8e89]: Clip protection
+                    - combobox "Clip protection" [ref=f8e90]:
+                      - generic: Auto (limit when 2+ tracks)
+                - tabpanel "Simple" [ref=f8e93]:
+                  - generic [ref=f8e94]:
+                    - generic [ref=f8e95]:
+                      - checkbox "Include track 1" [checked] [ref=f8e96]
+                      - generic [ref=f8e97] [cursor=pointer]:
+                        - generic [ref=f8e98]: Track 1
+                        - generic [ref=f8e99]: mono
+                      - generic [ref=f8e142]:
+                        - generic [ref=f8e143]: M
+                        - generic "audio level meter" [ref=f8e145]
+                      - generic [ref=f8e102]:
+                        - generic "Track 1 gain" [ref=f8e103]:
+                          - slider [ref=f8e107]
+                        - generic [ref=f8e108]: 100%
+                    - generic [ref=f8e109]:
+                      - checkbox "Include track 2" [checked] [ref=f8e110]
+                      - generic [ref=f8e111] [cursor=pointer]:
+                        - generic [ref=f8e112]: Track 2
+                        - generic [ref=f8e113]: mono
+                      - generic [ref=f8e146]:
+                        - generic [ref=f8e147]: M
+                        - generic "audio level meter" [ref=f8e149]
+                      - generic [ref=f8e116]:
+                        - generic "Track 2 gain" [ref=f8e117]:
+                          - slider [ref=f8e121]
+                        - generic [ref=f8e122]: 100%
+                    - generic [ref=f8e123]:
+                      - checkbox "Include track 3" [ref=f8e124]
+                      - generic [ref=f8e125] [cursor=pointer]:
+                        - generic [ref=f8e126]: Track 3
+                        - generic [ref=f8e127]: mono
+                      - generic [ref=f8e150]:
+                        - generic [ref=f8e151]: M
+                        - generic "audio level meter" [ref=f8e153]
+                      - generic [ref=f8e130]:
+                        - generic "Track 3 gain" [ref=f8e131]:
+                          - slider [disabled] [ref=f8e135]
+                        - generic [ref=f8e136]: 100%
+              - generic [ref=f8e137]:
+                - generic [ref=f8e138]:
+                  - generic [ref=f8e139]: Result
+                  - generic [ref=f8e154]:
+                    - generic [ref=f8e155]: Tracks 1, 2 → stereo
+                    - generic [ref=f8e165]: limiter
+                - generic [ref=f8e140]:
+                  - generic [ref=f8e156]:
+                    - generic [ref=f8e157]:
+                      - generic [ref=f8e158]: generated filter_complex
+                      - button "Copy filter string" [ref=f8e161]
+                    - generic [ref=f8e162]: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c0[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]"
+                  - paragraph [ref=f8e141]: Video is copied without re-encoding. Only this audio graph is applied, and only this destination restarts when you save.
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=f8e167]:
+        - button "Close toast" [ref=f8e168] [cursor=pointer]
+        - generic [ref=f8e175]: Routing saved.

@@ -360,9 +360,9 @@ func TestMetersArgsMergesTracksIntoOneStream(t *testing.T) {
 		t.Fatal("no filter_complex")
 	}
 
-	want := "[0:a:0]aresample=48000[mt0];" +
-		"[0:a:1]aresample=48000[mt1];" +
-		"[0:a:2]aresample=48000[mt2];" +
+	want := "[0:a:0]aresample=48000,aformat=channel_layouts=stereo[mt0];" +
+		"[0:a:1]aresample=48000,aformat=channel_layouts=stereo[mt1];" +
+		"[0:a:2]aresample=48000,aformat=channel_layouts=5.1[mt2];" +
 		"[mt0][mt1][mt2]amerge=inputs=3[mgd];" +
 		"[mgd]astats=metadata=1:reset=1:length=0.1:measure_perchannel=Peak_level+RMS_level:measure_overall=none," +
 		"ametadata=mode=print:file=-[mout]"
@@ -681,5 +681,40 @@ Output:
 	const withSRT = "Input:\n  file srt srtp udp\nOutput:\n  file srt srtp udp\n"
 	if !hasProtocol(withSRT, "srt") {
 		t.Error("a build that really has srt must be accepted")
+	}
+}
+
+// amerge refuses to negotiate when its inputs have ambiguous channel layouts:
+// three mono tracks make three channels, which could be 3.0 or 2.1, and FFmpeg
+// fails the whole graph with "could not choose their formats". Pinning each
+// input leg's layout is the fix, and it must be on the INPUTS -- constraining
+// amerge's output does not help. Regression test: a mono mic track is an
+// extremely common setup, so this broke metering for many real users.
+func TestMetersArgsPinsInputChannelLayouts(t *testing.T) {
+	args := MetersArgs(MetersSpec{RelayURL: "udp://127.0.0.1:1", TrackChannels: []int{1, 1, 1}})
+	fc, _ := argsAfter(args, "-filter_complex")
+
+	want := "[0:a:0]aresample=48000,aformat=channel_layouts=mono[mt0];" +
+		"[0:a:1]aresample=48000,aformat=channel_layouts=mono[mt1];" +
+		"[0:a:2]aresample=48000,aformat=channel_layouts=mono[mt2];" +
+		"[mt0][mt1][mt2]amerge=inputs=3[mgd];" +
+		"[mgd]astats=metadata=1:reset=1:length=0.1:measure_perchannel=Peak_level+RMS_level:measure_overall=none," +
+		"ametadata=mode=print:file=-[mout]"
+	if fc != want {
+		t.Errorf("\n got  %s\n want %s", fc, want)
+	}
+}
+
+func TestChannelLayoutName(t *testing.T) {
+	// These exact spellings are what libavutil parses. A wrong one fails at
+	// runtime during filter negotiation, not at startup.
+	tests := map[int]string{
+		1: "mono", 2: "stereo", 3: "3.0", 4: "quad",
+		5: "5.0", 6: "5.1", 7: "6.1", 8: "7.1", 12: "12c",
+	}
+	for channels, want := range tests {
+		if got := ChannelLayoutName(channels); got != want {
+			t.Errorf("ChannelLayoutName(%d) = %q, want %q", channels, got, want)
+		}
 	}
 }

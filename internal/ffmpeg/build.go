@@ -410,9 +410,17 @@ func MetersArgs(s MetersSpec) []string {
 	var labels []string
 	for i := 0; i < n; i++ {
 		label := fmt.Sprintf("mt%d", i)
-		// aresample guarantees every leg shares a sample rate, which amerge
-		// requires and which a mixed-rate ingest would otherwise violate.
-		chains = append(chains, fmt.Sprintf("[0:a:%d]aresample=%d[%s]", i, s.SampleRate, label))
+		// Two constraints, both load-bearing:
+		//
+		//  - aresample: amerge requires every leg at the same sample rate, and
+		//    a mixed-rate ingest would otherwise fail to negotiate.
+		//  - aformat: amerge cannot pick an output layout when its inputs have
+		//    ambiguous ones. Merging three mono tracks produces three channels,
+		//    which could be 3.0 or 2.1, and FFmpeg refuses with "The following
+		//    filters could not choose their formats". Pinning each INPUT leg's
+		//    layout resolves it; constraining amerge's output does not.
+		chains = append(chains, fmt.Sprintf("[0:a:%d]aresample=%d,aformat=channel_layouts=%s[%s]",
+			i, s.SampleRate, ChannelLayoutName(s.TrackChannels[i]), label))
 		labels = append(labels, "["+label+"]")
 	}
 

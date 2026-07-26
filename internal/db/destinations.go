@@ -193,6 +193,14 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if dst.Platform == "" {
 		dst.Platform = PlatformCustom
 	}
+	// A create request normally carries no routing profile — the user sets one
+	// afterwards in the routing editor. ApplyDefaults alone would produce six
+	// rows with nothing enabled, which fails validation ("no track is enabled")
+	// and makes creating a destination impossible. Seed a real default instead:
+	// track 1 at unity, which is what a single-track ingest wants anyway.
+	if dst.Profile.IsUnset() {
+		dst.Profile = routing.DefaultProfile()
+	}
 	dst.Profile.ApplyDefaults()
 	if err := dst.Validate(); err != nil {
 		return nil, err

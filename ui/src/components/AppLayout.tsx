@@ -1,0 +1,165 @@
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import {
+  Activity,
+  AudioLines,
+  Disc,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Settings as SettingsIcon,
+  Sliders,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { StatusDot } from "@/components/signature/StatusDot";
+import { useLiveData } from "@/hooks/useLiveData";
+import { toneForState } from "@/lib/signal";
+import { duration, kbps } from "@/lib/format";
+import { cn } from "@/lib/utils";
+
+const NAV = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/meters", label: "Audio meters", icon: AudioLines },
+  { to: "/routing", label: "Routing", icon: Sliders },
+  { to: "/recordings", label: "Recordings", icon: Disc },
+  { to: "/monitoring", label: "Monitoring", icon: Activity },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
+];
+
+export function AppLayout({
+  username,
+  onSignOut,
+}: {
+  username: string;
+  onSignOut: () => void;
+}) {
+  const { status, connected } = useLiveData();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+
+  // Close the drawer on navigation, or a phone user taps a link and stares at
+  // the menu they just used.
+  useEffect(() => setMobileOpen(false), [location.pathname]);
+
+  const ingest = status?.ingest;
+  const ingestTone = toneForState(ingest?.state);
+  const liveCount =
+    status?.destinations.filter((d) => d.process?.state === "running").length ?? 0;
+
+  return (
+    <div className="flex h-dvh flex-col bg-surface">
+      {/* ---- top bar: the always-visible answer to "am I on air?" ---- */}
+      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="md:hidden"
+          onClick={() => setMobileOpen((v) => !v)}
+          aria-label="Toggle navigation"
+        >
+          {mobileOpen ? <X /> : <Menu />}
+        </Button>
+
+        <div className="flex items-center gap-2">
+          <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/15">
+            <AudioLines className="h-3 w-3 text-primary" />
+          </div>
+          <span className="text-[13px] font-semibold tracking-tight">polyemesis</span>
+        </div>
+
+        <div className="ml-2 hidden items-center gap-2 sm:flex">
+          <StatusDot tone={ingestTone} />
+          <span className="text-[11px] text-muted-foreground">Ingest</span>
+          <span className="tnum font-mono text-[11px]">
+            {ingest?.state === "running"
+              ? kbps(ingest.progress?.bitrateKbps ?? 0)
+              : (ingest?.state ?? "offline")}
+          </span>
+        </div>
+
+        <div className="ml-auto flex items-center gap-3">
+          {liveCount > 0 && (
+            <Badge variant="live" className="hidden sm:inline-flex">
+              <StatusDot tone="live" size="sm" />
+              {liveCount} live
+            </Badge>
+          )}
+          {ingest?.state === "running" && (
+            <span className="tnum hidden font-mono text-[11px] text-muted-foreground sm:inline">
+              {duration(ingest.uptimeSec)}
+            </span>
+          )}
+          {/* Socket health matters: a disconnected UI showing stale numbers is
+              worse than one that admits it is stale. */}
+          {!connected && (
+            <Badge variant="warn" title="Live updates are disconnected; retrying">
+              offline
+            </Badge>
+          )}
+          <span className="hidden text-[11px] text-muted-foreground lg:inline">{username}</span>
+          <Button variant="ghost" size="icon-sm" onClick={onSignOut} aria-label="Sign out">
+            <LogOut />
+          </Button>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        {/* ---- sidebar ---- */}
+        <nav
+          className={cn(
+            "z-40 flex w-44 shrink-0 flex-col gap-0.5 border-r border-border bg-background p-2",
+            "max-md:absolute max-md:inset-y-11 max-md:left-0 max-md:transition-transform",
+            mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
+          )}
+        >
+          {NAV.map(({ to, label, icon: Icon, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
+                  isActive
+                    ? "bg-primary-dim text-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )
+              }
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+/** Consistent page header. Every page uses it so titles, subtitles and
+ *  actions sit in the same place regardless of what the page does. */
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+}: {
+  title: string;
+  subtitle?: string;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</p>}
+      </div>
+      {actions && <div className="flex items-center gap-1.5">{actions}</div>}
+    </div>
+  );
+}
