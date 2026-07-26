@@ -3,8 +3,17 @@
 /data/
 node_modules/
 ui/dist/
-internal/web/dist/
+config.yaml
+
+# The built UI is a build artefact, not source. But go:embed requires the
+# directory to contain at least one file or `go build ./...` fails in a clean
+# checkout -- hence the tracked .gitkeep. The `all:` prefix on the embed
+# pattern is what makes go:embed match a dotfile.
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+
 *.db
 *.db-wal
 *.db-shm
 .DS_Store
+.playwright-mcp/

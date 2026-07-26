@@ -21,14 +21,18 @@ func FS() (fs.FS, error) {
 	return fs.Sub(embedded, "dist")
 }
 
-// Built reports whether a real UI was embedded, as opposed to the placeholder
-// that keeps `go build ./...` working before `npm run build` has ever run.
+// Built reports whether a real UI was embedded.
+//
+// In a clean checkout the embedded directory holds only a tracked .gitkeep --
+// present so that go:embed has something to match and `go build ./...` works
+// before `npm run build` has ever run. No index.html means no UI, and main
+// warns rather than serving a blank page.
 func Built() bool {
 	b, err := embedded.ReadFile("dist/index.html")
 	if err != nil {
 		return false
 	}
-	return !strings.Contains(string(b), "polyemesis-ui-placeholder")
+	return len(b) > 0
 }
 
 // Handler serves the SPA: hashed assets with a long cache, everything else
