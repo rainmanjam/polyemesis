@@ -1,0 +1,7 @@
+[    9278ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8099/:0
+[   18938ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://localhost:8099/api/v1/destinations:0
+[   80071ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/hls/index.m3u8:0
+[   80506ms] [ERROR] WebSocket connection to 'ws://localhost:8099/api/v1/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/assets/index-CLKPFKQ-.js:10
+[   81076ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/hls/index.m3u8:0
+[   83085ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8099/hls/index.m3u8:0
+[   87093ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8099/hls/index.m3u8:0

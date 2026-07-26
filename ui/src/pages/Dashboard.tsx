@@ -1,0 +1,269 @@
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
+import { Copy, Plus, Radio } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/AppLayout";
+import { PreviewPlayer } from "@/components/PreviewPlayer";
+import { DestinationCard } from "@/components/DestinationCard";
+import { DestinationDialog } from "@/components/DestinationDialog";
+import { StatusDot } from "@/components/signature/StatusDot";
+import { Stat } from "@/components/signature/Stat";
+import { useLiveData } from "@/hooks/useLiveData";
+import { api } from "@/lib/api";
+import { duration, kbps } from "@/lib/format";
+import { labelForState, toneBadge, toneForState } from "@/lib/signal";
+import type { Destination, SystemInfo } from "@/lib/types";
+
+export function Dashboard() {
+  const { status } = useLiveData();
+  const [system, setSystem] = useState<SystemInfo | null>(null);
+  const [settingsPreview, setSettingsPreview] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Destination | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    api.system().then(setSystem).catch(() => {});
+    api
+      .getSettings()
+      .then((s) => setSettingsPreview(s.preview.enabled))
+      .catch(() => {});
+  }, [refreshKey]);
+
+  const act = useCallback(
+    async (id: number, fn: () => Promise<unknown>, label: string) => {
+      setBusyId(id);
+      try {
+        await fn();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : `Could not ${label}.`);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [],
+  );
+
+  const openEdit = async (id: number) => {
+    try {
+      const { destination } = await api.getDestination(id);
+      setEditing(destination);
+      setDialogOpen(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not load the destination.");
+    }
+  };
+
+  const remove = async (id: number, name: string) => {
+    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    await act(id, () => api.deleteDestination(id), "delete the destination");
+    toast.success("Destination deleted.");
+    setRefreshKey((k) => k + 1);
+  };
+
+  const ingest = status?.ingest;
+  const ingestTone = toneForState(ingest?.state);
+  const destinations = status?.destinations ?? [];
+  const source = status?.source;
+
+  const copyIngest = async () => {
+    if (!system?.ingestUrl) return;
+    try {
+      await navigator.clipboard.writeText(system.ingestUrl);
+      toast.success("Ingest URL copied.");
+    } catch {
+      toast.error("Clipboard is unavailable on this origin.");
+    }
+  };
+
+  return (
+    <div className="p-3">
+      <PageHeader
+        title="Dashboard"
+        subtitle="Ingest once, fan out with per-destination audio."
+        actions={
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          >
+            <Plus /> Add destination
+          </Button>
+        }
+      />
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        {/* ---------- preview + ingest ---------- */}
+        <div className="flex flex-col gap-3">
+          <PreviewPlayer active={settingsPreview} />
+
+          <Card>
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <StatusDot tone={ingestTone} />
+                Ingest
+              </CardTitle>
+              <Badge variant={toneBadge[ingestTone]}>{labelForState(ingest?.state)}</Badge>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat
+                  label="Bitrate"
+                  value={ingest?.state === "running" ? kbps(ingest.progress?.bitrateKbps ?? 0) : "—"}
+                />
+                <Stat
+                  label="Uptime"
+                  value={ingest?.state === "running" ? duration(ingest.uptimeSec) : "—"}
+                />
+                <Stat label="Audio tracks" value={source?.tracks?.length ?? 0} />
+                <Stat
+                  label="Reconnects"
+                  value={ingest?.restarts ?? 0}
+                  tone={(ingest?.restarts ?? 0) > 0 ? "warn" : "muted"}
+                />
+              </div>
+
+              {source?.video && (
+                <div className="font-mono text-[10px] text-muted-foreground">
+                  {source.video.codec} {source.video.width}×{source.video.height}
+                  {source.video.frameRate > 0 && ` @ ${source.video.frameRate.toFixed(2)}fps`}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
+                <Radio className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
+                  {system?.ingestUrl ?? "…"}
+                </code>
+                <Button variant="ghost" size="icon-sm" onClick={copyIngest} aria-label="Copy ingest URL">
+                  <Copy />
+                </Button>
+              </div>
+
+              {ingest?.lastError && ingest.state !== "running" && (
+                <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+                  {ingest.lastError}
+                </div>
+              )}
+
+              {system && !system.ffmpeg.hasLibsrt && (
+                <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+                  This FFmpeg build has no SRT support, so multi-track SRT ingest will not work.
+                  Install a build with <code className="font-mono">--enable-libsrt</code>, or switch
+                  the ingest to RTMP in Settings.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ---------- side stats ---------- */}
+        <div className="flex flex-col gap-3">
+          <Card>
+            <CardHeader>
+              <CardTitle>Pipeline</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-1.5">
+              {(
+                [
+                  ["Recorder", status?.recorder],
+                  ["Preview", status?.preview],
+                  ["Meters", status?.meters],
+                ] as const
+              ).map(([label, proc]) => {
+                const tone = proc ? toneForState(proc.state) : "idle";
+                return (
+                  <div key={label} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <StatusDot tone={tone} size="sm" />
+                      <span className="text-[11px]">{label}</span>
+                    </div>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {proc ? labelForState(proc.state) : "disabled"}
+                    </span>
+                  </div>
+                );
+              })}
+              <div className="mt-1 flex items-center justify-between border-t border-border pt-1.5">
+                <span className="text-[11px] text-muted-foreground">Relay subscribers</span>
+                <span className="tnum font-mono text-[10px]">
+                  {status?.relay.subscribers?.length ?? 0}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* ---------- destinations ---------- */}
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-[13px] font-semibold tracking-tight">
+            Destinations
+            <span className="ml-1.5 font-mono text-[11px] font-normal text-muted-foreground">
+              {destinations.length}
+            </span>
+          </h2>
+        </div>
+
+        {destinations.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
+              <p className="text-[12px] text-muted-foreground">
+                No destinations yet. Add one, then choose which audio tracks it receives.
+              </p>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditing(null);
+                  setDialogOpen(true);
+                }}
+              >
+                <Plus /> Add destination
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {destinations.map((d) => (
+              <DestinationCard
+                key={d.id}
+                dest={d}
+                busy={busyId === d.id}
+                onStart={() => act(d.id, () => api.startDestination(d.id), "start the destination")}
+                onStop={() => act(d.id, () => api.stopDestination(d.id), "stop the destination")}
+                onRestart={() =>
+                  act(d.id, () => api.restartDestination(d.id), "restart the destination")
+                }
+                onEdit={() => openEdit(d.id)}
+                onDelete={() => remove(d.id, d.name)}
+                onRefreshKey={async () => {
+                  await act(
+                    d.id,
+                    async () => {
+                      await api.refreshStreamKey(d.id);
+                      toast.success("Stream key refreshed from the platform.");
+                    },
+                    "refresh the stream key",
+                  );
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <DestinationDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        destination={editing}
+        onSaved={() => setRefreshKey((k) => k + 1)}
+      />
+    </div>
+  );
+}

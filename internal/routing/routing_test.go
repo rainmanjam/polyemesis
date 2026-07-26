@@ -644,3 +644,39 @@ func TestFmtCoeff(t *testing.T) {
 		}
 	}
 }
+
+// A create-destination request carries no routing profile: the user names the
+// endpoint first and picks the mix afterwards. ApplyDefaults on a zero profile
+// produces six rows with nothing enabled, which then fails validation — so
+// callers must substitute DefaultProfile. Without this, creating a destination
+// from the UI is impossible.
+func TestUnsetProfileIsDetectableAndDefaultIsValid(t *testing.T) {
+	var zero Profile
+	if !zero.IsUnset() {
+		t.Fatal("a zero profile must report IsUnset")
+	}
+
+	// The trap: defaulting a zero profile in place yields an invalid profile.
+	defaulted := zero
+	defaulted.ApplyDefaults()
+	if err := defaulted.Validate(); err == nil {
+		t.Fatal("expected an all-disabled profile to be invalid; if this changes, " +
+			"the IsUnset substitution in db.CreateDestination is no longer needed")
+	}
+
+	// The fix: DefaultProfile is valid and compiles.
+	d := DefaultProfile()
+	if d.IsUnset() {
+		t.Fatal("DefaultProfile must not look unset")
+	}
+	if err := d.Validate(); err != nil {
+		t.Fatalf("DefaultProfile must be valid: %v", err)
+	}
+	res, err := Compile(d, stereoSource(2))
+	if err != nil {
+		t.Fatalf("DefaultProfile must compile: %v", err)
+	}
+	if res.Summary != "Track 1 → stereo" {
+		t.Errorf("summary = %q, want track 1 selected by default", res.Summary)
+	}
+}

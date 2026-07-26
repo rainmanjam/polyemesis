@@ -151,6 +151,15 @@ func (e *ValidationError) Error() string {
 // ErrNoAudio is returned when a profile selects nothing at all.
 var ErrNoAudio = errors.New("routing profile selects no audio")
 
+// IsUnset reports whether a profile carries no routing information at all,
+// which is what a create-destination request looks like: the user names the
+// endpoint first and configures the mix afterwards. Callers substitute
+// DefaultProfile rather than letting ApplyDefaults produce an all-disabled
+// profile that then fails validation.
+func (p Profile) IsUnset() bool {
+	return len(p.Tracks) == 0 && len(p.Matrix) == 0
+}
+
 // ApplyDefaults fills in defaults for a partially specified profile. It is
 // applied on the way in from the API so that older/sparser payloads stay
 // accepted. (It cannot be called Normalize — that name is taken by the field.)
