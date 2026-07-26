@@ -1,0 +1,30 @@
+# Minimal compose file. Docker is optional — see the README for the bare-binary
+# and systemd deployments, which are the primary path.
+
+services:
+  polyemesis:
+    build:
+      context: .
+      args:
+        VERSION: compose
+    # Or, once published: image: polyemesis:latest
+    container_name: polyemesis
+    restart: unless-stopped
+    ports:
+      - "8080:8080"        # web UI + API
+      - "6000:6000/udp"    # SRT ingest — UDP, not TCP
+      - "1935:1935"        # RTMP ingest (fallback)
+    volumes:
+      # Database, encryption key and recordings all live here. Back it up.
+      - polyemesis-data:/data
+    # FFmpeg is happiest with a decent shared-memory segment when filtering
+    # several destinations at once.
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+
+volumes:
+  polyemesis-data:

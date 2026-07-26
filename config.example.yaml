@@ -1,0 +1,37 @@
+# polyemesis deployment configuration.
+#
+# Only the things that must be known before the database opens live here.
+# Everything a user can change at runtime — ingest ports, recording retention,
+# platform credentials — is configured in the web UI and stored in SQLite.
+#
+# Copy to config.yaml and edit. Every value can also be overridden by a flag;
+# run `polyemesis -h` for the list.
+
+# HTTP listen address for the web UI and API.
+addr: ":8080"
+
+# Holds polyemesis.db, secret.key, recordings/ and hls/.
+# Back this directory up: secret.key decrypts your stored OAuth tokens.
+dataDir: "./data"
+
+# Optional built-in TLS. Most deployments terminate TLS at a reverse proxy
+# instead and leave this disabled — see the README.
+tls:
+  enabled: false
+  certFile: ""
+  keyFile: ""
+
+# Set to true ONLY when polyemesis really is behind a reverse proxy you control.
+# It makes the server trust X-Forwarded-Proto and X-Forwarded-Host when marking
+# session cookies Secure and when building OAuth redirect URIs. With no proxy in
+# front, a client could forge those headers.
+trustProxyHeaders: false
+
+# Pin specific binaries instead of searching $PATH. Leave empty to autodetect.
+ffmpeg:
+  binary: ""
+  probe: ""
+
+# Feature flag for Enhanced RTMP / multitrack FLV ingest (OBS 30.2+).
+# Off by default: it is a stretch feature and must not destabilise v1.
+enhancedRtmp: false
