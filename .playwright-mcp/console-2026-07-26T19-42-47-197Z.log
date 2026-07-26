@@ -36,3 +36,6 @@
 [  542107ms] [ERROR] WebSocket connection to 'ws://localhost:8099/api/v1/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/assets/index-CLKPFKQ-.js:10
 [  557113ms] [ERROR] WebSocket connection to 'ws://localhost:8099/api/v1/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/assets/index-CLKPFKQ-.js:10
 [  572127ms] [ERROR] WebSocket connection to 'ws://localhost:8099/api/v1/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/assets/index-CLKPFKQ-.js:10
+[  587152ms] [ERROR] WebSocket connection to 'ws://localhost:8099/api/v1/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/assets/index-CLKPFKQ-.js:10
+[  602157ms] [ERROR] WebSocket connection to 'ws://localhost:8099/api/v1/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/assets/index-CLKPFKQ-.js:10
+[  617160ms] [ERROR] WebSocket connection to 'ws://localhost:8099/api/v1/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:8099/assets/index-CLKPFKQ-.js:10
