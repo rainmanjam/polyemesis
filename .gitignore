@@ -1,0 +1,10 @@
+/polyemesis
+/dist/
+/data/
+node_modules/
+ui/dist/
+internal/web/dist/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
