@@ -109,32 +109,51 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 		t.Version = strings.TrimSpace(t.Version) + " (unrecognised version string; assuming >= 6.0)"
 	}
 
-	if err := t.checkSRT(ctx); err != nil {
-		return t, err
-	}
+	t.checkSRT(ctx)
 	return t, nil
 }
 
-// checkSRT confirms the SRT protocol is actually compiled in. The configure
-// line is a hint; asking FFmpeg for its protocol list is the truth, and SRT is
-// the primary ingest so a missing one must fail loudly at startup rather than
-// at first stream.
-func (t *Tools) checkSRT(ctx context.Context) error {
+// checkSRT records whether the SRT protocol is actually compiled in.
+//
+// This is a warning, not a fatal error. SRT is the primary ingest, but RTMP is
+// a working fallback and the user can only switch to it from Settings — which
+// requires a running server. Refusing to start would leave them with no way to
+// fix the problem from inside the product. The failure surfaces instead as a
+// clear message on the ingest process and a banner in the UI.
+func (t *Tools) checkSRT(ctx context.Context) {
 	out, err := exec.CommandContext(ctx, t.FFmpeg, "-hide_banner", "-protocols").CombinedOutput()
 	if err != nil {
-		return nil // non-fatal: some builds restrict -protocols
+		return // some builds restrict -protocols; assume the best
 	}
-	if strings.Contains(string(out), "srt") {
-		t.HasLibSRT = true
-		return nil
+	// Whole-token match, not a substring. Every FFmpeg build lists "srtp"
+	// (Secure RTP), which contains "srt" — a naive Contains check passes on
+	// builds that have no SRT support whatsoever and defers the failure to the
+	// first stream, as "Protocol not found".
+	t.HasLibSRT = hasProtocol(string(out), "srt")
+}
+
+// SRTWarning returns the message to show when the detected FFmpeg cannot do
+// SRT, or "" when it can.
+func (t *Tools) SRTWarning() string {
+	if t.HasLibSRT {
+		return ""
 	}
-	t.HasLibSRT = false
-	return fmt.Errorf(
-		"%s (FFmpeg %s) was built without SRT support, which polyemesis uses for multi-track ingest. "+
-			"Install a build with --enable-libsrt (macOS: brew install ffmpeg; "+
-			"Debian/Ubuntu: apt install ffmpeg from a recent release), "+
-			"or switch the ingest to RTMP in Settings once the server is running",
-		t.FFmpeg, t.Version)
+	return fmt.Sprintf(
+		"%s (FFmpeg %s) was built without SRT support, so multi-track SRT ingest will not work. "+
+			"Install a build configured with --enable-libsrt, or switch Settings -> Ingest to RTMP "+
+			"(single audio track).", t.FFmpeg, t.Version)
+}
+
+// hasProtocol reports whether name appears as a whole entry in the output of
+// `ffmpeg -protocols`, which lists one protocol per whitespace-separated token
+// under Input:/Output: headings.
+func hasProtocol(protocolsOutput, name string) bool {
+	for _, field := range strings.Fields(protocolsOutput) {
+		if field == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ProbeVersion is a small helper for the /api/v1/system endpoint.

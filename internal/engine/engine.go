@@ -683,6 +683,14 @@ func (e *Engine) probeLoop(ctx context.Context) {
 	timer := time.NewTimer(fast)
 	defer timer.Stop()
 
+	// Probing is gated on the relay actually carrying data, not on the ingest
+	// process being up. An SRT listener sits in "running" for as long as it
+	// waits for a publisher, and conversely data can still be in flight while
+	// the ingest is momentarily restarting. Bytes on the relay is the only
+	// signal that means "there is a stream to probe".
+	lastRx := e.hub.RxBytes()
+	idleRounds := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -690,13 +698,13 @@ func (e *Engine) probeLoop(ctx context.Context) {
 		case <-timer.C:
 		}
 
-		e.mu.RLock()
-		ing := e.ingest
-		probed := e.probed
-		e.mu.RUnlock()
+		rx := e.hub.RxBytes()
+		flowing := rx > lastRx
+		lastRx = rx
 
 		next := fast
-		if ing != nil && ing.Status().State == supervisor.StateRunning {
+		if flowing {
+			idleRounds = 0
 			if changed := e.probeOnce(ctx); changed {
 				// Layout changed: the meters process and every destination
 				// graph were built against the old one.
@@ -705,10 +713,25 @@ func (e *Engine) probeLoop(ctx context.Context) {
 				e.publishStatus()
 			}
 			e.mu.RLock()
-			probed = e.probed
+			probed := e.probed
 			e.mu.RUnlock()
 			if probed {
 				next = slow
+			}
+		} else {
+			idleRounds++
+			// The stream has stopped. Forget the layout so the UI stops
+			// claiming tracks that are no longer arriving, and so the next
+			// stream is probed promptly rather than on the slow cadence.
+			if idleRounds >= 3 {
+				e.mu.Lock()
+				wasProbed := e.probed
+				e.probed = false
+				e.mu.Unlock()
+				if wasProbed {
+					e.log.Info("ingest stopped; track layout cleared")
+					e.bus.Publish(events.TypeSource, e.SourceInfo())
+				}
 			}
 		}
 		timer.Reset(next)
