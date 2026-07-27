@@ -119,3 +119,8 @@ CREATE INDEX IF NOT EXISTS idx_destinations_position ON destinations(position, i
 -- NOT EXISTS is a no-op and the column is therefore still missing. Everything
 -- that depends on that column lives in MigrateRenditions (renditions.go),
 -- which runs after this script and adds the column when it is absent.
+
+-- Same note for destinations.extra_input_args, extra_output_args and
+-- expert_ack_reencode: they are added by MigrateDestinationExpertArgs
+-- (destinations.go) rather than here, so that fresh and upgraded databases
+-- get them from exactly one place and cannot disagree about the default.

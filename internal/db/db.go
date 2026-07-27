@@ -51,6 +51,12 @@ func Open(path string) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Same story one release later: the expert-mode columns, plus draining the
+	// sidecar table they were first stored in.
+	if err := d.MigrateDestinationExpertArgs(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return d, nil
 }
 
