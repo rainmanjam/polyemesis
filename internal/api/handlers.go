@@ -22,6 +22,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
@@ -898,6 +899,28 @@ func (s *Server) handlePlatformPresets(w http.ResponseWriter, r *http.Request) {
 		"presets":    db.DestinationPresets(),
 		"groups":     db.PresetGroups(),
 		"disclaimer": db.PlatformPresetDisclaimer,
+	})
+}
+
+// handlePlatformCapabilities serves the honest capability matrix: per platform,
+// whether polyemesis can sign in, fetch the stream key, push metadata, read and
+// send chat, moderate, and report viewers.
+//
+// It sits beside the preset catalogue rather than inside it because the two
+// answer different questions. A preset says "here is the URL to type"; the
+// matrix says "here is what you get after you have typed it", which is what
+// somebody deciding whether to spend an evening on Meta's App Review actually
+// needs. Joining them by preset id lets the destination dialog show both.
+//
+// Nothing on this endpoint gates anything. Unverified capabilities are reported
+// as unverified and still attempted — see the sourcing rule in
+// internal/oauth/capabilities.go.
+func (s *Server) handlePlatformCapabilities(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"platforms": oauth.PlatformCapabilities(),
+		"columns":   oauth.CapabilityColumns(),
+		"support":   oauth.SupportLegend(),
+		"tiers":     oauth.TierLegend(),
 	})
 }
 

@@ -91,9 +91,13 @@ func TestMetadataTargetsOmitPlatformsWithoutTheCapability(t *testing.T) {
 
 	connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
 	connectAccount(t, store, s.box, db.PlatformTwitch, "dj")
-	// Kick has no OAuth provider at all, so an account for it — however it got
-	// there — must be absent rather than present and permanently failing.
+	// Kick cannot fetch a stream key but can push a title and a category, so it
+	// is a legitimate target — the two capabilities are unrelated.
 	connectAccount(t, store, s.box, db.PlatformKick, "kicker")
+	// A custom destination has no provider at all, so an account for it —
+	// however it got there — must be absent rather than present and permanently
+	// failing.
+	connectAccount(t, store, s.box, db.PlatformCustom, "diy")
 
 	r := jsonRequest(t, http.MethodGet, "/api/v1/metadata", nil)
 	sign(r)
@@ -107,12 +111,12 @@ func TestMetadataTargetsOmitPlatformsWithoutTheCapability(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got.Targets) != 2 {
-		t.Fatalf("targets = %d, want the two capable platforms: %#v", len(got.Targets), got.Targets)
+	if len(got.Targets) != 3 {
+		t.Fatalf("targets = %d, want the three capable platforms: %#v", len(got.Targets), got.Targets)
 	}
 	for _, tgt := range got.Targets {
-		if tgt.Platform == db.PlatformKick {
-			t.Fatal("kick was offered as a metadata target")
+		if tgt.Platform == db.PlatformCustom {
+			t.Fatal("a custom destination was offered as a metadata target")
 		}
 		if len(tgt.Caps.Fields) == 0 {
 			t.Fatalf("%s reported no fields, so the composer cannot render it", tgt.Platform)
