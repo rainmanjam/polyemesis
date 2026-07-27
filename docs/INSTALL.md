@@ -59,6 +59,15 @@ ffmpeg -protocols | tr ' ' '\n' | grep -x srt      # must print: srt
 > every build lists `srtp` (Secure RTP), a different protocol that happens to
 > contain the substring.
 
+**Hardware encoders — nothing to install, nothing to configure.** Do *not* go
+looking for a build with NVENC or VA-API compiled in on the strength of
+`ffmpeg -encoders`: that list is what the binary was compiled with, not what
+your machine can do, and a stock Ubuntu FFmpeg advertises all four vendors on a
+box with no GPU. polyemesis test-encodes a frame with each one at startup and
+offers only what worked. If you have a GPU you want it to reach — especially in
+a container, where it has to be passed in explicitly — see
+[docs/HARDWARE.md](HARDWARE.md).
+
 ---
 
 ## Docker

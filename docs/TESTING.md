@@ -305,6 +305,38 @@ go test -v ./internal/ffmpeg/     # ingest/destination/recorder command builders
 
 ---
 
+## 10. Acceptance suites
+
+Four scripts drive the built binary through a real ingest and assert on what
+came out the other end. They need `make build` first, and they are the only
+tests that can fail on something the unit tests cannot see.
+
+```bash
+./scripts/acceptance.sh              # per-destination audio routing, by measurement
+./scripts/acceptance-renditions.sh   # one shared encode serving two destinations
+./scripts/acceptance-tls.sh          # every TLS mode, including the old configs
+./scripts/acceptance-encoders.sh     # hardware-encoder detection
+```
+
+`acceptance-encoders.sh` is the odd one out, because the thing it tests is a
+disagreement with the machine it runs on. It builds three shim FFmpegs that
+delegate real work to the real binary and lie only about detection:
+
+- **liar** — lists `h264_nvenc` in `-encoders` and fails to encode with it.
+  This is a stock Linux FFmpeg on a GPU-less box, staged on a machine that has
+  no NVIDIA hardware to stage it with. The suite asserts the encoder is offered
+  as unusable with FFmpeg's own reason, that a rendition saved on it is refused
+  once rather than crash-looped, and that a `libx264` rendition beside it still
+  runs.
+- **blind** — every detection command errors. The server must still start, still
+  offer every encoder, and still produce a correct 720p encode. Detection that
+  could not run must never be the thing that stops a stream.
+- **instant** — probes return immediately. It is the control for the startup
+  timing: the suite reports the median of five launches with and without
+  probing, and fails if the difference exceeds one second.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause |
