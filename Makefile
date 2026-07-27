@@ -97,7 +97,7 @@ release: ui ## Cross-compile release binaries into dist/
 	@for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; \
 	  out=dist/$(BINARY)-$(VERSION)-$$os-$$arch; \
-	  [ "$$os" = windows ] && out=$$out.exe; \
+	  if [ "$$os" = windows ]; then out=$$out.exe; fi; \
 	  echo "  $$os/$$arch"; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 	    go build -trimpath -ldflags '$(LDFLAGS)' -o $$out $(CMD) || exit 1; \
