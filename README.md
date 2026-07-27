@@ -64,14 +64,61 @@ hot. One upload, one encode, different audio per platform.
 
 ## Install
 
+Step-by-step instructions for each platform — Docker, Linux, macOS, Windows —
+are in [`docs/INSTALL.md`](docs/INSTALL.md). What follows is the short version.
+
+### Platform support, honestly
+
+These are not four equal targets:
+
+| Platform | Status |
+|---|---|
+| **Linux (server)** | Primary target. Developed against, deployed, exercised. |
+| **Docker** | Primary target. Image built from this repo, FFmpeg pinned and bundled. |
+| **macOS** | Developed on daily. Good workstation and test rig. Homebrew's FFmpeg has no SRT. |
+| **Windows** | Implemented but **not executed on Windows**. It compiles, the service wrapper and process-group teardown are written, the installer scripts exist — but nobody has run the binary on a Windows host. Untested. |
+
 ### Requirements
 
-- **FFmpeg 6.0 or newer**, with SRT support for multitrack ingest.
-  - macOS: `brew install ffmpeg` — note that the current Homebrew bottle has
-    **no SRT**; see [FFmpeg without SRT](#ffmpeg-without-srt).
-  - Debian/Ubuntu: `apt install ffmpeg` (24.04+ includes libsrt).
-  - Check: `ffmpeg -protocols | tr ' ' '\n' | grep -x srt` must print `srt`.
-- Go 1.22+ and Node 20+ only if you are building from source.
+**FFmpeg 6.0 or newer**, with SRT for multitrack ingest. Two separate things,
+and they fail differently: polyemesis **refuses to start** on FFmpeg older than
+6.0, and starts-with-a-warning on a build that has no SRT (leaving you RTMP,
+which is one stereo pair and therefore nothing to route).
+
+```bash
+ffmpeg -version | head -1
+ffmpeg -protocols | tr ' ' '\n' | grep -x srt      # must print: srt
+```
+
+Several current server distributions ship an FFmpeg that is too old, so
+`apt install ffmpeg` is not a universal answer:
+
+| Distribution | Stock FFmpeg | polyemesis |
+|---|---|---|
+| Ubuntu 22.04 LTS (jammy) | **4.4.2** | **refuses to start** |
+| Debian 12 (bookworm) | **5.1.9** | **refuses to start** |
+| Ubuntu 24.04 LTS (noble) | 6.1.1 | clears the floor |
+| Debian 13 (trixie) | 7.1.5 | clears the floor |
+| Alpine 3.20 / 3.21 / 3.22 | 6.1.1 / 6.1.2 / 6.1.2 | clears the floor; 3.22 is what the Docker image runs |
+| RHEL / Rocky / AlmaLinux | not in the base repositories | see INSTALL.md |
+
+Version numbers checked against the distro package indexes on 2026-07-26.
+"Clears the floor" means the version passes the 6.0 startup check — only the
+Alpine 3.22 row has actually been run, via the Docker image. If your release is
+not listed, run `apt-cache policy ffmpeg` and read the number rather than
+assuming.
+
+On a distro that is too old you have three real options — **a newer distro**, **a
+static FFmpeg build** with libsrt, or **Docker**. All three, with commands, are
+in [`docs/INSTALL.md`](docs/INSTALL.md#if-your-distro-is-too-old-pick-one-of-three).
+
+macOS deserves its own warning: `brew install ffmpeg` is new enough but is
+**built without libsrt**, so a stock Homebrew install cannot do multitrack
+ingest. See [FFmpeg without SRT](#ffmpeg-without-srt).
+
+To build from source you also need **Go 1.26.5+** (the floor in `go.mod`) and
+**Node 20.19+ or 22.12+** (Vite 8's requirement). Neither is needed to run the
+resulting binary.
 
 ### From source
 
@@ -125,9 +172,24 @@ Docker is never required. If you prefer it:
 docker compose up -d
 ```
 
-The image bundles FFmpeg with SRT. Note the compose file exposes `6000/udp` —
-SRT is UDP, and omitting `/udp` is the classic reason an ingest silently
-receives nothing.
+The image bundles FFmpeg with SRT, at a **pinned** package version rather than
+whatever the Alpine branch holds on the day you build — otherwise an image
+rebuilt months later is a different transcoder under the same tag, and that kind
+of drift shows up as a broken stream rather than a build error. The `Dockerfile`
+documents how to bump it deliberately and fails the build if the resulting
+FFmpeg has no SRT.
+
+Note the compose file publishes `6000/udp` — SRT is UDP, and omitting `/udp` is
+the classic reason an ingest silently receives nothing.
+
+**Port 80 is commented out in `docker-compose.yml`**, and needs uncommenting for
+exactly one thing: `tls.mode: acme`. Let's Encrypt validates over HTTP-01, so it
+has to reach `http://<hostname>/.well-known/acme-challenge/…` on port 80 from
+the public internet, which means publishing the port on the host and not merely
+`EXPOSE`ing it in the image. It ships off because publishing `:80`
+unconditionally breaks `docker compose up` on any host already running a web
+server, and the default container configuration is plain HTTP with no
+certificate at all. See [ACME needs port 80](#acme-needs-port-80).
 
 ### systemd
 
@@ -155,6 +217,15 @@ way gets a self-signed certificate on `:8080` and logs that it could not bind
 1024 are privileged. That warning is harmless. If you want `mode: acme` it is
 not: see the commented `AmbientCapabilities` block in the unit file and
 [ACME needs port 80](#acme-needs-port-80).
+
+### Other platforms
+
+- **macOS** — a launchd plist, and the Homebrew SRT problem:
+  [`docs/INSTALL.md`](docs/INSTALL.md#macos).
+- **Windows** — the Service Control Manager installer lives in
+  [`deploy/windows/`](deploy/windows/). Read
+  [`deploy/windows/README.md`](deploy/windows/README.md) first, and note the
+  maturity caveat above: this path has not been executed on Windows.
 
 ---
 
@@ -996,10 +1067,34 @@ has no SRT and multitrack ingest will fail with `Protocol not found`.
 > protocol. Use the exact match above.
 
 polyemesis starts anyway and shows a warning, so you can reach Settings and
-switch the ingest to RTMP. To get multitrack:
+switch the ingest to RTMP. But RTMP carries a single stereo pair, so
+per-destination audio routing has nothing to route from — SRT is what makes this
+product work.
 
-- Install an FFmpeg configured with `--enable-libsrt`.
-- Or run the Docker image, which bundles one.
+Where builds stand, checked 2026-07-26. "Ran the check" means the `-protocols`
+command above was executed against that build; everything else is read off a
+package index or a published feature list, so run the check yourself:
+
+| Source | libsrt |
+|---|---|
+| Docker image in this repo | yes — the build asserts it, and it was run |
+| [BtbN](https://github.com/BtbN/FFmpeg-Builds/releases) static builds, **Linux** | yes — ran the check |
+| Ubuntu 24.04 / Debian 13 `apt install ffmpeg` | advertised in the package build flags; not run |
+| [BtbN](https://github.com/BtbN/FFmpeg-Builds/releases) static builds, **Windows** | same recipe as their Linux asset, but no Windows asset was downloaded or run |
+| [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) Windows builds | listed among the *essentials* build's externals; not downloaded or run |
+| **Homebrew `ffmpeg` on macOS** | **no** — `srt` is not among the formula's dependencies, and the check was run |
+| [johnvansickle.com](https://johnvansickle.com/ffmpeg/) static builds | not advertised; run the check before relying on it |
+
+On macOS, the way out is the `homebrew-ffmpeg` tap, which exposes the option:
+
+```bash
+brew tap homebrew-ffmpeg/ffmpeg
+brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-srt   # builds from source
+```
+
+Otherwise: install an FFmpeg configured with `--enable-libsrt`, or run the
+Docker image, which bundles one. Full per-platform detail in
+[`docs/INSTALL.md`](docs/INSTALL.md).
 
 ---
 
