@@ -324,7 +324,9 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		"configuration. The relay URL shown is a placeholder: the real loopback port is " +
 		"assigned when the destination starts."
 	target := row.Target()
-	if row.Kind == db.DestFile {
+	// The audio-only kind shares the file kind's confinement whenever its
+	// target is a path rather than an Icecast URL, so it has to share the note.
+	if row.Kind == db.DestFile || (row.Kind == db.DestAudio && !strings.Contains(row.URL, "://")) {
 		target = row.URL
 		note += " The output path is shown as configured; it is resolved inside the " +
 			"recordings directory at start."
@@ -339,6 +341,7 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		AudioBitrate:  row.AudioBitrate,
 		SampleRate:    row.Profile.SampleRate,
 		CopyVideo:     true,
+		VideoDelayMS:  compiled.VideoDelayMS,
 	})
 	return bin, base, false, note, nil
 }

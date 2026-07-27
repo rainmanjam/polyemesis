@@ -137,6 +137,12 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/version/check", s.handleCheckUpdate)
 			r.Get("/status", s.handleStatus)
 			r.Get("/source", s.handleSource)
+			// What each incoming track is. Per-ingest, not per-destination:
+			// the feed is the same feed whoever is listening to it.
+			r.Put("/source/annotations", s.handlePutAnnotations)
+			// Manual failover. The tier's return mode defaults to manual, so
+			// this is how a broadcast leaves a slate.
+			r.Post("/failover/source", s.handleSwitchSource)
 			r.Get("/stats", s.handleStats)
 			r.Get("/levels", s.handleLevels)
 
@@ -195,7 +201,40 @@ func (s *Server) Handler() http.Handler {
 
 			r.Get("/recordings", s.handleListRecordings)
 			r.Get("/recordings/usage", s.handleRecordingUsage)
+			// Stems live on disk beside the masters rather than in the index,
+			// so they are listed by name; the static segment beats {id} the
+			// same way /destinations/order does.
+			r.Get("/recordings/stems", s.handleListStems)
 			r.Delete("/recordings/{id}", s.handleDeleteRecording)
+
+			// Alerting: webhook rules and the test button that is the only
+			// reason anybody believes a webhook works.
+			r.Get("/alerts/meta", s.handleAlertsMeta)
+			r.Get("/alerts/rules", s.handleListAlertRules)
+			r.Post("/alerts/rules", s.handleCreateAlertRule)
+			r.Get("/alerts/rules/{id}", s.handleGetAlertRule)
+			r.Put("/alerts/rules/{id}", s.handleUpdateAlertRule)
+			r.Delete("/alerts/rules/{id}", s.handleDeleteAlertRule)
+			r.Post("/alerts/rules/{id}/test", s.handleTestAlertRule)
+
+			// Scheduling. /runs is what the last sweep did, which is where a
+			// skipped occurrence gets explained.
+			r.Get("/schedules", s.handleListSchedules)
+			r.Post("/schedules", s.handleCreateSchedule)
+			r.Get("/schedules/runs", s.handleScheduleRuns)
+			r.Get("/schedules/{id}", s.handleGetSchedule)
+			r.Put("/schedules/{id}", s.handleUpdateSchedule)
+			r.Delete("/schedules/{id}", s.handleDeleteSchedule)
+
+			// The rolling clip buffer.
+			r.Get("/clips", s.handleListClips)
+			r.Post("/clips", s.handleCaptureClip)
+			r.Put("/clips/buffer", s.handleSetClipBuffer)
+			r.Delete("/clips/{name}", s.handleDeleteClip)
+
+			// Loudness compliance, read by the meters page.
+			r.Get("/loudness", s.handleLoudness)
+			r.Put("/loudness", s.handleSetLoudnessMonitor)
 
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
@@ -207,6 +246,13 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/platforms/credentials/{platform}", s.handleDeleteCreds)
 			r.Get("/platforms/accounts", s.handleListAccounts)
 			r.Delete("/platforms/accounts/{id}", s.handleDeleteAccount)
+
+			// Go-live metadata. The push is a job rather than a request so a
+			// slow platform API cannot hold the dashboard open; the composer
+			// polls the job for per-platform results. See metadata.go.
+			r.Get("/metadata", s.handleMetadataOverview)
+			r.Post("/metadata/push", s.handlePushMetadata)
+			r.Get("/metadata/push/{id}", s.handleMetadataJob)
 		})
 
 		// A scraper has no CSRF token to double-submit, and this route is a
@@ -237,6 +283,8 @@ func (s *Server) Handler() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/recordings/{id}/download", s.handleDownloadRecording)
+			r.Get("/recordings/stems/{name}/download", s.handleDownloadStem)
+			r.Get("/clips/{name}/download", s.handleDownloadClip)
 		})
 	})
 
