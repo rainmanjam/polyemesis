@@ -23,6 +23,7 @@ import type {
   Status,
   SystemInfo,
   SystemStats,
+  TlsStatus,
   BitrateSample,
   LogLine,
 } from "./types";
@@ -136,6 +137,15 @@ export const api = {
   // --- settings ---
   getSettings: () => get<Settings>("/settings"),
   putSettings: (s: Settings) => put<Settings>("/settings", s),
+
+  // --- transport security ---
+  /** Read-only: TLS lives in config.yaml because it has to be right before the
+   *  server starts listening. This only reports what that produced. */
+  tlsStatus: () => get<TlsStatus>("/tls"),
+  /** A full-page navigation so the browser runs its own download UI, and
+   *  sessionless on the server so a user blocked by an untrusted certificate
+   *  can still fetch the CA that unblocks them. 404s outside selfsigned mode. */
+  caDownloadUrl: () => `${BASE}/tls/ca`,
 
   // --- destinations ---
   listDestinations: () => get<DestinationWithRouting[]>("/destinations"),

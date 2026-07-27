@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   Check,
   Copy,
+  Download,
   ExternalLink,
   KeyRound,
   Loader2,
@@ -34,13 +35,18 @@ import {
 } from "@/components/ui/accordion";
 import { PageHeader } from "@/components/AppLayout";
 import { api } from "@/lib/api";
+import { timestamp } from "@/lib/format";
+import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import type {
   ApiToken,
+  CertInfo,
   PlatformAccount,
   PlatformCreds,
   Settings,
   SetupGuide,
   SystemInfo,
+  TlsMode,
+  TlsStatus,
 } from "@/lib/types";
 
 export function SettingsPage() {
@@ -851,47 +857,274 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
         </CardContent>
       </Card>
 
-      <Card className="h-fit">
-        <CardHeader>
-          <CardTitle>Transport security</CardTitle>
-          <CardDescription>
-            Configured in config.yaml, not here — TLS must be right before the server starts
-            listening.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted-foreground">Built-in TLS</span>
-            <Badge variant={system?.tlsEnabled ? "live" : "outline"}>
-              {system?.tlsEnabled ? "enabled" : "disabled"}
-            </Badge>
-          </div>
-          <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
-{`# config.yaml
-tls:
-  enabled: true
-  certFile: /etc/polyemesis/cert.pem
-  keyFile:  /etc/polyemesis/key.pem`}
-          </pre>
-          <p className="text-[10px] text-muted-foreground">
-            Most deployments terminate TLS at a reverse proxy instead. If you do, set
-            <code className="mx-1 font-mono">trustProxyHeaders: true</code> so session cookies are
-            marked Secure and OAuth redirect URIs use your public origin. See the README.
-          </p>
-          <div className="flex items-center justify-between border-t border-border pt-2">
-            <span className="text-[11px] text-muted-foreground">Data directory</span>
-            <code className="font-mono text-[10px]">{system?.dataDir ?? "—"}</code>
-          </div>
-          <p className="text-[10px] text-muted-foreground">
-            OAuth tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
-            <code className="mx-1 font-mono">secret.key</code> in that directory. Back it up with the
-            database, or connected accounts must be re-authorised.
-          </p>
-        </CardContent>
-      </Card>
+      <TransportSecurity system={system} />
 
       <ApiTokens />
     </div>
+  );
+}
+
+/* ------------------------------------------------------- transport security */
+
+/** Human labels for the resolved mode. `auto` never reaches here — the server
+ *  resolves it — but it is listed so the map stays exhaustive over TlsMode. */
+const tlsModeLabel: Record<TlsMode, string> = {
+  auto: "Auto",
+  acme: "Let's Encrypt",
+  selfsigned: "Self-signed",
+  manual: "Manual certificate",
+  off: "Not terminated here",
+};
+
+/** Signal tone for the resolved mode. `off` is the one that depends on
+ *  context: behind a trusted proxy someone else is doing TLS correctly, which
+ *  is `armed`; without one the login form and session cookie cross the network
+ *  in plaintext, which is exactly what `down` is for. */
+function modeTone(tls: TlsStatus): SignalTone {
+  switch (tls.mode) {
+    case "acme":
+    case "manual":
+      return "live";
+    case "selfsigned":
+      return "warn";
+    default:
+      return tls.trustProxyHeaders ? "armed" : "down";
+  }
+}
+
+/** Expiry is the number every operator actually watches. Thirty days is the
+ *  point renewal should already have happened; seven is the point it has
+ *  started going wrong. */
+function expiryTone(daysRemaining: number): SignalTone {
+  if (daysRemaining < 7) return "down";
+  if (daysRemaining < 30) return "warn";
+  return "live";
+}
+
+function expiryLabel(cert: CertInfo): string {
+  if (cert.expired) {
+    const ago = Math.abs(cert.daysRemaining);
+    return ago === 0 ? "expired today" : `expired ${ago} day${ago === 1 ? "" : "s"} ago`;
+  }
+  return `${cert.daysRemaining} day${cert.daysRemaining === 1 ? "" : "s"} left`;
+}
+
+/** The config.yaml the current mode corresponds to, filled in with the values
+ *  this server actually resolved so it is copy-pasteable rather than a sample. */
+function tlsYaml(tls: TlsStatus): string {
+  const host = tls.hostname || "streams.example.com";
+  switch (tls.mode) {
+    case "acme":
+      return [
+        "# config.yaml",
+        "tls:",
+        "  mode: acme",
+        `  hostname: ${host}`,
+        "  acmeEmail: you@example.com",
+        "  hsts: true",
+      ].join("\n");
+    case "selfsigned":
+      return [
+        "# config.yaml",
+        "tls:",
+        "  mode: selfsigned",
+        `  hostname: ${host}`,
+        "  # hsts stays off: a browser must never be told to pin a host",
+        "  # whose certificate it cannot validate.",
+      ].join("\n");
+    case "manual":
+      return [
+        "# config.yaml",
+        "tls:",
+        "  mode: manual",
+        "  certFile: /etc/polyemesis/cert.pem",
+        "  keyFile:  /etc/polyemesis/key.pem",
+        "  hsts: true",
+      ].join("\n");
+    default:
+      return [
+        "# config.yaml",
+        "tls:",
+        "  mode: off",
+        "# Set this when a reverse proxy terminates TLS in front of you, so",
+        "# session cookies are marked Secure and OAuth uses your public origin.",
+        "trustProxyHeaders: true",
+      ].join("\n");
+  }
+}
+
+function TransportSecurity({ system }: { system: SystemInfo | null }) {
+  const [tls, setTls] = useState<TlsStatus | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    api
+      .tlsStatus()
+      .then(setTls)
+      .catch((err) =>
+        setLoadError(err instanceof Error ? err.message : "Could not read the TLS status."),
+      );
+  }, []);
+
+  const copyYaml = async () => {
+    if (!tls) return;
+    await navigator.clipboard.writeText(tlsYaml(tls));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const cert = tls?.certificate ?? null;
+  const sans = cert ? [...cert.dnsNames, ...cert.ipAddresses] : [];
+
+  return (
+    <Card className="h-fit">
+      <CardHeader>
+        <CardTitle>Transport security</CardTitle>
+        <CardDescription>
+          Configured in config.yaml, not here — TLS must be right before the server starts
+          listening. This card reports what that produced.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {!tls && !loadError && (
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" /> Reading the certificate…
+          </div>
+        )}
+        {loadError && <p className="text-[11px] text-down">{loadError}</p>}
+
+        {tls && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-muted-foreground">Mode</span>
+              <div className="flex items-center gap-1.5">
+                {tls.configured === "auto" && (
+                  <span className="text-[10px] text-subtle-foreground">auto resolved to</span>
+                )}
+                <Badge variant={toneBadge[modeTone(tls)]}>{tlsModeLabel[tls.mode]}</Badge>
+              </div>
+            </div>
+
+            {tls.mode === "off" && (
+              <p className="text-[10px] text-muted-foreground">
+                {tls.trustProxyHeaders
+                  ? "A reverse proxy in front of polyemesis terminates TLS, so this server serves plain HTTP on purpose."
+                  : "Nothing is encrypting this connection. Passwords and session cookies cross the network in plaintext — set tls.mode: auto, or bind to 127.0.0.1 behind a proxy."}
+              </p>
+            )}
+
+            {cert ? (
+              <>
+                <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
+                  <span className="text-[11px] text-muted-foreground">Expires</span>
+                  <span className="flex items-baseline gap-1.5">
+                    <code className="tnum font-mono text-[10px]">{timestamp(cert.notAfter)}</code>
+                    <span className={`tnum text-[10px] ${toneText[expiryTone(cert.daysRemaining)]}`}>
+                      {expiryLabel(cert)}
+                    </span>
+                  </span>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="shrink-0 text-[11px] text-muted-foreground">Issuer</span>
+                  <span className="min-w-0 break-all text-right text-[10px]">{cert.issuer}</span>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="shrink-0 text-[11px] text-muted-foreground">Subject</span>
+                  <span className="min-w-0 break-all text-right text-[10px]">{cert.subject}</span>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="shrink-0 text-[11px] text-muted-foreground">Valid for</span>
+                  <code className="min-w-0 break-all text-right font-mono text-[10px]">
+                    {sans.length ? sans.join(", ") : "—"}
+                  </code>
+                </div>
+              </>
+            ) : (
+              // In off mode the paragraph above already said this in context;
+              // repeating the API's wording underneath it reads as a fault.
+              tls.mode !== "off" &&
+              tls.certificateError && (
+                <p className="border-t border-border pt-2 text-[10px] text-muted-foreground">
+                  {tls.certificateError}
+                </p>
+              )
+            )}
+
+            {tls.hstsWarning && <p className="text-[10px] text-warn">{tls.hstsWarning}</p>}
+            {tls.hsts && (
+              <p className="text-[10px] text-muted-foreground">
+                HSTS is on. Browsers will refuse plain HTTP to
+                <code className="mx-1 font-mono">{tls.hostname || "this host"}</code>
+                until the max-age lapses; there is no server-side undo.
+              </p>
+            )}
+
+            {tls.caAvailable && (
+              <div className="flex flex-col gap-1.5 border-t border-border pt-2">
+                <span className="text-[11px] text-muted-foreground">
+                  Local certificate authority
+                </span>
+                <code className="tnum break-all rounded border border-border bg-background p-1.5 font-mono text-[9px] leading-relaxed text-muted-foreground">
+                  {tls.caFingerprint}
+                </code>
+                {/* A plain link, not XHR: this is a file the browser saves, and
+                    it stays reachable without a session so a user locked out by
+                    the untrusted certificate can still get it. */}
+                <Button asChild size="sm" variant="outline" className="w-fit">
+                  <a href={api.caDownloadUrl()} download>
+                    <Download /> Download CA certificate
+                  </a>
+                </Button>
+                <p className="text-[10px] text-muted-foreground">
+                  Install it to stop the browser warning, after checking the fingerprint above
+                  matches the one your browser shows.
+                  <span className="mt-1 block">
+                    <strong className="font-medium text-foreground">macOS</strong> — open it in
+                    Keychain Access, add to System, then set it to “Always Trust”.
+                  </span>
+                  <span className="block">
+                    <strong className="font-medium text-foreground">Linux</strong> — copy to
+                    <code className="mx-1 font-mono">/usr/local/share/ca-certificates/</code>and run
+                    <code className="mx-1 font-mono">update-ca-certificates</code>.
+                  </span>
+                  <span className="block">
+                    <strong className="font-medium text-foreground">Windows</strong> — import into
+                    “Trusted Root Certification Authorities” for the local machine.
+                  </span>
+                  <span className="mt-1 block">
+                    Firefox and Chrome keep their own stores on some platforms and may need it
+                    imported there too.
+                  </span>
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between border-t border-border pt-2">
+              <span className="text-[11px] text-muted-foreground">config.yaml</span>
+              <Button size="sm" variant="ghost" onClick={copyYaml}>
+                {copied ? <Check /> : <Copy />} Copy
+              </Button>
+            </div>
+            <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
+              {tlsYaml(tls)}
+            </pre>
+          </>
+        )}
+
+        <div className="flex items-start justify-between gap-2 border-t border-border pt-2">
+          <span className="shrink-0 text-[11px] text-muted-foreground">Data directory</span>
+          <code className="min-w-0 break-all text-right font-mono text-[10px]">
+            {system?.dataDir ?? "—"}
+          </code>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          OAuth tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
+          <code className="mx-1 font-mono">secret.key</code> in that directory. Back it up with the
+          database, or connected accounts must be re-authorised.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
