@@ -19,9 +19,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
-import type { Destination, DestKind, Platform, PlatformAccount } from "@/lib/types";
+import type {
+  Destination,
+  DestKind,
+  Platform,
+  PlatformAccount,
+  Rendition,
+} from "@/lib/types";
 
 /** Per-platform defaults so the common case is one field, not four.
  *  Kick appears here rather than in the OAuth flow because its public API
@@ -60,6 +65,22 @@ const PLATFORM_PRESETS: Record<
   },
 };
 
+/** The value the rendition picker carries for "no rendition at all".
+ *  Passthrough is the absence of a row, not a row, but a <Select> needs a
+ *  non-empty string to represent it. */
+const PASSTHROUGH = "passthrough";
+
+/** One rendition in a sentence, so two tiers in the same list are told apart
+ *  by what they do rather than by whatever they were named. */
+function renditionSpec(r: Rendition): string {
+  const scaled = r.width > 0 || r.height > 0;
+  // 0 on an axis means "derive it from the source", which reads as "auto"
+  // rather than as a zero the user is being asked to believe in.
+  const size = scaled ? `${r.width || "auto"}×${r.height || "auto"}` : "source size";
+  const fps = r.fps > 0 ? `${r.fps} fps` : "source fps";
+  return `${size} · ${fps} · ${r.videoBitrate} kbps · ${r.encoder}`;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -79,11 +100,17 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [bitrate, setBitrate] = useState(160);
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
+  const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
+  const [renditions, setRenditions] = useState<Rendition[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     api.listAccounts().then(setAccounts).catch(() => setAccounts([]));
+    api
+      .listRenditions()
+      .then((rows) => setRenditions(rows.map((r) => r.rendition)))
+      .catch(() => setRenditions([]));
 
     if (destination) {
       setName(destination.name);
@@ -93,6 +120,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setStreamKey(destination.streamKey);
       setBitrate(destination.audioBitrate);
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
+      // A destination saved before renditions existed has no rendition id at
+      // all, which is exactly passthrough — the same thing it has always done.
+      setRenditionId(destination.renditionId ? String(destination.renditionId) : PASSTHROUGH);
     } else {
       setName("");
       setPlatform("custom");
@@ -101,6 +131,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setStreamKey("");
       setBitrate(160);
       setAccountId("none");
+      setRenditionId(PASSTHROUGH);
     }
   }, [open, destination]);
 
@@ -108,6 +139,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const platformAccounts = useMemo(
     () => accounts.filter((a) => a.platform === platform),
     [accounts, platform],
+  );
+  const selectedRendition = useMemo(
+    () => renditions.find((r) => String(r.id) === renditionId) ?? null,
+    [renditions, renditionId],
   );
 
   const changePlatform = (p: Platform) => {
@@ -133,6 +168,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         streamKey: streamKey.trim(),
         audioBitrate: bitrate,
         accountId: accountId === "none" ? null : Number(accountId),
+        // null is passthrough: no encode, no process, straight off the ingest.
+        renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
       };
       if (editing) {
         await api.updateDestination(destination.id, payload);
@@ -156,8 +193,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         <DialogHeader>
           <DialogTitle>{editing ? "Edit destination" : "Add destination"}</DialogTitle>
           <DialogDescription>
-            Video is always passed through untouched. Only audio is re-encoded, using this
-            destination's own routing profile.
+            This destination copies its video and re-encodes only its audio, from its own
+            routing profile. Put it on a rendition if the platform will not take the source
+            video — a rendition re-encodes video once for everyone that shares it, and still
+            leaves the audio to each destination.
           </DialogDescription>
         </DialogHeader>
 
@@ -273,6 +312,43 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           )}
 
+          {/* Video and audio sit together on purpose: what a platform receives
+              is one answer with two halves, and the pairing is the feature. */}
+          <div className="flex flex-col gap-1">
+            <Label>Video</Label>
+            <Select value={renditionId} onValueChange={setRenditionId}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={PASSTHROUGH}>Passthrough — source, copied</SelectItem>
+                {renditions.map((r) => (
+                  <SelectItem key={r.id} value={String(r.id)}>
+                    {r.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[10px] text-muted-foreground">
+              {selectedRendition ? (
+                <>
+                  <span className="font-mono">{renditionSpec(selectedRendition)}</span>
+                  {/* Shared, not per-destination: this is why picking a
+                      rendition for a third platform costs nothing extra. */}
+                  {" — one encode, shared by every destination on this rendition."}
+                </>
+              ) : (
+                <>
+                  <span className="font-mono">-c:v copy</span> — the source video, byte for byte,
+                  at zero CPU cost. Pick a rendition when a platform will not accept the source.
+                </>
+              )}
+            </span>
+            {selectedRendition?.note && (
+              <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+            )}
+          </div>
+
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-bitrate">Audio bitrate</Label>
             <div className="flex items-center gap-2">
@@ -286,10 +362,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 className="w-24"
               />
               <span className="text-[11px] text-muted-foreground">kbps, AAC stereo</span>
-              <Badge variant="outline" className="ml-auto">
-                video: copy
-              </Badge>
             </div>
+            <span className="text-[10px] text-muted-foreground">
+              Mixed here from this destination's own routing profile, whichever rendition it is
+              on — a rendition never touches audio.
+            </span>
           </div>
 
           <p className="text-[10px] text-muted-foreground">{preset.hint}</p>

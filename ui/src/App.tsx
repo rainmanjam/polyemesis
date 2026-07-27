@@ -9,6 +9,7 @@ import { AuthScreen } from "@/pages/AuthScreen";
 import { Dashboard } from "@/pages/Dashboard";
 import { MetersPage } from "@/pages/MetersPage";
 import { RoutingPage } from "@/pages/RoutingPage";
+import { RenditionsPage } from "@/pages/RenditionsPage";
 import { RecordingsPage } from "@/pages/RecordingsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { Loader2 } from "lucide-react";
@@ -100,6 +101,7 @@ export default function App() {
               <Route path="/meters" element={<MetersPage />} />
               <Route path="/routing" element={<RoutingPage />} />
               <Route path="/routing/:id" element={<RoutingPage />} />
+              <Route path="/renditions" element={<RenditionsPage />} />
               <Route path="/recordings" element={<RecordingsPage />} />
               <Route
                 path="/monitoring"

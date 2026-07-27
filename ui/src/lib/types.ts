@@ -76,8 +76,89 @@ export interface Destination {
   audioBitrate: number;
   profile: RoutingProfile;
   position: number;
+  /** The shared video encode this destination reads. null or absent means
+   *  passthrough: no encode, straight off the ingest relay. */
+  renditionId?: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One shared video encode.
+ *
+ *  A rendition re-encodes VIDEO ONLY — every audio track is copied through it
+ *  untouched, and each destination still applies its own routing graph on top.
+ *  That is why there is no audio field here and must never be one. */
+export interface Rendition {
+  id: number;
+  name: string;
+  /** 0 on an axis means "keep the source's", so setting only height rescales
+   *  while preserving aspect. */
+  width: number;
+  height: number;
+  /** 0 keeps the source's frame rate. */
+  fps: number;
+  /** Target video bitrate in kbps. */
+  videoBitrate: number;
+  /** An FFmpeg encoder name. Not a union: which encoders exist is a property
+   *  of the running FFmpeg build, and GET /encoders is the only honest source
+   *  for that. */
+  encoder: string;
+  /** The encoder's own speed/quality knob — "veryfast" for x264, "p4" for
+   *  nvenc. The vocabulary is per-encoder, hence free text. */
+  preset: string;
+  /** Keyframe interval in seconds rather than frames, so it survives an fps
+   *  change. */
+  gopSeconds: number;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A rendition plus its usage. `enabledDestinations` is the ref count the
+ *  engine acts on: at zero there is no process and no CPU burnt. */
+export interface RenditionView {
+  rendition: Rendition;
+  destinations: number;
+  enabledDestinations: number;
+}
+
+/** What deleting a rendition cost. The destinations are not deleted with it —
+ *  they fall back to passthrough, which the warning spells out. */
+export interface RenditionDeleted {
+  status: string;
+  destinations: number;
+  enabledDestinations: number;
+  warning?: string;
+}
+
+/** An editable starting point for the create form. Passthrough is the odd one
+ *  out: it is the absence of a rendition, not a row. */
+export interface RenditionPreset {
+  key: string;
+  label: string;
+  passthrough: boolean;
+  rendition?: Rendition | null;
+}
+
+/** Server-side validation limits, so the form's inputs cannot drift from the
+ *  bounds the store actually enforces. */
+export interface RenditionBounds {
+  minDimension: number;
+  maxDimension: number;
+  maxFps: number;
+  minBitrate: number;
+  maxBitrate: number;
+  minGopSeconds: number;
+  maxGopSeconds: number;
+}
+
+/** One choice in the encoder list. `available` is whether this FFmpeg build
+ *  registers it; offering one it lacks costs a crash-looping stream to find. */
+export interface EncoderInfo {
+  name: string;
+  codec: string;
+  hardware: boolean;
+  available: boolean;
 }
 
 export type ProcessState =
@@ -125,6 +206,28 @@ export interface DestStatus {
   warnings: string[] | null;
   error?: string;
   process?: ProcessStatus | null;
+  /** The shared encode feeding this destination; absent for passthrough. */
+  renditionId?: number | null;
+  renditionName?: string;
+}
+
+/** One shared video encode's live state.
+ *
+ *  `consumers` is the ref count the engine acted on. A rendition with none has
+ *  no process by design, so an absent `process` reads as idle, not as failed. */
+export interface RenditionStatus {
+  id: number;
+  name: string;
+  width: number;
+  height: number;
+  fps: number;
+  videoBitrate: number;
+  encoder: string;
+  codec: string;
+  consumers: number;
+  relayPort?: number;
+  error?: string;
+  process?: ProcessStatus | null;
 }
 
 export interface RelayStats {
@@ -146,6 +249,7 @@ export interface Status {
   recorder?: ProcessStatus | null;
   preview?: ProcessStatus | null;
   meters?: ProcessStatus | null;
+  renditions: RenditionStatus[];
   destinations: DestStatus[];
   source: SourceInfo;
   relay: RelayStats;
