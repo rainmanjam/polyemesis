@@ -44,7 +44,14 @@ func Open(path string) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	return &DB{sql: sqldb}, nil
+	d := &DB{sql: sqldb}
+	// Adds destinations.rendition_id to a database created before renditions
+	// existed; CREATE TABLE IF NOT EXISTS cannot do it.
+	if err := d.MigrateRenditions(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return d, nil
 }
 
 // SQL exposes the underlying handle for the rare query that does not warrant
