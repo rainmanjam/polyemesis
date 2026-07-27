@@ -31,6 +31,7 @@ import type {
   SystemInfo,
   SystemStats,
   TlsStatus,
+  TrackAnnotation,
   BitrateSample,
   LogLine,
 } from "./types";
@@ -218,6 +219,9 @@ export const api = {
   redetectEncoders: () => get<EncoderList>("/encoders?redetect=1"),
 
   // --- routing ---
+  /** Compiles against the engine's live source layout, which is what makes the
+   *  filter string under the editor honest: it comes from the same Go code
+   *  that will run, not from a TypeScript reimplementation. */
   compileRouting: (profile: RoutingProfile) =>
     post<{ routing: RoutingResult; profile: RoutingProfile }>(
       "/routing/compile",
@@ -227,9 +231,24 @@ export const api = {
     get<{ presets: Preset[]; defaults: PresetOpts }>("/routing/presets"),
   applyPreset: (id: string, opts: PresetOpts) =>
     post<{ profile: RoutingProfile; routing: RoutingResult }>(
-      `/routing/presets/${id}`,
+      `/routing/presets/${encodeURIComponent(id)}`,
       opts,
     ),
+
+  /** Describe the ingest's tracks: role, label, language, denoise.
+   *
+   *  Annotations belong to the SOURCE, not to a destination — "track 2 is the
+   *  licensed music" is one fact, and every destination's role policy resolves
+   *  against it. They are read back from `GET /source`.
+   *
+   *  A server that predates the feature has no route here and answers 404. The
+   *  routing editor treats that as "not stored yet" and keeps editing locally
+   *  rather than refusing the whole page: a missing endpoint is not a reason to
+   *  take the mixer away. */
+  putAnnotations: (annotations: TrackAnnotation[]) =>
+    put<{ annotations: TrackAnnotation[] | null }>("/source/annotations", {
+      annotations,
+    }),
 
   // --- recordings ---
   listRecordings: () => get<Recording[]>("/recordings"),

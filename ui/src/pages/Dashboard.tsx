@@ -1,9 +1,12 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Copy, Plus, Radio } from "lucide-react";
+import { Copy, Megaphone, Plus, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationDialog } from "@/components/DestinationDialog";
@@ -13,6 +16,7 @@ import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { labelForState, toneBadge, toneForState } from "@/lib/signal";
+import type { SignalTone } from "@/lib/signal";
 import type { Destination, SystemInfo } from "@/lib/types";
 
 // hls.js is a few hundred kilobytes that only the preview needs, and the
@@ -21,6 +25,333 @@ import type { Destination, SystemInfo } from "@/lib/types";
 const PreviewPlayer = lazy(() =>
   import("@/components/PreviewPlayer").then((m) => ({ default: m.PreviewPlayer })),
 );
+
+// ---------------------------------------------------------- go-live composer
+//
+// Set the title, description and category once and push them to every
+// connected account. The shapes below mirror internal/api/metadata.go; they
+// live here rather than in lib/types.ts because nothing else renders them.
+
+type MetaField = "title" | "description" | "category";
+type MetaState = "pending" | "ok" | "partial" | "error";
+
+interface MetaCaps {
+  fields: MetaField[];
+  categoryLabel?: string;
+  categoryHint?: string;
+  titleMax?: number;
+  descriptionMax?: number;
+}
+
+interface MetaTarget {
+  accountId: number;
+  platform: string;
+  accountName: string;
+  caps: MetaCaps;
+}
+
+interface MetaOutcome {
+  accountId: number;
+  platform: string;
+  accountName: string;
+  state: MetaState;
+  message?: string;
+  applied: MetaField[];
+  skipped?: MetaField[];
+  target?: string;
+  category?: string;
+  warnings?: string[];
+}
+
+interface MetaJob {
+  id: string;
+  done: boolean;
+  results: MetaOutcome[];
+  metadata: { title: string; description: string; category: string };
+}
+
+/** The double-submit CSRF token, read the way lib/api.ts reads it. */
+function csrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)polyemesis_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+async function metaFetch<T>(path: string, body?: unknown): Promise<T> {
+  const headers = new Headers();
+  if (body !== undefined) {
+    headers.set("Content-Type", "application/json");
+    headers.set("X-CSRF-Token", csrfToken());
+  }
+  const resp = await fetch("/api/v1" + path, {
+    method: body === undefined ? "GET" : "POST",
+    headers,
+    credentials: "same-origin",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await resp.text();
+  const parsed: unknown = text ? JSON.parse(text) : null;
+  if (!resp.ok) {
+    const msg =
+      parsed && typeof parsed === "object" && "error" in parsed
+        ? String((parsed as { error: unknown }).error)
+        : `request failed (${resp.status})`;
+    throw new Error(msg);
+  }
+  return parsed as T;
+}
+
+// A push is reported per platform, never as one boolean, so each state needs
+// its own place in the signal language: still working, done, done with
+// something left undone, and refused.
+const metaTone: Record<MetaState, SignalTone> = {
+  pending: "armed",
+  ok: "live",
+  partial: "warn",
+  error: "down",
+};
+
+const metaLabel: Record<MetaState, string> = {
+  pending: "Pushing",
+  ok: "Updated",
+  partial: "Partial",
+  error: "Failed",
+};
+
+function GoLiveComposer() {
+  const [targets, setTargets] = useState<MetaTarget[] | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
+  const [job, setJob] = useState<MetaJob | null>(null);
+  const [pushing, setPushing] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    metaFetch<{ targets: MetaTarget[]; last?: MetaJob }>("/metadata")
+      .then((data) => {
+        if (!live) return;
+        setTargets(data.targets);
+        // Restoring the last push means a reloaded tab still shows which
+        // platforms took the title and which did not.
+        if (data.last) {
+          setJob(data.last);
+          setTitle(data.last.metadata.title);
+          setDescription(data.last.metadata.description);
+          setCategory(data.last.metadata.category);
+        }
+      })
+      .catch(() => setTargets([]));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The push is a job precisely so a slow platform API cannot hold the page,
+  // so the page has to poll it back.
+  const jobId = job?.id;
+  const jobDone = job?.done ?? true;
+  useEffect(() => {
+    if (!jobId || jobDone) return;
+    let live = true;
+    const timer = window.setInterval(() => {
+      metaFetch<MetaJob>(`/metadata/push/${jobId}`)
+        .then((next) => {
+          if (live) setJob(next);
+        })
+        .catch(() => {});
+    }, 1200);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [jobId, jobDone]);
+
+  const accepts = useCallback(
+    (field: MetaField) => (targets ?? []).filter((t) => t.caps.fields.includes(field)),
+    [targets],
+  );
+
+  // The counter shows the tightest limit among the platforms being pushed to,
+  // because that is the one that will refuse first.
+  const titleMax = useMemo(() => {
+    const limits = (targets ?? []).map((t) => t.caps.titleMax ?? 0).filter((n) => n > 0);
+    return limits.length > 0 ? Math.min(...limits) : 0;
+  }, [targets]);
+
+  const overLimit = useMemo(
+    () =>
+      (targets ?? []).filter((t) => {
+        const max = t.caps.titleMax ?? 0;
+        return max > 0 && title.length > max;
+      }),
+    [targets, title],
+  );
+
+  const categoryHint = (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
+  const noDescription = (targets ?? []).filter((t) => !t.caps.fields.includes("description"));
+
+  const push = async () => {
+    setPushing(true);
+    try {
+      const started = await metaFetch<MetaJob>("/metadata/push", { title, description, category });
+      setJob(started);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not push the metadata.");
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  if (targets === null) return null;
+
+  const empty = !title.trim() && !description.trim() && !category.trim();
+  const busy = pushing || (job !== null && !job.done);
+
+  return (
+    <Card className="mt-4">
+      <CardHeader className="flex-row items-center justify-between">
+        <CardTitle className="flex items-center gap-2">
+          <Megaphone className="h-3.5 w-3.5 text-muted-foreground" />
+          Go live
+        </CardTitle>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {targets.length === 1 ? "1 account" : `${targets.length} accounts`}
+        </span>
+      </CardHeader>
+
+      {targets.length === 0 ? (
+        <CardContent>
+          <p className="text-[12px] text-muted-foreground">
+            Connect a YouTube or Twitch account in Settings → Platforms to set your stream title,
+            description and category on every platform at once.
+          </p>
+        </CardContent>
+      ) : (
+        <CardContent className="grid gap-4 lg:grid-cols-2">
+          {/* ---------- the one form ---------- */}
+          <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline justify-between">
+                <Label htmlFor="golive-title">Title</Label>
+                {titleMax > 0 && (
+                  <span
+                    className={`tnum font-mono text-[10px] ${
+                      overLimit.length > 0 ? "text-down" : "text-muted-foreground"
+                    }`}
+                  >
+                    {title.length}/{titleMax}
+                  </span>
+                )}
+              </div>
+              <Input
+                id="golive-title"
+                value={title}
+                placeholder="Friday night set"
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              {overLimit.length > 0 && (
+                <p className="text-[10px] text-down">
+                  Too long for {overLimit.map((t) => t.platform).join(", ")}; that platform will be
+                  reported as failed and the others still pushed.
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="golive-description">Description</Label>
+              <Textarea
+                id="golive-description"
+                value={description}
+                rows={3}
+                placeholder="What this stream is."
+                onChange={(e) => setDescription(e.target.value)}
+              />
+              {noDescription.length > 0 && (
+                <p className="text-[10px] text-muted-foreground">
+                  {noDescription.map((t) => t.platform).join(", ")} has no description field, so
+                  this is skipped there rather than failed.
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="golive-category">Category</Label>
+              <Input
+                id="golive-category"
+                value={category}
+                placeholder="Music"
+                onChange={(e) => setCategory(e.target.value)}
+              />
+              {categoryHint && (
+                <p className="text-[10px] text-muted-foreground">
+                  {categoryHint} Type the name — polyemesis looks up the id.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={push} disabled={empty || busy}>
+                <Megaphone /> {busy ? "Pushing…" : "Push to platforms"}
+              </Button>
+              <span className="text-[10px] text-muted-foreground">
+                Applies to {accepts("title").length === 1 ? "the connected account" : "every connected account"}.
+              </span>
+            </div>
+          </div>
+
+          {/* ---------- what each platform did ---------- */}
+          <div aria-live="polite" className="flex flex-col gap-1.5">
+            {job === null ? (
+              <p className="text-[11px] text-muted-foreground">
+                Results appear here, one row per platform.
+              </p>
+            ) : (
+              job.results.map((res) => {
+                const tone = metaTone[res.state];
+                return (
+                  <div
+                    key={res.accountId}
+                    className="flex flex-col gap-0.5 rounded border border-border px-2 py-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <StatusDot tone={tone} size="sm" />
+                        <span className="truncate text-[11px] font-medium">{res.platform}</span>
+                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                          {res.accountName}
+                        </span>
+                      </div>
+                      <Badge variant={toneBadge[tone]}>{metaLabel[res.state]}</Badge>
+                    </div>
+
+                    {res.applied.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Set {res.applied.join(", ")}
+                        {res.category && ` — category “${res.category}”`}
+                        {res.target && ` on ${res.target}`}
+                      </p>
+                    )}
+                    {res.skipped && res.skipped.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Not supported here: {res.skipped.join(", ")}
+                      </p>
+                    )}
+                    {res.message && <p className="text-[10px] text-down">{res.message}</p>}
+                    {res.warnings?.map((warn) => (
+                      <p key={warn} className="text-[10px] text-warn">
+                        {warn}
+                      </p>
+                    ))}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
 
 export function Dashboard() {
   const { status } = useLiveData();
@@ -290,6 +621,8 @@ export function Dashboard() {
           </Card>
         </div>
       </div>
+
+      <GoLiveComposer />
 
       {/* ---------- destinations ---------- */}
       <div className="mt-4">
