@@ -860,3 +860,292 @@ func TestUpsertPlatformAccountKeepsTheRefreshTokenWhenNoneIsSupplied(t *testing.
 		t.Errorf("RefreshToken = %q, want the retained %q", got.RefreshToken, "refresh-1")
 	}
 }
+
+// ------------------------------------------------------------- pull settings
+
+// The pull URL only has to be dialable when pull is actually the ingest mode.
+// The asymmetry is the point: a half-filled pull form must not stop somebody
+// saving an unrelated SRT change, and switching to pull must not silently start
+// an ingest with nowhere to dial.
+func TestSettingsValidatePullURLOnlyInPullMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Settings)
+		wantErr string
+	}{
+		{
+			name: "pull mode with an http source is accepted",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestPull
+				s.Ingest.Pull.URL = "https://example.test/live.ts"
+			},
+		},
+		{
+			name: "pull mode with an rtsp camera is accepted",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestPull
+				s.Ingest.Pull.URL = "rtsp://cam.local/stream1"
+			},
+		},
+		{
+			name: "pull mode with a relative file source is accepted",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestPull
+				s.Ingest.Pull.URL = "file://loops/bars.ts"
+			},
+		},
+		{
+			name:    "pull mode with no URL is rejected",
+			mutate:  func(s *Settings) { s.Ingest.Mode = IngestPull },
+			wantErr: "pull source URL is required",
+		},
+		{
+			name: "pull mode with a scheme outside the allowlist is rejected",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestPull
+				s.Ingest.Pull.URL = "gopher://example.test/1"
+			},
+			wantErr: "unsupported pull source scheme",
+		},
+		{
+			name: "a file source escaping the data directory is rejected",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestPull
+				s.Ingest.Pull.URL = "file://../../etc/shadow"
+			},
+			wantErr: "must be a relative path inside the data directory",
+		},
+		{
+			name: "an absolute file source is rejected",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestPull
+				s.Ingest.Pull.URL = "file:///etc/shadow"
+			},
+			wantErr: "must be a relative path inside the data directory",
+		},
+		{
+			// The half-filled form. Nothing about SRT depends on the pull URL.
+			name:   "srt mode ignores an empty pull URL",
+			mutate: func(s *Settings) { s.Ingest.Mode = IngestSRT },
+		},
+		{
+			name: "rtmp mode ignores a nonsense pull URL",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestRTMP
+				s.Ingest.Pull.URL = "not a url at all"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := DefaultSettings()
+			tt.mutate(&s)
+			assertValidate(t, s, tt.wantErr)
+		})
+	}
+}
+
+// The pull tuning is range-checked whatever the mode, because a value out of
+// range is a typo now and a dead ingest the next time somebody switches to pull.
+func TestSettingsValidatePullTuning(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Settings)
+		wantErr string
+	}{
+		{
+			name:   "zero reconnect delay means the built-in default",
+			mutate: func(s *Settings) { s.Ingest.Pull.ReconnectDelayMaxSeconds = 0 },
+		},
+		{
+			name:   "the maximum reconnect delay is accepted",
+			mutate: func(s *Settings) { s.Ingest.Pull.ReconnectDelayMaxSeconds = 3600 },
+		},
+		{
+			name:    "a negative reconnect delay is rejected",
+			mutate:  func(s *Settings) { s.Ingest.Pull.ReconnectDelayMaxSeconds = -1 },
+			wantErr: "pull reconnect delay -1s out of range",
+		},
+		{
+			name:    "a reconnect delay past an hour is rejected",
+			mutate:  func(s *Settings) { s.Ingest.Pull.ReconnectDelayMaxSeconds = 3601 },
+			wantErr: "pull reconnect delay 3601s out of range",
+		},
+		{
+			name:   "an empty rtsp transport means the default",
+			mutate: func(s *Settings) { s.Ingest.Pull.RTSPTransport = "" },
+		},
+		{
+			name:   "udp_multicast is a transport FFmpeg knows",
+			mutate: func(s *Settings) { s.Ingest.Pull.RTSPTransport = "udp_multicast" },
+		},
+		{
+			name:    "a misspelt rtsp transport is caught in the form",
+			mutate:  func(s *Settings) { s.Ingest.Pull.RTSPTransport = "tpc" },
+			wantErr: `unknown rtsp transport "tpc"`,
+		},
+		{
+			// Range checks run in srt mode too: the tuning is stored either way.
+			name: "the tuning is checked even when pull is not the mode",
+			mutate: func(s *Settings) {
+				s.Ingest.Mode = IngestSRT
+				s.Ingest.Pull.ReconnectDelayMaxSeconds = 99999
+			},
+			wantErr: "pull reconnect delay 99999s out of range",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := DefaultSettings()
+			tt.mutate(&s)
+			assertValidate(t, s, tt.wantErr)
+		})
+	}
+}
+
+// Silence synthesis defaults ON. A video-only ingest is refused by every major
+// platform, so the default that "just works" is the one that fixes it — and an
+// upgraded install has to inherit it rather than keeping the old broken
+// behaviour because its stored blob predates the field.
+func TestSilenceOnVideoOnlyDefaultsOnIncludingForAnOlderBlob(t *testing.T) {
+	if !DefaultSettings().Synth.SilenceOnVideoOnly {
+		t.Error("DefaultSettings().Synth.SilenceOnVideoOnly = false, want true")
+	}
+
+	d := testDB(t)
+	// A settings blob written before the field existed.
+	if _, err := d.SQL().Exec(
+		`INSERT INTO settings (id, json) VALUES (1, ?)
+		 ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
+		`{"ingest":{"mode":"srt","srt":{"port":6000,"latencyMs":200}}}`); err != nil {
+		t.Fatalf("seed old settings: %v", err)
+	}
+	s, err := d.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if !s.Synth.SilenceOnVideoOnly {
+		t.Error("an upgraded install did not inherit the silence default")
+	}
+}
+
+func assertValidate(t *testing.T, s Settings, wantErr string) {
+	t.Helper()
+	err := s.Validate()
+	if wantErr == "" {
+		if err != nil {
+			t.Fatalf("Validate() = %v, want nil", err)
+		}
+		return
+	}
+	if err == nil {
+		t.Fatalf("Validate() = nil, want an error containing %q", wantErr)
+	}
+	if !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("Validate() = %q, want it to contain %q", err, wantErr)
+	}
+}
+
+// ------------------------------------------------------------- expert args
+
+// Expert arguments now live on the destination row rather than in a sidecar,
+// because the engine folds them into the restart signature and a signature
+// assembled from two reads of two tables can be assembled from a torn pair.
+func TestDestinationRoundTripPreservesExpertArgs(t *testing.T) {
+	d := testDB(t)
+
+	created, err := d.CreateDestination(&Destination{
+		Name: "twitch", Kind: DestRTMP, URL: "rtmp://ingest.example/app",
+		StreamKey: "key", AudioBitrate: 160,
+		ExtraInputArgs: "-analyzeduration 10M", ExtraOutputArgs: `-metadata "title=My Show"`,
+		ExpertAckReencode: true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.ExtraInputArgs != "-analyzeduration 10M" {
+		t.Errorf("input args = %q", created.ExtraInputArgs)
+	}
+	if created.ExtraOutputArgs != `-metadata "title=My Show"` {
+		t.Errorf("output args = %q", created.ExtraOutputArgs)
+	}
+	if !created.ExpertAckReencode {
+		t.Error("the acknowledgement did not survive the round trip")
+	}
+
+	// And clearing them clears them, rather than leaving the previous strings
+	// because an empty value looked like "field omitted".
+	created.ExtraInputArgs, created.ExtraOutputArgs = "", ""
+	created.ExpertAckReencode = false
+	updated, err := d.UpdateDestination(created)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.ExpertArgsSet() || updated.ExpertAckReencode {
+		t.Errorf("expert args survived being cleared: %+v", updated)
+	}
+}
+
+// A destination that predates expert mode reads back as two empty strings,
+// which is exactly "expert mode off" — never as a NULL scan error.
+func TestMigrateDestinationExpertArgsIsIdempotentAndDefaultsToOff(t *testing.T) {
+	d := testDB(t)
+	// Open already ran it once; running it again must be a no-op rather than a
+	// duplicate-column error, because it runs on every open.
+	if err := d.MigrateDestinationExpertArgs(); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	created, err := d.CreateDestination(&Destination{
+		Name: "plain", Kind: DestSRT, URL: "srt://example.test:9000", AudioBitrate: 160,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.ExpertArgsSet() {
+		t.Errorf("a fresh destination reports expert args: %+v", created)
+	}
+}
+
+// The sidecar table expert mode first shipped in is drained, not abandoned. A
+// developer upgrading across that change keeps the arguments they saved.
+func TestMigrateDestinationExpertArgsDrainsTheOldSidecarTable(t *testing.T) {
+	d := testDB(t)
+	created, err := d.CreateDestination(&Destination{
+		Name: "twitch", Kind: DestRTMP, URL: "rtmp://ingest.example/app", AudioBitrate: 160,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, err := d.SQL().Exec(`CREATE TABLE destination_expert_args (
+		destination_id INTEGER PRIMARY KEY,
+		input_args TEXT NOT NULL DEFAULT '',
+		output_args TEXT NOT NULL DEFAULT '',
+		ack_reencode INTEGER NOT NULL DEFAULT 0,
+		updated_at INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("create sidecar: %v", err)
+	}
+	if _, err := d.SQL().Exec(
+		`INSERT INTO destination_expert_args VALUES (?, '-re', '-muxdelay 0', 1, 0)`,
+		created.ID); err != nil {
+		t.Fatalf("seed sidecar: %v", err)
+	}
+
+	if err := d.MigrateDestinationExpertArgs(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	moved, err := d.GetDestination(created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if moved.ExtraInputArgs != "-re" || moved.ExtraOutputArgs != "-muxdelay 0" || !moved.ExpertAckReencode {
+		t.Errorf("sidecar values were not folded in: %+v", moved)
+	}
+	// And the table is gone, so there is one answer to "what does this
+	// destination run with" rather than two that can disagree.
+	if ok, err := tableExists(d.SQL(), "destination_expert_args"); err != nil || ok {
+		t.Errorf("sidecar table still present (exists=%v err=%v)", ok, err)
+	}
+}

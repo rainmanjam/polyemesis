@@ -56,10 +56,33 @@ type Destination struct {
 	// to. nil is passthrough: no encode, no process, straight off the ingest
 	// relay. Whatever the rendition, the destination still does -c:v copy plus
 	// its own audio routing graph.
-	RenditionID *int64    `json:"renditionId,omitempty"`
-	Position    int       `json:"position"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	RenditionID *int64 `json:"renditionId,omitempty"`
+	// Expert mode: arguments an operator hand-wrote for this destination,
+	// stored as the raw strings they typed so the editor shows them back
+	// unchanged. Parsing and the guard acknowledgement live in the API, which
+	// is the only place allowed to set these — see handleUpdateDestination.
+	//
+	// Empty for every destination that has not opted in, which is why they are
+	// omitempty: a payload for an ordinary destination looks exactly as it did
+	// before expert mode existed.
+	ExtraInputArgs  string `json:"extraInputArgs,omitempty"`
+	ExtraOutputArgs string `json:"extraOutputArgs,omitempty"`
+	// ExpertAckReencode records the operator agreeing, in as many words, that
+	// an argument here overrides something the product otherwise guarantees.
+	// Stored rather than treated as a one-shot confirmation, so a later edit
+	// that keeps the same override does not lose the record of who agreed.
+	ExpertAckReencode bool      `json:"expertAckReencode,omitempty"`
+	Position          int       `json:"position"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+// ExpertArgsSet reports whether this destination has any hand-written
+// arguments. Two empty strings and no row at all must both read as "expert
+// mode off".
+func (d Destination) ExpertArgsSet() bool {
+	return strings.TrimSpace(d.ExtraInputArgs) != "" ||
+		strings.TrimSpace(d.ExtraOutputArgs) != ""
 }
 
 // Target returns the full URL FFmpeg should publish to, i.e. URL with the
@@ -143,7 +166,9 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		updated    int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
-		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &d.Position, &created, &updated)
+		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition,
+		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
+		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +191,9 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 }
 
 const destColumns = `id, name, kind, platform, account_id, url, stream_key,
-	enabled, audio_bitrate, profile, rendition_id, position, created_at, updated_at`
+	enabled, audio_bitrate, profile, rendition_id,
+	extra_input_args, extra_output_args, expert_ack_reencode,
+	position, created_at, updated_at`
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
 // key would catch it anyway, but only as "FOREIGN KEY constraint failed",
@@ -249,10 +276,12 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	dst.Position = int(maxPos.Int64) + 1
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
-		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id, position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id,
+		 extra_input_args, extra_output_args, expert_ack_reencode, position, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.Position, now, now)
+		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID,
+		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode, dst.Position, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -281,9 +310,13 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
-		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, updated_at=? WHERE id=?`,
+		enabled=?, audio_bitrate=?, profile=?, rendition_id=?,
+		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
+		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, time.Now().Unix(), dst.ID)
+		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID,
+		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
+		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -390,4 +423,69 @@ func (d *DB) DeleteDestination(id int64) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// MigrateDestinationExpertArgs adds the expert-mode columns to a destinations
+// table created before expert mode existed, and folds in anything the earlier
+// sidecar table held.
+//
+// Same reasoning as MigrateRenditions, and the same constraint: schema.sql only
+// runs CREATE TABLE IF NOT EXISTS, which is a no-op against a table that is
+// already there, so a new column can only arrive by ALTER. Idempotent, safe on
+// every open, and every existing row reads back as two empty strings — which is
+// precisely "expert mode off".
+//
+// The destination_expert_args table is the shape expert mode shipped in while
+// internal/db was owned by another workstream. It is drained and dropped here
+// rather than left in place, so there is exactly one answer to "what arguments
+// does this destination run with".
+func (d *DB) MigrateDestinationExpertArgs() error {
+	columns := []struct{ name, ddl string }{
+		{"extra_input_args", `ALTER TABLE destinations ADD COLUMN extra_input_args TEXT NOT NULL DEFAULT ''`},
+		{"extra_output_args", `ALTER TABLE destinations ADD COLUMN extra_output_args TEXT NOT NULL DEFAULT ''`},
+		{"expert_ack_reencode", `ALTER TABLE destinations ADD COLUMN expert_ack_reencode INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, c := range columns {
+		has, err := columnExists(d.sql, "destinations", c.name)
+		if err != nil {
+			return fmt.Errorf("inspect destinations columns: %w", err)
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec(c.ddl); err != nil {
+			return fmt.Errorf("add destinations.%s: %w", c.name, err)
+		}
+	}
+
+	sidecar, err := tableExists(d.sql, "destination_expert_args")
+	if err != nil {
+		return fmt.Errorf("inspect destination_expert_args: %w", err)
+	}
+	if !sidecar {
+		return nil
+	}
+	// One UPDATE, then the drop. A destination whose sidecar row was deleted
+	// between the two statements simply keeps its empty columns, which is the
+	// same answer either order would have given.
+	if _, err := d.sql.Exec(`UPDATE destinations SET
+		extra_input_args    = COALESCE((SELECT input_args   FROM destination_expert_args e WHERE e.destination_id = destinations.id), extra_input_args),
+		extra_output_args   = COALESCE((SELECT output_args  FROM destination_expert_args e WHERE e.destination_id = destinations.id), extra_output_args),
+		expert_ack_reencode = COALESCE((SELECT ack_reencode FROM destination_expert_args e WHERE e.destination_id = destinations.id), expert_ack_reencode)`); err != nil {
+		return fmt.Errorf("fold destination_expert_args into destinations: %w", err)
+	}
+	if _, err := d.sql.Exec(`DROP TABLE destination_expert_args`); err != nil {
+		return fmt.Errorf("drop destination_expert_args: %w", err)
+	}
+	return nil
+}
+
+func tableExists(sqldb *sql.DB, table string) (bool, error) {
+	var name string
+	err := sqldb.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
