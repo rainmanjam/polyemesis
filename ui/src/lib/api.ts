@@ -2,7 +2,7 @@ import type {
   ApiToken,
   Destination,
   DiskUsage,
-  EncoderInfo,
+  EncoderList,
   Levels,
   PlatformAccount,
   PlatformCreds,
@@ -189,12 +189,19 @@ export const api = {
       disclaimer: string;
       bounds: RenditionBounds;
     }>("/renditions/presets"),
-  /** Which encoders this FFmpeg registers. The editor offers only these: an
-   *  encoder the binary lacks fails at start, once a stream is already live. */
-  listEncoders: () =>
-    get<{ encoders: EncoderInfo[]; default: string; probed: boolean }>(
-      "/encoders",
-    ),
+  /** Every known encoder, each with whether it actually encoded a frame on this
+   *  machine and why not when it did not. The list is deliberately complete:
+   *  "h264_nvenc — no NVENC capable device found" tells the user their container
+   *  is missing --gpus, where a silently shorter list teaches them nothing. */
+  listEncoders: () => get<EncoderList>("/encoders"),
+  /** Re-run the GPU scan and every test encode before answering.
+   *
+   *  A GET because it is a read of the machine's current state — the same
+   *  answer, not from the cache. Hardware moves after launch: a driver package
+   *  upgrades, a card is passed into the container, a laptop comes back from
+   *  suspend with a render node that now opens. Takes a few seconds, and is
+   *  single-flighted server-side so a second click costs nothing. */
+  redetectEncoders: () => get<EncoderList>("/encoders?redetect=1"),
 
   // --- routing ---
   compileRouting: (profile: RoutingProfile) =>

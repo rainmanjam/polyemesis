@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1194,6 +1195,51 @@ func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64) ffmpeg.
 	}
 }
 
+// renditionEncoderProblem reports why this encoder cannot run here, or nil when
+// nothing is known against it.
+//
+// Two different questions, asked in that order because they have two different
+// answers. `ffmpeg -encoders` says what the BUILD registers; the test encode
+// says what the MACHINE can do, and a stock Linux build lists nvenc, qsv, vaapi
+// and amf on a box with no GPU in it at all. A saved rendition goes stale for
+// the same reasons — the card was swapped, the driver was upgraded, the
+// container lost its --device passthrough — and the failure has to name the
+// cause here rather than leave FFmpeg crash-looping on a driver error nobody is
+// reading.
+//
+// Both checks are silent when detection could not run: an empty encoder list
+// and an unprobed encoder both mean "we do not know", and detection that could
+// not answer must never be the thing that stops a stream.
+func renditionEncoderProblem(tools *ffmpeg.Tools, encoder db.VideoEncoder) error {
+	if tools == nil {
+		return nil
+	}
+	if len(tools.VideoEncoders) > 0 && !tools.HasEncoder(string(encoder)) {
+		return fmt.Errorf("this FFmpeg build has no %s encoder", encoder)
+	}
+	works, reason := tools.EncoderWorks(string(encoder))
+	if works || notProbed(reason) {
+		return nil
+	}
+	if reason == "" {
+		reason = "the test encode failed without saying why"
+	}
+	return fmt.Errorf("%s did not pass its test encode on this machine: %s. "+
+		"Choose a different encoder, or fix the driver and re-detect hardware from the rendition editor",
+		encoder, reason)
+}
+
+// notProbed distinguishes "the encoder failed" from "we never got to ask it".
+//
+// Detection marks a probe it could not run — a cancelled scan, an expired
+// budget — as not working, with a reason that says so. Read literally, one
+// cancelled detection would refuse every rendition on the box. That is the
+// exact shape of the SRT check that used to stop the server from starting, and
+// the lesson from it was the same one: a capability check must fail open.
+func notProbed(reason string) bool {
+	return strings.HasPrefix(reason, "not probed:")
+}
+
 // startRendition brings up one shared encode: a hub of its own, a subscription
 // on the ingest hub for its input, and a supervised FFmpeg between them.
 //
@@ -1212,10 +1258,8 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		e.log.Error("start rendition", "rendition", row.Name, "err", err)
 	}
 
-	// Detection reports an empty list when the build would not tell us, so an
-	// unknown encoder is only rejected when we actually know it is missing.
-	if len(e.tools.VideoEncoders) > 0 && !e.tools.HasEncoder(string(row.Encoder)) {
-		fail(fmt.Errorf("this FFmpeg build has no %s encoder", row.Encoder))
+	if err := renditionEncoderProblem(e.tools, row.Encoder); err != nil {
+		fail(err)
 		return
 	}
 
