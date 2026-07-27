@@ -1,2 +1,0 @@
-[    4554ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8099/:0
-[   44079ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://localhost:8099/api/v1/destinations:0
