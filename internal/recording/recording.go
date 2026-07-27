@@ -8,12 +8,17 @@ package recording
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -24,14 +29,52 @@ type Manager struct {
 	log   *slog.Logger
 	store *db.DB
 	dir   string
+	// ffprobe measures finished segments. Empty means "not wired up": the
+	// index still works, it just carries no duration or track count.
+	ffprobe string
 	// onChange is called after any scan or sweep that altered the index, so
 	// the UI can refresh without polling.
 	onChange func()
+	// onStorage is called when the free-space floor halts or resumes
+	// recording, so the owner of the recorder process can act on it.
+	onStorage func(StorageState)
+	// freeSpace is diskFree in production; tests substitute a volume they can
+	// fill on demand, which no real temp directory lets them do.
+	freeSpace func(string) (uint64, uint64, error)
+
+	storageMu sync.Mutex
+	storage   StorageState
+}
+
+// StorageState is the free-space guard's verdict on whether the volume can
+// take more recording.
+type StorageState struct {
+	Halted bool `json:"halted"`
+	// Reason is written for a human reading an error banner, not parsed.
+	Reason string `json:"reason,omitempty"`
+}
+
+// Option configures a Manager at construction.
+type Option func(*Manager)
+
+// WithFFprobe supplies the ffprobe binary used to measure finished segments.
+func WithFFprobe(bin string) Option {
+	return func(m *Manager) { m.ffprobe = bin }
+}
+
+// WithStorageGuard registers the callback fired when the free-space floor
+// halts recording, and again when recovered space lets it resume.
+func WithStorageGuard(fn func(StorageState)) Option {
+	return func(m *Manager) { m.onStorage = fn }
 }
 
 // New creates a Manager.
-func New(log *slog.Logger, store *db.DB, dir string, onChange func()) *Manager {
-	return &Manager{log: log, store: store, dir: dir, onChange: onChange}
+func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Option) *Manager {
+	m := &Manager{log: log, store: store, dir: dir, onChange: onChange, freeSpace: diskFree}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // Dir is the recordings directory.
@@ -66,14 +109,96 @@ func (m *Manager) ScanAndSweep(s db.RecordingSettings) {
 	if err != nil {
 		m.log.Warn("recording retention sweep failed", "err", err)
 	}
-	if (changed || swept) && m.onChange != nil {
+	// After the sweep, not before: retention may have just freed enough room
+	// to lift a halt, and waiting another tick to notice would cost a whole
+	// segment of footage.
+	guarded := m.CheckFreeSpace(s)
+	if (changed || swept || guarded) && m.onChange != nil {
 		m.onChange()
 	}
+}
+
+// bytesPerGB is the binary gigabyte the size settings are expressed in.
+const bytesPerGB = 1024 * 1024 * 1024
+
+// CheckFreeSpace applies the free-space floor and reports whether the halt
+// state changed. One statfs, so it is cheap enough for the sweep tick.
+//
+// A recorder left running until writes fail does not fail alone: it takes the
+// database, the HLS preview and anything else on the volume with it. Stopping
+// early is the only outcome where the operator still has a working box.
+func (m *Manager) CheckFreeSpace(s db.RecordingSettings) bool {
+	if s.MinFreeGB <= 0 {
+		return m.setStorage(StorageState{})
+	}
+	free, total, err := m.freeSpace(m.dir)
+	if err != nil {
+		m.log.Warn("free-space check failed", "dir", m.dir, "err", err)
+		return false
+	}
+	// Platforms without a statfs report zeroes rather than an error; halting
+	// on that would disable recording everywhere it is unimplemented.
+	if total == 0 {
+		return false
+	}
+
+	floor := s.MinFreeGB * bytesPerGB
+	// Resume with headroom. Resuming exactly at the floor would halt again on
+	// the next tick, cycling the recorder every 30 seconds and shredding the
+	// recording into unusable fragments.
+	resume := floor * 1.25
+
+	if m.Storage().Halted {
+		if float64(free) < resume {
+			return false
+		}
+		m.log.Info("free space recovered; recording may resume",
+			"freeGb", float64(free)/bytesPerGB, "floorGb", s.MinFreeGB)
+		return m.setStorage(StorageState{})
+	}
+
+	if float64(free) >= floor {
+		return false
+	}
+	reason := fmt.Sprintf("recording halted: %.1f GB free on %s is below the %.1f GB floor",
+		float64(free)/bytesPerGB, m.dir, s.MinFreeGB)
+	m.log.Error("free space below floor; halting recording",
+		"dir", m.dir, "freeGb", float64(free)/bytesPerGB, "floorGb", s.MinFreeGB)
+	return m.setStorage(StorageState{Halted: true, Reason: reason})
+}
+
+// Storage reports the current verdict of the free-space guard.
+func (m *Manager) Storage() StorageState {
+	m.storageMu.Lock()
+	defer m.storageMu.Unlock()
+	return m.storage
+}
+
+// RecordingAllowed is what the owner of the recorder process consults before
+// starting or keeping it alive.
+func (m *Manager) RecordingAllowed() bool { return !m.Storage().Halted }
+
+func (m *Manager) setStorage(st StorageState) bool {
+	m.storageMu.Lock()
+	if m.storage == st {
+		m.storageMu.Unlock()
+		return false
+	}
+	m.storage = st
+	m.storageMu.Unlock()
+
+	if m.onStorage != nil {
+		m.onStorage(st)
+	}
+	return true
 }
 
 // Scan indexes every .mkv in the recordings directory and drops index rows
 // whose file has disappeared. Filesystem is the source of truth: a user who
 // deletes a file by hand should not be left with a phantom row.
+//
+// Finished segments are also measured once, so the index can report how long
+// each one runs and how many audio tracks it kept.
 func (m *Manager) Scan() (bool, error) {
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
@@ -83,8 +208,18 @@ func (m *Manager) Scan() (bool, error) {
 		return false, err
 	}
 
+	indexed, err := m.store.ListRecordings()
+	if err != nil {
+		return false, err
+	}
+	measured := map[string]bool{}
+	for _, r := range indexed {
+		measured[r.Filename] = r.DurationMS > 0
+	}
+
 	changed := false
 	onDisk := map[string]bool{}
+	segments := make([]*db.Recording, 0, len(entries))
 
 	for _, e := range entries {
 		if e.IsDir() || !isRecording(e.Name()) {
@@ -98,22 +233,30 @@ func (m *Manager) Scan() (bool, error) {
 
 		// The recorder is still appending to the newest segment, so its size
 		// changes on every scan; that is expected, not a reason to skip it.
-		rec := &db.Recording{
+		segments = append(segments, &db.Recording{
 			Filename:  e.Name(),
 			StartedAt: startTimeFromName(e.Name(), info.ModTime()),
 			Bytes:     info.Size(),
+		})
+	}
+
+	live := newestSegment(segments)
+	for _, rec := range segments {
+		// Probing costs an ffprobe per file, so it happens once per segment,
+		// and never on the one the recorder is still writing: its duration
+		// would be wrong the moment it was recorded.
+		if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] {
+			if err := m.measure(rec); err != nil {
+				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
+			}
 		}
 		if err := m.store.UpsertRecording(rec); err != nil {
-			m.log.Warn("index recording", "file", e.Name(), "err", err)
+			m.log.Warn("index recording", "file", rec.Filename, "err", err)
 			continue
 		}
 		changed = true
 	}
 
-	indexed, err := m.store.ListRecordings()
-	if err != nil {
-		return changed, err
-	}
 	for _, r := range indexed {
 		if !onDisk[r.Filename] {
 			if err := m.store.DeleteRecordingByFilename(r.Filename); err != nil {
@@ -125,6 +268,79 @@ func (m *Manager) Scan() (bool, error) {
 		}
 	}
 	return changed, nil
+}
+
+// newestSegment names the segment the recorder is presumably still appending
+// to. Start time, not mtime: mtime on an older segment can be bumped by a
+// filesystem touch, while the encoded start time cannot move.
+func newestSegment(segments []*db.Recording) string {
+	newest := ""
+	var at time.Time
+	for _, s := range segments {
+		// Equal start times are broken by name so the choice is stable across
+		// scans; without that, two same-second segments would take turns being
+		// "live" and neither would ever be measured.
+		if newest == "" || s.StartedAt.After(at) || (s.StartedAt.Equal(at) && s.Filename > newest) {
+			newest, at = s.Filename, s.StartedAt
+		}
+	}
+	return newest
+}
+
+// segmentProbe is the slice of ffprobe's JSON we need: overall duration and
+// enough of each stream to count the audio ones.
+type segmentProbe struct {
+	Streams []struct {
+		CodecType string `json:"codec_type"`
+	} `json:"streams"`
+	Format struct {
+		Duration string `json:"duration"`
+	} `json:"format"`
+}
+
+// measure fills in DurationMS and Tracks by running ffprobe over the segment.
+func (m *Manager) measure(rec *db.Recording) error {
+	path, err := m.Resolve(rec.Filename)
+	if err != nil {
+		return err
+	}
+	// A segment is a local file, so ffprobe returns almost immediately; the
+	// timeout only exists so a corrupt file cannot stall the scan loop.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, m.ffprobe,
+		"-hide_banner",
+		"-loglevel", "error",
+		"-print_format", "json",
+		"-show_entries", "format=duration:stream=codec_type",
+		path,
+	).Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			return fmt.Errorf("ffprobe: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return err
+	}
+
+	var p segmentProbe
+	if err := json.Unmarshal(out, &p); err != nil {
+		return fmt.Errorf("parse ffprobe output: %w", err)
+	}
+	secs, err := strconv.ParseFloat(p.Format.Duration, 64)
+	if err != nil || secs <= 0 {
+		return fmt.Errorf("ffprobe reported no duration for %s", rec.Filename)
+	}
+	tracks := 0
+	for _, s := range p.Streams {
+		if s.CodecType == "audio" {
+			tracks++
+		}
+	}
+	rec.DurationMS = int64(secs * 1000)
+	rec.Tracks = tracks
+	return nil
 }
 
 // Sweep enforces the retention policy: age first, then total size, deleting
@@ -242,6 +458,9 @@ type DiskUsage struct {
 	FreeBytes  uint64 `json:"freeBytes"`
 	TotalBytes uint64 `json:"totalBytes"`
 	Count      int    `json:"count"`
+	// Storage carries the free-space guard's verdict so the recordings page
+	// can explain a recorder that stopped on its own.
+	Storage StorageState `json:"storage"`
 }
 
 // Usage reports recordings disk usage.
@@ -252,10 +471,11 @@ func (m *Manager) Usage() (DiskUsage, error) {
 		return u, err
 	}
 	u.Count = len(recs)
+	u.Storage = m.Storage()
 	for _, r := range recs {
 		u.UsedBytes += r.Bytes
 	}
-	free, total, err := diskFree(m.dir)
+	free, total, err := m.freeSpace(m.dir)
 	if err == nil {
 		u.FreeBytes, u.TotalBytes = free, total
 	}
