@@ -81,6 +81,11 @@ type Spec struct {
 	OnProgress func(ffmpeg.Progress)
 	OnLog      func(LogLine)
 	OnState    func(Status)
+
+	// LogSink persists captured lines beyond the in-memory ring. Optional,
+	// and typically one sink shared by every process so the persisted log
+	// reads as a single interleaved timeline.
+	LogSink LogWriter
 }
 
 // Status is the externally visible state of a process.
@@ -418,6 +423,9 @@ func (p *Process) setState(s State, errMsg string) {
 func (p *Process) appendLog(text, level string) {
 	l := LogLine{Time: time.Now(), Process: p.spec.Name, Text: text, Level: level}
 	p.logs.add(l)
+	if p.spec.LogSink != nil {
+		p.spec.LogSink.WriteLog(l)
+	}
 	if p.spec.OnLog != nil {
 		p.spec.OnLog(l)
 	}
