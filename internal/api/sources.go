@@ -127,7 +127,16 @@ func (s *Server) handleGetSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
-	var row db.Source
+	// Enabled before decoding, not after: a bool cannot distinguish "absent"
+	// from "false" once decoded, and seeding it here means an omitted field
+	// keeps true while an explicit "enabled": false still wins.
+	//
+	// The default has to be true. Someone who adds a source has just said they
+	// want it; shipping it disabled means the encoder is refused with "source
+	// disabled" and the operator has no reason to suspect the thing they just
+	// created is off. That is exactly how it failed the first time this path
+	// was exercised end to end.
+	row := db.Source{Enabled: true}
 	if !decodeJSON(w, r, &row) {
 		return
 	}

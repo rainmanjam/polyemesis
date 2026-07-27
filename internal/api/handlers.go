@@ -648,7 +648,15 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	// The MANAGER, not the default engine.
+	//
+	// Settings are install-wide, and some of them are owned by the manager
+	// rather than by any one engine -- the one-port SRT listener above all,
+	// which is a single listener serving every source. Reconciling only the
+	// default engine saved the setting and changed nothing: enabling shared
+	// ingest returned 200 while no listener ever bound, which is exactly the
+	// kind of silent no-op that is worse than an error.
+	if err := s.mgr.Reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "settings saved but reconcile failed: "+err.Error())
 		return
 	}

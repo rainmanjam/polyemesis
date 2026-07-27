@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS sources (
     enabled    INTEGER NOT NULL DEFAULT 1,
     ingest     TEXT    NOT NULL,               -- db.IngestSettings as JSON
     token      TEXT    NOT NULL DEFAULT '',    -- per-source publish secret
+    -- The token this one replaced, still accepted until prev_token_until.
+    -- Rotation that instantly kills a live stream is rotation nobody performs,
+    -- and a credential nobody rotates is the problem the feature was meant to
+    -- solve. The grace window lets the new token take effect while the encoder
+    -- already connected on the old one keeps running.
+    prev_token       TEXT    NOT NULL DEFAULT '',
+    prev_token_until INTEGER NOT NULL DEFAULT 0,   -- unix seconds; 0 = none
     position   INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL

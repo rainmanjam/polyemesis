@@ -1,8 +1,10 @@
 package db
 
 import (
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The migration is the dangerous part of this feature. An operator upgrades,
@@ -314,5 +316,57 @@ func TestUpdatingASourceOntoAnotherSourcesPortIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already used by source") {
 		t.Errorf("error = %q, want it to name the conflicting source", err)
+	}
+}
+
+func TestRotationKeepsThePreviousTokenAliveForAGraceWindow(t *testing.T) {
+	d := testDB(t)
+	before, err := d.ListSources()
+	if err != nil || len(before) == 0 {
+		t.Fatalf("ListSources: %v", err)
+	}
+	old := before[0].Token
+
+	fresh, err := d.RotateSourceToken(before[0].ID)
+	if err != nil {
+		t.Fatalf("RotateSourceToken: %v", err)
+	}
+	if fresh == old {
+		t.Fatal("rotate returned the same token")
+	}
+
+	got, err := d.GetSource(before[0].ID)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	now := time.Now()
+	valid := got.ValidTokens(now)
+
+	// Both work during the window. An encoder already publishing on the old
+	// token must not be cut off the instant somebody clicks Rotate.
+	if !slices.Contains(valid, fresh) {
+		t.Error("the new token is not accepted")
+	}
+	if !slices.Contains(valid, old) {
+		t.Error("the previous token was dropped immediately; rotating would kill a live stream")
+	}
+
+	// And it expires on its own.
+	if after := got.ValidTokens(now.Add(TokenGrace + time.Minute)); slices.Contains(after, old) {
+		t.Error("the previous token outlived its grace window")
+	}
+}
+
+func TestASourceThatHasNeverRotatedAcceptsOnlyItsOwnToken(t *testing.T) {
+	d := testDB(t)
+	rows, err := d.ListSources()
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("ListSources: %v", err)
+	}
+	// No empty string in the accepted set: a publisher sending no streamid must
+	// never match a source that has simply never been rotated.
+	valid := rows[0].ValidTokens(time.Now())
+	if len(valid) != 1 || valid[0] != rows[0].Token {
+		t.Errorf("ValidTokens = %v, want exactly the live token", valid)
 	}
 }
