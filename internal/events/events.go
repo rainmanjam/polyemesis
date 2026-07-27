@@ -45,6 +45,26 @@ const (
 	// received is a line nobody needed, which is exactly what this broker's
 	// non-blocking publish is for.
 	TypeCaption Type = "caption"
+	// TypeChat carries one normalised chat message from any platform. One
+	// message per event rather than a batch: chat is read as it arrives, and a
+	// browser that joined mid-broadcast gets its scrollback from the REST
+	// history endpoint instead of from a replayed batch nobody else needs.
+	//
+	// Like every other payload here it is droppable. A subscriber so far behind
+	// that it is shedding chat has lost the conversation either way, and the
+	// adapters must never be slowed down by a browser: an IRC socket that stops
+	// being read gets dropped by Twitch in minutes.
+	TypeChat Type = "chat"
+	// TypeChatState carries the per-platform connection state for the whole
+	// chat surface — connecting, live, degraded, failed — with the reason in
+	// the operator's words.
+	//
+	// It is a separate type from TypeChat because it is the answer to "why has
+	// chat gone quiet", and that question is asked precisely when no messages
+	// are flowing. A UI that inferred health from message arrival could not
+	// tell an idle channel from a dead adapter, and cross-platform chat where
+	// one platform silently stopped is worse than one where it visibly did.
+	TypeChatState Type = "chatState"
 )
 
 // Event is one message.
