@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,6 +33,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -69,6 +71,11 @@ type Engine struct {
 	alloc  *relay.PortAllocator
 	mon    *stats.Monitor
 	recman *recording.Manager
+	// play is the public HLS/DASH origin. It owns its own processes and
+	// directory; the engine owns only the order it is reconciled in, which is
+	// the part that matters — a variant reads a rendition hub, so it must come
+	// up after that rendition and go down before it.
+	play *playout.Manager
 
 	// sink persists captured stderr beyond the in-memory ring. One sink for
 	// every child on purpose: the file reads as a single interleaved timeline.
@@ -85,6 +92,14 @@ type Engine struct {
 	meters   *supervisor.Process
 	dests    map[int64]*destination
 	rends    map[int64]*rendition
+	// silence is the synthetic-audio tier, nil unless the ingest probed with
+	// no audio at all. See silence.go.
+	silence *silenceTier
+	// playProcs mirrors the manager's running variants so the monitoring page
+	// can list them beside every other child. The manager hands out its
+	// processes as an opaque Runner, so this is the only place that still knows
+	// they are supervisor.Processes.
+	playProcs map[string]*supervisor.Process
 
 	// *Sig fields hash the inputs that would require restarting the
 	// corresponding process. Comparing them is what keeps an unrelated
@@ -96,6 +111,11 @@ type Engine struct {
 	recorderPort int
 	previewPort  int
 	metersPort   int
+	// metersHub is which relay the sidecar subscribed to — the ingest's, or the
+	// silence tier's. Held so it is unsubscribed from the same one, because an
+	// orphaned subscription forwards to a port the allocator has since handed
+	// to somebody else.
+	metersHub *relay.Hub
 
 	// source is the probed ingest layout. Until the ingest carries a stream,
 	// this is DefaultSource() so the routing editor still has something to
@@ -152,7 +172,11 @@ type rendition struct {
 	proc *supervisor.Process
 	// hub is this rendition's own relay, the one its destinations read.
 	hub *relay.Hub
-	// port and subName are its subscription on the INGEST hub, i.e. its input.
+	// in is the relay this encode READS: the ingest's, or the silence tier's
+	// when one is synthesising a track for a video-only ingest. Held so
+	// teardown unsubscribes from the same hub it subscribed to.
+	in *relay.Hub
+	// port and subName are its subscription on `in`, i.e. its input.
 	port    int
 	subName string
 	// spec plays the same role as a destination's: a hash of everything the
@@ -170,16 +194,17 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	}
 
 	e := &Engine{
-		log:    log,
-		cfg:    cfg,
-		store:  store,
-		tools:  tools,
-		bus:    bus,
-		hub:    hub,
-		alloc:  relay.NewPortAllocator(relayPortBase, relayPortSpan),
-		dests:  map[int64]*destination{},
-		rends:  map[int64]*rendition{},
-		source: routing.DefaultSource(),
+		log:       log,
+		cfg:       cfg,
+		store:     store,
+		tools:     tools,
+		bus:       bus,
+		hub:       hub,
+		alloc:     relay.NewPortAllocator(relayPortBase, relayPortSpan),
+		dests:     map[int64]*destination{},
+		rends:     map[int64]*rendition{},
+		playProcs: map[string]*supervisor.Process{},
+		source:    routing.DefaultSource(),
 	}
 	e.mon = stats.NewMonitor(hub.RxBytes)
 	e.recman = recording.New(log, store, cfg.RecordingsDir(), func() {
@@ -188,7 +213,59 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		recording.WithFFprobe(tools.FFprobe),
 		recording.WithStorageGuard(e.onStorage),
 	)
+	e.play = playout.New(playout.Deps{
+		Log:   log,
+		Dir:   cfg.PlayoutDir(),
+		Ports: e.alloc,
+		// The manager never imports internal/supervisor; it asks for a child
+		// and the engine decides what a child is. That is what keeps a playout
+		// muxer on the same log sink, state callbacks and restart policy as
+		// every other process in the pipeline.
+		Spawn: func(name string, args []string) playout.Runner {
+			proc := supervisor.New(e.log, supervisor.Spec{
+				Name: name, Kind: "playout", Bin: e.tools.FFmpeg, Args: args,
+				AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+			})
+			return &playoutProc{e: e, name: name, Process: proc}
+		},
+	})
 	return e, nil
+}
+
+// Playout exposes the public origin so the API can mount its media handler and
+// render its status.
+func (e *Engine) Playout() *playout.Manager { return e.play }
+
+// playoutProc is a supervised child the playout manager owns, registered with
+// the engine for the lifetime the manager runs it.
+//
+// The registration is what puts a playout muxer on the monitoring page beside
+// the ingest and the destinations. It hangs off Start/Stop rather than off
+// Reconcile because the manager's teardown is the only event that reliably
+// means "this child is gone" — polling states would leave a stopped variant
+// listed as a ghost until something else happened to look.
+type playoutProc struct {
+	*supervisor.Process
+	e    *Engine
+	name string
+}
+
+func (p *playoutProc) Start() {
+	p.e.mu.Lock()
+	p.e.playProcs[p.name] = p.Process
+	p.e.mu.Unlock()
+	p.Process.Start()
+}
+
+func (p *playoutProc) Stop(ctx context.Context) {
+	p.e.mu.Lock()
+	// Only if it is still ours: a restarted variant registers its replacement
+	// under the same name before the old one is torn down.
+	if p.e.playProcs[p.name] == p.Process {
+		delete(p.e.playProcs, p.name)
+	}
+	p.e.mu.Unlock()
+	p.Process.Stop(ctx)
 }
 
 // Hub exposes the relay for the monitoring endpoint.
@@ -226,6 +303,11 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.previewLoop(e.ctx) }()
 
+	// The playout sweeper: the muxers prune their own windows, but a restart
+	// orphans the previous run's segments and nothing else would collect them.
+	e.wg.Add(1)
+	go func() { defer e.wg.Done(); e.play.Run(e.ctx) }()
+
 	return e.Reconcile()
 }
 
@@ -256,9 +338,11 @@ func (e *Engine) Stop() {
 	for _, r := range e.rends {
 		rends = append(rends, r)
 	}
+	silence := e.silence
 	recorder, preview, meters, ingest := e.recorder, e.preview, e.meters, e.ingest
 	e.dests = map[int64]*destination{}
 	e.rends = map[int64]*rendition{}
+	e.silence = nil
 	e.recorder, e.preview, e.meters, e.ingest = nil, nil, nil, nil
 	e.mu.Unlock()
 	e.previewMu.Unlock()
@@ -277,6 +361,11 @@ func (e *Engine) Stop() {
 	stop(recorder)
 	stop(preview)
 	stop(meters)
+	// A playout variant is a rendition consumer exactly as a destination is, so
+	// it belongs in this phase and not the next one: torn down after the
+	// rendition tier, it would spend the shutdown reading a closed hub.
+	wg.Add(1)
+	go func() { defer wg.Done(); e.play.Stop() }()
 	wg.Wait()
 
 	// Only now that no destination is reading them: a rendition whose hub
@@ -291,6 +380,10 @@ func (e *Engine) Stop() {
 			_ = r.hub.Close()
 		}
 	}
+
+	// One more level up: the renditions above read the silence tier's hub, so
+	// it can only go once they have.
+	e.teardownSilence(silence)
 
 	if ingest != nil {
 		ingest.Stop(ctx)
@@ -455,7 +548,14 @@ func (e *Engine) ingestSpec(s db.Settings) []string {
 		RTMPPort:      s.Ingest.RTMP.Port,
 		RTMPApp:       s.Ingest.RTMP.App,
 		RTMPStreamKey: s.Ingest.RTMP.StreamKey,
-		RelayURL:      e.hub.InputURL(),
+		// DataDir is the confinement root for a file:// source. Without it a
+		// relative path resolves against the process working directory, which
+		// fails open — FFmpeg says "no such file" — rather than fails unsafe.
+		PullURL:               s.Ingest.Pull.URL,
+		PullDataDir:           e.cfg.DataDir,
+		PullReconnectDelayMax: s.Ingest.Pull.ReconnectDelayMaxSeconds,
+		PullRTSPTransport:     s.Ingest.Pull.RTSPTransport,
+		RelayURL:              e.hub.InputURL(),
 	}
 	return ffmpeg.IngestArgs(spec)
 }
@@ -468,6 +568,9 @@ func (e *Engine) ingestPublicURL(s db.Settings) string {
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
 		RTMPPort:      s.Ingest.RTMP.Port,
 		RTMPApp:       s.Ingest.RTMP.App,
+		// In pull mode nobody points an encoder anywhere, so the address the
+		// operator needs to see is the one we dial.
+		PullURL: s.Ingest.Pull.URL,
 	}
 	return spec.PublicIngestURL("<server>")
 }
@@ -737,8 +840,11 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 func (e *Engine) reconcileMeters(s db.Settings) {
 	e.mu.RLock()
 	cur := e.meters
-	src := e.source
 	e.mu.RUnlock()
+	// The layout the meters will actually see, which is the synthetic one when
+	// the silence tier is running — a meter built from a zero-track probe would
+	// parse nothing while the destinations downstream carry a track.
+	src := e.effectiveSource()
 
 	if !s.Meters.Enabled || len(src.Tracks) == 0 {
 		if cur != nil {
@@ -751,7 +857,11 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	for i, t := range src.Tracks {
 		channels[i] = t.Channels
 	}
-	sig := hashStrings([]string{fmt.Sprint(channels)})
+	// The hub identity rides in the signature, not just the channel counts. A
+	// one-stereo-track ingest and a synthesised silent track are both "[2]", so
+	// without this the meters would keep a subscription on a silence hub that
+	// has closed the moment the ingest gained a real track.
+	sig := hashStrings([]string{fmt.Sprint(channels), e.silenceLabel()})
 	if cur != nil && e.metersSig == sig {
 		return
 	}
@@ -764,7 +874,8 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		e.log.Error("meters: no relay port", "err", err)
 		return
 	}
-	url := e.hub.Subscribe("meters", port)
+	meterHub := e.sourceHub()
+	url := meterHub.Subscribe("meters", port)
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
 	interval := time.Duration(s.Meters.IntervalMS) * time.Millisecond
@@ -797,6 +908,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	e.meters = proc
 	e.metersPort = port
 	e.metersSig = sig
+	e.metersHub = meterHub
 	e.mu.Unlock()
 	proc.Start()
 }
@@ -834,14 +946,31 @@ func (e *Engine) reconcileOutputs() error {
 	if err != nil {
 		return err
 	}
+	// Playout variants are rendition consumers too, and they are the only ones
+	// the database cannot count: they live in settings, not in a table with a
+	// rendition_id. Folded in BEFORE wantedRenditions, so a tier that only
+	// playout reads still earns its encode instead of being torn down under a
+	// variant that is serving viewers off it.
+	settings := e.Settings()
+	for id, n := range playout.RenditionRefs(settings.Playout) {
+		counts[id] += n
+	}
 
 	e.mu.RLock()
 	src := e.source
 	fps := probedFPS(e.videoInfo)
 	e.mu.RUnlock()
 
+	// Decided before anything is planned, because it changes both the layout
+	// every routing graph is compiled against and the hub every consumer reads.
+	// wantSilence is the whole decision; everything below just carries it.
+	silenceSig := e.wantSilence(settings)
+	if silenceSig != "" {
+		src = synthTrack()
+	}
+
 	wantRends := wantedRenditions(rendRows, counts, func(r *db.Rendition) string {
-		return renditionSig(r, fps)
+		return renditionSig(r, fps, silenceSig)
 	})
 	e.mu.RLock()
 	haveRends := make(map[int64]string, len(e.rends))
@@ -853,7 +982,7 @@ func (e *Engine) reconcileOutputs() error {
 	e.mu.RUnlock()
 	startRends, stopRends := diffRenditions(wantRends, haveRends)
 
-	plans := e.planDestinations(destRows, wantRends, src)
+	plans := e.planDestinations(destRows, wantRends, src, silenceSig)
 
 	e.stopDestinations(plans)
 	for _, id := range stopRends {
@@ -864,6 +993,12 @@ func (e *Engine) reconcileOutputs() error {
 		e.teardownRendition(r)
 	}
 
+	// One level above the renditions, in the window where nothing at all is
+	// reading it. Both directions matter: appearing, it must be up before the
+	// renditions that will read it; disappearing, its hub must not close under
+	// one. Every consumer below reads e.sourceHub(), which this decides.
+	e.reconcileSilence(silenceSig)
+
 	byID := make(map[int64]*db.Rendition, len(rendRows))
 	for _, r := range rendRows {
 		byID[r.ID] = r
@@ -872,13 +1007,76 @@ func (e *Engine) reconcileOutputs() error {
 		e.startRendition(byID[id], wantRends[id], fps, counts[id])
 	}
 
+	// After the renditions are up, so a variant never resolves an upstream that
+	// has not started, and before the destinations, so the two consumer tiers
+	// come up in a deterministic order.
+	//
+	// One asymmetry against stopDestinations, stated rather than hidden: a
+	// variant whose rendition was removed in this same pass is torn down just
+	// after that rendition's hub closed rather than just before. What it sees is
+	// a UDP socket that stops delivering — the identical pause FFmpeg already
+	// rides out on every rendition restart — and it lasts until the line below.
+	if err := e.play.Reconcile(settings.Playout, e.playoutUpstream); err != nil {
+		// Never fatal to the reconcile: playout is an output, and an output
+		// that cannot be packaged must not stop the destinations from sending.
+		e.log.Error("playout reconcile", "err", err)
+	}
+
 	e.startDestinations(plans)
 	return nil
 }
 
+// playoutUpstream resolves which relay a playout variant reads: the ingest hub
+// for a passthrough rung, the named rendition's own hub otherwise.
+//
+// It lives on the engine rather than in internal/playout because rendition.hub
+// is unexported and in-package, which is the same reason upstreamHub does.
+func (e *Engine) playoutUpstream(id *int64) (playout.Upstream, error) {
+	if id == nil {
+		e.mu.RLock()
+		v := e.videoInfo
+		e.mu.RUnlock()
+		// Not e.hub: with a video-only ingest the source rung has to package the
+		// silence tier's output, or it publishes a stream with no audio track
+		// and every player that finds one refuses it.
+		up := playout.Upstream{Hub: e.sourceHub(), Label: "source:" + e.silenceLabel()}
+		// From the probe, so the master playlist advertises the real ingest
+		// rather than a guess. Absent before the first probe, which the
+		// packager reads as "unknown" and omits.
+		if v != nil {
+			up.Width, up.Height = v.Width, v.Height
+		}
+		return up, nil
+	}
+	e.mu.RLock()
+	r := e.rends[*id]
+	e.mu.RUnlock()
+	if r == nil || r.hub == nil {
+		// Packaging it anyway would publish a rung that resolves to a playlist
+		// nothing ever writes a segment into.
+		reason := "is not running"
+		if r != nil && r.err != "" {
+			reason = "failed to start: " + r.err
+		}
+		return playout.Upstream{}, fmt.Errorf("rendition %d %s", *id, reason)
+	}
+	return playout.Upstream{
+		Hub: r.hub,
+		// The id and the encode signature, never the name: the label rides in
+		// the variant's restart hash, so labelling by name would cycle a live
+		// muxer every time an operator renamed a tier. The id makes moving
+		// between two identically configured tiers restart the variant onto the
+		// hub it now has to read, which a signature alone would miss.
+		Label:     "rendition:" + strconv.FormatInt(*id, 10) + ":" + r.spec,
+		Width:     r.row.Width,
+		Height:    r.row.Height,
+		VideoKbps: r.row.VideoBitrate,
+	}, nil
+}
+
 // planDestinations works out the desired state of every enabled destination,
 // including which upstream it reads and whether it can run at all.
-func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source) map[int64]destPlan {
+func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source, silenceSig string) map[int64]destPlan {
 	plans := map[int64]destPlan{}
 	for _, row := range rows {
 		if !row.Enabled {
@@ -888,8 +1086,11 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 
 		// The upstream's own signature rides in the destination's, so editing a
 		// rendition restarts exactly the destinations downstream of it and
-		// nothing else.
-		upstream := ""
+		// nothing else. A passthrough destination's upstream is the silence
+		// tier when there is one, which is why silenceSig is the seed rather
+		// than the empty string: switching synthesis on or off has to restart
+		// every destination, not just the ones on a rendition.
+		upstream := silenceSig
 		if row.RenditionID != nil {
 			sig, ok := wantRends[*row.RenditionID]
 			if !ok {
@@ -995,7 +1196,10 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 // passthrough, its rendition's own otherwise.
 func (e *Engine) upstreamHub(row *db.Destination) (*relay.Hub, error) {
 	if row.RenditionID == nil {
-		return e.hub, nil
+		if err := e.silenceProblem(); err != nil {
+			return nil, err
+		}
+		return e.sourceHub(), nil
 	}
 	e.mu.RLock()
 	r := e.rends[*row.RenditionID]
@@ -1026,7 +1230,34 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		row.Target(), string(row.Kind), compiled.FilterComplex,
 		strconv.Itoa(row.AudioBitrate), strconv.Itoa(row.Profile.SampleRate),
 		source, upstream,
+		// Expert mode. Without these an edit would be saved and then do nothing
+		// until some unrelated reconcile happened to restart the destination,
+		// which is the worst of both worlds: the operator is told it applied
+		// and the process is still running the old command line.
+		row.ExtraInputArgs, row.ExtraOutputArgs,
 	})
+}
+
+// expertArgv parses a destination's hand-written arguments into an argv.
+//
+// A parse failure yields nothing rather than an error, and that is deliberate:
+// the API validates on the way in, so anything unparseable here got in before
+// the rules were what they are now. Dropping it starts the destination on its
+// generated command — the stream keeps running and the editor still shows the
+// operator the stored text with the reason it will not apply. Refusing to start
+// the destination would be the restrictive-direction failure this repo has
+// already paid for three times.
+func expertArgv(log *slog.Logger, row *db.Destination, raw, field string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	argv, err := ffmpeg.SplitArgs(raw)
+	if err != nil {
+		log.Warn("ignoring unparseable expert arguments",
+			"dest", row.Name, "field", field, "err", err)
+		return nil
+	}
+	return argv
 }
 
 func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub) error {
@@ -1059,6 +1290,11 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		AudioBitrate:  row.AudioBitrate,
 		SampleRate:    row.Profile.SampleRate,
 		CopyVideo:     true,
+		// Expert mode. Spliced by DestinationArgs into the two positions FFmpeg
+		// binds options from, which are the same two the operator was shown in
+		// the confirm dialog.
+		ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
+		ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
 	})
 
 	proc := supervisor.New(e.log, supervisor.Spec{
@@ -1162,11 +1398,16 @@ func diffRenditions(want, running map[int64]string) (start, stop []int64) {
 // destinations riding it. The source frame rate is folded in only when the
 // rendition inherits it, since that is the only case where the keyframe
 // interval — counted in frames — depends on what the ingest is doing.
-func renditionSig(r *db.Rendition, sourceFPS float64) string {
+func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string {
 	parts := []string{
 		strconv.Itoa(r.Width), strconv.Itoa(r.Height), strconv.Itoa(r.FPS),
 		strconv.Itoa(r.VideoBitrate), string(r.Encoder), r.Preset,
 		strconv.FormatFloat(r.GOPSeconds, 'g', -1, 64),
+		// Which relay it reads. RenditionArgs copies audio with -map 0:a, so a
+		// tier started against the raw ingest of a video-only stream produces a
+		// video-only hub; it has to be restarted onto the silence tier when one
+		// appears, and back off it when the ingest gains real tracks.
+		silenceSig,
 	}
 	if r.FPS == 0 {
 		parts = append(parts, strconv.FormatFloat(sourceFPS, 'g', -1, 64))
@@ -1277,8 +1518,20 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		return
 	}
 
+	// The silence tier's hub when there is one. RenditionArgs copies audio
+	// through untouched, so reading the raw ingest of a video-only stream here
+	// would produce a rendition hub with no audio track at all and break every
+	// destination on this tier.
+	if err := e.silenceProblem(); err != nil {
+		e.alloc.Release(port)
+		_ = hub.Close()
+		fail(err)
+		return
+	}
+	upstream := e.sourceHub()
+
 	subName := fmt.Sprintf("rendition:%d", row.ID)
-	in := e.hub.Subscribe(subName, port)
+	in := upstream.Subscribe(subName, port)
 	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS))
 
 	proc := supervisor.New(e.log, supervisor.Spec{
@@ -1292,13 +1545,14 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	// becoming an orphaned encoder holding a UDP socket.
 	if e.stopped {
 		e.mu.Unlock()
-		e.hub.Unsubscribe(subName)
+		upstream.Unsubscribe(subName)
 		e.alloc.Release(port)
 		_ = hub.Close()
 		return
 	}
 	e.rends[row.ID] = &rendition{
-		row: row, proc: proc, hub: hub, port: port, subName: subName, spec: spec,
+		row: row, proc: proc, hub: hub, in: upstream,
+		port: port, subName: subName, spec: spec,
 	}
 	e.mu.Unlock()
 
@@ -1317,7 +1571,12 @@ func (e *Engine) teardownRendition(r *rendition) {
 		cancel()
 	}
 	if r.subName != "" {
-		e.hub.Unsubscribe(r.subName)
+		// Its own input hub, which is not always the ingest's.
+		in := r.in
+		if in == nil {
+			in = e.hub
+		}
+		in.Unsubscribe(r.subName)
 	}
 	if r.port != 0 {
 		e.alloc.Release(r.port)
@@ -1333,6 +1592,9 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 	proc := *slot
 	*slot = nil
 	var port int
+	// The ingest hub unless this consumer says otherwise; only the meters
+	// sidecar ever reads anything else.
+	hub := e.hub
 	switch name {
 	case "recorder":
 		port, e.recorderPort = e.recorderPort, 0
@@ -1343,6 +1605,9 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 	case "meters":
 		port, e.metersPort = e.metersPort, 0
 		e.metersSig = ""
+		if e.metersHub != nil {
+			hub, e.metersHub = e.metersHub, nil
+		}
 	}
 	e.mu.Unlock()
 
@@ -1351,7 +1616,7 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 		proc.Stop(ctx)
 		cancel()
 	}
-	e.hub.Unsubscribe(name)
+	hub.Unsubscribe(name)
 	if port != 0 {
 		e.alloc.Release(port)
 	}
@@ -1443,7 +1708,20 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	defer cancel()
 
 	res, err := ffmpeg.Probe(pctx, e.tools.FFprobe, url, 3)
-	if err != nil || len(res.Audio) == 0 {
+	if err != nil {
+		return false
+	}
+	// A probe that succeeded and found no audio is a RESULT, not a failure, and
+	// it used to be thrown away here. It is the only evidence that an ingest is
+	// video-only, which is what the silence tier is started from — and without
+	// it a destination on such a stream was compiled against six assumed tracks
+	// and then crash-looped mapping audio that was never there.
+	//
+	// It still has to be a probe that ran: `err != nil` above returns early, so
+	// "we could not ask" never reaches this and never synthesises anything.
+	if res.Video == nil && len(res.Audio) == 0 {
+		// Neither video nor audio is not a video-only stream, it is a probe that
+		// read a few packets of something it could not identify yet.
 		return false
 	}
 
@@ -1496,11 +1774,15 @@ func sameSource(a, b routing.Source) bool {
 	return true
 }
 
-// Source returns the current ingest track layout.
+// Source returns the track layout a routing profile is compiled against.
+//
+// That is the ingest's own layout, except while the silence tier is standing in
+// for a video-only ingest — then it is the tier's single synthetic track,
+// because that is what every destination below it actually receives. Callers
+// that compile a graph must see the same layout the engine compiles against, or
+// the routing editor and the running destination disagree.
 func (e *Engine) Source() routing.Source {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.source
+	return e.effectiveSource()
 }
 
 // SourceInfo is the ingest layout as the API reports it.
@@ -1508,13 +1790,25 @@ type SourceInfo struct {
 	Probed bool                `json:"probed"`
 	Tracks []routing.Track     `json:"tracks"`
 	Video  *ffmpeg.VideoStream `json:"video,omitempty"`
+	// Synthetic reports that Tracks describes the silence tier's output rather
+	// than the ingest's. The routing editor has to be shown the layout the
+	// graphs are actually compiled against, or an operator on a video-only
+	// ingest would be offered nothing to route.
+	Synthetic bool `json:"synthetic,omitempty"`
 }
 
-// SourceInfo returns the probed layout.
+// SourceInfo returns the layout downstream graphs are compiled against, which
+// is the probe's unless the silence tier is standing in for it.
 func (e *Engine) SourceInfo() SourceInfo {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return SourceInfo{Probed: e.probed, Tracks: e.source.Tracks, Video: e.videoInfo}
+	probed, src, video := e.probed, e.source, e.videoInfo
+	synthetic := e.silence != nil && e.silence.hub != nil
+	e.mu.RUnlock()
+
+	if synthetic {
+		src = synthTrack()
+	}
+	return SourceInfo{Probed: probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic}
 }
 
 // Levels returns the most recent metering frame.
@@ -1569,14 +1863,19 @@ type RenditionStatus struct {
 
 // Status is the whole-system snapshot pushed over the WebSocket.
 type Status struct {
-	Ingest       *supervisor.Status `json:"ingest,omitempty"`
-	Recorder     *supervisor.Status `json:"recorder,omitempty"`
-	Preview      *supervisor.Status `json:"preview,omitempty"`
-	Meters       *supervisor.Status `json:"meters,omitempty"`
-	Renditions   []RenditionStatus  `json:"renditions"`
-	Destinations []DestStatus       `json:"destinations"`
-	Source       SourceInfo         `json:"source"`
-	Relay        relay.Stats        `json:"relay"`
+	Ingest   *supervisor.Status `json:"ingest,omitempty"`
+	Recorder *supervisor.Status `json:"recorder,omitempty"`
+	Preview  *supervisor.Status `json:"preview,omitempty"`
+	Meters   *supervisor.Status `json:"meters,omitempty"`
+	// Silence is the synthetic-audio tier, absent unless it is running. Nothing
+	// in the stream can say why a video-only ingest suddenly has audio — the
+	// MPEG-TS muxer discards a track title — so this is the only place it can
+	// be explained.
+	Silence      *SilenceStatus    `json:"silence,omitempty"`
+	Renditions   []RenditionStatus `json:"renditions"`
+	Destinations []DestStatus      `json:"destinations"`
+	Source       SourceInfo        `json:"source"`
+	Relay        relay.Stats       `json:"relay"`
 }
 
 // procStatus is nil for a process that is not running, which the JSON omits.
@@ -1600,6 +1899,12 @@ func (e *Engine) Renditions() []RenditionStatus {
 	counts, cerr := e.store.CountEnabledDestinationsByRendition()
 	if cerr != nil {
 		counts = map[int64]int{}
+	}
+	// The same fold reconcileOutputs does. Without it a tier kept alive purely
+	// by a playout variant reads as "0 consumers" on a card that is showing a
+	// running process, which is the dashboard calling its own decision a bug.
+	for id, n := range playout.RenditionRefs(e.Settings().Playout) {
+		counts[id] += n
 	}
 
 	e.mu.RLock()
@@ -1648,6 +1953,7 @@ func (e *Engine) Status() Status {
 	st.Recorder = procStatus(recorder)
 	st.Preview = procStatus(preview)
 	st.Meters = procStatus(meters)
+	st.Silence = e.Silence()
 
 	names := make(map[int64]string, len(st.Renditions))
 	for _, r := range st.Renditions {
@@ -1707,7 +2013,11 @@ func (e *Engine) Processes() []*supervisor.Process {
 	defer e.mu.RUnlock()
 
 	var out []*supervisor.Process
-	for _, p := range []*supervisor.Process{e.ingest, e.recorder, e.preview, e.meters} {
+	procs := []*supervisor.Process{e.ingest, e.recorder, e.preview, e.meters}
+	if e.silence != nil {
+		procs = append(procs, e.silence.proc)
+	}
+	for _, p := range procs {
 		if p != nil {
 			out = append(out, p)
 		}
@@ -1721,6 +2031,9 @@ func (e *Engine) Processes() []*supervisor.Process {
 		if d.proc != nil {
 			out = append(out, d.proc)
 		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(e.playProcs)) {
+		out = append(out, e.playProcs[name])
 	}
 	return out
 }

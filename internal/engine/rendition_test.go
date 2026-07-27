@@ -166,7 +166,7 @@ func TestRenditionSig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			changed := *base
 			tt.apply(&changed)
-			same := renditionSig(base, 60) == renditionSig(&changed, 60)
+			same := renditionSig(base, 60, "") == renditionSig(&changed, 60, "")
 			if same == tt.restart {
 				t.Errorf("signature equal = %v, want %v", same, !tt.restart)
 			}
@@ -199,7 +199,7 @@ func TestRenditionSigFollowsSourceFPSOnlyWhenInherited(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := testRendition(1, "tier")
 			r.FPS = tt.fps
-			same := renditionSig(r, 0) == renditionSig(r, 60)
+			same := renditionSig(r, 0, "") == renditionSig(r, 60, "")
 			if same == tt.restart {
 				t.Errorf("signature equal across source rates = %v, want %v", same, !tt.restart)
 			}

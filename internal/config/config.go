@@ -352,6 +352,13 @@ func (c Config) RecordingsDir() string { return filepath.Join(c.DataDir, "record
 func (c Config) HLSDir() string        { return filepath.Join(c.DataDir, "hls") }
 func (c Config) SecretPath() string    { return filepath.Join(c.DataDir, "secret.key") }
 
+// PlayoutDir is the public HLS/DASH origin's root, one directory per variant.
+//
+// Spelled out here rather than calling playout.DirIn so config stays a leaf
+// package — importing playout would drag db, ffmpeg and routing in behind it.
+// TestPlayoutDirMatchesThePlayoutPackage pins the two against each other.
+func (c Config) PlayoutDir() string { return filepath.Join(c.DataDir, "playout") }
+
 // TLS material lives under DataDir so the one directory operators are told to
 // back up carries everything the server cannot cheaply regenerate — an ACME
 // cache that survives a redeploy is what keeps Let's Encrypt rate limits from
@@ -380,6 +387,7 @@ func (c Config) EnsureDirs() error {
 		{c.DataDir, 0o755},
 		{c.RecordingsDir(), 0o755},
 		{c.HLSDir(), 0o755},
+		{c.PlayoutDir(), 0o755},
 	}
 	// Private keys land in these two, so they are 0700 and are only created
 	// when the resolved mode actually needs them.
