@@ -121,6 +121,19 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/destinations/{id}/restart", s.handleRestartDestination)
 			r.Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
 
+			r.Get("/renditions", s.handleListRenditions)
+			r.Post("/renditions", s.handleCreateRendition)
+			// Static segment first, same as /destinations/order above.
+			r.Get("/renditions/presets", s.handleRenditionPresets)
+			r.Get("/renditions/{id}", s.handleGetRendition)
+			r.Put("/renditions/{id}", s.handleUpdateRendition)
+			r.Delete("/renditions/{id}", s.handleDeleteRendition)
+			r.Post("/renditions/{id}/restart", s.handleRestartRendition)
+
+			// Which encoders this FFmpeg actually registers, so the rendition
+			// editor cannot offer one that would only fail once a stream is live.
+			r.Get("/encoders", s.handleListEncoders)
+
 			r.Post("/routing/compile", s.handleCompileRouting)
 			r.Get("/routing/presets", s.handleListPresets)
 			r.Post("/routing/presets/{preset}", s.handleApplyPreset)
