@@ -1,0 +1,303 @@
+//go:build ignore
+
+// Driver for scripts/acceptance-docker.sh.
+//
+// The other six acceptance suites drive a binary running on this machine. This
+// one drives a binary running inside the container image we ship, over the
+// published port, which is the only way to catch the things that are properties
+// of the IMAGE rather than of the code: a base image whose FFmpeg lost SRT, a
+// Go toolchain tag that no longer satisfies go.mod, a non-root user that cannot
+// write /data.
+//
+// Subcommands rather than one long script, because the bash side has to
+// interleave docker operations (publish a stream, restart the container)
+// between the API steps.
+//
+//	setup     <base>            first-run admin, then prove it cannot run twice
+//	security  <base>            unauthenticated + missing-CSRF mutations are refused
+//	dests     <base>            create the three differently-routed destinations
+//	tracks    <base>            print how many audio tracks the ingest probed
+//	count     <base>            print how many destinations exist (persistence)
+//	startall  <base>            start every destination
+//	stopall   <base>            stop every destination
+//	mode      <base> <srt|rtmp> switch the ingest mode
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"os"
+	"strings"
+	"time"
+)
+
+const (
+	user = "admin"
+	pass = "DockerAcceptance!9x"
+)
+
+var (
+	client *http.Client
+	base   string
+	csrf   string
+)
+
+func main() {
+	if len(os.Args) < 3 {
+		die("usage: acceptance_docker_driver.go <subcommand> <base-url> [args]")
+	}
+	cmd := os.Args[1]
+	base = strings.TrimSuffix(os.Args[2], "/") + "/api/v1"
+
+	jar, _ := cookiejar.New(nil)
+	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	waitUp()
+
+	switch cmd {
+	case "setup":
+		setup()
+	case "security":
+		security()
+	case "dests":
+		login()
+		dests()
+	case "tracks":
+		login()
+		tracks()
+	case "count":
+		login()
+		count()
+	case "startall":
+		login()
+		all("start")
+	case "stopall":
+		login()
+		all("stop")
+	case "mode":
+		if len(os.Args) < 4 {
+			die("mode needs srt|rtmp")
+		}
+		login()
+		setMode(os.Args[3])
+	default:
+		die("unknown subcommand " + cmd)
+	}
+}
+
+// ---------------------------------------------------------------- plumbing
+
+func waitUp() {
+	for i := 0; i < 90; i++ {
+		resp, err := client.Get(base + "/health")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(time.Second)
+	}
+	die("server never became healthy at " + base)
+}
+
+// do performs a request carrying the session cookie and the double-submit CSRF
+// header. The token is read back off the jar rather than remembered from the
+// login response, so a rotation mid-run cannot desynchronise us.
+func do(method, path string, body any) (int, []byte) {
+	var rdr io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, base+path, rdr)
+	if err != nil {
+		die(err.Error())
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if u := req.URL; u != nil {
+		for _, c := range client.Jar.Cookies(u) {
+			if c.Name == "polyemesis_csrf" {
+				csrf = c.Value
+			}
+		}
+	}
+	if csrf != "" {
+		req.Header.Set("X-CSRF-Token", csrf)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		die(err.Error())
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, out
+}
+
+func login() {
+	code, out := do(http.MethodPost, "/auth/login", map[string]string{"username": user, "password": pass})
+	if code != http.StatusOK {
+		die(fmt.Sprintf("login failed: %d %s", code, out))
+	}
+}
+
+// ---------------------------------------------------------------- steps
+
+func setup() {
+	code, out := do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass})
+	if code != http.StatusOK && code != http.StatusCreated {
+		die(fmt.Sprintf("setup failed: %d %s", code, out))
+	}
+	// CreateUser refuses to run twice; that is what stops a stranger who finds
+	// an exposed port from taking over an install that is already configured.
+	code2, _ := do(http.MethodPost, "/setup", map[string]string{"username": "intruder", "password": "Intruder!9xzq"})
+	if code2 == http.StatusOK || code2 == http.StatusCreated {
+		fmt.Println("SETUP_REPEATABLE")
+		return
+	}
+	fmt.Println("SETUP_OK")
+}
+
+// security asserts the two refusals a browser-facing API has to make. Both are
+// negative tests: they fail loudly if a mutation SUCCEEDS.
+func security() {
+	// 1. No session at all.
+	fresh, _ := cookiejar.New(nil)
+	anon := &http.Client{Jar: fresh, Timeout: 15 * time.Second}
+	body, _ := json.Marshal(map[string]any{"name": "anon", "kind": "file", "url": "anon.mkv"})
+	resp, err := anon.Post(base+"/destinations", "application/json", bytes.NewReader(body))
+	if err != nil {
+		die(err.Error())
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		fmt.Println("ANON_ACCEPTED")
+	} else {
+		fmt.Println("ANON_REFUSED", resp.StatusCode)
+	}
+
+	// 2. Valid session cookie, but no CSRF header — the exact shape of a
+	//    cross-site form post, which is why the cookie alone must not be enough.
+	login()
+	req, _ := http.NewRequest(http.MethodPost, base+"/destinations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// deliberately no X-CSRF-Token
+	resp2, err := client.Do(req)
+	if err != nil {
+		die(err.Error())
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode == http.StatusOK || resp2.StatusCode == http.StatusCreated {
+		fmt.Println("NOCSRF_ACCEPTED")
+	} else {
+		fmt.Println("NOCSRF_REFUSED", resp2.StatusCode)
+	}
+}
+
+func sel(on ...int) []map[string]any {
+	want := map[int]bool{}
+	for _, t := range on {
+		want[t] = true
+	}
+	rows := make([]map[string]any, 0, 6)
+	for i := 0; i < 6; i++ {
+		rows = append(rows, map[string]any{"track": i, "enabled": want[i], "gain": 1.0})
+	}
+	return rows
+}
+
+func profile(on ...int) map[string]any {
+	return map[string]any{
+		"mode": "simple", "tracks": sel(on...), "matrix": []any{},
+		// Normalisation off on purpose: the bash side proves routing by
+		// measuring absolute levels, and a limiter or loudnorm in the path
+		// would move the very numbers under test.
+		"normalize": "off", "sampleRate": 48000,
+	}
+}
+
+func dests() {
+	want := []struct {
+		name string
+		url  string
+		on   []int
+	}{
+		{"A-track1", "destA.mkv", []int{0}},
+		{"B-track2", "destB.mkv", []int{1}},
+		{"C-all", "destC.mkv", []int{0, 1, 2}},
+	}
+	for _, w := range want {
+		code, out := do(http.MethodPost, "/destinations", map[string]any{
+			"name": w.name, "kind": "file", "url": w.url,
+			"enabled": true, "audioBitrate": 160, "profile": profile(w.on...),
+		})
+		if code != http.StatusOK && code != http.StatusCreated {
+			die(fmt.Sprintf("create %s failed: %d %s", w.name, code, out))
+		}
+	}
+	fmt.Println("DESTS_OK")
+}
+
+func tracks() {
+	_, out := do(http.MethodGet, "/source", nil)
+	var src struct {
+		Probed bool `json:"probed"`
+		Tracks []struct {
+			Index int `json:"index"`
+		} `json:"tracks"`
+	}
+	_ = json.Unmarshal(out, &src)
+	fmt.Println(len(src.Tracks))
+}
+
+func listIDs() []int64 {
+	_, out := do(http.MethodGet, "/destinations", nil)
+	var rows []struct {
+		Destination struct {
+			ID int64 `json:"id"`
+		} `json:"destination"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return nil
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.Destination.ID)
+	}
+	return ids
+}
+
+func count() { fmt.Println(len(listIDs())) }
+
+func all(action string) {
+	for _, id := range listIDs() {
+		do(http.MethodPost, fmt.Sprintf("/destinations/%d/%s", id, action), nil)
+	}
+	fmt.Println(strings.ToUpper(action) + "_OK")
+}
+
+func setMode(mode string) {
+	_, out := do(http.MethodGet, "/settings", nil)
+	var s map[string]any
+	if err := json.Unmarshal(out, &s); err != nil {
+		die("settings unreadable: " + err.Error())
+	}
+	ing, _ := s["ingest"].(map[string]any)
+	if ing == nil {
+		die("settings carried no ingest block")
+	}
+	ing["mode"] = mode
+	code, body := do(http.MethodPut, "/settings", s)
+	if code != http.StatusOK {
+		die(fmt.Sprintf("switch to %s failed: %d %s", mode, code, body))
+	}
+	fmt.Println("MODE_" + strings.ToUpper(mode))
+}
+
+func die(msg string) {
+	fmt.Fprintln(os.Stderr, "driver: "+msg)
+	os.Exit(1)
+}
