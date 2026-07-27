@@ -39,6 +39,12 @@ const (
 	PlatformYouTube Platform = "youtube"
 	PlatformTwitch  Platform = "twitch"
 	PlatformKick    Platform = "kick"
+	// PlatformFacebook is a real platform rather than a preset because Facebook
+	// issues its ingest per broadcast over the Graph API: there is nothing for
+	// an operator to paste, so the integration has to exist for the destination
+	// to work at all. The string matches routing.PlatformFacebook, which is what
+	// makes the Rights Manager music policy apply to these destinations.
+	PlatformFacebook Platform = "facebook"
 )
 
 // ErrNotFound is returned by the typed getters.
@@ -118,7 +124,7 @@ func (d Destination) Validate() error {
 		add("unknown destination kind %q", d.Kind)
 	}
 	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, "":
+	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, "":
 	default:
 		add("unknown platform %q", d.Platform)
 	}

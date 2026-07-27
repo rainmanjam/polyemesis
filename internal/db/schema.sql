@@ -318,6 +318,43 @@ CREATE TRIGGER IF NOT EXISTS transcript_segments_au AFTER UPDATE ON transcript_s
     INSERT INTO transcript_fts(rowid, text) VALUES (new.id, new.text);
 END;
 
+-- Unified cross-platform chat. One row per message from any platform, kept
+-- only so a browser that connects mid-broadcast sees the last few minutes
+-- instead of an empty pane — this is a replay buffer with a schema, not an
+-- archive. PurgeChatMessages bounds it and is expected to run often.
+--
+-- message_id is the platform's own id and is NOT unique on its own: two
+-- platforms will collide on "1" sooner or later. The uniqueness that matters
+-- is (platform, account, message_id), which is also exactly what makes an
+-- adapter that redelivers an event after a reconnect idempotent.
+--
+-- badges and emotes are JSON because they are per-platform shapes that only
+-- the renderer reads; giving them columns would mean a migration every time a
+-- platform adds a flag.
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform     TEXT    NOT NULL,                 -- youtube | twitch | kick | facebook
+    account      TEXT    NOT NULL DEFAULT '',      -- platform_accounts.account_ref
+    message_id   TEXT    NOT NULL DEFAULT '',
+    channel      TEXT    NOT NULL DEFAULT '',
+    author_id    TEXT    NOT NULL DEFAULT '',
+    author_name  TEXT    NOT NULL DEFAULT '',
+    author_color TEXT    NOT NULL DEFAULT '',      -- '#rrggbb', empty when the platform sends none
+    moderator    INTEGER NOT NULL DEFAULT 0,
+    subscriber   INTEGER NOT NULL DEFAULT 0,
+    broadcaster  INTEGER NOT NULL DEFAULT 0,
+    text         TEXT    NOT NULL DEFAULT '',
+    badges       TEXT    NOT NULL DEFAULT '[]',
+    emotes       TEXT    NOT NULL DEFAULT '[]',
+    reply_to_id  TEXT    NOT NULL DEFAULT '',
+    reply_to     TEXT    NOT NULL DEFAULT '',      -- display name, so a reply renders without a second lookup
+    echo         INTEGER NOT NULL DEFAULT 0,       -- polyemesis sent this one
+    -- Milliseconds since epoch: chat arrives in bursts and a second-resolution
+    -- sort scrambles the order of a fast exchange.
+    at_ms        INTEGER NOT NULL,
+    UNIQUE (platform, account, message_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled, id);
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled, id);
@@ -337,6 +374,11 @@ CREATE INDEX IF NOT EXISTS idx_session_recordings_session ON session_recordings(
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_time ON transcript_segments(recording_id, track, start_ms, id);
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_track ON transcript_segments(track_id, start_ms, id);
 CREATE INDEX IF NOT EXISTS idx_transcript_tracks_recording ON transcript_tracks(recording_id, track);
+
+-- Both chat reads are "the newest N", either across everything or for one
+-- platform, and the purge walks the same order backwards.
+CREATE INDEX IF NOT EXISTS idx_chat_messages_recent ON chat_messages(at_ms DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_platform ON chat_messages(platform, at_ms DESC, id DESC);
 
 -- NOTE: nothing here may reference destinations.rendition_id. This file runs
 -- against databases created before renditions existed, where CREATE TABLE IF
