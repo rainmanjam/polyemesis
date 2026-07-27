@@ -1,9 +1,12 @@
 package ffmpeg
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -32,7 +35,67 @@ type IngestKind string
 const (
 	IngestSRT  IngestKind = "srt"
 	IngestRTMP IngestKind = "rtmp"
+	// IngestPull dials out to a source instead of waiting for an encoder to
+	// arrive: an RTSP camera, another server's HLS or DASH, an MPEG-TS over
+	// HTTP, or a local file looped as a test feed.
+	IngestPull IngestKind = "pull"
 )
+
+// DefaultPullReconnectDelayMax is how far FFmpeg's HTTP reconnect backoff is
+// allowed to grow, in seconds. Bounded so a source that comes back after a long
+// outage is picked up in tens of seconds, not tens of minutes.
+const DefaultPullReconnectDelayMax = 30
+
+// DefaultPullRTSPTransport is TCP because RTSP-over-UDP through NAT is the
+// classic silent failure: the RTSP handshake succeeds, the operator sees a
+// connected camera, and not one RTP packet ever arrives.
+const DefaultPullRTSPTransport = "tcp"
+
+// pullFamily groups schemes by the input flags they need, not by protocol.
+type pullFamily int
+
+const (
+	// pullDirect needs no extra flags: SRT and RTMP either reconnect
+	// themselves or exit, and the supervisor respawns them.
+	pullDirect pullFamily = iota
+	pullHTTP
+	pullRTSP
+	pullFile
+)
+
+// pullSchemes is the allowlist. A pull URL is operator input that becomes an
+// FFmpeg argument, and while os/exec means no shell ever sees it, the scheme
+// still decides how far FFmpeg can reach: without a list, gopher:// and
+// concat: are one settings write away.
+//
+// rtmps is here alongside rtmp because a destination may already use it and
+// refusing to *read* a transport we happily write would be the restrictive kind
+// of wrong. hls and dash are accepted as written even though FFmpeg usually
+// wants the plain http URL — passing them through lets FFmpeg give the operator
+// a real error rather than having polyemesis guess and refuse.
+var pullSchemes = map[string]pullFamily{
+	"http":  pullHTTP,
+	"https": pullHTTP,
+	"hls":   pullHTTP,
+	"dash":  pullHTTP,
+	"rtsp":  pullRTSP,
+	"rtsps": pullRTSP,
+	"srt":   pullDirect,
+	"rtmp":  pullDirect,
+	"rtmps": pullDirect,
+	"file":  pullFile,
+}
+
+// PullSchemes lists the accepted pull source schemes, sorted, so an error
+// message and a UI hint can both quote the same set.
+func PullSchemes() []string {
+	out := make([]string, 0, len(pullSchemes))
+	for s := range pullSchemes {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // IngestSpec describes the listener that receives the encoder's stream and
 // republishes it, untouched, into the relay.
@@ -49,14 +112,140 @@ type IngestSpec struct {
 	RTMPApp       string
 	RTMPStreamKey string
 
+	// Pull
+	//
+	// PullURL is the source to dial. PullDataDir is the directory a relative
+	// file:// source resolves against — the same confinement file destinations
+	// get, because a file source pointing anywhere on disk is a read primitive
+	// for whoever reaches the settings API.
+	PullURL     string
+	PullDataDir string
+	// PullReconnectDelayMax is the HTTP reconnect backoff ceiling in seconds.
+	// 0 means DefaultPullReconnectDelayMax.
+	PullReconnectDelayMax int
+	// PullRTSPTransport overrides DefaultPullRTSPTransport for the rare camera
+	// that only speaks UDP.
+	PullRTSPTransport string
+
 	// RelayURL is the loopback UDP address of the relay hub.
 	RelayURL string
+}
+
+// PullSource validates the configured pull URL and renders the exact string
+// handed to FFmpeg's -i.
+func (s IngestSpec) PullSource() (string, error) {
+	src, _, err := pullSource(s.PullURL, s.PullDataDir)
+	return src, err
+}
+
+// ValidatePullURL reports whether raw is a pull source polyemesis will dial.
+// The settings layer calls this so the operator sees the problem in a form
+// field instead of in an FFmpeg stderr line.
+func ValidatePullURL(raw string) error {
+	_, _, err := pullSource(raw, "")
+	return err
+}
+
+// pullSource validates raw and returns the -i string plus its flag family.
+//
+// baseDir is where a relative file:// path is rooted; an empty baseDir leaves
+// the path relative rather than refusing, so validation-only callers (which
+// have no data directory to hand) still get a yes/no answer.
+func pullSource(raw, baseDir string) (string, pullFamily, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", pullDirect, errors.New("pull source URL is required")
+	}
+	if strings.ContainsAny(raw, "\x00\n\r") {
+		return "", pullDirect, errors.New("pull source URL contains control characters")
+	}
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok {
+		return "", pullDirect, fmt.Errorf("pull source URL must start with a scheme (one of %s)",
+			strings.Join(PullSchemes(), ", "))
+	}
+	fam, ok := pullSchemes[strings.ToLower(scheme)]
+	if !ok {
+		return "", pullDirect, fmt.Errorf("unsupported pull source scheme %q (want one of %s)",
+			scheme, strings.Join(PullSchemes(), ", "))
+	}
+	if fam != pullFile {
+		// Split on "://" rather than url.Parse because file:// paths are not
+		// URLs in any useful sense; everything else still gets parsed so a
+		// mangled URL is reported here rather than by the child process.
+		if _, err := url.Parse(raw); err != nil {
+			return "", fam, fmt.Errorf("malformed pull source URL: %w", err)
+		}
+		return raw, fam, nil
+	}
+
+	// Backslashes are separators on Windows, so normalise before the traversal
+	// check or "..\..\secret.key" walks straight past it.
+	rel := strings.ReplaceAll(rest, `\`, "/")
+	switch {
+	case rel == "":
+		return "", fam, errors.New("file pull source needs a path")
+	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
+		filepath.IsAbs(rest), len(rel) > 1 && rel[1] == ':':
+		return "", fam, errors.New("file pull source must be a relative path inside the data directory")
+	}
+
+	p := filepath.FromSlash(rel)
+	if baseDir != "" {
+		p = filepath.Join(baseDir, p)
+	}
+	// The "file:" prefix is not decoration: a bare path containing a colon
+	// ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the
+	// prefix pins it to the file protocol whatever the name looks like.
+	return "file:" + p, fam, nil
+}
+
+// pullInputArgs are the input-side flags a pull source needs to survive its
+// first hiccup. They must precede -i or FFmpeg applies them to nothing.
+func (s IngestSpec) pullInputArgs() []string {
+	_, fam, err := pullSource(s.PullURL, s.PullDataDir)
+	if err != nil {
+		return nil
+	}
+	switch fam {
+	case pullHTTP:
+		delay := s.PullReconnectDelayMax
+		if delay <= 0 {
+			delay = DefaultPullReconnectDelayMax
+		}
+		return []string{
+			"-reconnect", "1",
+			// -reconnect alone only retries seekable inputs. A live HTTP-TS or
+			// HLS source is not seekable, so without -reconnect_streamed the
+			// first dropped connection ends the ingest for good.
+			"-reconnect_streamed", "1",
+			"-reconnect_delay_max", strconv.Itoa(delay),
+		}
+	case pullRTSP:
+		transport := s.PullRTSPTransport
+		if transport == "" {
+			transport = DefaultPullRTSPTransport
+		}
+		return []string{"-rtsp_transport", transport}
+	case pullFile:
+		// -stream_loop -1 makes the file look like a feed that never ends, and
+		// -re paces it at wall-clock speed. Without -re FFmpeg reads at disk
+		// speed and buries the relay in an hour of stream in seconds.
+		return []string{"-stream_loop", "-1", "-re"}
+	}
+	return nil
 }
 
 // IngestURL renders the listener URL. Exported so the UI can show the user the
 // exact address to paste into OBS.
 func (s IngestSpec) IngestURL() string {
 	switch s.Kind {
+	case IngestPull:
+		// A rejected source renders empty rather than raw. For file:// the raw
+		// string is the very thing being rejected, and handing it to FFmpeg
+		// anyway would make the confinement check decorative.
+		src, _ := s.PullSource()
+		return src
 	case IngestRTMP:
 		u := fmt.Sprintf("rtmp://0.0.0.0:%d/%s", s.RTMPPort, strings.Trim(s.RTMPApp, "/"))
 		if s.RTMPStreamKey != "" {
@@ -82,8 +271,14 @@ func (s IngestSpec) IngestURL() string {
 }
 
 // PublicIngestURL renders the URL a streamer points their encoder at.
+//
+// In pull mode nobody points anything anywhere, so it reports the source
+// polyemesis dials instead — that is the address the operator needs to see, and
+// returning nothing would leave the dashboard blank.
 func (s IngestSpec) PublicIngestURL(host string) string {
 	switch s.Kind {
+	case IngestPull:
+		return strings.TrimSpace(s.PullURL)
 	case IngestRTMP:
 		return fmt.Sprintf("rtmp://%s:%d/%s", host, s.RTMPPort, strings.Trim(s.RTMPApp, "/"))
 	default:
@@ -103,15 +298,21 @@ func (s IngestSpec) PublicIngestURL(host string) string {
 // The whole job is: accept, do not decode, republish. `-map 0 -c copy` keeps
 // every track and every byte, so the ingest costs almost no CPU regardless of
 // resolution, and no destination can ever be blamed on a lossy first hop.
+//
+// Pull mode is the same command with a different input: dialling out instead of
+// listening changes where the bytes come from, never what happens to them.
 func IngestArgs(s IngestSpec) []string {
 	args := commonArgs()
 	args = append(args, progressArgs()...)
 
-	if s.Kind == IngestRTMP {
+	switch s.Kind {
+	case IngestRTMP:
 		// The rtmp protocol's own listen option. FFmpeg accepts one publisher,
 		// then exits; the supervisor respawns it, which is exactly the
 		// "wait for the next session" behaviour we want.
 		args = append(args, "-listen", "1")
+	case IngestPull:
+		args = append(args, s.pullInputArgs()...)
 	}
 
 	args = append(args,
@@ -185,6 +386,95 @@ type DestSpec struct {
 	// CopyVideo is always true in v1 and is here to make the guarantee
 	// explicit and testable rather than implicit in the arg list.
 	CopyVideo bool
+	// ExtraInputArgs and ExtraOutputArgs are expert mode: arguments an operator
+	// hand-wrote for this destination, already parsed and already checked by
+	// the API. Empty for every destination that has not opted in, which is the
+	// overwhelming majority.
+	//
+	// They are spliced by SpliceExtraArgs rather than appended, because FFmpeg
+	// binds an option to the input or output that FOLLOWS it — appended to the
+	// end they would attach to nothing and silently do nothing.
+	ExtraInputArgs  []string
+	ExtraOutputArgs []string
+}
+
+// SpliceExtraArgs inserts hand-written arguments into a generated FFmpeg
+// command at the two positions FFmpeg reads them from: input options
+// immediately before -i, output options immediately before the target.
+//
+// Exported because the expert-mode preview has to show the operator the exact
+// command that will run, and for a LIVE destination it must splice into the
+// argv the running process was started with — that one carries the relay port
+// the hub actually assigned, which nothing outside the engine can reproduce.
+// One function, so the command that was confirmed and the command that runs
+// cannot drift apart.
+//
+// A base command that does not look the way this expects — no -i, or nothing
+// after it — gets the arguments appended rather than an error. Refusing to
+// build anything because the shape surprised us would be worse than producing
+// a command the operator can read and judge.
+func SpliceExtraArgs(base, in, out []string) []string {
+	if len(in) == 0 && len(out) == 0 {
+		return base
+	}
+	argv := make([]string, 0, len(base)+len(in)+len(out))
+
+	inputAt := -1
+	for i, a := range base {
+		if a == "-i" {
+			inputAt = i
+			break
+		}
+	}
+	if inputAt < 0 || len(base) == 0 {
+		argv = append(argv, base...)
+		argv = append(argv, in...)
+		return append(argv, out...)
+	}
+
+	argv = append(argv, base[:inputAt]...)
+	argv = append(argv, in...)
+	// Everything from -i up to but not including the output target, which is
+	// the final element of every command DestinationArgs builds.
+	argv = append(argv, base[inputAt:len(base)-1]...)
+	argv = append(argv, out...)
+	return append(argv, base[len(base)-1])
+}
+
+// StripExtraArgs is the exact inverse of SpliceExtraArgs: given a command that
+// was built with in and out spliced into it, it returns the generated command
+// underneath.
+//
+// It exists so the expert-mode editor can preview a CANDIDATE edit against a
+// destination that is already running with a previous one. The live process's
+// argv is the only place the relay port the hub actually assigned appears, so
+// it has to be the base — but splicing the candidate onto it directly would
+// stack the new arguments on top of the old.
+//
+// The tokens are removed only where they match exactly. Anything else — a
+// command that was not built by SpliceExtraArgs, arguments that were changed on
+// disk since the process started — is returned untouched, so the operator is
+// shown the real argv rather than a guess at what it should have been.
+func StripExtraArgs(argv, in, out []string) []string {
+	if len(in) == 0 && len(out) == 0 {
+		return argv
+	}
+	out2 := argv
+
+	if n := len(out); n > 0 && len(out2) >= n+1 {
+		// Immediately before the target, which is the final element.
+		at := len(out2) - 1 - n
+		if slices.Equal(out2[at:len(out2)-1], out) {
+			out2 = append(append([]string{}, out2[:at]...), out2[len(out2)-1])
+		}
+	}
+	if n := len(in); n > 0 {
+		inputAt := slices.Index(out2, "-i")
+		if inputAt >= n && slices.Equal(out2[inputAt-n:inputAt], in) {
+			out2 = append(append([]string{}, out2[:inputAt-n]...), out2[inputAt:]...)
+		}
+	}
+	return out2
 }
 
 // DestinationArgs builds one destination's command.
@@ -234,7 +524,7 @@ func DestinationArgs(s DestSpec) []string {
 		args = append(args, "-f", fileFormat(s.Target))
 	}
 	args = append(args, s.Target)
-	return args
+	return SpliceExtraArgs(args, s.ExtraInputArgs, s.ExtraOutputArgs)
 }
 
 // fileFormat picks a muxer from the extension. Matroska is the default because
