@@ -17,6 +17,16 @@ services:
     # Or, once published: image: polyemesis:latest
     container_name: polyemesis
     restart: unless-stopped
+    # Docker's default is 10s, and a measured shutdown with three destinations
+    # live takes ~8.3s: the supervisor gives each child an 8s grace period
+    # (shutdownGrace) before escalating to SIGKILL, and an FFmpeg whose ingest
+    # feed has gone quiet reliably needs that full 8s. 1.7s of headroom is not
+    # a margin, it is a coin flip — and losing it means Docker SIGKILLs the
+    # container mid-shutdown, which is exactly when a file destination has not
+    # yet finalised its container and the recording is truncated.
+    #
+    # 30s is the same shape as the systemd unit's TimeoutStopSec=45.
+    stop_grace_period: 30s
     ports:
       - "8080:8080"        # web UI + API
       - "6000:6000/udp"    # SRT ingest — UDP, not TCP
@@ -80,6 +90,10 @@ services:
   #       VERSION: compose-cuda
   #   container_name: polyemesis
   #   restart: unless-stopped
+  #   # Same reason as the default service above: an 8s supervisor grace period
+  #   # does not fit inside Docker's 10s default, and losing the race truncates
+  #   # whatever a file destination was still writing.
+  #   stop_grace_period: 30s
   #
   #   # `capabilities` here is not decoration: it becomes
   #   # NVIDIA_DRIVER_CAPABILITIES inside the container, and it OVERRIDES what
@@ -139,6 +153,10 @@ services:
   #       VERSION: compose-vaapi
   #   container_name: polyemesis
   #   restart: unless-stopped
+  #   # Same reason as the default service above: an 8s supervisor grace period
+  #   # does not fit inside Docker's 10s default, and losing the race truncates
+  #   # whatever a file destination was still writing.
+  #   stop_grace_period: 30s
   #
   #   devices:
   #     # Passing the whole directory rather than one node: which renderD* is
