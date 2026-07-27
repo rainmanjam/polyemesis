@@ -43,6 +43,8 @@ hot. One upload, one encode, different audio per platform.
 - **Full multitrack recording** to segmented MKV, preserving every audio track,
   with size and age retention.
 - **Low-latency HLS preview**, live process logs, CPU/RAM and bitrate graphs.
+- **Prometheus metrics** at `/api/v1/metrics`, covering ingest, every
+  destination, the relay, recording disk and host resources.
 - **Single static binary.** UI embedded, pure-Go SQLite, no cgo, no runtime
   dependencies except FFmpeg itself.
 
@@ -199,11 +201,18 @@ key. In OBS: `Settings → Stream`, Service **Custom...**:
 
 Then press **Start Streaming**.
 
-### Enhanced RTMP multitrack (experimental)
+### Enhanced RTMP multitrack (not implemented)
 
-OBS 30.2+ can send multiple audio tracks over Enhanced RTMP/FLV. This is behind
-the `enhancedRtmp` feature flag in `config.yaml` and is **off by default** — it
-is not part of v1 and is not recommended for production use. Use SRT.
+OBS 30.2+ can send multiple audio tracks over Enhanced RTMP/FLV. **polyemesis
+does not support this.** RTMP ingest is single-track.
+
+`config.yaml` accepts an `enhancedRtmp` key, but it is an inert placeholder for
+that unbuilt feature: **setting it to `true` does nothing.** No code path reads
+it and no endpoint reports it — RTMP ingest behaves identically either way. It
+exists only so config files that already carry the key keep parsing. Do not set
+it expecting multitrack RTMP.
+
+For multiple audio tracks, use SRT ingest.
 
 ---
 
@@ -339,11 +348,89 @@ tls:
 
 ---
 
+## Monitoring
+
+`GET /api/v1/metrics` returns Prometheus text exposition. Everything the
+dashboard draws is there: ingest state and bitrate, per-destination state,
+bitrate, restarts and dropped frames, relay throughput and drops, recording
+disk usage, and the process's own CPU and memory.
+
+**The endpoint requires authentication.** It accepts an API token, which is
+what a scraper should use — create one under Settings → API tokens and point
+Prometheus at it:
+
+```yaml
+scrape_configs:
+  - job_name: polyemesis
+    metrics_path: /api/v1/metrics
+    static_configs:
+      - targets: ['stream.example.com']
+    authorization:
+      credentials_file: /etc/prometheus/polyemesis.token
+```
+
+A session cookie works too, so you can just open the URL in a signed-in
+browser tab.
+
+Why not leave it open to loopback, as many projects do? Because loopback is
+both too strict and too lax here. Prometheus normally runs in a neighbouring
+container, so its scrape arrives from a bridge address and would be refused;
+and once `trustProxyHeaders` is on, *every* request arrives from a proxy on
+127.0.0.1, so the check would let the whole internet in. A revocable token is
+correct in both deployments.
+
+Metric names carry the `polyemesis_` prefix, counters end in `_total`, and
+values are in base units — bytes, seconds, bits per second. Destinations are
+labelled `id` and `name`; `polyemesis_destination_info` carries `kind` and
+`platform` for joining.
+
+A few queries to start from:
+
+```promql
+polyemesis_ingest_up == 0                                   # nobody is streaming
+polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1
+rate(polyemesis_destination_restarts_total[15m]) > 0        # a flapping output
+polyemesis_recording_free_bytes < 20e9                      # disk filling up
+```
+
+---
+
+## Automation with API tokens
+
+Everything the UI does is a REST call, and a script can make the same calls
+with an API token instead of a session. Create one under **Settings →
+Security → API tokens**; the secret is shown once, because polyemesis stores
+only its hash.
+
+```sh
+curl -H "Authorization: Bearer pmk_..." https://stream.example.com/api/v1/status
+curl -H "Authorization: Bearer pmk_..." \
+     -X POST https://stream.example.com/api/v1/destinations/3/stop
+```
+
+A token acts as the admin, with one exception: it cannot create or revoke
+tokens. That is deliberate. If a leaked token could mint more, revoking the one
+you know about would mean nothing — the holder has quietly issued three others.
+Minting stays behind the password, so revocation is final.
+
+Token requests need no CSRF header: the header exists to prove a request was
+not made by a browser carrying your cookie automatically, and a `Bearer` header
+is never sent automatically.
+
+---
+
 ## Security
 
 - Single admin user; password hashed with bcrypt.
 - Session is a JWT in an `HttpOnly`, `SameSite=Lax` cookie, signed with a key
   derived from the server secret.
+- Failed logins are throttled per client address: five free attempts, then a
+  delay that doubles from 2s and is capped at 5 minutes, with `Retry-After` on
+  the 429. The cap and a one-hour idle reset are what stop an attacker turning
+  the lockout into a denial of service against the admin. Counters live in
+  memory only — a restart must never strand you outside your own server.
+- API tokens are stored as hashes, prefixed `pmk_`, revocable individually, and
+  cannot manage other tokens.
 - CSRF: double-submit token required on every state-changing request.
 - OAuth `state` is server-stored, single-use and expiring.
 - OAuth tokens and client secrets encrypted at rest (NaCl secretbox).
