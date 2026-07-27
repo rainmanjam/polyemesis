@@ -1,6 +1,8 @@
 package ffmpeg
 
 import (
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -136,6 +138,245 @@ func TestIngestArgsRTMPListens(t *testing.T) {
 	li, ii := indexOf(args, "-listen"), indexOf(args, "-i")
 	if li < 0 || ii < 0 || li > ii {
 		t.Errorf("-listen must come before -i: %s", join(args))
+	}
+}
+
+// ------------------------------------------------------------- pull ingest
+
+func TestValidatePullURLAcceptsEveryAllowedScheme(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		ok   bool
+	}{
+		{"rtsp camera", "rtsp://cam.local:554/stream1", true},
+		{"rtsps camera", "rtsps://cam.local:322/stream1", true},
+		{"http mpegts", "http://origin.example/live.ts", true},
+		{"https hls playlist", "https://origin.example/live/index.m3u8", true},
+		{"hls scheme", "hls://origin.example/live/index.m3u8", true},
+		{"dash scheme", "dash://origin.example/live/manifest.mpd", true},
+		{"srt caller", "srt://peer.example:9000?mode=caller", true},
+		{"rtmp relay", "rtmp://peer.example/live/key", true},
+		// Refusing to read a transport we happily write would be the
+		// restrictive kind of wrong.
+		{"rtmps relay", "rtmps://peer.example/live/key", true},
+		{"relative file", "file://loops/bars.ts", true},
+		{"uppercase scheme", "RTSP://cam.local/stream1", true},
+
+		{"empty", "", false},
+		{"no scheme", "cam.local/stream1", false},
+		{"bare path", "/var/media/loop.ts", false},
+		// concat: and friends are one settings write away without the list.
+		{"concat protocol", "concat://a.ts|b.ts", false},
+		{"gopher", "gopher://evil.example/1", false},
+		{"data uri", "data://text/plain,hi", false},
+		{"pipe", "pipe://0", false},
+		{"newline injection", "http://ok.example/a\nrtsp://b", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidatePullURL(tc.url)
+			if tc.ok && err != nil {
+				t.Fatalf("ValidatePullURL(%q) = %v, want accepted", tc.url, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("ValidatePullURL(%q) accepted, want rejected", tc.url)
+			}
+		})
+	}
+}
+
+func TestPullFileSourceIsConfinedToDataDir(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		ok   bool
+	}{
+		{"relative", "file://loops/bars.ts", true},
+		{"nested relative", "file://a/b/c/bars.ts", true},
+		{"absolute unix", "file:///etc/shadow", false},
+		{"traversal", "file://../../secret.key", false},
+		{"traversal mid path", "file://loops/../../secret.key", false},
+		{"backslash traversal", `file://..\..\secret.key`, false},
+		{"windows drive", "file://C:/Windows/win.ini", false},
+		{"empty path", "file://", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidatePullURL(tc.url)
+			if tc.ok != (err == nil) {
+				t.Fatalf("ValidatePullURL(%q) = %v, want ok=%v", tc.url, err, tc.ok)
+			}
+		})
+	}
+}
+
+func TestPullFileSourceResolvesUnderDataDir(t *testing.T) {
+	s := IngestSpec{Kind: IngestPull, PullURL: "file://loops/bars.ts", PullDataDir: "/srv/polyemesis/data"}
+	got, err := s.PullSource()
+	if err != nil {
+		t.Fatalf("PullSource: %v", err)
+	}
+	// The file: prefix keeps a filename containing a colon from being re-read
+	// as a protocol name.
+	if want := "file:" + filepath.Join("/srv/polyemesis/data", "loops", "bars.ts"); got != want {
+		t.Errorf("PullSource = %q, want %q", got, want)
+	}
+}
+
+func TestIngestURLRefusesToRenderARejectedPullSource(t *testing.T) {
+	// If IngestURL echoed the raw string back, an escaping file:// path would
+	// reach FFmpeg anyway and the confinement check would be decorative.
+	s := IngestSpec{Kind: IngestPull, PullURL: "file:///etc/shadow", PullDataDir: "/srv/data"}
+	if got := s.IngestURL(); got != "" {
+		t.Errorf("IngestURL = %q, want empty for a rejected source", got)
+	}
+}
+
+func TestIngestArgsPullKeepsCopyContract(t *testing.T) {
+	args := IngestArgs(IngestSpec{
+		Kind:     IngestPull,
+		PullURL:  "rtsp://cam.local:554/stream1",
+		RelayURL: "udp://127.0.0.1:20000",
+	})
+
+	// Pull changes where bytes come from, never what happens to them.
+	if m, _ := argsAfter(args, "-map"); m != "0" {
+		t.Errorf("-map = %q, want \"0\" so every track survives", m)
+	}
+	if c, _ := argsAfter(args, "-c"); c != "copy" {
+		t.Errorf("-c = %q, want copy: the ingest must never re-encode", c)
+	}
+	if f, _ := argsAfter(args, "-f"); f != "mpegts" {
+		t.Errorf("-f = %q, want mpegts", f)
+	}
+	if i, _ := argsAfter(args, "-i"); i != "rtsp://cam.local:554/stream1" {
+		t.Errorf("-i = %q", i)
+	}
+	if !strings.Contains(join(args), "udp://127.0.0.1:20000?pkt_size=1316") {
+		t.Errorf("relay output missing TS-aligned pkt_size: %s", join(args))
+	}
+	// A pull ingest is not a listener; -listen belongs to the RTMP server path.
+	if has(args, "-listen") {
+		t.Errorf("pull mode must not listen: %s", join(args))
+	}
+	for _, bad := range []string{"libx264", "-b:v", "-crf", "aac"} {
+		if strings.Contains(join(args), bad) {
+			t.Errorf("ingest must not encode, found %q in: %s", bad, join(args))
+		}
+	}
+}
+
+func TestIngestArgsPullReconnectFlagsPerScheme(t *testing.T) {
+	cases := []struct {
+		name    string
+		spec    IngestSpec
+		want    []string
+		absent  []string
+		wantVal map[string]string
+	}{
+		{
+			name: "http gets streamed reconnect",
+			spec: IngestSpec{Kind: IngestPull, PullURL: "http://origin.example/live.ts"},
+			want: []string{"-reconnect", "-reconnect_streamed", "-reconnect_delay_max"},
+			// -reconnect alone only retries seekable inputs, which a live
+			// source never is.
+			wantVal: map[string]string{
+				"-reconnect":           "1",
+				"-reconnect_streamed":  "1",
+				"-reconnect_delay_max": "30",
+			},
+			absent: []string{"-rtsp_transport", "-stream_loop", "-re"},
+		},
+		{
+			name:    "https honours a custom backoff ceiling",
+			spec:    IngestSpec{Kind: IngestPull, PullURL: "https://origin.example/i.m3u8", PullReconnectDelayMax: 5},
+			want:    []string{"-reconnect_delay_max"},
+			wantVal: map[string]string{"-reconnect_delay_max": "5"},
+		},
+		{
+			name: "rtsp defaults to tcp",
+			spec: IngestSpec{Kind: IngestPull, PullURL: "rtsp://cam.local/stream1"},
+			want: []string{"-rtsp_transport"},
+			// UDP RTSP through NAT connects and then delivers nothing.
+			wantVal: map[string]string{"-rtsp_transport": "tcp"},
+			absent:  []string{"-reconnect", "-stream_loop"},
+		},
+		{
+			name:    "rtsp transport is overridable",
+			spec:    IngestSpec{Kind: IngestPull, PullURL: "rtsp://cam.local/s", PullRTSPTransport: "udp"},
+			want:    []string{"-rtsp_transport"},
+			wantVal: map[string]string{"-rtsp_transport": "udp"},
+		},
+		{
+			name: "file loops at wall-clock speed",
+			spec: IngestSpec{Kind: IngestPull, PullURL: "file://loops/bars.ts", PullDataDir: "/srv/data"},
+			// Without -re the file is read at disk speed and floods the relay.
+			want:    []string{"-stream_loop", "-re"},
+			wantVal: map[string]string{"-stream_loop": "-1"},
+			absent:  []string{"-reconnect", "-rtsp_transport"},
+		},
+		{
+			name:   "srt needs no extra input flags",
+			spec:   IngestSpec{Kind: IngestPull, PullURL: "srt://peer.example:9000"},
+			absent: []string{"-reconnect", "-rtsp_transport", "-stream_loop", "-re"},
+		},
+		{
+			name:   "rtmp needs no extra input flags",
+			spec:   IngestSpec{Kind: IngestPull, PullURL: "rtmp://peer.example/live/k"},
+			absent: []string{"-reconnect", "-rtsp_transport", "-stream_loop", "-listen"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.spec.RelayURL = "udp://127.0.0.1:20000"
+			args := IngestArgs(tc.spec)
+			for _, flag := range tc.want {
+				if !has(args, flag) {
+					t.Errorf("missing %s in: %s", flag, join(args))
+				}
+			}
+			for flag, want := range tc.wantVal {
+				if got, _ := argsAfter(args, flag); got != want {
+					t.Errorf("%s = %q, want %q", flag, got, want)
+				}
+			}
+			for _, flag := range tc.absent {
+				if has(args, flag) {
+					t.Errorf("unexpected %s in: %s", flag, join(args))
+				}
+			}
+			// Input options are meaningless after -i.
+			ii := indexOf(args, "-i")
+			for _, flag := range tc.want {
+				if fi := indexOf(args, flag); fi < 0 || fi > ii {
+					t.Errorf("%s must precede -i: %s", flag, join(args))
+				}
+			}
+		})
+	}
+}
+
+func TestPublicIngestURLReportsThePullSource(t *testing.T) {
+	// Nobody points an encoder anywhere in pull mode, so the dashboard shows
+	// what polyemesis dials instead of an address that does not exist.
+	s := IngestSpec{Kind: IngestPull, PullURL: " rtsp://cam.local/stream1 "}
+	if got, want := s.PublicIngestURL("stream.example.com"), "rtsp://cam.local/stream1"; got != want {
+		t.Errorf("PublicIngestURL = %q, want %q", got, want)
+	}
+}
+
+func TestPullSchemesAreStableAndSorted(t *testing.T) {
+	got := PullSchemes()
+	want := []string{"dash", "file", "hls", "http", "https", "rtmp", "rtmps", "rtsp", "rtsps", "srt"}
+	if len(got) != len(want) {
+		t.Fatalf("PullSchemes() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("PullSchemes() = %v, want %v", got, want)
+		}
 	}
 }
 
@@ -716,5 +957,198 @@ func TestChannelLayoutName(t *testing.T) {
 		if got := ChannelLayoutName(channels); got != want {
 			t.Errorf("ChannelLayoutName(%d) = %q, want %q", channels, got, want)
 		}
+	}
+}
+
+// ---------------------------------------------------------------- expert args
+
+// The two positions are the whole contract: FFmpeg binds an option to the input
+// or output that FOLLOWS it, so an argument in the wrong place is not merely
+// misplaced, it is silently inert.
+func TestSpliceExtraArgsPutsArgumentsWhereFFmpegReadsThem(t *testing.T) {
+	tests := []struct {
+		name string
+		base []string
+		in   []string
+		out  []string
+		want []string
+	}{
+		{
+			name: "nothing to splice returns the command untouched",
+			base: []string{"-i", "udp://x", "-f", "flv", "rtmp://y"},
+			want: []string{"-i", "udp://x", "-f", "flv", "rtmp://y"},
+		},
+		{
+			name: "input args land immediately before -i",
+			base: []string{"-hide_banner", "-i", "udp://x", "-f", "flv", "rtmp://y"},
+			in:   []string{"-analyzeduration", "10M"},
+			want: []string{"-hide_banner", "-analyzeduration", "10M", "-i", "udp://x", "-f", "flv", "rtmp://y"},
+		},
+		{
+			name: "output args land immediately before the target",
+			base: []string{"-i", "udp://x", "-f", "flv", "rtmp://y"},
+			out:  []string{"-muxdelay", "0"},
+			want: []string{"-i", "udp://x", "-f", "flv", "-muxdelay", "0", "rtmp://y"},
+		},
+		{
+			name: "both at once",
+			base: []string{"-i", "udp://x", "-f", "flv", "rtmp://y"},
+			in:   []string{"-re"},
+			out:  []string{"-muxdelay", "0"},
+			want: []string{"-re", "-i", "udp://x", "-f", "flv", "-muxdelay", "0", "rtmp://y"},
+		},
+		{
+			// Fail open. A shape we did not expect still produces a command the
+			// operator can read and judge, rather than an error that tells them
+			// nothing about what their destination is running.
+			name: "a command with no -i gets the arguments appended rather than an error",
+			base: []string{"-version"},
+			in:   []string{"-re"},
+			out:  []string{"-muxdelay", "0"},
+			want: []string{"-version", "-re", "-muxdelay", "0"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := slices.Clone(tt.base)
+			got := SpliceExtraArgs(base, tt.in, tt.out)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("SpliceExtraArgs() = %v\nwant %v", got, tt.want)
+			}
+			if !slices.Equal(base, tt.base) {
+				t.Errorf("SpliceExtraArgs mutated the caller's slice: %v", base)
+			}
+		})
+	}
+}
+
+// StripExtraArgs is what lets the editor preview a candidate edit against a
+// destination that is already running with a previous one. Without it the
+// preview would show the new arguments stacked on top of the old.
+func TestStripExtraArgsIsTheInverseOfSplice(t *testing.T) {
+	base := []string{"-hide_banner", "-i", "udp://x", "-f", "flv", "rtmp://y"}
+
+	cases := [][2][]string{
+		{nil, nil},
+		{{"-re"}, nil},
+		{nil, {"-muxdelay", "0"}},
+		{{"-analyzeduration", "10M"}, {"-metadata", "title=x"}},
+	}
+	for _, c := range cases {
+		in, out := c[0], c[1]
+		got := StripExtraArgs(SpliceExtraArgs(slices.Clone(base), in, out), in, out)
+		if !slices.Equal(got, base) {
+			t.Errorf("strip(splice(base, %v, %v)) = %v\nwant %v", in, out, got, base)
+		}
+	}
+}
+
+// Anything that was not built by SpliceExtraArgs comes back untouched. Showing
+// the operator the real argv beats showing them a guess at what it should be.
+func TestStripExtraArgsLeavesACommandItDoesNotRecognise(t *testing.T) {
+	argv := []string{"-i", "udp://x", "-f", "flv", "rtmp://y"}
+	got := StripExtraArgs(slices.Clone(argv), []string{"-re"}, []string{"-muxdelay", "0"})
+	if !slices.Equal(got, argv) {
+		t.Errorf("StripExtraArgs() = %v, want it unchanged: %v", got, argv)
+	}
+}
+
+// The engine and the API must tokenize the same stored string identically, or
+// the command the operator confirmed and the command that runs disagree about
+// where one argument ends.
+func TestSplitArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr string
+	}{
+		{name: "empty is no arguments", raw: "", want: nil},
+		{name: "plain flags", raw: "-re -muxdelay 0", want: []string{"-re", "-muxdelay", "0"}},
+		{
+			name: "a double-quoted value keeps its spaces",
+			raw:  `-metadata "title=My Show"`,
+			want: []string{"-metadata", "title=My Show"},
+		},
+		{
+			name: "a quoted metacharacter is a value, not a shell operator",
+			raw:  `-metadata "title=Rock & Roll"`,
+			want: []string{"-metadata", "title=Rock & Roll"},
+		},
+		{
+			// Backslash is a path separator on Windows, which this repo now
+			// supports. Treating it as an escape would break every such path.
+			name: "backslashes survive as path separators",
+			raw:  `-i C:\media\out.ts`,
+			want: []string{"-i", `C:\media\out.ts`},
+		},
+		{
+			// Filter-graph syntax. Rejecting these would be the restrictive
+			// kind of wrong this repo has already paid for three times.
+			name: "filter syntax and optional-stream suffixes are accepted",
+			raw:  "-map 0:a:1? -filter_complex [0:a]anull[x]",
+			want: []string{"-map", "0:a:1?", "-filter_complex", "[0:a]anull[x]"},
+		},
+		{name: "a bare semicolon is rejected", raw: "-re ; rm -rf /", wantErr: "metacharacter"},
+		{name: "a bare pipe is rejected", raw: "-re | tee x", wantErr: "metacharacter"},
+		{name: "an unclosed quote is rejected", raw: `-metadata "title=x`, wantErr: "unclosed"},
+		{name: "a newline is rejected", raw: "-re\n-muxdelay 0", wantErr: "control character"},
+		{
+			name:    "an over-long line is rejected",
+			raw:     strings.Repeat("a", MaxExtraArgsChars+1),
+			wantErr: "too long",
+		},
+		{
+			name:    "too many tokens are rejected",
+			raw:     strings.TrimSpace(strings.Repeat("-x ", MaxExtraArgsTokens+1)),
+			wantErr: "arguments, limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SplitArgs(tt.raw)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("SplitArgs(%q) err = %v, want it to contain %q", tt.raw, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SplitArgs(%q) = %v", tt.raw, err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("SplitArgs(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// DestinationArgs is where the splice actually happens for a live process. The
+// guarantee that matters is that expert mode ADDS to the routing graph rather
+// than displacing it: the explicit maps and the filter_complex are still there.
+func TestDestinationArgsSplicesExtrasWithoutDisplacingTheRoutingGraph(t *testing.T) {
+	args := DestinationArgs(DestSpec{
+		Kind: DestRTMP, Target: "rtmp://ingest.example/app/key",
+		RelayURL: "udp://127.0.0.1:21001", FilterComplex: "[0:a:1]anull[aout]",
+		AudioOutLabel: "aout", AudioBitrate: 160, SampleRate: 48000, CopyVideo: true,
+		ExtraInputArgs:  []string{"-analyzeduration", "10M"},
+		ExtraOutputArgs: []string{"-muxdelay", "0"},
+	})
+
+	iAt := slices.Index(args, "-i")
+	if iAt < 2 || args[iAt-2] != "-analyzeduration" || args[iAt-1] != "10M" {
+		t.Errorf("input args are not immediately before -i: %v", args)
+	}
+	if n := len(args); args[n-1] != "rtmp://ingest.example/app/key" ||
+		args[n-3] != "-muxdelay" || args[n-2] != "0" {
+		t.Errorf("output args are not immediately before the target: %v", args)
+	}
+	if !slices.Contains(args, "[0:a:1]anull[aout]") {
+		t.Error("the routing graph is missing")
+	}
+	if !slices.Contains(args, "[aout]") {
+		t.Error("the routing graph's output is no longer mapped")
 	}
 }
