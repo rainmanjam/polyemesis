@@ -181,7 +181,7 @@ func (s *Server) handleTestAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	n := s.eng.Alerts()
+	n := s.eng().Alerts()
 	if n == nil {
 		writeError(w, http.StatusServiceUnavailable, "the alert notifier is not running")
 		return
@@ -211,7 +211,7 @@ func (s *Server) handleAlertsMeta(w http.ResponseWriter, r *http.Request) {
 			"maxNameLen":         alerts.MaxRuleNameLen,
 			"maxUrlLen":          alerts.MaxURLLen,
 		},
-		"stats": s.eng.Alerts().Stats(),
+		"stats": s.eng().Alerts().Stats(),
 	})
 }
 
@@ -358,7 +358,7 @@ func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // A schedule that skipped because the server was down is the single most
 // confusing thing this feature can do, so it has to be visible.
 func (s *Server) handleScheduleRuns(w http.ResponseWriter, r *http.Request) {
-	last := s.eng.Scheduler().Last()
+	last := s.eng().Scheduler().Last()
 	if last == nil {
 		last = []scheduler.Result{}
 	}
@@ -368,7 +368,7 @@ func (s *Server) handleScheduleRuns(w http.ResponseWriter, r *http.Request) {
 // -------------------------------------------------------------------- clips
 
 func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
-	list, err := s.eng.Clips()
+	list, err := s.eng().Clips()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -376,7 +376,7 @@ func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []clips.Clip{}
 	}
-	usage, err := s.eng.ClipUsage()
+	usage, err := s.eng().ClipUsage()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -384,7 +384,7 @@ func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"clips":  list,
 		"usage":  usage,
-		"buffer": s.eng.ClipBuffer(),
+		"buffer": s.eng().ClipBuffer(),
 		"bounds": map[string]int{
 			"minWindowSeconds": clips.MinWindowSeconds,
 			"maxWindowSeconds": clips.MaxWindowSeconds,
@@ -401,7 +401,7 @@ func (s *Server) handleCaptureClip(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	clip, err := s.eng.Clip(req.Seconds)
+	clip, err := s.eng().Clip(req.Seconds)
 	switch {
 	case errors.Is(err, clips.ErrEmpty):
 		// 409, not 500: nothing is wrong, there is simply no history yet. The
@@ -425,16 +425,16 @@ func (s *Server) handleSetClipBuffer(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.eng.SetClipBuffer(req.Enabled, req.WindowSeconds); err != nil {
+	if err := s.eng().SetClipBuffer(req.Enabled, req.WindowSeconds); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.eng.ClipBuffer())
+	writeJSON(w, http.StatusOK, s.eng().ClipBuffer())
 }
 
 func (s *Server) handleDeleteClip(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.eng.DeleteClip(name); err != nil {
+	if err := s.eng().DeleteClip(name); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -443,7 +443,7 @@ func (s *Server) handleDeleteClip(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDownloadClip(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	path, err := s.eng.ClipPath(name)
+	path, err := s.eng().ClipPath(name)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -454,7 +454,7 @@ func (s *Server) handleDownloadClip(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------- loudness
 
 func (s *Server) handleLoudness(w http.ResponseWriter, r *http.Request) {
-	reports := s.eng.Loudness()
+	reports := s.eng().Loudness()
 	if reports == nil {
 		reports = []meters.Report{}
 	}
@@ -476,7 +476,7 @@ func (s *Server) handleSetLoudnessMonitor(w http.ResponseWriter, r *http.Request
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.eng.SetLoudnessMonitor(req.Enabled); err != nil {
+	if err := s.eng().SetLoudnessMonitor(req.Enabled); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -505,7 +505,7 @@ type stemFile struct {
 // are swept by following it — so this is a directory read rather than a query.
 // Anything it does not recognise as a stem this build wrote is skipped.
 func (s *Server) handleListStems(w http.ResponseWriter, r *http.Request) {
-	dir := s.eng.Recordings().StemsDir()
+	dir := s.eng().Recordings().StemsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -576,7 +576,7 @@ func (s *Server) resolveStem(name string) (string, error) {
 	if _, _, ok := recording.ParseStemFilename(name); !ok {
 		return "", fmt.Errorf("%q is not a stem file", name)
 	}
-	base, err := filepath.Abs(s.eng.Recordings().StemsDir())
+	base, err := filepath.Abs(s.eng().Recordings().StemsDir())
 	if err != nil {
 		return "", err
 	}

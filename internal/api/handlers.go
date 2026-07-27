@@ -176,7 +176,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // ------------------------------------------------------------------- system
 
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
-	settings := s.eng.Settings()
+	settings := s.eng().Settings()
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(settings.Ingest.Mode),
 		SRTPort:       settings.Ingest.SRT.Port,
@@ -200,7 +200,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version": s.version,
-		"ffmpeg":  s.eng.Tools(),
+		"ffmpeg":  s.eng().Tools(),
 		// What the machine has, as opposed to what the FFmpeg build lists. It
 		// rides on /system because the two are only meaningful together: an
 		// encoder list without the hardware behind it is what made the rendition
@@ -428,11 +428,11 @@ func compareSemver(a, b semver) int {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.eng.Status())
+	writeJSON(w, http.StatusOK, s.eng().Status())
 }
 
 func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.eng.SourceInfo())
+	writeJSON(w, http.StatusOK, s.eng().SourceInfo())
 }
 
 // handlePutAnnotations records what each incoming audio track is.
@@ -466,11 +466,11 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.eng.SourceInfo())
+	writeJSON(w, http.StatusOK, s.eng().SourceInfo())
 }
 
 // handleSwitchSource puts one failover source on air by hand.
@@ -486,25 +486,25 @@ func (s *Server) handleSwitchSource(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.eng.SwitchSource(req.Source); err != nil {
+	if err := s.eng().SwitchSource(req.Source); err != nil {
 		// Every failure here is the operator asking for something this
 		// configuration cannot do — an unknown name, or a tier that is off.
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.eng.Failover())
+	writeJSON(w, http.StatusOK, s.eng().Failover())
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"system":  s.eng.Monitor().System(),
-		"bitrate": s.eng.Monitor().Bitrate(),
-		"relay":   s.eng.Hub().Stats(),
+		"system":  s.eng().Monitor().System(),
+		"bitrate": s.eng().Monitor().Bitrate(),
+		"relay":   s.eng().Hub().Stats(),
 	})
 }
 
 func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
-	levels, at := s.eng.Levels()
+	levels, at := s.eng().Levels()
 	writeJSON(w, http.StatusOK, map[string]any{"levels": levels, "at": at})
 }
 
@@ -520,8 +520,8 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 // in the scrape config. A session cookie is accepted as well, so an admin who
 // is already signed in can just open the URL.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	st := s.eng.Status()
-	mon := s.eng.Monitor()
+	st := s.eng().Status()
+	mon := s.eng().Monitor()
 
 	snap := metrics.Snapshot{
 		Version:      s.version,
@@ -574,7 +574,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// A scrape reports what it can. Failing the whole endpoint because the
 	// recordings volume is momentarily unreadable would also lose the ingest
 	// and destination series, which are the ones an alert is watching.
-	if u, err := s.eng.Recordings().Usage(); err == nil {
+	if u, err := s.eng().Recordings().Usage(); err == nil {
 		snap.Recordings = metrics.Recordings{
 			Files:      u.Count,
 			UsedBytes:  u.UsedBytes,
@@ -630,7 +630,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "settings saved but reconcile failed: "+err.Error())
 		return
 	}
@@ -645,7 +645,7 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
-	src := s.eng.Source()
+	src := s.eng().Source()
 
 	// Each row is returned with its compiled routing, so the UI can render the
 	// "Tracks 1, 2, 4 → stereo" summary and the generated filter string
@@ -675,7 +675,7 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]any{"destination": row}
-	if c, err := routing.Compile(row.Profile, s.eng.Source()); err == nil {
+	if c, err := routing.Compile(row.Profile, s.eng().Source()); err == nil {
 		resp["routing"] = c
 	} else {
 		resp["routingError"] = err.Error()
@@ -697,7 +697,7 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after destination create", "err", err)
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"destination": created})
@@ -737,12 +737,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Reconcile restarts only this destination, and only if the change
 	// actually affects its command line.
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after destination update", "err", err)
 	}
 
 	resp := map[string]any{"destination": updated}
-	if c, err := routing.Compile(updated.Profile, s.eng.Source()); err == nil {
+	if c, err := routing.Compile(updated.Profile, s.eng().Source()); err == nil {
 		resp["routing"] = c
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -784,7 +784,7 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after destination delete", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -800,7 +800,7 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -821,7 +821,7 @@ func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.eng.RestartDestination(id); err != nil {
+	if err := s.eng().RestartDestination(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -841,7 +841,7 @@ func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 
 	// This backs the live filter-string preview in the routing editor: the
 	// user sees exactly what their checkboxes compile to, before saving.
-	res, err := routing.Compile(req.Profile, s.eng.Source())
+	res, err := routing.Compile(req.Profile, s.eng().Source())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":   err.Error(),
@@ -865,12 +865,12 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength > 0 && !decodeJSON(w, r, &opts) {
 		return
 	}
-	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), s.eng.Source(), opts)
+	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), s.eng().Source(), opts)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := routing.Compile(profile, s.eng.Source())
+	res, err := routing.Compile(profile, s.eng().Source())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -936,7 +936,7 @@ func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRecordingUsage(w http.ResponseWriter, r *http.Request) {
-	usage, err := s.eng.Recordings().Usage()
+	usage, err := s.eng().Recordings().Usage()
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -950,7 +950,7 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.eng.Recordings().Delete(id); err != nil {
+	if err := s.eng().Recordings().Delete(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -970,7 +970,7 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 	}
 	// Resolve confines the path to the recordings directory; the filename
 	// originates from a database row and is never trusted as a path.
-	path, err := s.eng.Recordings().Resolve(rec.Filename)
+	path, err := s.eng().Recordings().Resolve(rec.Filename)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -998,7 +998,7 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 // ---------------------------------------------------------------- processes
 
 func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
-	procs := s.eng.Processes()
+	procs := s.eng().Processes()
 	out := make([]map[string]any, 0, len(procs))
 	for _, p := range procs {
 		out = append(out, map[string]any{
@@ -1020,7 +1020,7 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	if decoded, err := url.PathUnescape(name); err == nil {
 		name = decoded
 	}
-	for _, p := range s.eng.Processes() {
+	for _, p := range s.eng().Processes() {
 		if p.Name() == name {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"name":    name,
@@ -1052,7 +1052,7 @@ func (s *Server) hlsHandler() http.Handler {
 			// A request that starts the encoder is answered 404 below, since
 			// ffmpeg has not written the playlist yet. hls.js retries a failed
 			// manifest load, so the player recovers within a segment or two.
-			s.eng.PreviewRequested()
+			s.eng().PreviewRequested()
 		}
 		fs.ServeHTTP(w, r)
 	}))

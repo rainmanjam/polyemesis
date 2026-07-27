@@ -164,7 +164,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dir := s.eng.Recordings().Dir()
+	dir := s.eng().Recordings().Dir()
 	for _, sess := range sessions {
 		view := librarySession{Session: sess, DisplayTitle: sess.DisplayTitle()}
 		for _, rec := range members[sess.ID] {
@@ -294,7 +294,7 @@ func (s *Server) handleGetLibrarySession(w http.ResponseWriter, r *http.Request)
 
 // expand decorates a set of recordings with everything the segment list shows.
 func (s *Server) expand(recs []db.Recording) []libraryRecording {
-	dir := s.eng.Recordings().Dir()
+	dir := s.eng().Recordings().Dir()
 	ids := make([]int64, 0, len(recs))
 	for _, rec := range recs {
 		ids = append(ids, rec.ID)
@@ -710,7 +710,7 @@ func (s *Server) handleLibraryMedia(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	path, err := media.Resolve(s.eng.Recordings().Dir(), rec.Filename, chi.URLParam(r, "file"))
+	path, err := media.Resolve(s.eng().Recordings().Dir(), rec.Filename, chi.URLParam(r, "file"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -904,7 +904,7 @@ func (s *Server) transcribeJob(rec db.Recording, req submitRequest) (jobs.Job, e
 		// Copied at submission rather than read when the job runs: a transcript
 		// is a record of a session, and re-running it after the roles were
 		// rearranged must not relabel the speakers.
-		Annotations: s.eng.Settings().Ingest.Annotations,
+		Annotations: s.eng().Settings().Ingest.Annotations,
 		Model:       strings.TrimSpace(req.Model),
 		Backend:     transcribe.Backend(strings.TrimSpace(req.Backend)),
 		Language:    strings.TrimSpace(req.Language),

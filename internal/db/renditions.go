@@ -118,7 +118,12 @@ type Rendition struct {
 	PadColor string `json:"padColor,omitempty"`
 	// Note is the "what is this tier for" line. Preset-derived renditions
 	// arrive with one already filled in; the user can rewrite it.
-	Note      string    `json:"note"`
+	Note string `json:"note"`
+	// SourceID is the programme this rendition re-encodes. A rendition reads
+	// exactly one ingest, so it belongs to exactly one source; nil means the
+	// source was deleted, which CASCADE makes unreachable in practice.
+	// CreateRendition fills it with the default source when omitted.
+	SourceID  *int64    `json:"sourceId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -307,14 +312,19 @@ func RenditionPresets() []RenditionPreset {
 func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 	var (
 		r       Rendition
+		source  sql.NullInt64
 		created int64
 		updated int64
 	)
 	err := s.Scan(&r.ID, &r.Name, &r.Width, &r.Height, &r.FPS, &r.VideoBitrate,
 		&r.Encoder, &r.Preset, &r.GOPSeconds, &r.AspectMode, &r.PadColor,
-		&r.Note, &created, &updated)
+		&r.Note, &source, &created, &updated)
 	if err != nil {
 		return nil, err
+	}
+	if source.Valid {
+		v := source.Int64
+		r.SourceID = &v
 	}
 	r.CreatedAt = time.Unix(created, 0)
 	r.UpdatedAt = time.Unix(updated, 0)
@@ -322,7 +332,7 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 }
 
 const renditionColumns = `id, name, width, height, fps, video_bitrate,
-	encoder, preset, gop_seconds, aspect_mode, pad_color, note, created_at, updated_at`
+	encoder, preset, gop_seconds, aspect_mode, pad_color, note, source_id, created_at, updated_at`
 
 // applyRenditionDefaults fills in the fields an API payload is allowed to
 // omit, so a create request can be as short as {"name","height","videoBitrate"}.
@@ -339,6 +349,27 @@ func (r *Rendition) applyDefaults() {
 }
 
 // ListRenditions returns every rendition, newest last.
+// ListRenditionsBySource returns the renditions belonging to one source, which
+// is what a per-source engine reconciles against.
+func (d *DB) ListRenditionsBySource(sourceID int64) ([]*Rendition, error) {
+	rows, err := d.sql.Query(
+		`SELECT `+renditionColumns+` FROM renditions WHERE source_id = ? ORDER BY id`, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []*Rendition{}
+	for rows.Next() {
+		r, err := scanRendition(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (d *DB) ListRenditions() ([]*Rendition, error) {
 	rows, err := d.sql.Query(`SELECT ` + renditionColumns + ` FROM renditions ORDER BY id`)
 	if err != nil {
@@ -373,13 +404,23 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
+	// Same reasoning as CreateDestination: a payload that names no source means
+	// the one that has always been there. A NULL here would produce a rendition
+	// no reconciler ever starts, which looks like a rendition that does nothing.
+	if r.SourceID == nil {
+		id, err := d.DefaultSourceID()
+		if err != nil {
+			return nil, fmt.Errorf("resolve default source: %w", err)
+		}
+		r.SourceID = &id
+	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO renditions
 		(name, width, height, fps, video_bitrate, encoder, preset, gop_seconds,
-		 aspect_mode, pad_color, note, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 aspect_mode, pad_color, note, source_id, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
-		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Note, now, now)
+		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Note, r.SourceID, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -398,10 +439,10 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 	res, err := d.sql.Exec(`UPDATE renditions SET
 		name=?, width=?, height=?, fps=?, video_bitrate=?,
 		encoder=?, preset=?, gop_seconds=?, aspect_mode=?, pad_color=?,
-		note=?, updated_at=? WHERE id=?`,
+		note=?, source_id=?, updated_at=? WHERE id=?`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
 		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor,
-		r.Note, time.Now().Unix(), r.ID)
+		r.Note, r.SourceID, time.Now().Unix(), r.ID)
 	if err != nil {
 		return nil, err
 	}

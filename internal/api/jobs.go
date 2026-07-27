@@ -532,7 +532,7 @@ func (s *Server) whisperInfo() whisperInfo {
 		info.Backend = string(s.whisper.BestBackend())
 	}
 
-	hint := transcribe.HintFromTools(s.eng.Tools())
+	hint := transcribe.HintFromTools(s.eng().Tools())
 	model := transcribe.DefaultModel(hint)
 	info.DefaultModel = model.Name
 	realtime, note := transcribe.RealtimeCapable(model, hint)

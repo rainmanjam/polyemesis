@@ -181,10 +181,10 @@ func run(h *hooks) error {
 
 	bus := events.NewBroker()
 
-	eng, err := engine.New(log, cfg, store, tools, bus)
-	if err != nil {
-		return err
-	}
+	// One engine per source, under a manager that owns the set. An install
+	// always has at least one source -- the database refuses to delete the
+	// last -- so this is never an empty pipeline.
+	eng := engine.NewManager(log, cfg, store, tools, bus)
 	h.progress("starting the streaming engine")
 	if err := eng.Start(ctx); err != nil {
 		return fmt.Errorf("starting the streaming engine: %w", err)

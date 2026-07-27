@@ -111,7 +111,7 @@ func (s *Server) handleCreateRendition(w http.ResponseWriter, r *http.Request) {
 	// Nothing selects a brand-new rendition yet, so this starts no encode; it
 	// runs for the same reason every other mutation reconciles, which is that
 	// the saved state and the running state are never allowed to drift.
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after rendition create", "err", err)
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"rendition": created})
@@ -143,7 +143,7 @@ func (s *Server) handleUpdateRendition(w http.ResponseWriter, r *http.Request) {
 	// The rendition's signature rides in each downstream destination's, so this
 	// restarts the encode and exactly the destinations reading it, and nothing
 	// else.
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after rendition update", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rendition": updated})
@@ -173,7 +173,7 @@ func (s *Server) handleDeleteRendition(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after rendition delete", "err", err)
 	}
 
@@ -283,7 +283,7 @@ type encoderInfo struct {
 // not from the cache — and because a driver install or a --device passthrough
 // that happened after launch is invisible until something asks again.
 func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
-	tools := s.eng.Tools()
+	tools := s.eng().Tools()
 
 	gpu := machineGPUs(r.Context())
 	if r.URL.Query().Get("redetect") != "" {
@@ -475,7 +475,7 @@ func (s *Server) handleRestartRendition(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.eng.RestartRendition(id); err != nil {
+	if err := s.eng().RestartRendition(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
