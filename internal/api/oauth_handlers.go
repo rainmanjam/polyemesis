@@ -138,12 +138,23 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.store.PutOAuthState(state, platform, ""); err != nil {
+	// PKCE (RFC 7636) rides alongside: the verifier never leaves the server, so
+	// a code intercepted in the browser's redirect cannot be redeemed elsewhere.
+	// Only providers that opt in get a challenge — see Provider.PKCE.
+	var verifier, challenge string
+	if provider.PKCE() {
+		verifier, challenge, err = oauth.NewPKCE()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if err := s.store.PutOAuthState(state, platform, verifier); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 
-	http.Redirect(w, r, provider.AuthURL(creds.ClientID, s.redirectURI(r, platform), state), http.StatusFound)
+	http.Redirect(w, r, provider.AuthURL(creds.ClientID, s.redirectURI(r, platform), state, challenge), http.StatusFound)
 }
 
 // handleOAuthCallback completes the flow and stores the connected account.
@@ -158,7 +169,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Validate state BEFORE touching the code: this is what stops an attacker
 	// grafting their own account onto the admin's session.
-	statePlatform, _, err := s.store.TakeOAuthState(q.Get("state"))
+	statePlatform, verifier, err := s.store.TakeOAuthState(q.Get("state"))
 	if err != nil {
 		s.oauthDone(w, r, "", err.Error())
 		return
@@ -182,7 +193,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	tok, err := provider.Exchange(ctx, creds.ClientID, creds.ClientSecret, s.redirectURI(r, platform), q.Get("code"))
+	tok, err := provider.Exchange(ctx, creds.ClientID, creds.ClientSecret, s.redirectURI(r, platform), q.Get("code"), verifier)
 	if err != nil {
 		s.oauthDone(w, r, "", "token exchange failed: "+err.Error())
 		return

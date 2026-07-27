@@ -53,8 +53,20 @@ type Provider interface {
 	// Scopes are requested at authorization time and shown in the UI so the
 	// user knows what they are granting.
 	Scopes() []string
-	AuthURL(clientID, redirectURI, state string) string
-	Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code string) (*Token, error)
+	// PKCE reports whether this platform accepts RFC 7636 parameters. It is
+	// opt-in per provider rather than on by default: a platform whose
+	// /authorize endpoint validates its query string strictly rejects an
+	// unknown code_challenge outright, which locks every user out of sign-in.
+	// That is a far worse outcome than doing without a defence-in-depth
+	// measure on a confidential client that never exposes the code.
+	PKCE() bool
+	// AuthURL builds the consent URL. challenge is the S256 code_challenge,
+	// and is empty whenever PKCE reports false.
+	AuthURL(clientID, redirectURI, state, challenge string) string
+	// Exchange trades the authorization code for tokens. verifier is the
+	// code_verifier matching the challenge given to AuthURL, empty when the
+	// provider does not do PKCE.
+	Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, verifier string) (*Token, error)
 	Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error)
 	Account(ctx context.Context, clientID, accessToken string) (*Account, error)
 	// Ingest fetches the ingest endpoint and stream key, so the user never

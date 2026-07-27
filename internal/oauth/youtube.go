@@ -21,7 +21,14 @@ func (y *YouTube) Scopes() []string {
 	return []string{"https://www.googleapis.com/auth/youtube"}
 }
 
-func (y *YouTube) AuthURL(clientID, redirectURI, state string) string {
+// PKCE is on: Google documents code_challenge/code_challenge_method for web
+// server applications, i.e. exactly this flow, and enforces the verifier at the
+// token endpoint. It costs nothing and it means a leaked authorization code —
+// through a proxy log, a referrer header, a shared machine's history — is
+// useless to anyone but this process.
+func (y *YouTube) PKCE() bool { return true }
+
+func (y *YouTube) AuthURL(clientID, redirectURI, state, challenge string) string {
 	q := url.Values{}
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
@@ -36,17 +43,25 @@ func (y *YouTube) AuthURL(clientID, redirectURI, state string) string {
 	// and no way to renew it.
 	q.Set("prompt", "consent")
 	q.Set("include_granted_scopes", "true")
+	if challenge != "" {
+		q.Set("code_challenge", challenge)
+		q.Set("code_challenge_method", "S256")
+	}
 	return "https://accounts.google.com/o/oauth2/v2/auth?" + q.Encode()
 }
 
-func (y *YouTube) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code string) (*Token, error) {
-	return postForm(ctx, "https://oauth2.googleapis.com/token", url.Values{
+func (y *YouTube) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, verifier string) (*Token, error) {
+	form := url.Values{
 		"code":          {code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"redirect_uri":  {redirectURI},
 		"grant_type":    {"authorization_code"},
-	}, nil)
+	}
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
+	}
+	return postForm(ctx, "https://oauth2.googleapis.com/token", form, nil)
 }
 
 func (y *YouTube) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
