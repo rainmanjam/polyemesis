@@ -156,19 +156,22 @@ what their routing compiles to.
 cmd/polyemesis/main.go          wiring, flags, graceful shutdown
 
 internal/
-  config/      config.yaml load/save/defaults, path resolution
+  config/      config.yaml load/defaults/validation, path resolution (read-only:
+               config.yaml is owned by the deployer, never rewritten by the app)
   db/          modernc.org/sqlite, migrations, stores
   ffmpeg/      detect.go (>=6.0 gate), probe.go, and the command BUILDERS:
                ingest.go · destination.go · recorder.go · preview.go · meters.go
   routing/     profile.go (model+validation) · filtergraph.go · presets.go
-  relay/       UDP fan-out hub, port allocator
-  supervisor/  process lifecycle, pgid kill, backoff, -progress parser, log ring
-  meters/      astats stderr parser → per-channel dBFS + peak hold
+  relay/       UDP fan-out hub, port allocator, TS continuity/loss measurement
+  supervisor/  process lifecycle, pgid kill, backoff, -progress parser, log ring,
+               rotating file sink for logs that must outlive the process
   stats/       ring buffers (30 min bitrate), host CPU/RAM
-  auth/        bcrypt, JWT cookie, CSRF double-submit
+  metrics/     Prometheus text exposition, rendered from the engine's status
+  auth/        bcrypt, JWT cookie, CSRF double-submit, API tokens, login throttle
   secrets/     NaCl secretbox token encryption at rest
-  oauth/       youtube.go · twitch.go · kick.go + token refresh
-  recording/   segment index, retention sweeper (max GB / max age)
+  oauth/       youtube.go · twitch.go · kick.go + PKCE + token refresh
+  recording/   segment index, retention sweeper (max GB / max age), free-space guard
+  events/      in-process pub/sub the WebSocket fans out
   engine/      the orchestrator: owns ingest+relay+recorder+preview+meters+dests
   api/         chi router, REST handlers, WebSocket hub
   web/         go:embed ui/dist + SPA fallback
