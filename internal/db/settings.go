@@ -54,6 +54,24 @@ type RecordingSettings struct {
 	MaxGB float64 `json:"maxGb"`
 	// MaxAgeHours deletes segments older than this. 0 = never.
 	MaxAgeHours int `json:"maxAgeHours"`
+	// MinFreeGB halts recording once the volume has less than this much room
+	// left. Retention caps only bound what polyemesis wrote; anything else
+	// sharing the volume can still fill it, and a full volume fails far more
+	// than the recording. 0 = no floor.
+	MinFreeGB float64 `json:"minFreeGb"`
+}
+
+// LoggingSettings controls whether captured process stderr outlives the
+// process that wrote it.
+type LoggingSettings struct {
+	// PersistProcessLogs mirrors each captured stderr line to a rotating file
+	// under the data directory. The in-memory ring dies with the server, which
+	// loses exactly the lines that explain why it died.
+	PersistProcessLogs bool `json:"persistProcessLogs"`
+	// MaxFileMB and MaxFiles bound the log directory at their product, so
+	// persistence cannot be the thing that fills the disk.
+	MaxFileMB int `json:"maxFileMb"`
+	MaxFiles  int `json:"maxFiles"`
 }
 
 // PreviewSettings controls the low-latency HLS preview shown on the dashboard.
@@ -65,6 +83,12 @@ type PreviewSettings struct {
 	// place polyemesis re-encodes video, and it never touches a destination.
 	VideoHeight int `json:"videoHeight"`
 	VideoKbps   int `json:"videoKbps"`
+	// IdleTimeoutSeconds is how long the encoder outlives the last playlist
+	// request. Because it is the only re-encode, the preview is started on
+	// demand and stopped again once nobody is watching, so on a small box it
+	// costs nothing while the dashboard is closed. 0 means the built-in
+	// default.
+	IdleTimeoutSeconds int `json:"idleTimeoutSeconds"`
 }
 
 // MeterSettings controls the audio-level sidecar.
@@ -80,6 +104,7 @@ type Settings struct {
 	Recording RecordingSettings `json:"recording"`
 	Preview   PreviewSettings   `json:"preview"`
 	Meters    MeterSettings     `json:"meters"`
+	Logging   LoggingSettings   `json:"logging"`
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -95,14 +120,17 @@ func DefaultSettings() Settings {
 			SegmentSeconds: 3600,
 			MaxGB:          50,
 			MaxAgeHours:    24 * 30,
+			MinFreeGB:      5,
 		},
 		Preview: PreviewSettings{
-			Enabled:        true,
-			SegmentSeconds: 2,
-			VideoHeight:    360,
-			VideoKbps:      800,
+			Enabled:            true,
+			SegmentSeconds:     2,
+			VideoHeight:        360,
+			VideoKbps:          800,
+			IdleTimeoutSeconds: 30,
 		},
-		Meters: MeterSettings{Enabled: true, IntervalMS: 100},
+		Meters:  MeterSettings{Enabled: true, IntervalMS: 100},
+		Logging: LoggingSettings{PersistProcessLogs: true, MaxFileMB: 8, MaxFiles: 3},
 	}
 }
 
@@ -145,11 +173,25 @@ func (s Settings) Validate() error {
 	if s.Recording.MaxAgeHours < 0 {
 		add("recording age cap cannot be negative")
 	}
+	if s.Recording.MinFreeGB < 0 {
+		add("recording free-space floor cannot be negative")
+	}
+	if s.Logging.MaxFileMB < 1 || s.Logging.MaxFileMB > 1024 {
+		add("log file size %dMB out of range (1-1024)", s.Logging.MaxFileMB)
+	}
+	if s.Logging.MaxFiles < 1 || s.Logging.MaxFiles > 100 {
+		add("log file count %d out of range (1-100)", s.Logging.MaxFiles)
+	}
 	if s.Preview.SegmentSeconds < 1 || s.Preview.SegmentSeconds > 10 {
 		add("preview segment length %ds out of range (1-10)", s.Preview.SegmentSeconds)
 	}
 	if s.Preview.VideoHeight < 144 || s.Preview.VideoHeight > 1080 {
 		add("preview height %d out of range (144-1080)", s.Preview.VideoHeight)
+	}
+	// Anything under a few seconds would tear the encoder down between a
+	// player's own playlist polls.
+	if t := s.Preview.IdleTimeoutSeconds; t != 0 && (t < 5 || t > 3600) {
+		add("preview idle timeout %ds out of range (5-3600, or 0 for the default)", t)
 	}
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)

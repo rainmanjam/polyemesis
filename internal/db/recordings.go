@@ -22,6 +22,10 @@ type Recording struct {
 
 // UpsertRecording indexes a segment file, keyed on filename so the filesystem
 // scanner can run repeatedly without creating duplicates.
+//
+// Duration and track count survive an upsert that carries neither: the scanner
+// measures a segment once and then keeps re-indexing it for its changing size,
+// and that must not wipe the measurement.
 func (d *DB) UpsertRecording(r *Recording) error {
 	var started, finished int64
 	if !r.StartedAt.IsZero() {
@@ -35,8 +39,8 @@ func (d *DB) UpsertRecording(r *Recording) error {
 		ON CONFLICT(filename) DO UPDATE SET
 			finished_at=excluded.finished_at,
 			bytes=excluded.bytes,
-			duration_ms=excluded.duration_ms,
-			tracks=excluded.tracks`,
+			duration_ms=CASE WHEN excluded.duration_ms > 0 THEN excluded.duration_ms ELSE recordings.duration_ms END,
+			tracks=CASE WHEN excluded.tracks > 0 THEN excluded.tracks ELSE recordings.tracks END`,
 		r.Filename, started, finished, r.Bytes, r.DurationMS, r.Tracks)
 	return err
 }

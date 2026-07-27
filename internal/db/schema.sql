@@ -8,6 +8,19 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at    INTEGER NOT NULL
 );
 
+-- Long-lived credentials for automation, so a script never needs the admin
+-- password or a cookie jar. Only the SHA-256 of the token is stored: the
+-- plaintext is 256 bits of CSPRNG output, so it is not guessable and a slow
+-- password KDF would only add latency to every API call.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT    NOT NULL,
+    token_hash   TEXT    NOT NULL UNIQUE,        -- hex SHA-256 of the plaintext
+    prefix       TEXT    NOT NULL DEFAULT '',    -- leading chars, so the UI can name a token
+    created_at   INTEGER NOT NULL,
+    last_used_at INTEGER NOT NULL DEFAULT 0
+);
+
 -- Single-row table holding the JSON-encoded runtime settings blob. Keeping it
 -- as one document avoids a migration every time a setting is added, and the
 -- settings are read as a unit anyway.

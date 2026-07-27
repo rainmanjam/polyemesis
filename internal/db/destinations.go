@@ -274,6 +274,79 @@ func (d *DB) SetDestinationEnabled(id int64, enabled bool) error {
 	return nil
 }
 
+func destinationIDs(tx *sql.Tx) (map[int64]bool, error) {
+	rows, err := tx.Query(`SELECT id FROM destinations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids[id] = true
+	}
+	return ids, rows.Err()
+}
+
+// checkPermutation reports whether ids names every member of known exactly
+// once. Anything less is rejected rather than partially honoured: a subset
+// would leave the unnamed rows sharing positions with the named ones, and the
+// resulting order is not one any client asked for.
+func checkPermutation(ids []int64, known map[int64]bool) error {
+	seen := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if !known[id] {
+			return fmt.Errorf("cannot reorder: destination %d does not exist", id)
+		}
+		if seen[id] {
+			return fmt.Errorf("cannot reorder: destination %d listed twice", id)
+		}
+		seen[id] = true
+	}
+	if len(ids) != len(known) {
+		return fmt.Errorf("cannot reorder: got %d ids for %d destinations", len(ids), len(known))
+	}
+	return nil
+}
+
+// ReorderDestinations rewrites display order so it matches ids, which must
+// name every destination exactly once. Position is presentation only, so
+// updated_at is deliberately left alone: moving a card up the dashboard is not
+// an edit to the destination.
+func (d *DB) ReorderDestinations(ids []int64) error {
+	// One transaction, because a half-applied order leaves rows sharing a
+	// position and the dashboard in an arrangement nobody asked for.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	known, err := destinationIDs(tx)
+	if err != nil {
+		return err
+	}
+	if err := checkPermutation(ids, known); err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(`UPDATE destinations SET position=? WHERE id=?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for pos, id := range ids {
+		if _, err := stmt.Exec(pos, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // DeleteDestination removes a destination.
 func (d *DB) DeleteDestination(id int64) error {
 	res, err := d.sql.Exec(`DELETE FROM destinations WHERE id = ?`, id)
