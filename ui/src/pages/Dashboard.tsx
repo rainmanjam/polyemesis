@@ -76,6 +76,7 @@ export function Dashboard() {
   const ingestTone = toneForState(ingest?.state);
   const source = status?.source;
   const live = status?.destinations;
+  const renditions = status?.renditions ?? [];
 
   // The socket republishes status on a two-second cadence, so a move applied
   // only on the server would leave the card sitting still after the click.
@@ -135,7 +136,7 @@ export function Dashboard() {
     <div className="p-3">
       <PageHeader
         title="Dashboard"
-        subtitle="Ingest once, fan out with per-destination audio."
+        subtitle="Ingest once, fan out with shared video and per-destination audio."
         actions={
           <Button
             size="sm"
@@ -255,6 +256,35 @@ export function Dashboard() {
                 <span className="tnum font-mono text-[10px]">
                   {status?.relay.subscribers?.length ?? 0}
                 </span>
+              </div>
+
+              {/* The shared encode tier, with the ref count that decides
+                  whether each one runs. A rendition nobody enabled has no
+                  process on purpose, so it reads as idle rather than as a
+                  fault, and the destination count is the whole economic
+                  argument: three platforms on one tier is still one encode. */}
+              <div className="mt-1 flex flex-col gap-1 border-t border-border pt-1.5">
+                <span className="text-[11px] text-muted-foreground">Renditions</span>
+                {renditions.length === 0 ? (
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    none — every destination is on passthrough
+                  </span>
+                ) : (
+                  renditions.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <StatusDot
+                          tone={r.consumers === 0 ? "idle" : toneForState(r.process?.state)}
+                          size="sm"
+                        />
+                        <span className="truncate text-[11px]">{r.name}</span>
+                      </div>
+                      <span className="tnum shrink-0 font-mono text-[10px] text-muted-foreground">
+                        {r.consumers === 1 ? "1 dest" : `${r.consumers} dests`}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>

@@ -37,10 +37,12 @@ const PLATFORM_LABEL: Record<string, string> = {
 
 /** One destination, as shown on the dashboard.
  *
- *  The card answers three questions in reading order: is it up, what audio is
- *  it sending, and how is it performing. The track summary is deliberately
- *  above the stats — which tracks a platform receives is the thing this whole
- *  product exists to make obvious. */
+ *  The card answers three questions in reading order: is it up, what is it
+ *  sending, and how is it performing. "What is it sending" is one block with
+ *  two rows rather than two blocks, because video and audio are a pair — a
+ *  platform that will not take the source video is exactly the platform whose
+ *  audio mix you are also about to check. That pairing is deliberately above
+ *  the stats; it is the thing this product exists to make obvious. */
 export function DestinationCard({
   dest,
   onStart,
@@ -73,6 +75,14 @@ export function DestinationCard({
   const running = state === "running";
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
+
+  // No rendition id is passthrough. The id is checked rather than the name so a
+  // status snapshot that arrives without one cannot make a re-encoded
+  // destination read as "source, copied", which is the one thing here that
+  // would send someone looking for a fault in the wrong place.
+  const video = dest.renditionId
+    ? dest.renditionName || `rendition ${dest.renditionId}`
+    : "passthrough · copy";
 
   return (
     <Card className="overflow-hidden">
@@ -127,16 +137,36 @@ export function DestinationCard({
           </div>
         </div>
 
-        {/* --- what audio does this get? the headline fact --- */}
-        <Link
-          to={`/routing/${dest.id}`}
-          className="group flex items-center justify-between gap-2 rounded-md border border-border bg-background px-2 py-1.5 transition-colors hover:border-border-strong"
-        >
-          <TrackSummary tracks={dest.tracks} />
-          <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
-            {dest.summary || "not configured"}
-          </span>
-        </Link>
+        {/* --- what does this platform get? the headline fact --- */}
+        <div className="rounded-md border border-border bg-background">
+          {/* Both rows link to the page that edits them, so the fact you are
+              reading is the thing you click. */}
+          <Link
+            to="/renditions"
+            className="group flex items-center justify-between gap-2 px-2 py-1.5 transition-colors hover:bg-muted"
+          >
+            <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
+              video
+            </span>
+            <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
+              {video}
+            </span>
+          </Link>
+          <Link
+            to={`/routing/${dest.id}`}
+            className="group flex items-center justify-between gap-2 border-t border-border px-2 py-1.5 transition-colors hover:bg-muted"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
+                audio
+              </span>
+              <TrackSummary tracks={dest.tracks} />
+            </div>
+            <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
+              {dest.summary || "not configured"}
+            </span>
+          </Link>
+        </div>
 
         {/* --- performance --- */}
         <div className="grid grid-cols-4 gap-2">

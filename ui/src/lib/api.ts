@@ -2,6 +2,7 @@ import type {
   ApiToken,
   Destination,
   DiskUsage,
+  EncoderInfo,
   Levels,
   PlatformAccount,
   PlatformCreds,
@@ -9,6 +10,11 @@ import type {
   PresetOpts,
   ProcessInfo,
   Recording,
+  Rendition,
+  RenditionBounds,
+  RenditionDeleted,
+  RenditionPreset,
+  RenditionView,
   RoutingProfile,
   RoutingResult,
   Settings,
@@ -151,6 +157,34 @@ export const api = {
     post<{ status: string }>(`/destinations/${id}/restart`),
   refreshStreamKey: (id: number) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
+
+  // --- renditions ---
+  // A rendition is one shared video encode several destinations can select, so
+  // N destinations wanting 1080p60 cost one encode rather than N. A destination
+  // with no rendition is passthrough, which is the default and costs nothing.
+  listRenditions: () => get<RenditionView[]>("/renditions"),
+  getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
+  createRendition: (r: Partial<Rendition>) =>
+    post<{ rendition: Rendition }>("/renditions", r),
+  updateRendition: (id: number, r: Partial<Rendition>) =>
+    put<{ rendition: Rendition }>(`/renditions/${id}`, r),
+  /** Succeeds even while destinations use it — they drop to passthrough, and
+   *  the response says how many did. */
+  deleteRendition: (id: number) => del<RenditionDeleted>(`/renditions/${id}`),
+  restartRendition: (id: number) =>
+    post<{ status: string }>(`/renditions/${id}/restart`),
+  renditionPresets: () =>
+    get<{
+      presets: RenditionPreset[];
+      disclaimer: string;
+      bounds: RenditionBounds;
+    }>("/renditions/presets"),
+  /** Which encoders this FFmpeg registers. The editor offers only these: an
+   *  encoder the binary lacks fails at start, once a stream is already live. */
+  listEncoders: () =>
+    get<{ encoders: EncoderInfo[]; default: string; probed: boolean }>(
+      "/encoders",
+    ),
 
   // --- routing ---
   compileRouting: (profile: RoutingProfile) =>
