@@ -882,17 +882,43 @@ func (p PostProdSettings) problems() []string {
 	return probs
 }
 
+// SharedIngestSettings configures the one-port SRT listener: a single port
+// serving every source, demultiplexed by each source's publish token.
+//
+// Off by default, and per-source ports keep working when it is on. That is a
+// deliberate difference from datarhei Core, which is one-port only: a dedicated
+// port per programme is genuinely useful for firewall rules, separate NICs and
+// QoS marking, and keeping both means the newer path can be adopted without
+// betting an install on it.
+type SharedIngestSettings struct {
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port"`
+}
+
+func (s SharedIngestSettings) problems() []string {
+	if !s.Enabled {
+		return nil
+	}
+	if s.Port < 1 || s.Port > 65535 {
+		return []string{fmt.Sprintf("shared ingest port %d out of range", s.Port)}
+	}
+	return nil
+}
+
 // Settings is everything the user can change from the web UI.
 type Settings struct {
-	Ingest    IngestSettings    `json:"ingest"`
-	Recording RecordingSettings `json:"recording"`
-	Preview   PreviewSettings   `json:"preview"`
-	Playout   PlayoutSettings   `json:"playout"`
-	Failover  FailoverSettings  `json:"failover"`
-	Synth     SynthSettings     `json:"synth"`
-	Meters    MeterSettings     `json:"meters"`
-	Logging   LoggingSettings   `json:"logging"`
-	PostProd  PostProdSettings  `json:"postProd"`
+	Ingest IngestSettings `json:"ingest"`
+	// SharedIngest is install-wide rather than per-source: it is one listener
+	// for every programme, so it cannot live on a source row.
+	SharedIngest SharedIngestSettings `json:"sharedIngest"`
+	Recording    RecordingSettings    `json:"recording"`
+	Preview      PreviewSettings      `json:"preview"`
+	Playout      PlayoutSettings      `json:"playout"`
+	Failover     FailoverSettings     `json:"failover"`
+	Synth        SynthSettings        `json:"synth"`
+	Meters       MeterSettings        `json:"meters"`
+	Logging      LoggingSettings      `json:"logging"`
+	PostProd     PostProdSettings     `json:"postProd"`
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -907,6 +933,9 @@ func DefaultSettings() Settings {
 				RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
 			},
 		},
+		// Off by default. It replaces the ingest path every stream depends on,
+		// so it is opted into rather than inherited by an upgrade.
+		SharedIngest: SharedIngestSettings{Enabled: false, Port: 6100},
 		Recording: RecordingSettings{
 			Enabled:        false,
 			SegmentSeconds: 3600,
@@ -1046,6 +1075,9 @@ func (s Settings) Validate() error {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)
 	}
 	for _, p := range s.PostProd.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.SharedIngest.problems() {
 		add("%s", p)
 	}
 

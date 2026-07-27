@@ -22,6 +22,7 @@ type sourceRow struct {
 	ID            int64             `json:"id"`
 	Name          string            `json:"name"`
 	Token         string            `json:"token"`
+	Enabled       bool              `json:"enabled"`
 	IsDefault     bool              `json:"isDefault"`
 	TokenEnforced bool              `json:"tokenEnforced"`
 	PublishURLs   map[string]string `json:"publishUrls"`
@@ -186,5 +187,27 @@ func TestSourceValidationSurfacesThroughTheAPI(t *testing.T) {
 
 	if !strings.Contains(string(body), "srt port") {
 		t.Errorf("error body %s, want it to name the srt port", body)
+	}
+}
+
+func TestANewSourceIsEnabledUnlessTheCallerSaysOtherwise(t *testing.T) {
+	h, _, sign := sourceServer(t)
+
+	// The UI sends only a name. A source that arrives disabled refuses the
+	// encoder with "source disabled", and nothing on screen suggests the thing
+	// you just created is off.
+	var created sourceRow
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/sources",
+		map[string]any{"name": "Vertical"}, http.StatusCreated), &created)
+	if !created.Enabled {
+		t.Error("a source created with just a name came out disabled")
+	}
+
+	// An explicit false still wins.
+	var off sourceRow
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/sources",
+		map[string]any{"name": "Standby", "enabled": false}, http.StatusCreated), &off)
+	if off.Enabled {
+		t.Error(`"enabled": false was ignored on create`)
 	}
 }

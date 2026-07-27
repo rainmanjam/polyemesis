@@ -34,10 +34,16 @@ type Source struct {
 	// operator has to paste it into OBS and will come back to read it again --
 	// see the schema comment on sources.token for why it is not hashed like an
 	// API token.
-	Token     string    `json:"token"`
-	Position  int       `json:"position"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Token string `json:"token"`
+	// PrevToken is the token this one replaced, still honoured until
+	// PrevTokenUntil. Rotation that instantly kills a live stream is rotation
+	// nobody performs, so the encoder already connected on the old token keeps
+	// running while the new one takes effect.
+	PrevToken      string    `json:"-"`
+	PrevTokenUntil time.Time `json:"prevTokenUntil,omitempty"`
+	Position       int       `json:"position"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 const (
@@ -94,11 +100,16 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 		s          Source
 		ingestJSON string
 		enabled    int
+		prevUntil  int64
 		created    int64
 		updated    int64
 	)
-	if err := row.Scan(&s.ID, &s.Name, &enabled, &ingestJSON, &s.Token, &s.Position, &created, &updated); err != nil {
+	if err := row.Scan(&s.ID, &s.Name, &enabled, &ingestJSON, &s.Token,
+		&s.PrevToken, &prevUntil, &s.Position, &created, &updated); err != nil {
 		return nil, err
+	}
+	if prevUntil > 0 {
+		s.PrevTokenUntil = time.Unix(prevUntil, 0)
 	}
 	s.Enabled = enabled != 0
 	// A source whose ingest blob will not parse still has to be listable, or a
@@ -113,7 +124,7 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 	return &s, nil
 }
 
-const sourceColumns = `id, name, enabled, ingest, token, position, created_at, updated_at`
+const sourceColumns = `id, name, enabled, ingest, token, prev_token, prev_token_until, position, created_at, updated_at`
 
 // ListSources returns every source in display order.
 func (d *DB) ListSources() ([]*Source, error) {
@@ -245,8 +256,8 @@ func (d *DB) CreateSource(s *Source) error {
 
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(
-		`INSERT INTO sources (name, enabled, ingest, token, position, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO sources (name, enabled, ingest, token, prev_token, prev_token_until, position, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?)`,
 		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, now, now)
 	if err != nil {
 		return err
@@ -284,9 +295,11 @@ func (d *DB) UpdateSource(s *Source) error {
 	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(
-		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, token = ?, position = ?, updated_at = ?
+		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, token = ?,
+		 prev_token = ?, prev_token_until = ?, position = ?, updated_at = ?
 		 WHERE id = ?`,
-		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, now, s.ID)
+		s.Name, boolToInt(s.Enabled), string(blob), s.Token,
+		s.PrevToken, unixOrZero(s.PrevTokenUntil), s.Position, now, s.ID)
 	if err != nil {
 		return err
 	}
@@ -321,14 +334,30 @@ func (d *DB) DeleteSource(id int64) error {
 	return nil
 }
 
+// TokenGrace is how long a rotated-out token keeps working.
+//
+// Rotation that instantly kills a live stream is rotation nobody performs, and
+// a credential nobody rotates is the problem per-source tokens were meant to
+// solve. Five minutes is long enough to update an encoder without hurrying and
+// short enough that a leaked token is not useful for long.
+const TokenGrace = 5 * time.Minute
+
 // RotateSourceToken issues a new publish secret and returns it.
+//
+// The replaced token stays valid for TokenGrace, so an encoder already
+// publishing on it keeps running while the operator moves across.
 func (d *DB) RotateSourceToken(id int64) (string, error) {
+	cur, err := d.GetSource(id)
+	if err != nil {
+		return "", err
+	}
 	tok, err := NewSourceToken()
 	if err != nil {
 		return "", err
 	}
-	res, err := d.sql.Exec(`UPDATE sources SET token = ?, updated_at = ? WHERE id = ?`,
-		tok, time.Now().Unix(), id)
+	res, err := d.sql.Exec(
+		`UPDATE sources SET token = ?, prev_token = ?, prev_token_until = ?, updated_at = ? WHERE id = ?`,
+		tok, cur.Token, time.Now().Add(TokenGrace).Unix(), time.Now().Unix(), id)
 	if err != nil {
 		return "", err
 	}
@@ -336,6 +365,20 @@ func (d *DB) RotateSourceToken(id int64) (string, error) {
 		return "", ErrSourceNotFound
 	}
 	return tok, nil
+}
+
+// ValidTokens returns every token this source currently accepts: the live one,
+// plus the rotated-out one while its grace window is open.
+//
+// Returned as a slice rather than checked here because the caller compares in
+// constant time across every candidate, and short-circuiting on the first match
+// is exactly what leaks which token was right.
+func (s *Source) ValidTokens(now time.Time) []string {
+	out := []string{s.Token}
+	if s.PrevToken != "" && !s.PrevTokenUntil.IsZero() && now.Before(s.PrevTokenUntil) {
+		out = append(out, s.PrevToken)
+	}
+	return out
 }
 
 // SourceByToken resolves a publish secret to its source. This is the lookup an
@@ -431,6 +474,25 @@ func (d *DB) MigrateSources() error {
 		}
 		if _, err := d.sql.Exec(c.ddl); err != nil {
 			return fmt.Errorf("add %s.source_id: %w", c.table, err)
+		}
+	}
+
+	// The rotation grace columns, for a database whose sources table predates
+	// them. Plain columns with literal defaults, so unlike source_id they carry
+	// a NOT NULL that ALTER TABLE accepts.
+	for _, c := range []struct{ name, ddl string }{
+		{"prev_token", `ALTER TABLE sources ADD COLUMN prev_token TEXT NOT NULL DEFAULT ''`},
+		{"prev_token_until", `ALTER TABLE sources ADD COLUMN prev_token_until INTEGER NOT NULL DEFAULT 0`},
+	} {
+		has, err := columnExists(d.sql, "sources", c.name)
+		if err != nil {
+			return fmt.Errorf("inspect sources columns: %w", err)
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec(c.ddl); err != nil {
+			return fmt.Errorf("add sources.%s: %w", c.name, err)
 		}
 	}
 
