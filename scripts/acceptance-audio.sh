@@ -24,6 +24,7 @@ BIN="$ROOT/polyemesis"
 # What the driver configured. Kept in step with acceptance_audio_driver.go.
 TARGET_LUFS=-14
 DELAY_MS=400
+NEG_DELAY_MS=300
 
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
@@ -110,15 +111,17 @@ avoffset() {
              | grep -o "silence_start: *[0-9.]*" | awk '{print $2}')
   [ -z "$blacks" ] || [ -z "$silences" ] && { echo ""; return; }
 
-  # The first video edge past the settling window, then the first audio edge at
-  # or after it. "At or after", not "nearest", because a delay only ever moves
-  # audio LATER and the previous cycle's edge is 8s away — far outside anything
-  # this test would call a match.
+  # The first video edge past the settling window, then the first audio edge
+  # within a second of it either way. Either way, because the offset is signed:
+  # a negative delay holds the VIDEO back, so the audio edge legitimately lands
+  # BEFORE the video one. A second is wide enough for any delay this product
+  # allows to be visible and far short of the 8s to the neighbouring cycle, so
+  # it can never match the wrong edge.
   local vb
   vb=$(echo "$blacks" | awk -v s="$EDGE_SKIP" '$1 > s {print; exit}')
   [ -z "$vb" ] && { echo ""; return; }
   local ab
-  ab=$(echo "$silences" | awk -v v="$vb" '$1 >= v - 0.1 {print; exit}')
+  ab=$(echo "$silences" | awk -v v="$vb" '$1 >= v - 1.0 && $1 <= v + 1.0 {print; exit}')
   [ -z "$ab" ] && { echo ""; return; }
   awk -v a="$ab" -v v="$vb" 'BEGIN{printf "%.3f", a-v}'
 }
@@ -154,7 +157,7 @@ else
 fi
 
 # --------------------------------------------------------------- 4. delay
-step "4. A/V delay: does a ${DELAY_MS}ms audio delay move the audio ${DELAY_MS}ms?"
+step "4. A/V delay: does a delay move the audio, in both directions?"
 REF=$(avoffset "$REC/delay-ref.mkv")
 DLY=$(avoffset "$REC/delayed.mkv")
 if [ -z "$REF" ] || [ -z "$DLY" ]; then
@@ -177,6 +180,24 @@ else
     ok "audio moved ${MEAS}ms against picture (asked for ${DELAY_MS}ms)"
   else
     bad "audio moved ${MEAS}ms against picture, expected ${DELAY_MS}ms"
+  fi
+
+  # The other direction, which is a different mechanism. A negative delay
+  # cannot be an audio filter — nothing can pull sound out of a stream before
+  # it arrived — so it becomes -itsoffset on the destination's VIDEO input. It
+  # leaves the filter string completely unchanged, which means a golden-string
+  # test cannot see it and only a measurement can.
+  NEG=$(avoffset "$REC/neg-delay.mkv")
+  if [ -z "$NEG" ]; then
+    bad "could not locate the A/V transition in the negative-delay capture"
+  else
+    NMEAS=$(awk -v n="$NEG" -v r="$REF" 'BEGIN{printf "%.0f", (n-r)*1000}')
+    nclose=$(awk -v m="$NMEAS" -v w="$NEG_DELAY_MS" 'BEGIN{d=m+w; if(d<0)d=-d; print (d<=60)?"yes":"no"}')
+    if [ "$nclose" = "yes" ]; then
+      ok "audio moved ${NMEAS}ms against picture (asked for -${NEG_DELAY_MS}ms)"
+    else
+      bad "audio moved ${NMEAS}ms against picture, expected -${NEG_DELAY_MS}ms"
+    fi
   fi
 fi
 

@@ -1339,15 +1339,15 @@ func TestDestinationArgsNegativeDelayHoldsTheVideoBack(t *testing.T) {
 		name  string
 		kind  DestKind
 		delay int
-		want  string // "" => no -itsoffset at all
+		want  string // "" => no video bitstream filter at all
 	}{
 		{"no delay leaves the command exactly as it was", DestRTMP, 0, ""},
 		{"a negative delay cannot arrive here as a negative number", DestRTMP, -40, ""},
-		{"120 ms", DestRTMP, 120, "0.120"},
-		{"1 ms still renders in seconds", DestRTMP, 1, "0.001"},
-		{"a whole second keeps three decimals", DestRTMP, 1000, "1.000"},
-		{"srt destinations get it too", DestSRT, 250, "0.250"},
-		{"file destinations get it too", DestFile, 250, "0.250"},
+		{"120 ms", DestRTMP, 120, "setts=pts=PTS+0.120/TB:dts=DTS+0.120/TB"},
+		{"1 ms still renders in seconds", DestRTMP, 1, "setts=pts=PTS+0.001/TB:dts=DTS+0.001/TB"},
+		{"a whole second keeps three decimals", DestRTMP, 1000, "setts=pts=PTS+1.000/TB:dts=DTS+1.000/TB"},
+		{"srt destinations get it too", DestSRT, 250, "setts=pts=PTS+0.250/TB:dts=DTS+0.250/TB"},
+		{"file destinations get it too", DestFile, 250, "setts=pts=PTS+0.250/TB:dts=DTS+0.250/TB"},
 		{"audio-only has no picture to hold back", DestAudio, 250, ""},
 	}
 	for _, tc := range tests {
@@ -1361,28 +1361,33 @@ func TestDestinationArgsNegativeDelayHoldsTheVideoBack(t *testing.T) {
 				FilterComplex: "[0:a:0]aresample=48000:async=1:first_pts=0[aout]",
 				VideoDelayMS:  tc.delay,
 			})
-			got, ok := argsAfter(args, "-itsoffset")
+			got, ok := argsAfter(args, "-bsf:v")
 			if tc.want == "" {
 				if ok {
-					t.Fatalf("-itsoffset = %q, want it absent: %s", got, join(args))
+					t.Fatalf("-bsf:v = %q, want it absent: %s", got, join(args))
 				}
 				return
 			}
 			if !ok {
-				t.Fatalf("-itsoffset missing: %s", join(args))
+				t.Fatalf("-bsf:v missing: %s", join(args))
 			}
 			if got != tc.want {
-				t.Errorf("-itsoffset = %q, want %q (seconds)", got, tc.want)
+				t.Errorf("-bsf:v = %q, want %q", got, tc.want)
 			}
-			// It is an INPUT option. After -i it would bind to the output and
-			// silently do nothing.
-			if slices.Index(args, "-itsoffset") > slices.Index(args, "-i") {
-				t.Errorf("-itsoffset must precede -i: %v", args)
+			// It is an OUTPUT option on the copied video stream. Before -i it
+			// would be read as an input option and rejected.
+			if slices.Index(args, "-bsf:v") < slices.Index(args, "-i") {
+				t.Errorf("-bsf:v must follow -i: %v", args)
 			}
-			// The other half of the mechanism: the offset is only a RELATIVE
-			// delay because video is copied while the graph pins audio to zero.
+			// pts and dts must be set separately. A single ts= writes both from
+			// one expression, which collapses them into each other and delivers
+			// the wrong offset on any stream carrying B-frames.
+			if !strings.Contains(got, "pts=") || !strings.Contains(got, "dts=") {
+				t.Errorf("-bsf:v = %q must set pts and dts separately", got)
+			}
+			// The delay is free only because video is never re-encoded.
 			if v, _ := argsAfter(args, "-c:v"); v != "copy" {
-				t.Errorf("-c:v = %q; the measured offset only holds under copy", v)
+				t.Errorf("-c:v = %q; the shift is a bitstream filter and needs copy", v)
 			}
 		})
 	}
@@ -1404,24 +1409,25 @@ func TestDestinationArgsZeroVideoDelayIsByteIdentical(t *testing.T) {
 	}
 }
 
-// Expert input args are spliced immediately before -i, so the delay has to
-// survive being pushed further from it.
+// Expert arguments are spliced around the generated ones, so the delay has to
+// survive sharing the command with them.
 func TestDestinationArgsVideoDelaySurvivesTheExpertSplice(t *testing.T) {
 	args := DestinationArgs(DestSpec{
 		Kind: DestRTMP, Target: "rtmp://a.example/live/key",
 		RelayURL: "udp://127.0.0.1:20022", FilterComplex: "[0:a:0]anull[aout]",
-		VideoDelayMS:   200,
-		ExtraInputArgs: []string{"-analyzeduration", "10M"},
+		VideoDelayMS:    200,
+		ExtraInputArgs:  []string{"-analyzeduration", "10M"},
+		ExtraOutputArgs: []string{"-muxdelay", "0"},
 	})
-	off := slices.Index(args, "-itsoffset")
+	off := slices.Index(args, "-bsf:v")
 	iAt := slices.Index(args, "-i")
-	if off < 0 || off > iAt {
-		t.Fatalf("-itsoffset lost or misplaced: %v", args)
+	if off < 0 || off < iAt {
+		t.Fatalf("-bsf:v lost or misplaced: %v", args)
 	}
 	if args[iAt-2] != "-analyzeduration" {
 		t.Errorf("expert input args are no longer immediately before -i: %v", args)
 	}
-	if args[off+1] != "0.200" {
-		t.Errorf("-itsoffset = %q, want 0.200", args[off+1])
+	if args[off+1] != "setts=pts=PTS+0.200/TB:dts=DTS+0.200/TB" {
+		t.Errorf("-bsf:v = %q, want the 0.200 setts expression", args[off+1])
 	}
 }
