@@ -113,6 +113,10 @@ type Rendition struct {
 	// It only takes effect when BOTH Width and Height are set: with one axis
 	// free there is no mismatch to resolve.
 	AspectMode string `json:"aspectMode,omitempty"`
+	// Deinterlace strips field combing before scaling. '' (off), 'auto' or
+	// 'all'. Empty is off, so every stored rendition keeps producing exactly
+	// the frame it always did.
+	Deinterlace string `json:"deinterlace,omitempty"`
 	// PadColor is the bar colour for the padding modes, in any syntax FFmpeg's
 	// colour parser takes. Empty means black.
 	PadColor string `json:"padColor,omitempty"`
@@ -318,7 +322,7 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 	)
 	err := s.Scan(&r.ID, &r.Name, &r.Width, &r.Height, &r.FPS, &r.VideoBitrate,
 		&r.Encoder, &r.Preset, &r.GOPSeconds, &r.AspectMode, &r.PadColor,
-		&r.Note, &source, &created, &updated)
+		&r.Deinterlace, &r.Note, &source, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +336,7 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 }
 
 const renditionColumns = `id, name, width, height, fps, video_bitrate,
-	encoder, preset, gop_seconds, aspect_mode, pad_color, note, source_id, created_at, updated_at`
+	encoder, preset, gop_seconds, aspect_mode, pad_color, deinterlace, note, source_id, created_at, updated_at`
 
 // applyRenditionDefaults fills in the fields an API payload is allowed to
 // omit, so a create request can be as short as {"name","height","videoBitrate"}.
@@ -417,10 +421,10 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO renditions
 		(name, width, height, fps, video_bitrate, encoder, preset, gop_seconds,
-		 aspect_mode, pad_color, note, source_id, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 aspect_mode, pad_color, deinterlace, note, source_id, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
-		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Note, r.SourceID, now, now)
+		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Deinterlace, r.Note, r.SourceID, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -439,10 +443,10 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 	res, err := d.sql.Exec(`UPDATE renditions SET
 		name=?, width=?, height=?, fps=?, video_bitrate=?,
 		encoder=?, preset=?, gop_seconds=?, aspect_mode=?, pad_color=?,
-		note=?, source_id=?, updated_at=? WHERE id=?`,
+		deinterlace=?, note=?, source_id=?, updated_at=? WHERE id=?`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
 		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor,
-		r.Note, r.SourceID, time.Now().Unix(), r.ID)
+		r.Deinterlace, r.Note, r.SourceID, time.Now().Unix(), r.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -535,6 +539,7 @@ func (d *DB) MigrateRenditionAspect() error {
 	for _, col := range []struct{ name, ddl string }{
 		{"aspect_mode", `ALTER TABLE renditions ADD COLUMN aspect_mode TEXT NOT NULL DEFAULT ''`},
 		{"pad_color", `ALTER TABLE renditions ADD COLUMN pad_color TEXT NOT NULL DEFAULT ''`},
+		{"deinterlace", `ALTER TABLE renditions ADD COLUMN deinterlace TEXT NOT NULL DEFAULT ''`},
 	} {
 		has, err := columnExists(d.sql, "renditions", col.name)
 		if err != nil {

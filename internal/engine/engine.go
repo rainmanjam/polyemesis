@@ -63,6 +63,9 @@ const (
 	// previewStartDebounce keeps a burst of requests against a down encoder,
 	// or a start that keeps failing, from turning into a burst of spawns.
 	previewStartDebounce = 2 * time.Second
+	// gpuDetectTimeout bounds the DRM enumeration. A wedged driver must not
+	// hold up starting an encode.
+	gpuDetectTimeout = 5 * time.Second
 )
 
 // Engine owns the whole streaming pipeline.
@@ -99,6 +102,11 @@ type Engine struct {
 	sink    atomic.Pointer[supervisor.FileSink]
 	sinkMu  sync.Mutex
 	sinkCfg db.LoggingSettings
+
+	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
+	// time a VAAPI rendition actually starts.
+	vaapiOnce sync.Once
+	vaapiDev  string
 
 	mu       sync.RWMutex
 	ingest   *supervisor.Process
@@ -1783,8 +1791,15 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string 
 // copies every audio track through with -c:a copy, which is what leaves the
 // per-destination routing graphs downstream with the full multitrack ingest to
 // work from.
-func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64) ffmpeg.RenditionSpec {
+func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDevice string) ffmpeg.RenditionSpec {
 	return ffmpeg.RenditionSpec{
+		Deinterlace: ffmpeg.DeinterlaceMode(r.Deinterlace),
+		// Only meaningful for the VAAPI encoders, and empty everywhere else.
+		// Until this was threaded through, every VAAPI rendition fell back to
+		// FFmpeg's built-in default node, so a machine with a second GPU could
+		// not be told to use it -- the detection had always chosen a device,
+		// and nothing ever asked for the answer.
+		VAAPIDevice: vaapiDevice,
 		InRelayURL:  in,
 		OutRelayURL: out,
 		Width:       r.Width,
@@ -1905,7 +1920,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 
 	subName := fmt.Sprintf("rendition:%d", row.ID)
 	in := upstream.Subscribe(subName, port)
-	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS))
+	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row)))
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: subName, Kind: "rendition", Bin: e.tools.FFmpeg, Args: args,
@@ -4593,4 +4608,35 @@ func clearDir(dir string) {
 			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
+}
+
+// vaapiDevice resolves the render node a VAAPI rendition should use.
+//
+// Detection is deferred and done once: enumerating DRM nodes touches sysfs and
+// opens devices, which is not work to repeat on every rendition restart, and is
+// pointless on the overwhelming majority of installs that never run a VAAPI
+// encoder at all. Anything other than a VAAPI encoder returns empty
+// immediately, without detecting.
+//
+// An empty result is the safe answer, not a failure: FFmpeg then uses its own
+// default node, which is exactly the behaviour every install had before this
+// existed. Being wrong in the restrictive direction here -- refusing to start a
+// rendition because a device string could not be resolved -- would be worse
+// than the software fallback it is meant to avoid.
+func (e *Engine) vaapiDevice(r *db.Rendition) string {
+	if !strings.HasSuffix(string(r.Encoder), "_vaapi") {
+		return ""
+	}
+	e.vaapiOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), gpuDetectTimeout)
+		defer cancel()
+		info := ffmpeg.DetectGPUs(ctx)
+		e.vaapiDev = info.VAAPIDevice
+		if e.vaapiDev == "" {
+			e.log.Info("no VAAPI render node chosen; FFmpeg will use its default")
+		} else {
+			e.log.Info("VAAPI render node selected", "device", e.vaapiDev)
+		}
+	})
+	return e.vaapiDev
 }

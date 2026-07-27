@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS renditions (
     preset        TEXT    NOT NULL DEFAULT 'veryfast',  -- encoder-specific quality knob
     gop_seconds   REAL    NOT NULL DEFAULT 2,
     note          TEXT    NOT NULL DEFAULT '',   -- what this tier is for
+    -- Deinterlace mode: '' (off), 'auto' (only frames flagged interlaced) or
+    -- 'all'. Off by default because progressive sources are the overwhelming
+    -- majority and deinterlacing one only softens it.
+    deinterlace   TEXT    NOT NULL DEFAULT '',
     -- A rendition re-encodes exactly one source, so it belongs to one.
     -- Nullable for the same ALTER TABLE reason as destinations.source_id.
     source_id     INTEGER,
