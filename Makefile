@@ -11,7 +11,7 @@ VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 LDFLAGS     := -s -w -X main.version=$(VERSION)
 
 # Cross-compilation targets for `make release`.
-PLATFORMS   := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+PLATFORMS   := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 .DEFAULT_GOAL := build
 
@@ -97,6 +97,7 @@ release: ui ## Cross-compile release binaries into dist/
 	@for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; \
 	  out=dist/$(BINARY)-$(VERSION)-$$os-$$arch; \
+	  [ "$$os" = windows ] && out=$$out.exe; \
 	  echo "  $$os/$$arch"; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 	    go build -trimpath -ldflags '$(LDFLAGS)' -o $$out $(CMD) || exit 1; \
