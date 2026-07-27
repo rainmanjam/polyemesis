@@ -19,7 +19,17 @@ const (
 	DestRTMP DestKind = "rtmp" // rtmp:// or rtmps://
 	DestSRT  DestKind = "srt"  // srt://
 	DestFile DestKind = "file" // local recording of this specific mix
+	// DestAudio carries no video at all — an Icecast mount for a radio or
+	// podcast feed, or an audio file. The routing profile is the whole output,
+	// which makes this the one kind where the per-destination mix is not a
+	// feature of the stream but the entire stream.
+	DestAudio DestKind = "audio" // icecast://user:pass@host:port/mount, or a filename
 )
+
+// IcecastScheme is the URL prefix an audio-only destination uses for a live
+// mount. Credentials and mount point ride in the URL, the way FFmpeg's icecast
+// protocol expects them, so no new column is needed to hold them.
+const IcecastScheme = "icecast://"
 
 // Platform identifies an integration, for branding and for stream-key fetch.
 type Platform string
@@ -103,7 +113,7 @@ func (d Destination) Validate() error {
 		add("name is required")
 	}
 	switch d.Kind {
-	case DestRTMP, DestSRT, DestFile:
+	case DestRTMP, DestSRT, DestFile, DestAudio:
 	default:
 		add("unknown destination kind %q", d.Kind)
 	}
@@ -143,6 +153,24 @@ func (d Destination) Validate() error {
 		// reaches the API.
 		if strings.Contains(target, "..") || strings.HasPrefix(target, "/") {
 			add("file destination must be a relative name inside the recordings directory")
+		}
+	case DestAudio:
+		// Two shapes, one kind: a live Icecast mount, or an audio file. The
+		// file form gets the same confinement DestFile gets, because "audio
+		// only" changes what is written, never where it may be written.
+		switch {
+		case target == "":
+			add("an Icecast URL or an output filename is required")
+		case strings.Contains(target, "://"):
+			if u, err := url.Parse(target); err != nil {
+				add("malformed audio destination URL: %v", err)
+			} else if u.Scheme != strings.TrimSuffix(IcecastScheme, "://") {
+				add("audio destination URL must start with %s (got %q)", IcecastScheme, u.Scheme)
+			} else if strings.Trim(u.Path, "/") == "" {
+				add("Icecast destination needs a mount point, e.g. %sHOST:8000/live.mp3", IcecastScheme)
+			}
+		case strings.Contains(target, ".."), strings.HasPrefix(target, "/"):
+			add("audio file destination must be a relative name inside the recordings directory")
 		}
 	}
 

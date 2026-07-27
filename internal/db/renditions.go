@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // VideoEncoder is the FFmpeg encoder a rendition drives. Software and the
@@ -103,6 +105,17 @@ type Rendition struct {
 	// GOPSeconds is the keyframe interval in seconds rather than frames, so it
 	// stays correct when FPS changes. Live platforms want 1-4s.
 	GOPSeconds float64 `json:"gopSeconds"`
+	// AspectMode decides what happens when the target shape does not match the
+	// source's — the vertical-plus-horizontal case. Empty is the historical
+	// behaviour, a plain scale that stretches, so every stored rendition keeps
+	// producing the frame it always did.
+	//
+	// It only takes effect when BOTH Width and Height are set: with one axis
+	// free there is no mismatch to resolve.
+	AspectMode string `json:"aspectMode,omitempty"`
+	// PadColor is the bar colour for the padding modes, in any syntax FFmpeg's
+	// colour parser takes. Empty means black.
+	PadColor string `json:"padColor,omitempty"`
 	// Note is the "what is this tier for" line. Preset-derived renditions
 	// arrive with one already filled in; the user can rewrite it.
 	Note      string    `json:"note"`
@@ -194,6 +207,34 @@ func (r Rendition) Validate() error {
 		add("gop %.4gs out of range (%g-%g seconds)", r.GOPSeconds, MinRenditionGOP, MaxRenditionGOP)
 	}
 
+	// An unknown mode is refused here rather than at start time, because the
+	// filter builder degrades it to a plain scale — which is a silently
+	// different picture, and the operator would have no way to tell that the
+	// mode they chose is not the one running.
+	if r.AspectMode != "" {
+		known := false
+		for _, m := range ffmpeg.AspectModes {
+			if string(m) == r.AspectMode {
+				known = true
+				break
+			}
+		}
+		if !known {
+			add("unknown aspect mode %q", r.AspectMode)
+		}
+	}
+	// Aspect conversion resolves a mismatch between two known shapes. With one
+	// axis free the scale already preserves aspect and the mode would do
+	// nothing, so saying so beats saving a control that is quietly inert.
+	if r.AspectMode != "" && (r.Width == 0 || r.Height == 0) {
+		add("aspect mode %q needs both a width and a height; with one axis free there is no shape to convert", r.AspectMode)
+	}
+	if r.PadColor != "" && !presetTokenOK(r.PadColor) {
+		// It lands on a filter graph, where a comma or a colon would end the
+		// argument and start something else.
+		add("pad colour %q must be a single word of letters, digits, '-', '_' or '.' (e.g. black, 0x101010)", r.PadColor)
+	}
+
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid rendition: %s", strings.Join(probs, "; "))
 	}
@@ -270,7 +311,8 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 		updated int64
 	)
 	err := s.Scan(&r.ID, &r.Name, &r.Width, &r.Height, &r.FPS, &r.VideoBitrate,
-		&r.Encoder, &r.Preset, &r.GOPSeconds, &r.Note, &created, &updated)
+		&r.Encoder, &r.Preset, &r.GOPSeconds, &r.AspectMode, &r.PadColor,
+		&r.Note, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +322,7 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 }
 
 const renditionColumns = `id, name, width, height, fps, video_bitrate,
-	encoder, preset, gop_seconds, note, created_at, updated_at`
+	encoder, preset, gop_seconds, aspect_mode, pad_color, note, created_at, updated_at`
 
 // applyRenditionDefaults fills in the fields an API payload is allowed to
 // omit, so a create request can be as short as {"name","height","videoBitrate"}.
@@ -333,10 +375,11 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO renditions
-		(name, width, height, fps, video_bitrate, encoder, preset, gop_seconds, note, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		(name, width, height, fps, video_bitrate, encoder, preset, gop_seconds,
+		 aspect_mode, pad_color, note, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
-		r.Encoder, r.Preset, r.GOPSeconds, r.Note, now, now)
+		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Note, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -354,9 +397,11 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 	}
 	res, err := d.sql.Exec(`UPDATE renditions SET
 		name=?, width=?, height=?, fps=?, video_bitrate=?,
-		encoder=?, preset=?, gop_seconds=?, note=?, updated_at=? WHERE id=?`,
+		encoder=?, preset=?, gop_seconds=?, aspect_mode=?, pad_color=?,
+		note=?, updated_at=? WHERE id=?`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
-		r.Encoder, r.Preset, r.GOPSeconds, r.Note, time.Now().Unix(), r.ID)
+		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor,
+		r.Note, time.Now().Unix(), r.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -435,6 +480,31 @@ func (d *DB) MigrateRenditions() error {
 	if _, err := d.sql.Exec(`CREATE INDEX IF NOT EXISTS idx_destinations_rendition
 		ON destinations(rendition_id)`); err != nil {
 		return fmt.Errorf("index destinations.rendition_id: %w", err)
+	}
+	return nil
+}
+
+// MigrateRenditionAspect adds the aspect-conversion columns to a database
+// created before dual-format renditions existed.
+//
+// Both default to the empty string, which is the historical plain scale, so an
+// upgraded install re-encodes exactly the frame it did yesterday until somebody
+// picks a mode.
+func (d *DB) MigrateRenditionAspect() error {
+	for _, col := range []struct{ name, ddl string }{
+		{"aspect_mode", `ALTER TABLE renditions ADD COLUMN aspect_mode TEXT NOT NULL DEFAULT ''`},
+		{"pad_color", `ALTER TABLE renditions ADD COLUMN pad_color TEXT NOT NULL DEFAULT ''`},
+	} {
+		has, err := columnExists(d.sql, "renditions", col.name)
+		if err != nil {
+			return fmt.Errorf("inspect renditions columns: %w", err)
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec(col.ddl); err != nil {
+			return fmt.Errorf("add renditions.%s: %w", col.name, err)
+		}
 	}
 	return nil
 }
