@@ -21,9 +21,22 @@ func (t *Twitch) Scopes() []string {
 	// the failure is a 401 the operator cannot fix by reconnecting — the scope
 	// has to be in the consent they granted.
 	//
+	// chat:read and chat:edit are what Twitch IRC authenticates with, for the
+	// unified chat pane. They are requested here rather than when chat is first
+	// opened because granting a scope does not upgrade a token that already
+	// exists: an operator who connected before this line landed has to
+	// disconnect and reconnect either way, and finding that out at the start of
+	// a broadcast is the worst possible moment.
+	//
 	// user:read:email is still not requested: we do not need it, and asking
-	// would make the consent screen scarier than the feature warrants.
-	return []string{"channel:read:stream_key", "channel:manage:broadcast"}
+	// would make the consent screen scarier than the feature warrants. Nor is
+	// any moderation scope — nothing in polyemesis bans or times out a viewer.
+	return []string{
+		"channel:read:stream_key",
+		"channel:manage:broadcast",
+		"chat:read",
+		"chat:edit",
+	}
 }
 
 // PKCE is off, and the challenge/verifier arguments below are deliberately
