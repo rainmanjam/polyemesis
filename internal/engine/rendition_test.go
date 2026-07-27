@@ -291,7 +291,7 @@ func TestDestSpec(t *testing.T) {
 // the builder.
 func TestRenditionSpecOfIsVideoOnly(t *testing.T) {
 	r := testRendition(1, "1080p60")
-	spec := renditionSpecOf(r, "udp://127.0.0.1:21000", "udp://127.0.0.1:21001", 59.94)
+	spec := renditionSpecOf(r, "udp://127.0.0.1:21000", "udp://127.0.0.1:21001", 59.94, "")
 
 	if spec.Width != 1920 || spec.Height != 1080 {
 		t.Errorf("size = %dx%d, want 1920x1080", spec.Width, spec.Height)
@@ -338,5 +338,43 @@ func TestProbedFPS(t *testing.T) {
 				t.Errorf("probedFPS() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestVAAPIRenditionsCarryTheChosenRenderNode(t *testing.T) {
+	// Until this was wired, GPUInfo.VAAPIDevice was computed at detection and
+	// then never asked for, so every VAAPI rendition fell back to FFmpeg's
+	// default node and a machine with a second GPU could not be pointed at it.
+	spec := renditionSpecOf(
+		&db.Rendition{Name: "vaapi", Width: 1280, Height: 720, VideoBitrate: 3000,
+			Encoder: db.EncoderVAAPIH264},
+		"udp://127.0.0.1:1", "udp://127.0.0.1:2", 30, "/dev/dri/renderD129")
+	if spec.VAAPIDevice != "/dev/dri/renderD129" {
+		t.Errorf("VAAPIDevice = %q, want the node that was chosen", spec.VAAPIDevice)
+	}
+	args := ffmpeg.RenditionArgs(spec)
+	if got := strings.Join(args, " "); !strings.Contains(got, "renderD129") {
+		t.Errorf("the render node never reached the command line: %s", got)
+	}
+}
+
+func TestNonVAAPIRenditionsCarryNoRenderNode(t *testing.T) {
+	// Software and every other hardware family must be untouched by this.
+	spec := renditionSpecOf(
+		&db.Rendition{Name: "x264", Width: 1280, Height: 720, VideoBitrate: 3000,
+			Encoder: db.EncoderX264},
+		"udp://127.0.0.1:1", "udp://127.0.0.1:2", 30, "")
+	if spec.VAAPIDevice != "" {
+		t.Errorf("VAAPIDevice = %q on a software rendition, want empty", spec.VAAPIDevice)
+	}
+}
+
+func TestDeinterlaceModeReachesTheSpec(t *testing.T) {
+	spec := renditionSpecOf(
+		&db.Rendition{Name: "sdi", Width: 1280, Height: 720, VideoBitrate: 3000,
+			Encoder: db.EncoderX264, Deinterlace: "auto"},
+		"udp://127.0.0.1:1", "udp://127.0.0.1:2", 30, "")
+	if spec.Deinterlace != ffmpeg.DeinterlaceAuto {
+		t.Errorf("Deinterlace = %q, want auto", spec.Deinterlace)
 	}
 }

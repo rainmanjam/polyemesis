@@ -1008,3 +1008,110 @@ func TestRenditionArgsSoftwareEncodeHasNoHardwareFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestDeinterlaceIsOffByDefault(t *testing.T) {
+	// Progressive sources are the overwhelming majority, and deinterlacing one
+	// only softens it. An upgrade must change nothing.
+	args := RenditionArgs(RenditionSpec{
+		InRelayURL: "udp://127.0.0.1:1", OutRelayURL: "udp://127.0.0.1:2",
+		Width: 1280, Height: 720, VideoKbps: 3000, Encoder: "libx264",
+	})
+	if got := strings.Join(args, " "); strings.Contains(got, "bwdif") {
+		t.Errorf("a rendition with no deinterlace mode emitted one: %s", got)
+	}
+}
+
+func TestDeinterlaceModesEmitTheRightFilter(t *testing.T) {
+	cases := map[DeinterlaceMode]string{
+		DeinterlaceAuto: "deint=interlaced",
+		DeinterlaceAll:  "deint=all",
+	}
+	for mode, want := range cases {
+		args := RenditionArgs(RenditionSpec{
+			InRelayURL: "udp://127.0.0.1:1", OutRelayURL: "udp://127.0.0.1:2",
+			Width: 1280, Height: 720, VideoKbps: 3000, Encoder: "libx264",
+			Deinterlace: mode,
+		})
+		got := strings.Join(args, " ")
+		if !strings.Contains(got, "bwdif") || !strings.Contains(got, want) {
+			t.Errorf("mode %q produced %s, want a bwdif carrying %s", mode, got, want)
+		}
+		// send_frame, never send_field: one progressive frame per input frame.
+		// send_field doubles the frame rate, which silently doubles the bitrate
+		// a platform receives and invalidates the GOP arithmetic computed from
+		// the source rate.
+		if !strings.Contains(got, "mode=send_frame") {
+			t.Errorf("mode %q did not pin send_frame: %s", mode, got)
+		}
+	}
+}
+
+func TestDeinterlaceRunsBeforeScaling(t *testing.T) {
+	// Load-bearing ordering. Scaling interlaced content blends the two fields
+	// together, and once that has happened the combing is baked into the pixels
+	// and no later filter can remove it -- the rendition ends up looking worse
+	// than the source at every size.
+	args := RenditionArgs(RenditionSpec{
+		InRelayURL: "udp://127.0.0.1:1", OutRelayURL: "udp://127.0.0.1:2",
+		Width: 1280, Height: 720, VideoKbps: 3000, Encoder: "libx264",
+		Deinterlace: DeinterlaceAll,
+	})
+	vf := ""
+	for i, a := range args {
+		if a == "-vf" && i+1 < len(args) {
+			vf = args[i+1]
+		}
+	}
+	if vf == "" {
+		t.Fatal("no -vf emitted")
+	}
+	di, sc := strings.Index(vf, "bwdif"), strings.Index(vf, "scale")
+	if di < 0 || sc < 0 {
+		t.Fatalf("expected both a deinterlace and a scale in %q", vf)
+	}
+	if di > sc {
+		t.Errorf("deinterlace runs AFTER the scale in %q: the combing is already "+
+			"blended into the pixels by then and cannot be removed", vf)
+	}
+}
+
+func TestDeinterlaceComposesWithAspectConversion(t *testing.T) {
+	// The horizontal-to-vertical case on an interlaced source: both stages have
+	// to appear, and the deinterlace still has to come first.
+	args := RenditionArgs(RenditionSpec{
+		InRelayURL: "udp://127.0.0.1:1", OutRelayURL: "udp://127.0.0.1:2",
+		Width: 1080, Height: 1920, VideoKbps: 6000, Encoder: "libx264",
+		Aspect: AspectCrop, Deinterlace: DeinterlaceAuto,
+	})
+	vf := ""
+	for i, a := range args {
+		if a == "-vf" && i+1 < len(args) {
+			vf = args[i+1]
+		}
+	}
+	di, crop := strings.Index(vf, "bwdif"), strings.Index(vf, "crop")
+	if di < 0 || crop < 0 {
+		t.Fatalf("expected both bwdif and crop in %q", vf)
+	}
+	if di > crop {
+		t.Errorf("deinterlace runs after the crop in %q", vf)
+	}
+}
+
+func TestAnUnknownDeinterlaceModeDegradesToOff(t *testing.T) {
+	// A rendition row written by a newer build, or hand-edited, must still
+	// encode. A stream that does not start is a worse answer than a stream that
+	// is not deinterlaced -- the same rule the aspect modes follow.
+	args := RenditionArgs(RenditionSpec{
+		InRelayURL: "udp://127.0.0.1:1", OutRelayURL: "udp://127.0.0.1:2",
+		Width: 1280, Height: 720, VideoKbps: 3000, Encoder: "libx264",
+		Deinterlace: DeinterlaceMode("from-the-future"),
+	})
+	got := strings.Join(args, " ")
+	if strings.Contains(got, "bwdif") {
+		t.Errorf("an unknown mode emitted a filter: %s", got)
+	}
+	if !strings.Contains(got, "scale=1280:720") {
+		t.Errorf("an unknown mode broke the rest of the chain: %s", got)
+	}
+}

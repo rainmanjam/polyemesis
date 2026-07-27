@@ -115,6 +115,11 @@ type RenditionSpec struct {
 	// binary does not recognise, the rendition falls back to the plain scale
 	// rather than refusing to start.
 	Aspect AspectMode
+	// Deinterlace removes field combing before anything else in the chain.
+	// Empty is off, which is right for the progressive sources almost everyone
+	// has; it exists for SDI, capture cards and legacy broadcast feeds.
+	Deinterlace DeinterlaceMode
+
 	// PadColor is the AspectPad fill; empty means black. Ignored by the other
 	// modes.
 	PadColor string
@@ -294,9 +299,66 @@ func presetArgs(prof encoderProfile, want string) []string {
 	return []string{prof.presetFlag, want}
 }
 
+// DeinterlaceMode selects whether a rendition deinterlaces its input.
+type DeinterlaceMode string
+
+const (
+	// DeinterlaceOff is the default and does nothing. Progressive sources are
+	// the overwhelming majority, and deinterlacing one softens it for no gain.
+	DeinterlaceOff DeinterlaceMode = ""
+	// DeinterlaceAuto touches only frames the source flagged as interlaced.
+	// This is the right choice for anything mixed -- a camera that switches
+	// modes, a playout chain splicing SD and HD -- because progressive frames
+	// pass through untouched.
+	DeinterlaceAuto DeinterlaceMode = "auto"
+	// DeinterlaceAll deinterlaces unconditionally, for sources that are
+	// interlaced but do not say so. Plenty of SDI bridges and capture cards
+	// flag everything progressive regardless of what they were fed, and on
+	// those DeinterlaceAuto is a no-op that looks like a broken setting.
+	DeinterlaceAll DeinterlaceMode = "all"
+)
+
+// DeinterlaceModes is every mode, in the order to offer them.
+var DeinterlaceModes = []DeinterlaceMode{DeinterlaceOff, DeinterlaceAuto, DeinterlaceAll}
+
+// deinterlaceFilter renders the deinterlace stage, or "" when off.
+//
+// bwdif rather than yadif: it is the same idea done better (Bob Weaver
+// motion-adaptive interpolation), costs a few percent more CPU, and has been in
+// FFmpeg since 3.3, so there is no build this project supports that has yadif
+// and not bwdif.
+//
+// mode=send_frame emits one progressive frame per input frame rather than one
+// per FIELD. send_field would double the frame rate, which silently doubles the
+// bitrate a platform receives and breaks the GOP arithmetic that was computed
+// from the source rate.
+func deinterlaceFilter(mode DeinterlaceMode) string {
+	switch mode {
+	case DeinterlaceAuto:
+		return "bwdif=mode=send_frame:deint=interlaced"
+	case DeinterlaceAll:
+		return "bwdif=mode=send_frame:deint=all"
+	default:
+		// An unrecognised mode degrades to off, for the same reason an
+		// unrecognised aspect mode degrades to a plain scale: a rendition row
+		// written by a newer build must still encode, and a stream that does
+		// not start is a worse answer than a stream that is not deinterlaced.
+		return ""
+	}
+}
+
 // videoFilter renders the scale chain, or "" when there is nothing to do.
 func videoFilter(s RenditionSpec, prof encoderProfile) string {
 	var chain []string
+	// Deinterlace FIRST, before any scaling.
+	//
+	// This ordering is load-bearing rather than tidy. Scaling interlaced
+	// content blends the two fields together, and once that has happened the
+	// combing is baked into the pixels and no later filter can remove it. The
+	// result is a rendition that looks worse than the source at every size.
+	if di := deinterlaceFilter(s.Deinterlace); di != "" {
+		chain = append(chain, di)
+	}
 	if fit := aspectFilter(s); fit != "" {
 		// The aspect chain already ends at exactly Width x Height, so the plain
 		// scale would be a second, redundant resize.
