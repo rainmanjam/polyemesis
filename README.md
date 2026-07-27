@@ -5,7 +5,10 @@ routing**.
 
 You stream once. polyemesis fans it out to as many destinations as you like —
 and each destination gets its *own* audio mix, chosen from the audio tracks your
-encoder sent. Video is copied through untouched and never re-encoded.
+encoder sent. Video is copied through untouched by default. When a platform will
+not accept your source video, a shared [**rendition**](#video-renditions)
+re-encodes the video *once* for every destination that needs it — and leaves the
+audio alone.
 
 ```
                                     ┌── YouTube    tracks 1+2   (no music)
@@ -30,8 +33,13 @@ hot. One upload, one encode, different audio per platform.
 
 - **Per-destination audio routing** — the differentiator. Checkbox-per-track
   simple mode, or a full channel-to-output mix matrix with a gain per cell.
-- **Video is never re-encoded.** `-c:v copy` everywhere. Only audio is decoded,
-  mixed and re-encoded to AAC, so CPU cost is nearly independent of resolution.
+- **Video is copied, not re-encoded.** `-c:v copy` on every destination, so CPU
+  cost is nearly independent of resolution. Only audio is decoded, mixed and
+  re-encoded to AAC.
+- **Shared video renditions** for platforms that will not take your source: one
+  encode feeds every destination that selects it, ref-counted so an unused tier
+  costs nothing. A rendition re-encodes **video only** — audio still routes per
+  destination.
 - **SRT multitrack ingest** (up to 6 AAC tracks), with RTMP as a fallback.
 - **Live audio meters** for every channel of every track — how you verify the
   clean track really is clean, *before* going live.
@@ -264,6 +272,141 @@ recorder, and every other destination are untouched.
 
 ---
 
+## Video renditions
+
+### The problem
+
+You ingest 4K60. YouTube will take it. Twitch, Kick and X cap well below 4K, so
+they reject it — or accept it and quietly transcode it into something worse.
+
+Without renditions the only way out is to drop **your whole ingest** to the
+lowest common denominator: YouTube gets 1080p because Kick cannot do 4K. And
+running one polyemesis destination per resolution does not help either, because
+each destination copies video — none of them can change it.
+
+A **rendition** is a named video output profile. Destinations *select* a
+rendition rather than owning one, so three platforms that all want 1080p60 cost
+**one** encode, not three.
+
+```
+relay ─────────────────────────► dest:youtube   -c:v copy + audio graph A
+  │                               (rendition = passthrough, zero cost)
+  └──► rendition "1080p60 6M"     ONE encode
+         (video encoded, ALL audio tracks copied through untouched)
+         └──► rendition's own relay hub
+                ├─► dest:twitch   -c:v copy + audio graph B
+                ├─► dest:kick     -c:v copy + audio graph C
+                └─► dest:x        -c:v copy + audio graph D
+```
+
+### A rendition re-encodes video only
+
+This is the load-bearing rule, and it is worth stating plainly: a rendition
+encodes **video**, and passes **every audio track through with `-c:a copy`**. It
+never mixes, never downmixes, never re-encodes audio. There is no audio setting
+on a rendition and there never will be one.
+
+That is what keeps the differentiator intact on top of shared video. The
+destinations downstream of a rendition still receive the full multitrack stream,
+still compile their own `-filter_complex` from their own routing profile, and
+still do `-c:v copy` — exactly as a passthrough destination does. Audio is
+encoded once, at the destination, and never twice.
+
+Consequently, changing which rendition a destination is on does not change its
+audio, and changing its audio routing does not restart the rendition or disturb
+the other destinations sharing it.
+
+### Passthrough is a rendition
+
+**Passthrough** is the zero-cost default: no process, no encode. The destination
+subscribes straight to the ingest relay and copies the source video, which is
+precisely what every destination has always done.
+
+Every existing destination stays on passthrough with no action from you, and
+behaves exactly as it did before. This feature is strictly additive: if you
+never create a rendition, nothing about your install changes.
+
+### A rendition only runs when something needs it
+
+The encode starts when the **first enabled** destination selects the rendition,
+and stops when the last one releases it. A rendition that nothing enabled points
+at has no process and burns no CPU — creating a tier you are not using yet is
+free, and stopping the last destination on a tier stops its encode too.
+
+- Editing a rendition restarts that encode and exactly the destinations reading
+  it. Nothing else moves.
+- Renaming a rendition, or editing its note, restarts nothing.
+- Deleting a rendition does **not** delete its destinations. They fall back to
+  passthrough and keep running — which means they are suddenly being handed your
+  source video, so the delete tells you how many destinations that just happened
+  to. Check the source still fits what each of those platforms accepts.
+
+Each destination's card on the dashboard shows the rendition it is on directly
+above the audio tracks it receives, so "what video and what audio does this
+platform get" is one glance, not two.
+
+### Presets are starting points, not limits
+
+The rendition editor offers these as editable starting points:
+
+| Preset | Size | Rate | Video bitrate | Encoder |
+|---|---|---|---|---|
+| Source passthrough | source | source | — (no encode) | — |
+| 1080p60 | 1920×1080 | 60 fps | 6000 kbps | `libx264`, `veryfast`, 2 s GOP |
+| 1080p30 | 1920×1080 | 30 fps | 4500 kbps | `libx264`, `veryfast`, 2 s GOP |
+| 720p60 | 1280×720 | 60 fps | 4500 kbps | `libx264`, `veryfast`, 2 s GOP |
+| 720p30 | 1280×720 | 30 fps | 3000 kbps | `libx264`, `veryfast`, 2 s GOP |
+
+> **Starting point — verify current limits with the platform.**
+>
+> These are not authoritative ceilings and are not presented as any platform's
+> policy. Published limits change without notice, and they differ by partner,
+> affiliate and beta status on the same platform for two different accounts.
+> Being confidently wrong about one of these numbers breaks a live stream, so
+> where we were unsure we picked the *lower* value: an under-spec stream is
+> watchable, an over-spec one is rejected at the ingest.
+>
+> Check your own account's current limits on the platform, then edit the
+> rendition. Every field is yours to change.
+
+Keyframe interval is set in **seconds**, not frames, so it stays correct when
+you change the frame rate. Two seconds suits every live platform we know of.
+
+### Hardware encoders
+
+polyemesis offers whichever encoders your FFmpeg build actually registers —
+probed from `ffmpeg -encoders`, not guessed — and greys out the rest with the
+reason, so you cannot select NVENC on a machine with no NVIDIA card and discover
+it only when a stream goes live.
+
+| Family | Encoders | Notes |
+|---|---|---|
+| Software | `libx264`, `libx265` | Always available. Identical rate control everywhere. |
+| NVIDIA | `h264_nvenc`, `hevc_nvenc` | Presets are `p1`–`p7`; `p4` is the honest middle. |
+| Intel Quick Sync | `h264_qsv`, `hevc_qsv` | Needs a working VA-API/QSV runtime, not just the CPU. |
+| Apple | `h264_videotoolbox`, `hevc_videotoolbox` | No preset knob; `-realtime` is the lever. |
+| VA-API (Linux) | `h264_vaapi`, `hevc_vaapi` | Needs a render node, `/dev/dri/renderD128` by default. |
+| AMD | `h264_amf`, `hevc_amf` | Windows and Linux with the AMF runtime installed. |
+
+`libx264` is the default even on a machine with a GPU, because its behaviour is
+the same on every host while the hardware wrappers vary by driver version.
+Hardware is an opt-in you make deliberately.
+
+**Be realistic about software 4K60.** `libx264` at 4K60 is not a workload a
+normal streaming box handles: even at `veryfast` it needs a very high core count
+to hold realtime, and this machine is *already* running your ingest, your
+recorder, the preview and one FFmpeg per destination. If it cannot keep up, the
+encode falls behind realtime and every destination on that rendition suffers.
+If you are ingesting 4K60 and need it re-encoded, use a hardware encoder. If you
+have no hardware encoder, rendition down from 4K rather than at 4K — that is
+what renditions are for.
+
+Note also that most RTMP ingests accept **H.264 only**. The HEVC encoders are
+listed because they are real and occasionally useful (SRT, a file destination,
+an ingest you control), not because a live platform is likely to take one.
+
+---
+
 ## Platform accounts
 
 polyemesis can fetch your stream key automatically so you never copy-paste one.
@@ -470,8 +613,12 @@ relay design and the tradeoffs behind it. In brief:
 - The hub replicates every datagram to each subscriber, so destinations, the
   recorder, the HLS preview and the metering sidecar each read the full stream
   independently and can restart without disturbing the ingest.
-- Each destination is its own supervised FFmpeg process: video copied, audio
-  compiled from its routing profile.
+- A rendition is that same shape one level up: a supervised FFmpeg reading the
+  ingest hub, encoding video only, publishing to a **hub of its own** that its
+  destinations subscribe to instead. Ref-counted by its enabled destinations, so
+  a tier nobody selects has no process.
+- Each destination is its own supervised FFmpeg process: video copied — from the
+  ingest hub, or from its rendition's — audio compiled from its routing profile.
 - Every child runs in its own process group and dies with the parent.
 
 ---
