@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/api"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -194,9 +195,20 @@ func run(h *hooks) error {
 	h.progress("starting the background job queue")
 	pp := startPostProd(ctx, log, cfg, store, eng, tools)
 
+	// The unified chat fan-in. Built unconditionally: a Hub with nothing
+	// attached is the difference between "no platform is connected" and "this
+	// build has no chat", and the operator needs to be told which.
+	hub := chat.New(
+		chat.WithStore(store),
+		chat.WithPublisher(bus),
+		chat.WithLogger(log),
+	)
+	defer hub.Close()
+
 	srv := api.New(api.Options{
 		Log: log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
+		Chat: hub,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.
@@ -206,6 +218,13 @@ func run(h *hooks) error {
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
 	go srv.RefreshLoop(ctx)
+
+	// After the API, because the adapters refresh their tokens through it.
+	// Nothing here fails the start: a platform that will not connect is a line
+	// in the log and a state in the chat pane, not a reason to refuse to stream.
+	if n := srv.StartChat(ctx); n > 0 {
+		log.Info("chat connected", "platforms", n)
+	}
 
 	httpServer := &http.Server{
 		Addr:      cfg.Addr,

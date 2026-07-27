@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -54,6 +55,11 @@ type Server struct {
 	jobq    *jobs.Queue
 	gov     *jobs.Governor
 	whisper *transcribe.Tools
+
+	// chat is the unified cross-platform chat fan-in. Optional like everything
+	// above it: a build with no chat wired serves the pane read-only from the
+	// stored scrollback rather than hiding it.
+	chat *chat.Hub
 }
 
 // Options configures the server.
@@ -81,6 +87,9 @@ type Options struct {
 	// perfectly ordinary machine without it installed; every method on Tools
 	// is nil-receiver safe for exactly this reason.
 	Whisper *transcribe.Tools
+	// Chat is the chat Hub. Optional: without it the chat page reports that no
+	// platform is connected and still shows the stored history.
+	Chat *chat.Hub
 }
 
 // New creates the server.
@@ -96,6 +105,7 @@ func New(o Options) *Server {
 		jobq:      o.Jobs,
 		gov:       o.Governor,
 		whisper:   o.Whisper,
+		chat:      o.Chat,
 		version:   o.Version,
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
@@ -322,12 +332,16 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
 
 			r.Get("/platforms/presets", s.handlePlatformPresets)
+			r.Get("/platforms/capabilities", s.handlePlatformCapabilities)
 			r.Get("/platforms/guides", s.handlePlatformGuides)
 			r.Get("/platforms/credentials", s.handleListCreds)
 			r.Put("/platforms/credentials/{platform}", s.handlePutCreds)
 			r.Delete("/platforms/credentials/{platform}", s.handleDeleteCreds)
 			r.Get("/platforms/accounts", s.handleListAccounts)
 			r.Delete("/platforms/accounts/{id}", s.handleDeleteAccount)
+			// Live viewer count, for the platforms that publish one. Absent is
+			// a 200 saying so rather than a 404; see handleAccountStats.
+			r.Get("/platforms/accounts/{id}/stats", s.handleAccountStats)
 
 			// Go-live metadata. The push is a job rather than a request so a
 			// slow platform API cannot hold the dashboard open; the composer
@@ -335,6 +349,16 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/metadata", s.handleMetadataOverview)
 			r.Post("/metadata/push", s.handlePushMetadata)
 			r.Get("/metadata/push/{id}", s.handleMetadataJob)
+
+			// Unified chat. Live messages arrive on the WebSocket, not here;
+			// these four are the scrollback a freshly opened pane needs plus
+			// the three things a socket cannot do. Deletion is addressed by
+			// query parameters because a platform-issued message id does not
+			// survive a path segment. See chat.go.
+			r.Get("/chat", s.handleChatOverview)
+			r.Get("/chat/messages", s.handleChatMessages)
+			r.Delete("/chat/messages", s.handleChatDeleteMessage)
+			r.Post("/chat/send", s.handleChatSend)
 		})
 
 		// A scraper has no CSRF token to double-submit, and this route is a
@@ -353,6 +377,12 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/oauth/{platform}/start", s.handleOAuthStart)
 			r.Get("/oauth/{platform}/callback", s.handleOAuthCallback)
 		})
+
+		// Kick's chat webhook. Outside requireAuth because Kick's servers post
+		// here with no session and no header polyemesis issued; the
+		// unguessable path segment is the whole credential, and the handler
+		// compares it before doing anything else. See chat_wiring.go.
+		r.HandleFunc("/chat/kick/{secret}", s.handleKickChatWebhook)
 
 		// The WebSocket does its own auth; the browser cannot set headers on
 		// the upgrade request, so CSRF middleware would reject it.

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -242,6 +243,62 @@ func urlEscape(s string) string {
 	).Replace(s)
 }
 
+// LiveStatter is the optional capability for a platform that will tell us how
+// many people are watching. Declared here rather than in internal/oauth because
+// it is the API layer that needs to discover it; the provider just has the
+// method. Kick is the only one today.
+type LiveStatter interface {
+	Stats(ctx context.Context, clientID, accessToken string) (*oauth.KickStats, error)
+}
+
+// handleAccountStats reads the live viewer count for one connected account.
+//
+// A platform without the capability answers 200 with supported:false rather
+// than 404: "we cannot ask" and "the account is gone" are different problems
+// with different fixes, and a client that cannot tell them apart shows the wrong
+// one. Being offline is likewise a normal answer, not an error.
+func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	acct, err := s.tokenFor(ctx, id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	provider, err := oauth.Get(acct.Platform)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"supported": false, "reason": err.Error()})
+		return
+	}
+	st, ok := provider.(LiveStatter)
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"supported": false,
+			"reason":    fmt.Sprintf("polyemesis does not read a viewer count from %s", acct.Platform),
+		})
+		return
+	}
+	creds, err := s.store.GetPlatformCreds(s.box, acct.Platform)
+	if err != nil {
+		writeError(w, http.StatusPreconditionFailed, "developer credentials are missing for "+string(acct.Platform))
+		return
+	}
+
+	stats, err := st.Stats(ctx, creds.ClientID, acct.AccessToken)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"supported": true, "stats": stats})
+}
+
 // handleRefreshKey re-fetches a destination's ingest URL and stream key from
 // the platform, refreshing the OAuth token first if it has expired.
 //
@@ -283,10 +340,22 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ing, err := provider.Ingest(ctx, creds.ClientID, acct.AccessToken)
+	ing, broadcastID, err := s.ingestFor(ctx, provider, creds.ClientID, acct)
 	if err != nil {
+		// A platform that publishes no key endpoint is not a transport
+		// failure, and 502 invites a retry that can never succeed. The
+		// operator needs the paste field, not the button again.
+		if errors.Is(err, oauth.ErrNoStreamKeyAPI) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+	// Facebook's key IS the broadcast, so this is where a running chat adapter
+	// finds out which live video to read comments from.
+	if broadcastID != "" {
+		s.setFacebookBroadcast(acct.AccountRef, broadcastID)
 	}
 
 	dest.URL = ing.URL
@@ -301,6 +370,31 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("reconcile after key refresh", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"destination": updated})
+}
+
+// ingestFor fetches an ingest, preferring the connected target over the login's
+// default profile.
+//
+// Provider.Ingest always targets whatever the token's own identity is, which for
+// Facebook means a Page connection would silently stream to the operator's
+// personal profile. TargetsFor is the capability that knows better; it also
+// returns the broadcast id, which is the handle the chat adapter needs and which
+// Provider.Ingest discards. Every other platform has no targets and falls
+// through to Ingest unchanged.
+func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount) (*oauth.Ingest, string, error) {
+	if tp, ok := oauth.TargetsFor(acct.Platform); ok {
+		b, err := tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef)
+		if err != nil {
+			return nil, "", err
+		}
+		ing := b.Ingest
+		return &ing, b.ID, nil
+	}
+	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)
+	if err != nil {
+		return nil, "", err
+	}
+	return ing, "", nil
 }
 
 // tokenFor loads an account and refreshes its access token if it is expired or
