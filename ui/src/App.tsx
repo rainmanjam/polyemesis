@@ -8,6 +8,7 @@ import { AppLayout } from "@/components/AppLayout";
 import { AuthScreen } from "@/pages/AuthScreen";
 import { AutomationPage } from "@/pages/AutomationPage";
 import { ClipsPage } from "@/pages/ClipsPage";
+import { LibraryPage } from "@/pages/LibraryPage";
 import { Dashboard } from "@/pages/Dashboard";
 import { MetersPage } from "@/pages/MetersPage";
 import { RoutingPage } from "@/pages/RoutingPage";
@@ -27,10 +28,28 @@ const PlayoutPage = lazy(() =>
   import("@/pages/PlayoutPage").then((m) => ({ default: m.PlayoutPage })),
 );
 
+// The clip editor is reached from a recording in the library, never from the
+// nav, and it carries a canvas timeline and a whole transcript nobody browsing
+// the dashboard has asked to download. Split for the same reason Monitoring is.
+//
+// /clips/:id is the editor for one recording; /clips with no id is the live
+// ring buffer, which is a different feature entirely. They share a path prefix
+// and nothing else — see internal/api/clips.go.
+const ClipEditor = lazy(() =>
+  import("@/pages/ClipEditor").then((m) => ({ default: m.ClipEditor })),
+);
+
 // The public player is split for a different reason than Monitoring is: not to
 // save the admin a download, but to save a VIEWER one. Somebody following a
 // shared link is not signing in and has no use for the console, so /watch is
 // resolved before the auth gate and pulls its own chunk.
+// The jobs page carries the whole resource-policy editor and is opened when
+// something needs explaining, not on every visit. Split for the same reason
+// Monitoring is.
+const JobsPage = lazy(() =>
+  import("@/pages/JobsPage").then((m) => ({ default: m.JobsPage })),
+);
+
 const PublicPlayer = lazy(() =>
   import("@/pages/PublicPlayer").then((m) => ({ default: m.PublicPlayer })),
 );
@@ -148,8 +167,27 @@ export default function App() {
                   </Suspense>
                 }
               />
+              <Route path="/library" element={<LibraryPage />} />
               <Route path="/recordings" element={<RecordingsPage />} />
               <Route path="/clips" element={<ClipsPage />} />
+              {/* The clip editor is per-recording and reached from the
+                  library, never from the nav. */}
+              <Route
+                path="/clips/:id"
+                element={
+                  <Suspense fallback={<RouteFallback />}>
+                    <ClipEditor />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/jobs"
+                element={
+                  <Suspense fallback={<RouteFallback />}>
+                    <JobsPage />
+                  </Suspense>
+                }
+              />
               <Route path="/automation" element={<AutomationPage />} />
               <Route
                 path="/monitoring"
