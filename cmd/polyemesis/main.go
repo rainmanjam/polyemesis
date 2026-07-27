@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/tlsx"
 )
 
 // version is stamped by the Makefile via -ldflags.
@@ -90,6 +92,16 @@ func run() error {
 	}
 	log.Info("ffmpeg detected", "version", tools.Version, "path", tools.FFmpeg, "srt", tools.HasLibSRT)
 
+	// The certificate is settled before anything long-lived is opened: an
+	// unreadable cert pair or an unwritable tls/ directory is a configuration
+	// mistake, and the operator should hear about it in the same breath as a
+	// missing ffmpeg rather than after the engine has started.
+	provider, err := newTLSProvider(cfg)
+	if err != nil {
+		return err
+	}
+	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
+
 	store, err := db.Open(cfg.DBPath())
 	if err != nil {
 		return err
@@ -114,12 +126,17 @@ func run() error {
 	srv := api.New(api.Options{
 		Log: log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
+		// The same provider the listener serves from. Handing the API its own
+		// would mean a second selfsigned Provider regenerating the material on
+		// disk out from under the running listener.
+		TLS: provider,
 	})
 	go srv.RefreshLoop(ctx)
 
 	httpServer := &http.Server{
-		Addr:    cfg.Addr,
-		Handler: srv.Handler(),
+		Addr:      cfg.Addr,
+		Handler:   srv.Handler(),
+		TLSConfig: provider.TLSConfig(),
 		// No WriteTimeout: the WebSocket and multi-gigabyte recording
 		// downloads are both long-lived by design, and a write timeout would
 		// sever them mid-transfer.
@@ -127,14 +144,23 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	if err := reportStartup(log, cfg, store, tools); err != nil {
+	// Only started when we are the ones terminating TLS; behind a proxy the
+	// proxy owns port 80.
+	var redirectServer *http.Server
+	if provider.Enabled() {
+		redirectServer = startHTTPHelper(log, cfg, provider)
+	}
+
+	if err := reportStartup(log, cfg, provider, store, tools); err != nil {
 		return err
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		if cfg.TLS.Enabled {
-			errCh <- httpServer.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile)
+		if provider.Enabled() {
+			// Empty paths: the certificate comes from TLSConfig, which is
+			// either the loaded pair or ACME's GetCertificate callback.
+			errCh <- httpServer.ListenAndServeTLS("", "")
 			return
 		}
 		errCh <- httpServer.ListenAndServe()
@@ -158,6 +184,11 @@ func run() error {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer shutdownCancel()
+	if redirectServer != nil {
+		// The redirect helper holds nothing a client can be mid-transfer on,
+		// so it goes first and never delays the listener that does.
+		_ = redirectServer.Shutdown(shutdownCtx)
+	}
 	_ = httpServer.Shutdown(shutdownCtx)
 
 	cancel()
@@ -166,7 +197,113 @@ func run() error {
 	return nil
 }
 
-func reportStartup(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools) error {
+// newTLSProvider turns the config into a certificate provider. Resolution is
+// delegated to the config package so the listener, the banner and the API all
+// describe the same decision instead of each re-deriving it.
+func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
+	mode := cfg.ResolvedTLSMode()
+	opts := tlsx.Options{
+		Mode:      tlsx.Mode(mode),
+		ACMEEmail: cfg.TLS.ACMEEmail,
+		CertFile:  cfg.TLS.CertFile,
+		KeyFile:   cfg.TLS.KeyFile,
+		DataDir:   cfg.DataDir,
+	}
+	// Only the modes that put a name in a certificate need one, and manual
+	// mode takes whatever the operator's file already says.
+	switch mode {
+	case config.ModeACME, config.ModeSelfSigned:
+		host, err := cfg.TLS.EffectiveHostname()
+		if err != nil {
+			return nil, err
+		}
+		opts.Hostname = host
+	}
+	return tlsx.New(opts)
+}
+
+// startHTTPHelper brings up the plain-HTTP companion on :80 — the ACME HTTP-01
+// responder in acme mode, a permanent redirect to HTTPS in every mode.
+//
+// It fails soft on purpose. Port 80 is unbindable for an unprivileged process
+// and is often already taken; aborting startup over it would leave the operator
+// with no UI in which to fix the setting that broke startup. Returns nil when
+// no helper is running, which the caller treats as "nothing to shut down".
+func startHTTPHelper(log *slog.Logger, cfg config.Config, provider *tlsx.Provider) *http.Server {
+	const addr = ":80"
+	if listenPort(cfg.Addr) == "80" {
+		return nil // the TLS listener already owns it
+	}
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		if provider.Mode() == tlsx.ModeACME {
+			log.Warn("cannot bind :80 for the acme http-01 challenge; certificate issuance will keep failing until port 80 reaches this host (free the port, grant CAP_NET_BIND_SERVICE, or forward it). Serving https meanwhile",
+				"error", err)
+		} else {
+			log.Warn("cannot bind :80 to redirect plain http to https; serving https only", "error", err)
+		}
+		return nil
+	}
+
+	srv := &http.Server{
+		Handler:           provider.HTTPChallengeHandler(redirectToHTTPS(cfg)),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() { _ = srv.Serve(ln) }()
+	log.Info("http redirect listening", "addr", addr, "acmeChallenge", provider.Mode() == tlsx.ModeACME)
+	return srv
+}
+
+// redirectToHTTPS sends everything that is not an ACME challenge to the TLS
+// listener.
+func redirectToHTTPS(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host := redirectHost(cfg, r.Host)
+		if host == "" {
+			http.Error(w, "no host to redirect to", http.StatusBadRequest)
+			return
+		}
+		// 301 is what a browser caches for a page load, but it is also allowed
+		// to rewrite the request to GET; 308 keeps the method and body for the
+		// API clients that would otherwise silently lose their request.
+		code := http.StatusMovedPermanently
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			code = http.StatusPermanentRedirect
+		}
+		http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), code)
+	}
+}
+
+// redirectHost builds the authority to redirect to: the configured hostname
+// when there is one (the certificate is only valid for that name anyway),
+// otherwise whatever the client asked for, carrying the port the TLS listener
+// is actually on.
+func redirectHost(cfg config.Config, requestHost string) string {
+	host := strings.TrimSpace(cfg.TLS.Hostname)
+	if host == "" {
+		host = requestHost
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+	}
+	if host == "" {
+		return ""
+	}
+	if port := listenPort(cfg.Addr); port != "" && port != "443" {
+		return net.JoinHostPort(host, port)
+	}
+	return host
+}
+
+func listenPort(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return ""
+}
+
+func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider, store *db.DB, tools *ffmpeg.Tools) error {
 	hasUser, err := store.HasUser()
 	if err != nil {
 		return err
@@ -177,11 +314,16 @@ func reportStartup(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffm
 	}
 
 	scheme := "http"
-	if cfg.TLS.Enabled {
+	if provider.Enabled() {
 		scheme = "https"
 	}
 	shown := cfg.Addr
-	if strings.HasPrefix(shown, ":") {
+	if host := strings.TrimSpace(cfg.TLS.Hostname); host != "" && provider.Enabled() {
+		shown = host
+		if port := listenPort(cfg.Addr); port != "" && port != "443" {
+			shown = net.JoinHostPort(host, port)
+		}
+	} else if strings.HasPrefix(shown, ":") {
 		shown = "localhost" + shown
 	}
 
@@ -190,7 +332,15 @@ func reportStartup(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffm
 	fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
 	fmt.Printf("  data dir    %s\n", cfg.DataDir)
 	fmt.Printf("  ffmpeg      %s\n", tools.Version)
+	reportTLS(cfg, provider, shown)
 	if warn := tools.SRTWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+	}
+	if warn := cfg.InsecureExposureWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+		log.Warn("insecure exposure", "detail", warn)
+	}
+	if _, warn := cfg.HSTSPolicy(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 	}
 	if !hasUser {
@@ -202,6 +352,45 @@ func reportStartup(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffm
 	}
 	fmt.Println()
 	return nil
+}
+
+// reportTLS prints what a browser is about to see.
+//
+// The CA fingerprint is printed here rather than left to the UI on purpose: the
+// person reading this line is the one staring at a certificate warning, and the
+// fingerprint is what tells them the warning is their own box and not something
+// sitting in the middle of the connection.
+func reportTLS(cfg config.Config, provider *tlsx.Provider, shown string) {
+	line := string(provider.Mode())
+	switch {
+	case provider.Enabled() && cfg.TLS.Hostname != "":
+		line += " (hostname " + cfg.TLS.Hostname + ")"
+	case !provider.Enabled() && cfg.TrustProxyHeaders:
+		line += " (a reverse proxy is expected to terminate tls)"
+	}
+	fmt.Printf("  tls         %s\n", line)
+	if !provider.Enabled() {
+		return
+	}
+
+	info, err := provider.CertInfo()
+	switch {
+	case errors.Is(err, tlsx.ErrNoCertificate):
+		fmt.Printf("  certificate not issued yet; acme obtains one on the first https request\n")
+	case err != nil:
+		fmt.Printf("  certificate unreadable: %v\n", err)
+	case info.Expired:
+		fmt.Printf("  certificate %s — EXPIRED %s\n", info.Subject, info.NotAfter.Format("2006-01-02"))
+	default:
+		fmt.Printf("  certificate %s, expires %s (%d days)\n",
+			info.Subject, info.NotAfter.Format("2006-01-02"), info.DaysRemaining)
+	}
+
+	if fp := provider.CAFingerprint(); fp != "" {
+		fmt.Printf("  ca sha-256  %s\n", fp)
+		fmt.Printf("              trust https://%s/api/v1/tls/ca (on disk: %s) to clear the browser warning\n",
+			shown, cfg.SelfSignedCACertPath())
+	}
 }
 
 func ingestPort(s db.Settings) int {
