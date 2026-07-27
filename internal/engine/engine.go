@@ -947,15 +947,22 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 	for _, id := range ids {
 		p := plans[id]
 
-		e.mu.RLock()
-		cur := e.dests[id]
-		e.mu.RUnlock()
-		if cur != nil {
+		e.mu.Lock()
+		if cur := e.dests[id]; cur != nil {
 			// Survived the stop phase, so it is running with the right
 			// arguments; refresh the row for cosmetic fields like the name.
-			cur.row = p.row
+			//
+			// Replaced wholesale rather than mutated in place: Status hands out
+			// these pointers and then reads their fields after dropping the
+			// lock, which is only safe while a published destination never
+			// changes again.
+			next := *cur
+			next.row = p.row
+			e.dests[id] = &next
+			e.mu.Unlock()
 			continue
 		}
+		e.mu.Unlock()
 
 		if p.err != "" {
 			e.mu.Lock()
