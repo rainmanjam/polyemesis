@@ -465,10 +465,31 @@ you change the frame rate. Two seconds suits every live platform we know of.
 
 ### Hardware encoders
 
-polyemesis offers whichever encoders your FFmpeg build actually registers —
-probed from `ffmpeg -encoders`, not guessed — and greys out the rest with the
-reason, so you cannot select NVENC on a machine with no NVIDIA card and discover
-it only when a stream goes live.
+At startup polyemesis **encodes one frame** with each encoder your FFmpeg
+registers and keeps the exit status:
+
+```bash
+ffmpeg -f lavfi -i testsrc2=size=320x240:rate=1 -frames:v 1 -c:v h264_nvenc -f null -
+```
+
+That is the only test that means anything. `ffmpeg -encoders` lists what the
+*build* was compiled with, not what the *machine* can do: a stock Ubuntu FFmpeg
+lists `h264_nvenc`, `h264_qsv`, `h264_vaapi` and `h264_amf` on a box with no GPU
+in it at all. The editor offers only what encoded a frame here, and shows
+everything else greyed out with FFmpeg's own reason — `Cannot load
+libcuda.so.1`, `No VA display found for device /dev/dri/renderD128` — so you
+find out at the dropdown rather than after you have gone live. A rendition saved
+on an encoder that later stops working is refused at start with the same
+message, instead of crash-looping.
+
+The scan is bounded, runs its probes concurrently and cannot fail the launch:
+if it cannot run at all, every encoder stays on offer and the product falls back
+to software. Measured cost on the development machine: **218 ms** added to
+startup.
+
+`Renditions → re-detect hardware` re-runs the whole thing without a restart,
+which is what you want after installing a driver or passing a GPU into a
+container.
 
 | Family | Encoders | Notes |
 |---|---|---|
@@ -476,12 +497,19 @@ it only when a stream goes live.
 | NVIDIA | `h264_nvenc`, `hevc_nvenc` | Presets are `p1`–`p7`; `p4` is the honest middle. |
 | Intel Quick Sync | `h264_qsv`, `hevc_qsv` | Needs a working VA-API/QSV runtime, not just the CPU. |
 | Apple | `h264_videotoolbox`, `hevc_videotoolbox` | No preset knob; `-realtime` is the lever. |
-| VA-API (Linux) | `h264_vaapi`, `hevc_vaapi` | Needs a render node, `/dev/dri/renderD128` by default. |
-| AMD | `h264_amf`, `hevc_amf` | Windows and Linux with the AMF runtime installed. |
+| VA-API (Linux) | `h264_vaapi`, `hevc_vaapi` | Needs a render node, `/dev/dri/renderD128` by default. This is the AMD path on Linux. |
+| AMD | `h264_amf`, `hevc_amf` | Windows. Ubuntu's packaged FFmpeg contains no `*_amf` encoder at all — on Linux, use VA-API for AMD. |
 
-`libx264` is the default even on a machine with a GPU, because its behaviour is
-the same on every host while the hardware wrappers vary by driver version.
-Hardware is an opt-in you make deliberately.
+A **working** hardware encoder is the default for a new rendition, because a
+machine with a usable GPU that quietly software-encodes cannot serve the feature
+the GPU was bought for. `libx264` is the default everywhere else, and is always
+selectable: at a given bitrate it still beats every fixed-function encoder on
+quality, so choosing it over hardware is a legitimate trade of headroom for
+picture.
+
+See **[docs/HARDWARE.md](docs/HARDWARE.md)** for per-vendor container images
+(`Dockerfile.cuda`, `Dockerfile.vaapi`), the GPU passthrough flags, and what each
+driver error message actually means.
 
 **Be realistic about software 4K60.** `libx264` at 4K60 is not a workload a
 normal streaming box handles: even at `veryfast` it needs a very high core count

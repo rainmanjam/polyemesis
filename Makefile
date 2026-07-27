@@ -111,6 +111,17 @@ release: ui ## Cross-compile release binaries into dist/
 docker: ## Build the Docker image (optional; Docker is never required)
 	docker build -t polyemesis:$(VERSION) -t polyemesis:latest .
 
+# The GPU images are separate tags rather than one fat image because NVENC's
+# runtime arrives from the host at `docker run`, not from the build — see
+# docs/HARDWARE.md. Neither has been built end to end on a machine with a GPU.
+.PHONY: docker-cuda
+docker-cuda: ## Build the NVIDIA/NVENC image (needs nvidia-container-toolkit at run time)
+	docker build -f Dockerfile.cuda -t polyemesis:$(VERSION)-cuda -t polyemesis:cuda .
+
+.PHONY: docker-vaapi
+docker-vaapi: ## Build the Intel/AMD VA-API image (needs --device /dev/dri at run time)
+	docker build -f Dockerfile.vaapi -t polyemesis:$(VERSION)-vaapi -t polyemesis:vaapi .
+
 # ------------------------------------------------------------------- clean
 
 .PHONY: clean

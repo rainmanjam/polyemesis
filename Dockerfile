@@ -10,6 +10,14 @@
 # would mean vendoring an FFmpeg build by hand.
 #
 # See docs/INSTALL.md for the per-platform install guide this image is one of.
+#
+# This image has NO hardware encoding. Alpine's ffmpeg carries the VA-API and
+# NVENC wrappers, but the vendor runtimes they dlopen() at startup are not here
+# and are not installable from the host by passing a device in — so every
+# rendition on this image software-encodes, which will not hold 4K60. For a GPU,
+# build Dockerfile.cuda (NVIDIA) or Dockerfile.vaapi (Intel/AMD) instead, and
+# read docs/HARDWARE.md first: the passthrough flags are the part that goes
+# wrong.
 
 # ---------- stage 1: build the web UI ----------
 # Vite 8 requires Node ^20.19 || >=22.12; the 22 line satisfies that and keeps
