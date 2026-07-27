@@ -456,15 +456,33 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	settings, err := s.store.GetSettings()
+	// Onto the SOURCE, not the settings singleton.
+	//
+	// Annotations describe what the tracks of one particular feed are -- which
+	// is the music, which is the mic -- so they are a property of a source, and
+	// with several sources they have to be. They used to live in
+	// settings.Ingest, and when the engine started reading its ingest from the
+	// source row instead they silently stopped arriving: role exclusion stopped
+	// dropping the music track and stems went back to being named track1,
+	// track2, track3. The audio acceptance suite caught it.
+	src, err := s.store.GetSource(s.eng().SourceID())
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	settings.Ingest.Annotations = req.Annotations
-	if err := s.store.PutSettings(settings); err != nil {
+	src.Ingest.Annotations = req.Annotations
+	if err := s.store.UpdateSource(src); err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	// Also mirrored into settings, so a client reading GET /settings still sees
+	// the annotations it wrote and an install that later drops back to a single
+	// source keeps them.
+	if settings, err := s.store.GetSettings(); err == nil {
+		settings.Ingest.Annotations = req.Annotations
+		if err := s.store.PutSettings(settings); err != nil {
+			s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
+		}
 	}
 	if err := s.eng().Reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
