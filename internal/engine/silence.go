@@ -117,9 +117,14 @@ func (e *Engine) effectiveSource() routing.Source {
 	src, live := e.source, e.silence != nil && e.silence.hub != nil
 	e.mu.RUnlock()
 	if live {
-		return synthTrack()
+		src = synthTrack()
 	}
-	return src
+	// The probe rebuilds e.source from scratch on every reconnect, so the
+	// annotations are re-attached here rather than stored on it. The synthetic
+	// layout gets them too: a single tier track can still be labelled, and
+	// dropping them would make a role exclusion silently stop applying the
+	// moment the ingest lost its video.
+	return e.annotate(src)
 }
 
 // reconcileSilence starts, stops or leaves the tier alone.
