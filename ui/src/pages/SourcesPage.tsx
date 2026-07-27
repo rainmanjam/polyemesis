@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  Activity,
   AlertTriangle,
   Copy,
   Info,
@@ -8,6 +9,7 @@ import {
   Loader2,
   Plus,
   RadioTower,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -407,6 +409,22 @@ function SourceCard({
           ) : null,
         )}
 
+        {source.link && (
+          /* Per-source uplink health. With several programmes on one install,
+             "why is it breaking up" is a question about one encoder's uplink,
+             and answering it per programme is something Restreamer's UI does
+             not do. */
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-live/30 bg-live-dim/20 px-2 py-1.5">
+            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-live">
+              <Activity className="h-3 w-3" /> publishing
+            </span>
+            <span className="font-mono text-[10px] text-muted-foreground">{source.link.peer}</span>
+            <span className="tnum font-mono text-[10px]">RTT {source.link.rttMs.toFixed(1)} ms</span>
+            <span className="tnum font-mono text-[10px]">loss {source.link.lossPackets}</span>
+            <span className="tnum font-mono text-[10px]">retrans {source.link.retransPackets}</span>
+          </div>
+        )}
+
         {/* The token, and the truth about it. */}
         <div className="flex flex-col gap-1.5 border-t border-border pt-2">
           <div className="flex items-center gap-2">
@@ -428,16 +446,26 @@ function SourceCard({
               <KeyRound className="h-3 w-3" /> Rotate
             </Button>
           </div>
-          {!source.tokenEnforced && (
-            /* Stated plainly rather than omitted. An operator who rotates this
-               believing it secures the ingest would be worse off than one who
-               knows it currently does nothing. */
+          {/* Stated plainly either way. Telling someone a rotated token
+              secures an ingest it does not is the worse error, but hiding that
+              it now does is also wrong — so the copy follows the server's
+              tokenEnforced, which follows the running listener rather than the
+              setting. */}
+          {source.tokenEnforced ? (
+            <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+              <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-live" />
+              This token <strong className="font-semibold">is the credential</strong>. Put it in
+              your encoder’s SRT <code className="font-mono">streamid</code> to publish to this
+              source on the shared port. Rotating issues a new one and keeps the old working for
+              five minutes, so you can move across without dropping a live stream.
+            </p>
+          ) : (
             <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
               <Info className="mt-0.5 h-3 w-3 shrink-0" />
-              This token is stored but <strong className="font-semibold">not yet enforced</strong>.
-              Sources are kept apart by port. What actually protects this ingest is the{" "}
-              {ing.mode === "rtmp" ? "stream key above" : "SRT passphrase above"}. The token
-              becomes the credential when one-port publishing lands.
+              This token is stored but <strong className="font-semibold">not enforced</strong> right
+              now — sources are kept apart by port. What actually protects this ingest is the{" "}
+              {ing.mode === "rtmp" ? "stream key above" : "SRT passphrase above"}. Turn on one-port
+              ingest in Settings to make the token the credential.
             </p>
           )}
         </div>
