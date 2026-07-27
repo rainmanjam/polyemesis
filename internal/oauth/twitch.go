@@ -21,7 +21,18 @@ func (t *Twitch) Scopes() []string {
 	return []string{"channel:read:stream_key"}
 }
 
-func (t *Twitch) AuthURL(clientID, redirectURI, state string) string {
+// PKCE is off, and the challenge/verifier arguments below are deliberately
+// discarded. Twitch's authorization-code documentation enumerates an exact
+// parameter set (client_id, force_verify, redirect_uri, response_type, scope,
+// state) and says nothing about RFC 7636; nothing published tells us whether
+// its /authorize endpoint tolerates an unknown code_challenge or rejects the
+// request. Sending one on a hunch would break Twitch sign-in for everyone, so
+// this stays off until Twitch documents support. The flow is still a
+// confidential client: the secret never leaves the server, the code is bound to
+// a whitelisted redirect URI, and the state is single-use.
+func (t *Twitch) PKCE() bool { return false }
+
+func (t *Twitch) AuthURL(clientID, redirectURI, state, _ string) string {
 	q := url.Values{}
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
@@ -35,7 +46,7 @@ func (t *Twitch) AuthURL(clientID, redirectURI, state string) string {
 	return "https://id.twitch.tv/oauth2/authorize?" + q.Encode()
 }
 
-func (t *Twitch) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code string) (*Token, error) {
+func (t *Twitch) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, _ string) (*Token, error) {
 	return postForm(ctx, "https://id.twitch.tv/oauth2/token", url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
