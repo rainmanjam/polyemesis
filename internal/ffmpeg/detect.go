@@ -33,6 +33,14 @@ type Tools struct {
 	Minor      int    `json:"minor"`
 	HasLibSRT  bool   `json:"hasLibsrt"`
 	HasLibX264 bool   `json:"hasLibx264"`
+
+	// VideoEncoders is every video encoder the binary reports, as whole
+	// tokens. Renditions are only offered encoders that appear here, because
+	// an encoder that is merely compiled-in-looking costs the user a
+	// crash-looping stream to discover.
+	VideoEncoders []string `json:"videoEncoders"`
+	// HWEncoders is the hardware-accelerated subset of VideoEncoders.
+	HWEncoders []string `json:"hwEncoders"`
 }
 
 // ErrNotFound signals a missing binary, as opposed to an unusable one.
@@ -110,6 +118,7 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 	}
 
 	t.checkSRT(ctx)
+	t.checkEncoders(ctx)
 	return t, nil
 }
 
@@ -142,6 +151,77 @@ func (t *Tools) SRTWarning() string {
 		"%s (FFmpeg %s) was built without SRT support, so multi-track SRT ingest will not work. "+
 			"Install a build configured with --enable-libsrt, or switch Settings -> Ingest to RTMP "+
 			"(single audio track).", t.FFmpeg, t.Version)
+}
+
+// checkEncoders records which video encoders this build can actually use.
+//
+// Like checkSRT this is advisory: a build with no hardware encoder still runs
+// every rendition on libx264. What it prevents is offering the user an encoder
+// the binary does not have, which would fail only once a stream is live.
+func (t *Tools) checkEncoders(ctx context.Context) {
+	out, err := exec.CommandContext(ctx, t.FFmpeg, "-hide_banner", "-encoders").CombinedOutput()
+	if err != nil {
+		return // assume the best, as with -protocols
+	}
+	t.VideoEncoders = parseVideoEncoders(string(out))
+	t.HWEncoders = nil
+	for _, name := range hwEncoders {
+		if t.HasEncoder(name) {
+			t.HWEncoders = append(t.HWEncoders, name)
+		}
+	}
+	// The encoder list is authoritative where the configure string was only a
+	// hint: a build can list --enable-libx264 in one place and still not
+	// register the encoder.
+	t.HasLibX264 = t.HasEncoder(EncoderX264)
+}
+
+// HasEncoder reports whether the build registers this exact encoder.
+func (t *Tools) HasEncoder(name string) bool {
+	for _, e := range t.VideoEncoders {
+		if e == name {
+			return true
+		}
+	}
+	return false
+}
+
+// DefaultVideoEncoder is what a newly created rendition should start on.
+//
+// Software x264 is the honest default even on a machine with a GPU: its rate
+// control behaves identically everywhere, whereas the hardware wrappers vary
+// by driver version. Hardware is an opt-in the user makes deliberately.
+func (t *Tools) DefaultVideoEncoder() string {
+	if !t.HasEncoder(EncoderX264) && len(t.HWEncoders) > 0 {
+		return t.HWEncoders[0]
+	}
+	return EncoderX264
+}
+
+// encoderLineRe matches one row of `ffmpeg -encoders`: six capability-flag
+// characters, then the encoder name, then a description.
+//
+//	V....D h264_nvenc           NVIDIA NVENC H.264 encoder (codec h264)
+var encoderLineRe = regexp.MustCompile(`^\s*([VAS])[.A-Z]{5}\s+(\S+)`)
+
+// parseVideoEncoders extracts the video encoder names from `ffmpeg -encoders`.
+//
+// It returns whole tokens for the same reason hasProtocol exists: substring
+// matching on this output is actively wrong. "nvenc" matches the hevc_nvenc
+// and av1_nvenc rows on a build with no H.264 NVENC at all, and "amf" appears
+// in the plain-English descriptions of encoders that are not AMF's.
+func parseVideoEncoders(encodersOutput string) []string {
+	var out []string
+	for _, line := range strings.Split(encodersOutput, "\n") {
+		m := encoderLineRe.FindStringSubmatch(line)
+		// The legend above the "------" separator has the same shape
+		// (" V..... = Video"), so the name column must be a real name.
+		if m == nil || m[1] != "V" || m[2] == "=" {
+			continue
+		}
+		out = append(out, m[2])
+	}
+	return out
 }
 
 // hasProtocol reports whether name appears as a whole entry in the output of
