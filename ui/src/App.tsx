@@ -10,6 +10,7 @@ import { AutomationPage } from "@/pages/AutomationPage";
 import { ClipsPage } from "@/pages/ClipsPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { Dashboard } from "@/pages/Dashboard";
+import { SourcesPage } from "@/pages/SourcesPage";
 import { MetersPage } from "@/pages/MetersPage";
 import { RoutingPage } from "@/pages/RoutingPage";
 import { RenditionsPage } from "@/pages/RenditionsPage";
@@ -162,6 +163,7 @@ export default function App() {
           <Routes>
             <Route element={<AppLayout username={gate.username} onSignOut={signOut} />}>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/sources" element={<SourcesPage />} />
               <Route path="/meters" element={<MetersPage />} />
               <Route path="/routing" element={<RoutingPage />} />
               <Route path="/routing/:id" element={<RoutingPage />} />

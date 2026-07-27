@@ -1,4 +1,6 @@
 import type {
+  Source,
+  SourceView,
   ApiToken,
   ChatMessage,
   ChatOverview,
@@ -200,6 +202,20 @@ export const api = {
     post<{ status: string }>(`/destinations/${id}/restart`),
   refreshStreamKey: (id: number) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
+
+  // --- sources ---
+  // A source is one ingested programme. Everything else -- destinations,
+  // renditions, recordings -- belongs to exactly one of them. Unscoped calls
+  // act on the default source, which is what keeps every other page working
+  // without knowing sources exist.
+  listSources: () => get<SourceView[]>("/sources"),
+  getSource: (id: number) => get<SourceView>(`/sources/${id}`),
+  createSource: (s: Partial<Source>) => post<SourceView>("/sources", s),
+  updateSource: (id: number, s: Partial<Source>) =>
+    put<SourceView>(`/sources/${id}`, s),
+  deleteSource: (id: number) => del<void>(`/sources/${id}`),
+  rotateSourceToken: (id: number) =>
+    post<SourceView>(`/sources/${id}/token`),
 
   // --- renditions ---
   // A rendition is one shared video encode several destinations can select, so

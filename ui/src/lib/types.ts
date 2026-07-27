@@ -496,6 +496,44 @@ export interface PullSettings {
   rtspTransport: string;
 }
 
+/** One ingested programme.
+ *
+ *  Multi-source exists because a horizontal and a vertical feed out of OBS's
+ *  vertical-canvas plugin are two different compositions, not one cropped from
+ *  the other. Each source carries its own ingest, and owns its own
+ *  destinations and renditions. */
+export interface Source {
+  id: number;
+  name: string;
+  enabled: boolean;
+  /** Same shape as Settings.ingest, deliberately: one form serves both. */
+  ingest: Settings["ingest"];
+  /** Publish secret. See SourceView.tokenEnforced before presenting this as
+   *  a security control -- today it is stored but nothing checks it. */
+  token: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A source plus what the server computes about it. */
+export interface SourceView extends Source {
+  /** Ready to paste into an encoder, keyed by protocol, with `<server>` where
+   *  the hostname goes. The token is deliberately NOT in these. */
+  publishUrls: Record<string, string>;
+  /** Whether unscoped API calls act on this source. */
+  isDefault: boolean;
+  /** False in this build. Sources are separated by PORT, and what actually
+   *  gates an ingest is the RTMP stream key or the SRT passphrase. The UI must
+   *  read this rather than assume, so nobody is told a rotated token protects
+   *  something it does not. */
+  tokenEnforced: boolean;
+  /** Whether an engine actually came up. A source whose port was already taken
+   *  is stored but not running, and that is the answer to "why is nothing
+   *  arriving". */
+  running: boolean;
+}
+
 export interface Settings {
   ingest: {
     mode: IngestMode;
