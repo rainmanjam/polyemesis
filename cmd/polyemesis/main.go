@@ -189,6 +189,11 @@ func run(h *hooks) error {
 		return fmt.Errorf("starting the streaming engine: %w", err)
 	}
 
+	// After the engine, because the governor's sensors read from it, and before
+	// the API, which cannot be given a queue after its handlers are built.
+	h.progress("starting the background job queue")
+	pp := startPostProd(ctx, log, cfg, store, eng, tools)
+
 	srv := api.New(api.Options{
 		Log: log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
@@ -196,6 +201,9 @@ func run(h *hooks) error {
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.
 		TLS: provider,
+		// The post-production tier. Optional in the API's eyes; wired here so
+		// the jobs page governs a real queue instead of answering 503.
+		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
 	go srv.RefreshLoop(ctx)
 

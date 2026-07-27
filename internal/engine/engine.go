@@ -43,6 +43,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
+	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
 // relayPortBase is where per-consumer loopback ports are allocated from.
@@ -131,6 +132,31 @@ type Engine struct {
 	// reason metersHub is: an orphaned subscription forwards to a port the
 	// allocator has since handed to somebody else.
 	clipHub *relay.Hub
+
+	// capt is the realtime captioner, nil unless it has been switched on.
+	//
+	// It is the one consumer in this file that deliberately competes with the
+	// destination encoders for CPU instead of yielding to them, which is why it
+	// is off by default, why it runs under the governor's nice wrapper, and why
+	// it switches ITSELF off the moment it cannot keep up. See
+	// internal/transcribe/live.go, and reconcileCaptions below.
+	capt     *transcribe.LiveCaptioner
+	captOn   bool
+	captCfg  transcribe.LiveConfig
+	captSig  string
+	captPort int
+	captHub  *relay.Hub
+	captVTT  *transcribe.LiveVTT
+	// captWarn is why captioning stopped, kept after the captioner is gone so
+	// the operator finds out. A caption stream that vanishes silently is the
+	// failure mode this whole feature is designed against.
+	captWarn string
+
+	// whisper is the detected whisper.cpp, nil on an install without it, and
+	// whisperDir where its models live. Both are set once by SetTranscriber.
+	whisper     *transcribe.Tools
+	whisperDir  string
+	whisperNice func(name string, args []string) (string, []string)
 
 	// alerter delivers webhooks and alertWatch decides what is worth
 	// delivering. Both are outside e.mu: the watcher is touched only by
@@ -340,6 +366,57 @@ func (e *Engine) Hub() *relay.Hub { return e.hub }
 // Monitor exposes host/bitrate stats.
 func (e *Engine) Monitor() *stats.Monitor { return e.mon }
 
+// ingestLiveGrace is how long after the last non-zero bitrate sample the ingest
+// is still called live. The monitor samples once a second, so this is two
+// missed samples — short enough to release the queue promptly when a broadcast
+// ends, long enough not to flap on one late tick.
+const ingestLiveGrace = 3 * time.Second
+
+// IngestLive reports whether a stream is arriving right now.
+//
+// Read from the bitrate series rather than from process state, for the reason
+// probeLoop spells out: an SRT or RTMP listener sits in "running" for as long
+// as it waits for a publisher, which is a different question from "is the
+// source arriving". This is the predicate the background-job governor gates
+// every heavy task on, so it has to be a bytes-are-flowing answer or the
+// governor would refuse to run anything for as long as the server was up.
+//
+// The monitor already samples the hub at 1 Hz for the bitrate graph; nothing
+// here adds a second sampler.
+func (e *Engine) IngestLive() bool { return ingestLive(e.mon.Bitrate(), time.Now()) }
+
+// ingestLive is the decision on its own, so every boundary of it is a table
+// test rather than a two-second sleep against a real monitor.
+func ingestLive(samples []stats.Sample, now time.Time) bool {
+	if len(samples) == 0 {
+		return false
+	}
+	last := samples[len(samples)-1]
+	return last.Kbps > 0 && now.Sub(last.Time) < ingestLiveGrace
+}
+
+// GPUBusy reports whether the live path is currently occupying a hardware
+// encoder, which is the signal that stops a transcode from queueing behind the
+// broadcast for the same silicon.
+//
+// Conservative in the permissive direction on purpose: an encoder name this
+// build did not probe successfully counts as software, so an unrecognised
+// encoder leaves background work RUNNING rather than blocking it forever on a
+// GPU nobody can prove is busy.
+func (e *Engine) GPUBusy() bool { return gpuBusy(e.Status().Renditions) }
+
+func gpuBusy(rends []RenditionStatus) bool {
+	for _, r := range rends {
+		if r.Process == nil || r.Process.State != supervisor.StateRunning {
+			continue
+		}
+		if r.Encoder != db.EncoderX264 && r.Encoder != db.EncoderX265 {
+			return true
+		}
+	}
+	return false
+}
+
 // Recordings exposes the recording manager.
 func (e *Engine) Recordings() *recording.Manager { return e.recman }
 
@@ -434,6 +511,11 @@ func (e *Engine) Stop() {
 		monitors = append(monitors, m)
 	}
 	clipCap, clipPort, clipHub := e.clipCap, e.clipPort, e.clipHub
+	// The captioner is a consumer of the same hub, so it comes down in the same
+	// phase. Left running it would spend the shutdown transcribing a dead relay
+	// with a whisper child still holding CPU.
+	capt, captPort, captHub, captVTT := e.capt, e.captPort, e.captHub, e.captVTT
+	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = nil, 0, nil, nil, ""
 	e.loud = map[int64]*loudnessMon{}
 	e.clipCap, e.clipPort, e.clipHub, e.clipSig = nil, 0, nil, ""
 	silence := e.silence
@@ -465,6 +547,11 @@ func (e *Engine) Stop() {
 		go func() { defer wg.Done(); e.teardownLoudness(mon) }()
 	}
 	e.teardownClips(clipCap, clipPort, clipHub)
+	// In parallel with the destination stops: the captioner's whisper child can
+	// take a couple of seconds to reap, and there is nothing to be gained by
+	// waiting for it before starting everything else.
+	wg.Add(1)
+	go func() { defer wg.Done(); e.teardownCaptions(capt, captPort, captHub, captVTT) }()
 	stop(recorder)
 	stop(preview)
 	stop(meters)
@@ -611,6 +698,7 @@ func (e *Engine) Reconcile() error {
 	// capture buffer that will not bind are both worth a log line and nothing
 	// more, and a destination must never be held back by either.
 	e.reconcileClips()
+	e.reconcileCaptions()
 	e.reconcileLoudness(settings)
 	e.publishStatus()
 	return nil
@@ -3616,6 +3704,317 @@ func (e *Engine) ClipBuffer() ClipStatus {
 		st.Buffer = &s
 	}
 	return st
+}
+
+// ------------------------------------------------------- realtime captions
+
+// captSubName is fixed: there is at most one captioner.
+const captSubName = "captions"
+
+// CaptionStatus is what the dashboard shows about realtime captioning.
+type CaptionStatus struct {
+	// Enabled is the operator's switch, Running whether a captioner is
+	// actually up. They differ while the ingest has no audio, and after the
+	// health guard has switched the feature back off.
+	Enabled bool `json:"enabled"`
+	Running bool `json:"running"`
+	// Available reports whether it could be offered at all, and Unavailable
+	// says why not.
+	Available   bool   `json:"available"`
+	Unavailable string `json:"unavailable,omitempty"`
+	// Cost is the plain-language warning the UI must show next to the switch.
+	// It lives in the transcription package so the promise the interface makes
+	// cannot drift away from what the code actually does.
+	Cost string `json:"cost"`
+	// Warning is why captioning stopped, and survives the captioner.
+	Warning string                `json:"warning,omitempty"`
+	Track   int                   `json:"track"`
+	Speaker string                `json:"speaker,omitempty"`
+	Model   string                `json:"model,omitempty"`
+	VTTPath string                `json:"vttPath,omitempty"`
+	Stats   transcribe.LiveStats  `json:"stats"`
+	Config  transcribe.LiveConfig `json:"config"`
+}
+
+// CaptionEvent is the payload of events.TypeCaption.
+//
+// Exactly one field is set per event: a caption line, or a status change. They
+// share a type because they share a stream — a caption bar that goes quiet has
+// to be able to say why, and a subscriber that took the lines but not the
+// warning would sit on a frozen last sentence forever.
+type CaptionEvent struct {
+	Line   *transcribe.LiveCaption `json:"line,omitempty"`
+	Status *CaptionStatus          `json:"status,omitempty"`
+}
+
+// SetTranscriber hands the engine the detected whisper.cpp, the directory its
+// models live in, and the governor's nice wrapper.
+//
+// All three are optional. A nil *transcribe.Tools is the normal state of an
+// install without whisper.cpp and must never be an error: captioning is simply
+// not offered, and everything else is unaffected. A nil nice wrapper works too,
+// but it is the difference between speech recognition yielding to the encoders
+// and competing with them at equal priority, so the captioner logs it.
+func (e *Engine) SetTranscriber(w *transcribe.Tools, modelsDir string, nice func(name string, args []string) (string, []string)) {
+	if modelsDir == "" {
+		modelsDir = transcribe.ModelsDir(e.cfg.DataDir)
+	}
+	e.mu.Lock()
+	e.whisper, e.whisperDir, e.whisperNice = w, modelsDir, nice
+	e.mu.Unlock()
+}
+
+// SetLiveCaptions turns realtime captioning on or off.
+//
+// Off is the default and an upgrade never turns it on: this is the one job that
+// takes CPU away from a live broadcast, and nobody should discover that by
+// noticing dropped frames.
+func (e *Engine) SetLiveCaptions(cfg transcribe.LiveConfig) error {
+	cfg = cfg.Normalized()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	e.mu.RLock()
+	w := e.whisper
+	e.mu.RUnlock()
+	if cfg.Enabled && !w.Available() {
+		return fmt.Errorf("%s", w.Unavailable())
+	}
+
+	e.mu.Lock()
+	e.captCfg, e.captOn = cfg, cfg.Enabled
+	if cfg.Enabled {
+		// A fresh opt-in clears the last refusal. The operator has seen it and
+		// chosen to try again, possibly with a smaller model.
+		e.captWarn = ""
+	}
+	e.mu.Unlock()
+	return e.Reconcile()
+}
+
+// LiveCaptions reports the captioner's state for the dashboard and the API.
+func (e *Engine) LiveCaptions() CaptionStatus {
+	e.mu.RLock()
+	capt, on, cfg, warn, w := e.capt, e.captOn, e.captCfg, e.captWarn, e.whisper
+	vtt := e.captVTT
+	e.mu.RUnlock()
+
+	st := CaptionStatus{
+		Enabled:     on,
+		Running:     capt != nil && capt.Running(),
+		Available:   w.Available(),
+		Unavailable: w.Unavailable(),
+		Cost:        transcribe.LiveCost,
+		Warning:     warn,
+		Track:       cfg.Track,
+		Speaker:     cfg.Speaker,
+		Model:       cfg.Model,
+		VTTPath:     vtt.Path(),
+		Config:      cfg,
+	}
+	if capt != nil {
+		st.Stats = capt.Stats()
+		if st.Stats.Warning != "" {
+			st.Warning = st.Stats.Warning
+		}
+	}
+	return st
+}
+
+// reconcileCaptions brings the captioner into line with the switch.
+//
+// Like the clip buffer it reads e.downstreamHub(), so the captions describe
+// what actually went to air, and the hub identity rides in the signature: a
+// captioner left subscribed to a silence tier that has closed would quietly
+// caption nothing forever.
+//
+// Nothing here can fail a reconcile. A missing model, a port that will not
+// allocate and a tap that will not start are all worth a warning the operator
+// can read and nothing more — a destination must never be held back because
+// speech recognition could not start.
+func (e *Engine) reconcileCaptions() {
+	e.mu.RLock()
+	on, cfg, cur, sig, stopped := e.captOn, e.captCfg, e.capt, e.captSig, e.stopped
+	whisper, modelsDir, nice := e.whisper, e.whisperDir, e.whisperNice
+	e.mu.RUnlock()
+
+	choice, haveTrack := transcribe.LiveTrack(e.effectiveSource(), cfg.Track)
+
+	want := ""
+	if on && !stopped && whisper.Available() && haveTrack {
+		cfg.Track, cfg.Speaker, cfg.Denoise = choice.Track, choice.Speaker, choice.Denoise
+		if cfg.Language == "" {
+			cfg.Language = choice.Language
+		}
+		want = hashStrings([]string{
+			strconv.Itoa(cfg.Track), cfg.Model, string(cfg.Backend), cfg.Language,
+			cfg.Window.String(), cfg.Step.String(), cfg.VTTPath, e.sourceLabel(),
+		})
+	}
+	if (cur != nil) == (want != "") && sig == want {
+		return
+	}
+
+	if cur != nil {
+		e.mu.Lock()
+		old, port, hub, vtt := e.capt, e.captPort, e.captHub, e.captVTT
+		e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = nil, 0, nil, nil, ""
+		e.mu.Unlock()
+		e.teardownCaptions(old, port, hub, vtt)
+	}
+	if want == "" {
+		return
+	}
+
+	hint := transcribe.HintFromTools(e.tools)
+	if cfg.Model == "" {
+		cfg.Model = transcribe.LiveDefaultModel(hint).Name
+	}
+	if cfg.Threads == 0 {
+		cfg.Threads = transcribe.LiveThreads(hint.CPUCores)
+	}
+	modelPath, err := transcribe.ResolveModel(modelsDir, cfg.Model)
+	if err != nil {
+		e.captionsFailed(fmt.Sprintf("live captions need the %s model: %v", cfg.Model, err))
+		return
+	}
+
+	port, err := e.alloc.Allocate()
+	if err != nil {
+		e.captionsFailed(fmt.Sprintf("live captions could not get a relay port: %v", err))
+		return
+	}
+	hub := e.downstreamHub()
+	url := hub.Subscribe(captSubName, port)
+
+	// The sidecar lands in the playout directory by default so it sits beside
+	// the HLS window it describes. It is a growing WebVTT file, not a
+	// conformant HLS subtitle rendition — see transcribe.LiveVTT — and the
+	// playout handler serves a closed list of extensions that does not yet
+	// include .vtt, so today this is for anything that reads the directory
+	// directly.
+	vttPath := cfg.VTTPath
+	if vttPath == "" {
+		vttPath = filepath.Join(e.play.Dir(), transcribe.LiveVTTName)
+	}
+	vtt, err := transcribe.OpenLiveVTT(vttPath)
+	if err != nil {
+		// Not fatal. Captions on the WebSocket are the feature; the file is a
+		// convenience, and losing it must not cost the dashboard its captions.
+		e.log.Warn("live captions: no sidecar file", "path", vttPath, "err", err)
+		vtt = nil
+	}
+
+	capt, err := transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
+		transcribe.WithLiveNice(nice),
+		transcribe.WithLiveEmit(func(c transcribe.LiveCaption) {
+			if err := vtt.Append(c); err != nil {
+				e.log.Warn("live captions: sidecar write failed", "err", err)
+			}
+			e.bus.Publish(events.TypeCaption, CaptionEvent{Line: &c})
+		}),
+		transcribe.WithLiveDegrade(e.onCaptionsDegraded),
+	)
+	if err != nil {
+		hub.Unsubscribe(captSubName)
+		e.alloc.Release(port)
+		_ = vtt.Close()
+		e.captionsFailed(err.Error())
+		return
+	}
+
+	ctx := e.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := capt.Start(ctx, url, modelPath, transcribe.LiveWorkDir(e.cfg.DataDir)); err != nil {
+		hub.Unsubscribe(captSubName)
+		e.alloc.Release(port)
+		_ = vtt.Close()
+		e.captionsFailed(err.Error())
+		return
+	}
+
+	e.mu.Lock()
+	if e.stopped {
+		e.mu.Unlock()
+		e.teardownCaptions(capt, port, hub, vtt)
+		return
+	}
+	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = capt, port, hub, vtt, want
+	e.captCfg = capt.Config()
+	e.mu.Unlock()
+
+	// Warn, not Info. This is the one thing in the pipeline that takes CPU away
+	// from the encoders, and an operator reading the log after a stutter should
+	// find it without looking.
+	e.log.Warn("live captions started: speech recognition now competes with the encoders for CPU",
+		"track", cfg.Track, "speaker", cfg.Speaker, "model", cfg.Model,
+		"threads", cfg.Threads, "niced", nice != nil)
+	e.publishCaptionStatus()
+}
+
+// captionsFailed records a reason captioning could not start, switches the
+// operator's flag back off and says so.
+//
+// Off rather than "keep retrying every reconcile": the failures that get here —
+// no model, no port, no tap — do not fix themselves, and a captioner that
+// re-attempts a doomed whisper start on every settings change is a background
+// CPU cost with nothing to show for it.
+func (e *Engine) captionsFailed(reason string) {
+	e.mu.Lock()
+	e.captOn, e.captCfg.Enabled, e.captWarn = false, false, reason
+	e.mu.Unlock()
+	e.log.Error("live captions could not start", "reason", reason)
+	e.publishCaptionStatus()
+}
+
+// onCaptionsDegraded is the health guard firing: the machine could not caption
+// and stream at the same time.
+//
+// The switch goes back OFF rather than the captioner being left to limp. The
+// operator has to opt in again, which is the correct shape for a feature whose
+// failure mode is stealing CPU from a live broadcast — and it makes the state
+// machine honest, because "enabled but not running" then only ever means "no
+// audio yet".
+func (e *Engine) onCaptionsDegraded(reason string) {
+	e.mu.Lock()
+	e.captOn, e.captCfg.Enabled, e.captWarn = false, false, reason
+	e.mu.Unlock()
+	e.log.Error("live captions stopped to protect the stream", "reason", reason)
+	e.publishCaptionStatus()
+	// From a goroutine: this fires on the captioner's own goroutine and the
+	// teardown reconcile waits for that goroutine to finish.
+	go func() {
+		if err := e.Reconcile(); err != nil {
+			e.log.Error("live captions: reconcile after degrade", "err", err)
+		}
+	}()
+}
+
+func (e *Engine) publishCaptionStatus() {
+	st := e.LiveCaptions()
+	e.bus.Publish(events.TypeCaption, CaptionEvent{Status: &st})
+}
+
+func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *relay.Hub, vtt *transcribe.LiveVTT) {
+	if c == nil {
+		_ = vtt.Close()
+		return
+	}
+	// The subscription first, so the hub stops forwarding before the port goes
+	// back in the pool and the allocator hands it to somebody else.
+	if hub == nil {
+		hub = e.hub
+	}
+	hub.Unsubscribe(captSubName)
+	c.Stop()
+	_ = vtt.Close()
+	if port != 0 {
+		e.alloc.Release(port)
+	}
+	e.log.Info("live captions stopped")
 }
 
 // Levels returns the most recent metering frame.

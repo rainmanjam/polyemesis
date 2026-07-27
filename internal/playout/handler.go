@@ -27,6 +27,13 @@ var servedTypes = map[string]string{
 	".mp4":  "video/mp4",
 	".m4v":  "video/mp4",
 	".m4a":  "audio/mp4",
+	// The live caption sidecar the engine writes to <playoutDir>/captions.vtt.
+	// Deliberately NOT advertised as an HLS SUBTITLES rendition: a single
+	// growing VTT has no X-TIMESTAMP-MAP and no segmentation, so it is a file a
+	// player can fetch, not a conformant rendition. Safe to serve from here —
+	// the sweeper only deletes segment extensions and clearVariantDir only
+	// touches variant subdirectories.
+	".vtt": "text/vtt",
 }
 
 // manifestExts are the files that are rewritten in place every segment.
