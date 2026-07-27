@@ -37,9 +37,11 @@ import { PageHeader } from "@/components/AppLayout";
 import { api } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
+import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
   ApiToken,
   CertInfo,
+  IngestMode,
   PlatformAccount,
   PlatformCreds,
   Settings,
@@ -155,7 +157,7 @@ function IngestSettings({
           <CardTitle>Ingest</CardTitle>
           <CardDescription>
             SRT carries up to six audio tracks. RTMP carries one, and exists as a fallback for
-            encoders that cannot do SRT.
+            encoders that cannot do SRT. Pull dials a source instead of waiting for one.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -164,7 +166,7 @@ function IngestSettings({
             <Select
               value={draft.ingest.mode}
               onValueChange={(v) =>
-                setDraft({ ...draft, ingest: { ...draft.ingest, mode: v as "srt" | "rtmp" } })
+                setDraft({ ...draft, ingest: { ...draft.ingest, mode: v as IngestMode } })
               }
             >
               <SelectTrigger>
@@ -173,6 +175,7 @@ function IngestSettings({
               <SelectContent>
                 <SelectItem value="srt">SRT — multitrack (recommended)</SelectItem>
                 <SelectItem value="rtmp">RTMP — single track</SelectItem>
+                <SelectItem value="pull">Pull — dial a camera, feed or file</SelectItem>
               </SelectContent>
             </Select>
             {system && !system.ffmpeg.hasLibsrt && draft.ingest.mode === "srt" && (
@@ -183,7 +186,9 @@ function IngestSettings({
             )}
           </div>
 
-          {draft.ingest.mode === "srt" ? (
+          {draft.ingest.mode === "pull" ? (
+            <PullIngestFields draft={draft} setDraft={setDraft} />
+          ) : draft.ingest.mode === "srt" ? (
             <>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
@@ -345,6 +350,86 @@ function IngestSettings({
   );
 }
 
+/** The pull source's fields.
+ *
+ *  The scheme list and the reconnect bounds are the SAME ones the server
+ *  enforces, quoted here so a mistake is a hint under the field rather than a
+ *  rejected save. They are a hint and nothing more: the server validates
+ *  independently, because a UI check is a convenience and never a control. */
+function PullIngestFields({
+  draft,
+  setDraft,
+}: {
+  draft: Settings;
+  setDraft: (s: Settings) => void;
+}) {
+  const pull = draft.ingest.pull ?? { url: "", reconnectDelayMaxSeconds: 30, rtspTransport: "tcp" };
+  const set = (patch: Partial<typeof pull>) =>
+    setDraft({ ...draft, ingest: { ...draft.ingest, pull: { ...pull, ...patch } } });
+
+  const scheme = pull.url.split("://")[0]?.toLowerCase() ?? "";
+  const known = (PULL_SCHEMES as readonly string[]).includes(scheme);
+
+  return (
+    <>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="pull-url">Source URL</Label>
+        <Input
+          id="pull-url"
+          value={pull.url}
+          placeholder="rtsp://camera.local/stream1"
+          onChange={(e) => set({ url: e.target.value })}
+        />
+        {pull.url !== "" && !known ? (
+          <span className="text-[10px] text-warn">
+            The server dials only: {PULL_SCHEMES.join(", ")}.
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">
+            One of {PULL_SCHEMES.join(", ")}. A file:// source is a path RELATIVE to the data
+            directory and may not contain ".." — it is confined there the same way a file
+            destination is.
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="pull-reconnect">Reconnect backoff cap (s)</Label>
+          <Input
+            id="pull-reconnect"
+            type="number"
+            value={pull.reconnectDelayMaxSeconds}
+            onChange={(e) => set({ reconnectDelayMaxSeconds: Number(e.target.value) })}
+          />
+          <span className="text-[10px] text-muted-foreground">
+            0 uses the default. HTTP and HLS sources only.
+          </span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label>RTSP transport</Label>
+          <Select value={pull.rtspTransport || "tcp"} onValueChange={(v) => set({ rtspTransport: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RTSP_TRANSPORTS.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-[10px] text-muted-foreground">
+            TCP unless the camera cannot. RTSP over UDP through NAT looks connected and delivers
+            nothing.
+          </span>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ---------------------------------------------------------------- pipeline */
 
 function PipelineSettings({
@@ -361,6 +446,34 @@ function PipelineSettings({
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle>Synthetic audio</CardTitle>
+          <CardDescription>
+            What happens when the ingest carries video and no audio at all.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="synth-silence">Synthesise a silent track</Label>
+            <Switch
+              id="synth-silence"
+              checked={draft.synth?.silenceOnVideoOnly ?? true}
+              onCheckedChange={(v) => setDraft({ ...draft, synth: { silenceOnVideoOnly: v } })}
+            />
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            Every major platform rejects a stream with no audio track. With this on, a video-only
+            ingest gains one silent stereo track and its destinations start; with it off they refuse
+            with "routing profile selects no audio". It only ever applies to an ingest that PROBED
+            with zero tracks, so it can never displace audio you are actually sending.
+          </span>
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Preview</CardTitle>

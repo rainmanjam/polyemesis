@@ -8,12 +8,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Eraser, Loader2 } from "lucide-react";
+import { AlertTriangle, Eraser, Loader2, TerminalSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -29,7 +31,13 @@ import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { labelForState, toneBadge, toneForState } from "@/lib/signal";
 import { cn } from "@/lib/utils";
-import type { LogLine, ProcessInfo } from "@/lib/types";
+import type {
+  Destination,
+  DryRunResult,
+  ExpertResponse,
+  LogLine,
+  ProcessInfo,
+} from "@/lib/types";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -66,6 +74,344 @@ function dedupe(history: LogLine[], live: LogLine[]): LogLine[] {
     pending.set(k, n - 1);
     return false;
   });
+}
+
+/* ------------------------------------------------------------------ expert */
+
+/** What is in the two boxes. Deliberately not ExpertArgs: the acknowledgement
+ *  is its own piece of state, because ticking it must not invalidate the
+ *  command the operator has already been shown. */
+interface ExpertDraft {
+  inputArgs: string;
+  outputArgs: string;
+}
+
+/** Whether the resolved command on screen was built from the text currently in
+ *  the boxes. Apply is gated on this: the whole point of the confirm step is
+ *  that the argv the operator read is the argv that gets saved. */
+function sameDraft(a: ExpertDraft | null, b: ExpertDraft): boolean {
+  return a !== null && a.inputArgs === b.inputArgs && a.outputArgs === b.outputArgs;
+}
+
+const DRY_RUN_TONE: Record<DryRunResult["verdict"], string> = {
+  ok: "text-live",
+  invalid: "text-down",
+  inconclusive: "text-warn",
+};
+
+const DRY_RUN_LABEL: Record<DryRunResult["verdict"], string> = {
+  ok: "FFmpeg accepted it",
+  invalid: "FFmpeg rejected an argument",
+  inconclusive: "Nothing proven either way",
+};
+
+/** Expert mode: append hand-written FFmpeg arguments to one destination.
+ *
+ *  The flow is deliberately three steps rather than a text box and a save
+ *  button. Type, resolve, then apply — and Apply does not light up until the
+ *  full command shown below the boxes was built from the text currently in
+ *  them. Someone pasting flags from a forum thread into a live stream should
+ *  have to look at the whole line first. */
+function ExpertPanel() {
+  const [dests, setDests] = useState<Destination[]>([]);
+  const [selected, setSelected] = useState<string>("");
+  const [draft, setDraft] = useState<ExpertDraft>({ inputArgs: "", outputArgs: "" });
+  const [resolved, setResolved] = useState<ExpertResponse | null>(null);
+  const [resolvedFor, setResolvedFor] = useState<ExpertDraft | null>(null);
+  const [ack, setAck] = useState(false);
+  const [dryRun, setDryRun] = useState<DryRunResult | null>(null);
+  const [busy, setBusy] = useState<"" | "preview" | "dryrun" | "apply" | "clear">("");
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState("");
+
+  useEffect(() => {
+    api
+      .listDestinations()
+      .then((rows) => setDests(rows.map((r) => r.destination)))
+      .catch(() => {});
+  }, []);
+
+  // Switching destination throws away everything about the previous one. A
+  // resolved command carried across would describe the wrong process.
+  const choose = useCallback((value: string) => {
+    setSelected(value);
+    setResolved(null);
+    setResolvedFor(null);
+    setDryRun(null);
+    setError("");
+    setSaved("");
+    setDraft({ inputArgs: "", outputArgs: "" });
+    setAck(false);
+    void api.getExpert(Number(value))
+      .then((r) => {
+        setDraft({ inputArgs: r.args.inputArgs, outputArgs: r.args.outputArgs });
+        setAck(r.args.ackReencode);
+        setResolved(r);
+        setResolvedFor({ inputArgs: r.args.inputArgs, outputArgs: r.args.outputArgs });
+      })
+      .catch((e: Error) => setError(e.message));
+  }, []);
+
+  const edit = useCallback((patch: Partial<ExpertDraft>) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    // The command on screen no longer describes what is in the boxes, so it
+    // stops counting as something the operator was shown.
+    setResolvedFor(null);
+    setDryRun(null);
+    setSaved("");
+  }, []);
+
+  const run = useCallback(
+    async (
+      kind: "preview" | "dryrun" | "apply" | "clear",
+      fn: () => Promise<void>,
+    ) => {
+      setBusy(kind);
+      setError("");
+      try {
+        await fn();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy("");
+      }
+    },
+    [],
+  );
+
+  const preview = useCallback(
+    () =>
+      run("preview", async () => {
+        const snapshot = draft;
+        const r = await api.previewExpert(Number(selected), { ...snapshot, ackReencode: ack });
+        setResolved(r);
+        setResolvedFor(snapshot);
+        setSaved("");
+      }),
+    [run, draft, selected, ack],
+  );
+
+  const doDryRun = useCallback(
+    () =>
+      run("dryrun", async () => {
+        setDryRun(
+          await api.dryRunExpert(Number(selected), { ...draft, ackReencode: ack }),
+        );
+      }),
+    [run, draft, selected, ack],
+  );
+
+  const apply = useCallback(
+    () =>
+      run("apply", async () => {
+        const r = await api.putExpert(Number(selected), { ...draft, ackReencode: ack, confirm: true });
+        setResolved(r);
+        setResolvedFor(draft);
+        setSaved(r.warning ?? "Saved.");
+      }),
+    [run, draft, selected, ack],
+  );
+
+  const clear = useCallback(
+    () =>
+      run("clear", async () => {
+        const r = await api.deleteExpert(Number(selected));
+        setDraft({ inputArgs: "", outputArgs: "" });
+        setAck(false);
+        setDryRun(null);
+        setResolved(r);
+        setResolvedFor({ inputArgs: "", outputArgs: "" });
+        setSaved("Cleared. This destination is back on the generated command.");
+      }),
+    [run, selected],
+  );
+
+  const guards = resolved?.guards ?? [];
+  const shown = sameDraft(resolvedFor, draft);
+  const blocked = guards.length > 0 && !ack;
+  const canApply = selected !== "" && shown && !blocked && busy === "";
+
+  return (
+    <Card className="mt-3">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
+        <CardTitle className="flex items-center gap-1.5">
+          <TerminalSquare className="h-3.5 w-3.5" />
+          Expert mode — extra FFmpeg arguments
+        </CardTitle>
+        <Select value={selected} onValueChange={choose}>
+          <SelectTrigger className="h-7 w-56 text-[11px]">
+            <SelectValue placeholder="Choose a destination…" />
+          </SelectTrigger>
+          <SelectContent>
+            {dests.map((d) => (
+              <SelectItem key={d.id} value={String(d.id)}>
+                {d.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-2.5">
+        <p className="text-[11px] text-muted-foreground">
+          These two strings are appended to the generated command — input arguments immediately
+          before <code className="font-mono">-i</code>, output arguments immediately before the
+          publish target. Nothing else is replaced, so the routing graph this destination was
+          configured with still decides which audio tracks it receives. Read the resolved command
+          below before applying.
+        </p>
+
+        {selected === "" ? (
+          <div className="rounded border border-dashed border-border py-6 text-center text-[11px] text-muted-foreground">
+            Choose a destination to edit its command line.
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="expert-in">Extra input arguments</Label>
+                <Textarea
+                  id="expert-in"
+                  spellCheck={false}
+                  className="mt-1 font-mono"
+                  placeholder="-thread_queue_size 2048"
+                  value={draft.inputArgs}
+                  onChange={(e) => edit({ inputArgs: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="expert-out">Extra output arguments</Label>
+                <Textarea
+                  id="expert-out"
+                  spellCheck={false}
+                  className="mt-1 font-mono"
+                  placeholder="-muxdelay 0.1"
+                  value={draft.outputArgs}
+                  onChange={(e) => edit({ outputArgs: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={preview} disabled={busy !== ""}>
+                {busy === "preview" && <Loader2 className="h-3 w-3 animate-spin" />}
+                Resolve command
+              </Button>
+              <Button size="sm" variant="secondary" onClick={doDryRun} disabled={busy !== ""}>
+                {busy === "dryrun" && <Loader2 className="h-3 w-3 animate-spin" />}
+                Dry run
+              </Button>
+              <Button size="sm" onClick={apply} disabled={!canApply}>
+                {busy === "apply" && <Loader2 className="h-3 w-3 animate-spin" />}
+                Apply
+              </Button>
+              <Button size="sm" variant="ghost" onClick={clear} disabled={busy !== ""}>
+                Clear
+              </Button>
+              {!shown && (
+                <span className="text-[10px] text-muted-foreground">
+                  Resolve the command to see exactly what will run before applying.
+                </span>
+              )}
+            </div>
+
+            {error && (
+              <div className="flex gap-1.5 rounded border border-down/30 bg-down-dim p-2 text-[11px] text-down">
+                <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
+                <span className="break-words">{error}</span>
+              </div>
+            )}
+
+            {guards.map((g) => (
+              <div
+                key={g.arg}
+                className="flex gap-1.5 rounded border border-warn/30 bg-warn-dim p-2 text-[11px] text-warn"
+              >
+                <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
+                <span className="break-words">{g.reason}</span>
+              </div>
+            ))}
+
+            {guards.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="expert-ack"
+                  checked={ack}
+                  onCheckedChange={(v) => setAck(v === true)}
+                />
+                <Label htmlFor="expert-ack" className="cursor-pointer">
+                  I understand this overrides what polyemesis otherwise guarantees for this
+                  destination.
+                </Label>
+              </div>
+            )}
+
+            {resolved?.warning && !error && (
+              <div className="rounded border border-warn/30 bg-warn-dim p-2 text-[11px] text-warn">
+                {resolved.warning}
+              </div>
+            )}
+            {saved && !error && (
+              <div className="rounded border border-border bg-surface p-2 text-[11px] text-muted-foreground">
+                {saved}
+              </div>
+            )}
+
+            {resolved?.command?.command && (
+              <div>
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+                    Full resolved command
+                  </span>
+                  <Badge variant={resolved.command.live ? "default" : "outline"}>
+                    {resolved.command.live ? "from the running process" : "rebuilt"}
+                  </Badge>
+                  {!shown && <Badge variant="outline">stale</Badge>}
+                </div>
+                <pre
+                  className={cn(
+                    "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-[10px]",
+                    shown ? "text-foreground" : "text-subtle-foreground",
+                  )}
+                >
+                  {resolved.command.command}
+                </pre>
+                {resolved.command.note && (
+                  <p className="mt-1 text-[10px] text-muted-foreground">{resolved.command.note}</p>
+                )}
+              </div>
+            )}
+
+            {dryRun && (
+              <div>
+                <div className="mb-1 flex items-center gap-2 text-[11px]">
+                  <span className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+                    Dry run
+                  </span>
+                  <span className={DRY_RUN_TONE[dryRun.verdict]}>
+                    {DRY_RUN_LABEL[dryRun.verdict]}
+                  </span>
+                </div>
+                {dryRun.message && (
+                  <p className="text-[11px] text-muted-foreground">{dryRun.message}</p>
+                )}
+                {dryRun.output && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
+                      FFmpeg output
+                    </summary>
+                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-[9px] text-muted-foreground">
+                      {dryRun.output}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export function MonitoringPage() {
@@ -408,6 +754,8 @@ export function MonitoringPage() {
           </CardContent>
         </Card>
       </div>
+
+      <ExpertPanel />
     </div>
   );
 }

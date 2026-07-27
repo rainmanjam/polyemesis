@@ -3,31 +3,57 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
   AudioLines,
+  Check,
   Disc,
+  Languages,
   Layers,
   LayoutDashboard,
   LogOut,
   Menu,
+  Radio,
   Settings as SettingsIcon,
   Sliders,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData } from "@/hooks/useLiveData";
 import { toneForState } from "@/lib/signal";
 import { duration, kbps } from "@/lib/format";
+import {
+  LANGUAGES,
+  setLanguage,
+  useLanguage,
+  useStateLabel,
+  useT,
+  type TranslationKey,
+} from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/meters", label: "Audio meters", icon: AudioLines },
-  { to: "/routing", label: "Routing", icon: Sliders },
-  { to: "/renditions", label: "Renditions", icon: Layers },
-  { to: "/recordings", label: "Recordings", icon: Disc },
-  { to: "/monitoring", label: "Monitoring", icon: Activity },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
+type NavItem = {
+  to: string;
+  labelKey: TranslationKey;
+  icon: React.ComponentType<{ className?: string }>;
+  end?: boolean;
+};
+
+const NAV: NavItem[] = [
+  { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
+  { to: "/meters", labelKey: "nav.meters", icon: AudioLines },
+  { to: "/routing", labelKey: "nav.routing", icon: Sliders },
+  { to: "/renditions", labelKey: "nav.renditions", icon: Layers },
+  { to: "/playout", labelKey: "nav.playout", icon: Radio },
+  { to: "/recordings", labelKey: "nav.recordings", icon: Disc },
+  { to: "/monitoring", labelKey: "nav.monitoring", icon: Activity },
+  { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
 ];
 
 export function AppLayout({
@@ -40,6 +66,9 @@ export function AppLayout({
   const { status, connected } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const t = useT();
+  const stateLabel = useStateLabel();
+  const language = useLanguage();
 
   // Close the drawer on navigation, or a phone user taps a link and stares at
   // the menu they just used.
@@ -59,7 +88,7 @@ export function AppLayout({
           size="icon-sm"
           className="md:hidden"
           onClick={() => setMobileOpen((v) => !v)}
-          aria-label="Toggle navigation"
+          aria-label={t("chrome.toggleNav")}
         >
           {mobileOpen ? <X /> : <Menu />}
         </Button>
@@ -73,11 +102,11 @@ export function AppLayout({
 
         <div className="ml-2 hidden items-center gap-2 sm:flex">
           <StatusDot tone={ingestTone} />
-          <span className="text-[11px] text-muted-foreground">Ingest</span>
+          <span className="text-[11px] text-muted-foreground">{t("chrome.ingest")}</span>
           <span className="tnum font-mono text-[11px]">
             {ingest?.state === "running"
               ? kbps(ingest.progress?.bitrateKbps ?? 0)
-              : (ingest?.state ?? "offline")}
+              : stateLabel(ingest?.state)}
           </span>
         </div>
 
@@ -85,7 +114,7 @@ export function AppLayout({
           {liveCount > 0 && (
             <Badge variant="live" className="hidden sm:inline-flex">
               <StatusDot tone="live" size="sm" />
-              {liveCount} live
+              {t("chrome.liveCount", { count: liveCount })}
             </Badge>
           )}
           {ingest?.state === "running" && (
@@ -96,12 +125,42 @@ export function AppLayout({
           {/* Socket health matters: a disconnected UI showing stale numbers is
               worse than one that admits it is stale. */}
           {!connected && (
-            <Badge variant="warn" title="Live updates are disconnected; retrying">
-              offline
+            <Badge variant="warn" title={t("chrome.socketOfflineHint")}>
+              {t("chrome.socketOffline")}
             </Badge>
           )}
           <span className="hidden text-[11px] text-muted-foreground lg:inline">{username}</span>
-          <Button variant="ghost" size="icon-sm" onClick={onSignOut} aria-label="Sign out">
+
+          {/* Sits in the chrome rather than on Settings: the operator who needs
+              it cannot necessarily read the nav item that would lead there. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("chrome.language")}
+                title={t("chrome.language")}
+              >
+                <Languages />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>{t("chrome.language")}</DropdownMenuLabel>
+              {LANGUAGES.map((lang) => (
+                <DropdownMenuItem key={lang.code} onSelect={() => setLanguage(lang.code)}>
+                  <Check className={cn(lang.code === language ? "opacity-100" : "opacity-0")} />
+                  {lang.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onSignOut}
+            aria-label={t("chrome.signOut")}
+          >
             <LogOut />
           </Button>
         </div>
@@ -116,7 +175,7 @@ export function AppLayout({
             mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
           )}
         >
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {NAV.map(({ to, labelKey, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -131,7 +190,7 @@ export function AppLayout({
               }
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
-              {label}
+              {t(labelKey)}
             </NavLink>
           ))}
         </nav>

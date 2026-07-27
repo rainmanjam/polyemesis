@@ -21,6 +21,28 @@ const MonitoringPage = lazy(() =>
   import("@/pages/MonitoringPage").then((m) => ({ default: m.MonitoringPage })),
 );
 
+const PlayoutPage = lazy(() =>
+  import("@/pages/PlayoutPage").then((m) => ({ default: m.PlayoutPage })),
+);
+
+// The public player is split for a different reason than Monitoring is: not to
+// save the admin a download, but to save a VIEWER one. Somebody following a
+// shared link is not signing in and has no use for the console, so /watch is
+// resolved before the auth gate and pulls its own chunk.
+const PublicPlayer = lazy(() =>
+  import("@/pages/PublicPlayer").then((m) => ({ default: m.PublicPlayer })),
+);
+
+/** Whether this page load is the public player.
+ *
+ *  Read from the raw location rather than from a route, because the decision has
+ *  to be made before <BrowserRouter> exists — the auth gate below runs first,
+ *  and a viewer has no session for it to resolve. */
+function isWatchRoute(): boolean {
+  const p = window.location.pathname;
+  return p === "/watch" || p.startsWith("/watch/");
+}
+
 /** Placeholder for a chunk still in flight. Same weight as the app's own
  *  loading states, so a split route reads as "loading", not as a flash. */
 function RouteFallback() {
@@ -39,8 +61,12 @@ type Gate =
 
 export default function App() {
   const [gate, setGate] = useState<Gate>({ phase: "loading" });
+  // Fixed for the life of the page: a viewer never navigates out of /watch, and
+  // an admin never navigates into it without a full reload.
+  const [watching] = useState(isWatchRoute);
 
   const resolveGate = useCallback(async () => {
+    if (watching) return;
     try {
       const { needsSetup } = await api.setupStatus();
       if (needsSetup) {
@@ -58,7 +84,7 @@ export default function App() {
       // "show the login screen" rather than a dead white page.
       setGate({ phase: "login" });
     }
-  }, []);
+  }, [watching]);
 
   useEffect(() => {
     void resolveGate();
@@ -71,6 +97,16 @@ export default function App() {
       setGate({ phase: "login" });
     }
   }, []);
+
+  // Ahead of every gate: no session, no setup check, no toaster, no live-data
+  // socket. A viewer following a shared link gets the player and nothing else.
+  if (watching) {
+    return (
+      <Suspense fallback={<RouteFallback />}>
+        <PublicPlayer />
+      </Suspense>
+    );
+  }
 
   if (gate.phase === "loading") {
     return (
@@ -102,6 +138,14 @@ export default function App() {
               <Route path="/routing" element={<RoutingPage />} />
               <Route path="/routing/:id" element={<RoutingPage />} />
               <Route path="/renditions" element={<RenditionsPage />} />
+              <Route
+                path="/playout"
+                element={
+                  <Suspense fallback={<RouteFallback />}>
+                    <PlayoutPage />
+                  </Suspense>
+                }
+              />
               <Route path="/recordings" element={<RecordingsPage />} />
               <Route
                 path="/monitoring"
