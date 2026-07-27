@@ -21,6 +21,14 @@
 # HTTP and must reach polyemesis directly — open those ports on the firewall
 # rather than trying to route them through nginx. The SRT ingest listener binds
 # 0.0.0.0 regardless of `addr`; give it a passphrase under Settings -> Ingest.
+#
+# Running polyemesis in the container from this repo? Same file. Publish only
+# 8080 to 127.0.0.1 ("127.0.0.1:8080:8080" in docker-compose.yml) so the
+# plaintext port is not reachable from anywhere but nginx, and leave the
+# commented ":80" mapping commented — nginx owns port 80 here, including the
+# ACME challenge path below.
+#
+# Per-platform install and service setup: ../docs/INSTALL.md
 
 server {
     listen 80;

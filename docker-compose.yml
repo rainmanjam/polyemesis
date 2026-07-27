@@ -1,5 +1,6 @@
-# Minimal compose file. Docker is optional — see the README for the bare-binary
-# and systemd deployments, which are the primary path.
+# Minimal compose file. Docker is optional — see docs/INSTALL.md for the
+# bare-binary, macOS and Windows deployments, and README.md for the systemd
+# unit, which is the primary path on a Linux server.
 
 services:
   polyemesis:
@@ -14,12 +15,37 @@ services:
       - "8080:8080"        # web UI + API
       - "6000:6000/udp"    # SRT ingest — UDP, not TCP
       - "1935:1935"        # RTMP ingest (fallback)
+
+      # ACME ONLY. Uncomment together with the config mount below if you want
+      # polyemesis to obtain its own Let's Encrypt certificate: HTTP-01
+      # validation must reach http://<hostname>/.well-known/acme-challenge/… on
+      # port 80 from the public internet, so the port has to be published here,
+      # not merely EXPOSEd in the image.
+      #
+      # It ships commented out on purpose. Publishing :80 unconditionally makes
+      # `docker compose up` fail outright on any host that already runs a web
+      # server, and the default configuration below is plain HTTP with no
+      # certificate at all — so the port would buy nothing and cost a bind
+      # error. Every non-acme TLS mode leaves it unused.
+      # - "80:80"
+
     volumes:
       # Database, encryption key and recordings all live here. Back it up.
       - polyemesis-data:/data
+
+      # Not mounted by default: with no config.yaml the container runs plain
+      # HTTP on :8080, which is the right default behind a reverse proxy or on a
+      # private network. Mount one to configure TLS, and see the "TLS and
+      # certificates" section of the README for which mode you want.
+      # - ./config.yaml:/data/config.yaml:ro
+
     # FFmpeg is happiest with a decent shared-memory segment when filtering
     # several destinations at once.
     shm_size: 256m
+    # Plain HTTP, matching the default config. If you mount a config.yaml that
+    # makes polyemesis terminate TLS on :8080, change this to
+    # `wget --no-check-certificate -qO- https://127.0.0.1:8080/…` or compose
+    # will mark a perfectly healthy container unhealthy and keep restarting it.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
       interval: 30s
