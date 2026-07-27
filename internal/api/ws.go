@@ -55,11 +55,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Send the current state immediately, so a freshly opened page is
 	// populated without waiting for the next tick.
 	initial := []events.Event{
-		{Type: events.TypeStatus, Time: time.Now(), Data: s.eng.Status()},
-		{Type: events.TypeSource, Time: time.Now(), Data: s.eng.SourceInfo()},
+		{Type: events.TypeStatus, Time: time.Now(), Data: s.eng().Status()},
+		{Type: events.TypeSource, Time: time.Now(), Data: s.eng().SourceInfo()},
 		{Type: events.TypeStats, Time: time.Now(), Data: map[string]any{
-			"system":  s.eng.Monitor().System(),
-			"bitrate": s.eng.Monitor().Bitrate(),
+			"system":  s.eng().Monitor().System(),
+			"bitrate": s.eng().Monitor().Bitrate(),
 		}},
 	}
 	for _, ev := range initial {

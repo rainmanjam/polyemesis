@@ -285,10 +285,10 @@ func quoteArgv(bin string, args []string) string {
 // actually resolved, which nothing outside the engine can reproduce. The
 // rebuilt form is the fallback for a stopped destination, and says so.
 func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []string, live bool, note string, err error) {
-	bin = s.eng.Tools().FFmpeg
+	bin = s.eng().Tools().FFmpeg
 
 	want := fmt.Sprintf("dest:%d", row.ID)
-	for _, p := range s.eng.Processes() {
+	for _, p := range s.eng().Processes() {
 		if p.Name() != want {
 			continue
 		}
@@ -311,7 +311,7 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		return argv[0], ffmpeg.StripExtraArgs(argv[1:], oldIn, oldOut), true, "", nil
 	}
 
-	compiled, cerr := routing.Compile(row.Profile, s.eng.Source())
+	compiled, cerr := routing.Compile(row.Profile, s.eng().Source())
 	if cerr != nil {
 		// A profile that does not compile is a routing problem, not an expert
 		// mode one, and it has its own editor. Say which so the operator does
@@ -738,7 +738,7 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 	// running state are never allowed to drift. The arguments ride in the
 	// destination's restart signature, so this is what actually applies them —
 	// the destination is torn down and respawned with the new command line.
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after expert args update", "err", err)
 	}
 
@@ -773,7 +773,7 @@ func (s *Server) handleDeleteExpert(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after expert args delete", "err", err)
 	}
 	resp := expertResponse{

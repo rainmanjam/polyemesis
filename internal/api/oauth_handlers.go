@@ -366,7 +366,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.eng.Reconcile(); err != nil {
+	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after key refresh", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"destination": updated})

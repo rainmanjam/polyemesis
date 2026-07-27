@@ -28,13 +28,25 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
+// eng is the engine an unscoped request operates on: the default source's.
+//
+// Every endpoint that predates sources goes through here, which is what keeps
+// the whole existing API and UI working while multi-source runs underneath.
+//
+// It cannot be nil in a running server: the database refuses to delete the last
+// source, and Manager.Start fails when no engine came up, so the process never
+// finishes booting without one. A handler reached before Start would panic,
+// which is the correct outcome for a bug that means the server is serving
+// before its pipeline exists.
+func (s *Server) eng() *engine.Engine { return s.mgr.Default() }
+
 // Server wires the HTTP layer to everything else.
 type Server struct {
 	log      *slog.Logger
 	cfg      config.Config
 	store    *db.DB
 	box      *secrets.Box
-	eng      *engine.Engine
+	mgr      *engine.Manager
 	bus      *events.Broker
 	sessions *auth.Manager
 	logins   *auth.Throttle
@@ -68,7 +80,7 @@ type Options struct {
 	Config  config.Config
 	DB      *db.DB
 	Secrets *secrets.Box
-	Engine  *engine.Engine
+	Engine  *engine.Manager
 	Events  *events.Broker
 	Version string
 	// TLS is the provider the HTTP listener was built from. Optional; without
@@ -99,7 +111,7 @@ func New(o Options) *Server {
 		cfg:       o.Config,
 		store:     o.DB,
 		box:       o.Secrets,
-		eng:       o.Engine,
+		mgr:       o.Engine,
 		bus:       o.Events,
 		tls:       o.TLS,
 		jobq:      o.Jobs,

@@ -67,6 +67,12 @@ const (
 
 // Engine owns the whole streaming pipeline.
 type Engine struct {
+	// sourceID is the programme this engine owns. One engine per source: the
+	// hub, the ingest, the recorder, the meters and the whole destination and
+	// rendition map are all per-instance already, so running N of them is what
+	// makes N programmes work rather than a rewrite of the reconciler.
+	sourceID int64
+
 	log    *slog.Logger
 	cfg    config.Config
 	store  *db.DB
@@ -264,20 +270,32 @@ type rendition struct {
 }
 
 // New creates the engine and binds the relay hub.
-func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker) (*Engine, error) {
+// New builds the engine for one source.
+//
+// alloc is shared across every engine on purpose. Each one used to mint its own
+// PortAllocator over the same base and span, which is harmless with a single
+// engine and a silent disaster with two: both would hand out the same relay
+// ports and the second programme's destinations would bind onto the first
+// programme's traffic. Pass one allocator, or pass nil for a private one when
+// there genuinely is only one engine (tests).
+func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker, sourceID int64, alloc *relay.PortAllocator) (*Engine, error) {
 	hub, err := relay.New(log, 0)
 	if err != nil {
 		return nil, err
 	}
+	if alloc == nil {
+		alloc = relay.NewPortAllocator(relayPortBase, relayPortSpan)
+	}
 
 	e := &Engine{
+		sourceID:  sourceID,
 		log:       log,
 		cfg:       cfg,
 		store:     store,
 		tools:     tools,
 		bus:       bus,
 		hub:       hub,
-		alloc:     relay.NewPortAllocator(relayPortBase, relayPortSpan),
+		alloc:     alloc,
 		dests:     map[int64]*destination{},
 		rends:     map[int64]*rendition{},
 		loud:      map[int64]*loudnessMon{},
@@ -427,7 +445,7 @@ func (e *Engine) Tools() *ffmpeg.Tools { return e.tools }
 func (e *Engine) Start(ctx context.Context) error {
 	e.ctx, e.cancel = context.WithCancel(ctx)
 
-	settings, err := e.store.GetSettings()
+	settings, err := e.effectiveSettings()
 	if err != nil {
 		return err
 	}
@@ -671,10 +689,42 @@ func (e *Engine) onStorage(st recording.StorageState) {
 
 // ---------------------------------------------------------------- reconcile
 
+// effectiveSettings returns the global settings with this engine's own ingest
+// overlaid on top.
+//
+// Everything except the ingest block stays genuinely global -- recording paths,
+// logging, meter intervals, post-production policy are properties of the
+// install, not of one programme. The ingest is the one part that differs per
+// source, so overlaying it here means every existing reader of
+// settings.Ingest keeps working unchanged and no caller has to learn that
+// sources exist.
+//
+// A source row that has gone missing falls back to the settings ingest rather
+// than failing the reconcile. That is the fail-open direction: an engine that
+// keeps running on its last known configuration is recoverable, and one that
+// refuses to reconcile takes the stream down over a database read.
+func (e *Engine) effectiveSettings() (db.Settings, error) {
+	settings, err := e.store.GetSettings()
+	if err != nil {
+		return settings, err
+	}
+	src, err := e.store.GetSource(e.sourceID)
+	if err != nil {
+		e.log.Warn("source row unavailable; keeping the settings ingest",
+			"source", e.sourceID, "err", err)
+		return settings, nil
+	}
+	settings.Ingest = src.Ingest
+	return settings, nil
+}
+
+// SourceID reports which programme this engine owns.
+func (e *Engine) SourceID() int64 { return e.sourceID }
+
 // Reconcile makes the running processes match the database. It is safe to call
 // repeatedly and from any handler.
 func (e *Engine) Reconcile() error {
-	settings, err := e.store.GetSettings()
+	settings, err := e.effectiveSettings()
 	if err != nil {
 		return err
 	}
@@ -1185,11 +1235,11 @@ type destPlan struct {
 // just been closed, spins on a dead relay. So destinations come down before the
 // renditions they read and go back up after them.
 func (e *Engine) reconcileOutputs() error {
-	destRows, err := e.store.ListDestinations()
+	destRows, err := e.store.ListDestinationsBySource(e.sourceID)
 	if err != nil {
 		return err
 	}
-	rendRows, err := e.store.ListRenditions()
+	rendRows, err := e.store.ListRenditionsBySource(e.sourceID)
 	if err != nil {
 		return err
 	}

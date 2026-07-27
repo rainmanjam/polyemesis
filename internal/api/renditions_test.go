@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -47,9 +48,11 @@ func renditionServer(t *testing.T, tools *ffmpeg.Tools) (http.Handler, *db.DB, f
 		t.Fatalf("EnsureDirs: %v", err)
 	}
 	bus := events.NewBroker()
-	eng, err := engine.New(slog.New(slog.NewTextHandler(io.Discard, nil)), cfg, store, tools, bus)
-	if err != nil {
-		t.Fatalf("engine.New: %v", err)
+	// A manager rather than a bare engine: the API is source-aware now, and
+	// Start is what creates the engine for the source the migration made.
+	eng := engine.NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)), cfg, store, tools, bus)
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatalf("engine manager Start: %v", err)
 	}
 	t.Cleanup(eng.Stop)
 

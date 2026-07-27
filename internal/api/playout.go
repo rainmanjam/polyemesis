@@ -253,10 +253,13 @@ func writePlayoutConfig(path string, cfg *playoutPublish) error {
 // engine, and every playout route has to answer "unavailable" rather than
 // panic when it is.
 func (s *Server) playoutManager() *playout.Manager {
-	if s.eng == nil {
+	// Two checks, not one: a Server built with no manager at all, and a manager
+	// with no engine running. Both mean "there is no pipeline to ask", and both
+	// have to answer unavailable rather than panic.
+	if s.mgr == nil || s.eng() == nil {
 		return nil
 	}
-	return s.eng.Playout()
+	return s.eng().Playout()
 }
 
 // playoutSettings is the stored configuration, which is authoritative for the
@@ -517,12 +520,12 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := s.playoutManager()
-	if m == nil || s.eng == nil {
+	if m == nil || s.mgr == nil || s.eng() == nil {
 		http.NotFound(w, r)
 		return
 	}
 	ffmpegPath := ""
-	if tools := s.eng.Tools(); tools != nil {
+	if tools := s.eng().Tools(); tools != nil {
 		ffmpegPath = tools.FFmpeg
 	}
 

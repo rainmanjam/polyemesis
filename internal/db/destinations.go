@@ -256,6 +256,31 @@ func (d *DB) checkRendition(id *int64) error {
 }
 
 // ListDestinations returns every destination in display order.
+// ListDestinationsBySource returns the destinations belonging to one source.
+//
+// This is what a per-source engine reconciles against: it must never see, and
+// so can never start, a destination that belongs to another programme. Getting
+// that wrong would fan the wrong video out to somebody's platform, which is the
+// worst failure this feature can have.
+func (d *DB) ListDestinationsBySource(sourceID int64) ([]*Destination, error) {
+	rows, err := d.sql.Query(
+		`SELECT `+destColumns+` FROM destinations WHERE source_id = ? ORDER BY position, id`, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []*Destination{}
+	for rows.Next() {
+		dst, err := scanDestination(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, dst)
+	}
+	return out, rows.Err()
+}
+
 func (d *DB) ListDestinations() ([]*Destination, error) {
 	rows, err := d.sql.Query(`SELECT ` + destColumns + ` FROM destinations ORDER BY position, id`)
 	if err != nil {

@@ -44,7 +44,7 @@ type postProd struct {
 // nice(1). None of those is a reason to refuse to serve a live stream, so a
 // failure here degrades one feature and logs why. The one thing that can fail
 // hard — the database — was already opened by the caller.
-func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, eng *engine.Engine, tools *ffmpeg.Tools) postProd {
+func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
 	settings, err := store.GetSettings()
 	if err != nil {
 		// Falling back to defaults rather than giving up: the stored policy is
@@ -69,10 +69,20 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	gov := jobs.NewGovernor(log, q,
 		jobs.WithPolicy(settings.PostProd.Policy()),
 		jobs.WithSensors(jobs.Sensors{
+			// IngestLive and GPUBusy aggregate across every programme: one
+			// live source is reason enough to keep heavy background work off
+			// the CPU. CPUPercent is system-wide whichever engine reports it,
+			// so it comes off whichever one is default.
 			IngestLive: eng.IngestLive,
-			CPUPercent: func() float64 { return eng.Monitor().System().CPUPercent },
-			GPUBusy:    eng.GPUBusy,
-			Power:      jobs.ReadPowerState,
+			CPUPercent: func() float64 {
+				d := eng.Default()
+				if d == nil {
+					return 0
+				}
+				return d.Monitor().System().CPUPercent
+			},
+			GPUBusy: eng.GPUBusy,
+			Power:   jobs.ReadPowerState,
 		}),
 	)
 
