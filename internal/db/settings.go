@@ -78,6 +78,59 @@ type IngestSettings struct {
 	Annotations []routing.TrackAnnotation `json:"annotations,omitempty"`
 }
 
+// problems reports everything wrong with one ingest configuration.
+//
+// Extracted from Settings.Validate when sources arrived: an ingest block is now
+// validated in two places -- inside the settings singleton, and on each row of
+// the sources table -- and two copies of these rules would drift. The first
+// divergence would be a source accepting an SRT passphrase that settings
+// rejects, which surfaces as a child process that will not start rather than as
+// a form error.
+func (i IngestSettings) problems() []string {
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	switch i.Mode {
+	case IngestSRT, IngestRTMP:
+	case IngestPull:
+		// The source only has to be dialable when it is actually the ingest;
+		// a half-filled pull form must not block someone saving an SRT change.
+		if err := ffmpeg.ValidatePullURL(i.Pull.URL); err != nil {
+			add("%v", err)
+		}
+	default:
+		add("unknown ingest mode %q", i.Mode)
+	}
+	probs = append(probs, i.Pull.problems()...)
+	// Track roles are the operator's description of the feed. An invalid one
+	// would compile into a graph nobody asked for, so it is caught here rather
+	// than by a destination that will not start.
+	if err := routing.ValidateAnnotations(i.Annotations); err != nil {
+		add("%v", err)
+	}
+	if i.SRT.Port < 1 || i.SRT.Port > 65535 {
+		add("srt port %d out of range", i.SRT.Port)
+	}
+	// SRT's own constraint, enforced here so the user sees it in a form field
+	// rather than in an FFmpeg stderr line.
+	if p := i.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
+		add("srt passphrase must be 10-79 characters (got %d)", len(p))
+	}
+	if i.SRT.LatencyMS < 20 || i.SRT.LatencyMS > 8000 {
+		add("srt latency %dms out of range (20-8000)", i.SRT.LatencyMS)
+	}
+	if i.RTMP.Port < 1 || i.RTMP.Port > 65535 {
+		add("rtmp port %d out of range", i.RTMP.Port)
+	}
+	if i.Mode == IngestRTMP && i.RTMP.App == "" {
+		add("rtmp app name is required")
+	}
+	if i.SRT.Port == i.RTMP.Port {
+		add("srt and rtmp cannot share port %d", i.SRT.Port)
+	}
+	return probs
+}
+
 // rtspTransports is FFmpeg's own closed set for -rtsp_transport. Listed so a
 // typo is caught in the settings form rather than by a child that exits
 // immediately and looks like a dead camera.
@@ -946,45 +999,8 @@ func (s Settings) Validate() error {
 	var probs []string
 	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
 
-	switch s.Ingest.Mode {
-	case IngestSRT, IngestRTMP:
-	case IngestPull:
-		// The source only has to be dialable when it is actually the ingest;
-		// a half-filled pull form must not block someone saving an SRT change.
-		if err := ffmpeg.ValidatePullURL(s.Ingest.Pull.URL); err != nil {
-			add("%v", err)
-		}
-	default:
-		add("unknown ingest mode %q", s.Ingest.Mode)
-	}
-	for _, p := range s.Ingest.Pull.problems() {
+	for _, p := range s.Ingest.problems() {
 		add("%s", p)
-	}
-	// Track roles are the operator's description of the feed. An invalid one
-	// would compile into a graph nobody asked for, so it is caught here rather
-	// than by a destination that will not start.
-	if err := routing.ValidateAnnotations(s.Ingest.Annotations); err != nil {
-		add("%v", err)
-	}
-	if s.Ingest.SRT.Port < 1 || s.Ingest.SRT.Port > 65535 {
-		add("srt port %d out of range", s.Ingest.SRT.Port)
-	}
-	// SRT's own constraint, enforced here so the user sees it in a form field
-	// rather than in an FFmpeg stderr line.
-	if p := s.Ingest.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
-		add("srt passphrase must be 10-79 characters (got %d)", len(p))
-	}
-	if s.Ingest.SRT.LatencyMS < 20 || s.Ingest.SRT.LatencyMS > 8000 {
-		add("srt latency %dms out of range (20-8000)", s.Ingest.SRT.LatencyMS)
-	}
-	if s.Ingest.RTMP.Port < 1 || s.Ingest.RTMP.Port > 65535 {
-		add("rtmp port %d out of range", s.Ingest.RTMP.Port)
-	}
-	if s.Ingest.Mode == IngestRTMP && s.Ingest.RTMP.App == "" {
-		add("rtmp app name is required")
-	}
-	if s.Ingest.SRT.Port == s.Ingest.RTMP.Port {
-		add("srt and rtmp cannot share port %d", s.Ingest.SRT.Port)
 	}
 	if s.Recording.SegmentSeconds < 10 || s.Recording.SegmentSeconds > 24*3600 {
 		add("recording segment length %ds out of range (10-86400)", s.Recording.SegmentSeconds)

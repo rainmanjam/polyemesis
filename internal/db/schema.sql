@@ -29,6 +29,38 @@ CREATE TABLE IF NOT EXISTS settings (
     json TEXT    NOT NULL
 );
 
+-- One ingested programme. Everything downstream -- destinations, renditions,
+-- recordings -- belongs to exactly one of these.
+--
+-- This exists because a single install has to carry more than one programme at
+-- once: the case that forced it is OBS's vertical-canvas plugin, which emits a
+-- 16:9 and a 9:16 feed that are genuinely different compositions, not one
+-- cropped from the other. Before this table an install could ingest one thing,
+-- and the answer to "I stream both" was "run two containers".
+--
+-- ingest holds a db.IngestSettings JSON blob -- the same shape settings.ingest
+-- carried when there was exactly one source. Keeping the shape identical is
+-- what lets the migration move an existing install across without rewriting
+-- anything, and what lets one validator serve both.
+--
+-- token is the per-source publish secret, and it is stored in plaintext,
+-- unlike api_tokens which are hashed. The difference is deliberate and worth
+-- stating: an API token is shown once and typed into a script, but an ingest
+-- token is pasted into OBS as part of a stream key or an SRT streamid, and the
+-- operator will come back to read it again. A hash cannot be displayed, and a
+-- secret nobody can look up is one that gets replaced by an empty string.
+-- stream_key on destinations is stored the same way for the same reason.
+CREATE TABLE IF NOT EXISTS sources (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    ingest     TEXT    NOT NULL,               -- db.IngestSettings as JSON
+    token      TEXT    NOT NULL DEFAULT '',    -- per-source publish secret
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 -- One shared video encode. Destinations SELECT a rendition rather than owning
 -- one, so five destinations that all need 1080p60 cost one encode, not five.
 -- A rendition re-encodes video only and copies every audio track through
@@ -44,8 +76,12 @@ CREATE TABLE IF NOT EXISTS renditions (
     preset        TEXT    NOT NULL DEFAULT 'veryfast',  -- encoder-specific quality knob
     gop_seconds   REAL    NOT NULL DEFAULT 2,
     note          TEXT    NOT NULL DEFAULT '',   -- what this tier is for
+    -- A rendition re-encodes exactly one source, so it belongs to one.
+    -- Nullable for the same ALTER TABLE reason as destinations.source_id.
+    source_id     INTEGER,
     created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL
+    updated_at    INTEGER NOT NULL,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS destinations (
@@ -60,10 +96,19 @@ CREATE TABLE IF NOT EXISTS destinations (
     audio_bitrate INTEGER NOT NULL DEFAULT 160,  -- kbps
     profile       TEXT    NOT NULL,              -- routing.Profile as JSON
     rendition_id  INTEGER,                       -- NULL = passthrough (no encode)
+    -- Which programme this destination belongs to. Nullable rather than
+    -- NOT NULL because SQLite refuses to ALTER TABLE ADD COLUMN a REFERENCES
+    -- column with a non-NULL default while foreign keys are on, and the
+    -- migrated shape and the fresh shape must not diverge. The store fills it
+    -- in on create; NULL here means the source was deleted, not "unassigned".
+    source_id     INTEGER,
     position      INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL,
     FOREIGN KEY (account_id) REFERENCES platform_accounts(id) ON DELETE SET NULL,
+    -- CASCADE, unlike rendition_id's SET NULL: a destination describes where
+    -- one programme goes, so it has no meaning once that programme is gone.
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
     -- SET NULL, not CASCADE: deleting a rendition must drop its destinations
     -- back to passthrough, never delete the endpoints the user configured.
     FOREIGN KEY (rendition_id) REFERENCES renditions(id) ON DELETE SET NULL
@@ -108,7 +153,14 @@ CREATE TABLE IF NOT EXISTS recordings (
     finished_at INTEGER NOT NULL DEFAULT 0,
     bytes       INTEGER NOT NULL DEFAULT 0,
     duration_ms INTEGER NOT NULL DEFAULT 0,
-    tracks      INTEGER NOT NULL DEFAULT 0
+    tracks      INTEGER NOT NULL DEFAULT 0,
+    -- SET NULL rather than CASCADE, unlike destinations: the recording is a
+    -- file on disk that still exists and is still playable after its source is
+    -- deleted. Dropping the row would orphan the file and lose the transcript
+    -- and clips hanging off it. An unattributed recording is a small loss; a
+    -- silently deleted library is not.
+    source_id   INTEGER,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE SET NULL
 );
 
 -- One webhook endpoint and what it wants to hear about. The URL is stored as
