@@ -158,10 +158,185 @@ CREATE TABLE IF NOT EXISTS schedules (
     updated_at      INTEGER NOT NULL
 );
 
+-- The durable background job queue. Every heavy task — transcription, proxy
+-- generation, lossless cutting — is a row here rather than work done inline,
+-- because a dropped frame on a live broadcast is unrecoverable and a transcript
+-- arriving an hour later costs nothing.
+--
+-- It is persisted for one reason above all others: a four-hour transcription
+-- that vanishes because the server bounced is worse than useless. A row left in
+-- 'running' by a process that died is requeued at startup, and attempts is what
+-- stops a job that crashes the server from crash-looping it forever.
+--
+-- available_at carries both retry backoff and resource-policy deferral, so
+-- there is one mechanism holding work back rather than two, and a deferred job
+-- becomes claimable again on its own if whatever deferred it dies.
+CREATE TABLE IF NOT EXISTS jobs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind          TEXT    NOT NULL,                  -- processors define these; the queue never reads one
+    target        TEXT    NOT NULL DEFAULT '',       -- usually 'recording:<id>'
+    params        TEXT    NOT NULL DEFAULT '{}',     -- opaque processor JSON
+    result        TEXT    NOT NULL DEFAULT '',       -- opaque worker output, JSON
+    priority      INTEGER NOT NULL DEFAULT 0,        -- higher first; FIFO within a priority
+    state         TEXT    NOT NULL DEFAULT 'queued', -- queued|running|done|failed|cancelled|deferred
+    unique_target INTEGER NOT NULL DEFAULT 0,        -- fold a resubmission into the active job
+    attempts      INTEGER NOT NULL DEFAULT 0,        -- starts, not failures
+    max_attempts  INTEGER NOT NULL DEFAULT 3,
+    progress      REAL    NOT NULL DEFAULT 0,        -- 0..1, best effort
+    log_tail      TEXT    NOT NULL DEFAULT '[]',     -- JSON array of the newest lines
+    last_error    TEXT    NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    available_at  INTEGER NOT NULL DEFAULT 0,        -- earliest claim time
+    started_at    INTEGER NOT NULL DEFAULT 0,
+    finished_at   INTEGER NOT NULL DEFAULT 0,
+    updated_at    INTEGER NOT NULL
+);
+
+-- A broadcast is not one file. With hour-long segments a four-hour show is
+-- four recordings rows, and the library should show one entry, not four. A
+-- session is that grouping: consecutive recordings whose start times chain,
+-- plus the metadata a human wants to attach to the whole thing.
+--
+-- The span columns are derived from the members and are stored anyway, because
+-- the library list would otherwise aggregate over every recording on every
+-- page load. RecalcSession is the single writer; nothing else may set them.
+CREATE TABLE IF NOT EXISTS sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT    NOT NULL DEFAULT '',
+    description TEXT    NOT NULL DEFAULT '',
+    tags        TEXT    NOT NULL DEFAULT '[]',   -- JSON array of strings
+    started_at  INTEGER NOT NULL DEFAULT 0,      -- derived: earliest member start
+    ended_at    INTEGER NOT NULL DEFAULT 0,      -- derived: latest member end
+    duration_ms INTEGER NOT NULL DEFAULT 0,      -- derived: sum of member durations
+    bytes       INTEGER NOT NULL DEFAULT 0,      -- derived
+    recordings  INTEGER NOT NULL DEFAULT 0,      -- derived: member count
+    -- auto distinguishes a session the grouper inferred from one the operator
+    -- built by hand. The backfill may extend the former and must never rewrite
+    -- the latter: a hand-curated grouping is a decision, not a guess.
+    auto        INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+-- Membership. recording_id is the PRIMARY KEY, not part of a composite one:
+-- a recording belongs to at most one session, and making the schema say so is
+-- cheaper than every caller remembering it.
+CREATE TABLE IF NOT EXISTS session_recordings (
+    recording_id INTEGER PRIMARY KEY,
+    session_id   INTEGER NOT NULL,
+    position     INTEGER NOT NULL DEFAULT 0,     -- order within the session
+    FOREIGN KEY (session_id)   REFERENCES sessions(id)   ON DELETE CASCADE,
+    FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+);
+
+-- Editable metadata for a single recording. A sidecar table rather than three
+-- columns on recordings because this file runs against databases created
+-- before the library existed, where CREATE TABLE IF NOT EXISTS is a no-op and
+-- added columns would silently not appear — the same trap documented at the
+-- foot of this file. A row here is optional; its absence means "no metadata",
+-- which is not an error.
+CREATE TABLE IF NOT EXISTS recording_meta (
+    recording_id INTEGER PRIMARY KEY,
+    title        TEXT    NOT NULL DEFAULT '',
+    description  TEXT    NOT NULL DEFAULT '',
+    tags         TEXT    NOT NULL DEFAULT '[]',  -- JSON array of strings
+    updated_at   INTEGER NOT NULL,
+    FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+);
+
+-- One row per (recording, audio track) that has been transcribed. The track is
+-- the unit because each microphone is recorded on its own track and each is
+-- transcribed in isolation: re-running track 2 with a bigger model must
+-- replace track 2 and leave track 1 alone.
+CREATE TABLE IF NOT EXISTS transcript_tracks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id INTEGER NOT NULL,
+    track        INTEGER NOT NULL,               -- 0-based audio track index
+    speaker      TEXT    NOT NULL DEFAULT '',    -- who that track is
+    role         TEXT    NOT NULL DEFAULT '',    -- routing role, plain text so it cannot go stale
+    language     TEXT    NOT NULL DEFAULT '',
+    model        TEXT    NOT NULL DEFAULT '',
+    backend      TEXT    NOT NULL DEFAULT '',
+    created_at   INTEGER NOT NULL,
+    UNIQUE (recording_id, track),
+    FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+);
+
+-- One utterance. recording_id, track and speaker are denormalised from the
+-- parent row on purpose: every search filters on them, and a hit that had to
+-- join to learn who was speaking would join once per result. They are written
+-- and rewritten only inside the same transaction as the parent, so they cannot
+-- drift.
+CREATE TABLE IF NOT EXISTS transcript_segments (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id         INTEGER NOT NULL,
+    recording_id     INTEGER NOT NULL,
+    track            INTEGER NOT NULL,
+    speaker          TEXT    NOT NULL DEFAULT '',
+    start_ms         INTEGER NOT NULL DEFAULT 0, -- offset into the recording
+    end_ms           INTEGER NOT NULL DEFAULT 0,
+    text             TEXT    NOT NULL DEFAULT '',
+    confidence       REAL    NOT NULL DEFAULT 0,
+    -- Separates "the model was unsure" from "nobody asked". Without it a
+    -- missing confidence reads as 0.0, the strongest possible claim of garbage
+    -- about a segment that may be perfect.
+    confidence_known INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (track_id)     REFERENCES transcript_tracks(id) ON DELETE CASCADE,
+    FOREIGN KEY (recording_id) REFERENCES recordings(id)        ON DELETE CASCADE
+);
+
+-- The search index. External-content FTS5: the text lives once, in
+-- transcript_segments, and this table holds only the inverted index keyed on
+-- that row's id.
+--
+-- The three triggers below are not a convenience. Deleting a recording deletes
+-- its segments through a foreign key cascade that never passes through Go, and
+-- an index that only Go maintained would keep returning hits for a recording
+-- that no longer exists. SQLite fires DELETE triggers for cascaded deletes,
+-- so the trigger is the only place that is guaranteed to run.
+--
+-- remove_diacritics 2 is the Unicode-correct setting; without it "café" and
+-- "cafe" are different words, which is never what a person searching a
+-- transcript means.
+CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
+    text,
+    content='transcript_segments',
+    content_rowid='id',
+    tokenize="unicode61 remove_diacritics 2"
+);
+
+CREATE TRIGGER IF NOT EXISTS transcript_segments_ai AFTER INSERT ON transcript_segments BEGIN
+    INSERT INTO transcript_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS transcript_segments_ad AFTER DELETE ON transcript_segments BEGIN
+    INSERT INTO transcript_fts(transcript_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS transcript_segments_au AFTER UPDATE ON transcript_segments BEGIN
+    INSERT INTO transcript_fts(transcript_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO transcript_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
 CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled, id);
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled, id);
 CREATE INDEX IF NOT EXISTS idx_destinations_position ON destinations(position, id);
+
+-- The claim index has to answer "the oldest highest-priority eligible job of
+-- these kinds" on every dispatch, which is the one query in this schema that
+-- runs in a loop.
+CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(state, available_at, priority DESC, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_target ON jobs(kind, target, state);
+CREATE INDEX IF NOT EXISTS idx_jobs_recent ON jobs(created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_span ON sessions(started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_session_recordings_session ON session_recordings(session_id, position, recording_id);
+-- Playback and the context window around a search hit both walk one track of
+-- one recording in time order; this is the index that makes both a seek.
+CREATE INDEX IF NOT EXISTS idx_transcript_segments_time ON transcript_segments(recording_id, track, start_ms, id);
+CREATE INDEX IF NOT EXISTS idx_transcript_segments_track ON transcript_segments(track_id, start_ms, id);
+CREATE INDEX IF NOT EXISTS idx_transcript_tracks_recording ON transcript_tracks(recording_id, track);
 
 -- NOTE: nothing here may reference destinations.rendition_id. This file runs
 -- against databases created before renditions existed, where CREATE TABLE IF

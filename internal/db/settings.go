@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -576,6 +578,257 @@ type MeterSettings struct {
 	IntervalMS int `json:"intervalMs"`
 }
 
+// ---------------------------------------------------------- post-production
+
+// Post-production bounds. Wide on purpose: they catch a unit mix-up or a typo,
+// not an opinion about how somebody runs their box.
+const (
+	MaxPostProdConcurrency = 16
+	MaxPostProdKinds       = 64
+	MaxPostProdRetainDays  = 3650
+	MaxPostProdRetainJobs  = 100_000
+)
+
+// PostProdKindSettings overrides how one kind of background work is governed.
+//
+// Kind is a free string because the queue never interprets one either: a
+// processor registers whatever constant it likes and this block has to be able
+// to name it without db knowing the processor exists.
+type PostProdKindSettings struct {
+	Kind string `json:"kind"`
+	// Mode is realtime, deferred, scheduled or manual. Empty inherits
+	// DefaultMode, so a row that only sets UsesGPU is legal.
+	Mode string `json:"mode,omitempty"`
+	// Windows are the local time ranges a scheduled kind may run in.
+	Windows []jobs.Window `json:"windows,omitempty"`
+	// UsesGPU marks work that would compete with a GPU-accelerated rendition
+	// encoder, and is the only work the GPU gate applies to.
+	UsesGPU bool `json:"usesGpu,omitempty"`
+	// IgnoreIngest exempts cheap work from the yield-to-the-stream gate without
+	// promoting it to realtime.
+	IgnoreIngest bool `json:"ignoreIngest,omitempty"`
+}
+
+// PostProdSettings is the resource policy for the background job queue: the
+// answer to "may heavy work have the machine right now".
+//
+// The defaults are the governing principle of the whole tier written down.
+// Yielding to the stream is on, every kind is deferred, one job at a time, and
+// every heavy child is niced — so an operator who never opens this page still
+// gets a box that will not drop a frame for a transcript.
+type PostProdSettings struct {
+	// Enabled false makes the governor inert: it releases whatever it was
+	// holding and gates nothing. Jobs still queue and still run; they simply
+	// stop yielding, which is a decision an operator with a dedicated encoder
+	// box is entitled to make.
+	Enabled bool `json:"enabled"`
+	// Concurrency is how many jobs may run at once, across every kind. One,
+	// because a second transcode buys throughput nobody asked for at a risk
+	// nobody accepted.
+	Concurrency int `json:"concurrency"`
+	// DefaultMode governs a kind with no row of its own.
+	DefaultMode string `json:"defaultMode"`
+	// YieldToStream is the default and most important gate: a live ingest holds
+	// back every deferred kind.
+	YieldToStream bool `json:"yieldToStream"`
+
+	// CPUCeilingPercent is the host CPU level above which nothing new starts.
+	// 0 disables the gate.
+	CPUCeilingPercent int `json:"cpuCeilingPercent"`
+	// CPUResumePercent is where it releases. It must sit below the ceiling; the
+	// gap is the hysteresis that stops a load on the threshold oscillating.
+	CPUResumePercent int `json:"cpuResumePercent"`
+	// CPUSustainedSeconds is how long the ceiling must be held before RUNNING
+	// work is suspended as well as held back.
+	CPUSustainedSeconds int `json:"cpuSustainedSeconds"`
+	// CPUSettleSeconds is how long it must be calm again before running work is
+	// released.
+	CPUSettleSeconds int `json:"cpuSettleSeconds"`
+
+	// AvoidGPUWhenStreaming applies the GPU gate to kinds marked UsesGPU.
+	AvoidGPUWhenStreaming bool `json:"avoidGpuWhenStreaming"`
+	// GPUBusy is the manual "the GPU is in use by streaming" switch. It exists
+	// because GPU contention is close to undetectable on every platform we run
+	// on, and an operator who knows their ladder is on NVENC can say so instead
+	// of having us guess — a guess of "free" being the one that hurts the
+	// broadcast.
+	GPUBusy bool `json:"gpuBusy"`
+
+	// BatteryFloorPercent holds deferred work back on a discharging laptop
+	// below this level. 0 disables it. Best effort: on a platform whose power
+	// state we cannot read, nothing is gated.
+	BatteryFloorPercent int `json:"batteryFloorPercent"`
+	// ThermalCeilingC stops everything, realtime included, because a CPU that
+	// is thermally throttling has already begun degrading the stream. 0
+	// disables it, and it is likewise gated on being able to read a sensor.
+	ThermalCeilingC int `json:"thermalCeilingC"`
+
+	// NiceLevel is the OS priority heavy children start at, 0..19. It applies
+	// regardless of every other policy, which is why it is cheap insurance
+	// rather than a gate.
+	NiceLevel int `json:"niceLevel"`
+	// IdleIO additionally drops those children to the idle IO class where
+	// ionice exists, so a transcode reading a recording loses the disk to the
+	// recorder writing the next segment.
+	IdleIO bool `json:"idleIo"`
+
+	// IngestLingerSeconds keeps the stream gate closed after the ingest stops,
+	// so a reconnect is not raced by a transcode pouncing on the gap.
+	IngestLingerSeconds int `json:"ingestLingerSeconds"`
+	// DeferSeconds is how far ahead blocked work is parked before the governor
+	// reconsiders it. Short, because the deferral is renewed while the block
+	// lasts and a governor that dies must leave work that comes back on its own.
+	DeferSeconds int `json:"deferSeconds"`
+
+	// RetainDays and RetainJobs bound the finished-job history. A job row is
+	// tiny, but "tiny forever" is still a leak.
+	RetainDays int `json:"retainDays"`
+	RetainJobs int `json:"retainJobs"`
+
+	// Kinds are the per-kind overrides.
+	Kinds []PostProdKindSettings `json:"kinds,omitempty"`
+}
+
+// Policy converts the stored settings into the governor's own policy, which is
+// the only place these numbers mean anything. Durations are stored as seconds
+// because that is what a form field holds.
+func (p PostProdSettings) Policy() jobs.Policy {
+	mode := jobs.Mode(p.DefaultMode)
+	if !mode.Valid() {
+		mode = jobs.DefaultMode
+	}
+	pol := jobs.Policy{
+		Enabled:       p.Enabled,
+		YieldToStream: p.YieldToStream,
+		Default:       jobs.KindPolicy{Mode: mode},
+		Kinds:         make(map[jobs.Kind]jobs.KindPolicy, len(p.Kinds)),
+		CPU: jobs.CPUPolicy{
+			CeilingPercent: float64(p.CPUCeilingPercent),
+			ResumePercent:  float64(p.CPUResumePercent),
+			Sustained:      time.Duration(p.CPUSustainedSeconds) * time.Second,
+			Settle:         time.Duration(p.CPUSettleSeconds) * time.Second,
+		},
+		GPU: jobs.GPUPolicy{AvoidWhenStreaming: p.AvoidGPUWhenStreaming, Busy: p.GPUBusy},
+		Power: jobs.PowerPolicy{
+			BatteryFloorPercent: float64(p.BatteryFloorPercent),
+			ThermalCeilingC:     float64(p.ThermalCeilingC),
+		},
+		NiceLevel:    p.NiceLevel,
+		IdleIO:       p.IdleIO,
+		DeferFor:     time.Duration(p.DeferSeconds) * time.Second,
+		IngestLinger: time.Duration(p.IngestLingerSeconds) * time.Second,
+	}
+	for _, k := range p.Kinds {
+		name := jobs.Kind(strings.TrimSpace(k.Kind))
+		if name == "" {
+			continue
+		}
+		km := jobs.Mode(k.Mode)
+		if !km.Valid() {
+			km = mode
+		}
+		pol.Kinds[name] = jobs.KindPolicy{
+			Mode:         km,
+			Windows:      k.Windows,
+			UsesGPU:      k.UsesGPU,
+			IgnoreIngest: k.IgnoreIngest,
+		}
+	}
+	// Normalized fills what a half-filled form left out, so a settings blob
+	// written before a field existed still produces a policy that evaluates.
+	return pol.Normalized()
+}
+
+// problems reports the post-production policy that could not be evaluated.
+//
+// Everything is checked whether or not the governor is enabled, so a
+// half-filled form is caught when it is saved rather than when the machine
+// gets busy.
+func (p PostProdSettings) problems() []string {
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	if n := p.Concurrency; n < 1 || n > MaxPostProdConcurrency {
+		add("job concurrency %d out of range (1-%d)", n, MaxPostProdConcurrency)
+	}
+	// Empty is accepted as "the default" so a client that predates this block
+	// can still save the rest of the settings.
+	if m := p.DefaultMode; m != "" && !jobs.Mode(m).Valid() {
+		add("unknown job mode %q (realtime, deferred, scheduled, manual)", m)
+	}
+	if c := p.CPUCeilingPercent; c < 0 || c > 100 {
+		add("cpu ceiling %d%% out of range (0-100, 0 to disable)", c)
+	}
+	if r := p.CPUResumePercent; r < 0 || r > 100 {
+		add("cpu resume level %d%% out of range (0-100)", r)
+	}
+	if p.CPUCeilingPercent > 0 && p.CPUResumePercent >= p.CPUCeilingPercent {
+		add("cpu resume level %d%% must be below the ceiling %d%%", p.CPUResumePercent, p.CPUCeilingPercent)
+	}
+	if s := p.CPUSustainedSeconds; s < 0 || s > 3600 {
+		add("cpu sustained window %ds out of range (0-3600, 0 for the default)", s)
+	}
+	if s := p.CPUSettleSeconds; s < 0 || s > 3600 {
+		add("cpu settle window %ds out of range (0-3600, 0 for the default)", s)
+	}
+	if b := p.BatteryFloorPercent; b < 0 || b > 100 {
+		add("battery floor %d%% out of range (0-100, 0 to disable)", b)
+	}
+	if t := p.ThermalCeilingC; t < 0 || t > 150 {
+		add("thermal ceiling %d°C out of range (0-150, 0 to disable)", t)
+	}
+	if n := p.NiceLevel; n < 0 || n > jobs.MaxNiceLevel {
+		add("nice level %d out of range (0-%d)", n, jobs.MaxNiceLevel)
+	}
+	if s := p.IngestLingerSeconds; s < 0 || s > 3600 {
+		add("ingest linger %ds out of range (0-3600)", s)
+	}
+	if s := p.DeferSeconds; s < 0 || s > 3600 {
+		add("job deferral %ds out of range (0-3600, 0 for the default)", s)
+	}
+	if d := p.RetainDays; d < 0 || d > MaxPostProdRetainDays {
+		add("job history retention %d days out of range (0-%d, 0 to keep forever)", d, MaxPostProdRetainDays)
+	}
+	if n := p.RetainJobs; n < 0 || n > MaxPostProdRetainJobs {
+		add("job history floor %d out of range (0-%d)", n, MaxPostProdRetainJobs)
+	}
+	if len(p.Kinds) > MaxPostProdKinds {
+		add("post-production policy names %d job kinds (maximum %d)", len(p.Kinds), MaxPostProdKinds)
+	}
+
+	seen := map[string]bool{}
+	for _, k := range p.Kinds {
+		name := strings.TrimSpace(k.Kind)
+		switch {
+		case name == "":
+			add("a post-production policy row has no job kind")
+			continue
+		case len(name) > jobs.MaxKindLen:
+			add("job kind %q is longer than %d characters", name, jobs.MaxKindLen)
+			continue
+		// Two rows for one kind would silently pick whichever the map iteration
+		// landed on last.
+		case seen[name]:
+			add("duplicate post-production policy for job kind %q", name)
+			continue
+		}
+		seen[name] = true
+
+		if k.Mode != "" && !jobs.Mode(k.Mode).Valid() {
+			add("job kind %q has an unknown mode %q", name, k.Mode)
+		}
+		if len(k.Windows) > jobs.MaxWindows {
+			add("job kind %q has %d windows (maximum %d)", name, len(k.Windows), jobs.MaxWindows)
+		}
+		for _, w := range k.Windows {
+			if err := w.Validate(); err != nil {
+				add("job kind %q: %v", name, err)
+			}
+		}
+	}
+	return probs
+}
+
 // Settings is everything the user can change from the web UI.
 type Settings struct {
 	Ingest    IngestSettings    `json:"ingest"`
@@ -586,6 +839,7 @@ type Settings struct {
 	Synth     SynthSettings     `json:"synth"`
 	Meters    MeterSettings     `json:"meters"`
 	Logging   LoggingSettings   `json:"logging"`
+	PostProd  PostProdSettings  `json:"postProd"`
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -660,6 +914,30 @@ func DefaultSettings() Settings {
 		Synth:   SynthSettings{SilenceOnVideoOnly: true},
 		Meters:  MeterSettings{Enabled: true, IntervalMS: 100},
 		Logging: LoggingSettings{PersistProcessLogs: true, MaxFileMB: 8, MaxFiles: 3},
+		// The governing principle as a default: yield to the stream, one job at
+		// a time, everything deferred, every heavy child niced. An operator who
+		// never opens this page still gets a box that will not drop a frame for
+		// a transcript.
+		PostProd: PostProdSettings{
+			Enabled:               true,
+			Concurrency:           jobs.DefaultConcurrency,
+			DefaultMode:           string(jobs.DefaultMode),
+			YieldToStream:         true,
+			CPUCeilingPercent:     jobs.DefaultCPUCeilingPercent,
+			CPUResumePercent:      jobs.DefaultCPUResumePercent,
+			CPUSustainedSeconds:   int(jobs.DefaultCPUSustained / time.Second),
+			CPUSettleSeconds:      int(jobs.DefaultCPUSettle / time.Second),
+			AvoidGPUWhenStreaming: true,
+			GPUBusy:               false,
+			BatteryFloorPercent:   jobs.DefaultBatteryFloorPercent,
+			ThermalCeilingC:       jobs.DefaultThermalCeilingC,
+			NiceLevel:             jobs.DefaultNiceLevel,
+			IdleIO:                true,
+			IngestLingerSeconds:   int(jobs.DefaultIngestLinger / time.Second),
+			DeferSeconds:          int(jobs.DefaultDeferFor / time.Second),
+			RetainDays:            30,
+			RetainJobs:            200,
+		},
 	}
 }
 
@@ -750,6 +1028,9 @@ func (s Settings) Validate() error {
 	}
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)
+	}
+	for _, p := range s.PostProd.problems() {
+		add("%s", p)
 	}
 
 	if len(probs) > 0 {
