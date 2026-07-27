@@ -368,7 +368,77 @@ const (
 	DestRTMP DestKind = "rtmp"
 	DestSRT  DestKind = "srt"
 	DestFile DestKind = "file"
+	// DestAudio carries no video at all: an Icecast mount for a radio or
+	// podcast feed, or an audio file. It is the routing graph with nothing
+	// else attached, which makes it the purest expression of the per-
+	// destination mix rather than a special case bolted onto a video output.
+	DestAudio DestKind = "audio"
 )
+
+// audioCodec is the muxer/encoder pair one audio-only container needs.
+type audioCodec struct {
+	muxer   string
+	encoder string
+	// contentType is the Icecast Content-Type header. FFmpeg's icecast
+	// protocol only defaults it to audio/mpeg, and a listener handed the wrong
+	// one gets a download prompt instead of a stream.
+	contentType string
+	// lossless marks the containers where -b:a means nothing. Passing it
+	// anyway is not fatal but it puts a warning in the log tail for every
+	// single destination, which is how a log tail stops being read.
+	lossless bool
+}
+
+// audioFormats maps an output extension to the codec that fills it.
+//
+// .ogg is Opus, not Vorbis, on purpose. libvorbis is an optional FFmpeg build
+// flag and is missing from builds that carry libopus — Homebrew's is one — so
+// selecting it would be this repo's recurring mistake in a new costume: a
+// destination that refuses to start on a machine that is perfectly capable of
+// running it. Opus in Ogg is what every Icecast client of the last decade
+// plays, and it is what is actually present.
+var audioFormats = map[string]audioCodec{
+	".mp3":  {muxer: "mp3", encoder: "libmp3lame", contentType: "audio/mpeg"},
+	".aac":  {muxer: "adts", encoder: "aac", contentType: "audio/aac"},
+	".m4a":  {muxer: "ipod", encoder: "aac", contentType: "audio/mp4"},
+	".ogg":  {muxer: "ogg", encoder: "libopus", contentType: "audio/ogg"},
+	".opus": {muxer: "ogg", encoder: "libopus", contentType: "audio/ogg"},
+	".flac": {muxer: "flac", encoder: "flac", contentType: "audio/flac", lossless: true},
+	".wav":  {muxer: "wav", encoder: "pcm_s16le", contentType: "audio/wav", lossless: true},
+}
+
+// defaultAudioFormat is what a target with no recognisable extension gets. MP3,
+// because an Icecast mount is conventionally written bare ("/live") and MP3 is
+// the one audio codec every listener on the internet can already play.
+var defaultAudioFormat = audioFormats[".mp3"]
+
+// IcecastScheme is the URL prefix that marks an audio-only destination as a
+// live Icecast mount rather than a file. Credentials and mount point ride in
+// the URL itself: icecast://source:hackme@radio.example:8000/live.mp3
+const IcecastScheme = "icecast://"
+
+// isIcecast reports whether target is an Icecast mount.
+func isIcecast(target string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(target)), IcecastScheme)
+}
+
+// audioCodecFor picks the container for an audio-only destination from its
+// target: the file extension, or the extension of the Icecast mount point.
+func audioCodecFor(target string) audioCodec {
+	p := strings.TrimSpace(target)
+	// For a URL the extension lives on the path. Parsing rather than taking
+	// filepath.Ext of the whole string keeps a query string ("?x=y.wav") and a
+	// password containing a dot from deciding the codec.
+	if strings.Contains(p, "://") {
+		if u, err := url.Parse(p); err == nil {
+			p = u.Path
+		}
+	}
+	if f, ok := audioFormats[strings.ToLower(filepath.Ext(p))]; ok {
+		return f
+	}
+	return defaultAudioFormat
+}
 
 // DestSpec describes one outbound stream.
 type DestSpec struct {
@@ -386,6 +456,13 @@ type DestSpec struct {
 	// CopyVideo is always true in v1 and is here to make the guarantee
 	// explicit and testable rather than implicit in the arg list.
 	CopyVideo bool
+	// VideoDelayMS holds the picture back to satisfy a NEGATIVE routing delay,
+	// i.e. audio that needs to arrive early. It is routing.Result.VideoDelayMS
+	// passed straight through; the audio side of a negative delay is not
+	// expressible as a filter, because audio cannot be moved earlier than it
+	// arrives. Zero for every profile that does not use it, which is nearly all
+	// of them, and zero produces byte-for-byte the command as before.
+	VideoDelayMS int
 	// ExtraInputArgs and ExtraOutputArgs are expert mode: arguments an operator
 	// hand-wrote for this destination, already parsed and already checked by
 	// the API. Empty for every destination that has not opted in, which is the
@@ -482,7 +559,12 @@ func StripExtraArgs(argv, in, out []string) []string {
 // The central promise of polyemesis lives in two lines here: video is
 // `-c:v copy` (never re-encoded, never degraded, near-zero CPU) while audio is
 // decoded, re-mixed through the routing graph, and re-encoded to the single
-// stereo AAC track the platform will accept.
+// stereo track the platform will accept.
+//
+// DestAudio is the same command with the video half deleted rather than a
+// second code path: same relay, same filter graph, same explicit maps. What it
+// drops is the video map and the video codec flag, and what it gains is a
+// container chosen from the target instead of from the transport.
 func DestinationArgs(s DestSpec) []string {
 	if s.AudioBitrate == 0 {
 		s.AudioBitrate = 160
@@ -501,20 +583,32 @@ func DestinationArgs(s DestSpec) []string {
 		// The relay is a live source; a large input queue absorbs scheduler
 		// jitter that would otherwise show up as dropped frames.
 		"-thread_queue_size", "1024",
+	)
+	args = append(args, videoDelayArgs(s)...)
+	args = append(args,
 		"-i", RelayInputURL(s.RelayURL),
 		"-filter_complex", s.FilterComplex,
-		// Explicit maps only. Without them FFmpeg's default stream selection
-		// would pick one arbitrary audio track and quietly ignore the routing
-		// graph entirely — the single most damaging possible bug in this app.
-		"-map", "0:v:0",
-		"-c:v", "copy",
-		"-map", "["+s.AudioOutLabel+"]",
+	)
+
+	// Explicit maps only. Without them FFmpeg's default stream selection would
+	// pick one arbitrary audio track and quietly ignore the routing graph
+	// entirely — the single most damaging possible bug in this app.
+	if s.Kind != DestAudio {
+		args = append(args, "-map", "0:v:0", "-c:v", "copy")
+	}
+	args = append(args, "-map", "["+s.AudioOutLabel+"]")
+
+	if s.Kind == DestAudio {
+		return SpliceExtraArgs(append(args, audioOutputArgs(s)...),
+			s.ExtraInputArgs, s.ExtraOutputArgs)
+	}
+
+	args = append(args,
 		"-c:a", "aac",
 		"-b:a", strconv.Itoa(s.AudioBitrate)+"k",
 		"-ac", "2",
 		"-ar", strconv.Itoa(s.SampleRate),
 	)
-
 	switch s.Kind {
 	case DestRTMP:
 		args = append(args, "-f", "flv")
@@ -525,6 +619,58 @@ func DestinationArgs(s DestSpec) []string {
 	}
 	args = append(args, s.Target)
 	return SpliceExtraArgs(args, s.ExtraInputArgs, s.ExtraOutputArgs)
+}
+
+// videoDelayArgs renders a negative routing delay — audio early — as the input
+// offset that holds the picture back. Empty for every other profile.
+//
+// -itsoffset shifts EVERY stream of the input it precedes, so on its own it
+// would move audio and video together and achieve exactly nothing. What makes
+// it work here is the other end of the pipeline: every graph Compile emits ends
+// in `aresample=...:first_pts=0`, which pins the mixed audio to zero however
+// the input was shifted. Video keeps the offset, audio does not, and the
+// difference is the delay. Verified against FFmpeg 8.1.2: with first_pts=0 the
+// video start moved by exactly the offset and audio did not move at all;
+// against a graph without it, both moved and the separation stayed at zero.
+//
+// -itsoffset and -c:v copy get along, which is the combination that matters
+// here — the offset is applied by the demuxer, so there is no encoder in the
+// video path to renormalise it, and the measured shift was the requested one to
+// the microsecond. A re-encode also keeps the offset but snaps it to the frame
+// grid (0.500 s came out as 0.480 at 25 fps), so copy is both the cheaper and
+// the more accurate path. Do not "fix" this by moving the offset onto the video
+// filter chain: there is no video filter chain, by design.
+//
+// Audio-only destinations get nothing. There is no picture to hold back, and
+// offsetting the sole input would only shift timestamps the graph then pins.
+func videoDelayArgs(s DestSpec) []string {
+	if s.Kind == DestAudio || s.VideoDelayMS <= 0 {
+		return nil
+	}
+	// FFmpeg wants seconds. Millisecond precision, fixed notation, because
+	// %g would render 120 ms as "0.12" and 1 ms as "0.001" inconsistently.
+	return []string{"-itsoffset", strconv.FormatFloat(float64(s.VideoDelayMS)/1000, 'f', 3, 64)}
+}
+
+// audioOutputArgs renders the codec, container and (for Icecast) the headers an
+// audio-only destination needs, ending with the target.
+func audioOutputArgs(s DestSpec) []string {
+	f := audioCodecFor(s.Target)
+
+	args := []string{"-c:a", f.encoder}
+	if !f.lossless {
+		args = append(args, "-b:a", strconv.Itoa(s.AudioBitrate)+"k")
+	}
+	// Still stereo, still at the profile's rate: an audio-only destination is a
+	// destination, and the promise is one summed stereo mix per destination.
+	args = append(args, "-ac", "2", "-ar", strconv.Itoa(s.SampleRate))
+
+	if isIcecast(s.Target) {
+		// FFmpeg only assumes audio/mpeg. Anything else has to be declared or
+		// listeners get a file download where they expected a stream.
+		args = append(args, "-content_type", f.contentType)
+	}
+	return append(args, "-f", f.muxer, s.Target)
 }
 
 // fileFormat picks a muxer from the extension. Matroska is the default because

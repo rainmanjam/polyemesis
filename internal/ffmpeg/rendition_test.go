@@ -1,6 +1,10 @@
 package ffmpeg
 
 import (
+	"bytes"
+	"fmt"
+	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -121,6 +125,340 @@ func TestRenditionArgsScale(t *testing.T) {
 				t.Errorf("-vf = %q, must derive with -2 so the result stays even", got)
 			}
 		})
+	}
+}
+
+// --------------------------------------------------------------- dual format
+
+// The whole backwards-compatibility promise of this feature in one test: a
+// rendition saved before dual-format existed has no aspect mode, and must
+// still compile to the exact same filter string it always did.
+func TestRenditionArgsAspectDefaultIsTheOldScale(t *testing.T) {
+	tests := []struct {
+		name   string
+		aspect AspectMode
+	}{
+		{"the zero value is the historical stretch", AspectMode("")},
+		{"the named stretch mode is the same zero value", AspectStretch},
+		// A row written by a newer build, or edited by hand, must still encode.
+		// Refusing is the restrictive-direction mistake this repo keeps paying
+		// for; a stream in the old shape beats a stream that never starts.
+		{"an unrecognised mode degrades to the plain scale", AspectMode("fit-to-hexagon")},
+		{"a near-miss spelling degrades rather than refuses", AspectMode("Crop")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := baseRendition()
+			s.Width, s.Height = 1920, 1080
+			s.Aspect = tc.aspect
+			got, ok := argsAfter(RenditionArgs(s), "-vf")
+			if !ok || got != "scale=1920:1080" {
+				t.Errorf("-vf = %q (present=%v), want the unchanged scale=1920:1080", got, ok)
+			}
+		})
+	}
+}
+
+// An aspect conversion is defined by the TARGET SHAPE. With one axis left on
+// "keep the source's" there is no shape to convert to, so the rendition falls
+// back to the plain scale instead of inventing one.
+func TestRenditionArgsAspectNeedsBothDimensions(t *testing.T) {
+	tests := []struct {
+		name   string
+		w, h   int
+		wantVF string
+	}{
+		{"height only cannot know the target shape", 0, 1920, "scale=-2:1920"},
+		{"width only cannot know the target shape", 1080, 0, "scale=1080:-2"},
+		{"neither set is still no filter at all", 0, 0, ""},
+		{"negative values are treated as unset", -1080, -1920, ""},
+	}
+	for _, mode := range []AspectMode{AspectCrop, AspectPad, AspectBlurredPad} {
+		for _, tc := range tests {
+			t.Run(string(mode)+"/"+tc.name, func(t *testing.T) {
+				s := baseRendition()
+				s.Width, s.Height, s.Aspect = tc.w, tc.h, mode
+				got, ok := argsAfter(RenditionArgs(s), "-vf")
+				if tc.wantVF == "" {
+					if ok {
+						t.Fatalf("-vf = %q, want no filter at all", got)
+					}
+					return
+				}
+				if !ok || got != tc.wantVF {
+					t.Errorf("-vf = %q (present=%v), want %q", got, ok, tc.wantVF)
+				}
+			})
+		}
+	}
+}
+
+// The exact filter strings, pinned. These are verified against a real FFmpeg in
+// TestAspectFiltersAgainstRealFFmpeg; this test is what tells you which edit
+// changed them.
+func TestRenditionArgsAspectFilterStrings(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   AspectMode
+		w, h   int
+		color  string
+		wantVF string
+	}{
+		{
+			name: "crop landscape source to a vertical rendition",
+			mode: AspectCrop, w: 1080, h: 1920,
+			wantVF: `crop=2*floor(min(iw\,ih*1080/1920)/2):2*floor(min(ih\,iw*1920/1080)/2),scale=1080:1920,setsar=1`,
+		},
+		{
+			// The same expression, unchanged, running the other way: min() picks
+			// the side that has to give, so there is no direction to get wrong.
+			name: "crop vertical source to a landscape rendition",
+			mode: AspectCrop, w: 1920, h: 1080,
+			wantVF: `crop=2*floor(min(iw\,ih*1920/1080)/2):2*floor(min(ih\,iw*1080/1920)/2),scale=1920:1080,setsar=1`,
+		},
+		{
+			name: "pad letterboxes onto black by default",
+			mode: AspectPad, w: 1080, h: 1920,
+			wantVF: "scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2," +
+				"pad=1080:1920:2*floor((ow-iw)/2/2):2*floor((oh-ih)/2/2):black,setsar=1",
+		},
+		{
+			name: "pad honours a named colour",
+			mode: AspectPad, w: 1920, h: 1080, color: "white",
+			wantVF: "scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2," +
+				"pad=1920:1080:2*floor((ow-iw)/2/2):2*floor((oh-ih)/2/2):white,setsar=1",
+		},
+		{
+			name: "blurred pad composites the frame onto a blurred copy of itself",
+			mode: AspectBlurredPad, w: 1080, h: 1920,
+			wantVF: "split=2[bgsrc][fgsrc];" +
+				"[bgsrc]scale=134:240:force_original_aspect_ratio=increase:force_divisible_by=2," +
+				"crop=134:240,gblur=sigma=4,scale=1080:1920,setsar=1[bg];" +
+				"[fgsrc]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2[fg];" +
+				"[bg][fg]overlay=2*floor((W-w)/2/2):2*floor((H-h)/2/2)",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := baseRendition()
+			s.Width, s.Height, s.Aspect, s.PadColor = tc.w, tc.h, tc.mode, tc.color
+			args := RenditionArgs(s)
+
+			got, ok := argsAfter(args, "-vf")
+			if !ok {
+				t.Fatalf("missing -vf: %s", join(args))
+			}
+			if got != tc.wantVF {
+				t.Errorf("-vf =\n\t%q\nwant\n\t%q", got, tc.wantVF)
+			}
+			// The aspect chain already lands on exactly Width x Height; a second
+			// scale on the end would be a redundant resize.
+			if strings.Count(got, "scale=") != strings.Count(tc.wantVF, "scale=") {
+				t.Errorf("-vf has an extra scale: %q", got)
+			}
+			// Whatever the video path does, audio is still every track, copied.
+			if c, _ := argsAfter(args, "-c:a"); c != "copy" {
+				t.Errorf("-c:a = %q, want copy: aspect conversion is a video filter", c)
+			}
+			if maps := allAfter(args, "-map"); len(maps) != 2 || maps[1] != "0:a" {
+				t.Errorf("maps = %v, want the video stream plus every audio track", maps)
+			}
+		})
+	}
+}
+
+// H.264 encodes 4:2:0 chroma at half resolution, so an odd width or height has
+// no representable chroma plane and the encoder refuses to open with "width not
+// divisible by 2". Every dimension in an aspect chain is therefore either an
+// even literal or guarded, and there is no other way to get one.
+func TestRenditionArgsAspectDimensionsStayEven(t *testing.T) {
+	sizes := []struct{ w, h int }{
+		{1080, 1920}, {1920, 1080}, {720, 1280}, {608, 1080}, {128, 128}, {2160, 3840},
+	}
+	for _, mode := range []AspectMode{AspectCrop, AspectPad, AspectBlurredPad} {
+		for _, sz := range sizes {
+			t.Run(fmt.Sprintf("%s/%dx%d", mode, sz.w, sz.h), func(t *testing.T) {
+				s := baseRendition()
+				s.Width, s.Height, s.Aspect = sz.w, sz.h, mode
+				vf, ok := argsAfter(RenditionArgs(s), "-vf")
+				if !ok {
+					t.Fatalf("missing -vf")
+				}
+
+				// Every dimension is either an even literal or an expression
+				// that rounds itself even. There is no third option, because
+				// the third option is a stream that will not start.
+				for _, arg := range sizingArgs(vf) {
+					if n, err := strconv.Atoi(arg); err == nil {
+						if n%2 != 0 {
+							t.Errorf("odd dimension %d in %q", n, vf)
+						}
+						if n < 2 {
+							t.Errorf("zero-sized filter output in %q", vf)
+						}
+						continue
+					}
+					if !strings.HasPrefix(arg, "2*floor(") {
+						t.Errorf("dimension %q is neither an even literal nor rounded even: %q", arg, vf)
+					}
+				}
+				// Composite offsets land on the chroma grid for the same reason
+				// the dimensions do.
+				for _, arg := range filterArgs(vf, "overlay=", 2) {
+					if !strings.HasPrefix(arg, "2*floor(") {
+						t.Errorf("overlay offset %q is not rounded even: %q", arg, vf)
+					}
+				}
+				// -1 rounds to whatever the arithmetic lands on, which is odd
+				// half the time; -2 and force_divisible_by=2 are the two ways
+				// to derive a side that stays legal.
+				if strings.Contains(vf, ":-1") || strings.Contains(vf, "=-1") {
+					t.Errorf("-1 derivation can land on an odd side: %q", vf)
+				}
+				if strings.Contains(vf, "force_original_aspect_ratio") &&
+					strings.Count(vf, "force_original_aspect_ratio") != strings.Count(vf, "force_divisible_by=2") {
+					t.Errorf("an aspect-preserving scale derives a side without pinning it even: %q", vf)
+				}
+			})
+		}
+	}
+}
+
+// The blur runs on a shrunken copy because a gaussian wide enough to look
+// deliberate costs more per frame at 1080p than the H.264 encode it feeds.
+func TestBlurProxySize(t *testing.T) {
+	tests := []struct {
+		name         string
+		w, h         int
+		wantW, wantH int
+	}{
+		{"a vertical 1080p target blurs at an eighth", 1080, 1920, 134, 240},
+		{"a horizontal 1080p target blurs at an eighth", 1920, 1080, 240, 134},
+		{"an odd eighth rounds down to stay a legal frame", 1000, 1000, 124, 124},
+		// Blurring a dozen pixels turns the background into one flat colour,
+		// which is the "lazy" look this mode exists to avoid.
+		{"a small target holds a floor rather than blurring to mush", 256, 256, 32, 32},
+		{"the floor applies per axis", 1920, 128, 240, 32},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w, h := blurProxySize(tc.w, tc.h)
+			if w != tc.wantW || h != tc.wantH {
+				t.Errorf("blurProxySize(%d, %d) = %dx%d, want %dx%d", tc.w, tc.h, w, h, tc.wantW, tc.wantH)
+			}
+			if w%2 != 0 || h%2 != 0 {
+				t.Errorf("proxy %dx%d is not a legal 4:2:0 frame", w, h)
+			}
+		})
+	}
+}
+
+// The colour lands inside a filter argument, where a comma or a colon silently
+// re-cuts the whole chain into different filters. A mistyped colour must not be
+// the reason a live stream will not start, so the answer is black, not an error.
+func TestPadColorFallsBackToBlackRatherThanRefusing(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"empty is black", "", "black"},
+		{"a colour name is passed through", "white", "white"},
+		{"a hex triplet is passed through", "#1a2b3c", "#1a2b3c"},
+		{"FFmpeg's 0x form is passed through", "0xFF00FF", "0xFF00FF"},
+		{"surrounding space is trimmed", "  navy  ", "navy"},
+		{"a comma would start a new filter", "black,scale=2:2", "black"},
+		{"a colon would start a new argument", "black:0.5", "black"},
+		{"a filter-graph separator is refused", "black;anullsrc", "black"},
+		{"an alpha suffix has nothing behind it to show", "black@0.5", "black"},
+		{"a hash anywhere but the front is not a colour", "bl#ack", "black"},
+		{"a quote is not a colour", "'red'", "black"},
+		{"an absurd length is not a colour", strings.Repeat("a", 25), "black"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := padColor(tc.in); got != tc.want {
+				t.Errorf("padColor(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// PadColor is only meaningful where there are bars to fill. It must not leak
+// into the modes that have none.
+func TestRenditionArgsPadColorIsIgnoredByTheOtherModes(t *testing.T) {
+	for _, mode := range []AspectMode{AspectStretch, AspectCrop, AspectBlurredPad} {
+		t.Run(string(mode), func(t *testing.T) {
+			s := baseRendition()
+			s.Width, s.Height, s.Aspect, s.PadColor = 1080, 1920, mode, "magenta"
+			vf, _ := argsAfter(RenditionArgs(s), "-vf")
+			if strings.Contains(vf, "magenta") {
+				t.Errorf("-vf = %q, want no pad colour: %s has no bars to fill", vf, mode)
+			}
+		})
+	}
+}
+
+// VAAPI encodes from GPU surfaces. The aspect work happens in software and the
+// upload has to stay on the end of it, which only works because every mode's
+// graph ends in a single linear chain.
+func TestRenditionArgsAspectUploadsForVAAPI(t *testing.T) {
+	for _, mode := range []AspectMode{AspectCrop, AspectPad, AspectBlurredPad} {
+		t.Run(string(mode), func(t *testing.T) {
+			s := baseRendition()
+			s.Width, s.Height, s.Aspect = 1080, 1920, mode
+			s.Encoder = EncoderVAAPI
+			vf, ok := argsAfter(RenditionArgs(s), "-vf")
+			if !ok {
+				t.Fatal("missing -vf")
+			}
+			if !strings.HasSuffix(vf, ",format=nv12,hwupload") {
+				t.Errorf("-vf = %q, want the hwupload tail on the end", vf)
+			}
+			// A tail after a ';' would be a new, unconnected chain rather than
+			// the last link of this one.
+			if tail := vf[strings.LastIndex(vf, ";")+1:]; strings.Contains(tail, "[") &&
+				!strings.HasPrefix(tail, "[") {
+				t.Errorf("-vf = %q, hwupload must extend the final chain", vf)
+			}
+		})
+	}
+}
+
+// sizingArgs returns the width and height argument of every filter in the chain
+// that decides how big a frame is.
+func sizingArgs(vf string) []string {
+	var out []string
+	for _, name := range []string{"scale=", "crop=", "pad="} {
+		out = append(out, filterArgs(vf, name, 2)...)
+	}
+	return out
+}
+
+// filterArgs pulls the first n positional arguments of every `name` filter in a
+// chain.
+//
+// The chain is walked rather than regexed because the arithmetic contains its
+// own commas — escaped as `\,` so FFmpeg does not read them as the start of the
+// next filter — and a naive split would cut an expression in half.
+func filterArgs(vf, name string, n int) []string {
+	var out []string
+	for rest := vf; ; {
+		i := strings.Index(rest, name)
+		if i < 0 {
+			return out
+		}
+		rest = rest[i+len(name):]
+
+		end := len(rest)
+		for j := 0; j < len(rest); j++ {
+			if (rest[j] == ',' || rest[j] == ';') && (j == 0 || rest[j-1] != '\\') {
+				end = j
+				break
+			}
+		}
+		args := strings.Split(rest[:end], ":")
+		for k := 0; k < n && k < len(args); k++ {
+			out = append(out, args[k])
+		}
 	}
 }
 
@@ -465,6 +803,194 @@ func TestDefaultVideoEncoderPrefersSoftware(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.tools.DefaultVideoEncoder(); got != tc.want {
 				t.Errorf("DefaultVideoEncoder() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// ------------------------------------------- dual format, against real FFmpeg
+//
+// A filter string that looks right and a filter string that runs are different
+// things, and the gap between them is where "-vf accepted, encoder refused to
+// open" lives. These two tests run the generated chains through the FFmpeg on
+// this machine: the first proves the output is exactly the size asked for and
+// legal to encode, the second proves the picture is actually placed the way the
+// mode's name claims.
+
+// aspectFilterFor is the -vf the engine would pass for this rendition.
+func aspectFilterFor(t *testing.T, mode AspectMode, w, h int) string {
+	t.Helper()
+	s := baseRendition()
+	s.Width, s.Height, s.Aspect = w, h, mode
+	vf, ok := argsAfter(RenditionArgs(s), "-vf")
+	if !ok {
+		t.Fatalf("%s %dx%d produced no -vf", mode, w, h)
+	}
+	return vf
+}
+
+func needFFmpeg(t *testing.T, names ...string) []string {
+	t.Helper()
+	var bins []string
+	for _, n := range names {
+		bin, err := exec.LookPath(n)
+		if err != nil {
+			t.Skipf("%s is not installed; the aspect arithmetic is covered by the string tests", n)
+		}
+		bins = append(bins, bin)
+	}
+	return bins
+}
+
+func TestAspectFiltersAgainstRealFFmpeg(t *testing.T) {
+	bins := needFFmpeg(t, "ffmpeg", "ffprobe")
+	ffmpeg, ffprobe := bins[0], bins[1]
+
+	// Deliberately awkward sources: odd dimensions, square, and both
+	// orientations, because every one of them lands the even-rounding
+	// arithmetic somewhere different.
+	sources := []string{"1920x1080", "1080x1920", "1000x1000", "1279x721", "641x361"}
+	targets := []struct{ w, h int }{
+		{1080, 1920}, // the vertical rendition this feature exists for
+		{1920, 1080}, // and the same conversion run backwards
+	}
+
+	for _, mode := range []AspectMode{AspectCrop, AspectPad, AspectBlurredPad} {
+		for _, tgt := range targets {
+			vf := aspectFilterFor(t, mode, tgt.w, tgt.h)
+			for _, src := range sources {
+				t.Run(fmt.Sprintf("%s/%s_to_%dx%d", mode, src, tgt.w, tgt.h), func(t *testing.T) {
+					out := t.TempDir() + "/out.mp4"
+					cmd := exec.Command(ffmpeg, "-hide_banner", "-v", "error", "-nostdin",
+						"-f", "lavfi", "-i", "testsrc2=size="+src+":rate=30:duration=0.2",
+						"-vf", vf, "-frames:v", "1",
+						// The encoder is the point: an odd width anywhere in the
+						// chain fails here with "width not divisible by 2".
+						"-c:v", "libx264", "-pix_fmt", "yuv420p", "-y", out)
+					if b, err := cmd.CombinedOutput(); err != nil || len(b) > 0 {
+						t.Fatalf("ffmpeg refused %q on a %s source: %v\n%s", vf, src, err, b)
+					}
+
+					probe := exec.Command(ffprobe, "-v", "error", "-select_streams", "v:0",
+						"-show_entries", "stream=width,height,sample_aspect_ratio",
+						"-of", "csv=p=0", out)
+					b, err := probe.Output()
+					if err != nil {
+						t.Fatalf("ffprobe: %v", err)
+					}
+					got := strings.TrimSpace(string(b))
+					// SAR 1:1 matters as much as the pixel count: scale pushes
+					// any leftover aspect error into the sample aspect ratio, so
+					// a stream can be 1080x1920 and still display un-square.
+					want := fmt.Sprintf("%d,%d,1:1", tgt.w, tgt.h)
+					if got != want {
+						t.Errorf("%s source through %s produced %q, want %q\n-vf %s", src, mode, got, want, vf)
+					}
+				})
+			}
+		}
+	}
+}
+
+// What each mode does to the picture, told apart by looking at the pixels.
+//
+// The source is solid blue with a green band along the edge that a centre crop
+// has to throw away. That one marker separates all three modes: crop loses it,
+// pad keeps it and adds bars, blurred-pad keeps it and has no bars at all.
+func TestAspectFiltersPlaceThePictureCorrectly(t *testing.T) {
+	ffmpeg := needFFmpeg(t, "ffmpeg")[0]
+
+	const (
+		// A band 1/8 of the way in from the edge, well outside the centre that
+		// a 16:9 <-> 9:16 crop keeps.
+		landscapeSrc = "color=c=0x0000FF:s=1920x1080:r=30:d=0.2," +
+			"drawbox=x=0:y=0:w=240:h=1080:color=0x00FF00:t=fill"
+		portraitSrc = "color=c=0x0000FF:s=1080x1920:r=30:d=0.2," +
+			"drawbox=x=0:y=0:w=1080:h=240:color=0x00FF00:t=fill"
+	)
+
+	tests := []struct {
+		name       string
+		mode       AspectMode
+		src        string
+		w, h       int
+		wantEdge   bool // the green band survived the conversion
+		wantBars   bool // some of the canvas is the pad colour
+		wantReason string
+	}{
+		{
+			name: "crop drops the edges of a landscape source", mode: AspectCrop,
+			src: landscapeSrc, w: 1080, h: 1920,
+			wantEdge: false, wantBars: false,
+			wantReason: "a centre crop keeps the middle and fills the frame",
+		},
+		{
+			name: "crop drops the edges of a portrait source", mode: AspectCrop,
+			src: portraitSrc, w: 1920, h: 1080,
+			wantEdge: false, wantBars: false,
+			wantReason: "the same crop run the other way trims top and bottom",
+		},
+		{
+			name: "pad keeps everything and admits the bars", mode: AspectPad,
+			src: landscapeSrc, w: 1080, h: 1920,
+			wantEdge: true, wantBars: true,
+			wantReason: "nothing is lost, so the leftover canvas is black",
+		},
+		{
+			name: "pad pillarboxes a portrait source", mode: AspectPad,
+			src: portraitSrc, w: 1920, h: 1080,
+			wantEdge: true, wantBars: true,
+			wantReason: "bars move to the sides but the picture is whole",
+		},
+		{
+			name: "blurred pad keeps everything with no bars at all", mode: AspectBlurredPad,
+			src: landscapeSrc, w: 1080, h: 1920,
+			wantEdge: true, wantBars: false,
+			wantReason: "the background is the frame itself, so black never shows",
+		},
+		{
+			name: "blurred pad fills the sides of a portrait source", mode: AspectBlurredPad,
+			src: portraitSrc, w: 1920, h: 1080,
+			wantEdge: true, wantBars: false,
+			wantReason: "the same composite, filling left and right instead",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vf := aspectFilterFor(t, tc.mode, tc.w, tc.h)
+			cmd := exec.Command(ffmpeg, "-hide_banner", "-v", "error", "-nostdin",
+				"-f", "lavfi", "-i", tc.src, "-vf", vf, "-frames:v", "1",
+				"-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("ffmpeg: %v\n%s\n-vf %s", err, stderr.String(), vf)
+			}
+
+			frame := stdout.Bytes()
+			if want := tc.w * tc.h * 3; len(frame) != want {
+				t.Fatalf("frame is %d bytes, want %d (%dx%d rgb24)", len(frame), want, tc.w, tc.h)
+			}
+
+			var green, bars int
+			for i := 0; i+2 < len(frame); i += 3 {
+				r, g, b := frame[i], frame[i+1], frame[i+2]
+				switch {
+				// Generous thresholds: the resample rings at the colour
+				// boundary and the blur smears it, so this counts unmistakable
+				// pixels rather than exact ones.
+				case g > 150 && r < 100 && b < 100:
+					green++
+				case r < 40 && g < 40 && b < 40:
+					bars++
+				}
+			}
+			if got := green > 0; got != tc.wantEdge {
+				t.Errorf("green edge present = %v, want %v: %s (%d px)", got, tc.wantEdge, tc.wantReason, green)
+			}
+			if got := bars > 0; got != tc.wantBars {
+				t.Errorf("bars present = %v, want %v: %s (%d px)", got, tc.wantBars, tc.wantReason, bars)
 			}
 		})
 	}
