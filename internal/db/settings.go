@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
 // IngestMode selects which listener the ingest supervisor runs.
@@ -65,6 +66,14 @@ type IngestSettings struct {
 	SRT  SRTSettings  `json:"srt"`
 	RTMP RTMPSettings `json:"rtmp"`
 	Pull PullSettings `json:"pull"`
+	// Annotations describe what each incoming audio track IS — mic, music,
+	// commentary, its language — and they live here rather than on a
+	// destination because they are a property of the feed, not of anyone
+	// listening to it. Every destination compiles against the same set.
+	//
+	// omitempty so a settings blob written before roles existed round-trips
+	// byte-identically.
+	Annotations []routing.TrackAnnotation `json:"annotations,omitempty"`
 }
 
 // rtspTransports is FFmpeg's own closed set for -rtsp_transport. Listed so a
@@ -103,6 +112,20 @@ type RecordingSettings struct {
 	// sharing the volume can still fill it, and a full volume fails far more
 	// than the recording. 0 = no floor.
 	MinFreeGB float64 `json:"minFreeGb"`
+	// Stems ALSO writes every ingest audio track to its own file — mic.flac,
+	// music.flac, game.flac — beside the multitrack master, from the same
+	// process so they stay sample-aligned with each other. It is what makes
+	// polyemesis a multitrack field recorder as well as a restreamer.
+	//
+	// Default FALSE, and it must stay false: it multiplies what a session
+	// writes by roughly the track count, which is a decision about someone's
+	// disk rather than a default anyone should inherit from an upgrade.
+	Stems bool `json:"stems"`
+	// StemCodec is what those files are written as. Both choices are lossless;
+	// FLAC is the default because it is about half the size, and WAV exists for
+	// the one tool in the chain that still cannot open a FLAC. Empty means
+	// FLAC, so a settings blob that predates stems needs no migration.
+	StemCodec ffmpeg.StemCodec `json:"stemCodec"`
 }
 
 // LoggingSettings controls whether captured process stderr outlives the
@@ -324,15 +347,215 @@ func (p PlayoutSettings) problems() []string {
 	return probs
 }
 
+// ----------------------------------------------------------------- failover
+
+// FailoverReturn decides what happens when the primary ingest comes back.
+type FailoverReturn string
+
+const (
+	// FailoverReturnManual leaves the backup on air until an operator says
+	// otherwise. It is the default because an encoder that dropped once usually
+	// drops again, and an automatic return turns that into a broadcast that
+	// flaps between two sources — each flap a visible cut for every viewer.
+	FailoverReturnManual FailoverReturn = "manual"
+	// FailoverReturnAuto goes back to the primary once it has been delivering
+	// steadily for ReturnStableSeconds.
+	FailoverReturnAuto FailoverReturn = "auto"
+)
+
+// Failover bounds. Wide enough to be an opinion about units rather than about
+// how someone runs their show.
+const (
+	MinFailoverGraceSeconds = 1
+	MaxFailoverGraceSeconds = 300
+	MaxFailoverReturnStable = 3600
+	// MaxSlateImagePath keeps the stored path to something a filesystem and a
+	// form field can both hold.
+	MaxSlateImagePath = 512
+)
+
+// BackupIngestSettings is the second listener, running alongside the primary on
+// its own port.
+//
+// It is a full ingest configuration rather than "the primary with a different
+// port" on purpose: the redundant path is usually a different box on a
+// different network, and the encoder that feeds it is often a different model
+// that can only speak RTMP. Forcing it to mirror the primary's protocol would
+// make the feature useless in exactly the case it exists for.
+type BackupIngestSettings struct {
+	Enabled bool         `json:"enabled"`
+	Mode    IngestMode   `json:"mode"`
+	SRT     SRTSettings  `json:"srt"`
+	RTMP    RTMPSettings `json:"rtmp"`
+	Pull    PullSettings `json:"pull"`
+}
+
+// SlateSettings is the standby picture published while no ingest is delivering.
+//
+// There is deliberately no width, height or frame rate here. The slate has to
+// match the departed ingest closely enough that a `-c:v copy` destination does
+// not choke on the change, and the only thing that knows what the ingest was is
+// the probe — an operator typing 1080p into a form while their camera sends
+// 720p would produce exactly the silent corruption this feature must not cause.
+type SlateSettings struct {
+	Enabled bool `json:"enabled"`
+	// ImagePath is a still image, relative to the data directory and confined
+	// there the same way a file:// pull source is. Empty paints Color instead,
+	// and that is the fallback precisely because a flat colour has no file to
+	// fail to open.
+	ImagePath string `json:"imagePath"`
+	// Color is any spelling FFmpeg's colour parser accepts. Empty means black.
+	Color string `json:"color"`
+	// VideoKbps is a floor, not a budget: a static frame needs almost nothing,
+	// but platforms watch for a bitrate before they call a stream unhealthy.
+	VideoKbps int `json:"videoKbps"`
+	// Encoder is empty for libx264, which is the right default even on a box
+	// full of hardware: a static frame costs a software encoder nothing, and the
+	// one job the slate has is to start when everything else has already failed.
+	Encoder VideoEncoder `json:"encoder"`
+	Preset  string       `json:"preset"`
+}
+
+// FailoverSettings turns on the source-selector tier: a permanent relay between
+// the ingest and everything downstream, fed by whichever source is currently
+// live.
+//
+// Default OFF, and that is not timidity. With it off the pipeline is
+// byte-for-byte what it was before this feature existed — destinations
+// subscribe straight to the ingest (or the silence tier) and no extra process
+// runs. With it on there is one more remux hop, which is cheap but not free,
+// and it is a decision rather than something an upgrade should make for you.
+type FailoverSettings struct {
+	Enabled bool `json:"enabled"`
+	// GraceSeconds is how long the current source may deliver nothing before
+	// the selector switches away from it. Too low and a network hiccup becomes
+	// a cut; too high and the platform sees a stall before the slate arrives.
+	GraceSeconds int            `json:"graceSeconds"`
+	Return       FailoverReturn `json:"return"`
+	// ReturnStableSeconds is how long the primary must deliver continuously
+	// before an automatic return trusts it. Ignored in manual mode.
+	ReturnStableSeconds int                  `json:"returnStableSeconds"`
+	Backup              BackupIngestSettings `json:"backup"`
+	Slate               SlateSettings        `json:"slate"`
+}
+
+// SlateImageProblem reports why the configured still cannot be used, or nil.
+//
+// Same confinement as a file:// pull source, and for the same reason: the path
+// is operator input that becomes an FFmpeg argument, and an absolute path here
+// would be a read primitive for whoever reaches the settings API.
+func (s SlateSettings) SlateImageProblem() error {
+	p := strings.TrimSpace(s.ImagePath)
+	if p == "" {
+		return nil
+	}
+	if len(p) > MaxSlateImagePath {
+		return fmt.Errorf("slate image path is longer than %d characters", MaxSlateImagePath)
+	}
+	if strings.ContainsAny(p, "\x00\n\r") {
+		return errors.New("slate image path contains control characters")
+	}
+	// Backslashes are separators on Windows, so normalise before the traversal
+	// check or "..\..\secret.key" walks straight past it.
+	rel := strings.ReplaceAll(p, `\`, "/")
+	switch {
+	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
+		len(rel) > 1 && rel[1] == ':':
+		return errors.New("slate image must be a relative path inside the data directory")
+	}
+	return nil
+}
+
+// boundPort is the port this ingest configuration will actually bind, or 0 when
+// it binds nothing. A pull source dials out and listens on no port at all, so
+// asking "do these two conflict" has to start here rather than at the numbers.
+func boundPort(mode IngestMode, srt SRTSettings, rtmp RTMPSettings) int {
+	switch mode {
+	case IngestSRT:
+		return srt.Port
+	case IngestRTMP:
+		return rtmp.Port
+	}
+	return 0
+}
+
+// problems reports the failover configuration that would produce a process that
+// cannot start.
+//
+// Ranges are checked whether or not the feature is enabled, so a half-filled
+// form is caught when it is saved. The port conflict is not: it depends on
+// which listener each side will actually bind, and two ingests that never run
+// together cannot collide.
+func (f FailoverSettings) problems(primary IngestSettings) []string {
+	var probs []string
+	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
+
+	if g := f.GraceSeconds; g < MinFailoverGraceSeconds || g > MaxFailoverGraceSeconds {
+		add("failover grace period %ds out of range (%d-%d)", g, MinFailoverGraceSeconds, MaxFailoverGraceSeconds)
+	}
+	switch f.Return {
+	case FailoverReturnManual, FailoverReturnAuto:
+	default:
+		add("unknown failover return mode %q (manual, auto)", f.Return)
+	}
+	if t := f.ReturnStableSeconds; t < 0 || t > MaxFailoverReturnStable {
+		add("failover return delay %ds out of range (0-%d)", t, MaxFailoverReturnStable)
+	}
+
+	b := f.Backup
+	switch b.Mode {
+	case IngestSRT, IngestRTMP:
+	case IngestPull:
+		if b.Enabled {
+			if err := ffmpeg.ValidatePullURL(b.Pull.URL); err != nil {
+				add("backup ingest: %v", err)
+			}
+		}
+	default:
+		add("unknown backup ingest mode %q", b.Mode)
+	}
+	for _, p := range b.Pull.problems() {
+		add("backup ingest: %s", p)
+	}
+	if b.SRT.Port < 1 || b.SRT.Port > 65535 {
+		add("backup srt port %d out of range", b.SRT.Port)
+	}
+	if p := b.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
+		add("backup srt passphrase must be 10-79 characters (got %d)", len(p))
+	}
+	if b.SRT.LatencyMS < 20 || b.SRT.LatencyMS > 8000 {
+		add("backup srt latency %dms out of range (20-8000)", b.SRT.LatencyMS)
+	}
+	if b.RTMP.Port < 1 || b.RTMP.Port > 65535 {
+		add("backup rtmp port %d out of range", b.RTMP.Port)
+	}
+	if b.Mode == IngestRTMP && b.RTMP.App == "" {
+		add("backup rtmp app name is required")
+	}
+	if f.Enabled && b.Enabled {
+		// Both listeners are up at once, which is the whole point, so they
+		// cannot share a socket with each other or with the primary.
+		if bp := boundPort(b.Mode, b.SRT, b.RTMP); bp != 0 {
+			if pp := boundPort(primary.Mode, primary.SRT, primary.RTMP); pp == bp {
+				add("the backup ingest cannot share port %d with the primary", bp)
+			}
+		}
+	}
+	if err := f.Slate.SlateImageProblem(); err != nil {
+		add("%v", err)
+	}
+	if k := f.Slate.VideoKbps; k < 0 || k > 100_000 {
+		add("slate bitrate %d kbps out of range (0-100000, 0 for the default)", k)
+	}
+	return probs
+}
+
 // SynthSettings controls the synthetic sources.
 //
-// Only silence is here. The slate — a standby picture published while the
-// ingest is away — needs a permanent source-selector tier between the ingest
-// and the destinations, because switching a destination's subscription means
-// restarting its process and dropping the platform connection, which is the
-// exact failure a slate exists to prevent. ffmpeg.SlateArgs is built and
-// tested; the tier that would drive it is not, and a setting for a feature the
-// engine cannot honour would be worse than no setting at all.
+// Only silence is here. The slate lives in FailoverSettings, because a standby
+// picture and a backup ingest are the same piece of work: both need the
+// permanent source-selector tier, and both are just another answer to "what is
+// feeding the hub the destinations already subscribe to".
 type SynthSettings struct {
 	// SilenceOnVideoOnly synthesises a silent stereo track when the ingest
 	// probes with zero audio tracks.
@@ -359,6 +582,7 @@ type Settings struct {
 	Recording RecordingSettings `json:"recording"`
 	Preview   PreviewSettings   `json:"preview"`
 	Playout   PlayoutSettings   `json:"playout"`
+	Failover  FailoverSettings  `json:"failover"`
 	Synth     SynthSettings     `json:"synth"`
 	Meters    MeterSettings     `json:"meters"`
 	Logging   LoggingSettings   `json:"logging"`
@@ -382,6 +606,8 @@ func DefaultSettings() Settings {
 			MaxGB:          50,
 			MaxAgeHours:    24 * 30,
 			MinFreeGB:      5,
+			Stems:          false,
+			StemCodec:      ffmpeg.DefaultStemCodec,
 		},
 		Preview: PreviewSettings{
 			Enabled:            true,
@@ -409,6 +635,28 @@ func DefaultSettings() Settings {
 				{Name: "source", Enabled: true},
 			},
 		},
+		// Off, so an upgrade changes nothing at all, but described in full so
+		// that turning it on is one switch rather than a form to design. The
+		// backup listener sits one port above the primary's, the slate is
+		// already enabled inside it, and the return is manual — which is the
+		// choice that cannot surprise anyone mid-broadcast.
+		Failover: FailoverSettings{
+			Enabled:             false,
+			GraceSeconds:        5,
+			Return:              FailoverReturnManual,
+			ReturnStableSeconds: 30,
+			Backup: BackupIngestSettings{
+				Enabled: false,
+				Mode:    IngestSRT,
+				SRT:     SRTSettings{Port: 6001, LatencyMS: 200},
+				RTMP:    RTMPSettings{Port: 1936, App: "live", StreamKey: "backup"},
+				Pull: PullSettings{
+					ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
+					RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
+				},
+			},
+			Slate: SlateSettings{Enabled: true, Color: "black", VideoKbps: 2000},
+		},
 		Synth:   SynthSettings{SilenceOnVideoOnly: true},
 		Meters:  MeterSettings{Enabled: true, IntervalMS: 100},
 		Logging: LoggingSettings{PersistProcessLogs: true, MaxFileMB: 8, MaxFiles: 3},
@@ -433,6 +681,12 @@ func (s Settings) Validate() error {
 	}
 	for _, p := range s.Ingest.Pull.problems() {
 		add("%s", p)
+	}
+	// Track roles are the operator's description of the feed. An invalid one
+	// would compile into a graph nobody asked for, so it is caught here rather
+	// than by a destination that will not start.
+	if err := routing.ValidateAnnotations(s.Ingest.Annotations); err != nil {
+		add("%v", err)
 	}
 	if s.Ingest.SRT.Port < 1 || s.Ingest.SRT.Port > 65535 {
 		add("srt port %d out of range", s.Ingest.SRT.Port)
@@ -466,6 +720,11 @@ func (s Settings) Validate() error {
 	if s.Recording.MinFreeGB < 0 {
 		add("recording free-space floor cannot be negative")
 	}
+	// Empty is deliberately accepted as "the default": a client that has never
+	// heard of stems must be able to save the rest of the recording settings.
+	if !ffmpeg.ValidStemCodec(s.Recording.StemCodec) {
+		add("unknown stem codec %q (flac, wav)", s.Recording.StemCodec)
+	}
 	if s.Logging.MaxFileMB < 1 || s.Logging.MaxFileMB > 1024 {
 		add("log file size %dMB out of range (1-1024)", s.Logging.MaxFileMB)
 	}
@@ -484,6 +743,9 @@ func (s Settings) Validate() error {
 		add("preview idle timeout %ds out of range (5-3600, or 0 for the default)", t)
 	}
 	for _, p := range s.Playout.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.Failover.problems(s.Ingest) {
 		add("%s", p)
 	}
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {

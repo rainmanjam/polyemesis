@@ -111,7 +111,56 @@ CREATE TABLE IF NOT EXISTS recordings (
     tracks      INTEGER NOT NULL DEFAULT 0
 );
 
+-- One webhook endpoint and what it wants to hear about. The URL is stored as
+-- given because a Slack or Discord webhook URL IS the credential and there is
+-- nothing to post to without it; it is never returned by the API or written to
+-- a payload. See alerts.Rule.RedactedURL.
+--
+-- debounce_seconds is the window inside which repeats of the same subject
+-- become one message, and min_interval_seconds is the floor between two
+-- deliveries to this endpoint. Both have non-zero defaults on purpose: a rule
+-- with neither is how a flapping destination sends two hundred messages.
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                 TEXT    NOT NULL,
+    enabled              INTEGER NOT NULL DEFAULT 1,
+    url                  TEXT    NOT NULL,
+    format               TEXT    NOT NULL DEFAULT 'json',   -- json | discord | slack
+    events               TEXT    NOT NULL DEFAULT '[]',     -- JSON array; empty = every event
+    min_severity         TEXT    NOT NULL DEFAULT 'info',
+    debounce_seconds     INTEGER NOT NULL DEFAULT 10,
+    min_interval_seconds INTEGER NOT NULL DEFAULT 30,
+    created_at           INTEGER NOT NULL,
+    updated_at           INTEGER NOT NULL
+);
+
+-- When destinations should be live. Instants are UTC; a recurring schedule
+-- stores a wall-clock minute plus the IANA zone to read it in, so a show at
+-- 19:00 local stays at 19:00 across a daylight-saving boundary.
+--
+-- last_run_at is the newest occurrence already handled, whether it fired or was
+-- skipped for being missed. It is what stops a server that was off all morning
+-- from replaying the morning when it comes back.
+CREATE TABLE IF NOT EXISTS schedules (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    action          TEXT    NOT NULL DEFAULT 'start',  -- start | stop
+    kind            TEXT    NOT NULL DEFAULT 'once',   -- once | daily | weekly
+    destination_ids TEXT    NOT NULL DEFAULT '[]',     -- JSON array; empty = every destination
+    tz              TEXT    NOT NULL DEFAULT '',       -- IANA zone; empty = UTC
+    at_minutes      INTEGER NOT NULL DEFAULT 0,        -- minutes past local midnight
+    days            TEXT    NOT NULL DEFAULT '[]',     -- JSON array of weekday numbers, Sunday = 0
+    run_at          INTEGER NOT NULL DEFAULT 0,        -- unix seconds, one-shot only
+    grace_seconds   INTEGER NOT NULL DEFAULT 300,
+    last_run_at     INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled, id);
+CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled, id);
 CREATE INDEX IF NOT EXISTS idx_destinations_position ON destinations(position, id);
 
 -- NOTE: nothing here may reference destinations.rendition_id. This file runs
@@ -124,3 +173,6 @@ CREATE INDEX IF NOT EXISTS idx_destinations_position ON destinations(position, i
 -- expert_ack_reencode: they are added by MigrateDestinationExpertArgs
 -- (destinations.go) rather than here, so that fresh and upgraded databases
 -- get them from exactly one place and cannot disagree about the default.
+
+-- And again for renditions.aspect_mode and pad_color: MigrateRenditionAspect
+-- (renditions.go) owns them, for the same reason.
