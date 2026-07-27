@@ -423,28 +423,35 @@ var destinationPresets = []DestinationPreset{
 		URL:         "rtmps://fa723fc1b171.global-contribute.live-video.net",
 		SeparateKey: true,
 		HelpURL:     "https://kick.com/dashboard/settings/stream",
-		Notes: "Kick does not expose stream keys over its public API, so there is nothing to connect — copy both the " +
-			"ingest URL and the key from Kick → Settings → Stream. Kick issues the ingest host per channel, so " +
-			"replace the one prefilled here with yours if it differs.",
+		Notes: "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and " +
+			"viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → " +
+			"Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes " +
+			"your title and category and reports viewer counts. Kick issues the ingest host per channel, so replace " +
+			"the one prefilled here with yours if it differs.",
 	},
 	{
 		ID: "facebook", Name: "Facebook Live", Group: GroupMajor,
-		Transport: PresetRTMPS, Kind: DestRTMP,
+		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformFacebook,
 		URL:         "rtmps://live-api-s.facebook.com:443/rtmp/",
 		SeparateKey: true,
 		HelpURL:     "https://www.facebook.com/live/producer",
-		Notes: "Create the broadcast in Live Producer and copy the stream key; a persistent key lets you reuse this " +
-			"destination across broadcasts. Facebook requires RTMPS — plain RTMP is refused.",
+		Notes: "Connect a Facebook account in Settings → Platform credentials and polyemesis creates the broadcast " +
+			"and fills in both the ingest URL and the key. Note that Facebook issues them per broadcast, so each " +
+			"refresh starts a new live video rather than re-reading an existing one. Registering the Meta app is " +
+			"the slow part — it needs App Review before anyone but you can connect. To do it by hand instead, copy " +
+			"the server URL and key from Live Producer. Facebook requires RTMPS; plain RTMP is refused.",
 		Aliases: []string{"meta", "fb"},
 	},
 	{
 		ID: "instagram", Name: "Instagram Live", Group: GroupMajor,
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
-		HelpURL:     "https://www.facebook.com/live/producer",
-		Notes: "Instagram issues the server URL and key per broadcast, and only to accounts with Live Producer " +
-			"access. Start the broadcast in Meta's Live Producer, then copy the server URL and key from there — " +
-			"there is no fixed Instagram ingest host to prefill.",
+		HelpURL:     "https://developers.facebook.com/docs/instagram-platform",
+		Notes: "Not supported, and this preset exists to say so rather than to be used. Instagram publishes no Live " +
+			"broadcast API — its platform covers messaging, content publishing and comments — and Live Producer's " +
+			"RTMP option was withdrawn for most accounts. If your account is one of the few that still has it, the " +
+			"server URL and key come from Live Producer and change every broadcast; otherwise there is nothing to " +
+			"paste here and no amount of configuration will change that.",
 		Aliases: []string{"meta", "ig"},
 	},
 	{
@@ -460,8 +467,10 @@ var destinationPresets = []DestinationPreset{
 		ID: "x", Name: "X (Twitter) Live", Group: GroupVideo,
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
-		Notes: "X issues an ingest URL and key per source in Media Studio → Producer. Create the source there and " +
-			"copy both fields.",
+		Notes: "Manual key only. X's API covers posts, users, media and the post firehose — \"streaming\" in its " +
+			"documentation means streaming posts, not ingesting video — so there is no documented endpoint for " +
+			"polyemesis to fetch an ingest from, and none is planned. Create the source in X's own producer tooling " +
+			"and copy the server URL and key from there.",
 		Aliases: []string{"twitter", "periscope"},
 	},
 	{
@@ -482,14 +491,17 @@ var destinationPresets = []DestinationPreset{
 		ID: "dlive", Name: "DLive", Group: GroupVideo,
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
-		Notes:       "Copy the server URL and stream key from DLive → Dashboard → Stream settings.",
+		Notes: "Copy the server URL and stream key from DLive → Dashboard → Stream settings. Manual only, and likely " +
+			"to stay that way: DLive's developer portal at dev.dlive.tv no longer resolves, so there is nothing " +
+			"published to integrate against.",
 	},
 	{
 		ID: "rumble", Name: "Rumble", Group: GroupVideo,
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
-		Notes: "Rumble Studio issues an ingest URL and key per stream. Set the stream up in Rumble Studio and copy " +
-			"both fields from its RTMP details.",
+		Notes: "Manual key only. Rumble Studio issues an ingest URL and key per stream — set the stream up there and " +
+			"copy both fields from its RTMP details. Rumble's API page (rumble.com/account/api) is behind a login " +
+			"wall with nothing published, so there is no integration to build against.",
 	},
 	{
 		ID: "odysee", Name: "Odysee", Group: GroupVideo,

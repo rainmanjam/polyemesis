@@ -149,11 +149,12 @@ func TestPresetPlatformsAreKnownIntegrations(t *testing.T) {
 	// only reference values that exist. Everything else saves as custom, which
 	// is what lets the catalogue grow without touching validation.
 	known := map[Platform]bool{
-		PlatformYouTube: true,
-		PlatformTwitch:  true,
-		PlatformKick:    true,
-		PlatformCustom:  true,
-		"":              true,
+		PlatformYouTube:  true,
+		PlatformTwitch:   true,
+		PlatformKick:     true,
+		PlatformFacebook: true,
+		PlatformCustom:   true,
+		"":               true,
 	}
 	for _, p := range DestinationPresets() {
 		if !known[p.Platform] {
@@ -166,7 +167,7 @@ func TestOAuthPlatformsKeepAPreset(t *testing.T) {
 	// The OAuth-capable platforms shipped before the catalogue existed and must
 	// still be reachable from it, or adding presets would have removed a
 	// feature.
-	for _, want := range []Platform{PlatformYouTube, PlatformTwitch, PlatformKick} {
+	for _, want := range []Platform{PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook} {
 		if got := DestinationPresetsForPlatform(want); len(got) == 0 {
 			t.Errorf("no preset for platform %q", want)
 		}
