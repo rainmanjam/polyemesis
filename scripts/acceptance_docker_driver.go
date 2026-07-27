@@ -21,6 +21,9 @@
 //	startall  <base>            start every destination
 //	stopall   <base>            stop every destination
 //	mode      <base> <srt|rtmp> switch the ingest mode
+//	addsource <base> <name>     create a source, print its id and SRT port
+//	destfor   <base> <srcID> <name> <file> <track>
+//	                            create a file destination on one source
 package main
 
 import (
@@ -31,6 +34,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -77,6 +81,18 @@ func main() {
 	case "stopall":
 		login()
 		all("stop")
+	case "addsource":
+		if len(os.Args) < 4 {
+			die("addsource needs a name")
+		}
+		login()
+		addSource(os.Args[3])
+	case "destfor":
+		if len(os.Args) < 7 {
+			die("destfor needs <srcID> <name> <file> <track>")
+		}
+		login()
+		destFor(os.Args[3], os.Args[4], os.Args[5], os.Args[6])
 	case "mode":
 		if len(os.Args) < 4 {
 			die("mode needs srt|rtmp")
@@ -277,6 +293,52 @@ func all(action string) {
 		do(http.MethodPost, fmt.Sprintf("/destinations/%d/%s", id, action), nil)
 	}
 	fmt.Println(strings.ToUpper(action) + "_OK")
+}
+
+// addSource creates a programme and prints "<id> <srtPort>". The port is
+// printed because the server may have moved it off a clash, and the publisher
+// has to be pointed at the one actually in use rather than the one requested.
+func addSource(name string) {
+	code, out := do(http.MethodPost, "/sources", map[string]any{"name": name})
+	if code != http.StatusOK && code != http.StatusCreated {
+		die(fmt.Sprintf("create source failed: %d %s", code, out))
+	}
+	var v struct {
+		ID     int64 `json:"id"`
+		Ingest struct {
+			SRT struct {
+				Port int `json:"port"`
+			} `json:"srt"`
+		} `json:"ingest"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		die("decode created source: " + err.Error())
+	}
+	fmt.Printf("%d %d\n", v.ID, v.Ingest.SRT.Port)
+}
+
+// destFor creates a file destination that belongs to one source and carries a
+// single ingest track. This is what proves separation: two destinations on two
+// sources, each mixing only its own programme's audio.
+func destFor(srcID, name, file, track string) {
+	sid, err := strconv.ParseInt(srcID, 10, 64)
+	if err != nil {
+		die("bad source id " + srcID)
+	}
+	tr, err := strconv.Atoi(track)
+	if err != nil {
+		die("bad track " + track)
+	}
+	code, out := do(http.MethodPost, "/destinations", map[string]any{
+		"name": name, "kind": "file", "url": file,
+		"enabled": true, "audioBitrate": 160,
+		"sourceId": sid,
+		"profile":  profile(tr),
+	})
+	if code != http.StatusOK && code != http.StatusCreated {
+		die(fmt.Sprintf("create %s failed: %d %s", name, code, out))
+	}
+	fmt.Println("DEST_OK")
 }
 
 func setMode(mode string) {

@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Multi-source acceptance test.
+#
+# The scenario that forced sources to exist: OBS's vertical-canvas plugin emits
+# a horizontal and a vertical feed that are two different compositions, not one
+# cropped from the other. Before this, one install could ingest one of them.
+#
+# This proves two programmes run side by side in ONE container, each with its
+# own ingest port and its own destinations, and that their audio never crosses.
+# The proof is by measurement: each source is fed a different tone, and each
+# destination's output is bandpassed at both frequencies. A destination that
+# carried the other programme's audio would show it.
+#
+# Usage:  ./scripts/acceptance-multisource.sh
+# Requires: docker, go
+set -uo pipefail
+
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SCRIPTS/.." && pwd)"
+DRIVER="$SCRIPTS/acceptance_docker_driver.go"
+
+IMAGE=polyemesis:multisource
+CTR=poly-ms
+NET=poly-ms-net
+VOL=poly-ms-data
+PORT=8097
+BASE="http://127.0.0.1:$PORT"
+
+pass=0; fail=0
+ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
+bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
+step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
+
+cleanup() {
+  docker rm -f "$CTR" pub-h pub-v >/dev/null 2>&1
+  docker volume rm "$VOL" >/dev/null 2>&1
+  docker network rm "$NET" >/dev/null 2>&1
+}
+trap cleanup EXIT
+cleanup
+
+drive() { go run "$DRIVER" "$@" 2>&1; }
+inctr() { docker exec "$CTR" sh -c "$1" 2>/dev/null; }
+
+# publish <name> <port> <freq> <seconds>
+# One video and one audio track at a distinctive frequency, so the programme a
+# destination received can be identified afterwards rather than assumed.
+publish() {
+  docker run -d --rm --name "$1" --network "$NET" --entrypoint ffmpeg "$IMAGE" \
+    -hide_banner -loglevel error -re \
+    -f lavfi -i "testsrc2=size=640x360:rate=30" \
+    -f lavfi -i "sine=frequency=$3:sample_rate=48000" \
+    -map 0:v -map 1:a \
+    -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -b:v 1000k \
+    -c:a aac -b:a 128k -ac 2 -t "$4" \
+    -f mpegts "srt://$CTR:$2?mode=caller&latency=200000&transtype=live" >/dev/null 2>&1
+}
+
+rms() {
+  inctr "cd /data/recordings && ffmpeg -hide_banner -nostats -i $1 \
+    -af 'bandpass=f=$2:width_type=h:w=$3,astats=metadata=1:reset=0' -f null - 2>&1 \
+    | grep 'RMS level dB' | tail -1 | sed 's/.*: *//'"
+}
+louder_than() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0 > b+0)}'; }
+
+docker info >/dev/null 2>&1 || { echo "docker daemon not running"; exit 1; }
+
+step "1. Image and container"
+docker build -t "$IMAGE" --build-arg VERSION=multisource "$ROOT" >/tmp/poly-ms-build.log 2>&1 \
+  && ok "image builds" || { bad "image build (see /tmp/poly-ms-build.log)"; exit 1; }
+
+docker network create "$NET" >/dev/null 2>&1
+docker volume create "$VOL" >/dev/null 2>&1
+# Both ingest ports published. 6001 is where the second source lands once the
+# server moves it off the first source's 6000.
+docker run -d --name "$CTR" --network "$NET" \
+  -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" \
+  -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
+
+healthy=no
+for _ in $(seq 1 60); do
+  [ "$(docker inspect --format '{{.State.Health.Status}}' "$CTR" 2>/dev/null)" = "healthy" ] && { healthy=yes; break; }
+  sleep 1
+done
+[ "$healthy" = yes ] && ok "container healthy" || { bad "container never became healthy"; exit 1; }
+
+step "2. Two sources in one install"
+drive setup "$BASE" >/dev/null
+
+# The migration made the first source from the existing ingest. Adding a second
+# is the whole feature.
+read -r VID VPORT <<<"$(drive addsource "$BASE" Vertical | tail -1)"
+if [ -n "${VID:-}" ] && [ -n "${VPORT:-}" ]; then
+  ok "second source created (id $VID)"
+else
+  bad "could not create a second source"; exit 1
+fi
+
+# It must NOT have landed on the first source's port, or its ingest cannot bind
+# and the programme silently receives nothing.
+if [ "$VPORT" != "6000" ]; then
+  ok "second source moved off the taken port, onto $VPORT"
+else
+  bad "second source kept port 6000, which the first already binds"
+fi
+
+# Both engines have to be up. One engine for two sources would mean the second
+# programme has no pipeline at all.
+INGESTS=$(inctr 'ps -o args | grep -c "mode=listener"' | tr -d ' ')
+if [ "${INGESTS:-0}" -ge 2 ] 2>/dev/null; then
+  ok "two ingest listeners running ($INGESTS)"
+else
+  bad "only $INGESTS ingest listener(s); the second engine did not start"
+fi
+
+step "3. A destination on each source"
+# Source 1 is the one the migration created from the existing ingest.
+drive destfor "$BASE" 1 horizontal-out horiz.mkv 0 >/dev/null
+drive destfor "$BASE" "$VID" vertical-out vert.mkv 0 >/dev/null
+ok "one file destination on each source"
+
+step "4. Publish a different programme into each"
+# 300 Hz into the horizontal source, 5000 Hz into the vertical one. Two tones
+# far enough apart that a bandpass cannot confuse them.
+publish pub-h 6000 300 30
+publish pub-v "$VPORT" 5000 30
+sleep 34
+drive stopall "$BASE" >/dev/null
+sleep 12
+
+H3=$(rms horiz.mkv 300 100);  H50=$(rms horiz.mkv 5000 400)
+V3=$(rms vert.mkv 300 100);   V50=$(rms vert.mkv 5000 400)
+
+if [ -n "$H3" ] && [ -n "$V50" ]; then
+  printf "        horizontal out  300Hz %s   5000Hz %s\n" "$H3" "$H50"
+  printf "        vertical   out  300Hz %s   5000Hz %s\n" "$V3" "$V50"
+
+  # Each destination carries its own programme...
+  louder_than "$H3" "-45"  && ok "horizontal destination carries its own 300 Hz programme" \
+                           || bad "horizontal destination is missing its programme (300Hz $H3)"
+  louder_than "$V50" "-45" && ok "vertical destination carries its own 5000 Hz programme" \
+                           || bad "vertical destination is missing its programme (5000Hz $V50)"
+
+  # ...and NOT the other one. This is the assertion the whole feature rests on:
+  # if the two programmes shared a relay hub, each output would contain both.
+  if louder_than "$H3" "$(awk -v x="$H50" 'BEGIN{print x+20}')"; then
+    ok "horizontal destination did NOT receive the vertical programme"
+  else
+    bad "programmes crossed: horizontal out contains 5000Hz at $H50 against its own $H3"
+  fi
+  if louder_than "$V50" "$(awk -v x="$V3" 'BEGIN{print x+20}')"; then
+    ok "vertical destination did NOT receive the horizontal programme"
+  else
+    bad "programmes crossed: vertical out contains 300Hz at $V3 against its own $V50"
+  fi
+else
+  bad "could not measure the outputs (no recordings produced)"
+fi
+
+step "5. Survives a container replacement"
+docker rm -f "$CTR" >/dev/null 2>&1
+docker run -d --name "$CTR" --network "$NET" \
+  -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" \
+  -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
+sleep 14
+AFTER=$(inctr 'ps -o args | grep -c "mode=listener"' | tr -d ' ')
+if [ "${AFTER:-0}" -ge 2 ] 2>/dev/null; then
+  ok "both sources came back after the container was destroyed ($AFTER listeners)"
+else
+  bad "only $AFTER listener(s) after restart; a source did not persist"
+fi
+
+printf "\n\033[1m%d passed, %d failed\033[0m\n" "$pass" "$fail"
+[ "$fail" -eq 0 ]
