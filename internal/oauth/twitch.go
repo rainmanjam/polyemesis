@@ -15,10 +15,15 @@ type Twitch struct{}
 func (t *Twitch) Platform() db.Platform { return db.PlatformTwitch }
 
 func (t *Twitch) Scopes() []string {
-	// The minimum that lets us read the key. user:read:email is not requested:
-	// we do not need it and asking for it would make the consent screen scarier
-	// than the feature warrants.
-	return []string{"channel:read:stream_key"}
+	// The minimum for what polyemesis actually does with a Twitch account: read
+	// the stream key, and write the title/category before going live. Helix
+	// Modify Channel Information refuses the second without its own scope, and
+	// the failure is a 401 the operator cannot fix by reconnecting — the scope
+	// has to be in the consent they granted.
+	//
+	// user:read:email is still not requested: we do not need it, and asking
+	// would make the consent screen scarier than the feature warrants.
+	return []string{"channel:read:stream_key", "channel:manage:broadcast"}
 }
 
 // PKCE is off, and the challenge/verifier arguments below are deliberately

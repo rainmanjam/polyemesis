@@ -434,6 +434,66 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.eng.SourceInfo())
 }
 
+// handlePutAnnotations records what each incoming audio track is.
+//
+// Roles describe the feed, so they are stored once on the ingest rather than
+// per destination, and every destination recompiles against them. That does
+// mean a save can move audio: a role exclusion or a denoise tick changes the
+// filter string, and the reconcile below restarts the destinations that
+// changed. Destinations whose graph is unaffected are left running.
+func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Annotations []routing.TrackAnnotation `json:"annotations"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	// Validated before the store is touched, and with routing's own validator,
+	// so the message an operator sees here is worded like every other routing
+	// error they have already met.
+	if err := routing.ValidateAnnotations(req.Annotations); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	settings.Ingest.Annotations = req.Annotations
+	if err := s.store.PutSettings(settings); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.eng.Reconcile(); err != nil {
+		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.eng.SourceInfo())
+}
+
+// handleSwitchSource puts one failover source on air by hand.
+//
+// Manual is the DEFAULT return mode, so without this route the only thing that
+// can ever hand control back after an automatic switch is another automatic
+// switch — the operator would watch the slate with no way to leave it. "auto"
+// clears the pin and returns the tier to its detector.
+func (s *Server) handleSwitchSource(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source string `json:"source"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.eng.SwitchSource(req.Source); err != nil {
+		// Every failure here is the operator asking for something this
+		// configuration cannot do — an unknown name, or a tier that is off.
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.eng.Failover())
+}
+
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"system":  s.eng.Monitor().System(),
