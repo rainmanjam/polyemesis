@@ -112,7 +112,7 @@ func run() error {
 	}
 
 	srv := api.New(api.Options{
-		Log: log, Config: cfg, ConfigPath: *configPath,
+		Log: log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
 	})
 	go srv.RefreshLoop(ctx)

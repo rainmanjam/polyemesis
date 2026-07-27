@@ -2,16 +2,23 @@ package api
 
 import (
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // -------------------------------------------------------------- setup & auth
@@ -61,6 +68,16 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// Checked before the body is read and long before bcrypt runs: the point
+	// of the throttle is that a guess must not cost us a password hash.
+	ip := auth.ClientIP(r, s.cfg.TrustProxyHeaders)
+	if wait := s.logins.Retry(ip); wait > 0 {
+		s.log.Warn("throttled login", "remote", ip, "retryAfter", wait)
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+		writeError(w, http.StatusTooManyRequests, "too many failed attempts, try again later")
+		return
+	}
+
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -76,10 +93,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// One message for both wrong-user and wrong-password: no username oracle.
 	if user.Username != req.Username || !user.CheckPassword(req.Password) {
-		s.log.Warn("failed login", "username", req.Username, "remote", r.RemoteAddr)
+		wait := s.logins.Fail(ip)
+		s.log.Warn("failed login", "username", req.Username, "remote", ip, "penalty", wait)
 		writeError(w, http.StatusUnauthorized, "incorrect username or password")
 		return
 	}
+	s.logins.Succeed(ip)
 
 	token, err := s.sessions.Issue(user.ID, user.Username)
 	if err != nil {
@@ -99,12 +118,24 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.sessions.FromRequest(r)
-	if err != nil {
+	p, ok := principalFrom(r.Context())
+	if !ok {
 		writeError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"username": claims.Username})
+	if p.token == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"username": p.username, "auth": "session"})
+		return
+	}
+	// A token acts as the admin, so report the admin's name rather than
+	// leaving a scripted caller guessing whose install it is talking to.
+	username := ""
+	if u, err := s.store.GetUser(); err == nil {
+		username = u.Username
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"username": username, "auth": "token", "tokenName": p.token.Name,
+	})
 }
 
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -155,15 +186,14 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":      s.version,
-		"ffmpeg":       s.eng.Tools(),
-		"ingestUrl":    spec.PublicIngestURL(host),
-		"ingestMode":   settings.Ingest.Mode,
-		"maxTracks":    routing.MaxTracks,
-		"enhancedRtmp": s.cfg.EnhancedRTMP,
-		"tlsEnabled":   s.cfg.TLS.Enabled,
-		"dataDir":      s.cfg.DataDir,
-		"uiBuilt":      UIBuilt(),
+		"version":    s.version,
+		"ffmpeg":     s.eng.Tools(),
+		"ingestUrl":  spec.PublicIngestURL(host),
+		"ingestMode": settings.Ingest.Mode,
+		"maxTracks":  routing.MaxTracks,
+		"tlsEnabled": s.cfg.TLS.Enabled,
+		"dataDir":    s.cfg.DataDir,
+		"uiBuilt":    UIBuilt(),
 	})
 }
 
@@ -186,6 +216,98 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 	levels, at := s.eng.Levels()
 	writeJSON(w, http.StatusOK, map[string]any{"levels": levels, "at": at})
+}
+
+// handleMetrics renders the Prometheus exposition.
+//
+// The route is authenticated; it is not open from loopback. Loopback is the
+// wrong gate for the way this server is actually deployed: Prometheus usually
+// runs in a neighbouring container, so its scrape never arrives from
+// 127.0.0.1, and with TrustProxyHeaders on, every request arrives from a proxy
+// that does. The check would be too strict and too lax at once. An API token
+// is neither — it is issued and revoked from the tokens page like any other,
+// and Prometheus sends one natively with `authorization` or `bearer_token_file`
+// in the scrape config. A session cookie is accepted as well, so an admin who
+// is already signed in can just open the URL.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	st := s.eng.Status()
+	mon := s.eng.Monitor()
+
+	snap := metrics.Snapshot{
+		Version:      s.version,
+		Uptime:       time.Since(s.startedAt),
+		Destinations: make([]metrics.Destination, 0, len(st.Destinations)),
+		Relay: metrics.Relay{
+			Subscribers: len(st.Relay.Subscribers),
+			RxPackets:   st.Relay.RxPackets,
+			RxBytes:     st.Relay.RxBytes,
+			TxPackets:   st.Relay.TxPackets,
+			Dropped:     st.Relay.Dropped,
+		},
+	}
+
+	// The relay's own rate, not the ingest process's -progress line: this is
+	// the series the dashboard graphs, so the metric cannot disagree with what
+	// an operator is looking at while they read it.
+	if b := mon.Bitrate(); len(b) > 0 {
+		snap.Ingest.BitrateKbps = b[len(b)-1].Kbps
+	}
+	snap.Ingest.State = string(supervisor.StateStopped)
+	if st.Ingest != nil {
+		snap.Ingest.State = string(st.Ingest.State)
+		snap.Ingest.Restarts = st.Ingest.Restarts
+	}
+
+	for _, d := range st.Destinations {
+		md := metrics.Destination{
+			// A destination that is not running has no supervised process at
+			// all; reporting it as stopped keeps its state series meaningful
+			// instead of leaving every state at zero.
+			Process:  metrics.Process{State: string(supervisor.StateStopped)},
+			ID:       d.ID,
+			Name:     d.Name,
+			Kind:     string(d.Kind),
+			Platform: string(d.Platform),
+			Enabled:  d.Enabled,
+		}
+		if d.Process != nil {
+			md.Process = metrics.Process{
+				State:       string(d.Process.State),
+				Restarts:    d.Process.Restarts,
+				BitrateKbps: d.Process.Progress.BitrateKbps,
+				DropFrames:  d.Process.Progress.DropFrames,
+			}
+		}
+		snap.Destinations = append(snap.Destinations, md)
+	}
+
+	// A scrape reports what it can. Failing the whole endpoint because the
+	// recordings volume is momentarily unreadable would also lose the ingest
+	// and destination series, which are the ones an alert is watching.
+	if u, err := s.eng.Recordings().Usage(); err == nil {
+		snap.Recordings = metrics.Recordings{
+			Files:      u.Count,
+			UsedBytes:  u.UsedBytes,
+			FreeBytes:  u.FreeBytes,
+			TotalBytes: u.TotalBytes,
+		}
+	} else {
+		s.log.Warn("metrics: recordings usage unavailable", "err", err)
+	}
+
+	sys := mon.System()
+	snap.Host = metrics.Host{
+		CPUPercent:     sys.CPUPercent,
+		MemUsedBytes:   sys.MemUsedBytes,
+		MemTotalBytes:  sys.MemTotalBytes,
+		ProcCPUPercent: sys.ProcCPUPercent,
+		ProcMemBytes:   sys.ProcMemBytes,
+		NumCPU:         sys.NumCPU,
+	}
+
+	w.Header().Set("Content-Type", metrics.ContentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = io.WriteString(w, metrics.Render(snap))
 }
 
 // ----------------------------------------------------------------- settings
@@ -322,6 +444,32 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		resp["routing"] = c
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleReorderDestinations persists dashboard order. It deliberately does not
+// reconcile: position is display only and is not part of a destination's spec
+// hash, so rearranging cards must never interrupt a live output.
+func (s *Server) handleReorderDestinations(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.store.ReorderDestinations(req.IDs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rows, err := s.store.ListDestinations()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ids": ids})
 }
 
 func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request) {
@@ -539,6 +687,15 @@ func (s *Server) hlsHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		if strings.HasSuffix(r.URL.Path, ".m3u8") {
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			// The encoder is on-demand, and playlist polling is what keeps it
+			// alive. Only the playlist counts: a player can keep pulling
+			// segments from a manifest it already holds, so segment requests
+			// are not evidence anyone is still watching a live stream.
+			//
+			// A request that starts the encoder is answered 404 below, since
+			// ffmpeg has not written the playlist yet. hls.js retries a failed
+			// manifest load, so the player recovers within a segment or two.
+			s.eng.PreviewRequested()
 		}
 		fs.ServeHTTP(w, r)
 	}))
