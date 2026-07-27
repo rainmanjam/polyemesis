@@ -52,7 +52,7 @@ func TestMetadataCapabilityIsAbsentRatherThanErroringForPlatformsThatCannotDoIt(
 	}{
 		{"youtube can push metadata", db.PlatformYouTube, true},
 		{"twitch can push metadata", db.PlatformTwitch, true},
-		{"kick has no provider at all", db.PlatformKick, false},
+		{"kick can push a title and a category", db.PlatformKick, true},
 		{"an unknown platform is absent", db.Platform("mystery"), false},
 	}
 	for _, tc := range tests {

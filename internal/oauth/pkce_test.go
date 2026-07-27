@@ -163,6 +163,11 @@ func TestProvidersOnlyClaimPKCEWhereItIsDocumented(t *testing.T) {
 	want := map[db.Platform]bool{
 		db.PlatformYouTube: true,
 		db.PlatformTwitch:  false,
+		// Meta's Login dialog does not document code_challenge; sending one is
+		// the lock-everyone-out risk Provider.PKCE exists to avoid.
+		db.PlatformFacebook: false,
+		// Kick speaks OAuth 2.1, which folds RFC 7636 into the grant itself.
+		db.PlatformKick: true,
 	}
 	for platform, p := range Providers() {
 		w, ok := want[platform]

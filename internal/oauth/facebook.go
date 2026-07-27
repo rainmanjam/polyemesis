@@ -1,0 +1,853 @@
+package oauth
+
+// Facebook Live.
+//
+// Two things make this provider unlike YouTube and Twitch, and both of them
+// shape everything below.
+//
+//  1. There is no persistent stream key. A Facebook broadcast is a live_video
+//     object, created per go-live, and its ingest dies with it. "Fetch the
+//     key" therefore means "create the broadcast", which is why Ingest here has
+//     a side effect the other providers do not have. The live_video id it
+//     returns is the handle for everything that comes afterwards — ending the
+//     broadcast, editing its title, reading its comments — so it is carried out
+//     of here rather than dropped on the floor. See Broadcast.
+//
+//  2. One connected login can publish to more than one place: the person's own
+//     profile, or any Page they manage. Those need different permissions
+//     (publish_video versus pages_manage_posts + pages_read_engagement) and,
+//     for a Page, a different access token entirely. So this provider carries a
+//     target alongside the account — see TargetedProvider — and Provider's
+//     target-less methods mean "the profile", which is the configuration that
+//     needs the fewest permissions and covers the most people.
+//
+// Every capability check in here fails open. A token that cannot list Pages is
+// a profile-only connection, not an error; a permission we cannot see is one
+// the platform gets to refuse with a message we turn into advice.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
+)
+
+// fbGraphBase and fbDialogBase are vars so tests can point the provider at a
+// stub. Nothing at runtime rewrites them.
+//
+// The version is pinned rather than left off: an unversioned Graph call follows
+// whatever Meta has made current, and a broadcast that starts working
+// differently on a Tuesday is not a failure mode worth having. v24.0 is also
+// the first version that removed overlay_url, which we deliberately never send.
+var (
+	fbGraphBase  = "https://graph.facebook.com/v24.0"
+	fbDialogBase = "https://www.facebook.com/v24.0/dialog/oauth"
+)
+
+// Facebook implements Facebook Login plus the Live Video API.
+type Facebook struct{}
+
+func (f *Facebook) Platform() db.Platform { return db.PlatformFacebook }
+
+// Scopes covers both targets at once. A creator streaming to their own profile
+// only needs publish_video and will never exercise the Page permissions; a
+// business streaming to a Page needs the other three. Asking for the union is
+// what lets one connection serve both, and Facebook lets a user decline
+// individual permissions on the consent screen, so the Page scopes cost a
+// profile-only user nothing but a line on that screen.
+//
+// pages_show_list is what makes /me/accounts readable at all — without it we
+// cannot even offer the Page choice, whatever else was granted.
+func (f *Facebook) Scopes() []string {
+	return []string{
+		"public_profile",
+		"publish_video",
+		"pages_show_list",
+		"pages_manage_posts",
+		"pages_read_engagement",
+	}
+}
+
+// PKCE is off, and the challenge/verifier arguments are deliberately discarded,
+// for the same reason Twitch's are. Meta's Facebook Login manual-flow
+// documentation enumerates its parameters (client_id, redirect_uri, state,
+// response_type, scope, auth_type) and says nothing about RFC 7636; nothing
+// published tells us whether the dialog tolerates an unknown code_challenge or
+// rejects the request outright. Guessing wrong here does not degrade a
+// defence-in-depth measure, it locks every user out of sign-in — so this stays
+// off until Meta documents support. The flow remains a confidential client: the
+// secret never leaves the server, the code is bound to a whitelisted redirect
+// URI, and the state is single-use.
+func (f *Facebook) PKCE() bool { return false }
+
+func (f *Facebook) AuthURL(clientID, redirectURI, state, _ string) string {
+	q := url.Values{}
+	q.Set("client_id", clientID)
+	q.Set("redirect_uri", redirectURI)
+	q.Set("response_type", "code")
+	// Facebook's scope parameter is comma-delimited, not space-delimited like
+	// the rest of the world's.
+	q.Set("scope", strings.Join(f.Scopes(), ","))
+	q.Set("state", state)
+	// rerequest is Facebook's equivalent of Twitch's force_verify: without it a
+	// user who declined publish_video the first time is bounced straight back
+	// with the same partial grant and no chance to fix it.
+	q.Set("auth_type", "rerequest")
+	return fbDialogBase + "?" + q.Encode()
+}
+
+// fbTokenURL is where both the code exchange and the long-lived upgrade go.
+func fbTokenURL() string { return fbGraphBase + "/oauth/access_token" }
+
+// Exchange trades the code for a short-lived user token.
+//
+// Facebook issues no refresh token at all. What it has instead is
+// fb_exchange_token, which trades a valid token for a longer-lived one, so the
+// access token doubles as its own refresh credential — hence the assignment
+// below. Refresh performs that upgrade, which means the first refresh turns the
+// ~2-hour token from this call into a ~60-day one. Doing the upgrade here
+// instead would make sign-in depend on a second network call that, if it
+// failed, would fail a sign-in that had already succeeded.
+func (f *Facebook) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, _ string) (*Token, error) {
+	tok, err := postForm(ctx, fbTokenURL(), url.Values{
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"redirect_uri":  {redirectURI},
+		"code":          {code},
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if tok.RefreshToken == "" {
+		tok.RefreshToken = tok.AccessToken
+	}
+	// Facebook returns granted permissions on /me/permissions rather than in
+	// the token response, so record what we asked for. It is advisory only —
+	// nothing in polyemesis refuses a call because this list looks short.
+	if tok.Scopes == "" {
+		tok.Scopes = strings.Join(f.Scopes(), " ")
+	}
+	return tok, nil
+}
+
+// Refresh re-exchanges the stored token for a fresh long-lived one. This works
+// while the current token is still valid; once it has expired the only cure is
+// reconnecting, which is what the 190 branch of fbAdvice tells the operator.
+func (f *Facebook) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
+	tok, err := postForm(ctx, fbTokenURL(), url.Values{
+		"grant_type":        {"fb_exchange_token"},
+		"client_id":         {clientID},
+		"client_secret":     {clientSecret},
+		"fb_exchange_token": {refreshToken},
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Self-referential on purpose: see Exchange.
+	tok.RefreshToken = tok.AccessToken
+	return tok, nil
+}
+
+// --------------------------------------------------------------- targets
+
+// BroadcastTarget is one place a single connected account may publish to.
+//
+// This and TargetedProvider live in this file because Facebook is the only
+// platform that has ever needed them; if a second one appears they belong in
+// oauth.go next to Provider.
+type BroadcastTarget struct {
+	// Ref is what gets stored in PlatformAccount.AccountRef and handed back to
+	// AccountFor/IngestFor. See parseTargetRef for the spellings.
+	Ref string `json:"ref"`
+	// Kind is "user" or "page", so the UI can group and badge them.
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	// Category is the Page's own category, empty for a profile. It is the one
+	// thing that distinguishes two Pages with similar names in a dropdown.
+	Category string `json:"category,omitempty"`
+}
+
+// Broadcast is an ingest plus the platform's identifier for the broadcast
+// object that issued it.
+//
+// The ingest fields carry a stream key, so they are json:"-": nothing should
+// ever serialise this struct outward, and if something does, it must not be the
+// key that leaks. ID and Target are safe to persist and to show.
+type Broadcast struct {
+	// ID is Facebook's live_video id. It is the handle for ending the
+	// broadcast, editing its metadata and reading its comments, so a caller
+	// that discards it has to create a new broadcast to get another one.
+	ID string `json:"id"`
+	// Target is the ref this was created on, which is what makes the id
+	// addressable later: a Page's live video needs the Page's token.
+	Target string `json:"target"`
+	Ingest Ingest `json:"-"`
+	// Backups are the platform's secondary ingest endpoints, for a redundant
+	// encoder feed. Exposed even though nothing consumes them yet, because they
+	// arrive in the same response and re-fetching them means creating a second
+	// broadcast.
+	Backups []Ingest `json:"-"`
+}
+
+// TargetedProvider is the optional capability for a platform where one
+// connected login can publish to more than one destination. Discover it with
+// TargetsFor; never type-assert Provider at a call site, because "absent" is
+// the answer for every other platform and has to be handled once.
+type TargetedProvider interface {
+	Provider
+	// Targets lists everywhere this token may publish. It reports an error only
+	// when the identity itself cannot be read: a token that cannot see Pages
+	// returns the profile alone, because that is a legitimate connection rather
+	// than a failure.
+	Targets(ctx context.Context, clientID, accessToken string) ([]BroadcastTarget, error)
+	// AccountFor identifies one chosen target, for storing as a connected
+	// account. An empty targetRef means the default.
+	AccountFor(ctx context.Context, clientID, accessToken, targetRef string) (*Account, error)
+	// IngestFor creates (or fetches) the ingest for one target and returns the
+	// broadcast object behind it.
+	IngestFor(ctx context.Context, clientID, accessToken, targetRef string) (*Broadcast, error)
+}
+
+// TargetsFor returns the multi-target capability for a platform, or false when
+// that platform has none. Mirrors MetadataFor.
+func TargetsFor(p db.Platform) (TargetedProvider, bool) {
+	pr, ok := Providers()[p]
+	if !ok {
+		return nil, false
+	}
+	tp, ok := pr.(TargetedProvider)
+	return tp, ok
+}
+
+// Target ref spellings. A bare id with no prefix is treated as "look it up",
+// which is what keeps a ref stored by an older build working.
+const (
+	fbRefUser = "user:"
+	fbRefPage = "page:"
+)
+
+type fbKind int
+
+const (
+	fbKindUser fbKind = iota
+	fbKindPage
+	fbKindAuto
+)
+
+func parseTargetRef(ref string) (fbKind, string) {
+	ref = strings.TrimSpace(ref)
+	switch {
+	case ref == "":
+		return fbKindUser, ""
+	case strings.HasPrefix(ref, fbRefUser):
+		return fbKindUser, strings.TrimPrefix(ref, fbRefUser)
+	case strings.HasPrefix(ref, fbRefPage):
+		return fbKindPage, strings.TrimPrefix(ref, fbRefPage)
+	default:
+		return fbKindAuto, ref
+	}
+}
+
+// fbTarget is a resolved target: the Graph node to address and the token that
+// may address it. The token is unexported and never rendered — a Page access
+// token is as sensitive as the user token it came from.
+type fbTarget struct {
+	ref   string
+	kind  fbKind
+	node  string
+	name  string
+	token string
+}
+
+type fbUser struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type fbPage struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	AccessToken string `json:"access_token"`
+}
+
+func (f *Facebook) me(ctx context.Context, accessToken string) (*fbUser, error) {
+	var out fbUser
+	if err := fbGet(ctx, accessToken, "/me", url.Values{"fields": {"id,name"}}, &out); err != nil {
+		return nil, fbAdvice(err, "read the Facebook profile", f.Scopes())
+	}
+	if out.ID == "" {
+		return nil, fmt.Errorf("Facebook returned no user for this token; reconnect the account")
+	}
+	return &out, nil
+}
+
+// pages lists the Pages this login manages. The access_token field is the Page
+// token, which is what a Page broadcast must be created with.
+func (f *Facebook) pages(ctx context.Context, accessToken string) ([]fbPage, error) {
+	var out struct {
+		Data []fbPage `json:"data"`
+	}
+	err := fbGet(ctx, accessToken, "/me/accounts",
+		url.Values{"fields": {"id,name,category,access_token"}, "limit": {"100"}}, &out)
+	if err != nil {
+		return nil, fbAdvice(err, "list Facebook Pages", []string{"pages_show_list"})
+	}
+	return out.Data, nil
+}
+
+// Targets lists the profile first, then every Page.
+//
+// A failure to read Pages is swallowed on purpose: streaming to your own
+// profile needs nothing but publish_video, and turning "you did not grant
+// pages_show_list" into an error would refuse a setup that works perfectly.
+func (f *Facebook) Targets(ctx context.Context, clientID, accessToken string) ([]BroadcastTarget, error) {
+	me, err := f.me(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	out := []BroadcastTarget{{
+		Ref:  fbRefUser + me.ID,
+		Kind: "user",
+		Name: me.Name,
+	}}
+	pages, err := f.pages(ctx, accessToken)
+	if err != nil {
+		return out, nil
+	}
+	for _, p := range pages {
+		out = append(out, BroadcastTarget{
+			Ref:      fbRefPage + p.ID,
+			Kind:     "page",
+			Name:     p.Name,
+			Category: p.Category,
+		})
+	}
+	return out, nil
+}
+
+// resolveTarget turns a ref into the node to POST to and the token to do it
+// with.
+func (f *Facebook) resolveTarget(ctx context.Context, accessToken, ref string) (*fbTarget, error) {
+	kind, id := parseTargetRef(ref)
+
+	if kind == fbKindPage || kind == fbKindAuto {
+		pages, err := f.pages(ctx, accessToken)
+		if err != nil {
+			// An explicit Page ref cannot fall back to the profile: publishing a
+			// business broadcast to someone's personal timeline because we could
+			// not read the Page list would be worse than refusing.
+			if kind == fbKindPage {
+				return nil, err
+			}
+			pages = nil
+		}
+		for _, p := range pages {
+			if p.ID == id {
+				return &fbTarget{
+					ref: fbRefPage + p.ID, kind: fbKindPage,
+					node: p.ID, name: p.Name, token: p.AccessToken,
+				}, nil
+			}
+		}
+		if kind == fbKindPage {
+			return nil, fmt.Errorf("this Facebook login no longer manages Page %s. "+
+				"Reconnect the account and grant access to that Page, or pick a different target", id)
+		}
+	}
+
+	// The profile. "me" resolves against whichever user the token belongs to,
+	// so no lookup is needed to publish — the id only matters for display.
+	return &fbTarget{ref: ref, kind: fbKindUser, node: "me", token: accessToken}, nil
+}
+
+// Account identifies the default target: the person's own profile.
+func (f *Facebook) Account(ctx context.Context, clientID, accessToken string) (*Account, error) {
+	return f.AccountFor(ctx, clientID, accessToken, "")
+}
+
+// AccountFor identifies one chosen target. The returned Ref is the prefixed
+// form, and is what IngestFor and PushMetadata expect back.
+func (f *Facebook) AccountFor(ctx context.Context, clientID, accessToken, targetRef string) (*Account, error) {
+	kind, id := parseTargetRef(targetRef)
+
+	if kind == fbKindPage || kind == fbKindAuto {
+		pages, err := f.pages(ctx, accessToken)
+		if err != nil && kind == fbKindPage {
+			return nil, err
+		}
+		for _, p := range pages {
+			if p.ID == id {
+				// "(Page)" is worth the noise: a person and their Page routinely
+				// share a name, and the two are not interchangeable.
+				return &Account{Name: p.Name + " (Page)", Ref: fbRefPage + p.ID}, nil
+			}
+		}
+		if kind == fbKindPage {
+			return nil, fmt.Errorf("this Facebook login does not manage Page %s; "+
+				"reconnect the account and grant access to it", id)
+		}
+	}
+
+	me, err := f.me(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	return &Account{Name: me.Name, Ref: fbRefUser + me.ID}, nil
+}
+
+// --------------------------------------------------------------- ingest
+
+type fbLiveVideo struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Title  string `json:"title"`
+	// Facebook returns four ingest fields: an rtmp:// and an rtmps:// primary,
+	// and a list of each for the backup encoder.
+	StreamURL          string   `json:"stream_url"`
+	SecureStreamURL    string   `json:"secure_stream_url"`
+	StreamSecondary    []string `json:"stream_secondary_urls"`
+	SecureStreamSecond []string `json:"secure_stream_secondary_urls"`
+}
+
+// fbLiveVideoFields is what a follow-up read asks for. Requested explicitly
+// because a Graph read returns a default field set that does not include the
+// ingest URLs.
+const fbLiveVideoFields = "id,status,title,stream_url,secure_stream_url," +
+	"stream_secondary_urls,secure_stream_secondary_urls"
+
+// Ingest creates a broadcast on the default target and returns its ingest.
+//
+// Note the side effect, which no other provider has: there is no persistent
+// Facebook stream key, so every call here creates a new live_video. Pressing
+// "refresh key" on a Facebook destination starts a new broadcast object rather
+// than re-reading an existing one. The Provider interface has nowhere to put
+// the resulting id, which is why IngestFor exists and why a caller that wants
+// to end the broadcast or push metadata to it should use that instead.
+func (f *Facebook) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
+	b, err := f.IngestFor(ctx, clientID, accessToken, "")
+	if err != nil {
+		return nil, err
+	}
+	ing := b.Ingest
+	return &ing, nil
+}
+
+// IngestFor creates a live_video on one target and splits its ingest into the
+// URL and stream key polyemesis stores separately.
+func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetRef string) (*Broadcast, error) {
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	// status=LIVE_NOW is what makes this a broadcast rather than a scheduled
+	// post. The video only appears once bytes arrive, so creating it ahead of
+	// the encoder is safe.
+	//
+	// overlay_url is deliberately absent: Graph removed it in v24.0 and sending
+	// it now is an error rather than a no-op.
+	var created fbLiveVideo
+	err = fbPost(ctx, tgt.token, "/"+tgt.node+"/live_videos",
+		url.Values{"status": {"LIVE_NOW"}}, &created)
+	if err != nil {
+		return nil, fbAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
+	}
+	if created.ID == "" {
+		return nil, fmt.Errorf("Facebook accepted the broadcast but returned no live video id")
+	}
+
+	// The create response normally carries the ingest already. When it does not
+	// — or carries no backups — one read fills the gaps, and its failure is not
+	// fatal because whatever we already have may well be enough.
+	if created.SecureStreamURL == "" || len(created.SecureStreamSecond) == 0 {
+		var full fbLiveVideo
+		if err := fbGet(ctx, tgt.token, "/"+created.ID,
+			url.Values{"fields": {fbLiveVideoFields}}, &full); err == nil {
+			mergeLiveVideo(&created, full)
+		}
+	}
+
+	// Prefer RTMPS. Facebook has required it for years, and the plain rtmp://
+	// field is kept only as the fallback for a response that omits the secure
+	// one rather than as a thing we would choose.
+	primary := firstNonEmpty(created.SecureStreamURL, created.StreamURL)
+	if primary == "" {
+		return nil, fmt.Errorf("Facebook created live video %s but returned no ingest URL", created.ID)
+	}
+	server, key, err := splitIngestURL(primary)
+	if err != nil {
+		return nil, err
+	}
+
+	b := &Broadcast{ID: created.ID, Target: tgt.ref, Ingest: Ingest{URL: server, Key: key}}
+
+	backups := created.SecureStreamSecond
+	if len(backups) == 0 {
+		backups = created.StreamSecondary
+	}
+	for _, raw := range backups {
+		// A backup we cannot parse is dropped, not fatal: the primary is what
+		// the stream actually needs.
+		if u, k, err := splitIngestURL(raw); err == nil {
+			b.Backups = append(b.Backups, Ingest{URL: u, Key: k})
+		}
+	}
+	return b, nil
+}
+
+// publishScopes names the permissions the failed call actually needed, so the
+// advice is not a list of five when only one is missing.
+func (f *Facebook) publishScopes(kind fbKind) []string {
+	if kind == fbKindPage {
+		return []string{"pages_manage_posts", "pages_read_engagement", "pages_show_list"}
+	}
+	return []string{"publish_video"}
+}
+
+func mergeLiveVideo(dst *fbLiveVideo, src fbLiveVideo) {
+	dst.StreamURL = firstNonEmpty(dst.StreamURL, src.StreamURL)
+	dst.SecureStreamURL = firstNonEmpty(dst.SecureStreamURL, src.SecureStreamURL)
+	dst.Status = firstNonEmpty(dst.Status, src.Status)
+	dst.Title = firstNonEmpty(dst.Title, src.Title)
+	if len(dst.StreamSecondary) == 0 {
+		dst.StreamSecondary = src.StreamSecondary
+	}
+	if len(dst.SecureStreamSecond) == 0 {
+		dst.SecureStreamSecond = src.SecureStreamSecond
+	}
+}
+
+// splitIngestURL splits a Facebook ingest into the two halves polyemesis stores
+// separately: the server, which is safe to display, and the stream key, which
+// the UI masks. db.Destination.Target() joins them back with a single slash, so
+// the split has to be exactly reversible.
+//
+// The anchor is the last slash of the *path*, not of the whole string, because
+// the key arrives with a query string attached (s_bl, s_psm, a signature…) and
+// a base64 signature can contain a slash of its own. Splitting on the last
+// slash overall would then cut the key in half and produce a server URL nobody
+// can publish to.
+//
+// No error message here ever echoes the URL: everything after /rtmp/ is a
+// credential.
+func splitIngestURL(raw string) (server, key string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", fmt.Errorf("Facebook returned an empty ingest URL")
+	}
+	scheme := strings.Index(raw, "://")
+	if scheme < 0 {
+		return "", "", fmt.Errorf("Facebook returned an ingest URL with no scheme; expected rtmps://…/rtmp/<key>")
+	}
+
+	path := raw
+	if q := strings.IndexByte(raw, '?'); q >= 0 {
+		path = raw[:q]
+	}
+	slash := strings.LastIndexByte(path, '/')
+	// scheme+2 is the second slash of "://" — a URL with no path at all.
+	if slash <= scheme+2 {
+		return "", "", fmt.Errorf("Facebook returned an ingest URL with no path; expected rtmps://…/rtmp/<key>")
+	}
+	server, key = raw[:slash], raw[slash+1:]
+	if key == "" {
+		return "", "", fmt.Errorf("Facebook returned an ingest URL with no stream key on the end")
+	}
+	return server, key, nil
+}
+
+// FacebookLiveVideoID recovers the broadcast id from a stored stream key.
+//
+// Facebook's key is the live_video id followed by a query string, which means
+// the id is already persisted in destinations.stream_key and needs no column of
+// its own. Best-effort by design: anything that is not a bare numeric id
+// returns empty, and a caller that needs certainty should keep Broadcast.ID
+// from IngestFor instead of relying on this.
+func FacebookLiveVideoID(streamKey string) string {
+	id := strings.TrimSpace(streamKey)
+	if q := strings.IndexByte(id, '?'); q >= 0 {
+		id = id[:q]
+	}
+	if id == "" {
+		return ""
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return id
+}
+
+// --------------------------------------------------------------- metadata
+
+func (f *Facebook) MetadataCaps() MetadataCaps {
+	return MetadataCaps{
+		// No category: a Facebook live video has no field equivalent to a
+		// YouTube category or a Twitch game. Saying so here is what keeps it out
+		// of the failure list.
+		Fields: []MetadataField{FieldTitle, FieldDescription},
+		// Both limits are left at zero — "no published limit". Meta documents no
+		// maximum for either field, and inventing one would reject a title the
+		// platform would have accepted, which is the restrictive-check mistake
+		// this codebase keeps relearning.
+		Scope: "publish_video",
+	}
+}
+
+// PushMetadata edits the live video's title and description.
+//
+// accountRef is the target ref stored when the account was connected
+// ("user:…"/"page:…"), not a live video id: the broadcast to edit is discovered
+// from the target, because the operator may have started it from Live Producer
+// rather than from here. A caller that recorded Broadcast.ID from IngestFor
+// should call UpdateLiveVideo instead — it is one round trip shorter and it
+// cannot pick the wrong broadcast.
+func (f *Facebook) PushMetadata(ctx context.Context, clientID, accessToken, accountRef string, m Metadata) (*MetadataResult, error) {
+	m = m.Trimmed()
+	tgt, err := f.resolveTarget(ctx, accessToken, accountRef)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &MetadataResult{}
+	if m.Category != "" {
+		res.Skipped = append(res.Skipped, FieldCategory)
+		res.Warnings = append(res.Warnings,
+			"Facebook Live has no category field; set the audience and content tags in Live Producer.")
+	}
+	if m.Title == "" && m.Description == "" {
+		return res, nil
+	}
+
+	lv, err := f.currentLiveVideo(ctx, tgt)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.writeLiveVideo(ctx, tgt, lv.ID, m); err != nil {
+		return nil, err
+	}
+
+	res.Target = firstNonEmpty(lv.Title, lv.ID)
+	if m.Title != "" {
+		res.Applied = append(res.Applied, FieldTitle)
+		res.Target = m.Title
+	}
+	if m.Description != "" {
+		res.Applied = append(res.Applied, FieldDescription)
+	}
+	return res, nil
+}
+
+// UpdateLiveVideo edits one known broadcast. This is the reliable path for a
+// caller holding a Broadcast.ID: it addresses the video directly instead of
+// guessing which of the target's broadcasts was meant.
+func (f *Facebook) UpdateLiveVideo(ctx context.Context, clientID, accessToken, targetRef, liveVideoID string, m Metadata) (*MetadataResult, error) {
+	m = m.Trimmed()
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no Facebook live video id was recorded for this destination")
+	}
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &MetadataResult{Target: liveVideoID}
+	if m.Category != "" {
+		res.Skipped = append(res.Skipped, FieldCategory)
+		res.Warnings = append(res.Warnings,
+			"Facebook Live has no category field; set the audience and content tags in Live Producer.")
+	}
+	if m.Title == "" && m.Description == "" {
+		return res, nil
+	}
+	if err := f.writeLiveVideo(ctx, tgt, liveVideoID, m); err != nil {
+		return nil, err
+	}
+	if m.Title != "" {
+		res.Applied = append(res.Applied, FieldTitle)
+		res.Target = m.Title
+	}
+	if m.Description != "" {
+		res.Applied = append(res.Applied, FieldDescription)
+	}
+	return res, nil
+}
+
+func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string, m Metadata) error {
+	params := url.Values{}
+	// Only what the operator typed is sent. An empty field means "leave what is
+	// there", and posting an empty title would blank a live broadcast's title.
+	if m.Title != "" {
+		params.Set("title", m.Title)
+	}
+	if m.Description != "" {
+		params.Set("description", m.Description)
+	}
+	err := fbPost(ctx, tgt.token, "/"+id, params, nil)
+	if err != nil {
+		return fbAdvice(err, "edit the Facebook broadcast", f.publishScopes(tgt.kind))
+	}
+	return nil
+}
+
+// fbLiveRank orders a target's broadcasts: whatever is on air, then whatever is
+// staged, and never a finished VOD. Editing last week's broadcast because it
+// sorted first is the most embarrassing outcome available here.
+func fbLiveRank(status string) int {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "LIVE", "LIVE_NOW":
+		return 0
+	case "UNPUBLISHED", "SCHEDULED_UNPUBLISHED", "SCHEDULED_LIVE":
+		return 1
+	case "":
+		// Graph omits status on some reads. Unknown is not the same as finished,
+		// so it stays eligible and sorts last.
+		return 2
+	default: // VOD, PROCESSING, SCHEDULED_CANCELED, anything Meta adds later
+		return -1
+	}
+}
+
+func (f *Facebook) currentLiveVideo(ctx context.Context, tgt *fbTarget) (*fbLiveVideo, error) {
+	var list struct {
+		Data []fbLiveVideo `json:"data"`
+	}
+	err := fbGet(ctx, tgt.token, "/"+tgt.node+"/live_videos",
+		url.Values{"fields": {"id,status,title"}, "limit": {"25"}}, &list)
+	if err != nil {
+		return nil, fbAdvice(err, "list Facebook broadcasts", f.publishScopes(tgt.kind))
+	}
+
+	// Graph returns this edge newest-first, so the first acceptable entry at the
+	// best rank is the right one.
+	best := -1
+	for i, lv := range list.Data {
+		r := fbLiveRank(lv.Status)
+		if r < 0 || lv.ID == "" {
+			continue
+		}
+		if best < 0 || r < fbLiveRank(list.Data[best].Status) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return nil, fmt.Errorf("this Facebook target has no live or staged broadcast to update; " +
+			"start the stream (polyemesis creates the broadcast when it fetches the ingest) and push again")
+	}
+	lv := list.Data[best]
+	return &lv, nil
+}
+
+// --------------------------------------------------------------- transport
+
+// fbGet and fbPost keep the access token in the Authorization header rather
+// than in Graph's ?access_token= parameter. Graph accepts both, and the header
+// is the one that keeps a token out of the endpoint string that statusError
+// carries into every error message and log line.
+func fbGet(ctx context.Context, accessToken, path string, q url.Values, out any) error {
+	endpoint := fbGraphBase + path
+	if len(q) > 0 {
+		endpoint += "?" + q.Encode()
+	}
+	return requestJSON(ctx, http.MethodGet, endpoint, accessToken, nil, nil, out)
+}
+
+// fbPost sends its parameters in the query string, which is the form Meta's own
+// documentation uses for these edges (POST /me/live_videos?status=LIVE_NOW),
+// rather than as a JSON body.
+func fbPost(ctx context.Context, accessToken, path string, params url.Values, out any) error {
+	endpoint := fbGraphBase + path
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
+	return requestJSON(ctx, http.MethodPost, endpoint, accessToken, nil, nil, out)
+}
+
+// graphError is Meta's error envelope. Every field here is server-authored
+// text; none of it carries credentials.
+type graphError struct {
+	Message   string `json:"message"`
+	Type      string `json:"type"`
+	Code      int    `json:"code"`
+	Subcode   int    `json:"error_subcode"`
+	UserTitle string `json:"error_user_title"`
+	UserMsg   string `json:"error_user_msg"`
+}
+
+func decodeGraphError(body string) (graphError, bool) {
+	var env struct {
+		Error graphError `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &env); err != nil {
+		return graphError{}, false
+	}
+	if env.Error.Message == "" && env.Error.Code == 0 {
+		return graphError{}, false
+	}
+	return env.Error, true
+}
+
+// fbAdvice turns Meta's numbered errors into the one instruction that fixes
+// them. Anything it does not recognise is returned untouched: a wrong guess
+// about what an error means sends the operator somewhere useless, and Meta's
+// own wording is at least accurate.
+func fbAdvice(err error, what string, scopes []string) error {
+	se, ok := err.(*statusError)
+	if !ok {
+		return err
+	}
+	ge, ok := decodeGraphError(se.Body)
+	if !ok {
+		return err
+	}
+	msg := strings.ToLower(ge.Message + " " + ge.UserMsg + " " + ge.UserTitle)
+
+	// App Review first: it usually arrives as a permission error too, and
+	// "grant the permission" is useless advice when the permission cannot be
+	// granted until Meta approves the app.
+	for _, marker := range []string{
+		"app review", "advanced access", "standard access",
+		"development mode", "not been approved", "must be approved",
+		"not approved for",
+	} {
+		if strings.Contains(msg, marker) {
+			return fmt.Errorf("Facebook would not let polyemesis %s because the Meta app has not been "+
+				"approved for it. Live video publishing needs Advanced Access to %s, which means "+
+				"submitting the app for App Review in the Meta App Dashboard. Facebook said: %s",
+				what, strings.Join(scopes, ", "), metaMessage(ge))
+		}
+	}
+
+	// 190 is the whole token family: expired, invalidated by a password change,
+	// or de-authorised. All three have the same cure.
+	if ge.Code == 190 {
+		return fmt.Errorf("Facebook rejected the access token, so polyemesis could not %s. "+
+			"Facebook tokens expire (about 60 days) and are invalidated by a password change or by "+
+			"removing the app. Reconnect the Facebook account in Settings → Platforms. Facebook said: %s",
+			what, metaMessage(ge))
+	}
+
+	// 200/10/3 are the permission codes; the OAuthException fallback catches the
+	// ones Meta has not numbered consistently.
+	if ge.Code == 200 || ge.Code == 10 || ge.Code == 3 ||
+		(ge.Type == "OAuthException" && strings.Contains(msg, "permission")) {
+		return fmt.Errorf("Facebook refused to let polyemesis %s for lack of a permission. "+
+			"This needs %s — reconnect the account in Settings → Platforms and accept every permission "+
+			"on the consent screen (Facebook lets you decline them one at a time). Facebook said: %s",
+			what, strings.Join(scopes, ", "), metaMessage(ge))
+	}
+
+	return err
+}
+
+// metaMessage prefers the user-facing text when Meta supplies one, because it
+// is the half of the envelope written for a human.
+func metaMessage(ge graphError) string {
+	return firstNonEmpty(strings.TrimSpace(ge.UserMsg), strings.TrimSpace(ge.Message))
+}
