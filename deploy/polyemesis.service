@@ -25,6 +25,33 @@ ExecStart=/usr/local/bin/polyemesis \
     --data /var/lib/polyemesis \
     --addr :8080
 
+# --- TLS ---
+# As written this serves whatever /etc/polyemesis/config.yaml asks for on :8080.
+#
+# If polyemesis terminates TLS itself (tls.mode acme/selfsigned/manual) it also
+# tries to bind :80 for the HTTP->HTTPS redirect, and in acme mode for the
+# Let's Encrypt HTTP-01 challenge. Ports below 1024 are privileged and this unit
+# runs as an unprivileged user, so that bind fails: polyemesis logs a warning
+# and keeps serving HTTPS, but ACME issuance will never complete.
+#
+# For mode: acme, change --addr to :443 and uncomment both lines below, then
+# check `journalctl -u polyemesis` on the next start to confirm the bind
+# succeeded rather than assuming it did.
+#
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+# CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+#
+# Alternatives, if you would rather grant nothing: set the sysctl
+# net.ipv4.ip_unprivileged_port_start=80, or forward 80/443 to 8080 with an
+# nftables/iptables redirect. Both keep this unit unprivileged, and the redirect
+# also works when something else already owns port 80 on the host.
+#
+# Generated TLS material (the local CA, the ACME cache, private keys) is written
+# under --data, which ReadWritePaths already covers. For mode: manual, note that
+# ProtectHome=true below makes anything under /home unreadable — keep certFile
+# and keyFile somewhere like /etc/ssl/polyemesis/ and make them readable by this
+# user.
+
 # polyemesis shuts its FFmpeg children down in order on SIGTERM, so that a
 # recording is finalised rather than truncated. Give it room to finish.
 KillSignal=SIGTERM
