@@ -1,28 +1,58 @@
 # Reverse-proxy example for polyemesis.
 #
-# This is the recommended deployment: nginx (or Caddy/Traefik) terminates TLS
-# and polyemesis listens on plain HTTP behind it.
+# One of the two recommended deployments: nginx (or Caddy/Traefik) terminates
+# TLS and polyemesis listens on plain HTTP behind it. The other is to let
+# polyemesis do TLS itself with `tls.mode: auto` and skip this file entirely —
+# see the "TLS and certificates" section of the README.
 #
-# Set `trustProxyHeaders: true` in config.yaml so polyemesis marks session
-# cookies Secure and builds OAuth redirect URIs from your public origin.
+# The matching config.yaml is:
+#
+#     addr: "127.0.0.1:8080"      # nothing but nginx should reach the plaintext port
+#     trustProxyHeaders: true     # honour X-Forwarded-Proto / X-Forwarded-Host
+#     tls:
+#       mode: "auto"              # resolves to OFF, because trustProxyHeaders is true
+#
+# With trustProxyHeaders set, `mode: auto` deliberately resolves to `off`:
+# polyemesis obtains no certificate, does not bind port 80, and sends no HSTS.
+# TLS, the HTTP->HTTPS redirect and HSTS all belong to nginx here. Two processes
+# competing for port 80 to answer ACME challenges is a much worse day than one.
 #
 # NOTE: this proxies only the web UI. SRT (UDP) and RTMP (TCP) ingest are NOT
 # HTTP and must reach polyemesis directly — open those ports on the firewall
-# rather than trying to route them through nginx.
+# rather than trying to route them through nginx. The SRT ingest listener binds
+# 0.0.0.0 regardless of `addr`; give it a passphrase under Settings -> Ingest.
 
 server {
     listen 80;
     server_name stream.example.com;
-    # ACME challenges aside, send everything to HTTPS.
-    return 301 https://$host$request_uri;
+
+    # certbot's webroot challenge must not be swallowed by the redirect below.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;                       # nginx < 1.25.1: use `listen 443 ssl http2;`
     server_name stream.example.com;
 
     ssl_certificate     /etc/letsencrypt/live/stream.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/stream.example.com/privkey.pem;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    # HSTS lives here, not in polyemesis: nginx owns the whole origin and you
+    # can undo it by editing this file. Uncomment only once you are certain this
+    # name will serve HTTPS for good — browsers remember it for the full
+    # max-age and the server cannot retract it. Leave `preload` off unless you
+    # genuinely mean to submit the domain, which is close to irreversible.
+    # add_header Strict-Transport-Security "max-age=31536000" always;
 
     # Recording downloads are multi-gigabyte files.
     client_max_body_size 0;
@@ -35,7 +65,8 @@ server {
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        # polyemesis reads these two when trustProxyHeaders is enabled.
+        # polyemesis reads these two when trustProxyHeaders is enabled: they are
+        # what make the session cookie Secure and the OAuth redirect URI https.
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host  $host;
 
@@ -51,4 +82,11 @@ server {
         # Buffering delays HLS segments and WebSocket frames.
         proxy_buffering off;
     }
+
+    # polyemesis already sends its own Content-Security-Policy, X-Frame-Options,
+    # X-Content-Type-Options, Referrer-Policy and Permissions-Policy on every
+    # response. Do not add your own copies here: nginx `add_header` in this
+    # block would not replace them, and a second, stricter CSP is intersected
+    # with the first — the usual result is a blank page, because the UI's video
+    # player needs `blob:` in media-src and worker-src.
 }

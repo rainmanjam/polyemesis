@@ -287,7 +287,171 @@ verbatim in both the UI and the README.
 
 ---
 
-## 4. Package layout
+## 4. The HTTP edge: TLS and security headers
+
+### Where the decision lives
+
+`tls.mode` accepts five values but only four are servable. Resolving `auto` down
+to one of them is done **once**, in `internal/config`, and everything downstream
+consumes the answer:
+
+```
+config.TLS.Resolve(trustProxy) ──► config.Mode {off|acme|selfsigned|manual}
+        │
+        ├──► tlsx.New(...)              the *tls.Config the listener serves
+        ├──► api.securityHeaders(...)   whether HSTS may ever be sent
+        └──► main.reportStartup(...)    what the banner claims
+```
+
+`internal/tlsx` deliberately knows nothing about `config.yaml`: it takes an
+already-resolved mode. That keeps the auto-resolution rules — and their tests —
+in one package, and keeps `tlsx` a pure certificate concern. The alternative,
+letting each consumer re-derive the mode, is how a banner ends up saying "acme"
+while the listener serves self-signed.
+
+Resolution order for `auto`: `trustProxyHeaders` wins first (the proxy
+terminates TLS, so we must not), then a public FQDN plus an `acmeEmail` earns
+ACME, then everything else falls to self-signed. It never returns `auto`.
+
+### Backwards compatibility is a mapping, not a migration
+
+`config.yaml` is read-only to the app — there is no `Config.Save()` and there
+must not be one; the file is owned by whoever deploys the box. So the legacy
+`tls.enabled` boolean cannot be rewritten into `tls.mode` on disk. It is mapped
+at load time instead (`normalizeTLS`): an absent `tls.mode` falls back to
+`enabled: true → manual`, `false/absent → off`. An explicit mode always wins.
+
+The consequence is that an existing install upgrades to exactly what it served
+yesterday and does not silently acquire `auto`. Swapping an operator's real
+certificate for a generated one, or dropping HTTPS entirely, would both be
+serious regressions, and neither is reachable from a config that predates the
+mode field.
+
+### The certificate layer (`internal/tlsx`)
+
+| mode | source | persisted under `<dataDir>/tls/` |
+|---|---|---|
+| `manual` | `tls.LoadX509KeyPair` at startup | nothing |
+| `selfsigned` | local CA + leaf, minted on demand | `ca.crt` `ca.key` `server.crt` `server.key` |
+| `acme` | `autocert.Manager`, lazy on first handshake | `acme/` (account key + issued certs) |
+| `off` | — | nothing |
+
+Rules that hold across all of it:
+
+- Private keys are written `0600` through an **atomic temp-file + rename**, into
+  a `0700` directory. A half-written key from a power cut would otherwise brick
+  HTTPS with material that is present but unparsable.
+- Material that exists but does not parse is an **error, not a silent
+  regeneration**. Writes are atomic, so corruption means something outside
+  polyemesis interfered, and quietly replacing a CA the user has already
+  installed in three browsers is worse than saying so.
+- No key is logged, returned by an API, or carried in `CertInfo` — which is JSON
+  encoded straight onto a response and therefore has no field for one.
+- `tls.Config` is pinned explicitly: `MinVersion: TLS 1.2`, curves
+  X25519/P-256/P-384, `NextProtos` h2 + http/1.1. Go's default already floors at
+  1.2; stating it means a toolchain change cannot alter the policy silently and
+  an auditor reads it in one place.
+
+The self-signed CA is valid ten years and the leaf one, renewed inside a 30-day
+window, or reissued when `tls.hostname` changes or the CA is replaced. The long
+CA life is the point: installing a root into a browser, a phone and a keychain
+is the most tedious step of a homelab setup, and an annual repeat is a reason to
+abandon HTTPS. The leaf rotates underneath it instead. Leaf SANs always include
+`localhost`, `127.0.0.1` and `::1` alongside the configured name, because the
+first login usually arrives by loopback or over an SSH tunnel.
+
+ACME issuance is pinned to the single configured hostname by an `autocert`
+`HostPolicy`. Left open, any SNI arriving on a public port would trigger an
+order, which is a free way for a stranger to exhaust this box's Let's Encrypt
+rate limit.
+
+### Failing soft on port 80
+
+`startHTTPHelper` binds `:80` whenever polyemesis is terminating TLS: it serves
+the ACME HTTP-01 responder (acme mode) and a permanent redirect to HTTPS
+(always; `301` for GET/HEAD, `308` otherwise so an API client keeps its method
+and body).
+
+**Failure to bind is a warning, not a fatal error.** Port 80 is privileged and
+frequently already taken, and a server that refuses to start over it leaves the
+operator with no UI in which to fix the setting that stopped it starting. This
+is the same judgement made earlier for the SRT capability check, and for the
+same reason. ACME also advertises `acme.ALPNProto` on the 443 listener, so
+TLS-ALPN-01 can still complete on a box where only 443 is reachable.
+
+Configuration errors are treated differently and *are* fatal: `Config.Validate`
+rejects `acme` without a hostname or email, `acme` with a private name, and
+`manual` with files it cannot stat. Those are wrong before anything starts, and
+starting anyway would just defer the same error to the first request.
+
+### HSTS, and why it is the one opt-in
+
+`Strict-Transport-Security` is persisted by the browser and cannot be retracted
+by the server. On a self-signed box it also removes the click-through on the
+certificate warning, so one header can shut both doors on a LAN machine
+permanently.
+
+The policy is therefore decided once, at router construction, from two inputs —
+the resolved mode and `tls.hsts` — and passed into `securityHeaders` as
+parameters rather than read off the server struct, so the decision with no undo
+is stated at the call site and testable without building a server:
+
+```go
+allowHSTS := hsts && (mode == config.ModeACME || mode == config.ModeManual)
+...
+if allowHSTS && r.TLS != nil { h.Set("Strict-Transport-Security", "max-age=86400") }
+```
+
+`r.TLS` is the only proof of a genuinely encrypted hop. A forwarded header is
+never consulted, even from a trusted proxy: in that deployment the resolved mode
+is already `off`, and the policy for the connection the browser actually made
+belongs to whoever terminated it. `max-age` is one day, with no
+`includeSubDomains` and no `preload` — both widen the blast radius past this
+host, and a day is long enough to matter while still ageing out of a mistake.
+`Config.HSTSPolicy` returns the suppression reason so the startup banner can
+explain the silence rather than the operator discovering it with `curl -I`.
+
+### CSP
+
+The policy is a `[]string` of directives, one per line with its justification
+next to it, joined at init. Every relaxation is load-bearing for a feature that
+fails *silently* — usually as a white page:
+
+| directive | why |
+|---|---|
+| `media-src 'self' blob:` | hls.js hands `<video>` its MediaSource as a blob URL |
+| `worker-src 'self' blob:` | hls.js compiles its demuxer worker from generated source |
+| `connect-src 'self' ws: wss:` | the telemetry WebSocket; `ws:` because a LAN box may be on plain HTTP |
+| `img-src 'self' data:` | inline icons |
+| `style-src 'self' 'unsafe-inline'` | the bundle injects `<style>` at runtime |
+
+What is **absent** is the load-bearing part: no `'unsafe-inline'` for
+`script-src`. The UI is a Vite bundle of hashed module files with no inline
+`<script>`, so nothing needs it, and it is the one relaxation that would turn an
+injected string into executable code. `frame-ancestors 'none'`, `base-uri
+'self'` and `form-action 'self'` complete it.
+
+`securityHeaders` is added to the existing chain (`RequestID → Recoverer →
+requestLogger`) at the router root, so it covers the embedded UI and the SPA
+fallback as well as the API — a CSP that only guarded `/api/v1` would guard
+nothing that renders.
+
+### Transport security is not only the web UI
+
+Worth stating because the TLS mode is easy to mistake for the whole story:
+
+- SRT ingest carries its own AES encryption via a passphrase
+  (`db.SRTSettings.Passphrase`, 10–79 characters, enforced in
+  `Settings.Validate`), rendered into both the listener URL and the
+  copy-pasteable encoder URL. RTMP ingest has no equivalent — it is
+  authenticated by the stream key in the path and is otherwise in the clear.
+- Destination URLs are passed to FFmpeg verbatim, and `db.Destination.Validate`
+  accepts `rtmps://` as well as `rtmp://`, so a destination can be TLS-wrapped
+  independently of how the UI is served.
+
+---
+
+## 5. Package layout
 
 ```
 cmd/polyemesis/main.go          wiring, flags, graceful shutdown
@@ -306,6 +470,8 @@ internal/
   stats/       ring buffers (30 min bitrate), host CPU/RAM
   metrics/     Prometheus text exposition, rendered from the engine's status
   auth/        bcrypt, JWT cookie, CSRF double-submit, API tokens, login throttle
+  tlsx/        certificate layer: tls.Config, local CA + leaf, autocert, expiry
+               introspection. Takes an already-resolved mode; knows no yaml.
   secrets/     NaCl secretbox token encryption at rest
   oauth/       youtube.go · twitch.go · kick.go + PKCE + token refresh
   recording/   segment index, retention sweeper (max GB / max age), free-space guard
@@ -322,9 +488,14 @@ ui/            Vite + React + TS + Tailwind + shadcn/ui + Recharts + hls.js
 `routing` and `ffmpeg` are pure (string in / string out, no I/O) which is what
 makes them exhaustively unit-testable without a live process.
 
+`tlsx` sits off to the side: `main` and `api` depend on it, it depends on
+nothing of ours. Its only inputs are a resolved `Mode` and a data directory,
+which is what lets its tests mint and expire certificates against a fake clock
+without a config file or a listener.
+
 ---
 
-## 5. Build & verify order
+## 6. Build & verify order
 
 1. config, db, ffmpeg detect + builders
 2. **routing engine + its unit tests** (the differentiator, pure, testable first)
@@ -334,8 +505,11 @@ makes them exhaustively unit-testable without a live process.
    engine's ref counting — in that order, because the invariant that a rendition
    never encodes audio is provable in a pure function before any process exists
 6. auth, secrets, api, websocket
-7. frontend (theme → shadcn chrome → bespoke meters/matrix → pages)
-8. oauth
-9. docs, Docker, systemd
+7. tls: `config`'s mode resolution and the legacy `tls.enabled` mapping first —
+   they are pure and the backwards-compatibility rules are the part a regression
+   would be silent in — then `tlsx`, then the listener wiring in `main`
+8. frontend (theme → shadcn chrome → bespoke meters/matrix → pages)
+9. oauth
+10. docs, Docker, systemd
 
 `go build ./...` · `go test ./...` · `make build` (embeds UI) must all pass.
