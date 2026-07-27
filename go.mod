@@ -3,6 +3,7 @@ module github.com/rainmanjam/polyemesis
 go 1.26.5
 
 require (
+	github.com/datarhei/gosrt v0.6.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
@@ -14,6 +15,7 @@ require (
 )
 
 require (
+	github.com/benburkert/openpgp v0.0.0-20160410205803-c2471f86866c // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect

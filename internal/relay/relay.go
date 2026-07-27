@@ -274,6 +274,31 @@ func (h *Hub) run() {
 	}
 }
 
+// Deliver injects one datagram from inside this process, as though it had
+// arrived on the hub's UDP socket.
+//
+// It exists for the one-port SRT listener, which reads MPEG-TS straight off a
+// gosrt connection in Go. Without it the listener would have to write to
+// InputURL and have the run loop read it back, paying a loopback UDP hop and a
+// copy for data that is already in memory — and inheriting the kernel's
+// datagram-drop behaviour on a socket we control both ends of.
+//
+// Callers must pass whole datagrams. SRT in live mode preserves message
+// boundaries, so one Read is one datagram and the 188-byte MPEG-TS framing the
+// continuity counter depends on survives; splitting or coalescing reads here
+// would make measure() report discontinuities that never happened.
+func (h *Hub) Deliver(pkt []byte) {
+	if len(pkt) == 0 {
+		return
+	}
+	h.rxPackets.Add(1)
+	h.rxBytes.Add(uint64(len(pkt)))
+	// Same order as run(): fan out before measuring, because measurement must
+	// never sit in front of delivery.
+	h.fanout(pkt)
+	h.measure(pkt)
+}
+
 func (h *Hub) measure(dgram []byte) {
 	packets, discos, lost := h.cc.inspect(dgram)
 	if packets == 0 {
