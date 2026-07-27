@@ -1,0 +1,150 @@
+# polyemesis — NVIDIA / NVENC container image.
+#
+# Build:  docker build -f Dockerfile.cuda -t polyemesis:cuda .
+# Run:    docker run --gpus all -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \
+#                    -v polyemesis-data:/data polyemesis:cuda
+#
+# This image exists because the default image cannot be made to do NVENC. It is
+# Alpine, and NVENC needs libnvidia-encode.so.1 and libcuda.so.1 — which are
+# part of the NVIDIA *driver*, not a package you can apt-get or apk add. They
+# arrive from the host at `docker run` time or they do not arrive at all.
+#
+# THE HOST REQUIREMENT, PLAINLY. Three things must all be true:
+#
+#   1. An NVIDIA GPU with an NVENC engine. Most GeForce, Quadro/RTX and Tesla
+#      parts have one; the low-end and the datacentre compute cards sometimes
+#      do not. NVIDIA's "Video Encode and Decode GPU Support Matrix" is the
+#      authority on your specific board.
+#   2. The proprietary NVIDIA driver installed and loaded on the host. Nouveau
+#      has no NVENC.
+#   3. nvidia-container-toolkit installed and wired into the Docker daemon on
+#      the host. THIS IS NOT OPTIONAL and its absence is the single most common
+#      reason "nvenc does not work in Docker" — without it `--gpus all` either
+#      errors out or, worse on some setups, starts a container with no
+#      /dev/nvidia* and no driver libraries, and every NVENC probe fails with
+#      "Cannot load libcuda.so.1". Install it from NVIDIA's own repository
+#      (packaged as `nvidia-container-toolkit`), then
+#      `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`.
+#
+# Confirm all three before blaming this image:
+#   docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi
+# If that prints your GPU, the host is fine. If it does not, nothing in this
+# file can help. See docs/HARDWARE.md for the failure-by-failure walkthrough.
+
+# ---------- stage 1: build the web UI ----------
+# Identical to the default Dockerfile. Kept as a copy rather than factored into
+# a shared base image, because a shared base would have to be built and
+# published before either of these Dockerfiles could build at all — and the one
+# property this project keeps is that any Dockerfile here builds from a clean
+# checkout with nothing else on the machine.
+FROM node:22-alpine AS ui
+WORKDIR /src/ui
+COPY ui/package.json ui/package-lock.json* ./
+RUN npm ci
+COPY ui/ ./
+RUN mkdir -p /src/internal/web && npm run build
+
+# ---------- stage 2: build the Go binary ----------
+# Must stay >= the `go` directive in go.mod; the official golang images set
+# GOTOOLCHAIN=local, so a too-old tag fails the build rather than quietly
+# fetching a newer toolchain.
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui /src/internal/web/dist ./internal/web/dist
+ARG VERSION=docker-cuda
+# CGO off means the binary is static, so it runs unchanged on this glibc base.
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION}" \
+      -o /out/polyemesis ./cmd/polyemesis
+
+# ---------- stage 3: runtime ----------
+#
+# nvidia/cuda:*-base rather than plain ubuntu because the base images already
+# carry NVIDIA_VISIBLE_DEVICES and NVIDIA_DRIVER_CAPABILITIES, which are what
+# the container toolkit reads to decide which devices and driver libraries to
+# inject. Plain Ubuntu works too if you set both yourself; this is the version
+# that behaves the way every NVIDIA doc says it should.
+#
+# `-base`, not `-runtime` or `-devel`: NVENC uses no CUDA math libraries. The
+# only NVIDIA userspace it needs comes from the host driver, so the larger tags
+# would be several hundred megabytes of cuBLAS nothing here ever opens.
+#
+# 12.6.3-base-ubuntu24.04 verified to exist on linux/amd64 and linux/arm64 on
+# 2026-07-26. The CUDA version is close to irrelevant for this workload — we
+# link none of it — so prefer an OLDER 12.x line over a newer one: the tag's
+# NVIDIA_REQUIRE_CUDA check is what refuses to start on a host whose driver is
+# behind, and a lower floor turns away fewer working machines. If you bump it,
+# bump for the Ubuntu release underneath (which decides the FFmpeg version),
+# not for CUDA features.
+FROM nvidia/cuda:12.6.3-base-ubuntu24.04
+
+# THE SECOND TRAP, and it is invisible: the nvidia/cuda base images ship
+# NVIDIA_DRIVER_CAPABILITIES=compute,utility — verified by reading `env` in
+# 12.6.3-base-ubuntu24.04. That set does NOT include `video`, so the container
+# toolkit injects libcuda.so.1 but NOT libnvidia-encode.so.1. nvidia-smi works,
+# CUDA works, and NVENC alone fails with "Cannot load libnvidia-encode.so.1" —
+# which reads like a broken image rather than a missing capability flag.
+#
+# Adding `video` here fixes it for every `docker run` of this image. It is
+# repeated in docker-compose.yml because a compose `deploy.resources.devices`
+# entry sets the variable itself and overrides what the image declared.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+ENV NVIDIA_VISIBLE_DEVICES=all
+
+# Ubuntu 24.04's FFmpeg is 6.1.1, which keeps this image on the same 6.1.x
+# series as the Alpine one — the series this project is actually exercised
+# against — and it is built with NVENC (verified: `ffmpeg -encoders` in
+# ubuntu:24.04 lists h264_nvenc and hevc_nvenc). FFmpeg dlopen()s the encode
+# library at runtime rather than linking it, which is exactly why a build with
+# NVENC compiled in tells you nothing about whether NVENC works.
+#
+# Pinned rather than floating, for the same reason the Alpine image pins: an
+# unpinned transcoder makes a rebuild six months from now a different product
+# under the same tag, and the difference shows up as a broken stream rather
+# than a build error. A pinned version FAILS LOUDLY once Ubuntu supersedes it,
+# which is the prompt to bump on purpose. To bump:
+#
+#   docker run --rm ubuntu:24.04 sh -c 'apt-get update -qq && apt-cache policy ffmpeg'
+#
+# 7:6.1.1-3ubuntu5 verified present on 2026-07-26 (linux/amd64).
+ARG FFMPEG_VERSION=7:6.1.1-3ubuntu5
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata wget \
+ && rm -rf /var/lib/apt/lists/* \
+ # SRT is what multitrack ingest rides on, and `grep srt` would pass on every
+ # build because `srtp` is always listed. -x makes it a real check.
+ && ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt \
+ # This asserts the BUILD contains NVENC. It cannot assert that any machine can
+ # use it — no builder has a GPU, and that gap is the entire reason polyemesis
+ # probes with a one-frame test encode at startup instead of trusting a list.
+ # Shipping a "cuda" image whose FFmpeg has no NVENC at all is still worth
+ # failing the build over.
+ && ffmpeg -hide_banner -encoders | awk '{print $2}' | grep -qx h264_nvenc
+
+COPY --from=build /out/polyemesis /usr/local/bin/polyemesis
+
+# The NVIDIA device nodes are world-accessible (unlike /dev/dri render nodes),
+# so unlike the VAAPI image this needs no supplementary group at runtime.
+RUN useradd --system --uid 10001 --create-home --home-dir /home/polyemesis polyemesis \
+ && mkdir -p /data && chown polyemesis:polyemesis /data
+VOLUME ["/data"]
+USER polyemesis
+WORKDIR /data
+
+EXPOSE 8080/tcp
+# SRT is UDP. Forgetting the /udp suffix is the classic reason an SRT ingest
+# silently never receives anything.
+EXPOSE 6000/udp
+EXPOSE 1935/tcp
+# Only needed for `tls.mode: acme`; see the default Dockerfile for why.
+EXPOSE 80/tcp
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD wget -qO- http://127.0.0.1:8080/api/v1/health || exit 1
+
+ENTRYPOINT ["polyemesis"]
+CMD ["-addr", ":8080", "-data", "/data"]
