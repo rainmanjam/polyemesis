@@ -1,5 +1,6 @@
-// Package auth provides the session layer: a JWT in an HttpOnly cookie, plus
-// double-submit CSRF protection on state-changing requests.
+// Package auth provides the session layer: a JWT in an HttpOnly cookie,
+// double-submit CSRF protection on state-changing requests, Bearer-header
+// extraction for API tokens, and per-address throttling of failed logins.
 //
 // Single admin user, so there is no role model and no user table to walk —
 // the token proves "you are the admin", nothing more.
@@ -157,6 +158,17 @@ func (m *Manager) FromRequest(r *http.Request) (*Claims, error) {
 		return nil, ErrUnauthorized
 	}
 	return m.Verify(c.Value)
+}
+
+// BearerToken returns the credential from an Authorization: Bearer header,
+// or "" when the request does not carry one.
+func BearerToken(r *http.Request) string {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if len(h) < len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(h[len(prefix):])
 }
 
 // CheckCSRF validates the double-submit token on state-changing requests.
