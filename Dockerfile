@@ -24,7 +24,12 @@
 # satisfying it as it moves. Keep this in step with ui/package.json's
 # @types/node major: typing against a newer Node than the one that runs the
 # build is how you get code that compiles here and throws at runtime.
-FROM node:24-alpine AS ui
+#
+# --platform=$BUILDPLATFORM pins this stage to the machine doing the building,
+# never the target architecture. The output is JavaScript and CSS, which are
+# architecture-independent, so emulating this stage under QEMU for an arm64
+# target would burn minutes to produce identical bytes.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS ui
 WORKDIR /src/ui
 # Copy manifests first so a dependency-only change reuses the install layer.
 COPY ui/package.json ui/package-lock.json* ./
@@ -38,7 +43,16 @@ RUN mkdir -p /src/internal/web && npm run build
 # set GOTOOLCHAIN=local, so a too-old image does not quietly download a newer
 # toolchain the way a developer's machine does — it fails the build outright
 # with "go.mod requires go >= …". Bump this line whenever go.mod's floor moves.
-FROM golang:1.26-alpine AS build
+# Also pinned to $BUILDPLATFORM, and then cross-compiled with GOARCH below.
+# The alternative — running the Go toolchain under QEMU for the target arch —
+# is both far slower and unreliable: `go mod download` fetching from
+# proxy.golang.org through emulation times out its TLS handshake often enough
+# to fail a multi-arch build outright, which is exactly what it did here.
+#
+# Cross-compiling is safe because CGO_ENABLED=0 already: there is no C
+# toolchain in the picture, so a native Go compiler targeting another GOARCH
+# produces the same static binary emulation would have.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -46,7 +60,11 @@ COPY . .
 # Bring in the compiled UI so go:embed picks it up rather than the placeholder.
 COPY --from=ui /src/internal/web/dist ./internal/web/dist
 ARG VERSION=docker
-RUN CGO_ENABLED=0 go build -trimpath \
+# Supplied automatically by buildx, and defaulted so a plain `docker build`
+# with no buildx still works.
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X main.version=${VERSION}" \
       -o /out/polyemesis ./cmd/polyemesis
 
