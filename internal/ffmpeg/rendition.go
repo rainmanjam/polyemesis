@@ -29,6 +29,58 @@ var hwEncoders = []string{EncoderNVENC, EncoderQSV, EncoderVideoToolbox, Encoder
 // the one encoder that cannot work without knowing its device up front.
 const defaultVAAPIDevice = "/dev/dri/renderD128"
 
+// AspectMode decides what happens to a frame whose shape does not match the
+// rendition's Width x Height. It is the whole of dual-format output: a 9:16
+// rendition of a 16:9 ingest is one more entry in the ladder, encoded once and
+// shared, not a second pipeline.
+//
+// The zero value is deliberately the historical behaviour. Every rendition
+// saved before this existed scaled straight to the target size, and must keep
+// compiling to exactly that filter string.
+type AspectMode string
+
+const (
+	// AspectStretch scales to Width x Height and lets the picture distort if
+	// the source disagrees. Anamorphic, and almost never what anyone wants —
+	// but it is what this code did before dual-format, so it stays the default.
+	AspectStretch AspectMode = ""
+	// AspectCrop centre-crops to the target shape and then scales. Subjects
+	// keep their on-screen size; the edges of the frame are gone.
+	AspectCrop AspectMode = "crop"
+	// AspectPad scales the whole frame to fit and fills the remainder with a
+	// flat colour. Nothing is lost, but a 16:9 source on a 9:16 canvas is
+	// mostly bars.
+	AspectPad AspectMode = "pad"
+	// AspectBlurredPad fills the remainder with a blurred, cropped-to-fill copy
+	// of the frame itself. This is the convention every vertical feed has
+	// settled on, and it is the difference between a repurposed landscape
+	// stream looking deliberate and looking lazy.
+	AspectBlurredPad AspectMode = "blurpad"
+)
+
+// AspectModes is every mode a rendition may name, in the order to offer them:
+// the no-op first, then increasing amounts of work.
+var AspectModes = []AspectMode{AspectStretch, AspectCrop, AspectPad, AspectBlurredPad}
+
+// defaultPadColor is the letterbox fill. Black, because a bar the viewer does
+// not notice is the entire goal of a bar.
+const defaultPadColor = "black"
+
+// The blurred background is built from a shrunken copy rather than blurred in
+// place. A gaussian wide enough to read as "background" costs more per frame at
+// 1080p than the H.264 encode it feeds, and this runs on a live stream; on a
+// 1/8-scale proxy the same look costs a rounding error, because the upscale
+// back to full size does most of the blurring for free.
+const (
+	blurProxyDivisor = 8
+	// blurProxySigma is measured in PROXY pixels, so it lands around 8x this
+	// once the proxy is scaled back up.
+	blurProxySigma = 4
+	// minBlurProxyDimension keeps a small rendition from blurring a handful of
+	// pixels into one flat colour.
+	minBlurProxyDimension = 32
+)
+
 // assumedSourceFPS is the frame rate used for the GOP arithmetic when neither
 // the target nor the probed source rate is known. Guessing low is the safe
 // direction: on a 60 fps source it yields 1 s keyframes rather than 4 s, which
@@ -53,6 +105,19 @@ type RenditionSpec struct {
 	// source dimension and derive this one".
 	Width  int
 	Height int
+
+	// Aspect reconciles the source's shape with Width x Height. The zero value
+	// stretches, which is what every pre-dual-format rendition did.
+	//
+	// It needs BOTH dimensions to mean anything: an aspect conversion is
+	// defined by the target shape, and "1080 tall, width from the source" has
+	// no shape to convert to. With one dimension set, or with a mode this
+	// binary does not recognise, the rendition falls back to the plain scale
+	// rather than refusing to start.
+	Aspect AspectMode
+	// PadColor is the AspectPad fill; empty means black. Ignored by the other
+	// modes.
+	PadColor string
 
 	// FPS is the output frame rate; 0 keeps the source rate.
 	FPS float64
@@ -232,7 +297,11 @@ func presetArgs(prof encoderProfile, want string) []string {
 // videoFilter renders the scale chain, or "" when there is nothing to do.
 func videoFilter(s RenditionSpec, prof encoderProfile) string {
 	var chain []string
-	if scale := scaleFilter(s.Width, s.Height); scale != "" {
+	if fit := aspectFilter(s); fit != "" {
+		// The aspect chain already ends at exactly Width x Height, so the plain
+		// scale would be a second, redundant resize.
+		chain = append(chain, fit)
+	} else if scale := scaleFilter(s.Width, s.Height); scale != "" {
 		chain = append(chain, scale)
 	}
 	if prof.vaapi {
@@ -261,6 +330,145 @@ func scaleFilter(w, h int) string {
 	default:
 		return ""
 	}
+}
+
+// ------------------------------------------------------------- dual format
+
+// aspectFilter renders the aspect-conversion chain, or "" when this rendition
+// is a plain scale and the caller should fall back to scaleFilter.
+//
+// An unrecognised mode degrades to the plain scale on purpose. A rendition row
+// written by a newer build, or hand-edited in the database, must still encode:
+// this repo has already paid three times for a check that was wrong in the
+// restrictive direction, and a stream that does not start is a worse answer
+// than a stream in the wrong shape.
+func aspectFilter(s RenditionSpec) string {
+	if s.Width <= 0 || s.Height <= 0 {
+		return ""
+	}
+	switch s.Aspect {
+	case AspectCrop:
+		return cropFitFilter(s.Width, s.Height)
+	case AspectPad:
+		return padFitFilter(s.Width, s.Height, s.PadColor)
+	case AspectBlurredPad:
+		return blurredPadFilter(s.Width, s.Height)
+	default:
+		return ""
+	}
+}
+
+// cropFitFilter centre-crops to the target shape, then scales.
+//
+// One expression covers both directions, which is why there is no
+// landscape/portrait branch anywhere in this file: cropping 16:9 to 9:16 keeps
+// the full height and trims the width, cropping 9:16 to 16:9 does the reverse,
+// and min() picks whichever of the two the source actually needs.
+//
+// crop's own x/y default to centred, and vf_crop masks them down to the chroma
+// grid itself, so the offsets are deliberately left unstated.
+//
+// setsar=1 is load-bearing rather than tidy. Rounding the crop down to an even
+// number of pixels leaves it up to one pixel off the exact target ratio, and
+// scale preserves DISPLAY aspect by pushing that error into the sample aspect
+// ratio: without this the file is 1080x1920 carrying SAR 404:405, so a player
+// that honours SAR shows a 9:16 rendition very slightly un-square. Verified
+// against real FFmpeg — it is not a hypothetical.
+func cropFitFilter(w, h int) string {
+	cw := evenExpr(fmt.Sprintf("min(iw\\,ih*%d/%d)", w, h))
+	ch := evenExpr(fmt.Sprintf("min(ih\\,iw*%d/%d)", h, w))
+	return fmt.Sprintf("crop=%s:%s,scale=%d:%d,setsar=1", cw, ch, w, h)
+}
+
+// padFitFilter scales the whole frame to fit and letterboxes the remainder.
+//
+// setsar=1 closes the chain because the padded frame IS the target shape now:
+// an anamorphic source that arrived with a non-square SAR would otherwise hand
+// the player a display aspect that no longer describes the canvas we built.
+func padFitFilter(w, h int, color string) string {
+	return fmt.Sprintf("%s,pad=%d:%d:%s:%s:%s,setsar=1",
+		fitInsideFilter(w, h), w, h,
+		evenExpr("(ow-iw)/2"), evenExpr("(oh-ih)/2"), padColor(color))
+}
+
+// blurredPadFilter centres the real frame on a blurred, cropped-to-fill copy of
+// itself.
+//
+// split feeds one decoded frame to both halves, so the background is always the
+// picture behind it rather than a still or a colour. The background is built at
+// proxy size and blown back up; see blurProxyDivisor for why.
+func blurredPadFilter(w, h int) string {
+	bw, bh := blurProxySize(w, h)
+	var b strings.Builder
+	b.WriteString("split=2[bgsrc][fgsrc];")
+	fmt.Fprintf(&b, "[bgsrc]scale=%d:%d:force_original_aspect_ratio=increase:force_divisible_by=2,"+
+		"crop=%d:%d,gblur=sigma=%d,scale=%d:%d,setsar=1[bg];",
+		bw, bh, bw, bh, blurProxySigma, w, h)
+	fmt.Fprintf(&b, "[fgsrc]%s[fg];", fitInsideFilter(w, h))
+	// W/H are the background's dimensions and w/h the foreground's, which is
+	// overlay's own vocabulary rather than ours; the result is the real frame
+	// centred on the canvas.
+	fmt.Fprintf(&b, "[bg][fg]overlay=%s:%s", evenExpr("(W-w)/2"), evenExpr("(H-h)/2"))
+	return b.String()
+}
+
+// fitInsideFilter scales to the largest size that fits inside w x h with the
+// source's own aspect ratio intact.
+//
+// force_divisible_by=2 is not decoration: the derived side of a
+// force_original_aspect_ratio scale lands wherever the arithmetic puts it, and
+// an odd width reaches the encoder as "width not divisible by 2" — a start
+// failure, not a warning. It needs FFmpeg 4.4, comfortably below the 6.0 the
+// startup check already demands.
+func fitInsideFilter(w, h int) string {
+	return fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2", w, h)
+}
+
+// blurProxySize is the background's working size, kept even so the proxy is
+// itself a legal 4:2:0 frame.
+func blurProxySize(w, h int) (int, int) {
+	return evenDown(max(w/blurProxyDivisor, minBlurProxyDimension)),
+		evenDown(max(h/blurProxyDivisor, minBlurProxyDimension))
+}
+
+// evenExpr wraps an FFmpeg expression so its value lands on an even number of
+// pixels, which 4:2:0 chroma subsampling requires of every dimension and which
+// keeps a composited frame on the chroma grid.
+func evenExpr(expr string) string { return "2*floor(" + expr + "/2)" }
+
+// evenDown rounds down to an even number, with 2 as the floor because a
+// zero-sized filter output is not a frame.
+func evenDown(v int) int {
+	v -= v % 2
+	if v < 2 {
+		return 2
+	}
+	return v
+}
+
+// padColor keeps operator text off the filter graph unless it is unmistakably a
+// colour.
+//
+// The value lands inside a filter argument, where a comma or a colon would
+// silently re-cut the entire chain into different filters. Anything outside
+// FFmpeg's colour vocabulary — a bare name, #rrggbb[aa], or 0xRRGGBB — becomes
+// black rather than an error, because a mistyped colour must not be the reason
+// a live stream will not start. The alpha suffix ("black@0.5") is not accepted:
+// a translucent letterbox has nothing behind it.
+func padColor(c string) string {
+	c = strings.TrimSpace(c)
+	if c == "" || len(c) > 24 {
+		return defaultPadColor
+	}
+	for i, r := range c {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '#' && i == 0:
+		default:
+			return defaultPadColor
+		}
+	}
+	return c
 }
 
 // gopFrames converts the configured keyframe interval in seconds into the

@@ -1152,3 +1152,276 @@ func TestDestinationArgsSplicesExtrasWithoutDisplacingTheRoutingGraph(t *testing
 		t.Error("the routing graph's output is no longer mapped")
 	}
 }
+
+// --------------------------------------------------- audio-only destinations
+
+// The defining property of an audio-only destination: nothing about video
+// survives into the command. No map, no codec flag, no muxer that would pull
+// one in by default.
+func TestDestinationArgsAudioOnlyEmitsNoVideo(t *testing.T) {
+	tests := []struct {
+		name        string
+		target      string
+		wantMuxer   string
+		wantEncoder string
+	}{
+		{"icecast mount without an extension defaults to mp3",
+			"icecast://source:pw@radio.example:8000/live", "mp3", "libmp3lame"},
+		{"icecast mount extension picks the codec",
+			"icecast://source:pw@radio.example:8000/live.aac", "adts", "aac"},
+		{"ogg mount is opus, not vorbis",
+			"icecast://source:pw@radio.example:8000/live.ogg", "ogg", "libopus"},
+		{"mp3 file", "podcast.mp3", "mp3", "libmp3lame"},
+		{"m4a file", "podcast.m4a", "ipod", "aac"},
+		{"aac file", "podcast.aac", "adts", "aac"},
+		{"opus file", "podcast.opus", "ogg", "libopus"},
+		{"flac file", "archive.flac", "flac", "flac"},
+		{"wav file", "archive.wav", "wav", "pcm_s16le"},
+		{"unknown extension falls back to mp3 rather than refusing",
+			"podcast.weird", "mp3", "libmp3lame"},
+		{"no extension falls back to mp3", "podcast", "mp3", "libmp3lame"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			args := DestinationArgs(DestSpec{
+				Kind: DestAudio, Target: tc.target, RelayURL: "udp://127.0.0.1:20010",
+				FilterComplex: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
+					"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				AudioBitrate: 160,
+			})
+			s := join(args)
+
+			maps := allAfter(args, "-map")
+			if len(maps) != 1 || maps[0] != "[aout]" {
+				t.Fatalf("want exactly one map, the routing graph output; got %v", maps)
+			}
+			if has(args, "-c:v") {
+				t.Errorf("audio-only destination carries a video codec flag: %s", s)
+			}
+			for _, bad := range []string{"0:v:0", "copy", "-b:v", "libx264"} {
+				if has(args, bad) {
+					t.Errorf("found video argument %q in an audio-only command: %s", bad, s)
+				}
+			}
+			if got, _ := argsAfter(args, "-c:a"); got != tc.wantEncoder {
+				t.Errorf("-c:a = %q, want %q", got, tc.wantEncoder)
+			}
+			if got, _ := argsAfter(args, "-f"); got != tc.wantMuxer {
+				t.Errorf("-f = %q, want %q", got, tc.wantMuxer)
+			}
+			if args[len(args)-1] != tc.target {
+				t.Errorf("target must be last: %s", s)
+			}
+			if fc, _ := argsAfter(args, "-filter_complex"); !strings.Contains(fc, "pan=stereo") {
+				t.Errorf("the routing graph must still be applied, got %q", fc)
+			}
+			if ac, _ := argsAfter(args, "-ac"); ac != "2" {
+				t.Errorf("-ac = %q, want the summed stereo mix", ac)
+			}
+		})
+	}
+}
+
+// Icecast needs the Content-Type or a listener gets a download prompt, and it
+// needs the credentials and mount to survive verbatim or it gets a 401.
+func TestDestinationArgsIcecastHeadersAndTarget(t *testing.T) {
+	tests := []struct {
+		target string
+		want   string
+	}{
+		{"icecast://source:pw@radio.example:8000/live", "audio/mpeg"},
+		{"icecast://source:pw@radio.example:8000/live.mp3", "audio/mpeg"},
+		{"icecast://source:pw@radio.example:8000/live.aac", "audio/aac"},
+		{"icecast://source:pw@radio.example:8000/live.ogg", "audio/ogg"},
+		{"icecast://source:pw@radio.example:8000/live.opus", "audio/ogg"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.target, func(t *testing.T) {
+			args := DestinationArgs(DestSpec{
+				Kind: DestAudio, Target: tc.target, RelayURL: "udp://127.0.0.1:20011",
+				FilterComplex: "[0:a:0]anull[aout]",
+			})
+			if got, ok := argsAfter(args, "-content_type"); !ok || got != tc.want {
+				t.Errorf("-content_type = %q (present=%v), want %q", got, ok, tc.want)
+			}
+			if args[len(args)-1] != tc.target {
+				t.Errorf("credentials and mount must reach FFmpeg unchanged: %v", args)
+			}
+		})
+	}
+}
+
+// A dot in the password must not be mistaken for the container.
+func TestDestinationArgsIcecastCredentialsDoNotDecideTheCodec(t *testing.T) {
+	args := DestinationArgs(DestSpec{
+		Kind: DestAudio, Target: "icecast://source:p.wav@radio.example:8000/live",
+		RelayURL: "udp://127.0.0.1:20012", FilterComplex: "[0:a:0]anull[aout]",
+	})
+	if got, _ := argsAfter(args, "-f"); got != "mp3" {
+		t.Errorf("-f = %q, want mp3; the password was read as an extension", got)
+	}
+}
+
+// A file destination is not an Icecast mount and must not claim to be one.
+func TestDestinationArgsAudioFileHasNoIcecastHeaders(t *testing.T) {
+	args := DestinationArgs(DestSpec{
+		Kind: DestAudio, Target: "/data/recordings/podcast.mp3",
+		RelayURL: "udp://127.0.0.1:20013", FilterComplex: "[0:a:0]anull[aout]",
+	})
+	if has(args, "-content_type") {
+		t.Errorf("-content_type has no meaning for a file: %s", join(args))
+	}
+}
+
+// -b:a against a lossless container is not fatal, but it warns on every start
+// and a log tail full of harmless warnings stops being read.
+func TestDestinationArgsAudioOnlyLosslessOmitsBitrate(t *testing.T) {
+	for _, target := range []string{"archive.flac", "archive.wav"} {
+		args := DestinationArgs(DestSpec{
+			Kind: DestAudio, Target: target, RelayURL: "udp://127.0.0.1:20014",
+			FilterComplex: "[0:a:0]anull[aout]", AudioBitrate: 320,
+		})
+		if has(args, "-b:a") {
+			t.Errorf("%s: -b:a is meaningless for a lossless codec: %s", target, join(args))
+		}
+	}
+	args := DestinationArgs(DestSpec{
+		Kind: DestAudio, Target: "podcast.mp3", RelayURL: "udp://127.0.0.1:20015",
+		FilterComplex: "[0:a:0]anull[aout]", AudioBitrate: 320,
+	})
+	if got, _ := argsAfter(args, "-b:a"); got != "320k" {
+		t.Errorf("-b:a = %q, want 320k for a lossy codec", got)
+	}
+}
+
+func TestDestinationArgsAudioOnlyDefaults(t *testing.T) {
+	args := DestinationArgs(DestSpec{
+		Kind: DestAudio, Target: "podcast.mp3", RelayURL: "udp://127.0.0.1:20016",
+		FilterComplex: "[0:a:0]anull[aout]",
+	})
+	if got, _ := argsAfter(args, "-b:a"); got != "160k" {
+		t.Errorf("default bitrate = %q, want 160k", got)
+	}
+	if got, _ := argsAfter(args, "-ar"); got != "48000" {
+		t.Errorf("default sample rate = %q", got)
+	}
+	if got, _ := argsAfter(args, "-map"); got != "[aout]" {
+		t.Errorf("default out label not applied: %s", join(args))
+	}
+}
+
+// Expert mode splices into the same two positions for an audio-only
+// destination as for any other, and the target stays last.
+func TestDestinationArgsAudioOnlySplicesExtras(t *testing.T) {
+	args := DestinationArgs(DestSpec{
+		Kind: DestAudio, Target: "icecast://source:pw@radio.example:8000/live",
+		RelayURL: "udp://127.0.0.1:20017", FilterComplex: "[0:a:0]anull[aout]",
+		ExtraInputArgs:  []string{"-analyzeduration", "10M"},
+		ExtraOutputArgs: []string{"-ice_name", "Studio B"},
+	})
+	iAt := slices.Index(args, "-i")
+	if iAt < 2 || args[iAt-2] != "-analyzeduration" || args[iAt-1] != "10M" {
+		t.Errorf("input args are not immediately before -i: %v", args)
+	}
+	if n := len(args); args[n-1] != "icecast://source:pw@radio.example:8000/live" ||
+		args[n-3] != "-ice_name" || args[n-2] != "Studio B" {
+		t.Errorf("output args are not immediately before the target: %v", args)
+	}
+}
+
+// --------------------------------------------------------------- a/v delay
+
+// A negative routing delay means the audio is early, which is only expressible
+// as holding the picture back. The graph agent hands that over as VideoDelayMS;
+// this is where it becomes an argument.
+func TestDestinationArgsNegativeDelayHoldsTheVideoBack(t *testing.T) {
+	tests := []struct {
+		name  string
+		kind  DestKind
+		delay int
+		want  string // "" => no -itsoffset at all
+	}{
+		{"no delay leaves the command exactly as it was", DestRTMP, 0, ""},
+		{"a negative delay cannot arrive here as a negative number", DestRTMP, -40, ""},
+		{"120 ms", DestRTMP, 120, "0.120"},
+		{"1 ms still renders in seconds", DestRTMP, 1, "0.001"},
+		{"a whole second keeps three decimals", DestRTMP, 1000, "1.000"},
+		{"srt destinations get it too", DestSRT, 250, "0.250"},
+		{"file destinations get it too", DestFile, 250, "0.250"},
+		{"audio-only has no picture to hold back", DestAudio, 250, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			target := "rtmp://a.example/live/key"
+			if tc.kind == DestAudio {
+				target = "podcast.mp3"
+			}
+			args := DestinationArgs(DestSpec{
+				Kind: tc.kind, Target: target, RelayURL: "udp://127.0.0.1:20020",
+				FilterComplex: "[0:a:0]aresample=48000:async=1:first_pts=0[aout]",
+				VideoDelayMS:  tc.delay,
+			})
+			got, ok := argsAfter(args, "-itsoffset")
+			if tc.want == "" {
+				if ok {
+					t.Fatalf("-itsoffset = %q, want it absent: %s", got, join(args))
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("-itsoffset missing: %s", join(args))
+			}
+			if got != tc.want {
+				t.Errorf("-itsoffset = %q, want %q (seconds)", got, tc.want)
+			}
+			// It is an INPUT option. After -i it would bind to the output and
+			// silently do nothing.
+			if slices.Index(args, "-itsoffset") > slices.Index(args, "-i") {
+				t.Errorf("-itsoffset must precede -i: %v", args)
+			}
+			// The other half of the mechanism: the offset is only a RELATIVE
+			// delay because video is copied while the graph pins audio to zero.
+			if v, _ := argsAfter(args, "-c:v"); v != "copy" {
+				t.Errorf("-c:v = %q; the measured offset only holds under copy", v)
+			}
+		})
+	}
+}
+
+// Backwards compatibility is the point: a profile that never touched the delay
+// must produce the same argv it always did, byte for byte.
+func TestDestinationArgsZeroVideoDelayIsByteIdentical(t *testing.T) {
+	spec := DestSpec{
+		Kind: DestRTMP, Target: "rtmp://a.example/live/key",
+		RelayURL: "udp://127.0.0.1:20021", FilterComplex: "[0:a:0]anull[aout]",
+		AudioBitrate: 160, SampleRate: 48000, CopyVideo: true,
+	}
+	withField := spec
+	withField.VideoDelayMS = 0
+	if !slices.Equal(DestinationArgs(spec), DestinationArgs(withField)) {
+		t.Errorf("an unset delay changed the command:\n old %v\n new %v",
+			DestinationArgs(spec), DestinationArgs(withField))
+	}
+}
+
+// Expert input args are spliced immediately before -i, so the delay has to
+// survive being pushed further from it.
+func TestDestinationArgsVideoDelaySurvivesTheExpertSplice(t *testing.T) {
+	args := DestinationArgs(DestSpec{
+		Kind: DestRTMP, Target: "rtmp://a.example/live/key",
+		RelayURL: "udp://127.0.0.1:20022", FilterComplex: "[0:a:0]anull[aout]",
+		VideoDelayMS:   200,
+		ExtraInputArgs: []string{"-analyzeduration", "10M"},
+	})
+	off := slices.Index(args, "-itsoffset")
+	iAt := slices.Index(args, "-i")
+	if off < 0 || off > iAt {
+		t.Fatalf("-itsoffset lost or misplaced: %v", args)
+	}
+	if args[iAt-2] != "-analyzeduration" {
+		t.Errorf("expert input args are no longer immediately before -i: %v", args)
+	}
+	if args[off+1] != "0.200" {
+		t.Errorf("-itsoffset = %q, want 0.200", args[off+1])
+	}
+}
