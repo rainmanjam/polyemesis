@@ -222,6 +222,16 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/destinations/{id}/expert/preview", s.handlePreviewExpert)
 			r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
 
+			// Sources: the multi-programme endpoints. Placed before renditions
+			// because a rendition belongs to a source, which is the order the
+			// UI needs to build its forms in too.
+			r.Get("/sources", s.handleListSources)
+			r.Post("/sources", s.handleCreateSource)
+			r.Get("/sources/{id}", s.handleGetSource)
+			r.Put("/sources/{id}", s.handleUpdateSource)
+			r.Delete("/sources/{id}", s.handleDeleteSource)
+			r.Post("/sources/{id}/token", s.handleRotateSourceToken)
+
 			r.Get("/renditions", s.handleListRenditions)
 			r.Post("/renditions", s.handleCreateRendition)
 			// Static segment first, same as /destinations/order above.
