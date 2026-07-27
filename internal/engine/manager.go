@@ -173,6 +173,19 @@ func (m *Manager) reconcileSharedIngest() {
 		return
 	}
 	want := st.SharedIngest
+	// The store does not validate -- Settings.Validate runs in the API handler
+	// -- so the manager is the last place between a stored value and a bound
+	// socket, and it has to check. Port 0 is the one that matters: it is not
+	// an error to the kernel, it means "any free port", so a zero here would
+	// bind something random, report itself as listening, and tell the operator
+	// their token is enforced while nothing they could publish to exists.
+	if want.Port < 1 || want.Port > 65535 {
+		if want.Enabled {
+			m.log.Error("one-port srt ingest not started: port out of range",
+				"port", want.Port)
+		}
+		want.Enabled = false
+	}
 	addr := fmt.Sprintf(":%d", want.Port)
 
 	m.mu.Lock()
