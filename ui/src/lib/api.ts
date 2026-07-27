@@ -24,6 +24,20 @@ import type {
   RenditionView,
   RoutingProfile,
   RoutingResult,
+  JobKindInfo,
+  JobState,
+  JobStats,
+  JobView,
+  JobsOverview,
+  LibraryRecording,
+  LibrarySession,
+  LibraryView,
+  Metadata,
+  PostProdSettings,
+  SearchResults,
+  SearchParams,
+  TranscriptTrack,
+  TranscriptView,
   Settings,
   SetupGuide,
   SourceInfo,
@@ -317,6 +331,139 @@ export const api = {
   putExpert: (id: number, args: ExpertArgs & { confirm: boolean }) =>
     put<ExpertResponse>(`/destinations/${id}/expert`, args),
   deleteExpert: (id: number) => del<ExpertResponse>(`/destinations/${id}/expert`),
+
+  // --- background jobs ---
+  //
+  // Nothing here starts work directly. Every call either reads the queue or
+  // changes the policy that decides when the queue may have the machine; the
+  // stream always wins, and that is the architecture rather than a setting.
+  //
+  // Each of these answers 503 on a server with no queue wired, which the pages
+  // treat as "this capability is absent" rather than as an error.
+  jobsOverview: () => get<JobsOverview>("/jobs/overview"),
+  listJobs: (opts: {
+    states?: (JobState | "active")[];
+    kinds?: string[];
+    recordingId?: number;
+    limit?: number;
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.states?.length) q.set("state", opts.states.join(","));
+    if (opts.kinds?.length) q.set("kind", opts.kinds.join(","));
+    if (opts.recordingId) q.set("recordingId", String(opts.recordingId));
+    if (opts.limit) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return get<{ jobs: JobView[]; stats: JobStats; paused: boolean }>(
+      "/jobs" + (qs ? `?${qs}` : ""),
+    );
+  },
+  getJob: (id: number) => get<JobView>(`/jobs/${id}`),
+  cancelJob: (id: number) => post<JobView>(`/jobs/${id}/cancel`),
+  retryJob: (id: number) => post<JobView>(`/jobs/${id}/retry`),
+  /** Releases ONE job from the governor's gates. Deliberately not per-kind:
+   *  "run this one now" must not become "and every one from now on". */
+  releaseJob: (id: number) =>
+    post<{ released: boolean; governed: boolean }>(`/jobs/${id}/release`),
+  deleteJob: (id: number) => del<{ status: string }>(`/jobs/${id}`),
+  pauseJobs: () => post<{ paused: boolean }>("/jobs/pause"),
+  resumeJobs: () => post<{ paused: boolean }>("/jobs/resume"),
+  purgeJobs: (body: { days?: number; keep?: number }) =>
+    post<{ purged: number }>("/jobs/purge", body),
+
+  jobPolicy: () =>
+    get<{ policy: PostProdSettings; kinds: JobKindInfo[]; modes: string[] }>(
+      "/jobs/policy",
+    ),
+  /** `restartRequired` is true when concurrency changed: the queue fixes that
+   *  when it is constructed, so the new value is saved but not yet live. */
+  putJobPolicy: (policy: PostProdSettings) =>
+    put<{
+      policy: PostProdSettings;
+      kinds: JobKindInfo[];
+      restartRequired: boolean;
+    }>("/jobs/policy", policy),
+
+  // --- the media library ---
+  library: () => get<LibraryView>("/library"),
+  librarySession: (id: number) =>
+    get<{ session: LibrarySession; recordings: LibraryRecording[] }>(
+      `/library/sessions/${id}`,
+    ),
+  createLibrarySession: (m: Metadata & { recordings?: number[] }) =>
+    post<LibrarySession>("/library/sessions", m),
+  /** Omitting `recordings` leaves the membership alone, so renaming a session
+   *  cannot silently empty it. */
+  updateLibrarySession: (id: number, m: Metadata & { recordings?: number[] }) =>
+    put<LibrarySession>(`/library/sessions/${id}`, m),
+  /** Ungroups the segments; it never deletes media. */
+  deleteLibrarySession: (id: number) =>
+    del<{ status: string; note: string }>(`/library/sessions/${id}`),
+  /** Re-runs the grouping backfill: additive, idempotent, and it never merges
+   *  a grouping a human has already split. */
+  regroupSessions: () =>
+    post<{
+      created: number;
+      assigned: number;
+      extended: number;
+      groups: number;
+      pruned: number;
+    }>("/library/sessions/regroup"),
+
+  libraryRecording: (id: number) =>
+    get<{ recording: LibraryRecording; transcriptTracks: TranscriptTrack[] | null }>(
+      `/library/recordings/${id}`,
+    ),
+  updateLibraryRecording: (id: number, m: Metadata) =>
+    put<Metadata & { recordingId: number }>(`/library/recordings/${id}`, m),
+
+  transcript: (id: number) =>
+    get<TranscriptView>(`/library/recordings/${id}/transcript`),
+  deleteTranscript: (id: number, track?: number) =>
+    del<{ status: string }>(
+      `/library/recordings/${id}/transcript` +
+        (track === undefined ? "" : `?track=${track}`),
+    ),
+  /** The manual half of the free-diarization story: the tracks already
+   *  separate the voices, this is where "track 2" becomes "Ana". */
+  setTranscriptSpeaker: (id: number, track: number, speaker: string) =>
+    put<{ track: number; speaker: string }>(
+      `/library/recordings/${id}/speaker`,
+      { track, speaker },
+    ),
+
+  /** The headline feature. A GET with query parameters, so a result is a place:
+   *  it survives being bookmarked, shared and reloaded. */
+  searchTranscripts: (p: SearchParams) => {
+    const q = new URLSearchParams();
+    q.set("q", p.q);
+    if (p.prefix) q.set("prefix", "1");
+    if (p.raw) q.set("raw", "1");
+    if (p.recordingId) q.set("recordingId", String(p.recordingId));
+    if (p.sessionId) q.set("sessionId", String(p.sessionId));
+    if (p.track !== undefined) q.set("track", String(p.track));
+    if (p.speaker) q.set("speaker", p.speaker);
+    if (p.since) q.set("since", p.since);
+    if (p.until) q.set("until", p.until);
+    if (p.order) q.set("order", p.order);
+    if (p.limit !== undefined) q.set("limit", String(p.limit));
+    if (p.offset !== undefined) q.set("offset", String(p.offset));
+    if (p.context !== undefined) q.set("context", String(p.context));
+    return get<SearchResults>(`/library/search?${q.toString()}`);
+  },
+
+  /** Queue one piece of post-production about one recording. The response's
+   *  `created` is false when the queue folded it into work already running,
+   *  which is what stops a double click transcribing twice. */
+  submitRecordingJob: (id: number, kind: string, body: Record<string, unknown> = {}) =>
+    post<{ job: JobView; created: boolean }>(
+      `/library/recordings/${id}/jobs/${encodeURIComponent(kind)}`,
+      body,
+    ),
+
+  /** A derived file's URL. Used as a <video> or <img> src, so it has to be a
+   *  plain authenticated GET — a media element attaches no headers of its own. */
+  libraryMediaUrl: (id: number, file: string) =>
+    `${BASE}/library/recordings/${id}/media/${encodeURIComponent(file)}`,
 
   // --- platforms ---
   platformGuides: () => get<SetupGuide[]>("/platforms/guides"),

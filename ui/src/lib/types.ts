@@ -939,3 +939,390 @@ export interface DryRunResult {
   command: string;
   output?: string;
 }
+
+// ------------------------------------------------------- background jobs
+//
+// Everything heavy in this product is a queued job governed by a resource
+// policy that yields to the live stream by default. Transcription, proxy
+// encodes and archive compression all cost CPU, and a dropped frame on a live
+// broadcast is unrecoverable while a transcript arriving an hour later costs
+// nothing. These types are how the operator sees and steers that tradeoff.
+
+export type JobState =
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "deferred";
+
+/** How one kind of work is allowed to take the machine.
+ *  - realtime:  never held back
+ *  - deferred:  yields to the stream (the default, and the whole point)
+ *  - scheduled: only inside its windows
+ *  - manual:    only when a human releases it */
+export type JobMode = "realtime" | "deferred" | "scheduled" | "manual";
+
+export const JOB_MODES = ["realtime", "deferred", "scheduled", "manual"] as const;
+
+export const JOB_MODE_LABEL: Record<JobMode, string> = {
+  realtime: "Realtime",
+  deferred: "Yield to stream",
+  scheduled: "Scheduled",
+  manual: "Manual only",
+};
+
+export const JOB_MODE_HINT: Record<JobMode, string> = {
+  realtime: "Runs immediately, even while a broadcast is going out. Only for work you know is cheap.",
+  deferred: "Waits for the ingest to stop and for the machine to be quiet. The safe default.",
+  scheduled: "Only runs inside the windows below — overnight, typically.",
+  manual: "Never starts on its own. You release each job by hand.",
+};
+
+/** Priority is stored as a number; these are the three the API mints. */
+export type JobPriority = number;
+
+export interface Job {
+  id: number;
+  kind: string;
+  /** Opaque to the queue; "recording:<id>" for everything this UI submits. */
+  target: string;
+  params?: unknown;
+  result?: unknown;
+  priority: JobPriority;
+  state: JobState;
+  unique?: boolean;
+  /** Counts STARTS, not failures. */
+  attempts: number;
+  maxAttempts: number;
+  /** 0..1. */
+  progress: number;
+  log?: string[];
+  /** Survives a retry, so a job going wrong is visible before it gives up. */
+  error?: string;
+  createdAt: string;
+  availableAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt: string;
+}
+
+/** A job plus the two things the queue does not store: why it is not running,
+ *  and roughly how long it has left. `reason` is the load-bearing field on the
+ *  jobs page — a paused job with no explanation reads as a broken job. */
+export interface JobView extends Job {
+  recordingId?: number;
+  recording?: string;
+  blocked: boolean;
+  reason?: string;
+  etaSeconds?: number;
+  label?: string;
+}
+
+export interface JobStats {
+  running: number;
+  paused: boolean;
+  started: number;
+  completed: number;
+  failed: number;
+  retried: number;
+  cancelled: number;
+  requeued: number;
+  byKind?: Record<string, number>;
+}
+
+/** A local wall-clock range a scheduled kind may run in. It may wrap midnight,
+ *  and a wrapping window belongs to the day its START falls on. */
+export interface JobWindow {
+  /** IANA zone. Empty means UTC — never the server's local time. */
+  tz?: string;
+  /** Minutes past local midnight. End may be 1440 for the following midnight. */
+  startMinutes: number;
+  endMinutes: number;
+  /** 0 = Sunday. Empty means every day. */
+  days?: number[];
+}
+
+export interface JobKindInfo {
+  kind: string;
+  label: string;
+  description: string;
+  mode: JobMode;
+  windows?: JobWindow[];
+  usesGpu: boolean;
+  ignoreIngest: boolean;
+  /** Whether this kind has a policy row of its own, or inherits the default. */
+  overridden: boolean;
+  /** Fails open: a kind we cannot judge is available. */
+  available: boolean;
+  unavailable?: string;
+}
+
+export interface PowerState {
+  /** False means the platform told us nothing, which gates nothing. */
+  known: boolean;
+  onBattery: boolean;
+  /** -1 when unknown. */
+  percent: number;
+  tempC: number;
+}
+
+export interface GovernorGates {
+  at: string;
+  /** Includes the linger period after the stream stopped. */
+  ingestLive: boolean;
+  /** -1 when unavailable. */
+  cpuPercent: number;
+  cpuOverCeiling: boolean;
+  cpuSustained: boolean;
+  gpuBusy: boolean;
+  onBattery: boolean;
+  tooHot: boolean;
+  power: PowerState;
+}
+
+export interface GovernorVerdict {
+  kind: string;
+  mode: JobMode;
+  /** May a queued job of this kind be claimed now. */
+  start: boolean;
+  /** May one that is ALREADY running keep the machine. */
+  continue: boolean;
+  suspension: "stop" | "finish-then-yield" | string;
+  reason: string;
+}
+
+export interface GovernorSnapshot {
+  at: string;
+  enabled: boolean;
+  gates: GovernorGates;
+  verdicts: GovernorVerdict[];
+  deferred?: number[];
+  suspended?: string[];
+  /** Kinds that should be paused but cannot be, and are finishing instead. */
+  yielding?: string[];
+  paused: boolean;
+}
+
+export interface PostProdKindSettings {
+  kind: string;
+  mode?: JobMode | "";
+  windows?: JobWindow[];
+  usesGpu?: boolean;
+  ignoreIngest?: boolean;
+}
+
+export interface PostProdSettings {
+  enabled: boolean;
+  concurrency: number;
+  defaultMode: JobMode | "";
+  yieldToStream: boolean;
+  cpuCeilingPercent: number;
+  cpuResumePercent: number;
+  cpuSustainedSeconds: number;
+  cpuSettleSeconds: number;
+  avoidGpuWhenStreaming: boolean;
+  gpuBusy: boolean;
+  batteryFloorPercent: number;
+  thermalCeilingC: number;
+  niceLevel: number;
+  idleIo: boolean;
+  ingestLingerSeconds: number;
+  deferSeconds: number;
+  retainDays: number;
+  retainJobs: number;
+  kinds?: PostProdKindSettings[];
+}
+
+/** What this machine can do about speech to text. Reported even when
+ *  whisper.cpp is absent: "install this and the button appears" beats a
+ *  disabled control with no explanation. */
+export interface WhisperInfo {
+  available: boolean;
+  unavailable?: string;
+  binary?: string;
+  version?: string;
+  backends?: string[];
+  backend?: string;
+  models?: string[];
+  defaultModel?: string;
+  realtime: boolean;
+  realtimeNote?: string;
+}
+
+export interface JobsOverview {
+  /** False means no queue is wired on this server. */
+  available: boolean;
+  paused: boolean;
+  stats: JobStats;
+  counts: Record<string, number>;
+  governor?: GovernorSnapshot;
+  policy: PostProdSettings;
+  kinds: JobKindInfo[];
+  active: JobView[];
+  recent: JobView[];
+  whisper: WhisperInfo;
+}
+
+// ------------------------------------------------------------- the library
+//
+// Sessions are the primary unit: a session is one broadcast, and its segments
+// are an implementation detail of how the recorder wrote it down.
+
+export interface RecordingAssets {
+  proxy: boolean;
+  poster: boolean;
+  contactSheet: boolean;
+  sprites: boolean;
+  archive: boolean;
+}
+
+export interface LibraryRecording extends Recording {
+  sessionId?: number;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  hasTranscript: boolean;
+  assets: RecordingAssets;
+  activeJobs?: JobView[];
+}
+
+export interface Session {
+  id: number;
+  title: string;
+  description: string;
+  tags: string[] | null;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  bytes: number;
+  recordings: number;
+  /** False once a human has built or split this session by hand. */
+  auto: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibrarySession extends Session {
+  displayTitle: string;
+  /** The derived still that stands in for the session, if one has been
+   *  generated. Keyed on the recording id, which is what the media URL wants. */
+  posterRecordingId?: number;
+  posterFile?: string;
+  transcribed: number;
+}
+
+export interface LibraryView {
+  sessions: LibrarySession[];
+  ungrouped: LibraryRecording[];
+  tags: string[];
+  speakers: string[];
+  jobsAvailable: boolean;
+  transcribeAvailable: boolean;
+  transcribeNote?: string;
+  /** The sentinels the search wraps matched terms in. Split on these. */
+  markers: [string, string];
+}
+
+/** The editable half of a session or a recording. Kept separate from the
+ *  computed span so an update cannot carry a stale one back. */
+export interface Metadata {
+  title: string;
+  description: string;
+  tags: string[];
+}
+
+export interface TranscriptSegment {
+  id: number;
+  recordingId: number;
+  track: number;
+  speaker?: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+  confidence?: number;
+  confidenceKnown?: boolean;
+}
+
+export interface TranscriptTrack {
+  id: number;
+  recordingId: number;
+  track: number;
+  speaker?: string;
+  role?: string;
+  language?: string;
+  model?: string;
+  backend?: string;
+  createdAt: string;
+  segments?: TranscriptSegment[];
+  count: number;
+  durationMs: number;
+}
+
+export interface Transcript {
+  recordingId: number;
+  recording: string;
+  tracks: TranscriptTrack[];
+}
+
+export interface TranscriptView {
+  transcript: Transcript;
+  /** The free-diarization view: time-ordered, already speaker-attributed
+   *  because each microphone was recorded on its own track. */
+  merged: TranscriptSegment[];
+  speakers: string[];
+  segments: number;
+}
+
+export type TranscriptOrder = "relevance" | "time" | "recent";
+
+export interface TranscriptHit {
+  segmentId: number;
+  recordingId: number;
+  recording: string;
+  sessionId?: number;
+  track: number;
+  speaker?: string;
+  startMs: number;
+  endMs: number;
+  /** Wall-clock instant of the utterance, not an offset. */
+  at: string;
+  text: string;
+  /** Text with matched terms wrapped in the markers. */
+  snippet: string;
+  context?: string;
+  score: number;
+}
+
+/** Everything the transcript search accepts. Every field is optional but the
+ *  text, and the server clamps the numbers, so a caller may pass what it has. */
+export interface SearchParams {
+  q: string;
+  /** Makes the final term a prefix match, which is what makes
+   *  search-as-you-type useful. */
+  prefix?: boolean;
+  /** Passes the text to FTS5 untouched, for someone who knows the syntax. */
+  raw?: boolean;
+  recordingId?: number;
+  sessionId?: number;
+  track?: number;
+  speaker?: string;
+  /** RFC3339 or a bare YYYY-MM-DD. */
+  since?: string;
+  until?: string;
+  order?: TranscriptOrder;
+  limit?: number;
+  offset?: number;
+  /** Neighbouring segments glued either side of the hit; negative for none. */
+  context?: number;
+  snippetTokens?: number;
+}
+
+export interface SearchResults {
+  hits: TranscriptHit[];
+  /** -1 when the count could not be taken; the hits are still good. */
+  total: number;
+  limit: number;
+  offset: number;
+  markers: [string, string];
+}
