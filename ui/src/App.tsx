@@ -6,6 +6,8 @@ import { LiveDataProvider } from "@/hooks/useLiveData";
 import { api, ApiError } from "@/lib/api";
 import { AppLayout } from "@/components/AppLayout";
 import { AuthScreen } from "@/pages/AuthScreen";
+import { AutomationPage } from "@/pages/AutomationPage";
+import { ClipsPage } from "@/pages/ClipsPage";
 import { Dashboard } from "@/pages/Dashboard";
 import { MetersPage } from "@/pages/MetersPage";
 import { RoutingPage } from "@/pages/RoutingPage";
@@ -147,6 +149,8 @@ export default function App() {
                 }
               />
               <Route path="/recordings" element={<RecordingsPage />} />
+              <Route path="/clips" element={<ClipsPage />} />
+              <Route path="/automation" element={<AutomationPage />} />
               <Route
                 path="/monitoring"
                 element={

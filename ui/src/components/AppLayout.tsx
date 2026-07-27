@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
   AudioLines,
+  CalendarClock,
   Check,
   Disc,
   Languages,
@@ -11,6 +12,7 @@ import {
   LogOut,
   Menu,
   Radio,
+  Scissors,
   Settings as SettingsIcon,
   Sliders,
   X,
@@ -38,12 +40,15 @@ import {
 } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
+/** A nav entry names itself either through the catalogue or, for a page whose
+ *  key has not been added to en.json yet, with a literal. The literal arm is a
+ *  bridge, not a pattern: a page that ships before its translation key should
+ *  still appear in the nav rather than render a raw key at the operator. */
 type NavItem = {
   to: string;
-  labelKey: TranslationKey;
   icon: React.ComponentType<{ className?: string }>;
   end?: boolean;
-};
+} & ({ labelKey: TranslationKey; label?: never } | { label: string; labelKey?: never });
 
 const NAV: NavItem[] = [
   { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
@@ -52,6 +57,8 @@ const NAV: NavItem[] = [
   { to: "/renditions", labelKey: "nav.renditions", icon: Layers },
   { to: "/playout", labelKey: "nav.playout", icon: Radio },
   { to: "/recordings", labelKey: "nav.recordings", icon: Disc },
+  { to: "/clips", label: "Clips", icon: Scissors },
+  { to: "/automation", label: "Automation", icon: CalendarClock },
   { to: "/monitoring", labelKey: "nav.monitoring", icon: Activity },
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
 ];
@@ -175,7 +182,7 @@ export function AppLayout({
             mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
           )}
         >
-          {NAV.map(({ to, labelKey, icon: Icon, end }) => (
+          {NAV.map(({ to, labelKey, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -190,7 +197,7 @@ export function AppLayout({
               }
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
-              {t(labelKey)}
+              {labelKey ? t(labelKey) : label}
             </NavLink>
           ))}
         </nav>

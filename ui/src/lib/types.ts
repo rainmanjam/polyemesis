@@ -20,12 +20,128 @@ export interface MatrixCell {
   gain: number;
 }
 
+// ------------------------------------------------------------- track roles
+//
+// A role is what the operator says a track *is* — "the licensed music", "the
+// Spanish commentary" — as opposed to "track 3". Roles live on the SOURCE,
+// not on a destination, because the answer does not change per platform.
+//
+// Roles are inert by themselves: nothing is filtered unless a destination asks
+// for it through `excludeRoles`. That asymmetry is deliberate and the UI has
+// to preserve it — labelling a track must never silently drop audio.
+
+/** "" is the zero value: a track nobody has described yet. */
+export type TrackRole =
+  | ""
+  | "music"
+  | "mic"
+  | "game"
+  | "commentary"
+  | "clean"
+  | "other";
+
+/** The catalogue, in the order routing.TrackRoles() offers it. "" is absent:
+ *  "no role" is the absence of an annotation, not a choice. */
+export const TRACK_ROLES = [
+  "mic",
+  "commentary",
+  "game",
+  "music",
+  "clean",
+  "other",
+] as const satisfies readonly Exclude<TrackRole, "">[];
+
+export const ROLE_LABEL: Record<Exclude<TrackRole, "">, string> = {
+  mic: "Mic",
+  commentary: "Commentary",
+  game: "Game",
+  music: "Music",
+  clean: "Clean",
+  other: "Other",
+};
+
+/** Matches routing.MaxLabelLen / MaxLangTagLen. */
+export const MAX_LABEL_LEN = 64;
+export const MAX_LANG_TAG_LEN = 35;
+
+/** The operator's description of one ingest track. Keyed by index rather than
+ *  by position, so it survives a track vanishing and coming back. */
+export interface TrackAnnotation {
+  track: number;
+  role?: TrackRole;
+  label?: string;
+  language?: string;
+  denoise?: boolean;
+}
+
+// -------------------------------------------------------- destination audio
+
+/** Programme-loudness target. Absent leaves the fixed loudnorm parameters that
+ *  shipped with `loudnorm` alone, byte for byte. */
+export interface Loudness {
+  targetLufs: number;
+  /** 0 means routing.DefaultTruePeakDB (−1 dBTP). */
+  truePeakDb?: number;
+  /** 0 means routing.DefaultLoudnessLRA (11 LU). */
+  rangeLu?: number;
+}
+
+export const LUFS_STREAMING = -14;
+export const LUFS_PODCAST = -16;
+export const LUFS_BROADCAST = -23;
+export const DEFAULT_TRUE_PEAK_DB = -1;
+export const DEFAULT_LOUDNESS_LRA = 11;
+
+export const MIN_TARGET_LUFS = -70;
+export const MAX_TARGET_LUFS = -5;
+export const MIN_TRUE_PEAK_DB = -9;
+export const MAX_TRUE_PEAK_DB = 0;
+export const MIN_LOUDNESS_LRA = 1;
+export const MAX_LOUDNESS_LRA = 50;
+
+/** Audio against video, in ms. Positive holds AUDIO back (lip-sync repair, a
+ *  moderation delay); negative pulls it ahead, which the compiler pays for by
+ *  holding the VIDEO back instead. The bounds are asymmetric for that reason. */
+export const MIN_DELAY_MS = -2000;
+export const MAX_DELAY_MS = 30000;
+
+/** Pull one group of tracks down whenever another is speaking. `trigger` is
+ *  what causes the duck (the mic), `target` is what gets pushed down (the
+ *  music). They must be disjoint. */
+export interface Ducking {
+  trigger: number[];
+  target: number[];
+  /** Each 0 means the routing default below. */
+  thresholdDb?: number;
+  ratio?: number;
+  attackMs?: number;
+  releaseMs?: number;
+}
+
+export const DEFAULT_DUCK_THRESHOLD_DB = -24;
+export const DEFAULT_DUCK_RATIO = 8;
+export const DEFAULT_DUCK_ATTACK_MS = 20;
+export const DEFAULT_DUCK_RELEASE_MS = 300;
+
+export const MIN_DUCK_THRESHOLD_DB = -60;
+export const MAX_DUCK_THRESHOLD_DB = 0;
+export const MIN_DUCK_RATIO = 1;
+export const MAX_DUCK_RATIO = 20;
+
 export interface RoutingProfile {
   mode: RoutingMode;
   tracks: TrackSel[];
   matrix: MatrixCell[] | null;
   normalize: NormalizeMode;
   sampleRate: number;
+
+  /** Every field below is optional and absent means "behaves exactly as
+   *  before". Send them omitted, never as zero values, or a saved profile
+   *  stops compiling to the string it used to. */
+  loudness?: Loudness | null;
+  delayMs?: number;
+  ducking?: Ducking | null;
+  excludeRoles?: TrackRole[] | null;
 }
 
 export interface RoutingResult {
@@ -35,6 +151,9 @@ export interface RoutingResult {
   tracks: number[];
   normalization: NormalizeMode;
   warnings: string[] | null;
+  /** How long the VIDEO is held back to satisfy a negative `delayMs`. Zero for
+   *  every other profile. */
+  videoDelayMs?: number;
 }
 
 export interface SourceTrack {
@@ -59,6 +178,12 @@ export interface SourceInfo {
   probed: boolean;
   tracks: SourceTrack[] | null;
   video?: VideoStream | null;
+  /** `tracks` describes the silence tier's synthetic output rather than the
+   *  ingest's, because the ingest carries no audio at all. */
+  synthetic?: boolean;
+  /** What the operator has said these tracks are. Absent on a server that does
+   *  not persist annotations yet. */
+  annotations?: TrackAnnotation[] | null;
 }
 
 export type DestKind = "rtmp" | "srt" | "file";
@@ -613,6 +738,34 @@ export interface SystemInfo {
   uiBuilt: boolean;
 }
 
+// ----------------------------------------------------- music-rights policy
+//
+// A superset of `Platform`: the rights table folds a destination's platform
+// and its kind together, because where the bytes land is the only thing a
+// music policy cares about. A local recording is `file` no matter what
+// platform the row claims. Kept separate from `Platform` so widening this
+// cannot widen the destination editor's platform picker.
+export type PolicyPlatform = Platform | "facebook" | "file";
+
+/** "" follows the platform table; the other two overrule it. */
+export type MusicPolicyChoice = "" | "keep" | "exclude";
+
+/** The resolved answer to "does this destination carry music?", pre-phrased
+ *  for the badge. `reason` names the mechanism ("Twitch DMCA policy"), never a
+ *  legal conclusion, and `overridden` records that a person decided rather
+ *  than the table. */
+export interface MusicDecision {
+  platform: PolicyPlatform;
+  exclude: boolean;
+  overridden: boolean;
+  reason: string;
+  summary: string;
+}
+
+/** The `platform:` prefix routing.PlatformPresetID() puts on the presets
+ *  generated from the music-rights table. */
+export const PLATFORM_PRESET_PREFIX = "platform:";
+
 export interface Preset {
   id: string;
   name: string;
@@ -620,12 +773,26 @@ export interface Preset {
   needsMusicTrack: boolean;
   needsMicTrack: boolean;
   needsSurroundTrack: boolean;
+  needsCleanTrack: boolean;
+  /** Asks for a BCP-47 tag, e.g. "es". */
+  needsLanguage: boolean;
+  /** Set only on the presets generated from the music-rights table. Those
+   *  double as the UI's copy of that table — there is no separate endpoint for
+   *  it, and deriving the badge from the same rows the presets came from is
+   *  what keeps the two from disagreeing. */
+  platform?: PolicyPlatform;
+  policy?: MusicDecision;
+  loudness?: Loudness | null;
+  delayMs?: number;
 }
 
 export interface PresetOpts {
   musicTrack: number;
   micTrack: number;
   surroundTrack: number;
+  cleanTrack: number;
+  language?: string;
+  musicPolicy?: MusicPolicyChoice;
 }
 
 export interface PlatformCreds {
