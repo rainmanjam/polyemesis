@@ -1,9 +1,8 @@
-//go:build !windows
-
-// The process-lifecycle tests drive real children through /bin/sh and probe
-// them with signal 0, so they are Unix-only. The pure-logic tests (ring,
-// classify, CommandString) live here too rather than in a second file,
-// because splitting them buys nothing on the only platforms we ship.
+// The process-lifecycle tests drive real children and probe whether their pids
+// are still alive; both are platform-specific, and both live behind helpers in
+// testfake_test.go so these bodies run unchanged on every platform we ship.
+// The pure-logic tests (ring, classify, CommandString) live here too rather
+// than in a second file, because splitting them buys nothing.
 
 package supervisor
 
@@ -13,87 +12,15 @@ import (
 	"io"
 	"log/slog"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
-
-const shell = "/bin/sh"
-
-func testProcess(t *testing.T, spec Spec) *Process {
-	t.Helper()
-	spec.Bin = shell
-	if spec.Name == "" {
-		spec.Name = t.Name()
-	}
-	p := New(slog.New(slog.NewTextHandler(io.Discard, nil)), spec)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		p.Stop(ctx)
-	})
-	return p
-}
-
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
-
-// alive reports whether the OS still knows about pid. Signal 0 performs the
-// permission and existence checks without delivering anything.
-func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
-
-// recorder collects the state transitions the supervisor announces. Polling
-// Status() cannot stand in for it: a process is born in StateStopped, so
-// "wait until stopped" would pass before the child ever ran.
-type recorder struct {
-	mu     sync.Mutex
-	states []State
-	pids   map[int]bool
-}
-
-func newRecorder() *recorder { return &recorder{pids: map[int]bool{}} }
-
-func (r *recorder) onState(st Status) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.states = append(r.states, st.State)
-	if st.State == StateRunning {
-		r.pids[st.PID] = true
-	}
-}
-
-func (r *recorder) saw(s State) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, seen := range r.states {
-		if seen == s {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *recorder) distinctPIDs() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.pids)
-}
 
 // ------------------------------------------------------------------ restart
 
 func TestAutoRestartRespawnsAfterNonZeroExit(t *testing.T) {
 	rec := newRecorder()
-	p := testProcess(t, Spec{
-		Args:        []string{"-c", "exit 1"},
+	p := testProcess(t, fakeExit(1), Spec{
 		AutoRestart: true,
 		MinBackoff:  10 * time.Millisecond,
 		MaxBackoff:  10 * time.Millisecond,
@@ -119,19 +46,19 @@ func TestAutoRestartRespawnsAfterNonZeroExit(t *testing.T) {
 func TestNoAutoRestartIsTerminal(t *testing.T) {
 	tests := []struct {
 		name      string
-		script    string
+		exitCode  int
 		wantState State
 		wantErr   bool
 	}{
 		{
 			name:      "a failing child ends in failed and is not respawned",
-			script:    "exit 7",
+			exitCode:  7,
 			wantState: StateFailed,
 			wantErr:   true,
 		},
 		{
 			name:      "a child that exits cleanly ends in stopped",
-			script:    "exit 0",
+			exitCode:  0,
 			wantState: StateStopped,
 		},
 	}
@@ -139,8 +66,7 @@ func TestNoAutoRestartIsTerminal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := newRecorder()
-			p := testProcess(t, Spec{
-				Args:        []string{"-c", tt.script},
+			p := testProcess(t, fakeExit(tt.exitCode), Spec{
 				AutoRestart: false,
 				OnState:     rec.onState,
 			})
@@ -184,8 +110,7 @@ func TestBackoffDoublesUpToTheCeiling(t *testing.T) {
 	var got []time.Duration
 	enough := make(chan struct{})
 
-	p := testProcess(t, Spec{
-		Args:        []string{"-c", "exit 1"},
+	p := testProcess(t, fakeExit(1), Spec{
 		AutoRestart: true,
 		MinBackoff:  min,
 		MaxBackoff:  max,
@@ -228,8 +153,7 @@ func TestBackoffDoublesUpToTheCeiling(t *testing.T) {
 // --------------------------------------------------------------------- stop
 
 func TestStopKillsTheChildAndReportsStopped(t *testing.T) {
-	p := testProcess(t, Spec{
-		Args:        []string{"-c", "sleep 30"},
+	p := testProcess(t, fakeSleep(30*time.Second), Spec{
 		AutoRestart: true,
 		MinBackoff:  10 * time.Millisecond,
 	})
@@ -275,9 +199,7 @@ func TestStderrCaptureIsBoundedAndOldestFirst(t *testing.T) {
 	const emitted = logRingSize + 200
 
 	rec := newRecorder()
-	p := testProcess(t, Spec{
-		Args: []string{"-c", fmt.Sprintf(
-			`i=0; while [ $i -lt %d ]; do echo "line$i" >&2; i=$((i+1)); done`, emitted)},
+	p := testProcess(t, fakeStderr(emitted), Spec{
 		AutoRestart: false,
 		OnState:     rec.onState,
 	})
