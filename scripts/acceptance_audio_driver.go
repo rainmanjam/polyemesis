@@ -64,6 +64,10 @@ const loudnessTarget = -14.0
 // plausible moderation delay.
 const delayMS = 400
 
+// negDelayMS is the magnitude of the NEGATIVE delay, i.e. audio pulled ahead of
+// picture. Applied as -negDelayMS.
+const negDelayMS = 300
+
 // stereo widens a lavfi mono generator to two channels. See the source comment.
 const stereo = "aformat=channel_layouts=stereo"
 
@@ -181,6 +185,15 @@ probed:
 	pd["delayMs"] = delayMS
 	call("POST", "/destinations", dest("Delayed", "file", "delayed.mkv", pd))
 
+	// The other direction, which is a different mechanism entirely. No audio
+	// filter can pull sound AHEAD of picture, so a negative delay compiles to
+	// nothing in the graph and holds the VIDEO back instead, on the
+	// destination's command line. It leaves no trace in the filter string,
+	// which is exactly why it needs measuring rather than reading.
+	pn := profile([]int{2}, 1.0)
+	pn["delayMs"] = -negDelayMS
+	call("POST", "/destinations", dest("Pulled ahead", "file", "neg-delay.mkv", pn))
+
 	// 4 and 5. DUCKING, against a control carrying the identical mix with no
 	// duck. The control is what makes the result mean something: anything that
 	// pulls the music down when the mic arrives — a limiter, amix's own
@@ -208,7 +221,7 @@ probed:
 	call("POST", "/destinations", dest("No music", "file", "no-music.mkv", pe))
 
 	fmt.Println("waiting for every destination to run")
-	want := 7
+	want := 8
 	deadline = time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(1500 * time.Millisecond)

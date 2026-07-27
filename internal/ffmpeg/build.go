@@ -584,7 +584,6 @@ func DestinationArgs(s DestSpec) []string {
 		// jitter that would otherwise show up as dropped frames.
 		"-thread_queue_size", "1024",
 	)
-	args = append(args, videoDelayArgs(s)...)
 	args = append(args,
 		"-i", RelayInputURL(s.RelayURL),
 		"-filter_complex", s.FilterComplex,
@@ -595,6 +594,8 @@ func DestinationArgs(s DestSpec) []string {
 	// entirely — the single most damaging possible bug in this app.
 	if s.Kind != DestAudio {
 		args = append(args, "-map", "0:v:0", "-c:v", "copy")
+		// After -c:v copy, because it is a filter on the copied bitstream.
+		args = append(args, videoDelayArgs(s)...)
 	}
 	args = append(args, "-map", "["+s.AudioOutLabel+"]")
 
@@ -621,35 +622,39 @@ func DestinationArgs(s DestSpec) []string {
 	return SpliceExtraArgs(args, s.ExtraInputArgs, s.ExtraOutputArgs)
 }
 
-// videoDelayArgs renders a negative routing delay — audio early — as the input
-// offset that holds the picture back. Empty for every other profile.
+// videoDelayArgs renders a negative routing delay — audio early — as a
+// timestamp shift on the copied video stream. Empty for every other profile.
 //
-// -itsoffset shifts EVERY stream of the input it precedes, so on its own it
-// would move audio and video together and achieve exactly nothing. What makes
-// it work here is the other end of the pipeline: every graph Compile emits ends
-// in `aresample=...:first_pts=0`, which pins the mixed audio to zero however
-// the input was shifted. Video keeps the offset, audio does not, and the
-// difference is the delay. Verified against FFmpeg 8.1.2: with first_pts=0 the
-// video start moved by exactly the offset and audio did not move at all;
-// against a graph without it, both moved and the separation stayed at zero.
+// This was -itsoffset first, and -itsoffset does not work here. It shifts EVERY
+// stream of the input it precedes, so audio and video move together and the
+// separation between them stays at exactly zero. The idea that
+// `aresample=...:first_pts=0` at the end of the graph would pin the audio back
+// and leave only the video moved is wrong: measured against FFmpeg 8.1.2 the
+// two moved in lockstep and the delivered offset was 0 ms for every requested
+// value. A negative delay was emitting a flag and changing nothing.
 //
-// -itsoffset and -c:v copy get along, which is the combination that matters
-// here — the offset is applied by the demuxer, so there is no encoder in the
-// video path to renormalise it, and the measured shift was the requested one to
-// the microsecond. A re-encode also keeps the offset but snaps it to the frame
-// grid (0.500 s came out as 0.480 at 25 fps), so copy is both the cheaper and
-// the more accurate path. Do not "fix" this by moving the offset onto the video
-// filter chain: there is no video filter chain, by design.
+// setts shifts the video alone, and it is a BITSTREAM filter, so it does it
+// without decoding — `-c:v copy` survives, which is the whole promise of a
+// destination. It needs FFmpeg 5.0; the startup check already demands 6.0.
 //
-// Audio-only destinations get nothing. There is no picture to hold back, and
-// offsetting the sole input would only shift timestamps the graph then pins.
+// pts and dts are set SEPARATELY and deliberately. setts also accepts a single
+// `ts=` that writes both from one expression, which silently collapses them
+// into each other — with B-frames, where DTS legitimately runs ahead of PTS,
+// that measured -232 ms for a requested -300 ms, while the separate form
+// measured -298 ms. A stream with no B-frames cannot tell the two apart, so
+// this is exactly the kind of bug that survives a test on synthetic footage and
+// appears on a real encoder.
+//
+// Audio-only destinations get nothing: there is no picture to hold back.
 func videoDelayArgs(s DestSpec) []string {
 	if s.Kind == DestAudio || s.VideoDelayMS <= 0 {
 		return nil
 	}
-	// FFmpeg wants seconds. Millisecond precision, fixed notation, because
-	// %g would render 120 ms as "0.12" and 1 ms as "0.001" inconsistently.
-	return []string{"-itsoffset", strconv.FormatFloat(float64(s.VideoDelayMS)/1000, 'f', 3, 64)}
+	// Seconds, divided by the stream timebase to reach ticks. Millisecond
+	// precision in fixed notation, because %g would render 120 ms as "0.12" and
+	// 1 ms as "0.001" inconsistently.
+	d := strconv.FormatFloat(float64(s.VideoDelayMS)/1000, 'f', 3, 64)
+	return []string{"-bsf:v", "setts=pts=PTS+" + d + "/TB:dts=DTS+" + d + "/TB"}
 }
 
 // audioOutputArgs renders the codec, container and (for Icecast) the headers an
