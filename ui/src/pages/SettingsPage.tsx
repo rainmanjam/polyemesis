@@ -33,7 +33,19 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
+// The capability matrix lives beside the destination dialog that renders it
+// inline; this page shows the same rows as a full table. It should move to
+// ui/src/lib/ when someone owns that file — it is data, not a component.
+import {
+  CAPABILITY_COLUMNS,
+  PLATFORM_CAPABILITIES,
+  SUPPORT_LEGEND,
+  supportInfo,
+  supportOf,
+  tierInfo,
+} from "@/components/DestinationDialog";
 import { api } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
@@ -680,6 +692,8 @@ function PlatformSettings() {
 
   return (
     <div className="flex flex-col gap-3">
+      <PlatformCapabilityMatrix />
+
       <Card>
         <CardHeader>
           <CardTitle>Why you need your own developer app</CardTitle>
@@ -701,6 +715,133 @@ function PlatformSettings() {
         />
       ))}
     </div>
+  );
+}
+
+/** The honest answer to "what do I actually get?", above the setup forms
+ *  rather than below them.
+ *
+ *  Every row of this table was a question somebody would otherwise only answer
+ *  by spending an evening: Kick signs in but never hands over a key; Facebook
+ *  works completely and needs Meta's App Review first; Instagram cannot be
+ *  streamed to at all. Reading it takes thirty seconds and it is deliberately
+ *  the first thing on this tab. */
+function PlatformCapabilityMatrix() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>What each platform can do</CardTitle>
+        <CardDescription>
+          Platforms differ in how much of this polyemesis can automate, and the difference is
+          worth knowing before you start rather than an hour in. Streaming itself works the same
+          everywhere — per-destination audio routing, renditions, reconnect and meters do not
+          depend on any of the columns below.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-3">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Platform</TableHead>
+                {CAPABILITY_COLUMNS.map((c) => (
+                  <TableHead key={c.key} title={c.help}>
+                    {c.label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {PLATFORM_CAPABILITIES.map((p) => (
+                <TableRow key={p.presetId}>
+                  <TableCell>
+                    <div className="flex flex-col gap-0.5">
+                      <span
+                        className={
+                          p.tier === "unsupported" ? "text-muted-foreground" : undefined
+                        }
+                      >
+                        {p.name}
+                      </span>
+                      <Badge
+                        variant={p.tier === "unsupported" ? "warn" : "outline"}
+                        className="w-fit"
+                        title={tierInfo(p.tier).help}
+                      >
+                        {tierInfo(p.tier).label}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  {CAPABILITY_COLUMNS.map((c) => {
+                    const info = supportInfo(supportOf(p, c.key));
+                    return (
+                      <TableCell key={c.key}>
+                        {/* The reason, where there is one, is the cell's own
+                            tooltip: a tick with no explanation is how a claim
+                            becomes folklore. */}
+                        <Badge
+                          variant={info.variant}
+                          className="normal-case"
+                          title={p.reasons?.[c.key] ?? info.help}
+                        >
+                          {info.label}
+                        </Badge>
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {SUPPORT_LEGEND.map((l) => (
+            <span key={l.key} className="flex items-center gap-1.5">
+              <Badge variant={l.variant} className="normal-case">
+                {l.label}
+              </Badge>
+              <span className="text-[10px] text-muted-foreground">{l.help}</span>
+            </span>
+          ))}
+        </div>
+
+        {/* "Unverified" is the load-bearing value here and the one most likely
+            to be misread as "no". Saying it plainly costs a sentence and saves
+            an operator concluding a feature is blocked when it was only never
+            checked. */}
+        <p className="text-[10px] text-muted-foreground">
+          Unverified means exactly that: polyemesis does not do it today and nobody here has read
+          the platform's API either way. It is never a refusal — if you can make it work, it
+          works, and we would rather be told than guess. Only “not possible” is a checked
+          absence.
+        </p>
+
+        {PLATFORM_CAPABILITIES.filter((p) => p.readFirst).map((p) => (
+          <div
+            key={p.presetId}
+            className={
+              p.tier === "unsupported"
+                ? "flex flex-col gap-1 rounded-md border border-warn/40 bg-warn-dim p-2"
+                : "flex flex-col gap-1 rounded-md border border-dashed p-2"
+            }
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-medium">{p.name}</span>
+              <Badge variant={p.tier === "unsupported" ? "warn" : "outline"}>read first</Badge>
+            </div>
+            <p
+              className={
+                p.tier === "unsupported" ? "text-[10px] text-warn" : "text-[10px] text-muted-foreground"
+              }
+            >
+              {p.readFirst}
+            </p>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

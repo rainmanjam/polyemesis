@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -148,7 +149,7 @@ const PRESETS: DestPreset[] = [
     separateKey: true,
     helpUrl: "https://kick.com/dashboard/settings/stream",
     notes:
-      "Kick does not expose stream keys over its public API, so there is nothing to connect — copy both the ingest URL and the key from Kick → Settings → Stream. Kick issues the ingest host per channel, so replace the one prefilled here with yours if it differs.",
+      "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes your title and category and reports viewer counts. Kick issues the ingest host per channel, so replace the one prefilled here with yours if it differs.",
   },
   {
     id: "facebook",
@@ -156,11 +157,12 @@ const PRESETS: DestPreset[] = [
     group: "major",
     transport: "rtmps",
     kind: "rtmp",
+    platform: "facebook",
     url: "rtmps://live-api-s.facebook.com:443/rtmp/",
     separateKey: true,
     helpUrl: "https://www.facebook.com/live/producer",
     notes:
-      "Create the broadcast in Live Producer and copy the stream key; a persistent key lets you reuse this destination across broadcasts. Facebook requires RTMPS — plain RTMP is refused.",
+      "Connect a Facebook account in Settings → Platform credentials and polyemesis creates the broadcast and fills in both the ingest URL and the key. Note that Facebook issues them per broadcast, so each refresh starts a new live video rather than re-reading an existing one. Registering the Meta app is the slow part — it needs App Review before anyone but you can connect. To do it by hand instead, copy the server URL and key from Live Producer. Facebook requires RTMPS; plain RTMP is refused.",
     aliases: ["meta", "fb"],
   },
   {
@@ -171,9 +173,9 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    helpUrl: "https://www.facebook.com/live/producer",
+    helpUrl: "https://developers.facebook.com/docs/instagram-platform",
     notes:
-      "Instagram issues the server URL and key per broadcast, and only to accounts with Live Producer access. Start the broadcast in Meta's Live Producer, then copy the server URL and key from there — there is no fixed Instagram ingest host to prefill.",
+      "Not supported, and this preset exists to say so rather than to be used. Instagram publishes no Live broadcast API — its platform covers messaging, content publishing and comments — and Live Producer's RTMP option was withdrawn for most accounts. If your account is one of the few that still has it, the server URL and key come from Live Producer and change every broadcast; otherwise there is nothing to paste here and no amount of configuration will change that.",
     aliases: ["meta", "ig"],
   },
   {
@@ -197,7 +199,7 @@ const PRESETS: DestPreset[] = [
     url: "",
     separateKey: true,
     notes:
-      "X issues an ingest URL and key per source in Media Studio → Producer. Create the source there and copy both fields.",
+      "Manual key only. X's API covers posts, users, media and the post firehose — “streaming” in its documentation means streaming posts, not ingesting video — so there is no documented endpoint for polyemesis to fetch an ingest from, and none is planned. Create the source in X's own producer tooling and copy the server URL and key from there.",
     aliases: ["twitter", "periscope"],
   },
   {
@@ -230,7 +232,8 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes: "Copy the server URL and stream key from DLive → Dashboard → Stream settings.",
+    notes:
+      "Copy the server URL and stream key from DLive → Dashboard → Stream settings. Manual only, and likely to stay that way: DLive's developer portal at dev.dlive.tv no longer resolves, so there is nothing published to integrate against.",
   },
   {
     id: "rumble",
@@ -241,7 +244,7 @@ const PRESETS: DestPreset[] = [
     url: "",
     separateKey: true,
     notes:
-      "Rumble Studio issues an ingest URL and key per stream. Set the stream up in Rumble Studio and copy both fields from its RTMP details.",
+      "Manual key only. Rumble Studio issues an ingest URL and key per stream — set the stream up there and copy both fields from its RTMP details. Rumble's API page (rumble.com/account/api) is behind a login wall with nothing published, so there is no integration to build against.",
   },
   {
     id: "odysee",
@@ -479,19 +482,338 @@ const PRESETS: DestPreset[] = [
   },
 ];
 
-/** Which platforms can hand us a stream key over OAuth. Kick is deliberately
- *  absent: its public API does not expose stream keys — see internal/oauth. */
-const OAUTH_PLATFORMS: Platform[] = ["youtube", "twitch"];
+/* ------------------------------------------------- platform capability matrix
+ *
+ *  What a user actually gets from each platform, said out loud before they
+ *  invest an hour in setup. Mirrors internal/oauth/capabilities.go, which is
+ *  also served from GET /api/v1/platforms/capabilities for scripted clients —
+ *  the same arrangement the preset catalogue above already uses.
+ *
+ *  This is a description, never a gate. Nothing below is consulted to decide
+ *  whether a save is allowed: an operator whose account can do something ours
+ *  could not verify must be able to try it and read the platform's own error.
+ *  See "unknown" below.
+ */
 
-/** The label for the connect affordance. Kept separate from preset names
- *  because a connected account belongs to the platform, not to one of the two
- *  ingests that platform offers. */
-const PLATFORM_LABELS: Record<Platform, string> = {
-  custom: "Custom",
-  youtube: "YouTube",
-  twitch: "Twitch",
-  kick: "Kick",
-};
+export type Capability =
+  | "sso"
+  | "streamKey"
+  | "metadata"
+  | "chatRead"
+  | "chatSend"
+  | "moderation"
+  | "viewerStats";
+
+/** Four values rather than a boolean, because the interesting platforms are
+ *  not binary. Kick's stream key is not "unsupported" — it works perfectly,
+ *  the operator just types it. */
+export type Support =
+  /** polyemesis does this for you today. */
+  | "yes"
+  /** Works, with one step you do by hand. A pasted key is a supported
+   *  destination, not a degraded one. */
+  | "manual"
+  /** The platform publishes no API for this. Only ever set where somebody
+   *  actually read the platform's docs and found the thing absent. */
+  | "no"
+  /** Not built, and the platform's API not confirmed either way. The honest
+   *  default and the fail-open one: shown as unverified, never as a refusal. */
+  | "unknown";
+
+export type CapTier = "integrated" | "partial" | "manual" | "unsupported";
+
+export interface PlatformCapability {
+  /** Joins this row to an entry in PRESETS. */
+  presetId: string;
+  name: string;
+  /** The platform id for /oauth/{id}/start and for matching connected
+   *  accounts. Deliberately a plain string rather than `Platform`: Facebook
+   *  signs in and fetches keys today, but the destination row's platform
+   *  column only widens to "facebook" once ui/src/lib/types.ts does. Keying
+   *  the connect affordance off this means the button works either way. */
+  connect?: string;
+  tier: CapTier;
+  summary: string;
+  /** The thing that costs a day if it is met halfway through instead of at
+   *  the start. Facebook's App Review is why this field exists. */
+  readFirst?: string;
+  caps: Partial<Record<Capability, Support>>;
+  /** Only the cells where the value alone would raise a question. A wall of
+   *  tooltips is not honesty. */
+  reasons?: Partial<Record<Capability, string>>;
+}
+
+export const CAPABILITY_COLUMNS: { key: Capability; label: string; help: string }[] = [
+  { key: "sso", label: "Sign in", help: "Connect the account with OAuth instead of pasting secrets." },
+  { key: "streamKey", label: "Stream key", help: "polyemesis fetches the ingest URL and key for you." },
+  { key: "metadata", label: "Metadata", help: "Set the title, description or category when you go live." },
+  { key: "chatRead", label: "Chat read", help: "Messages appear in the unified chat pane." },
+  { key: "chatSend", label: "Chat send", help: "You can reply from the chat pane." },
+  { key: "moderation", label: "Moderation", help: "Delete a message or time a viewer out." },
+  { key: "viewerStats", label: "Viewers", help: "Live viewer count read back from the platform." },
+];
+
+export const SUPPORT_LEGEND: {
+  key: Support;
+  label: string;
+  help: string;
+  variant: "live" | "default" | "outline" | "warn";
+}[] = [
+  { key: "yes", label: "Works", help: "polyemesis does this for you today.", variant: "live" },
+  {
+    key: "manual",
+    label: "By hand",
+    help: "Supported, with one step you do yourself — usually pasting a key.",
+    variant: "default",
+  },
+  {
+    key: "unknown",
+    label: "Unverified",
+    help: "Not built yet, and the platform's API was not confirmed either way. Nothing stops you trying.",
+    variant: "outline",
+  },
+  {
+    key: "no",
+    label: "Not possible",
+    help: "The platform publishes no API for this, so no amount of setup will produce it.",
+    variant: "warn",
+  },
+];
+
+export const TIER_LEGEND: { key: CapTier; label: string; help: string }[] = [
+  {
+    key: "integrated",
+    label: "Fully integrated",
+    help: "Sign in once and polyemesis fetches the ingest URL and stream key.",
+  },
+  {
+    key: "partial",
+    label: "Sign in + paste key",
+    help: "Sign-in works and brings chat and metadata with it, but the key is typed by hand.",
+  },
+  {
+    key: "manual",
+    label: "Manual key",
+    help: "Paste the ingest URL and stream key from the platform's dashboard. Streaming works exactly as well; there is just nothing to connect.",
+  },
+  {
+    key: "unsupported",
+    label: "Not supported",
+    help: "polyemesis cannot stream here. Shown so you do not spend an evening finding that out.",
+  },
+];
+
+/** Display order: most integrated first, unsupported last — because the last
+ *  row is the one nobody should have to scroll to find. */
+export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
+  {
+    presetId: "youtube",
+    name: "YouTube Live",
+    connect: "youtube",
+    tier: "integrated",
+    summary:
+      "Connect a Google account and polyemesis fetches the ingest URL and stream key, pushes your title and description at go-live, and reads and replies to live chat.",
+    caps: {
+      sso: "yes",
+      streamKey: "yes",
+      metadata: "yes",
+      chatRead: "yes",
+      chatSend: "yes",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+    reasons: {
+      chatRead:
+        "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
+    },
+  },
+  {
+    presetId: "twitch",
+    name: "Twitch",
+    connect: "twitch",
+    tier: "integrated",
+    summary:
+      "Connect a Twitch account and polyemesis fetches the stream key, sets your title and category at go-live, and joins chat over IRC.",
+    caps: {
+      sso: "yes",
+      streamKey: "yes",
+      metadata: "yes",
+      chatRead: "yes",
+      chatSend: "yes",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+    reasons: { metadata: "Title and category, over the channel:manage:broadcast scope." },
+  },
+  {
+    presetId: "facebook",
+    name: "Facebook Live",
+    connect: "facebook",
+    tier: "integrated",
+    summary:
+      "Connect a Facebook profile or Page and polyemesis creates the broadcast, splits out the RTMPS ingest and key, pushes the title and description, and reads the comment thread.",
+    readFirst:
+      "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it.",
+    caps: {
+      sso: "yes",
+      streamKey: "yes",
+      metadata: "yes",
+      chatRead: "yes",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+    reasons: {
+      streamKey:
+        "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
+      metadata:
+        "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
+      chatRead:
+        "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was pasted by hand has no live-video id to attach to, and the chat pane says so.",
+    },
+  },
+  {
+    presetId: "kick",
+    name: "Kick",
+    connect: "kick",
+    tier: "partial",
+    summary:
+      "Sign in with Kick for chat, moderation, metadata and viewer stats — then paste the stream key, because Kick's public API does not publish one.",
+    readFirst:
+      "Both halves of this destination are real at once: click Connect account for everything Kick's API does offer, and paste the ingest URL and key from Kick → Settings → Stream. Neither replaces the other, and the paste is not a workaround for a broken connection.",
+    caps: {
+      sso: "yes",
+      streamKey: "manual",
+      metadata: "yes",
+      chatRead: "yes",
+      chatSend: "yes",
+      moderation: "yes",
+      viewerStats: "yes",
+    },
+    reasons: {
+      sso: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
+      streamKey:
+        "Checked against Kick's published Channels, Livestreams and Users endpoints — none of them return a stream key. This is a documented absence, not a missing feature on our side, and it does not hold back anything else.",
+      metadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
+      chatRead:
+        "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
+      moderation:
+        "Delete a message, over moderation:chat_message:manage. Banning and timing out are not implemented and the moderation:ban scope is deliberately not requested: nothing in polyemesis bans a viewer, and asking a restreamer's audience for that power would be overreach. Use Kick's own dashboard.",
+      viewerStats: "Live state and viewer count from Kick's livestreams endpoints.",
+    },
+  },
+  {
+    presetId: "x",
+    name: "X (Twitter) Live",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key. There is no API to connect: X's developer platform covers posts, users, media and the post firehose, not live-video ingest.",
+    readFirst:
+      "“Streaming” in X's API documentation means streaming posts, not ingesting video. No documented third-party live-video ingest endpoint exists, and access to what is documented is credit-based and paid. Set the source up in X's own producer tooling and copy both fields across.",
+    caps: {
+      sso: "no",
+      streamKey: "manual",
+      metadata: "no",
+      chatRead: "no",
+      chatSend: "no",
+      moderation: "no",
+      viewerStats: "no",
+    },
+    reasons: {
+      sso: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
+    },
+  },
+  {
+    presetId: "rumble",
+    name: "Rumble",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key from Rumble Studio. Rumble has an API page, but it sits behind a login and nothing about it is published.",
+    readFirst:
+      "rumble.com/account/api requires an account to view and documents nothing publicly, so polyemesis makes no claim about what it can or cannot do. If you have access and it turns out to offer more, that is a gap in our knowledge rather than a limit of the platform.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
+    presetId: "dlive",
+    name: "DLive",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key from DLive → Dashboard → Stream settings. Streaming works; there is no integration to connect.",
+    readFirst:
+      "DLive's developer portal at dev.dlive.tv no longer resolves in DNS, so its developer support appears to be inactive. Nothing about streaming to DLive depends on that — but do not go looking for an API key, because there is currently nowhere to get one.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
+    presetId: "instagram",
+    name: "Instagram Live",
+    tier: "unsupported",
+    summary:
+      "polyemesis cannot stream to Instagram. Instagram's platform covers messaging, content publishing and comments — there is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts.",
+    readFirst:
+      "This entry exists to save you the evening. A destination that silently never connects is worse than no destination at all: it looks like a bug in polyemesis, and there is nothing to fix. If your account still has Live Producer RTMP access, add a Generic RTMPS destination and paste the server URL and key Meta gives you — but check that you have it before you build the show around it.",
+    caps: {
+      sso: "no",
+      // Not "manual": for most accounts there is no key to paste, so offering
+      // the paste field as the answer would be its own lie.
+      streamKey: "no",
+      metadata: "no",
+      chatRead: "no",
+      chatSend: "no",
+      moderation: "no",
+      viewerStats: "no",
+    },
+  },
+];
+
+/** The row for a preset id.
+ *
+ *  A preset with no row is the common case — thirty-odd entries, eight with
+ *  anything to say beyond "paste the key" — so this returns a manual-tier row
+ *  rather than nothing. Every unlisted capability then reads through
+ *  `supportOf` as "unknown", which is the fail-open answer: claiming "no"
+ *  about an API nobody here has read is how a capability check starts refusing
+ *  things that work. */
+export function capabilityFor(presetId: string, name?: string): PlatformCapability {
+  const row = PLATFORM_CAPABILITIES.find((p) => p.presetId === presetId);
+  if (row) return row;
+  return {
+    presetId,
+    name: name || presetId,
+    tier: "manual",
+    summary:
+      "Paste the ingest URL and stream key from this platform's dashboard. Every polyemesis feature on this side of the wire — per-destination audio routing, renditions, reconnect, meters — works exactly the same.",
+    caps: { streamKey: "manual" },
+  };
+}
+
+/** An absent capability is unverified, never unsupported. */
+export function supportOf(row: PlatformCapability, c: Capability): Support {
+  return row.caps[c] ?? "unknown";
+}
+
+export function supportInfo(s: Support) {
+  return SUPPORT_LEGEND.find((l) => l.key === s) ?? SUPPORT_LEGEND[2];
+}
+
+export function tierInfo(t: CapTier) {
+  return TIER_LEGEND.find((l) => l.key === t) ?? TIER_LEGEND[2];
+}
 
 /** Best-effort match of a saved destination back onto a catalogue entry, so
  *  reopening one shows what it is instead of "choose a platform". An exact URL
@@ -591,9 +913,18 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     () => PRESETS.find((p) => p.id === presetId) ?? null,
     [presetId],
   );
+  // What this platform can and cannot do, resolved for every preset including
+  // the ones with no row of their own — capabilityFor never returns nothing.
+  const caps = useMemo(
+    () => (selectedPreset ? capabilityFor(selectedPreset.id, selectedPreset.name) : null),
+    [selectedPreset],
+  );
+  // Matched on the capability row's connect id rather than on the saved
+  // platform column, because the two are not the same set: Facebook signs in
+  // and fetches keys today while its destinations still save as "custom".
   const platformAccounts = useMemo(
-    () => accounts.filter((a) => a.platform === platform),
-    [accounts, platform],
+    () => (caps?.connect ? accounts.filter((a) => String(a.platform) === caps.connect) : []),
+    [accounts, caps],
   );
   const selectedRendition = useMemo(
     () => renditions.find((r) => String(r.id) === renditionId) ?? null,
@@ -622,6 +953,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     // A preset whose transport we cannot publish leaves the form untouched: it
     // is in the list to explain itself, not to half-configure a destination.
     if (!p.kind) return;
+    // Same for a platform polyemesis cannot stream to at all. The form is left
+    // alone and the warning below does the talking; half-filling it would make
+    // an Instagram destination look one field away from working, which is
+    // precisely the impression that generates the support request.
+    if (capabilityFor(p.id, p.name).tier === "unsupported") return;
     setKind(p.kind);
     // Only the presets with integration code behind them carry a platform;
     // every other one is an ordinary custom endpoint. That is what keeps this
@@ -635,7 +971,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     if (!name.trim()) setName(p.name);
   };
 
-  const showOAuth = OAUTH_PLATFORMS.includes(platform);
+  // Sign-in is offered wherever the platform has it, independently of whether
+  // it can also hand over a key. Kick is the case that forced the split: it
+  // signs in for chat, moderation, metadata and viewer stats, and the key is
+  // still typed by hand. Both affordances are shown at once, each labelled for
+  // what it does, rather than one of them being hidden as if it did not exist.
+  const showOAuth = caps?.connect !== undefined && supportOf(caps, "sso") === "yes";
+  const manualKey = caps ? supportOf(caps, "streamKey") === "manual" : false;
+  const unsupported = caps?.tier === "unsupported";
 
   const save = async () => {
     setBusy(true);
@@ -727,18 +1070,47 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <div className="px-2 pt-2 pb-1 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
                           {g.label}
                         </div>
-                        {rows.map((p) => (
+                        {rows.map((p) => {
+                          const rowCaps = capabilityFor(p.id, p.name);
+                          return (
                           <button
                             key={p.id}
                             type="button"
                             onClick={() => applyPreset(p)}
                             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent"
                           >
-                            <span className="flex-1 truncate">{p.name}</span>
+                            <span
+                              className={
+                                rowCaps.tier === "unsupported"
+                                  ? "flex-1 truncate text-muted-foreground line-through"
+                                  : "flex-1 truncate"
+                              }
+                            >
+                              {p.name}
+                            </span>
+                            {/* The one label that has to survive a scan of
+                                thirty rows. A platform we cannot stream to at
+                                all must never look like one that merely needs
+                                a URL pasting. */}
+                            {rowCaps.tier === "unsupported" && (
+                              <Badge variant="warn" className="shrink-0">
+                                not supported
+                              </Badge>
+                            )}
+                            {/* Partial signs in as much as integrated does —
+                                it just cannot fetch the key — so hiding the
+                                hint on it would understate what Kick offers.
+                                The suffix is what stops "sign in" reading as
+                                "and you are done". */}
+                            {(rowCaps.tier === "integrated" || rowCaps.tier === "partial") && (
+                              <span className="shrink-0 text-[9px] text-muted-foreground">
+                                {rowCaps.tier === "partial" ? "sign in + paste key" : "sign in"}
+                              </span>
+                            )}
                             {/* Saying so here saves the operator picking a
                                 platform and then wondering why the URL box is
                                 still empty. */}
-                            {p.kind && !p.url && (
+                            {p.kind && !p.url && rowCaps.tier !== "unsupported" && (
                               <span className="shrink-0 text-[9px] text-muted-foreground">
                                 URL from dashboard
                               </span>
@@ -748,7 +1120,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                             </span>
                             {p.id === presetId && <Check className="size-3 shrink-0" />}
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
                     );
                   })}
@@ -762,6 +1135,54 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </div>
             )}
           </div>
+
+          {/* What this platform gives you, before an hour goes into setting it
+              up. It sits directly under the picker because that is the moment
+              the decision is being made — not in a help page nobody opens. */}
+          {caps && (
+            <div
+              className={
+                unsupported
+                  ? "flex flex-col gap-1.5 rounded-md border border-warn/40 bg-warn-dim p-2"
+                  : "flex flex-col gap-1.5 rounded-md border p-2"
+              }
+            >
+              <div className="flex items-center gap-1.5">
+                <Badge variant={unsupported ? "warn" : "outline"}>{tierInfo(caps.tier).label}</Badge>
+                <span className="text-[10px] text-muted-foreground">{tierInfo(caps.tier).help}</span>
+              </div>
+              <p className={unsupported ? "text-[11px] text-warn" : "text-[11px] text-muted-foreground"}>
+                {caps.summary}
+              </p>
+              {caps.readFirst && (
+                <p className="text-[10px] text-muted-foreground">{caps.readFirst}</p>
+              )}
+              <div className="flex flex-wrap gap-1">
+                {CAPABILITY_COLUMNS.map((col) => {
+                  const s = supportOf(caps, col.key);
+                  const info = supportInfo(s);
+                  return (
+                    <Badge
+                      key={col.key}
+                      variant={info.variant}
+                      className="normal-case"
+                      title={`${col.label} — ${info.label}. ${caps.reasons?.[col.key] ?? info.help}`}
+                    >
+                      {col.label}
+                      <span className="opacity-70">{info.label.toLowerCase()}</span>
+                    </Badge>
+                  );
+                })}
+              </div>
+              {unsupported && (
+                <p className="text-[10px] text-warn">
+                  Nothing stops you saving this — if your account is one of the exceptions, paste
+                  what the platform gave you and it will stream. It is unticked here so that a
+                  destination which can never connect does not look like a bug in polyemesis.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <Label>Transport</Label>
@@ -777,7 +1198,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </Select>
           </div>
 
-          {showOAuth && (
+          {showOAuth && caps?.connect && (
             <div className="flex flex-col gap-1">
               <Label>Connected account</Label>
               {platformAccounts.length > 0 ? (
@@ -786,7 +1207,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Not linked (enter key manually)</SelectItem>
+                    {/* "Not linked" is neutral wording on purpose. On Kick the
+                        key is always typed, so calling the unlinked state
+                        "manual" would imply the account link had failed. */}
+                    <SelectItem value="none">Not linked</SelectItem>
                     {platformAccounts.map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>
                         {a.accountName}
@@ -796,14 +1220,28 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </Select>
               ) : (
                 <Button variant="outline" size="sm" asChild>
-                  <a href={api.connectUrl(platform)}>
-                    <ExternalLink /> Connect {PLATFORM_LABELS[platform]} account
+                  <a href={api.connectUrl(caps.connect)}>
+                    <ExternalLink /> Connect {caps.name} account
                   </a>
                 </Button>
               )}
+              {/* The mixed case, spelled out. Kick's sign-in is worth having on
+                  its own merits — chat, moderation, metadata, viewer count —
+                  and an operator who reads "connect an account" as "this is how
+                  I get my key" will conclude the feature is broken when the key
+                  field stays empty. */}
               <span className="text-[10px] text-muted-foreground">
-                Linking an account lets polyemesis fetch the stream key for you. Requires
-                developer credentials in Settings → Platform credentials.
+                {manualKey
+                  ? `Signing in gets you ${[
+                      supportOf(caps, "chatRead") === "yes" && "chat",
+                      supportOf(caps, "moderation") === "yes" && "moderation",
+                      supportOf(caps, "metadata") === "yes" && "title and category push",
+                      supportOf(caps, "viewerStats") === "yes" && "viewer counts",
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}. It does not get you the stream key — ${caps.name} does not publish one, so you type that in below. Both at once is the expected setup here, not a fallback.`
+                  : "Linking an account lets polyemesis fetch the stream key for you."}{" "}
+                Requires developer credentials in Settings → Platform credentials.
               </span>
             </div>
           )}
@@ -856,6 +1294,17 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 <span className="text-[10px] text-muted-foreground">
                   {selectedPreset.name} puts everything in the URL — leave this empty unless
                   its dashboard shows a separate key.
+                </span>
+              )}
+              {/* Said at the field, where the operator is looking for a Fetch
+                  button that is never going to appear. The reason travels with
+                  it so this does not read as an apology. */}
+              {manualKey && caps && (
+                <span className="text-[10px] text-muted-foreground">
+                  {showOAuth
+                    ? `Type this one in even with an account connected. ${caps.reasons?.streamKey ?? ""}`
+                    : caps.reasons?.streamKey ??
+                      `${caps.name} has no API to fetch a key from — copy it from the platform's dashboard.`}
                 </span>
               )}
             </div>

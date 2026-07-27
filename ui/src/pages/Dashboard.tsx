@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationDialog } from "@/components/DestinationDialog";
+import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -222,8 +223,9 @@ function GoLiveComposer() {
       {targets.length === 0 ? (
         <CardContent>
           <p className="text-[12px] text-muted-foreground">
-            Connect a YouTube or Twitch account in Settings → Platforms to set your stream title,
-            description and category on every platform at once.
+            Connect a YouTube, Twitch, Facebook or Kick account in Settings → Platform credentials
+            to set your stream title, description and category on every platform at once. Each one
+            accepts a different subset — the composer names which, and pushes what it can.
           </p>
         </CardContent>
       ) : (
@@ -554,6 +556,12 @@ export function Dashboard() {
 
         {/* ---------- side stats ---------- */}
         <div className="flex flex-col gap-3">
+          {/* Chat sits above the pipeline because it is the only thing on this
+              column an operator reads mid-broadcast. It renders honestly when
+              nothing is connected — "no platforms connected", not an error —
+              so it costs an install with no accounts nothing but a heading. */}
+          <ChatPanel className="h-80" />
+
           <Card>
             <CardHeader>
               <CardTitle>Pipeline</CardTitle>
