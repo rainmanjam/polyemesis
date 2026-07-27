@@ -29,6 +29,25 @@ CREATE TABLE IF NOT EXISTS settings (
     json TEXT    NOT NULL
 );
 
+-- One shared video encode. Destinations SELECT a rendition rather than owning
+-- one, so five destinations that all need 1080p60 cost one encode, not five.
+-- A rendition re-encodes video only and copies every audio track through
+-- untouched; per-destination audio routing still happens at the destination.
+CREATE TABLE IF NOT EXISTS renditions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    width         INTEGER NOT NULL DEFAULT 0,    -- 0 = keep source
+    height        INTEGER NOT NULL DEFAULT 0,    -- 0 = keep source
+    fps           INTEGER NOT NULL DEFAULT 0,    -- 0 = keep source
+    video_bitrate INTEGER NOT NULL DEFAULT 0,    -- kbps
+    encoder       TEXT    NOT NULL DEFAULT 'libx264',
+    preset        TEXT    NOT NULL DEFAULT 'veryfast',  -- encoder-specific quality knob
+    gop_seconds   REAL    NOT NULL DEFAULT 2,
+    note          TEXT    NOT NULL DEFAULT '',   -- what this tier is for
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS destinations (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT    NOT NULL,
@@ -40,10 +59,14 @@ CREATE TABLE IF NOT EXISTS destinations (
     enabled       INTEGER NOT NULL DEFAULT 0,    -- user intent: should it be running
     audio_bitrate INTEGER NOT NULL DEFAULT 160,  -- kbps
     profile       TEXT    NOT NULL,              -- routing.Profile as JSON
+    rendition_id  INTEGER,                       -- NULL = passthrough (no encode)
     position      INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL,
-    FOREIGN KEY (account_id) REFERENCES platform_accounts(id) ON DELETE SET NULL
+    FOREIGN KEY (account_id) REFERENCES platform_accounts(id) ON DELETE SET NULL,
+    -- SET NULL, not CASCADE: deleting a rendition must drop its destinations
+    -- back to passthrough, never delete the endpoints the user configured.
+    FOREIGN KEY (rendition_id) REFERENCES renditions(id) ON DELETE SET NULL
 );
 
 -- The operator's own OAuth developer app. polyemesis cannot ship these.
@@ -90,3 +113,9 @@ CREATE TABLE IF NOT EXISTS recordings (
 
 CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_destinations_position ON destinations(position, id);
+
+-- NOTE: nothing here may reference destinations.rendition_id. This file runs
+-- against databases created before renditions existed, where CREATE TABLE IF
+-- NOT EXISTS is a no-op and the column is therefore still missing. Everything
+-- that depends on that column lives in MigrateRenditions (renditions.go),
+-- which runs after this script and adds the column when it is absent.

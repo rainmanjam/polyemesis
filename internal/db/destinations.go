@@ -52,9 +52,14 @@ type Destination struct {
 	Enabled      bool            `json:"enabled"`
 	AudioBitrate int             `json:"audioBitrate"` // kbps
 	Profile      routing.Profile `json:"profile"`
-	Position     int             `json:"position"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
+	// RenditionID selects the shared video encode this destination subscribes
+	// to. nil is passthrough: no encode, no process, straight off the ingest
+	// relay. Whatever the rendition, the destination still does -c:v copy plus
+	// its own audio routing graph.
+	RenditionID *int64    `json:"renditionId,omitempty"`
+	Position    int       `json:"position"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // Target returns the full URL FFmpeg should publish to, i.e. URL with the
@@ -132,18 +137,25 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 	var (
 		d          Destination
 		acct       sql.NullInt64
+		rendition  sql.NullInt64
 		profileRaw string
 		created    int64
 		updated    int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
-		&d.Enabled, &d.AudioBitrate, &profileRaw, &d.Position, &created, &updated)
+		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
 	if acct.Valid {
 		v := acct.Int64
 		d.AccountID = &v
+	}
+	// NULL stays nil: that is passthrough, which is what every destination
+	// created before renditions existed reads back as.
+	if rendition.Valid {
+		v := rendition.Int64
+		d.RenditionID = &v
 	}
 	if err := json.Unmarshal([]byte(profileRaw), &d.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", d.ID, err)
@@ -154,7 +166,22 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 }
 
 const destColumns = `id, name, kind, platform, account_id, url, stream_key,
-	enabled, audio_bitrate, profile, position, created_at, updated_at`
+	enabled, audio_bitrate, profile, rendition_id, position, created_at, updated_at`
+
+// checkRendition rejects a rendition_id that names no rendition. The foreign
+// key would catch it anyway, but only as "FOREIGN KEY constraint failed",
+// which tells the user nothing about which field is wrong. A nil id is
+// passthrough and always valid.
+func (d *DB) checkRendition(id *int64) error {
+	if id == nil {
+		return nil
+	}
+	_, err := d.GetRendition(*id)
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("invalid destination: rendition %d does not exist", *id)
+	}
+	return err
+}
 
 // ListDestinations returns every destination in display order.
 func (d *DB) ListDestinations() ([]*Destination, error) {
@@ -205,6 +232,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err := dst.Validate(); err != nil {
 		return nil, err
 	}
+	if err := d.checkRendition(dst.RenditionID); err != nil {
+		return nil, err
+	}
 
 	profile, err := json.Marshal(dst.Profile)
 	if err != nil {
@@ -219,10 +249,10 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	dst.Position = int(maxPos.Int64) + 1
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
-		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id, position, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.Enabled, dst.AudioBitrate, string(profile), dst.Position, now, now)
+		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.Position, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -242,15 +272,18 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err := dst.Validate(); err != nil {
 		return nil, err
 	}
+	if err := d.checkRendition(dst.RenditionID); err != nil {
+		return nil, err
+	}
 	profile, err := json.Marshal(dst.Profile)
 	if err != nil {
 		return nil, err
 	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
-		enabled=?, audio_bitrate=?, profile=?, updated_at=? WHERE id=?`,
+		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.Enabled, dst.AudioBitrate, string(profile), time.Now().Unix(), dst.ID)
+		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
 	}
