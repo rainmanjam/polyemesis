@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -37,6 +38,17 @@ const (
 	relayPortSpan = 500
 	// stopTimeout bounds how long we wait for one child to exit.
 	stopTimeout = 12 * time.Second
+
+	// previewIdleDefault is how long the preview encoder outlives the last
+	// playlist request when settings do not say.
+	previewIdleDefault = 30 * time.Second
+	// previewSweep is how often idleness is re-evaluated. It is well under the
+	// idle window so the stop lands near the deadline without a timer per
+	// request.
+	previewSweep = 5 * time.Second
+	// previewStartDebounce keeps a burst of requests against a down encoder,
+	// or a start that keeps failing, from turning into a burst of spawns.
+	previewStartDebounce = 2 * time.Second
 )
 
 // Engine owns the whole streaming pipeline.
@@ -50,6 +62,14 @@ type Engine struct {
 	alloc  *relay.PortAllocator
 	mon    *stats.Monitor
 	recman *recording.Manager
+
+	// sink persists captured stderr beyond the in-memory ring. One sink for
+	// every child on purpose: the file reads as a single interleaved timeline.
+	// It is read on the stderr goroutine of every child and swapped whenever
+	// the logging settings change, so it is atomic rather than under e.mu.
+	sink    atomic.Pointer[supervisor.FileSink]
+	sinkMu  sync.Mutex
+	sinkCfg db.LoggingSettings
 
 	mu       sync.RWMutex
 	ingest   *supervisor.Process
@@ -78,6 +98,18 @@ type Engine struct {
 	levels    ffmpeg.Levels
 	levelsAt  time.Time
 	settings  db.Settings
+
+	// previewMu serializes preview lifecycle changes. Unlike every other
+	// child, the preview is started from an HTTP handler, so two playlist
+	// requests can race to spawn it.
+	previewMu sync.Mutex
+	// previewSeen is the last playlist request and previewAt the last start
+	// attempt; together they drive on-demand start and idle stop.
+	previewSeen time.Time
+	previewAt   time.Time
+	// stopped closes the door on a playlist request that arrives while the
+	// engine is shutting down, which would otherwise leave an orphan encoder.
+	stopped bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -118,7 +150,10 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	e.mon = stats.NewMonitor(hub.RxBytes)
 	e.recman = recording.New(log, store, cfg.RecordingsDir(), func() {
 		bus.Publish(events.TypeRecordings, nil)
-	})
+	},
+		recording.WithFFprobe(tools.FFprobe),
+		recording.WithStorageGuard(e.onStorage),
+	)
 	return e, nil
 }
 
@@ -154,6 +189,9 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.statsLoop(e.ctx) }()
 
+	e.wg.Add(1)
+	go func() { defer e.wg.Done(); e.previewLoop(e.ctx) }()
+
 	return e.Reconcile()
 }
 
@@ -168,7 +206,13 @@ func (e *Engine) Stop() {
 
 	// Consumers first, then the ingest. Stopping the ingest first would make
 	// every consumer log a spurious "input ended" as it dies.
+	//
+	// previewMu is taken ahead of e.mu, matching the order every other preview
+	// path uses, so an in-flight playlist request cannot spawn an encoder
+	// between here and the teardown below.
+	e.previewMu.Lock()
 	e.mu.Lock()
+	e.stopped = true
 	dests := make([]*destination, 0, len(e.dests))
 	for _, d := range e.dests {
 		dests = append(dests, d)
@@ -177,6 +221,7 @@ func (e *Engine) Stop() {
 	e.dests = map[int64]*destination{}
 	e.recorder, e.preview, e.meters, e.ingest = nil, nil, nil, nil
 	e.mu.Unlock()
+	e.previewMu.Unlock()
 
 	var wg sync.WaitGroup
 	stop := func(p *supervisor.Process) {
@@ -200,6 +245,11 @@ func (e *Engine) Stop() {
 
 	e.wg.Wait()
 	_ = e.hub.Close()
+	// After every child is gone, so the queued tail of their stderr is flushed
+	// rather than dropped.
+	if sink := e.sink.Swap(nil); sink != nil {
+		_ = sink.Close()
+	}
 	e.log.Info("engine stopped")
 }
 
@@ -216,6 +266,60 @@ func (e *Engine) Settings() db.Settings {
 	return e.settings
 }
 
+// logSink is the LogWriter handed to every child. It indirects through the
+// engine rather than naming a *FileSink directly, so turning persistence on
+// starts filling the file for children that are already running.
+type logSink struct{ e *Engine }
+
+func (s logSink) WriteLog(l supervisor.LogLine) {
+	if f := s.e.sink.Load(); f != nil {
+		f.WriteLog(l)
+	}
+}
+
+// applyLogging opens, closes or re-opens the persistent process log to match
+// settings. A rotation limit change re-opens rather than adjusts, so the file
+// on disk always obeys the limits it is labelled with.
+func (e *Engine) applyLogging(s db.LoggingSettings) {
+	e.sinkMu.Lock()
+	defer e.sinkMu.Unlock()
+
+	if s == e.sinkCfg {
+		return
+	}
+	e.sinkCfg = s
+
+	if old := e.sink.Swap(nil); old != nil {
+		_ = old.Close()
+	}
+	if !s.PersistProcessLogs {
+		return
+	}
+
+	f, err := supervisor.NewFileSink(e.log, filepath.Join(e.cfg.DataDir, "logs"), s.MaxFileMB, s.MaxFiles)
+	if err != nil {
+		// Not fatal: the in-memory ring still has the last few hundred lines,
+		// which is what the UI reads.
+		e.log.Error("cannot open process log; logs stay in memory only", "err", err)
+		return
+	}
+	e.sink.Store(f)
+	e.log.Info("persisting process logs", "path", f.Path())
+}
+
+// onStorage reacts to the recording free-space guard. Halting stops the
+// recorder outright rather than letting it write until the volume is full and
+// takes the database down with it.
+func (e *Engine) onStorage(st recording.StorageState) {
+	if st.Halted {
+		e.log.Warn("stopping recorder", "reason", st.Reason)
+	} else {
+		e.log.Info("free space recovered; restarting recorder")
+	}
+	e.reconcileRecorder(e.Settings())
+	e.publishStatus()
+}
+
 // ---------------------------------------------------------------- reconcile
 
 // Reconcile makes the running processes match the database. It is safe to call
@@ -230,6 +334,7 @@ func (e *Engine) Reconcile() error {
 	e.settings = settings
 	e.mu.Unlock()
 
+	e.applyLogging(settings.Logging)
 	e.reconcileIngest(settings, prev)
 	e.reconcileRecorder(settings)
 	e.reconcilePreview(settings)
@@ -273,6 +378,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		MaxBackoff: 5 * time.Second,
 		OnLog:      e.onLog,
 		OnState:    e.onState,
+		LogSink:    logSink{e},
 	})
 
 	e.mu.Lock()
@@ -318,7 +424,9 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	cur := e.recorder
 	e.mu.RUnlock()
 
-	if !s.Recording.Enabled {
+	// The free-space guard has the last word: recording into a volume that is
+	// about to fill takes the database and the preview down with it.
+	if !s.Recording.Enabled || !e.recman.RecordingAllowed() {
 		if cur != nil {
 			e.stopAux(&e.recorder, "recorder")
 		}
@@ -351,10 +459,20 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "recorder", Kind: "recorder", Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState,
+		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
+	// Shutdown may have run since the checks above: the free-space guard calls
+	// this from the recording loop, which Stop waits on rather than precedes.
+	// Publishing the process under the same lock Stop uses to collect them is
+	// what keeps a late start from becoming an orphan.
+	if e.stopped {
+		e.mu.Unlock()
+		e.hub.Unsubscribe("recorder")
+		e.alloc.Release(port)
+		return
+	}
 	e.recorder = proc
 	e.recorderPort = port
 	e.recorderSig = sig
@@ -362,23 +480,136 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	proc.Start()
 }
 
+// reconcilePreview applies settings changes to the preview encoder, but never
+// conjures one out of nothing: the preview is demand-driven from
+// PreviewRequested. Reconcile only stops an encoder that settings have
+// disabled, and restarts one that is being watched with stale arguments.
 func (e *Engine) reconcilePreview(s db.Settings) {
+	e.previewMu.Lock()
+	defer e.previewMu.Unlock()
+
 	e.mu.RLock()
-	cur := e.preview
+	cur, sig, seen := e.preview, e.previewSig, e.previewSeen
 	e.mu.RUnlock()
 
 	if !s.Preview.Enabled {
 		if cur != nil {
-			e.stopAux(&e.preview, "preview")
+			e.stopPreviewLocked()
 		}
 		return
 	}
-	sig := fmt.Sprintf("%d/%d/%d", s.Preview.SegmentSeconds, s.Preview.VideoHeight, s.Preview.VideoKbps)
-	if cur != nil && e.previewSig == sig {
+
+	want := previewSig(s)
+	if cur != nil && sig == want {
 		return
 	}
 	if cur != nil {
-		e.stopAux(&e.preview, "preview")
+		e.stopPreviewLocked()
+	}
+	// Restart only for a viewer who is still there. With nobody watching, the
+	// next playlist request picks the new arguments up anyway.
+	if !previewIdle(s, seen, time.Now()) {
+		e.startPreviewLocked(s)
+	}
+}
+
+// PreviewRequested records a client asking for the HLS playlist, and starts the
+// encoder if it is down.
+//
+// The preview is the only video re-encode polyemesis performs, so it runs only
+// while someone is watching instead of for the whole session. A player polls
+// the playlist every segment, and that poll is the liveness signal previewLoop
+// uses to decide when to shut the encoder down again.
+//
+// The first request after an idle stop is answered 404, because ffmpeg has not
+// written the playlist yet. That is expected: hls.js retries a failed manifest
+// load, so the player recovers on its own once the first segment lands, a
+// second or two later.
+func (e *Engine) PreviewRequested() {
+	now := time.Now()
+
+	e.mu.Lock()
+	s, stopped := e.settings, e.stopped
+	running := e.preview != nil
+	last := e.previewAt
+	e.previewSeen = now
+	e.mu.Unlock()
+
+	if stopped || running || !s.Preview.Enabled {
+		return
+	}
+	if !last.IsZero() && now.Sub(last) < previewStartDebounce {
+		return
+	}
+
+	e.previewMu.Lock()
+	e.mu.RLock()
+	running = e.preview != nil
+	e.mu.RUnlock()
+	if !running {
+		e.startPreviewLocked(s)
+	}
+	e.previewMu.Unlock()
+
+	if !running {
+		e.publishStatus()
+	}
+}
+
+// previewLoop stops the encoder once the playlist has gone unrequested for the
+// configured idle period.
+func (e *Engine) previewLoop(ctx context.Context) {
+	tick := time.NewTicker(previewSweep)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			e.sweepPreview(time.Now())
+		}
+	}
+}
+
+func (e *Engine) sweepPreview(now time.Time) {
+	e.mu.RLock()
+	s, seen := e.settings, e.previewSeen
+	running := e.preview != nil
+	e.mu.RUnlock()
+
+	if !running || !previewIdle(s, seen, now) {
+		return
+	}
+
+	e.previewMu.Lock()
+	// A request may have landed while we were taking the lock, and that client
+	// is now watching an encoder we were about to kill.
+	e.mu.RLock()
+	seen = e.previewSeen
+	running = e.preview != nil
+	e.mu.RUnlock()
+	stop := running && previewIdle(s, seen, now)
+	if stop {
+		e.stopPreviewLocked()
+	}
+	e.previewMu.Unlock()
+
+	if stop {
+		e.log.Info("preview idle; encoder stopped", "after", previewIdleWindow(s))
+		e.publishStatus()
+	}
+}
+
+// startPreviewLocked spawns the encoder. The caller must hold previewMu.
+func (e *Engine) startPreviewLocked(s db.Settings) {
+	e.mu.Lock()
+	stopped := e.stopped
+	// Recorded even when the start below fails, so a failing start backs off
+	// rather than being retried on every poll.
+	e.previewAt = time.Now()
+	e.mu.Unlock()
+	if stopped {
+		return
 	}
 
 	dir := e.cfg.HLSDir()
@@ -407,15 +638,44 @@ func (e *Engine) reconcilePreview(s db.Settings) {
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "preview", Kind: "preview", Bin: e.tools.FFmpeg, Args: args,
-		AutoRestart: true, OnLog: e.onLog, OnState: e.onState,
+		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
 	e.preview = proc
 	e.previewPort = port
-	e.previewSig = sig
+	e.previewSig = previewSig(s)
 	e.mu.Unlock()
 	proc.Start()
+	e.log.Info("preview started on demand", "height", s.Preview.VideoHeight)
+}
+
+// stopPreviewLocked tears the encoder down. The caller must hold previewMu.
+func (e *Engine) stopPreviewLocked() {
+	e.stopAux(&e.preview, "preview")
+	// The playlist left behind would be served to the next viewer, pointing at
+	// segments the next start is about to delete.
+	clearDir(e.cfg.HLSDir())
+}
+
+// previewSig hashes the arguments a running encoder was built with. The idle
+// timeout is deliberately absent: changing it must not cycle a live preview.
+func previewSig(s db.Settings) string {
+	return fmt.Sprintf("%d/%d/%d", s.Preview.SegmentSeconds, s.Preview.VideoHeight, s.Preview.VideoKbps)
+}
+
+func previewIdleWindow(s db.Settings) time.Duration {
+	if s.Preview.IdleTimeoutSeconds <= 0 {
+		return previewIdleDefault
+	}
+	return time.Duration(s.Preview.IdleTimeoutSeconds) * time.Second
+}
+
+// previewIdle reports whether the last playlist request is old enough that the
+// encoder should not be running. The window is what stops a page reload, which
+// pauses polling for a moment, from cycling ffmpeg.
+func previewIdle(s db.Settings, seen, now time.Time) bool {
+	return now.Sub(seen) >= previewIdleWindow(s)
 }
 
 // reconcileMeters restarts the metering sidecar whenever the ingest's track
@@ -477,6 +737,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		},
 		OnLog:   e.onLog,
 		OnState: e.onState,
+		LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
@@ -608,6 +869,7 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		AutoRestart: true,
 		OnLog:       e.onLog,
 		OnState:     e.onState,
+		LogSink:     logSink{e},
 	})
 
 	e.mu.Lock()
