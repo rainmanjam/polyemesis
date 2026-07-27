@@ -229,16 +229,31 @@ fi
 
 # Video must be copied, never re-encoded. Two destinations that received
 # completely different AUDIO must contain byte-identical VIDEO frames.
-FRAMES=$(inctr 'cd /data/recordings &&
+SHARED=$(inctr 'cd /data/recordings &&
   ffmpeg -v error -i destA.mkv -map 0:v -f framemd5 -c copy /tmp/a.md5 &&
   ffmpeg -v error -i destB.mkv -map 0:v -f framemd5 -c copy /tmp/b.md5 &&
   comm -12 <(grep -v "^#" /tmp/a.md5 | awk "{print \$6}" | sort) \
            <(grep -v "^#" /tmp/b.md5 | awk "{print \$6}" | sort) | grep -c .')
-TOTAL=$(inctr 'grep -v "^#" /tmp/a.md5 | grep -c .')
-if [ -n "$FRAMES" ] && [ "$FRAMES" -gt 0 ] 2>/dev/null && [ "$FRAMES" = "$TOTAL" ]; then
-  ok "video passed through untouched ($FRAMES/$TOTAL frames byte-identical across destinations)"
-elif [ -n "$FRAMES" ] && [ "$FRAMES" -gt 0 ] 2>/dev/null; then
-  bad "video differs across destinations ($FRAMES/$TOTAL identical) — something re-encoded"
+NA=$(inctr 'grep -v "^#" /tmp/a.md5 | grep -c .')
+NB=$(inctr 'grep -v "^#" /tmp/b.md5 | grep -c .')
+# Compare against the SMALLER file, not against destA specifically. The two
+# destinations are separate FFmpeg processes started and stopped milliseconds
+# apart, so their capture windows overlap heavily but neither is reliably a
+# superset of the other — asserting "every destA frame is in destB" is a
+# coin flip on process scheduling, and it flipped.
+#
+# The assertion that actually distinguishes copy from re-encode is the ratio.
+# Two independent encodes of the same input share essentially NO frame hashes
+# (different GOP boundaries, different rate control), so anything near 100% is
+# proof of -c:v copy while a genuine re-encode would score ~0%.
+MIN="$NA"; [ -n "$NB" ] && [ "$NB" -lt "$MIN" ] 2>/dev/null && MIN="$NB"
+if [ -n "$SHARED" ] && [ "$MIN" -gt 0 ] 2>/dev/null; then
+  PCT=$(awk -v c="$SHARED" -v m="$MIN" 'BEGIN{printf "%.1f", 100*c/m}')
+  if awk -v p="$PCT" 'BEGIN{exit !(p >= 90)}'; then
+    ok "video passed through untouched ($SHARED/$MIN frames byte-identical, ${PCT}%)"
+  else
+    bad "video differs across destinations (only ${PCT}% identical) — something re-encoded"
+  fi
 else
   bad "could not compare video frames"
 fi
