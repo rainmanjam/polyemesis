@@ -27,6 +27,14 @@ const (
 	TypeSource Type = "source"
 	// TypeRecordings signals the recordings list has changed.
 	TypeRecordings Type = "recordings"
+	// TypeLoudness carries one destination's EBU R128 compliance report,
+	// measured downstream of that destination's own routing graph. One
+	// destination per event rather than the whole set: the reports arrive
+	// independently and a browser that only cares about one card should not be
+	// re-rendering all of them.
+	TypeLoudness Type = "loudness"
+	// TypeClips signals the captured-clip list has changed.
+	TypeClips Type = "clips"
 )
 
 // Event is one message.

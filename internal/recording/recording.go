@@ -109,11 +109,19 @@ func (m *Manager) ScanAndSweep(s db.RecordingSettings) {
 	if err != nil {
 		m.log.Warn("recording retention sweep failed", "err", err)
 	}
+	// Stems follow their masters, so this runs after the sweep that decided
+	// which masters survived. Without it they accumulate forever: the index
+	// only ever holds video containers, so a stem is never scanned and would
+	// never be a candidate for any retention rule.
+	stemsSwept, err := m.SweepStems()
+	if err != nil {
+		m.log.Warn("stem retention sweep failed", "err", err)
+	}
 	// After the sweep, not before: retention may have just freed enough room
 	// to lift a halt, and waiting another tick to notice would cost a whole
 	// segment of footage.
 	guarded := m.CheckFreeSpace(s)
-	if (changed || swept || guarded) && m.onChange != nil {
+	if (changed || swept || stemsSwept || guarded) && m.onChange != nil {
 		m.onChange()
 	}
 }
@@ -380,18 +388,86 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 		for _, r := range recs {
 			total += r.Bytes
 		}
+		// Stems are on the same volume and are not in the index, so a cap that
+		// ignored them would be several times looser than the number the
+		// operator typed. They are charged against the cap here and credited
+		// back as their masters go, so the loop never deletes more footage than
+		// the cap actually requires.
+		stems, serr := m.stemSizes()
+		if serr != nil {
+			m.log.Warn("stem sizes unreadable; size cap covers masters only", "err", serr)
+		}
+		for _, st := range stems {
+			total += st.bytes
+		}
 		// Never delete the last remaining segment: it is almost certainly the
 		// one being written right now, and deleting it would fight the
 		// recorder rather than free space.
 		for i := 0; total > limit && i < len(recs)-1; i++ {
-			if m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
-				total -= recs[i].Bytes
-				deleted = true
+			if !m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
+				continue
 			}
+			total -= recs[i].Bytes
+			// SweepStems runs straight after this and orphans everything
+			// starting before the oldest surviving master, so those bytes are
+			// as good as freed already.
+			total -= creditStems(stems, recs[i+1].StartedAt.Add(-stemSweepSlack))
+			deleted = true
 		}
 	}
 
 	return deleted, nil
+}
+
+// stemSize is one stem file as the size cap sees it: when its master started,
+// and what it costs.
+type stemSize struct {
+	start time.Time
+	bytes int64
+}
+
+// stemSizes lists every stem on disk, oldest first. Anything this build does
+// not recognise as a stem is skipped, so a stray file in the directory is never
+// charged against the cap and never deleted on its account.
+func (m *Manager) stemSizes() ([]stemSize, error) {
+	entries, err := os.ReadDir(m.StemsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]stemSize, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		start, _, ok := ParseStemFilename(e.Name())
+		if !ok {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, stemSize{start: start, bytes: info.Size()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].start.Before(out[j].start) })
+	return out, nil
+}
+
+// creditStems returns the bytes of every stem starting before cutoff, zeroing
+// each as it goes so a second call with a later cutoff cannot count it twice.
+func creditStems(stems []stemSize, cutoff time.Time) int64 {
+	var freed int64
+	for i := range stems {
+		if !stems[i].start.Before(cutoff) {
+			break
+		}
+		freed += stems[i].bytes
+		stems[i].bytes = 0
+	}
+	return freed
 }
 
 func (m *Manager) delete(r db.Recording, reason string) bool {
@@ -474,6 +550,14 @@ func (m *Manager) Usage() (DiskUsage, error) {
 	u.Storage = m.Storage()
 	for _, r := range recs {
 		u.UsedBytes += r.Bytes
+	}
+	// Stems are not in the index — nothing indexes them — so without this a
+	// stems-enabled install under-reports its own footprint by roughly the
+	// track count. That is the direction that quietly fills a volume.
+	if b, err := m.StemBytes(); err == nil {
+		u.UsedBytes += b
+	} else {
+		m.log.Warn("stem usage unreadable; disk figure excludes stems", "err", err)
 	}
 	free, total, err := m.freeSpace(m.dir)
 	if err == nil {
