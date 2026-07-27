@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/media"
 )
 
 // Manager scans and prunes the recordings directory.
@@ -117,11 +118,19 @@ func (m *Manager) ScanAndSweep(s db.RecordingSettings) {
 	if err != nil {
 		m.log.Warn("stem retention sweep failed", "err", err)
 	}
+	// Proxies and thumbnails follow their masters for exactly the reason stems
+	// do: they live under a subdirectory the index never scans, so nothing else
+	// would ever consider them for retention.
+	derivedSwept := m.sweepDerived()
+	// Sessions are derived from the index, so they are refreshed after
+	// everything that could have changed it — a first measurement or a swept
+	// member both move a session's span.
+	grouped := m.groupSessions(s)
 	// After the sweep, not before: retention may have just freed enough room
 	// to lift a halt, and waiting another tick to notice would cost a whole
 	// segment of footage.
 	guarded := m.CheckFreeSpace(s)
-	if (changed || swept || stemsSwept || guarded) && m.onChange != nil {
+	if (changed || swept || stemsSwept || derivedSwept || grouped || guarded) && m.onChange != nil {
 		m.onChange()
 	}
 }
@@ -483,6 +492,7 @@ func (m *Manager) delete(r db.Recording, reason string) bool {
 	if err := m.store.DeleteRecording(r.ID); err != nil {
 		m.log.Warn("de-index recording", "file", r.Filename, "err", err)
 	}
+	m.removeDerived(r.Filename)
 	m.log.Info("recording deleted by retention policy", "file", r.Filename, "reason", reason)
 	return true
 }
@@ -502,6 +512,15 @@ func (m *Manager) Delete(id int64) error {
 	}
 	if err := m.store.DeleteRecording(id); err != nil {
 		return err
+	}
+	m.removeDerived(r.Filename)
+	// The session this belonged to may now be empty, and its span is wrong
+	// either way. Both are cheap and both are wrong until something says so.
+	if err := m.store.RecalcSessions(); err != nil {
+		m.log.Warn("cannot recalculate session spans", "err", err)
+	}
+	if _, err := m.store.PruneEmptySessions(); err != nil {
+		m.log.Warn("cannot prune empty sessions", "err", err)
 	}
 	if m.onChange != nil {
 		m.onChange()
@@ -558,6 +577,13 @@ func (m *Manager) Usage() (DiskUsage, error) {
 		u.UsedBytes += b
 	} else {
 		m.log.Warn("stem usage unreadable; disk figure excludes stems", "err", err)
+	}
+	// Proxies and contact sheets are not in the index either, and a library
+	// with a proxy per recording is not a small addition to the footprint.
+	if b, err := media.Bytes(m.dir); err == nil {
+		u.UsedBytes += b
+	} else {
+		m.log.Warn("derived-media usage unreadable; disk figure excludes proxies", "err", err)
 	}
 	free, total, err := m.freeSpace(m.dir)
 	if err == nil {

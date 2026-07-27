@@ -25,6 +25,10 @@ type Config struct {
 	DataDir string `yaml:"dataDir"`
 	TLS     TLS    `yaml:"tls"`
 	FFmpeg  FFmpeg `yaml:"ffmpeg"`
+	// Transcription pins the optional whisper.cpp binary. Every field is
+	// optional and an empty Binary means "look on $PATH"; a machine without
+	// whisper installed is an ordinary machine, not a misconfigured one.
+	Transcription Transcription `yaml:"transcription"`
 	// TrustProxyHeaders makes the server honour X-Forwarded-Proto when
 	// deciding whether to set the Secure flag on the session cookie. Only
 	// enable it when polyemesis really is behind a reverse proxy, otherwise a
@@ -93,6 +97,15 @@ type TLS struct {
 type FFmpeg struct {
 	Binary string `yaml:"binary"`
 	Probe  string `yaml:"probe"`
+}
+
+// Transcription pins the optional whisper.cpp CLI. It is deliberately not
+// validated: whisper is an optional external tool, so an unusable path degrades
+// transcription and must never stop the server from serving a live stream.
+type Transcription struct {
+	// Binary is the whisper.cpp CLI (whisper-cli, or the older `main`). Empty
+	// means search $PATH.
+	Binary string `yaml:"binary"`
 }
 
 // Default returns the configuration used when no config.yaml exists.
@@ -351,6 +364,14 @@ func (c Config) DBPath() string        { return filepath.Join(c.DataDir, "polyem
 func (c Config) RecordingsDir() string { return filepath.Join(c.DataDir, "recordings") }
 func (c Config) HLSDir() string        { return filepath.Join(c.DataDir, "hls") }
 func (c Config) SecretPath() string    { return filepath.Join(c.DataDir, "secret.key") }
+
+// ModelsDir holds downloaded speech models.
+//
+// Spelled out here rather than calling transcribe.ModelsDir for the same reason
+// PlayoutDir does not call playout.DirIn: config is a leaf package and importing
+// transcribe would drag ffmpeg and jobs in behind it.
+// TestModelsDirMatchesTheTranscribePackage pins the two against each other.
+func (c Config) ModelsDir() string { return filepath.Join(c.DataDir, "models", "whisper") }
 
 // PlayoutDir is the public HLS/DASH origin's root, one directory per variant.
 //
