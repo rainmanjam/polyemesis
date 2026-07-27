@@ -20,9 +20,11 @@
 # wrong.
 
 # ---------- stage 1: build the web UI ----------
-# Vite 8 requires Node ^20.19 || >=22.12; the 22 line satisfies that and keeps
-# satisfying it as it moves.
-FROM node:22-alpine AS ui
+# Vite 8 requires Node ^20.19 || >=22.12; the 24 line satisfies that and keeps
+# satisfying it as it moves. Keep this in step with ui/package.json's
+# @types/node major: typing against a newer Node than the one that runs the
+# build is how you get code that compiles here and throws at runtime.
+FROM node:24-alpine AS ui
 WORKDIR /src/ui
 # Copy manifests first so a dependency-only change reuses the install layer.
 COPY ui/package.json ui/package-lock.json* ./
