@@ -28,8 +28,10 @@ type Config struct {
 	// enable it when polyemesis really is behind a reverse proxy, otherwise a
 	// client can forge the header.
 	TrustProxyHeaders bool `yaml:"trustProxyHeaders"`
-	// EnhancedRTMP gates the OBS 30.2+ multitrack FLV ingest. Off by default:
-	// it is a stretch feature and must not destabilise v1.
+	// EnhancedRTMP is a placeholder for OBS 30.2+ multitrack FLV ingest, which
+	// is not implemented. No code branches on it and no endpoint reports it, so
+	// setting it has no effect; it survives only so config files that already
+	// carry the key keep parsing.
 	EnhancedRTMP bool `yaml:"enhancedRtmp"`
 }
 
@@ -93,21 +95,6 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-// Save writes the config back to disk, used by the Settings page when TLS
-// options change.
-func (c Config) Save(path string) error {
-	b, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	return os.WriteFile(path, b, 0o600)
 }
 
 // Paths derived from DataDir.

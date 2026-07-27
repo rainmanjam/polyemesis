@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -27,38 +28,40 @@ import (
 type Server struct {
 	log      *slog.Logger
 	cfg      config.Config
-	cfgPath  string
 	store    *db.DB
 	box      *secrets.Box
 	eng      *engine.Engine
 	bus      *events.Broker
 	sessions *auth.Manager
+	logins   *auth.Throttle
 	version  string
+	// startedAt is the process start, which is what the uptime metric reports.
+	startedAt time.Time
 }
 
 // Options configures the server.
 type Options struct {
-	Log        *slog.Logger
-	Config     config.Config
-	ConfigPath string
-	DB         *db.DB
-	Secrets    *secrets.Box
-	Engine     *engine.Engine
-	Events     *events.Broker
-	Version    string
+	Log     *slog.Logger
+	Config  config.Config
+	DB      *db.DB
+	Secrets *secrets.Box
+	Engine  *engine.Engine
+	Events  *events.Broker
+	Version string
 }
 
 // New creates the server.
 func New(o Options) *Server {
 	return &Server{
-		log:     o.Log,
-		cfg:     o.Config,
-		cfgPath: o.ConfigPath,
-		store:   o.DB,
-		box:     o.Secrets,
-		eng:     o.Engine,
-		bus:     o.Events,
-		version: o.Version,
+		log:       o.Log,
+		cfg:       o.Config,
+		store:     o.DB,
+		box:       o.Secrets,
+		eng:       o.Engine,
+		bus:       o.Events,
+		version:   o.Version,
+		startedAt: time.Now(),
+		logins:    auth.NewThrottle(),
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			o.Config.TLS.Enabled,
@@ -92,6 +95,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/auth/me", s.handleMe)
 			r.Post("/auth/password", s.handleChangePassword)
 
+			r.Get("/auth/tokens", s.handleListAPITokens)
+			r.Post("/auth/tokens", s.handleCreateAPIToken)
+			r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
+
 			r.Get("/system", s.handleSystem)
 			r.Get("/status", s.handleStatus)
 			r.Get("/source", s.handleSource)
@@ -103,6 +110,9 @@ func (s *Server) Handler() http.Handler {
 
 			r.Get("/destinations", s.handleListDestinations)
 			r.Post("/destinations", s.handleCreateDestination)
+			// chi matches the static segment ahead of {id}, so this does not
+			// collide with the destination routes below.
+			r.Put("/destinations/order", s.handleReorderDestinations)
 			r.Get("/destinations/{id}", s.handleGetDestination)
 			r.Put("/destinations/{id}", s.handleUpdateDestination)
 			r.Delete("/destinations/{id}", s.handleDeleteDestination)
@@ -128,6 +138,14 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/platforms/credentials/{platform}", s.handleDeleteCreds)
 			r.Get("/platforms/accounts", s.handleListAccounts)
 			r.Delete("/platforms/accounts/{id}", s.handleDeleteAccount)
+		})
+
+		// A scraper has no CSRF token to double-submit, and this route is a
+		// read-only GET, so requireCSRF is skipped. It is still authenticated;
+		// handleMetrics says why.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAuth)
+			r.Get("/metrics", s.handleMetrics)
 		})
 
 		// OAuth redirects are top-level browser navigations, so they carry the
@@ -180,8 +198,10 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(ww, r)
 
-		// Health checks and the stats poll would otherwise drown the log.
-		if r.URL.Path == "/api/v1/health" || strings.HasPrefix(r.URL.Path, "/hls/") {
+		// Health checks, metric scrapes and the stats poll would otherwise
+		// drown the log.
+		if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/metrics" ||
+			strings.HasPrefix(r.URL.Path, "/hls/") {
 			return
 		}
 		level := slog.LevelDebug
@@ -196,18 +216,65 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 	})
 }
 
+// principal is who the current request is acting as. Both routes lead to the
+// same single administrator; what differs is how the claim was made, which is
+// what the CSRF and token-management rules key off.
+type principal struct {
+	// username is the signed-in account, empty for Bearer authentication.
+	username string
+	// token is set only for Bearer authentication.
+	token *db.APIToken
+}
+
+type ctxKey int
+
+const principalKey ctxKey = iota
+
+func principalFrom(ctx context.Context) (*principal, bool) {
+	p, ok := ctx.Value(principalKey).(*principal)
+	return p, ok
+}
+
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := s.sessions.FromRequest(r); err != nil {
+		p, err := s.authenticate(r)
+		if err != nil {
 			writeError(w, http.StatusUnauthorized, "not signed in")
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
 	})
+}
+
+// authenticate resolves a Bearer token or a session cookie, in that order: a
+// client that bothered to send a token meant to use it, and silently falling
+// back to an ambient cookie would make a revoked token look like it still
+// works.
+func (s *Server) authenticate(r *http.Request) (*principal, error) {
+	if raw := auth.BearerToken(r); raw != "" {
+		tok, err := s.store.LookupAPIToken(raw)
+		if err != nil {
+			return nil, auth.ErrUnauthorized
+		}
+		return &principal{token: tok}, nil
+	}
+	claims, err := s.sessions.FromRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	return &principal{username: claims.Username}, nil
 }
 
 func (s *Server) requireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// CSRF exists because the browser attaches the session cookie on its
+		// own. Nothing attaches an Authorization header on its own, so a
+		// token-authenticated request is not forgeable cross-site and the
+		// double-submit token has nothing left to protect.
+		if p, ok := principalFrom(r.Context()); ok && p.token != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if err := auth.CheckCSRF(r); err != nil {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
