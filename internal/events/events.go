@@ -35,6 +35,16 @@ const (
 	TypeLoudness Type = "loudness"
 	// TypeClips signals the captured-clip list has changed.
 	TypeClips Type = "clips"
+	// TypeCaption carries one live caption line, or the news that live
+	// captioning has stopped because this machine could not keep up.
+	//
+	// One type for both because the two belong to the same stream: a caption
+	// bar that goes quiet has to be able to say why, and a subscriber that took
+	// the lines but not the warning would show a frozen last sentence forever.
+	// Captions are also the most droppable payload here — a line nobody
+	// received is a line nobody needed, which is exactly what this broker's
+	// non-blocking publish is for.
+	TypeCaption Type = "caption"
 )
 
 // Event is one message.
