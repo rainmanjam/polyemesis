@@ -414,6 +414,45 @@ export interface ProcessInfo {
   command: string;
 }
 
+/** The five values tls.mode accepts in config.yaml. `auto` only ever appears
+ *  as `TlsStatus.configured`; `TlsStatus.mode` is always already resolved. */
+export type TlsMode = "auto" | "acme" | "selfsigned" | "manual" | "off";
+
+/** The public half of the certificate the server presents. Deliberately has no
+ *  field for key material and must never grow one. */
+export interface CertInfo {
+  subject: string;
+  issuer: string;
+  dnsNames: string[];
+  ipAddresses: string[];
+  notBefore: string;
+  notAfter: string;
+  /** Negative once expired, so "expired 3 days ago" needs no second field. */
+  daysRemaining: number;
+  expired: boolean;
+  /** SHA-256 of the DER, colon-separated uppercase hex. */
+  fingerprint: string;
+  selfSigned: boolean;
+}
+
+export interface TlsStatus {
+  /** What `auto` decided, or the mode as written when it was not `auto`. */
+  mode: TlsMode;
+  configured: TlsMode;
+  hostname: string;
+  servesTls: boolean;
+  trustProxyHeaders: boolean;
+  /** Whether HSTS may be sent. False plus a warning is the interesting case:
+   *  it means the operator asked for it somewhere it would be unsafe. */
+  hsts: boolean;
+  hstsWarning: string;
+  /** Null when TLS is off, or before ACME's first issuance. */
+  certificate: CertInfo | null;
+  certificateError: string;
+  caAvailable: boolean;
+  caFingerprint: string;
+}
+
 export type EventType =
   | "status"
   | "levels"
