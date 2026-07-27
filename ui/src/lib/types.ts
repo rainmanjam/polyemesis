@@ -187,7 +187,7 @@ export interface SourceInfo {
 }
 
 export type DestKind = "rtmp" | "srt" | "file";
-export type Platform = "custom" | "youtube" | "twitch" | "kick";
+export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
 
 export interface Destination {
   id: number;
@@ -881,12 +881,164 @@ export type EventType =
   | "log"
   | "stats"
   | "source"
-  | "recordings";
+  | "recordings"
+  /** One chat message, one event. See ChatMessage. */
+  | "chat"
+  /** The whole per-platform connection table, whenever any part of it moves. */
+  | "chatState";
 
 export interface WsEvent {
   type: EventType;
   time: string;
   data: unknown;
+}
+
+// --------------------------------------------------------------------- chat
+//
+// One pane, one send box, four platforms. Everything below mirrors
+// internal/chat exactly; nothing here re-derives a fact the server already
+// stated, because two answers to "is YouTube connected" is one answer too many.
+
+/** The platforms the chat pane can show. Identical to `Platform` now that
+ *  Facebook has a destination platform of its own, and kept as a separate name
+ *  because chat and destinations gain platforms at different times — the next
+ *  chat-only platform widens this without touching the destination picker. */
+export type ChatPlatform = Platform;
+
+/** A chat connection's condition, in the words the operator would use.
+ *  `degraded` is running-but-limited and always arrives with a reason. */
+export type ChatState =
+  | "connecting"
+  | "live"
+  | "degraded"
+  | "failed"
+  | "stopped";
+
+/** One badge the platform put next to a name. Deliberately loose: Twitch has
+ *  id/version pairs, Kick has labels, YouTube has boolean roles. */
+export interface ChatBadge {
+  id: string;
+  version?: string;
+  label?: string;
+}
+
+/** One inline image, located by RUNE offsets into `text`. `start` is inclusive
+ *  and `end` is exclusive, which is what both Go and JavaScript slice with. */
+export interface ChatEmote {
+  id: string;
+  name?: string;
+  start: number;
+  end: number;
+  url?: string;
+}
+
+export interface ChatAuthor {
+  id?: string;
+  name: string;
+  /** "#rrggbb", or absent when the platform sent none — then the UI picks. */
+  color?: string;
+  badges?: ChatBadge[] | null;
+  moderator?: boolean;
+  subscriber?: boolean;
+  broadcaster?: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  platform: ChatPlatform;
+  /** The platform account this arrived on. Two Twitch channels connected at
+   *  once are two accounts, and merging them is a bug rather than a feature. */
+  account?: string;
+  channel?: string;
+  author: ChatAuthor;
+  text: string;
+  emotes?: ChatEmote[] | null;
+  at: string;
+  /** An /me message: rendered in the author's colour, without a colon. */
+  action?: boolean;
+  replyToId?: string;
+  replyTo?: string;
+  /** Sent by polyemesis itself. */
+  echo?: boolean;
+}
+
+/** YouTube's daily API budget. Present only where a platform has one that can
+ *  silently kill chat for the rest of the day. `estimated` is always true and
+ *  is in the payload so the UI can say so. */
+export interface ChatQuota {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetAt: string;
+  intervalMs: number;
+  paused?: boolean;
+  estimated: boolean;
+}
+
+export interface ChatStatus {
+  platform: ChatPlatform;
+  account?: string;
+  channel?: string;
+  state: ChatState;
+  /** One sentence saying WHY, for every state that is not plainly `live`. */
+  detail?: string;
+  since: string;
+  received: number;
+  sent: number;
+  /** Reconnections. A number that climbs while the state reads `live` is a
+   *  flapping connection, which looks healthy at every instant you check it. */
+  restarts: number;
+  lastError?: string;
+  canSend: boolean;
+  quota?: ChatQuota | null;
+}
+
+/** One platform's outcome from a fan-out send. `skipped` is "this platform
+ *  cannot send", which is a permanent property, not a failure to retry. */
+export interface ChatSendResult {
+  platform: ChatPlatform;
+  account?: string;
+  ok: boolean;
+  skipped?: boolean;
+  detail?: string;
+}
+
+export interface ChatSendResponse {
+  results: ChatSendResult[];
+  sent: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface ChatStats {
+  received: number;
+  deduped: number;
+  stored: number;
+  /** Shed because persistence fell behind. They were still shown live; only
+   *  the scrollback lost them. */
+  dropped: number;
+  pending: number;
+  adapters: number;
+}
+
+/** A platform's published maximum message length. Advisory: the composer warns
+ *  and still sends, because the platform is the authority on its own rules and
+ *  a limit we got wrong would cost the operator a message for nothing. */
+export interface ChatLimit {
+  platform: ChatPlatform;
+  maxChars: number;
+}
+
+export interface ChatOverview {
+  /** False when no chat hub is wired at all — distinct from a hub running with
+   *  nothing attached, because the operator's next move differs. */
+  configured: boolean;
+  statuses: ChatStatus[];
+  stats?: ChatStats | null;
+  messages: ChatMessage[];
+  limits: ChatLimit[];
+  /** The scrollback came from the database rather than a live connection. */
+  stored?: boolean;
 }
 
 // ------------------------------------------------------------------- expert

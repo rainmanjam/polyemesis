@@ -50,6 +50,13 @@ const JobsPage = lazy(() =>
   import("@/pages/JobsPage").then((m) => ({ default: m.JobsPage })),
 );
 
+// Chat opens its own socket and buffers messages for as long as it is mounted,
+// so it is split for a reason the other lazy routes are not: a session that
+// never opens the pane should not pay for it at all.
+const ChatPage = lazy(() =>
+  import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })),
+);
+
 const PublicPlayer = lazy(() =>
   import("@/pages/PublicPlayer").then((m) => ({ default: m.PublicPlayer })),
 );
@@ -185,6 +192,14 @@ export default function App() {
                 element={
                   <Suspense fallback={<RouteFallback />}>
                     <JobsPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/chat"
+                element={
+                  <Suspense fallback={<RouteFallback />}>
+                    <ChatPage />
                   </Suspense>
                 }
               />

@@ -1,5 +1,9 @@
 import type {
   ApiToken,
+  ChatMessage,
+  ChatOverview,
+  ChatPlatform,
+  ChatSendResponse,
   DryRunResult,
   ExpertArgs,
   ExpertResponse,
@@ -464,6 +468,40 @@ export const api = {
    *  plain authenticated GET — a media element attaches no headers of its own. */
   libraryMediaUrl: (id: number, file: string) =>
     `${BASE}/library/recordings/${id}/media/${encodeURIComponent(file)}`,
+
+  // --- unified chat ---
+  //
+  // Live messages do NOT come through here. They arrive on the WebSocket as
+  // `chat` and `chatState` events; these four are the scrollback a freshly
+  // opened pane needs plus the three things a socket cannot do.
+  //
+  // `configured: false` is the answer on a server with no chat wired, rather
+  // than a 503, because the stored scrollback is still worth showing and a
+  // page that refuses to render teaches the operator nothing.
+  chatOverview: (limit?: number) =>
+    get<ChatOverview>("/chat" + (limit ? `?limit=${limit}` : "")),
+  /** Older scrollback, out of the database rather than the live ring. */
+  chatMessages: (opts: { platform?: ChatPlatform; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.platform) q.set("platform", opts.platform);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return get<{ messages: ChatMessage[]; stored: boolean }>(
+      "/chat/messages" + (qs ? `?${qs}` : ""),
+    );
+  },
+  /** Fan-out. Answers 200 even when every platform failed: the per-platform
+   *  verdicts are the answer, and a status code cannot say "Twitch took it and
+   *  YouTube did not". */
+  sendChat: (text: string) => post<ChatSendResponse>("/chat/send", { text }),
+  /** Moderator delete, on the platform that issued the id. A platform that
+   *  cannot do it answers with a sentence saying so and naming where it can be
+   *  done instead — the button is never hidden on a guess. */
+  deleteChatMessage: (m: { platform: ChatPlatform; account?: string; id: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, id: m.id });
+    if (m.account) q.set("account", m.account);
+    return del<{ status: string }>(`/chat/messages?${q.toString()}`);
+  },
 
   // --- platforms ---
   platformGuides: () => get<SetupGuide[]>("/platforms/guides"),
