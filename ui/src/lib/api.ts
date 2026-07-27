@@ -1,4 +1,5 @@
 import type {
+  ApiToken,
   Destination,
   DiskUsage,
   Levels,
@@ -108,6 +109,16 @@ export const api = {
   changePassword: (current: string, next: string) =>
     post<{ status: string }>("/auth/password", { current, new: next }),
 
+  // --- api tokens ---
+  listTokens: () => get<ApiToken[]>("/auth/tokens"),
+  /**
+   * `plaintext` is the only time the secret exists — nothing stores it, so a
+   * caller that drops it has to mint a new token.
+   */
+  createToken: (name: string) =>
+    post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name }),
+  revokeToken: (id: number) => del<{ status: string }>(`/auth/tokens/${id}`),
+
   // --- system & telemetry ---
   system: () => get<SystemInfo>("/system"),
   status: () => get<Status>("/status"),
@@ -129,6 +140,9 @@ export const api = {
   updateDestination: (id: number, d: Partial<Destination>) =>
     put<DestinationWithRouting>(`/destinations/${id}`, d),
   deleteDestination: (id: number) => del<{ status: string }>(`/destinations/${id}`),
+  /** Display order only — the server does not restart anything for this. */
+  reorderDestinations: (ids: number[]) =>
+    put<{ ids: number[] }>("/destinations/order", { ids }),
   startDestination: (id: number) =>
     post<{ enabled: boolean }>(`/destinations/${id}/start`),
   stopDestination: (id: number) =>

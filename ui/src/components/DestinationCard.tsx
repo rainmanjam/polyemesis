@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
   KeyRound,
   MoreVertical,
   Pencil,
@@ -47,6 +49,10 @@ export function DestinationCard({
   onEdit,
   onDelete,
   onRefreshKey,
+  onMoveEarlier,
+  onMoveLater,
+  canMoveEarlier,
+  canMoveLater,
   busy,
 }: {
   dest: DestStatus;
@@ -56,6 +62,10 @@ export function DestinationCard({
   onEdit: () => void;
   onDelete: () => void;
   onRefreshKey: () => void;
+  onMoveEarlier: () => void;
+  onMoveLater: () => void;
+  canMoveEarlier: boolean;
+  canMoveLater: boolean;
   busy?: boolean;
 }) {
   const state = dest.process?.state;
@@ -172,7 +182,7 @@ export function DestinationCard({
           </div>
         ))}
 
-        {/* --- the one action that matters --- */}
+        {/* --- the one action that matters, plus display order --- */}
         <div className="flex gap-1.5">
           {dest.enabled ? (
             <Button variant="outline" size="sm" className="flex-1" onClick={onStop} disabled={busy}>
@@ -183,6 +193,27 @@ export function DestinationCard({
               <Play /> Start
             </Button>
           )}
+          {/* Buttons rather than drag: they work from the keyboard, and moving
+              a card is only ever a rearrangement of the dashboard — nothing
+              here restarts a stream. */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onMoveEarlier}
+            disabled={!canMoveEarlier}
+            aria-label={`Move ${dest.name} earlier`}
+          >
+            <ChevronUp />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onMoveLater}
+            disabled={!canMoveLater}
+            aria-label={`Move ${dest.name} later`}
+          >
+            <ChevronDown />
+          </Button>
         </div>
       </CardContent>
     </Card>

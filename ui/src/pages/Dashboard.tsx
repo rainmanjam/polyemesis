@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Copy, Plus, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/AppLayout";
-import { PreviewPlayer } from "@/components/PreviewPlayer";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { StatusDot } from "@/components/signature/StatusDot";
@@ -16,6 +15,13 @@ import { duration, kbps } from "@/lib/format";
 import { labelForState, toneBadge, toneForState } from "@/lib/signal";
 import type { Destination, SystemInfo } from "@/lib/types";
 
+// hls.js is a few hundred kilobytes that only the preview needs, and the
+// preview is off entirely for some installs. Load it alongside the dashboard
+// rather than ahead of it.
+const PreviewPlayer = lazy(() =>
+  import("@/components/PreviewPlayer").then((m) => ({ default: m.PreviewPlayer })),
+);
+
 export function Dashboard() {
   const { status } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -24,6 +30,8 @@ export function Dashboard() {
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [pending, setPending] = useState<number[] | null>(null);
+  const [moveNote, setMoveNote] = useState("");
 
   useEffect(() => {
     api.system().then(setSystem).catch(() => {});
@@ -66,8 +74,52 @@ export function Dashboard() {
 
   const ingest = status?.ingest;
   const ingestTone = toneForState(ingest?.state);
-  const destinations = status?.destinations ?? [];
   const source = status?.source;
+  const live = status?.destinations;
+
+  // The socket republishes status on a two-second cadence, so a move applied
+  // only on the server would leave the card sitting still after the click.
+  // Hold the requested order locally until the server's own order agrees.
+  const destinations = useMemo(() => {
+    const rows = live ?? [];
+    if (!pending) return rows;
+    const rank = new Map(pending.map((id, i) => [id, i]));
+    return [...rows].sort(
+      (a, b) =>
+        (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }, [live, pending]);
+
+  // The override is only worth keeping while the server still lists the same
+  // destinations in a different order. Once it agrees — or once one is added or
+  // deleted underneath it — it can only mis-sort, so drop it.
+  useEffect(() => {
+    if (!pending || !live) return;
+    const ids = live.map((d) => d.id);
+    const awaitingServer =
+      ids.length === pending.length &&
+      ids.every((id) => pending.includes(id)) &&
+      ids.some((id, i) => id !== pending[i]);
+    if (!awaitingServer) setPending(null);
+  }, [live, pending]);
+
+  const move = async (id: number, delta: -1 | 1) => {
+    const ids = destinations.map((d) => d.id);
+    const from = ids.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+
+    setPending(ids);
+    setMoveNote(`${destinations[from].name} moved to position ${to + 1} of ${ids.length}.`);
+    try {
+      await api.reorderDestinations(ids);
+    } catch (err) {
+      setPending(null);
+      setMoveNote("");
+      toast.error(err instanceof Error ? err.message : "Could not reorder the destinations.");
+    }
+  };
 
   const copyIngest = async () => {
     if (!system?.ingestUrl) return;
@@ -100,7 +152,13 @@ export function Dashboard() {
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
         {/* ---------- preview + ingest ---------- */}
         <div className="flex flex-col gap-3">
-          <PreviewPlayer active={settingsPreview} />
+          <Suspense
+            fallback={
+              <div className="aspect-video w-full rounded-md border border-border bg-black" />
+            }
+          >
+            <PreviewPlayer active={settingsPreview} />
+          </Suspense>
 
           <Card>
             <CardHeader className="flex-row items-center justify-between">
@@ -171,11 +229,14 @@ export function Dashboard() {
             <CardContent className="flex flex-col gap-1.5">
               {(
                 [
-                  ["Recorder", status?.recorder],
-                  ["Preview", status?.preview],
-                  ["Meters", status?.meters],
+                  ["Recorder", status?.recorder, "disabled"],
+                  // The preview encoder is started on demand and stopped again
+                  // when nobody is watching, so having no process is the normal
+                  // idle state rather than a fault or a disabled feature.
+                  ["Preview", status?.preview, settingsPreview ? "idle" : "disabled"],
+                  ["Meters", status?.meters, "disabled"],
                 ] as const
-              ).map(([label, proc]) => {
+              ).map(([label, proc, absent]) => {
                 const tone = proc ? toneForState(proc.state) : "idle";
                 return (
                   <div key={label} className="flex items-center justify-between">
@@ -184,7 +245,7 @@ export function Dashboard() {
                       <span className="text-[11px]">{label}</span>
                     </div>
                     <span className="font-mono text-[10px] text-muted-foreground">
-                      {proc ? labelForState(proc.state) : "disabled"}
+                      {proc ? labelForState(proc.state) : absent}
                     </span>
                   </div>
                 );
@@ -211,6 +272,12 @@ export function Dashboard() {
           </h2>
         </div>
 
+        {/* A card that jumps position is invisible to a screen reader unless
+            the move is announced. */}
+        <output aria-live="polite" className="sr-only">
+          {moveNote}
+        </output>
+
         {destinations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
@@ -230,11 +297,15 @@ export function Dashboard() {
           </Card>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {destinations.map((d) => (
+            {destinations.map((d, i) => (
               <DestinationCard
                 key={d.id}
                 dest={d}
                 busy={busyId === d.id}
+                canMoveEarlier={i > 0}
+                canMoveLater={i < destinations.length - 1}
+                onMoveEarlier={() => move(d.id, -1)}
+                onMoveLater={() => move(d.id, 1)}
                 onStart={() => act(d.id, () => api.startDestination(d.id), "start the destination")}
                 onStop={() => act(d.id, () => api.stopDestination(d.id), "stop the destination")}
                 onRestart={() =>

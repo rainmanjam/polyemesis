@@ -134,6 +134,11 @@ export interface RelayStats {
   rxBytes: number;
   txPackets: number;
   dropped: number;
+  /** MPEG-TS continuity counters, measured on the ingest side of the relay. */
+  tsPackets: number;
+  tsLost: number;
+  discontinuities: number;
+  lossPercent: number;
 }
 
 export interface Status {
@@ -178,14 +183,21 @@ export interface Settings {
     segmentSeconds: number;
     maxGb: number;
     maxAgeHours: number;
+    minFreeGb: number;
   };
   preview: {
     enabled: boolean;
     segmentSeconds: number;
     videoHeight: number;
     videoKbps: number;
+    idleTimeoutSeconds: number;
   };
   meters: { enabled: boolean; intervalMs: number };
+  logging: {
+    persistProcessLogs: boolean;
+    maxFileMb: number;
+    maxFiles: number;
+  };
 }
 
 export interface Recording {
@@ -203,6 +215,22 @@ export interface DiskUsage {
   freeBytes: number;
   totalBytes: number;
   count: number;
+  storage: StorageState;
+}
+
+/** The free-space guard's verdict on whether the volume can take more footage. */
+export interface StorageState {
+  halted: boolean;
+  reason?: string;
+}
+
+/** A long-lived automation credential. The secret exists only at creation. */
+export interface ApiToken {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string;
 }
 
 export interface FFmpegTools {
@@ -221,7 +249,6 @@ export interface SystemInfo {
   ingestUrl: string;
   ingestMode: string;
   maxTracks: number;
-  enhancedRtmp: boolean;
   tlsEnabled: boolean;
   dataDir: string;
   uiBuilt: boolean;
