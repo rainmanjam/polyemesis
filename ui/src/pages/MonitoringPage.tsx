@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -29,7 +29,7 @@ import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { labelForState, toneBadge, toneForState } from "@/lib/signal";
 import { cn } from "@/lib/utils";
-import type { ProcessInfo } from "@/lib/types";
+import type { LogLine, ProcessInfo } from "@/lib/types";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -38,12 +38,48 @@ const LOG_LEVEL_CLASS: Record<string, string> = {
   info: "text-muted-foreground",
 };
 
+/** How much of the server's ring buffer to keep after merging every process.
+ *  Deep enough to explain a restart that happened before the page opened,
+ *  shallow enough that the tail stays a tail. */
+const BACKFILL_LIMIT = 400;
+
+const lineKey = (l: LogLine) => `${l.time} ${l.process} ${l.text}`;
+
+/** Drops the historical lines the socket has already delivered.
+ *
+ *  The socket is open before the backfill request lands, so the tail of the
+ *  ring buffer overlaps the head of the live feed. Each live line cancels one
+ *  identical historical line rather than every match: FFmpeg repeats itself
+ *  verbatim, and de-duplicating by key alone would silently thin the log. Both
+ *  sides carry the same server-stamped time, so the keys line up exactly. */
+function dedupe(history: LogLine[], live: LogLine[]): LogLine[] {
+  if (history.length === 0 || live.length === 0) return history;
+  const pending = new Map<string, number>();
+  for (const l of live) {
+    const k = lineKey(l);
+    pending.set(k, (pending.get(k) ?? 0) + 1);
+  }
+  return history.filter((l) => {
+    const k = lineKey(l);
+    const n = pending.get(k) ?? 0;
+    if (n === 0) return true;
+    pending.set(k, n - 1);
+    return false;
+  });
+}
+
 export function MonitoringPage() {
   const { system, bitrate, logs, status, clearLogs } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
+  const [history, setHistory] = useState<LogLine[]>([]);
   const [filter, setFilter] = useState("all");
   const [follow, setFollow] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
+  const logsRef = useRef(logs);
+
+  useEffect(() => {
+    logsRef.current = logs;
+  }, [logs]);
 
   // Process list changes rarely; poll rather than adding another event type.
   useEffect(() => {
@@ -53,10 +89,54 @@ export function MonitoringPage() {
     return () => window.clearInterval(t);
   }, []);
 
-  const filtered = useMemo(
-    () => (filter === "all" ? logs : logs.filter((l) => l.process === filter)),
-    [logs, filter],
+  // The socket only carries lines produced after it connected, so a page opened
+  // mid-session would start blank. Drain each process's ring buffer once to
+  // give the tail some past; the socket keeps appending from there. This runs
+  // its own listProcesses rather than waiting on the poll above, so it stays a
+  // genuine one-shot instead of re-firing on every poll result.
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listProcesses()
+      .then((procs) =>
+        Promise.all(
+          Array.from(new Set(procs.map((p) => p.status.name))).map((n) =>
+            api
+              .processLogs(n)
+              .then((r) => r.lines ?? [])
+              .catch(() => [] as LogLine[]),
+          ),
+        ),
+      )
+      .then((batches) => {
+        if (cancelled) return;
+        const ordered = batches
+          .flat()
+          .sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+        setHistory(dedupe(ordered.slice(-BACKFILL_LIMIT), logsRef.current));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const merged = useMemo(
+    () => (history.length === 0 ? logs : [...history, ...logs]),
+    [history, logs],
   );
+
+  const filtered = useMemo(
+    () => (filter === "all" ? merged : merged.filter((l) => l.process === filter)),
+    [merged, filter],
+  );
+
+  // Clearing has to take the backfill with it, or the "cleared" log would
+  // instantly redraw everything the ring buffer still holds.
+  const clearAll = useCallback(() => {
+    setHistory([]);
+    clearLogs();
+  }, [clearLogs]);
 
   // Tail behaviour: stick to the bottom while following, so a live log reads
   // like `tail -f` rather than a scroll position you have to chase.
@@ -87,7 +167,7 @@ export function MonitoringPage() {
       />
 
       {/* ---------- host + relay ---------- */}
-      <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="pt-3">
             <Stat
@@ -130,6 +210,20 @@ export function MonitoringPage() {
             />
             <div className="mt-1 text-[10px] text-muted-foreground">
               sends to a consumer that had not bound its port yet
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-3">
+            <Stat
+              label="Ingest loss"
+              value={`${(status?.relay.lossPercent ?? 0).toFixed(2)}%`}
+              tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
+            />
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              {(status?.relay.tsLost ?? 0).toLocaleString()} of{" "}
+              {((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString()} TS
+              packets missing · {(status?.relay.discontinuities ?? 0).toLocaleString()} breaks
             </div>
           </CardContent>
         </Card>
@@ -283,7 +377,7 @@ export function MonitoringPage() {
                   Follow
                 </Label>
               </div>
-              <Button variant="ghost" size="icon-sm" onClick={clearLogs} aria-label="Clear log">
+              <Button variant="ghost" size="icon-sm" onClick={clearAll} aria-label="Clear log">
                 <Eraser />
               </Button>
             </div>

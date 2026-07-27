@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  KeyRound,
   Loader2,
   Save,
   ShieldCheck,
@@ -34,6 +35,7 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { api } from "@/lib/api";
 import type {
+  ApiToken,
   PlatformAccount,
   PlatformCreds,
   Settings,
@@ -416,6 +418,27 @@ function PipelineSettings({
               />
             </div>
           </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="prev-idle">Stop after idle (s)</Label>
+            <Input
+              id="prev-idle"
+              type="number"
+              min={5}
+              max={3600}
+              value={draft.preview.idleTimeoutSeconds}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  preview: { ...draft.preview, idleTimeoutSeconds: Number(e.target.value) },
+                })
+              }
+            />
+            <span className="text-[10px] text-muted-foreground">
+              The encoder starts when the dashboard asks for the playlist and stops again this long
+              after the last request, so a closed dashboard costs no CPU. Changing this never
+              restarts a preview someone is watching.
+            </span>
+          </div>
         </CardContent>
       </Card>
 
@@ -449,11 +472,75 @@ function PipelineSettings({
               }
             />
           </div>
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save pipeline settings
-          </Button>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Process logs</CardTitle>
+          <CardDescription>
+            Captured FFmpeg stderr is always kept in memory, but that dies with the server — which
+            loses exactly the lines explaining why it died. Persisting mirrors it to a rotating
+            file under the data directory.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="log-persist">Write logs to disk</Label>
+            <Switch
+              id="log-persist"
+              checked={draft.logging.persistProcessLogs}
+              onCheckedChange={(v) =>
+                setDraft({ ...draft, logging: { ...draft.logging, persistProcessLogs: v } })
+              }
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="log-mb">File size (MB)</Label>
+              <Input
+                id="log-mb"
+                type="number"
+                min={1}
+                max={1024}
+                value={draft.logging.maxFileMb}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    logging: { ...draft.logging, maxFileMb: Number(e.target.value) },
+                  })
+                }
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="log-files">Files kept</Label>
+              <Input
+                id="log-files"
+                type="number"
+                min={1}
+                max={100}
+                value={draft.logging.maxFiles}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    logging: { ...draft.logging, maxFiles: Number(e.target.value) },
+                  })
+                }
+              />
+            </div>
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            The log directory is bounded by the product of these two, so persistence can never be
+            the thing that fills the disk.
+          </span>
+        </CardContent>
+      </Card>
+
+      <div className="lg:col-span-2">
+        <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+          {saving ? <Loader2 className="animate-spin" /> : <Save />} Save pipeline settings
+        </Button>
+      </div>
     </div>
   );
 }
@@ -802,6 +889,143 @@ tls:
           </p>
         </CardContent>
       </Card>
+
+      <ApiTokens />
     </div>
   );
+}
+
+function ApiTokens() {
+  const [tokens, setTokens] = useState<ApiToken[]>([]);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Held in state and nowhere else: the server keeps only a hash, so this is
+  // the one and only time the plaintext exists.
+  const [minted, setMinted] = useState<{ token: ApiToken; plaintext: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const load = () => {
+    api.listTokens().then(setTokens).catch(() => {});
+  };
+  useEffect(load, []);
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      setMinted(await api.createToken(name.trim()));
+      setCopied(false);
+      setName("");
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not create the token.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (t: ApiToken) => {
+    try {
+      await api.revokeToken(t.id);
+      toast.success(`Revoked ${t.name}.`);
+      if (minted?.token.id === t.id) setMinted(null);
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not revoke the token.");
+    }
+  };
+
+  const copy = async () => {
+    if (!minted) return;
+    await navigator.clipboard.writeText(minted.plaintext);
+    setCopied(true);
+  };
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle>API tokens</CardTitle>
+        <CardDescription>
+          Long-lived credentials for scripts, Prometheus and anything else that cannot hold a
+          session. Send one as
+          <code className="mx-1 font-mono">Authorization: Bearer pmk_…</code>. A token can do
+          everything the admin can, except manage tokens — that stays behind the password, so
+          revoking one is final.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <form onSubmit={create} className="flex flex-wrap items-end gap-2">
+          <div className="flex min-w-48 flex-1 flex-col gap-1">
+            <Label htmlFor="tok-name">Name</Label>
+            <Input
+              id="tok-name"
+              value={name}
+              maxLength={64}
+              placeholder="prometheus"
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={busy || !name.trim()}>
+            {busy ? <Loader2 className="animate-spin" /> : <KeyRound />} Create token
+          </Button>
+        </form>
+
+        {minted && (
+          <div className="flex flex-col gap-1.5 rounded border border-warn/50 bg-warn/5 p-2">
+            <span className="text-[11px] font-medium">
+              Copy {minted.token.name} now — it is never shown again.
+            </span>
+            <div className="flex items-center gap-1.5">
+              <code className="min-w-0 flex-1 overflow-x-auto rounded border border-border bg-background px-2 py-1 font-mono text-[11px]">
+                {minted.plaintext}
+              </code>
+              <Button size="sm" variant="outline" onClick={copy}>
+                {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              polyemesis stores only a hash. If you lose it, revoke this token and create another.
+            </span>
+          </div>
+        )}
+
+        {tokens.length === 0 ? (
+          <span className="text-[11px] text-muted-foreground">No tokens yet.</span>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {tokens.map((t) => (
+              <div
+                key={t.id}
+                className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-[12px]">{t.name}</div>
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    {t.prefix}… · created {new Date(t.createdAt).toLocaleDateString()} ·{" "}
+                    {tokenLastUsed(t)}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => revoke(t)}
+                  aria-label={`Revoke ${t.name}`}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The server sends the zero time for a token nothing has presented yet. */
+function tokenLastUsed(t: ApiToken): string {
+  const used = new Date(t.lastUsedAt);
+  if (Number.isNaN(used.getTime()) || used.getUTCFullYear() <= 1) return "never used";
+  return `last used ${used.toLocaleString()}`;
 }

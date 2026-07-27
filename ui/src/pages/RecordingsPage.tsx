@@ -19,7 +19,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
-import { bytes, timestamp } from "@/lib/format";
+import { bytes, shortDuration, timestamp } from "@/lib/format";
 import type { DiskUsage, Recording, Settings } from "@/lib/types";
 
 export function RecordingsPage() {
@@ -101,6 +101,8 @@ export function RecordingsPage() {
                   <TableRow>
                     <TableHead>File</TableHead>
                     <TableHead>Started</TableHead>
+                    <TableHead className="text-right">Duration</TableHead>
+                    <TableHead className="text-center">Tracks</TableHead>
                     <TableHead className="text-right">Size</TableHead>
                     <TableHead className="w-20" />
                   </TableRow>
@@ -111,6 +113,20 @@ export function RecordingsPage() {
                       <TableCell className="font-mono text-[11px]">{r.filename}</TableCell>
                       <TableCell className="tnum font-mono text-[11px] text-muted-foreground">
                         {timestamp(r.startedAt)}
+                      </TableCell>
+                      {/* Both are measured only once the recorder has moved on
+                          to the next segment, so the live one reads as dashes. */}
+                      <TableCell className="tnum text-right font-mono text-[11px] text-muted-foreground">
+                        {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {r.tracks > 0 ? (
+                          <Badge variant="outline" title={`${r.tracks} audio tracks preserved`}>
+                            {r.tracks}
+                          </Badge>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="tnum text-right font-mono text-[11px]">
                         {bytes(r.bytes)}
@@ -161,6 +177,14 @@ export function RecordingsPage() {
               />
               <Stat label="Volume" value={usage?.totalBytes ? bytes(usage.totalBytes) : "—"} tone="muted" />
             </CardContent>
+            {usage?.storage.halted && (
+              <CardContent className="pt-0">
+                <p className="rounded border border-down/50 bg-down/5 p-2 text-[11px] text-down">
+                  {usage.storage.reason ?? "Recording is halted: the volume is below the free-space floor."}
+                  {" "}The recorder restarts by itself once space is freed.
+                </p>
+              </CardContent>
+            )}
           </Card>
 
           {settings && (
@@ -238,6 +262,30 @@ export function RecordingsPage() {
                     }
                   />
                   <span className="text-[10px] text-muted-foreground">0 = keep forever.</span>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="rec-free">Stop below free space (GB)</Label>
+                  <Input
+                    id="rec-free"
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={settings.recording.minFreeGb}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        recording: {
+                          ...settings.recording,
+                          minFreeGb: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                  <span className="text-[10px] text-muted-foreground">
+                    The caps above only bound what polyemesis wrote; anything else on the volume can
+                    still fill it. 0 = no floor.
+                  </span>
                 </div>
 
                 <Button size="sm" onClick={() => saveRetention(settings)} disabled={saving}>
