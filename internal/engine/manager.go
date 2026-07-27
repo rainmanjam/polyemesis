@@ -392,3 +392,14 @@ func (m *Manager) GPUBusy() bool {
 	}
 	return false
 }
+
+// SharedIngestListening reports whether the one-port listener is actually bound.
+//
+// Distinct from the setting: a listener whose port was already taken leaves the
+// setting on while enforcing nothing, and the UI has to be able to tell those
+// apart before it tells anyone their token protects an ingest.
+func (m *Manager) SharedIngestListening() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.srt != nil
+}

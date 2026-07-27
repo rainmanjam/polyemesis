@@ -523,11 +523,23 @@ export interface SourceView extends Source {
   publishUrls: Record<string, string>;
   /** Whether unscoped API calls act on this source. */
   isDefault: boolean;
-  /** False in this build. Sources are separated by PORT, and what actually
-   *  gates an ingest is the RTMP stream key or the SRT passphrase. The UI must
-   *  read this rather than assume, so nobody is told a rotated token protects
-   *  something it does not. */
+  /** Whether the publish token actually gates anything: true only while the
+   *  one-port SRT listener is BOUND and serving this source. With per-source
+   *  ports the token is inert and what protects the ingest is the RTMP stream
+   *  key or the SRT passphrase. Follows the running listener, not the setting,
+   *  because a listener that failed to bind enforces nothing. */
   tokenEnforced: boolean;
+  /** Whether an encoder is live on the shared listener for this source. */
+  publishing: boolean;
+  /** Uplink health for that publisher, when there is one. */
+  link?: {
+    peer: string;
+    since: string;
+    bytes: number;
+    rttMs: number;
+    lossPackets: number;
+    retransPackets: number;
+  };
   /** Whether an engine actually came up. A source whose port was already taken
    *  is stored but not running, and that is the answer to "why is nothing
    *  arriving". */

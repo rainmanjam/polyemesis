@@ -23,6 +23,7 @@ type sourceRow struct {
 	Name          string            `json:"name"`
 	Token         string            `json:"token"`
 	Enabled       bool              `json:"enabled"`
+	Publishing    bool              `json:"publishing"`
 	IsDefault     bool              `json:"isDefault"`
 	TokenEnforced bool              `json:"tokenEnforced"`
 	PublishURLs   map[string]string `json:"publishUrls"`
@@ -209,5 +210,31 @@ func TestANewSourceIsEnabledUnlessTheCallerSaysOtherwise(t *testing.T) {
 		map[string]any{"name": "Standby", "enabled": false}, http.StatusCreated), &off)
 	if off.Enabled {
 		t.Error(`"enabled": false was ignored on create`)
+	}
+}
+
+func TestTokenEnforcedTracksTheListenerNotTheSetting(t *testing.T) {
+	h, store, sign := sourceServer(t)
+
+	// Per-source ports: the token is stored but nothing checks it.
+	if listSources(t, h, sign)[0].TokenEnforced {
+		t.Error("tokenEnforced is true while no shared listener is running")
+	}
+
+	// Turning the setting on is not enough on its own -- a listener that fails
+	// to bind leaves the setting on and enforces nothing. The field has to
+	// follow the listener, because reporting false assurance is the whole thing
+	// it exists to prevent.
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.SharedIngest.Enabled = true
+	st.SharedIngest.Port = 0 // cannot bind
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	if listSources(t, h, sign)[0].TokenEnforced {
+		t.Error("tokenEnforced went true on the setting alone, with no listener bound")
 	}
 }

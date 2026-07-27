@@ -6,6 +6,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/srtserver"
 )
 
 // Sources are the multi-programme endpoints: one install, several independent
@@ -34,6 +35,15 @@ type sourceView struct {
 	// reads this rather than assuming, so nobody is told a rotated token
 	// protects an ingest that it does not.
 	TokenEnforced bool `json:"tokenEnforced"`
+	// Publishing reports whether an encoder is live on the shared listener for
+	// this source right now.
+	Publishing bool `json:"publishing"`
+	// Link is this publisher's uplink health, when one is connected on the
+	// shared listener. Surfaced per source because with several programmes on
+	// one install, "why is it breaking up" is a question about one encoder's
+	// uplink and not about the server -- and answering it per programme is
+	// something Restreamer's UI does not do.
+	Link *srtserver.LinkStats `json:"link,omitempty"`
 	// Running reports whether an engine actually came up for this source. A
 	// source whose ingest port was already taken is stored but not running, and
 	// a UI that showed it as configured-and-fine would be lying about why
@@ -42,14 +52,35 @@ type sourceView struct {
 }
 
 func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
+	var link *srtserver.LinkStats
+	publishing := false
+	// Derived from the running listener rather than from the setting alone: a
+	// shared listener that failed to bind leaves the setting on and enforces
+	// nothing, and reporting that as enforced would be the exact false
+	// assurance this field exists to prevent.
+	tokenEnforced := false
+	if st, err := s.store.GetSettings(); err == nil {
+		tokenEnforced = st.SharedIngest.Enabled &&
+			src.Ingest.Mode == db.IngestSRT &&
+			s.mgr != nil && s.mgr.SharedIngestListening()
+	}
+	if s.mgr != nil {
+		publishing = s.mgr.SharedIngestPublishing(src.ID)
+		for _, l := range s.mgr.SRTLinks() {
+			if l.SourceID == src.ID {
+				stat := l
+				link = &stat
+				break
+			}
+		}
+	}
 	return sourceView{
-		Source:      src,
-		PublishURLs: publishURLs(src),
-		IsDefault:   src.ID == defaultID,
-		// Hardcoded false, not a config flag: it becomes true when a
-		// streamid-demultiplexing listener lands, and a flag would let it be
-		// switched on before the enforcement exists.
-		TokenEnforced: false,
+		Publishing:    publishing,
+		Link:          link,
+		Source:        src,
+		PublishURLs:   publishURLs(src),
+		IsDefault:     src.ID == defaultID,
+		TokenEnforced: tokenEnforced,
 		Running:       s.mgr != nil && s.mgr.Engine(src.ID) != nil,
 	}
 }
