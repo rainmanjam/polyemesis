@@ -5,6 +5,11 @@
 // calls Reconcile, and the engine works out what must start, stop or restart.
 // That is what makes "changing a routing profile restarts only that
 // destination" fall out naturally instead of needing a special code path.
+//
+// Renditions are the same idea one level up: a shared video encode is a hub of
+// its own with a supervised encoder feeding it, ref-counted by the enabled
+// destinations that select it, and reconciled in dependency order so no
+// destination is ever left reading a relay that has gone away.
 package engine
 
 import (
@@ -16,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -77,6 +83,7 @@ type Engine struct {
 	preview  *supervisor.Process
 	meters   *supervisor.Process
 	dests    map[int64]*destination
+	rends    map[int64]*rendition
 
 	// *Sig fields hash the inputs that would require restarting the
 	// corresponding process. Comparing them is what keeps an unrelated
@@ -123,8 +130,33 @@ type destination struct {
 	port     int
 	subName  string
 	compiled routing.Result
+	// hub is where this destination reads from: the ingest hub for a
+	// passthrough destination, its rendition's own hub otherwise. Held so
+	// teardown unsubscribes from the same hub it subscribed to.
+	hub *relay.Hub
 	// spec is a hash of everything that would require a restart. Comparing it
 	// is what keeps an unrelated edit from cycling a healthy stream.
+	spec string
+	err  string
+}
+
+// rendition is one running shared video encode.
+//
+// It reads the ingest hub, re-encodes VIDEO ONLY — every audio track is copied
+// through untouched — and publishes to a hub of its own, which its destinations
+// subscribe to instead of the ingest's. That is what lets N destinations share
+// one encode while each still applies its own audio routing graph.
+type rendition struct {
+	row  *db.Rendition
+	proc *supervisor.Process
+	// hub is this rendition's own relay, the one its destinations read.
+	hub *relay.Hub
+	// port and subName are its subscription on the INGEST hub, i.e. its input.
+	port    int
+	subName string
+	// spec plays the same role as a destination's: a hash of everything the
+	// encode's command line depends on, so editing an unrelated rendition or
+	// renaming this one never cycles a live encode.
 	spec string
 	err  string
 }
@@ -145,6 +177,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		hub:    hub,
 		alloc:  relay.NewPortAllocator(relayPortBase, relayPortSpan),
 		dests:  map[int64]*destination{},
+		rends:  map[int64]*rendition{},
 		source: routing.DefaultSource(),
 	}
 	e.mon = stats.NewMonitor(hub.RxBytes)
@@ -204,8 +237,9 @@ func (e *Engine) Stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Consumers first, then the ingest. Stopping the ingest first would make
-	// every consumer log a spurious "input ended" as it dies.
+	// Consumers first, then the renditions they read, then the ingest. Stopping
+	// an upstream first would make everything below it log a spurious "input
+	// ended" as it dies.
 	//
 	// previewMu is taken ahead of e.mu, matching the order every other preview
 	// path uses, so an in-flight playlist request cannot spawn an encoder
@@ -217,8 +251,13 @@ func (e *Engine) Stop() {
 	for _, d := range e.dests {
 		dests = append(dests, d)
 	}
+	rends := make([]*rendition, 0, len(e.rends))
+	for _, r := range e.rends {
+		rends = append(rends, r)
+	}
 	recorder, preview, meters, ingest := e.recorder, e.preview, e.meters, e.ingest
 	e.dests = map[int64]*destination{}
+	e.rends = map[int64]*rendition{}
 	e.recorder, e.preview, e.meters, e.ingest = nil, nil, nil, nil
 	e.mu.Unlock()
 	e.previewMu.Unlock()
@@ -238,6 +277,19 @@ func (e *Engine) Stop() {
 	stop(preview)
 	stop(meters)
 	wg.Wait()
+
+	// Only now that no destination is reading them: a rendition whose hub
+	// closed under a live destination would leave it spinning on a dead relay
+	// for as long as the shutdown takes.
+	for _, r := range rends {
+		stop(r.proc)
+	}
+	wg.Wait()
+	for _, r := range rends {
+		if r.hub != nil {
+			_ = r.hub.Close()
+		}
+	}
 
 	if ingest != nil {
 		ingest.Stop(ctx)
@@ -340,7 +392,7 @@ func (e *Engine) Reconcile() error {
 	e.reconcilePreview(settings)
 	e.reconcileMeters(settings)
 
-	if err := e.reconcileDestinations(); err != nil {
+	if err := e.reconcileOutputs(); err != nil {
 		return err
 	}
 	e.publishStatus()
@@ -748,94 +800,234 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	proc.Start()
 }
 
-func (e *Engine) reconcileDestinations() error {
-	rows, err := e.store.ListDestinations()
+// destPlan is what one destination should look like after this reconcile.
+type destPlan struct {
+	row      *db.Destination
+	compiled routing.Result
+	spec     string
+	// err is a reason not to run at all — a routing graph that will not
+	// compile, or an upstream rendition that is not there. Either way the
+	// destination is shown as broken rather than started against nothing.
+	err string
+}
+
+// reconcileOutputs brings the shared encodes and the destinations that consume
+// them into line with the database.
+//
+// The order is the load-bearing part, and it is why this is one function rather
+// than two: a destination whose rendition has not started yet, or whose hub has
+// just been closed, spins on a dead relay. So destinations come down before the
+// renditions they read and go back up after them.
+func (e *Engine) reconcileOutputs() error {
+	destRows, err := e.store.ListDestinations()
+	if err != nil {
+		return err
+	}
+	rendRows, err := e.store.ListRenditions()
+	if err != nil {
+		return err
+	}
+	// The ref count, straight from the database: a rendition nothing enabled
+	// selects is absent, and absent means "must not be burning CPU".
+	counts, err := e.store.CountEnabledDestinationsByRendition()
 	if err != nil {
 		return err
 	}
 
 	e.mu.RLock()
 	src := e.source
+	fps := probedFPS(e.videoInfo)
 	e.mu.RUnlock()
 
-	want := map[int64]*db.Destination{}
-	for _, r := range rows {
-		if r.Enabled {
-			want[r.ID] = r
-		}
+	wantRends := wantedRenditions(rendRows, counts, func(r *db.Rendition) string {
+		return renditionSig(r, fps)
+	})
+	e.mu.RLock()
+	haveRends := make(map[int64]string, len(e.rends))
+	for id, r := range e.rends {
+		// A rendition that failed to start carries an empty spec, so it never
+		// matches a wanted one and is retried on the next reconcile.
+		haveRends[id] = r.spec
+	}
+	e.mu.RUnlock()
+	startRends, stopRends := diffRenditions(wantRends, haveRends)
+
+	plans := e.planDestinations(destRows, wantRends, src)
+
+	e.stopDestinations(plans)
+	for _, id := range stopRends {
+		e.mu.Lock()
+		r := e.rends[id]
+		delete(e.rends, id)
+		e.mu.Unlock()
+		e.teardownRendition(r)
 	}
 
-	// Stop destinations that are gone or newly disabled.
+	byID := make(map[int64]*db.Rendition, len(rendRows))
+	for _, r := range rendRows {
+		byID[r.ID] = r
+	}
+	for _, id := range startRends {
+		e.startRendition(byID[id], wantRends[id], fps, counts[id])
+	}
+
+	e.startDestinations(plans)
+	return nil
+}
+
+// planDestinations works out the desired state of every enabled destination,
+// including which upstream it reads and whether it can run at all.
+func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source) map[int64]destPlan {
+	plans := map[int64]destPlan{}
+	for _, row := range rows {
+		if !row.Enabled {
+			continue
+		}
+		p := destPlan{row: row}
+
+		// The upstream's own signature rides in the destination's, so editing a
+		// rendition restarts exactly the destinations downstream of it and
+		// nothing else.
+		upstream := ""
+		if row.RenditionID != nil {
+			sig, ok := wantRends[*row.RenditionID]
+			if !ok {
+				// The rendition was deleted between the two queries. Deleting
+				// one drops its destinations back to passthrough, so the
+				// reconcile that follows the delete sees a nil id and this
+				// destination comes straight back.
+				p.err = fmt.Sprintf("rendition %d is no longer available", *row.RenditionID)
+			}
+			upstream = sig
+		}
+
+		compiled, cerr := routing.Compile(row.Profile, src)
+		if cerr != nil {
+			p.err = cerr.Error()
+		} else {
+			p.compiled = compiled
+			p.spec = destSpec(row, compiled, upstream)
+		}
+		plans[row.ID] = p
+	}
+	return plans
+}
+
+// stopDestinations tears down every destination that is gone, newly disabled,
+// newly broken, or running with arguments that no longer match. Everything else
+// is left strictly alone — that is the guarantee that renaming a destination,
+// or editing a different one, never interrupts a live output.
+func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 	e.mu.Lock()
 	var toStop []*destination
 	for id, d := range e.dests {
-		if _, ok := want[id]; !ok {
+		p, wanted := plans[id]
+		keep := wanted && d.proc != nil && p.err == "" && d.spec == p.spec
+		if !keep {
 			toStop = append(toStop, d)
 			delete(e.dests, id)
 		}
 	}
 	e.mu.Unlock()
+
 	for _, d := range toStop {
 		e.teardownDest(d)
 	}
+}
 
-	for id, row := range want {
-		compiled, cerr := routing.Compile(row.Profile, src)
-		spec := ""
-		if cerr == nil {
-			spec = hashStrings([]string{
-				row.Target(), string(row.Kind), compiled.FilterComplex,
-				strconv.Itoa(row.AudioBitrate), strconv.Itoa(row.Profile.SampleRate),
-			})
-		}
+// startDestinations starts everything the plan wants that is not already
+// running, once its rendition is up.
+func (e *Engine) startDestinations(plans map[int64]destPlan) {
+	ids := make([]int64, 0, len(plans))
+	for id := range plans {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
+	for _, id := range ids {
+		p := plans[id]
 
 		e.mu.RLock()
 		cur := e.dests[id]
 		e.mu.RUnlock()
-
-		if cerr != nil {
-			// A destination whose routing cannot compile must not run with a
-			// stale graph: stop it and surface the reason.
-			if cur != nil {
-				e.teardownDest(cur)
-				e.mu.Lock()
-				delete(e.dests, id)
-				e.mu.Unlock()
-			}
-			e.mu.Lock()
-			e.dests[id] = &destination{row: row, err: cerr.Error()}
-			e.mu.Unlock()
-			e.log.Warn("destination routing invalid", "dest", row.Name, "err", cerr)
-			continue
-		}
-
-		// Nothing that matters changed: leave the stream alone. This is the
-		// guarantee that renaming a destination, or editing a different one,
-		// never interrupts a live output.
-		if cur != nil && cur.proc != nil && cur.spec == spec {
-			cur.row = row
-			continue
-		}
 		if cur != nil {
-			e.teardownDest(cur)
+			// Survived the stop phase, so it is running with the right
+			// arguments; refresh the row for cosmetic fields like the name.
+			cur.row = p.row
+			continue
 		}
-		if err := e.startDest(row, compiled, spec); err != nil {
-			e.log.Error("start destination", "dest", row.Name, "err", err)
+
+		if p.err != "" {
 			e.mu.Lock()
-			e.dests[id] = &destination{row: row, compiled: compiled, err: err.Error()}
+			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: p.err}
+			e.mu.Unlock()
+			e.log.Warn("destination cannot run", "dest", p.row.Name, "err", p.err)
+			continue
+		}
+
+		hub, herr := e.upstreamHub(p.row)
+		if herr != nil {
+			e.mu.Lock()
+			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: herr.Error()}
+			e.mu.Unlock()
+			e.log.Warn("destination has no upstream", "dest", p.row.Name, "err", herr)
+			continue
+		}
+
+		if err := e.startDest(p.row, p.compiled, p.spec, hub); err != nil {
+			e.log.Error("start destination", "dest", p.row.Name, "err", err)
+			e.mu.Lock()
+			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: err.Error()}
 			e.mu.Unlock()
 		}
 	}
-	return nil
 }
 
-func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string) error {
+// upstreamHub is the relay a destination reads: the ingest's when it is on
+// passthrough, its rendition's own otherwise.
+func (e *Engine) upstreamHub(row *db.Destination) (*relay.Hub, error) {
+	if row.RenditionID == nil {
+		return e.hub, nil
+	}
+	e.mu.RLock()
+	r := e.rends[*row.RenditionID]
+	e.mu.RUnlock()
+	if r == nil || r.hub == nil {
+		// Starting it anyway would give the user a destination that looks
+		// healthy and sends nothing.
+		reason := "is not running"
+		if r != nil && r.err != "" {
+			reason = "failed to start: " + r.err
+		}
+		return nil, fmt.Errorf("rendition %d %s", *row.RenditionID, reason)
+	}
+	return r.hub, nil
+}
+
+// destSpec hashes everything about a destination that requires a restart.
+//
+// upstream is its rendition's signature, empty for passthrough. Folding both it
+// and the rendition id in is what makes moving a destination between tiers, or
+// editing the tier it sits on, restart that destination and no other.
+func destSpec(row *db.Destination, compiled routing.Result, upstream string) string {
+	source := "passthrough"
+	if row.RenditionID != nil {
+		source = "rendition:" + strconv.FormatInt(*row.RenditionID, 10)
+	}
+	return hashStrings([]string{
+		row.Target(), string(row.Kind), compiled.FilterComplex,
+		strconv.Itoa(row.AudioBitrate), strconv.Itoa(row.Profile.SampleRate),
+		source, upstream,
+	})
+}
+
+func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub) error {
 	port, err := e.alloc.Allocate()
 	if err != nil {
 		return err
 	}
 	subName := fmt.Sprintf("dest:%d", row.ID)
-	url := e.hub.Subscribe(subName, port)
+	url := hub.Subscribe(subName, port)
 
 	target := row.Target()
 	if row.Kind == db.DestFile {
@@ -875,13 +1067,13 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	e.mu.Lock()
 	e.dests[row.ID] = &destination{
 		row: row, proc: proc, port: port, subName: subName,
-		compiled: compiled, spec: spec,
+		compiled: compiled, hub: hub, spec: spec,
 	}
 	e.mu.Unlock()
 
 	proc.Start()
 	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
-		"tracks", compiled.Summary)
+		"tracks", compiled.Summary, "rendition", renditionLabel(row))
 	return nil
 }
 
@@ -895,10 +1087,193 @@ func (e *Engine) teardownDest(d *destination) {
 		cancel()
 	}
 	if d.subName != "" {
-		e.hub.Unsubscribe(d.subName)
+		// Its own hub, which is not always the ingest's.
+		hub := d.hub
+		if hub == nil {
+			hub = e.hub
+		}
+		hub.Unsubscribe(d.subName)
 	}
 	if d.port != 0 {
 		e.alloc.Release(d.port)
+	}
+}
+
+func renditionLabel(row *db.Destination) string {
+	if row.RenditionID == nil {
+		return "passthrough"
+	}
+	return strconv.FormatInt(*row.RenditionID, 10)
+}
+
+// --------------------------------------------------------------- renditions
+
+// wantedRenditions is the ref count made concrete: a shared encode earns a
+// process from its first enabled destination and loses it with its last, so a
+// tier nobody selects never appears here and never costs a core.
+//
+// counts comes from the database and omits renditions with no enabled
+// destinations entirely; passthrough destinations are not counted because there
+// is no process to ref-count.
+func wantedRenditions(rows []*db.Rendition, counts map[int64]int, sig func(*db.Rendition) string) map[int64]string {
+	want := map[int64]string{}
+	for _, r := range rows {
+		if counts[r.ID] > 0 {
+			want[r.ID] = sig(r)
+		}
+	}
+	return want
+}
+
+// diffRenditions splits the wanted encodes against the running ones. A changed
+// signature appears in both lists, because a shared encode is replaced rather
+// than adjusted: FFmpeg cannot change its output resolution mid-run, and the
+// destinations copying its video have to be restarted onto the new stream
+// anyway.
+func diffRenditions(want, running map[int64]string) (start, stop []int64) {
+	for id, sig := range running {
+		if w, ok := want[id]; !ok || w != sig {
+			stop = append(stop, id)
+		}
+	}
+	for id, sig := range want {
+		if r, ok := running[id]; !ok || r != sig {
+			start = append(start, id)
+		}
+	}
+	// Sorted so a reconcile is deterministic and reads the same in the log
+	// twice running.
+	slices.Sort(start)
+	slices.Sort(stop)
+	return start, stop
+}
+
+// renditionSig hashes everything the encode's command line depends on.
+//
+// Name and note are deliberately absent: renaming a tier must not interrupt the
+// destinations riding it. The source frame rate is folded in only when the
+// rendition inherits it, since that is the only case where the keyframe
+// interval — counted in frames — depends on what the ingest is doing.
+func renditionSig(r *db.Rendition, sourceFPS float64) string {
+	parts := []string{
+		strconv.Itoa(r.Width), strconv.Itoa(r.Height), strconv.Itoa(r.FPS),
+		strconv.Itoa(r.VideoBitrate), string(r.Encoder), r.Preset,
+		strconv.FormatFloat(r.GOPSeconds, 'g', -1, 64),
+	}
+	if r.FPS == 0 {
+		parts = append(parts, strconv.FormatFloat(sourceFPS, 'g', -1, 64))
+	}
+	return hashStrings(parts)
+}
+
+// renditionSpecOf maps a stored rendition onto the encode's command line.
+//
+// There is no audio field to map, and there must never be one: RenditionArgs
+// copies every audio track through with -c:a copy, which is what leaves the
+// per-destination routing graphs downstream with the full multitrack ingest to
+// work from.
+func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64) ffmpeg.RenditionSpec {
+	return ffmpeg.RenditionSpec{
+		InRelayURL:  in,
+		OutRelayURL: out,
+		Width:       r.Width,
+		Height:      r.Height,
+		FPS:         float64(r.FPS),
+		SourceFPS:   sourceFPS,
+		VideoKbps:   r.VideoBitrate,
+		Encoder:     string(r.Encoder),
+		Preset:      r.Preset,
+		GOPSeconds:  r.GOPSeconds,
+	}
+}
+
+// startRendition brings up one shared encode: a hub of its own, a subscription
+// on the ingest hub for its input, and a supervised FFmpeg between them.
+//
+// consumers is the ref count that earned it a process, carried through for the
+// log line only — the decision itself was made from the database.
+func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float64, consumers int) {
+	if row == nil {
+		return
+	}
+	fail := func(err error) {
+		// Recorded rather than returned: the destinations downstream have to be
+		// told why they are not starting, and the next reconcile retries.
+		e.mu.Lock()
+		e.rends[row.ID] = &rendition{row: row, err: err.Error()}
+		e.mu.Unlock()
+		e.log.Error("start rendition", "rendition", row.Name, "err", err)
+	}
+
+	// Detection reports an empty list when the build would not tell us, so an
+	// unknown encoder is only rejected when we actually know it is missing.
+	if len(e.tools.VideoEncoders) > 0 && !e.tools.HasEncoder(string(row.Encoder)) {
+		fail(fmt.Errorf("this FFmpeg build has no %s encoder", row.Encoder))
+		return
+	}
+
+	port, err := e.alloc.Allocate()
+	if err != nil {
+		fail(err)
+		return
+	}
+	// Its own hub, so its destinations read the encoded stream instead of the
+	// ingest. Port 0 lets the kernel pick, well clear of the allocator's range.
+	hub, err := relay.New(e.log, 0)
+	if err != nil {
+		e.alloc.Release(port)
+		fail(err)
+		return
+	}
+
+	subName := fmt.Sprintf("rendition:%d", row.ID)
+	in := e.hub.Subscribe(subName, port)
+	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS))
+
+	proc := supervisor.New(e.log, supervisor.Spec{
+		Name: subName, Kind: "rendition", Bin: e.tools.FFmpeg, Args: args,
+		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+	})
+
+	e.mu.Lock()
+	// Shutdown may have run since this reconcile started; publishing under the
+	// same lock Stop collects processes with is what keeps a late start from
+	// becoming an orphaned encoder holding a UDP socket.
+	if e.stopped {
+		e.mu.Unlock()
+		e.hub.Unsubscribe(subName)
+		e.alloc.Release(port)
+		_ = hub.Close()
+		return
+	}
+	e.rends[row.ID] = &rendition{
+		row: row, proc: proc, hub: hub, port: port, subName: subName, spec: spec,
+	}
+	e.mu.Unlock()
+
+	proc.Start()
+	e.log.Info("rendition started", "rendition", row.Name, "encoder", row.Encoder,
+		"bitrate", row.VideoBitrate, "consumers", consumers, "relayPort", hub.Port())
+}
+
+func (e *Engine) teardownRendition(r *rendition) {
+	if r == nil {
+		return
+	}
+	if r.proc != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+		r.proc.Stop(ctx)
+		cancel()
+	}
+	if r.subName != "" {
+		e.hub.Unsubscribe(r.subName)
+	}
+	if r.port != 0 {
+		e.alloc.Release(r.port)
+	}
+	// After the process, so the encode is never writing into a closed socket.
+	if r.hub != nil {
+		_ = r.hub.Close()
 	}
 }
 
@@ -969,9 +1344,11 @@ func (e *Engine) probeLoop(ctx context.Context) {
 			idleRounds = 0
 			if changed := e.probeOnce(ctx); changed {
 				// Layout changed: the meters process and every destination
-				// graph were built against the old one.
+				// graph were built against the old one, and a rendition that
+				// inherits the source frame rate has a keyframe interval
+				// derived from it.
 				e.reconcileMeters(e.Settings())
-				_ = e.reconcileDestinations()
+				_ = e.reconcileOutputs()
 				e.publishStatus()
 			}
 			e.mu.RLock()
@@ -1028,7 +1405,11 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	}
 
 	e.mu.Lock()
-	changed := !sameSource(e.source, src) || !e.probed
+	// The frame rate counts as a change because a rendition that inherits it
+	// converts its keyframe interval from seconds into frames; a rendition
+	// started before the first probe is running on the assumed rate.
+	changed := !sameSource(e.source, src) || !e.probed ||
+		probedFPS(e.videoInfo) != probedFPS(res.Video)
 	e.source = src
 	e.probed = true
 	e.videoInfo = res.Video
@@ -1039,6 +1420,15 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		e.bus.Publish(events.TypeSource, e.SourceInfo())
 	}
 	return changed
+}
+
+// probedFPS is the ingest's frame rate, or 0 while it is unknown — which the
+// rendition builder reads as "assume a conservative rate".
+func probedFPS(v *ffmpeg.VideoStream) float64 {
+	if v == nil {
+		return 0
+	}
+	return v.FrameRate
 }
 
 func sameSource(a, b routing.Source) bool {
@@ -1099,6 +1489,31 @@ type DestStatus struct {
 	Warnings      []string           `json:"warnings"`
 	Error         string             `json:"error,omitempty"`
 	Process       *supervisor.Status `json:"process,omitempty"`
+	// RenditionID is the shared encode this destination reads, nil for
+	// passthrough. RenditionName is its label, empty for passthrough, so the
+	// dashboard can group destinations under the encode they share.
+	RenditionID   *int64 `json:"renditionId,omitempty"`
+	RenditionName string `json:"renditionName,omitempty"`
+}
+
+// RenditionStatus is one shared video encode's live state.
+//
+// Consumers is the ref count the engine acted on: a rendition with none has no
+// process, by design, and the dashboard should say so rather than show it as
+// failed.
+type RenditionStatus struct {
+	ID           int64              `json:"id"`
+	Name         string             `json:"name"`
+	Width        int                `json:"width"`
+	Height       int                `json:"height"`
+	FPS          int                `json:"fps"`
+	VideoBitrate int                `json:"videoBitrate"`
+	Encoder      db.VideoEncoder    `json:"encoder"`
+	Codec        string             `json:"codec"`
+	Consumers    int                `json:"consumers"`
+	RelayPort    int                `json:"relayPort,omitempty"`
+	Error        string             `json:"error,omitempty"`
+	Process      *supervisor.Status `json:"process,omitempty"`
 }
 
 // Status is the whole-system snapshot pushed over the WebSocket.
@@ -1107,9 +1522,59 @@ type Status struct {
 	Recorder     *supervisor.Status `json:"recorder,omitempty"`
 	Preview      *supervisor.Status `json:"preview,omitempty"`
 	Meters       *supervisor.Status `json:"meters,omitempty"`
+	Renditions   []RenditionStatus  `json:"renditions"`
 	Destinations []DestStatus       `json:"destinations"`
 	Source       SourceInfo         `json:"source"`
 	Relay        relay.Stats        `json:"relay"`
+}
+
+// procStatus is nil for a process that is not running, which the JSON omits.
+func procStatus(p *supervisor.Process) *supervisor.Status {
+	if p == nil {
+		return nil
+	}
+	s := p.Status()
+	return &s
+}
+
+// Renditions returns the live state of every shared encode.
+//
+// Every rendition row appears, running or not: one with no enabled destination
+// is idle on purpose and must not read as broken.
+func (e *Engine) Renditions() []RenditionStatus {
+	rows, err := e.store.ListRenditions()
+	if err != nil {
+		return []RenditionStatus{}
+	}
+	counts, cerr := e.store.CountEnabledDestinationsByRendition()
+	if cerr != nil {
+		counts = map[int64]int{}
+	}
+
+	e.mu.RLock()
+	live := make(map[int64]*rendition, len(e.rends))
+	for id, r := range e.rends {
+		live[id] = r
+	}
+	e.mu.RUnlock()
+
+	out := make([]RenditionStatus, 0, len(rows))
+	for _, row := range rows {
+		rs := RenditionStatus{
+			ID: row.ID, Name: row.Name, Width: row.Width, Height: row.Height,
+			FPS: row.FPS, VideoBitrate: row.VideoBitrate, Encoder: row.Encoder,
+			Codec: row.Codec(), Consumers: counts[row.ID],
+		}
+		if r := live[row.ID]; r != nil {
+			rs.Error = r.err
+			rs.Process = procStatus(r.proc)
+			if r.hub != nil {
+				rs.RelayPort = r.hub.Port()
+			}
+		}
+		out = append(out, rs)
+	}
+	return out
 }
 
 // Status assembles the current snapshot.
@@ -1125,19 +1590,18 @@ func (e *Engine) Status() Status {
 	st := Status{
 		Source:       e.SourceInfo(),
 		Relay:        e.hub.Stats(),
+		Renditions:   e.Renditions(),
 		Destinations: []DestStatus{},
 	}
-	statusOf := func(p *supervisor.Process) *supervisor.Status {
-		if p == nil {
-			return nil
-		}
-		s := p.Status()
-		return &s
+	st.Ingest = procStatus(ingest)
+	st.Recorder = procStatus(recorder)
+	st.Preview = procStatus(preview)
+	st.Meters = procStatus(meters)
+
+	names := make(map[int64]string, len(st.Renditions))
+	for _, r := range st.Renditions {
+		names[r.ID] = r.Name
 	}
-	st.Ingest = statusOf(ingest)
-	st.Recorder = statusOf(recorder)
-	st.Preview = statusOf(preview)
-	st.Meters = statusOf(meters)
 
 	// Every destination row appears, running or not, so the dashboard shows a
 	// disabled destination rather than silently omitting it.
@@ -1147,6 +1611,10 @@ func (e *Engine) Status() Status {
 			ds := DestStatus{
 				ID: row.ID, Name: row.Name, Kind: row.Kind,
 				Platform: row.Platform, Enabled: row.Enabled,
+				RenditionID: row.RenditionID,
+			}
+			if row.RenditionID != nil {
+				ds.RenditionName = names[*row.RenditionID]
 			}
 			if live := e.destByID(dests, row.ID); live != nil {
 				ds.Summary = live.compiled.Summary
@@ -1155,7 +1623,7 @@ func (e *Engine) Status() Status {
 				ds.Normalization = live.compiled.Normalization
 				ds.Warnings = live.compiled.Warnings
 				ds.Error = live.err
-				ds.Process = statusOf(live.proc)
+				ds.Process = procStatus(live.proc)
 			} else if c, cerr := routing.Compile(row.Profile, e.Source()); cerr == nil {
 				// Not running: still show what it *would* send, so the card is
 				// informative before the stream is ever started.
@@ -1193,12 +1661,37 @@ func (e *Engine) Processes() []*supervisor.Process {
 			out = append(out, p)
 		}
 	}
+	for _, r := range e.rends {
+		if r.proc != nil {
+			out = append(out, r.proc)
+		}
+	}
 	for _, d := range e.dests {
 		if d.proc != nil {
 			out = append(out, d.proc)
 		}
 	}
 	return out
+}
+
+// RestartRendition cycles one shared encode without touching anything else.
+//
+// Its destinations ride the gap out rather than being restarted with it: their
+// input is a UDP socket on the rendition's hub, which the restart never closes,
+// so FFmpeg simply sees a pause in the datagrams — the same thing it already
+// survives every time the ingest reconnects.
+func (e *Engine) RestartRendition(id int64) error {
+	e.mu.RLock()
+	r := e.rends[id]
+	e.mu.RUnlock()
+	if r == nil || r.proc == nil {
+		return e.Reconcile()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	r.proc.Restart(ctx)
+	e.publishStatus()
+	return nil
 }
 
 // RestartDestination cycles one destination without touching anything else.
