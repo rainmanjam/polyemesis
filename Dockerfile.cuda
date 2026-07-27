@@ -37,7 +37,7 @@
 # published before either of these Dockerfiles could build at all — and the one
 # property this project keeps is that any Dockerfile here builds from a clean
 # checkout with nothing else on the machine.
-FROM node:22-alpine AS ui
+FROM node:24-alpine AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json* ./
 RUN npm ci
