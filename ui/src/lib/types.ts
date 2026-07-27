@@ -338,11 +338,53 @@ export interface BitrateSample {
   kbps: number;
 }
 
+/** `pull` inverts the direction: rather than waiting for an encoder, the server
+ *  dials a source. That is what lets an IP camera, another server's HLS, or a
+ *  looped file become the ingest. */
+export type IngestMode = "srt" | "rtmp" | "pull";
+
+/** The schemes the server will dial. Mirrors ffmpeg.PullSchemes(); the server
+ *  rejects anything else, and quotes this same list when it does. */
+export const PULL_SCHEMES = [
+  "dash",
+  "file",
+  "hls",
+  "http",
+  "https",
+  "rtmp",
+  "rtmps",
+  "rtsp",
+  "rtsps",
+  "srt",
+] as const;
+
+export const RTSP_TRANSPORTS = ["tcp", "udp", "udp_multicast", "http", "https"] as const;
+
+export interface PullSettings {
+  /** A `file://` source is a path RELATIVE to the data directory and may not
+   *  contain "..": the server confines it there the same way file destinations
+   *  are confined. */
+  url: string;
+  /** Caps FFmpeg's HTTP reconnect backoff. 0 uses the built-in default. */
+  reconnectDelayMaxSeconds: number;
+  /** Empty means TCP, which is right for almost every camera. */
+  rtspTransport: string;
+}
+
 export interface Settings {
   ingest: {
-    mode: "srt" | "rtmp";
+    mode: IngestMode;
     srt: { port: number; passphrase: string; latencyMs: number };
     rtmp: { port: number; app: string; streamKey: string };
+    /** Optional so a client that predates pull can still PUT settings. */
+    pull?: PullSettings;
+  };
+  /** Synthetic sources. Optional for the same reason. */
+  synth?: {
+    /** Synthesises a silent stereo track when the ingest probes with no audio
+     *  at all. On by default: a video-only stream is refused by every major
+     *  platform. It can never affect an ingest that does carry audio. */
+    silenceOnVideoOnly: boolean;
   };
   recording: {
     enabled: boolean;
@@ -364,6 +406,135 @@ export interface Settings {
     maxFileMb: number;
     maxFiles: number;
   };
+  /** Optional so a client that predates playout can still PUT settings: the
+   *  server merges over the stored value, and an absent key leaves it alone. */
+  playout?: PlayoutSettings;
+}
+
+// ---------------------------------------------------------------- playout
+//
+// Playout is the viewer-facing origin: the stream packaged as public HLS (and
+// optionally DASH) rather than relayed to another platform. It CONSUMES the
+// rendition tier — a variant copies its rendition's video bit-for-bit — so
+// adding a rung costs a muxer, never a second video encode.
+
+export type PlayoutFormat = "hls" | "hls+dash";
+
+/** One publicly served rung. `renditionId` null packages the ingest directly. */
+export interface PlayoutVariant {
+  name: string;
+  enabled: boolean;
+  renditionId?: number | null;
+  /** Which ingest track this rung publishes. A viewer's player wants one
+   *  stereo track; per-destination audio routing is untouched by this. */
+  audioTrack: number;
+}
+
+export interface PlayoutSettings {
+  enabled: boolean;
+  /** Serves playlists and segments without an admin session. Off by default. */
+  public: boolean;
+  /** Sends CORS headers on the media so a player on another site can fetch it,
+   *  and relaxes the frame headers on /watch so the embed renders. */
+  allowCrossOrigin: boolean;
+  format: PlayoutFormat;
+  segmentSeconds: number;
+  playlistSegments: number;
+  /** 0 is live-only. */
+  dvrWindowSeconds: number;
+  maxDiskMb: number;
+  audioKbps: number;
+  sessionIdleSeconds: number;
+  maxSessions: number;
+  variants: PlayoutVariant[];
+}
+
+export interface PlayoutVariantStatus {
+  name: string;
+  renditionId?: number | null;
+  audioTrack: number;
+  running: boolean;
+  error?: string;
+  bandwidth: number;
+  width?: number;
+  height?: number;
+  /** Relative to the playout root; prefix with `/playout/`. */
+  playlist: string;
+  manifest?: string;
+  viewers: number;
+  startedAt?: string;
+}
+
+export interface PlayoutAnalytics {
+  viewers: number;
+  byVariant: Record<string, number> | null;
+  peak: number;
+  peakAt?: string;
+  /** Total sessions opened; a reconnect counts as a new one. */
+  sessions: number;
+  requests: number;
+  /** New viewers that arrived with the table full. They are still served. */
+  uncounted: number;
+  idleSeconds: number;
+  capacity: number;
+}
+
+export interface PlayoutUsage {
+  bytes: number;
+  files: number;
+  limitBytes: number;
+  /** The cap is below one playlist window — raise it or lower the bitrate. */
+  overLimit: boolean;
+  deleted: number;
+}
+
+export interface PlayoutStatus {
+  enabled: boolean;
+  public: boolean;
+  master: string;
+  format: PlayoutFormat;
+  variants: PlayoutVariantStatus[] | null;
+  analytics: PlayoutAnalytics;
+  usage: PlayoutUsage;
+}
+
+/** How an anonymous viewer proves they may watch. `token` is the default and
+ *  the only safe one; `open` means anyone with the URL. */
+export type PlayoutProtection = "token" | "open";
+
+export interface PlayoutUrls {
+  master: string;
+  watch: string;
+  embed: string;
+}
+
+/** The Playout page's single read. `token` is the playback secret in the
+ *  clear — this response is behind the admin session. */
+export interface PlayoutAdminView {
+  status: PlayoutStatus;
+  settings: PlayoutSettings;
+  protection: PlayoutProtection;
+  token: string;
+  title: string;
+  description: string;
+  urls: PlayoutUrls;
+  /** True only when anyone on the internet holding the URL can watch. The
+   *  page leads with this. */
+  exposed: boolean;
+  /** False when the playout manager is not wired up, so the page can say so
+   *  rather than showing an empty ladder. */
+  running: boolean;
+}
+
+/** What the public player page is told. Never carries the token. */
+export interface PlayoutPublicView {
+  enabled: boolean;
+  title: string;
+  description: string;
+  master: string;
+  poster: string;
+  variants: { name: string; playlist: string; width?: number; height?: number }[] | null;
+  viewers: number;
 }
 
 export interface Recording {
@@ -549,4 +720,55 @@ export interface WsEvent {
   type: EventType;
   time: string;
   data: unknown;
+}
+
+// ------------------------------------------------------------------- expert
+//
+// Hand-edited FFmpeg arguments, per destination. Two strings appended to the
+// generated command — one before the input, one before the output — with
+// everything else, including the audio routing graph, untouched.
+
+/** One override the server wants said out loud before it will save. */
+export interface ExpertGuard {
+  arg: string;
+  reason: string;
+}
+
+/** The exact argv a destination would run, rendered for reading. */
+export interface ResolvedCommand {
+  bin: string;
+  argv: string[];
+  /** True when this came from the destination's RUNNING process, so every
+   *  value in it is real. False means it was rebuilt and `note` says which
+   *  parts are stand-ins. */
+  command: string;
+  live: boolean;
+  note?: string;
+}
+
+export interface ExpertArgs {
+  inputArgs: string;
+  outputArgs: string;
+  ackReencode: boolean;
+}
+
+export interface ExpertResponse {
+  destinationId: number;
+  args: ExpertArgs;
+  enabled: boolean;
+  command: ResolvedCommand;
+  guards?: ExpertGuard[];
+  passthrough: boolean;
+  applied: boolean;
+  warning?: string;
+}
+
+/** Three-valued on purpose. An unreachable ingest is not a verdict on the
+ *  arguments, and reporting it as one would refuse an edit for a reason that
+ *  has nothing to do with it. */
+export interface DryRunResult {
+  verdict: "ok" | "invalid" | "inconclusive";
+  message?: string;
+  command: string;
+  output?: string;
 }

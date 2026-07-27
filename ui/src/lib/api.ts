@@ -1,11 +1,18 @@
 import type {
   ApiToken,
+  DryRunResult,
+  ExpertArgs,
+  ExpertResponse,
   Destination,
   DiskUsage,
   EncoderList,
   Levels,
   PlatformAccount,
   PlatformCreds,
+  PlayoutAdminView,
+  PlayoutProtection,
+  PlayoutPublicView,
+  PlayoutUrls,
   Preset,
   PresetOpts,
   ProcessInfo,
@@ -96,6 +103,13 @@ const post = <T,>(p: string, body?: unknown) =>
 const put = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: "PUT", body: JSON.stringify(body) });
 const del = <T,>(p: string) => request<T>(p, { method: "DELETE" });
+
+/** `?t=<token>` when a playback token is in play, empty otherwise. The public
+ *  routes accept the token this way because an <img> src and a <video> src are
+ *  the only handles a player page has on those requests. */
+function tokenQuery(token?: string): string {
+  return token ? `?t=${encodeURIComponent(token)}` : "";
+}
 
 export interface DestinationWithRouting {
   destination: Destination;
@@ -223,12 +237,67 @@ export const api = {
   deleteRecording: (id: number) => del<{ status: string }>(`/recordings/${id}`),
   downloadUrl: (id: number) => `${BASE}/recordings/${id}/download`,
 
+  // --- playout (the public origin) ---
+  // Distinct from the dashboard preview: that is an admin-only 360p re-encode,
+  // this is the viewer-facing HLS/DASH origin. Variant configuration lives in
+  // Settings.playout and is saved through putSettings; everything here is the
+  // publishing half — who may watch, and what the player page says.
+  playout: () => get<PlayoutAdminView>("/playout"),
+  /** Partial: an omitted field is left alone rather than blanked. */
+  updatePlayoutPublish: (body: {
+    protection?: PlayoutProtection;
+    title?: string;
+    description?: string;
+  }) => put<{ protection: PlayoutProtection; title: string; description: string }>(
+    "/playout/publish",
+    body,
+  ),
+  /** Mints a new playback secret, which is the revocation mechanism: every
+   *  link already handed out stops working. */
+  rotatePlayoutToken: () =>
+    post<{ token: string; urls: PlayoutUrls }>("/playout/token"),
+  resetPlayoutAnalytics: () => post<unknown>("/playout/analytics/reset"),
+
+  /** The public player's read. Unauthenticated, so it is called with a plain
+   *  fetch rather than through `request`, which assumes a session. `token` is
+   *  the shared playback secret from a /watch/:token link. */
+  playoutPublic: async (token?: string): Promise<PlayoutPublicView> => {
+    const url = BASE + "/playout/public" + tokenQuery(token);
+    // credentials are included so the cookie the server hands back on the
+    // first authorised request carries the following ones.
+    const resp = await fetch(url, { credentials: "same-origin" });
+    if (!resp.ok) {
+      throw new ApiError(resp.status, `request failed (${resp.status})`);
+    }
+    return (await resp.json()) as PlayoutPublicView;
+  },
+  /** Poster image URL. A plain <img> src, so the token rides in the query. */
+  playoutPosterUrl: (token?: string) =>
+    BASE + "/playout/poster.jpg" + tokenQuery(token),
+  /** The HLS ladder. Relative, so it works under whatever host or proxy prefix
+   *  the viewer reached the page through. */
+  playoutMasterUrl: (token?: string) =>
+    "/playout/master.m3u8" + tokenQuery(token),
+
   // --- monitoring ---
   listProcesses: () => get<ProcessInfo[]>("/processes"),
   processLogs: (name: string) =>
     get<{ name: string; command: string; lines: LogLine[] | null }>(
       `/processes/${encodeURIComponent(name)}/logs`,
     ),
+
+  // --- expert mode ---
+  //
+  // Preview and dry-run are POSTs because they carry a candidate edit in the
+  // body, not because they change anything: neither writes.
+  getExpert: (id: number) => get<ExpertResponse>(`/destinations/${id}/expert`),
+  previewExpert: (id: number, args: ExpertArgs) =>
+    post<ExpertResponse>(`/destinations/${id}/expert/preview`, args),
+  dryRunExpert: (id: number, args: ExpertArgs) =>
+    post<DryRunResult>(`/destinations/${id}/expert/dry-run`, args),
+  putExpert: (id: number, args: ExpertArgs & { confirm: boolean }) =>
+    put<ExpertResponse>(`/destinations/${id}/expert`, args),
+  deleteExpert: (id: number) => del<ExpertResponse>(`/destinations/${id}/expert`),
 
   // --- platforms ---
   platformGuides: () => get<SetupGuide[]>("/platforms/guides"),
