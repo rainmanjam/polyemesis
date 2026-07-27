@@ -20,8 +20,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
+	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
@@ -44,6 +46,14 @@ type Server struct {
 	version string
 	// startedAt is the process start, which is what the uptime metric reports.
 	startedAt time.Time
+
+	// The post-production tier. Every one of these is optional and every
+	// handler that reads one checks first, because a build that has not wired
+	// the queue yet must still serve the console — the library's search and
+	// session views work perfectly well without a job ever running.
+	jobq    *jobs.Queue
+	gov     *jobs.Governor
+	whisper *transcribe.Tools
 }
 
 // Options configures the server.
@@ -58,6 +68,19 @@ type Options struct {
 	// TLS is the provider the HTTP listener was built from. Optional; without
 	// it the TLS status endpoint can only report what config.yaml asked for.
 	TLS *tlsx.Provider
+
+	// Jobs is the background work queue. Optional: without it the jobs page
+	// reports that no queue is running and the library hides its submit
+	// buttons rather than offering work nothing will pick up.
+	Jobs *jobs.Queue
+	// Governor is the resource policy. Optional even when Jobs is set, and the
+	// absence is reported as "not governed" rather than as "allowed": an
+	// operator who cannot see a gate must not be told there is one.
+	Governor *jobs.Governor
+	// Whisper is the startup detection of whisper.cpp. A nil pointer is a
+	// perfectly ordinary machine without it installed; every method on Tools
+	// is nil-receiver safe for exactly this reason.
+	Whisper *transcribe.Tools
 }
 
 // New creates the server.
@@ -70,6 +93,9 @@ func New(o Options) *Server {
 		eng:       o.Engine,
 		bus:       o.Events,
 		tls:       o.TLS,
+		jobq:      o.Jobs,
+		gov:       o.Governor,
+		whisper:   o.Whisper,
 		version:   o.Version,
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
@@ -207,6 +233,62 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/recordings/stems", s.handleListStems)
 			r.Delete("/recordings/{id}", s.handleDeleteRecording)
 
+			// Background work. Every heavy post-production task is a queued
+			// job governed by a resource policy that yields to the stream, so
+			// this is where an operator sees the CPU tradeoff and changes it.
+			// Static segments precede {id} for the reason /destinations/order
+			// does. See jobs.go.
+			r.Get("/jobs", s.handleListJobs)
+			r.Get("/jobs/overview", s.handleJobsOverview)
+			r.Get("/jobs/policy", s.handleGetJobPolicy)
+			r.Put("/jobs/policy", s.handlePutJobPolicy)
+			r.Post("/jobs/pause", s.handlePauseJobs)
+			r.Post("/jobs/resume", s.handleResumeJobs)
+			r.Post("/jobs/purge", s.handlePurgeJobs)
+			r.Get("/jobs/{id}", s.handleGetJob)
+			r.Delete("/jobs/{id}", s.handleDeleteJob)
+			r.Post("/jobs/{id}/cancel", s.handleCancelJob)
+			r.Post("/jobs/{id}/retry", s.handleRetryJob)
+			// "Run it anyway": releases one job from the governor's gates
+			// without changing the policy for every other job of its kind.
+			r.Post("/jobs/{id}/release", s.handleReleaseJob)
+
+			// The media library: sessions, transcripts and the full-text
+			// search over them. See library.go.
+			r.Get("/library", s.handleLibrary)
+			r.Get("/library/search", s.handleSearchTranscripts)
+			r.Post("/library/sessions", s.handleCreateLibrarySession)
+			r.Post("/library/sessions/regroup", s.handleRegroupSessions)
+			r.Get("/library/sessions/{id}", s.handleGetLibrarySession)
+			r.Put("/library/sessions/{id}", s.handleUpdateLibrarySession)
+			r.Delete("/library/sessions/{id}", s.handleDeleteLibrarySession)
+			r.Get("/library/recordings/{id}", s.handleGetLibraryRecording)
+			r.Put("/library/recordings/{id}", s.handleUpdateLibraryRecording)
+			r.Get("/library/recordings/{id}/transcript", s.handleGetTranscript)
+			r.Delete("/library/recordings/{id}/transcript", s.handleDeleteTranscript)
+			r.Put("/library/recordings/{id}/speaker", s.handleSetTranscriptSpeaker)
+			// Submitting the work the library page offers. One route per
+			// kind's name rather than a body field, so an unknown kind is a
+			// 404 from the router instead of a validation error.
+			r.Post("/library/recordings/{id}/jobs/{kind}", s.handleSubmitRecordingJob)
+			// Derived media: the proxy the inline player uses, the poster, the
+			// contact sheet, the scrub sprites. A GET, so requireCSRF passes
+			// it through and a plain <video src> can reach it — which it has
+			// to, because a media element attaches no headers of its own.
+			r.Get("/library/recordings/{id}/media/{file}", s.handleLibraryMedia)
+
+			// The clip editor: keyframe-accurate lossless cuts out of a
+			// recording already on disk. Deliberately NOT under /clips, which
+			// is the live ring buffer and a different feature entirely; see
+			// the file comment in clips.go. Planning is a POST because it
+			// carries a candidate cut in the body, not because it writes —
+			// nothing here runs FFmpeg, the export is a queued job.
+			r.Get("/clipper/recordings/{id}", s.handleClipSource)
+			r.Get("/clipper/recordings/{id}/keyframes", s.handleClipKeyframes)
+			r.Get("/clipper/recordings/{id}/transcript", s.handleClipTranscript)
+			r.Post("/clipper/recordings/{id}/plan", s.handleClipPlan)
+			r.Post("/clipper/recordings/{id}/export", s.handleClipExport)
+
 			// Alerting: webhook rules and the test button that is the only
 			// reason anybody believes a webhook works.
 			r.Get("/alerts/meta", s.handleAlertsMeta)
@@ -284,6 +366,10 @@ func (s *Server) Handler() http.Handler {
 			r.Use(s.requireAuth)
 			r.Get("/recordings/{id}/download", s.handleDownloadRecording)
 			r.Get("/recordings/stems/{name}/download", s.handleDownloadStem)
+			// Addressed by the JOB rather than by a filename: the export's
+			// path was written by the server and is never handed to a client
+			// to spell back at us.
+			r.Get("/clipper/jobs/{id}/download", s.handleDownloadClipExport)
 			r.Get("/clips/{name}/download", s.handleDownloadClip)
 		})
 	})
