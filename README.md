@@ -166,7 +166,31 @@ The TLS block is the part most worth reading before you deploy:
 
 ### Docker (optional)
 
-Docker is never required. If you prefer it:
+Docker is never required. If you prefer it, pull a published image:
+
+```bash
+docker pull rainmanjam/polyemesis:latest
+```
+
+The image is **multi-architecture**: one tag serves `linux/amd64` and
+`linux/arm64`, and Docker picks the right one. That covers Intel and AMD
+servers, Apple Silicon and Windows under Docker Desktop, AWS Graviton and
+Ampere, and the Raspberry Pi 4/5 — there is no macOS or Windows *image*,
+because Docker Desktop runs a Linux VM.
+
+| Tag | Contents | Architectures |
+|---|---|---|
+| `:latest`, `:1.2.3`, `:1.2` | Alpine + FFmpeg 8.1.2, software encoding | `amd64`, `arm64` |
+| `:cuda` | NVIDIA NVENC, CUDA on Ubuntu 24.04 (FFmpeg 6.1.1) | `amd64` |
+| `:vaapi` | Intel/AMD VA-API on Ubuntu 24.04 (FFmpeg 6.1.1) | `amd64` |
+
+The GPU tags exist so people with the hardware can try them; neither has been
+built or run on a machine with a GPU attached, and the FFmpeg there trails the
+default image because `nvidia/cuda` has no Ubuntu 26.04 base yet. Read
+[docs/HARDWARE.md](docs/HARDWARE.md) before using either — the passthrough
+flags are the part that goes wrong.
+
+Or build and run locally from a clone:
 
 ```bash
 docker compose up -d

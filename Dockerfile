@@ -52,17 +52,22 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 # ---------- stage 3: runtime ----------
 #
-# Alpine 3.22 rather than something newer: it is the last branch whose ffmpeg
-# package is still 6.1.x, which is the FFmpeg series this project is actually
-# exercised against. Alpine 3.23 and 3.24 ship FFmpeg 8.x — a jump nobody here
-# has tested with multitrack MPEG-TS routing yet, and the wrong thing to inherit
-# silently from a base-image tag.
+# Alpine 3.24, which ships FFmpeg 8.1.2.
 #
-# The tag is deliberately left floating at the patch level (3.22, not 3.22.5) so
+# This image sat on 3.22/FFmpeg 6.1.x for a while on the theory that 6.1 was
+# "the series this project is exercised against". That had it backwards. The
+# six host acceptance suites — 156 checks covering multitrack routing, the
+# loudness analyser, ducking, denoise, delay, the rendition ladder and the
+# encoder probes — run against whatever FFmpeg is on the developer machine,
+# and that has been 8.1.2. The 6.1.x container was the LESS tested
+# configuration, not the more tested one, and pinning to it meant shipping
+# something no suite had ever exercised end to end.
+#
+# The tag is deliberately left floating at the patch level (3.24, not 3.24.1) so
 # rebuilds pick up musl/openssl security fixes. If you need a bit-exact rebuild
-# instead, pin the digest as well — verified 2026-07-26, amd64 and arm64:
-#   FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
-FROM alpine:3.22
+# instead, pin the digest as well — verified 2026-07-27, amd64 and arm64:
+#   FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+FROM alpine:3.24
 
 # FFMPEG_VERSION is pinned, not floating, because `apk add ffmpeg` resolves to
 # whatever the branch happens to hold on the day you build. That makes an image
@@ -75,19 +80,19 @@ FROM alpine:3.22
 # the current one. That failure is the feature: it is the prompt to bump this
 # on purpose. To bump:
 #
-#   1. docker run --rm alpine:3.22 sh -c 'apk update >/dev/null && apk list ffmpeg'
-#      (or https://pkgs.alpinelinux.org/packages?name=ffmpeg&branch=v3.22)
+#   1. docker run --rm alpine:3.24 sh -c 'apk update >/dev/null && apk list ffmpeg'
+#      (or https://pkgs.alpinelinux.org/packages?name=ffmpeg&branch=v3.24)
 #   2. Set FFMPEG_VERSION to what it prints, matching on BOTH amd64 and arm64.
 #   3. Confirm the new build still has SRT before shipping it:
 #      docker run --rm <image> ffmpeg -protocols | tr ' ' '\n' | grep -x srt
 #
-# 6.1.2-r2 verified on linux/amd64 and linux/arm64: srt + rtmp protocols,
+# 8.1.2-r0 verified on linux/amd64 and linux/arm64: srt + rtmp protocols,
 # libx264 and native aac encoders all present.
 #
 # The trailing grep is not decoration: it fails the build rather than shipping
 # an image whose multitrack SRT ingest cannot work. `grep srt` would be no check
 # at all — every build lists `srtp`, which is a different protocol.
-ARG FFMPEG_VERSION=6.1.2-r2
+ARG FFMPEG_VERSION=8.1.2-r0
 RUN apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata \
  && adduser -D -u 10001 polyemesis \
  && ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt

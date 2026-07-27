@@ -11,7 +11,16 @@ VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 LDFLAGS     := -s -w -X main.version=$(VERSION)
 
 # Cross-compilation targets for `make release`.
-PLATFORMS   := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+PLATFORMS   := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+
+# Docker Hub coordinates. Override to publish somewhere else:
+#   make docker-buildx IMAGE=ghcr.io/you/polyemesis PUSH=1
+IMAGE            ?= rainmanjam/polyemesis
+# linux/amd64 covers Intel and AMD servers plus Windows via WSL2; linux/arm64
+# covers Apple Silicon under Docker Desktop, Ampere/Graviton servers and the
+# Raspberry Pi 4/5. Those two are the whole practical matrix — there is no
+# darwin or windows Docker image, because Docker Desktop runs a Linux VM.
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
 .DEFAULT_GOAL := build
 
@@ -121,6 +130,25 @@ docker-cuda: ## Build the NVIDIA/NVENC image (needs nvidia-container-toolkit at 
 .PHONY: docker-vaapi
 docker-vaapi: ## Build the Intel/AMD VA-API image (needs --device /dev/dri at run time)
 	docker build -f Dockerfile.vaapi -t polyemesis:$(VERSION)-vaapi -t polyemesis:vaapi .
+
+# Multi-architecture publish. Defaults to BUILD ONLY: a bare `make docker-buildx`
+# proves both architectures compile and pushes nothing, which is what you want
+# in CI on a pull request. Publishing is opt-in with PUSH=1.
+#
+# buildx cannot `--load` a multi-arch result into the local docker image store
+# (the store holds one architecture per tag), so the no-push build discards its
+# output. That is fine: the point of the no-push run is that it FAILS if either
+# architecture cannot build.
+.PHONY: docker-buildx
+docker-buildx: ## Build $(IMAGE) for $(DOCKER_PLATFORMS). PUSH=1 to publish.
+	@docker buildx inspect polyemesis-builder >/dev/null 2>&1 \
+	  || docker buildx create --name polyemesis-builder --driver docker-container >/dev/null
+	docker buildx build --builder polyemesis-builder \
+	  --platform $(DOCKER_PLATFORMS) \
+	  --build-arg VERSION=$(VERSION) \
+	  -t $(IMAGE):$(VERSION) -t $(IMAGE):latest \
+	  $(if $(PUSH),--push,) .
+	@if [ -z "$(PUSH)" ]; then echo "  built for $(DOCKER_PLATFORMS), pushed nothing (PUSH=1 to publish)"; fi
 
 # ------------------------------------------------------------------- clean
 
