@@ -152,13 +152,75 @@ export interface RenditionBounds {
   maxGopSeconds: number;
 }
 
-/** One choice in the encoder list. `available` is whether this FFmpeg build
- *  registers it; offering one it lacks costs a crash-looping stream to find. */
+/** The silicon behind an encoder. "software" is libx264/libx265, which drive
+ *  no silicon at all. */
+export type GpuVendor = "intel" | "nvidia" | "amd" | "apple" | "software" | "unknown";
+
+/** One device the encoders could use — on Linux a /dev/dri node.
+ *
+ *  `usable` is the field that matters: a node that exists but cannot be opened
+ *  is the most common hardware-encoding failure there is, and `problem` is
+ *  already phrased as the fix. */
+export interface GpuDevice {
+  path: string;
+  node: string;
+  render: boolean;
+  vendor: GpuVendor;
+  vendorId?: string;
+  usable: boolean;
+  problem?: string;
+}
+
+/** What the machine has, as opposed to what the FFmpeg build lists. Advisory
+ *  only — the test encode decides what works. `notes` are operator-facing and
+ *  already written as instructions, so they are rendered verbatim. */
+export interface GpuInfo {
+  platform: string;
+  devices?: GpuDevice[];
+  vendors?: GpuVendor[];
+  vaapiDevice?: string;
+  nvidia: boolean;
+  nvidiaDriver?: string;
+  appleSilicon?: boolean;
+  notes?: string[];
+}
+
+/** One choice in the encoder list.
+ *
+ *  `available` and `works` are two different questions and the gap between them
+ *  is the whole point: a stock Linux FFmpeg is `available` for nvenc, qsv, vaapi
+ *  and amf on a box with no GPU in it. `works` is the result of actually
+ *  encoding a frame here, and `reason` is FFmpeg's own words when it did not. */
 export interface EncoderInfo {
   name: string;
   codec: string;
+  vendor: GpuVendor;
   hardware: boolean;
+  /** Whether this FFmpeg build registers the encoder. */
   available: boolean;
+  /** Whether it is usable on this machine. Unknown counts as usable —
+   *  detection that could not run must not take choices away. */
+  works: boolean;
+  /** True when this exact encoder was test-encoded, false when the verdict was
+   *  assumed or inherited from the H.264 encoder of the same family. */
+  measured: boolean;
+  reason?: string;
+  durationMs?: number;
+  /** The one a new rendition starts on. */
+  default: boolean;
+}
+
+/** GET /encoders. `probed` is whether the build's encoder list was readable;
+ *  `tested` is whether anything was actually encoded. Both false means every
+ *  `works` below is an assumption. */
+export interface EncoderList {
+  encoders: EncoderInfo[];
+  default: string;
+  probed: boolean;
+  tested: boolean;
+  /** Working hardware encoders in preference order; empty means software only. */
+  hardware: string[] | null;
+  gpu: GpuInfo;
 }
 
 export type ProcessState =
@@ -345,11 +407,33 @@ export interface FFmpegTools {
   minor: number;
   hasLibsrt: boolean;
   hasLibx264: boolean;
+  /** Every video encoder the binary registers. The candidate set, not the
+   *  answer: this is what the BUILD was compiled with. */
+  videoEncoders?: string[] | null;
+  /** The hardware subset that passed its test encode, in preference order. */
+  hwEncoders?: string[] | null;
+  /** What each candidate did when this machine was asked to encode a frame.
+   *  Empty means the test encode never ran. */
+  encoderCaps?: EncoderCapability[] | null;
+}
+
+/** One encoder's measured answer: what happened when this machine, with these
+ *  drivers, was asked to encode a frame just now. */
+export interface EncoderCapability {
+  name: string;
+  vendor: GpuVendor;
+  works: boolean;
+  reason?: string;
+  durationMs: number;
 }
 
 export interface SystemInfo {
   version: string;
   ffmpeg: FFmpegTools;
+  /** What the machine has. It rides alongside `ffmpeg` because the two are only
+   *  meaningful together — an encoder list without the hardware behind it is
+   *  what made the editor offer NVENC on an AMD box. */
+  gpu: GpuInfo;
   ingestUrl: string;
   ingestMode: string;
   maxTracks: number;

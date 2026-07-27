@@ -186,8 +186,14 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":    s.version,
-		"ffmpeg":     s.eng.Tools(),
+		"version": s.version,
+		"ffmpeg":  s.eng.Tools(),
+		// What the machine has, as opposed to what the FFmpeg build lists. It
+		// rides on /system because the two are only meaningful together: an
+		// encoder list without the hardware behind it is what made the rendition
+		// editor offer NVENC on an AMD box in the first place. Cached after the
+		// first scan, so this stays a cheap endpoint.
+		"gpu":        machineGPUs(r.Context()),
 		"ingestUrl":  spec.PublicIngestURL(host),
 		"ingestMode": settings.Ingest.Mode,
 		"maxTracks":  routing.MaxTracks,

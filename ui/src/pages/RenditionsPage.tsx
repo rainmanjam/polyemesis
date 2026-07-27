@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Cpu, Layers, Loader2, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
+import {
+  Cpu,
+  Layers,
+  Loader2,
+  Pencil,
+  Plus,
+  RotateCw,
+  ScanSearch,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,6 +49,9 @@ import { labelForState, toneBadge, toneForState, type SignalTone } from "@/lib/s
 import type {
   DestStatus,
   EncoderInfo,
+  EncoderList,
+  GpuInfo,
+  GpuVendor,
   Rendition,
   RenditionBounds,
   RenditionPreset,
@@ -86,6 +99,84 @@ const SIZES = [
 //   3840×2160×60  = 498 MP/s
 const SOFTWARE_BUSY_PIXELS = 120e6;
 const SOFTWARE_UNREALISTIC_PIXELS = 240e6;
+
+/** How each vendor is named in the list. "unknown" is deliberately shown as
+ *  "hardware": we know it drives silicon, we just could not say whose. */
+const VENDOR_LABEL: Record<GpuVendor, string> = {
+  intel: "Intel",
+  nvidia: "NVIDIA",
+  amd: "AMD",
+  apple: "Apple",
+  software: "software",
+  unknown: "hardware",
+};
+
+/** The one-line description beside an encoder's name in the dropdown. */
+function encoderLabel(e: EncoderInfo): string {
+  const parts = [VENDOR_LABEL[e.vendor] ?? "hardware"];
+  if (e.default) parts.push("default");
+  if (!e.works) parts.push("unavailable here");
+  return parts.join(" · ");
+}
+
+/** Why this encoder is not offered, in full, for the tooltip and the line under
+ *  the select. The server's `reason` is FFmpeg's own words, which is the part
+ *  worth keeping: "Cannot load libcuda.so.1" and "Permission denied" are two
+ *  problems with two different fixes. */
+function encoderProblem(e: EncoderInfo | undefined): string {
+  if (!e || e.works) return "";
+  if (!e.available) return e.reason || `This FFmpeg build has no ${e.name}.`;
+  const measured = e.measured
+    ? `${e.name} failed a one-frame test encode on this machine.`
+    : `${e.name} was not offered because a related encoder failed here.`;
+  return e.reason ? `${measured} FFmpeg said: ${e.reason}` : measured;
+}
+
+/** As much of a reason as fits on a dropdown row. The full text is on the
+ *  item's tooltip and under the select, so nothing is only ever truncated. */
+function shortReason(reason: string): string {
+  return reason.length > 48 ? `${reason.slice(0, 47)}…` : reason;
+}
+
+/** Whether a diagnostic is the kind the user can fix in one command.
+ *
+ *  A render node that exists but cannot be opened is the most common
+ *  hardware-encoding failure there is, and it is one group membership or one
+ *  `--device` away from working — which makes it the one blocker worth pulling
+ *  out of a tooltip and putting on the page. */
+function isPermissionProblem(text: string): boolean {
+  return /permission denied|not permitted|eacces|\brender group\b|\bvideo group\b/i.test(text);
+}
+
+interface Diagnostic {
+  text: string;
+  permission: boolean;
+}
+
+/** Everything the hardware scan and the test encodes found worth telling an
+ *  operator, deduped. The notes come from the server already phrased as
+ *  instructions, so they are shown verbatim rather than reworded here. */
+function hardwareDiagnostics(gpu: GpuInfo | null, encoders: EncoderInfo[]): Diagnostic[] {
+  const seen = new Set<string>();
+  const out: Diagnostic[] = [];
+  const add = (text: string) => {
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    out.push({ text, permission: isPermissionProblem(text) });
+  };
+
+  for (const d of gpu?.devices ?? []) {
+    if (!d.usable && d.problem) add(`${d.path} — ${d.problem}`);
+  }
+  for (const n of gpu?.notes ?? []) add(n);
+  for (const e of encoders) {
+    if (e.hardware && e.available && !e.works && e.measured && e.reason) {
+      add(`${e.name} — ${e.reason}`);
+    }
+  }
+  // Permission problems first: they are the ones with a fix attached.
+  return out.sort((a, b) => Number(b.permission) - Number(a.permission));
+}
 
 type CostTone = "muted" | "warn" | "down";
 
@@ -153,10 +244,14 @@ function encodeCost(
   encoder: EncoderInfo | undefined,
   src: VideoStream | null | undefined,
   cores?: number,
+  /** Whether any hardware encoder passed its test encode on this machine. When
+   *  none did, "choose a hardware encoder" is advice the user cannot act on and
+   *  must not be given. */
+  hardwareExists = true,
 ): Cost {
   const { width, height } = effectiveSize(r, src);
   const fps = effectiveFps(r.fps, src);
-  const hardware = encoder?.hardware ?? false;
+  const hardware = (encoder?.hardware ?? false) && (encoder?.works ?? true);
 
   if (width <= 0 || height <= 0 || fps <= 0) {
     return {
@@ -185,6 +280,15 @@ function encodeCost(
     };
   }
 
+  // The way out of a software encode this size is a hardware one — unless no
+  // hardware encoder passed its test encode here, in which case there is no way
+  // out and saying so is the only honest thing left.
+  const escape = hardwareExists
+    ? "Choose a hardware encoder, or a smaller output."
+    : "No hardware encoder works on this machine, so there is nothing to move this onto — " +
+      "the only lever here is a smaller output. Re-detect hardware if you have since " +
+      "installed a driver or passed a GPU into the container.";
+
   if (rate >= SOFTWARE_UNREALISTIC_PIXELS) {
     return {
       tone: "down",
@@ -193,7 +297,7 @@ function encodeCost(
       detail:
         `${label} is ${mpps} for a single encode. x264 at this size usually loses the race with ` +
         "real time, and a rendition that falls behind drops frames for every destination reading " +
-        `it — which you find out mid-stream.${machine} Choose a hardware encoder, or a smaller output.`,
+        `it — which you find out mid-stream.${machine} ${escape}`,
     };
   }
 
@@ -205,7 +309,7 @@ function encodeCost(
       detail:
         `${label} is ${mpps} on ${encoder?.name ?? "a software encoder"}, which is a heavy ` +
         `real-time encode.${machine} Watch the encoder's speed once it is live: below 1.0× it is ` +
-        "falling behind and the destinations under it will start dropping frames.",
+        `falling behind and the destinations under it will start dropping frames. ${escape}`,
     };
   }
 
@@ -260,8 +364,8 @@ function renditionSignal(
 export function RenditionsPage() {
   const { status, system } = useLiveData();
   const [views, setViews] = useState<RenditionView[]>([]);
-  const [encoders, setEncoders] = useState<EncoderInfo[]>([]);
-  const [defaultEncoder, setDefaultEncoder] = useState("libx264");
+  const [caps, setCaps] = useState<EncoderList | null>(null);
+  const [redetecting, setRedetecting] = useState(false);
   const [presets, setPresets] = useState<RenditionPreset[]>([]);
   const [disclaimer, setDisclaimer] = useState(FALLBACK_DISCLAIMER);
   const [bounds, setBounds] = useState<RenditionBounds>(FALLBACK_BOUNDS);
@@ -283,16 +387,15 @@ export function RenditionsPage() {
     [],
   );
 
-  // The encoder list and the presets are properties of the install, not of the
-  // data, so they are fetched once rather than on every refresh.
+  // The encoder capabilities and the presets are properties of the machine, not
+  // of the data, so they are fetched once rather than on every refresh. The
+  // re-detect button is what re-asks, because the answer only changes when the
+  // hardware or its drivers do.
   useEffect(() => {
     api
       .listEncoders()
-      .then((e) => {
-        setEncoders(e.encoders);
-        setDefaultEncoder(e.default);
-      })
-      .catch(() => setEncoders([]));
+      .then(setCaps)
+      .catch(() => setCaps(null));
     api
       .renditionPresets()
       .then((p) => {
@@ -334,6 +437,32 @@ export function RenditionsPage() {
   const passthrough = (status?.destinations ?? []).filter((d) => d.renditionId == null);
   const running = (status?.renditions ?? []).filter((r) => r.process?.state === "running").length;
   const sourceVideo = status?.source.video ?? null;
+
+  const encoders = caps?.encoders ?? [];
+  // Empty is meaningful and different from "not loaded yet": it is the machine
+  // saying no hardware encoder passed. Before the list arrives, assume hardware
+  // exists so the cost model does not tell the user something final on no data.
+  const hardwareExists = caps ? (caps.hardware?.length ?? 0) > 0 : true;
+
+  // The test encodes take a few seconds, so the button owns a spinner rather
+  // than the page: everything on screen stays true until the answer changes.
+  const redetect = useCallback(async () => {
+    setRedetecting(true);
+    try {
+      const next = await api.redetectEncoders();
+      setCaps(next);
+      const working = next.hardware?.length ?? 0;
+      toast.success(
+        working > 0
+          ? `Hardware re-detected: ${next.hardware?.join(", ")} passed a test encode.`
+          : "Hardware re-detected. No hardware encoder passed a test encode on this machine.",
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not re-detect the hardware.");
+    } finally {
+      setRedetecting(false);
+    }
+  }, []);
 
   const openCreate = () => {
     setEditing(null);
@@ -435,6 +564,7 @@ export function RenditionsPage() {
               live={liveById.get(v.rendition.id)}
               users={status ? (usersById.get(v.rendition.id) ?? []) : null}
               encoder={encoders.find((e) => e.name === v.rendition.encoder)}
+              hardwareExists={hardwareExists}
               source={sourceVideo}
               cores={system?.numCpu}
               busy={busyId === v.rendition.id}
@@ -450,8 +580,9 @@ export function RenditionsPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         rendition={editing}
-        encoders={encoders}
-        defaultEncoder={defaultEncoder}
+        caps={caps}
+        redetecting={redetecting}
+        onRedetect={redetect}
         presets={presets}
         disclaimer={disclaimer}
         bounds={bounds}
@@ -491,6 +622,7 @@ function RenditionCard({
   live,
   users,
   encoder,
+  hardwareExists,
   source,
   cores,
   busy,
@@ -503,6 +635,7 @@ function RenditionCard({
   /** null before the first live snapshot, when only the counts are known. */
   users: DestStatus[] | null;
   encoder?: EncoderInfo;
+  hardwareExists: boolean;
   source: VideoStream | null;
   cores?: number;
   busy: boolean;
@@ -514,8 +647,13 @@ function RenditionCard({
   const total = users ? users.length : view.destinations;
   const enabled = users ? users.filter((d) => d.enabled).length : view.enabledDestinations;
   const signal = renditionSignal(live, enabled);
-  const cost = encodeCost(r, encoder, source, cores);
+  const cost = encodeCost(r, encoder, source, cores, hardwareExists);
   const proc = live?.process;
+  // A saved rendition goes stale: the card was swapped, the driver upgraded,
+  // the container lost its --device passthrough. The engine refuses to start it
+  // with this same reason, so say it here rather than leave the row looking
+  // healthy until someone enables a destination on it.
+  const encoderProblemText = encoderProblem(encoder);
 
   return (
     <Card>
@@ -588,6 +726,11 @@ function RenditionCard({
           )}
         </div>
 
+        {encoderProblemText && (
+          <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+            {encoderProblemText} Edit this rendition to choose one that works.
+          </div>
+        )}
         {live?.error && (
           <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
             {live.error}
@@ -660,8 +803,9 @@ function RenditionDialog({
   open,
   onOpenChange,
   rendition,
-  encoders,
-  defaultEncoder,
+  caps,
+  redetecting,
+  onRedetect,
   presets,
   disclaimer,
   bounds,
@@ -674,8 +818,10 @@ function RenditionDialog({
   onOpenChange: (open: boolean) => void;
   /** The rendition being edited, or null to create one. */
   rendition: Rendition | null;
-  encoders: EncoderInfo[];
-  defaultEncoder: string;
+  /** What this machine can encode with, or null until the list arrives. */
+  caps: EncoderList | null;
+  redetecting: boolean;
+  onRedetect: () => void;
   presets: RenditionPreset[];
   disclaimer: string;
   bounds: RenditionBounds;
@@ -685,6 +831,9 @@ function RenditionDialog({
   onSaved: () => void;
 }) {
   const editing = rendition !== null;
+  const encoders = useMemo(() => caps?.encoders ?? [], [caps]);
+  const defaultEncoder = caps?.default ?? "libx264";
+  const hardwareExists = caps ? (caps.hardware?.length ?? 0) > 0 : true;
   const [form, setForm] = useState(() => emptyForm(defaultEncoder));
   const [sizeKey, setSizeKey] = useState("1920x1080");
   const [busy, setBusy] = useState(false);
@@ -727,7 +876,7 @@ function RenditionDialog({
       videoBitrate: t.videoBitrate,
       // The preset names a software encoder because that is the one every
       // build has. If this machine's default is something else, respect it.
-      encoder: encoders.some((e) => e.name === t.encoder && e.available)
+      encoder: encoders.some((e) => e.name === t.encoder && e.works)
         ? t.encoder
         : defaultEncoder,
       preset: t.preset,
@@ -743,23 +892,29 @@ function RenditionDialog({
     if (size) setForm((f) => ({ ...f, width: size.width, height: size.height }));
   };
 
-  // Only encoders this FFmpeg registers are offered. The one exception is the
-  // encoder already saved on the rendition being edited: the row was legal when
-  // it was written, and silently swapping it under the user would be worse than
-  // showing it greyed with the reason.
+  // Every known encoder is listed, working ones first. The ones that do not
+  // work stay visible and disabled with the reason attached, because
+  // "h264_nvenc — no NVENC capable device found" tells the user their container
+  // is missing --gpus, where a silently shorter list teaches them nothing.
   const choices = useMemo(() => {
-    const usable = encoders.filter((e) => e.available);
-    if (editing && rendition && !usable.some((e) => e.name === rendition.encoder)) {
-      const saved = encoders.find((e) => e.name === rendition.encoder);
-      return saved ? [saved, ...usable] : usable;
-    }
-    return usable;
-  }, [encoders, editing, rendition]);
+    const working = encoders.filter((e) => e.works);
+    const broken = encoders.filter((e) => !e.works);
+    return [...working, ...broken];
+  }, [encoders]);
 
   const encoder = encoders.find((e) => e.name === form.encoder);
-  const cost = encodeCost(form, encoder, source, cores);
+  const cost = encodeCost(form, encoder, source, cores, hardwareExists);
   const notes = sourceNotes(form, source);
   const enabledUsers = users.filter((d) => d.enabled).length;
+  const diagnostics = useMemo(
+    () => hardwareDiagnostics(caps?.gpu ?? null, encoders),
+    [caps, encoders],
+  );
+  const permissionBlocked = diagnostics.some((d) => d.permission);
+  // The encoder saved on the rendition being edited stays selectable even when
+  // it no longer works: the row was legal when it was written, and a form that
+  // silently swapped it would hide the very failure this is meant to explain.
+  const savedEncoder = editing ? rendition.encoder : "";
 
   const nameOk = form.name.trim().length > 0;
   const bitrateOk =
@@ -955,16 +1110,42 @@ function RenditionDialog({
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label>Encoder</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Encoder</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  onClick={onRedetect}
+                  disabled={redetecting}
+                  title="Re-run the GPU scan and encode one test frame with each encoder. Takes a few seconds."
+                >
+                  {redetecting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+                  Re-detect hardware
+                </Button>
+              </div>
               <Select value={form.encoder} onValueChange={(v) => set("encoder", v)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {choices.map((e) => (
-                    <SelectItem key={e.name} value={e.name}>
-                      {e.name} · {e.hardware ? "hardware" : "software"}
-                      {e.available ? "" : " · not on this machine"}
+                    <SelectItem
+                      key={e.name}
+                      value={e.name}
+                      // Disabled, not hidden: the reason is the useful part. The
+                      // one already saved stays selectable so an edit of an
+                      // unrelated field is not blocked by it.
+                      disabled={!e.works && e.name !== savedEncoder}
+                      title={encoderProblem(e) || `${e.name} encoded a test frame on this machine.`}
+                      // Radix refuses to select a disabled item on its own, so
+                      // the pointer events shadcn turns off here are only
+                      // costing the title tooltip — which is the one thing a
+                      // disabled encoder has to be able to show.
+                      className="data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed"
+                    >
+                      {e.name} · {encoderLabel(e)}
+                      {!e.works && e.reason ? ` — ${shortReason(e.reason)}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -972,6 +1153,15 @@ function RenditionDialog({
               {choices.length === 0 && (
                 <span className="text-[10px] text-warn">
                   This FFmpeg reported no usable video encoder.
+                </span>
+              )}
+              {encoderProblem(encoder) && (
+                <span className="text-[10px] text-down">{encoderProblem(encoder)}</span>
+              )}
+              {!caps?.tested && choices.length > 0 && (
+                <span className="text-[10px] text-muted-foreground">
+                  Nothing has been test-encoded on this machine yet, so this list is what the FFmpeg
+                  build contains rather than what the hardware can do. Re-detect to find out.
                 </span>
               )}
             </div>
@@ -991,6 +1181,55 @@ function RenditionDialog({
               </span>
             </div>
           </div>
+
+          {/* Why the hardware encoders above are or are not offered. A
+              permission problem is called out first and loudest because it is
+              the only one on this list the user can fix in one command. */}
+          {diagnostics.length > 0 && (
+            <div
+              className={cn(
+                "flex gap-2 rounded border px-2 py-1.5",
+                permissionBlocked ? "border-down/50 bg-down/5" : "border-border bg-background",
+              )}
+            >
+              <ShieldAlert
+                className={cn(
+                  "mt-0.5 h-3.5 w-3.5 shrink-0",
+                  permissionBlocked ? "text-down" : "text-muted-foreground",
+                )}
+              />
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span
+                  className={cn(
+                    "text-[11px] font-medium",
+                    permissionBlocked ? "text-down" : "text-foreground",
+                  )}
+                >
+                  {permissionBlocked
+                    ? "A GPU is present but this process cannot open it"
+                    : "What the hardware scan found"}
+                </span>
+                {diagnostics.map((d) => (
+                  <span
+                    key={d.text}
+                    className={cn(
+                      "text-[10px]",
+                      d.permission ? "text-down" : "text-muted-foreground",
+                    )}
+                  >
+                    {d.text}
+                  </span>
+                ))}
+                {permissionBlocked && (
+                  <span className="text-[10px] text-muted-foreground">
+                    This is a permissions problem, not a missing driver — the device is there. Add
+                    the user polyemesis runs as to the group that owns the render node, or pass the
+                    node into the container, then re-detect.
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           {encoder?.codec === "hevc" && (
             <div className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
