@@ -73,6 +73,12 @@ type Destination struct {
 	// relay. Whatever the rendition, the destination still does -c:v copy plus
 	// its own audio routing graph.
 	RenditionID *int64 `json:"renditionId,omitempty"`
+	// SourceID is the programme this destination carries. Nil is not "no
+	// source": it means the source was deleted, which the CASCADE makes
+	// unreachable in practice. CreateDestination fills it with the default
+	// source when the caller omits it, so an API client written before sources
+	// existed keeps working and lands on the programme it used to mean.
+	SourceID *int64 `json:"sourceId,omitempty"`
 	// Expert mode: arguments an operator hand-wrote for this destination,
 	// stored as the raw strings they typed so the editor shows them back
 	// unchanged. Parsing and the guard acknowledgement live in the API, which
@@ -195,12 +201,13 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		d          Destination
 		acct       sql.NullInt64
 		rendition  sql.NullInt64
+		source     sql.NullInt64
 		profileRaw string
 		created    int64
 		updated    int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
-		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition,
+		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
 		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
 		&d.Position, &created, &updated)
 	if err != nil {
@@ -216,6 +223,10 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		v := rendition.Int64
 		d.RenditionID = &v
 	}
+	if source.Valid {
+		v := source.Int64
+		d.SourceID = &v
+	}
 	if err := json.Unmarshal([]byte(profileRaw), &d.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", d.ID, err)
 	}
@@ -225,7 +236,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 }
 
 const destColumns = `id, name, kind, platform, account_id, url, stream_key,
-	enabled, audio_bitrate, profile, rendition_id,
+	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	position, created_at, updated_at`
 
@@ -296,6 +307,18 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err := d.checkRendition(dst.RenditionID); err != nil {
 		return nil, err
 	}
+	// A request that names no source means the one the operator has always
+	// had. Every API client written before sources existed sends exactly that,
+	// and the alternative is a destination with a NULL source_id that no
+	// reconciler ever picks up -- created successfully, never started, with
+	// nothing on screen to explain why.
+	if dst.SourceID == nil {
+		id, err := d.DefaultSourceID()
+		if err != nil {
+			return nil, fmt.Errorf("resolve default source: %w", err)
+		}
+		dst.SourceID = &id
+	}
 
 	profile, err := json.Marshal(dst.Profile)
 	if err != nil {
@@ -310,11 +333,11 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	dst.Position = int(maxPos.Int64) + 1
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
-		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id,
+		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id, source_id,
 		 extra_input_args, extra_output_args, expert_ack_reencode, position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID,
+		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode, dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -344,11 +367,11 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
-		enabled=?, audio_bitrate=?, profile=?, rendition_id=?,
+		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
 		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID,
+		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		time.Now().Unix(), dst.ID)
 	if err != nil {
