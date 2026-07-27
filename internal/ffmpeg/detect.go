@@ -9,12 +9,14 @@ package ffmpeg
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,12 +37,34 @@ type Tools struct {
 	HasLibX264 bool   `json:"hasLibx264"`
 
 	// VideoEncoders is every video encoder the binary reports, as whole
-	// tokens. Renditions are only offered encoders that appear here, because
-	// an encoder that is merely compiled-in-looking costs the user a
-	// crash-looping stream to discover.
+	// tokens. This is the candidate set, not the answer: the list reflects
+	// what the BUILD was compiled with, and a stock Linux build lists nvenc,
+	// qsv, vaapi and amf on a machine with no GPU at all.
 	VideoEncoders []string `json:"videoEncoders"`
-	// HWEncoders is the hardware-accelerated subset of VideoEncoders.
+	// HWEncoders is the hardware subset that PASSED the probe encode, in
+	// preference order. Before the probe has run it holds the listed hardware
+	// encoders instead, which is a hint and not a capability.
 	HWEncoders []string `json:"hwEncoders"`
+	// EncoderCaps is what each candidate encoder actually did when this
+	// machine was asked to encode a frame with it, including why it failed.
+	// Empty means the probe never ran, which is treated as "assume the best"
+	// everywhere, exactly like the -protocols and -encoders checks.
+	EncoderCaps []EncoderCapability `json:"encoderCaps"`
+
+	// mu guards the fields the encoder probe writes. Detection is a startup
+	// snapshot that RefreshEncoderCapabilities can replace underneath a
+	// running server, so readers cannot assume they are the only ones here.
+	mu sync.RWMutex
+}
+
+// MarshalJSON serialises Tools under the read lock, so the /api/v1/system
+// handler cannot race a refresh that is rewriting the probe results.
+func (t *Tools) MarshalJSON() ([]byte, error) {
+	// The local type sheds the method set; without it this recurses forever.
+	type alias Tools
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return json.Marshal((*alias)(t))
 }
 
 // ErrNotFound signals a missing binary, as opposed to an unusable one.
@@ -153,49 +177,200 @@ func (t *Tools) SRTWarning() string {
 			"(single audio track).", t.FFmpeg, t.Version)
 }
 
-// checkEncoders records which video encoders this build can actually use.
+// checkEncoders records which video encoders this machine can actually use.
 //
-// Like checkSRT this is advisory: a build with no hardware encoder still runs
-// every rendition on libx264. What it prevents is offering the user an encoder
-// the binary does not have, which would fail only once a stream is live.
+// Two steps, and only the second one is evidence. `ffmpeg -encoders` gives the
+// candidate set — there is no point probing an encoder the build does not
+// contain — and then each candidate is asked to encode a frame, which is the
+// only question whose answer says anything about the hardware.
+//
+// Like checkSRT this is advisory: a machine where every hardware probe fails
+// still runs every rendition on libx264.
 func (t *Tools) checkEncoders(ctx context.Context) {
 	out, err := exec.CommandContext(ctx, t.FFmpeg, "-hide_banner", "-encoders").CombinedOutput()
-	if err != nil {
-		return // assume the best, as with -protocols
+	if err == nil {
+		t.mu.Lock()
+		t.VideoEncoders = parseVideoEncoders(string(out))
+		t.HWEncoders = nil
+		for _, name := range hwEncoders {
+			if containsString(t.VideoEncoders, name) {
+				t.HWEncoders = append(t.HWEncoders, name)
+			}
+		}
+		// The encoder list is authoritative where the configure string was
+		// only a hint: a build can list --enable-libx264 in one place and
+		// still not register the encoder.
+		t.HasLibX264 = containsString(t.VideoEncoders, EncoderX264)
+		t.mu.Unlock()
 	}
-	t.VideoEncoders = parseVideoEncoders(string(out))
+	t.RefreshEncoderCapabilities(ctx)
+}
+
+// RefreshEncoderCapabilities re-probes every candidate encoder and replaces the
+// cached result.
+//
+// Detection is a snapshot taken at startup, and the hardware under it moves
+// more often than you would expect: a driver package upgrades, a GPU is passed
+// into the container after the fact, a laptop comes back from suspend with a
+// wedged render node. This is how a caller invalidates the snapshot without
+// restarting the server and dropping every live stream to do it.
+//
+// It never fails. A probe that errors, times out or finds nothing leaves the
+// product on software encoding.
+func (t *Tools) RefreshEncoderCapabilities(ctx context.Context) []EncoderCapability {
+	caps := ProbeEncoders(ctx, t.FFmpeg, t.candidateEncoders())
+	if len(caps) == 0 {
+		// Nothing to probe, or no binary to probe with. Keep whatever the
+		// build list told us rather than downgrading to "nothing works".
+		return t.Capabilities()
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.EncoderCaps = caps
 	t.HWEncoders = nil
-	for _, name := range hwEncoders {
-		if t.HasEncoder(name) {
+	// Preference order rather than probe order, so the first entry is the one
+	// a caller that just wants "the hardware encoder" should reach for.
+	for _, name := range encoderPreference {
+		if c, ok := t.capabilityLocked(name); ok && c.Works && c.Vendor != VendorSoftware {
 			t.HWEncoders = append(t.HWEncoders, name)
 		}
 	}
-	// The encoder list is authoritative where the configure string was only a
-	// hint: a build can list --enable-libx264 in one place and still not
-	// register the encoder.
-	t.HasLibX264 = t.HasEncoder(EncoderX264)
+	// HasLibX264 is deliberately left alone. It answers "was this build
+	// configured with x264", which the encoder list settles; whether x264
+	// encodes on this machine is EncoderWorks' question, and conflating the
+	// two would let a cancelled probe read as a build without x264.
+	return append([]EncoderCapability(nil), t.EncoderCaps...)
 }
 
-// HasEncoder reports whether the build registers this exact encoder.
-func (t *Tools) HasEncoder(name string) bool {
-	for _, e := range t.VideoEncoders {
-		if e == name {
-			return true
+// candidateEncoders is what is worth probing: the known candidates the build
+// actually registers. An empty or unavailable encoder list means we could not
+// narrow it down, so everything gets probed — the same "assume the best" the
+// rest of detection uses, since the probe itself will settle it either way.
+func (t *Tools) candidateEncoders() []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if len(t.VideoEncoders) == 0 {
+		return append([]string(nil), probeCandidates...)
+	}
+	var out []string
+	for _, name := range probeCandidates {
+		if containsString(t.VideoEncoders, name) {
+			out = append(out, name)
 		}
 	}
-	return false
+	return out
+}
+
+// Capabilities returns a copy of the probe results, so a caller ranging over
+// them cannot be tripped up by a concurrent refresh.
+func (t *Tools) Capabilities() []EncoderCapability {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return append([]EncoderCapability(nil), t.EncoderCaps...)
+}
+
+// Capability returns the probe result for one encoder. ok is false when the
+// encoder was never probed, which is not the same as "it does not work".
+func (t *Tools) Capability(name string) (EncoderCapability, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.capabilityLocked(name)
+}
+
+func (t *Tools) capabilityLocked(name string) (EncoderCapability, bool) {
+	for _, c := range t.EncoderCaps {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return EncoderCapability{}, false
+}
+
+// EncoderWorks reports whether this encoder demonstrably encodes here, and why
+// not when it does not.
+//
+// An encoder nobody probed is reported as working with no reason: detection
+// that could not run must not be the thing that stops a rendition starting.
+func (t *Tools) EncoderWorks(name string) (bool, string) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if c, ok := t.capabilityLocked(name); ok {
+		return c.Works, c.Reason
+	}
+	return true, ""
+}
+
+// HasEncoder reports whether the build registers this exact encoder. It is a
+// question about the binary; EncoderWorks is the question about the machine.
+func (t *Tools) HasEncoder(name string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return containsString(t.VideoEncoders, name)
+}
+
+// encoderPreference is the order a new rendition picks from.
+//
+// This optimises for THROUGHPUT, not for quality per bit — the two disagree,
+// and the rendition tier exists to make one 4K60 ingest serve platforms with
+// lower ceilings, which software x264 cannot do in realtime on most machines.
+// x264 at a slow preset still beats every fixed-function encoder here at a
+// given bitrate, so a user who wants quality over headroom should choose it
+// deliberately; that is why it is offered, and why it is last.
+//
+// Within hardware: videotoolbox first because it only ever probes successfully
+// on macOS, where it is the only hardware option; then nvenc, which has the
+// best quality per bit of the fixed-function encoders; then qsv; then vaapi,
+// which reaches Intel and AMD but through a driver stack with more ways to be
+// half-configured; then amf, which is Windows-first and the least predictable
+// of the four on Linux.
+var encoderPreference = []string{
+	EncoderVideoToolbox,
+	EncoderNVENC,
+	EncoderQSV,
+	EncoderVAAPI,
+	EncoderAMF,
+	EncoderX264,
 }
 
 // DefaultVideoEncoder is what a newly created rendition should start on.
 //
-// Software x264 is the honest default even on a machine with a GPU: its rate
-// control behaves identically everywhere, whereas the hardware wrappers vary
-// by driver version. Hardware is an opt-in the user makes deliberately.
+// A working hardware encoder wins over x264, because a machine with a usable
+// GPU that silently software-encodes cannot serve the feature it was bought
+// for. "Working" means it passed the probe: the build listing an encoder is
+// not evidence, and defaulting to a listed-but-dead encoder is how the user
+// finds out about libcuda after they have gone live.
 func (t *Tools) DefaultVideoEncoder() string {
-	if !t.HasEncoder(EncoderX264) && len(t.HWEncoders) > 0 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if len(t.EncoderCaps) > 0 {
+		for _, name := range encoderPreference {
+			if c, ok := t.capabilityLocked(name); ok && c.Works {
+				return name
+			}
+		}
+		// Every probe failed, including x264's. Naming x264 anyway keeps the
+		// product usable and the failure legible; an empty -c:v is neither.
+		return EncoderX264
+	}
+
+	// No probe ran, so nothing has been demonstrated. Stay conservative and
+	// keep the pre-probe answer rather than guessing at a GPU.
+	if !containsString(t.VideoEncoders, EncoderX264) && len(t.HWEncoders) > 0 {
 		return t.HWEncoders[0]
 	}
 	return EncoderX264
+}
+
+func containsString(haystack []string, want string) bool {
+	for _, s := range haystack {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // encoderLineRe matches one row of `ffmpeg -encoders`: six capability-flag
