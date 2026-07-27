@@ -31,7 +31,7 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 // origin reconstructs the browser-visible base URL.
 func (s *Server) origin(r *http.Request) string {
 	scheme := "http"
-	if r.TLS != nil || s.cfg.TLS.Enabled {
+	if r.TLS != nil || s.cfg.ServesTLS() {
 		scheme = "https"
 	}
 	if s.cfg.TrustProxyHeaders {

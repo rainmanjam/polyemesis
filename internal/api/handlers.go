@@ -191,7 +191,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		"ingestUrl":  spec.PublicIngestURL(host),
 		"ingestMode": settings.Ingest.Mode,
 		"maxTracks":  routing.MaxTracks,
-		"tlsEnabled": s.cfg.TLS.Enabled,
+		"tlsEnabled": s.cfg.ServesTLS(),
 		"dataDir":    s.cfg.DataDir,
 		"uiBuilt":    UIBuilt(),
 	})

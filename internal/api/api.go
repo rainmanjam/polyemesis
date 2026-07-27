@@ -21,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/tlsx"
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
@@ -34,7 +35,13 @@ type Server struct {
 	bus      *events.Broker
 	sessions *auth.Manager
 	logins   *auth.Throttle
-	version  string
+	// tls is the same Provider the listener is serving from, so the status
+	// card describes the certificate actually in use rather than re-deriving
+	// one — a second Provider in selfsigned mode would rewrite the material
+	// on disk out from under the running listener. Nil is tolerated: the
+	// status endpoint then reports the configured intent only.
+	tls     *tlsx.Provider
+	version string
 	// startedAt is the process start, which is what the uptime metric reports.
 	startedAt time.Time
 }
@@ -48,6 +55,9 @@ type Options struct {
 	Engine  *engine.Engine
 	Events  *events.Broker
 	Version string
+	// TLS is the provider the HTTP listener was built from. Optional; without
+	// it the TLS status endpoint can only report what config.yaml asked for.
+	TLS *tlsx.Provider
 }
 
 // New creates the server.
@@ -59,12 +69,17 @@ func New(o Options) *Server {
 		box:       o.Secrets,
 		eng:       o.Engine,
 		bus:       o.Events,
+		tls:       o.TLS,
 		version:   o.Version,
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
-			o.Config.TLS.Enabled,
+			// ServesTLS, not the legacy tls.enabled: an install that writes
+			// tls.mode explicitly leaves Enabled false, and reading it here
+			// would drop the Secure flag from the session cookie on a server
+			// that is genuinely terminating TLS.
+			o.Config.ServesTLS(),
 			o.Config.TrustProxyHeaders,
 		),
 	}
@@ -76,6 +91,9 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(s.requestLogger)
+	// Applies to the embedded UI and the HLS preview as well as the API, which
+	// is the point: the CSP only protects the pages the browser renders.
+	r.Use(securityHeaders(s.cfg.ResolvedTLSMode(), s.cfg.TLS.HSTS))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// --- unauthenticated ---
@@ -85,6 +103,10 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		})
+		// Sessionless on purpose: in selfsigned mode the browser will not let
+		// the user reach the login form until this CA is installed. See
+		// handleDownloadCA for the full argument.
+		r.Get("/tls/ca", s.handleDownloadCA)
 
 		// --- authenticated ---
 		r.Group(func(r chi.Router) {
@@ -107,6 +129,8 @@ func (s *Server) Handler() http.Handler {
 
 			r.Get("/settings", s.handleGetSettings)
 			r.Put("/settings", s.handlePutSettings)
+
+			r.Get("/tls", s.handleTLSStatus)
 
 			r.Get("/destinations", s.handleListDestinations)
 			r.Post("/destinations", s.handleCreateDestination)
