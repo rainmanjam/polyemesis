@@ -13,9 +13,10 @@ export default defineConfig({
     // and there is no copy phase to forget.
     outDir: path.resolve(__dirname, "../internal/web/dist"),
     emptyOutDir: true,
-    // The whole app is one bundle behind a login screen on a LAN; splitting it
-    // would trade a trivial first-load win for extra round trips.
-    chunkSizeWarningLimit: 1600,
+    // The app is one bundle apart from the two routes that drag in a chart
+    // library and an HLS player. Those are big enough to be worth a second
+    // round trip; splitting anything finer would not be.
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     port: 5173,

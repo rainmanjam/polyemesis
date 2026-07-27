@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -10,9 +10,25 @@ import { Dashboard } from "@/pages/Dashboard";
 import { MetersPage } from "@/pages/MetersPage";
 import { RoutingPage } from "@/pages/RoutingPage";
 import { RecordingsPage } from "@/pages/RecordingsPage";
-import { MonitoringPage } from "@/pages/MonitoringPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { Loader2 } from "lucide-react";
+
+// Monitoring is the only page that pulls in recharts — several hundred
+// kilobytes nobody watching the dashboard has asked for. Split it out so the
+// first paint pays for the pages it actually shows.
+const MonitoringPage = lazy(() =>
+  import("@/pages/MonitoringPage").then((m) => ({ default: m.MonitoringPage })),
+);
+
+/** Placeholder for a chunk still in flight. Same weight as the app's own
+ *  loading states, so a split route reads as "loading", not as a flash. */
+function RouteFallback() {
+  return (
+    <div className="flex h-64 items-center justify-center">
+      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 type Gate =
   | { phase: "loading" }
@@ -85,7 +101,14 @@ export default function App() {
               <Route path="/routing" element={<RoutingPage />} />
               <Route path="/routing/:id" element={<RoutingPage />} />
               <Route path="/recordings" element={<RecordingsPage />} />
-              <Route path="/monitoring" element={<MonitoringPage />} />
+              <Route
+                path="/monitoring"
+                element={
+                  <Suspense fallback={<RouteFallback />}>
+                    <MonitoringPage />
+                  </Suspense>
+                }
+              />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

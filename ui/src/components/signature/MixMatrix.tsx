@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { channelLabels } from "./AudioMeter";
@@ -13,13 +13,24 @@ import { RotateCcw } from "lucide-react";
    is what makes "take only the rear channels of the 5.1 track" or "pan the mic
    hard left" expressible at all.
 
-   Interaction is deliberately keyboard-and-drag free: a cell is a small
-   number input plus a fill bar. Sliders in a 2 x 36 grid would be unusable,
-   and a drag-to-set surface would be imprecise for values that must often be
-   exactly 0, 0.707 or 1.
+   A cell is a small number input plus a fill bar. Sliders in a 2 x 36 grid
+   would be unusable, and a drag-to-set surface would be imprecise for values
+   that must often be exactly 0, 0.707 or 1.
+
+   Arrow keys walk the grid the way a spreadsheet does, because tabbing through
+   seventy-odd cells to reach one is not editing, it is commuting.
    =========================================================================== */
 
 const MAX_GAIN = 2;
+
+/** Arrow key to [row, column] step. Rows are the two output channels, so
+ *  up and down are really "the other one". */
+const NAV_STEP: Record<string, [number, number]> = {
+  ArrowUp: [-1, 0],
+  ArrowDown: [1, 0],
+  ArrowLeft: [0, -1],
+  ArrowRight: [0, 1],
+};
 
 interface MixMatrixProps {
   tracks: SourceTrack[];
@@ -53,6 +64,35 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
 
   const totalCols = tracks.reduce((n, t) => n + t.channels, 0);
 
+  /** Column index of each track's first channel, so a cell knows its position
+   *  in the flattened grid rather than only within its own track. */
+  const trackColStart = useMemo(() => {
+    const starts: number[] = [];
+    let n = 0;
+    for (const t of tracks) {
+      starts.push(n);
+      n += t.channels;
+    }
+    return starts;
+  }, [tracks]);
+
+  const gridRef = useRef<HTMLTableElement>(null);
+
+  const focusCell = useCallback(
+    (out: number, col: number) => {
+      // Edges do not wrap: landing on the far side of the matrix after one
+      // arrow press loses your place more than it saves a keystroke.
+      if (out < 0 || out > 1 || col < 0 || col >= totalCols) return;
+      const el = gridRef.current?.querySelector<HTMLInputElement>(
+        `[data-cell="${out}-${col}"]`,
+      );
+      if (!el) return;
+      el.focus();
+      el.select();
+    },
+    [totalCols],
+  );
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -66,7 +106,7 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
       </div>
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">
-        <table className="w-full border-collapse">
+        <table ref={gridRef} className="w-full border-collapse">
           <thead>
             {/* Track grouping header, so a 5.1 track's six columns read as one
                 unit rather than six unrelated channels. */}
@@ -116,6 +156,7 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                 {tracks.map((t, ti) =>
                   Array.from({ length: t.channels }, (_, ch) => {
                     const g = gainAt(t.index, ch, out);
+                    const col = trackColStart[ti] + ch;
                     return (
                       <td
                         key={`${t.index}-${ch}-${out}`}
@@ -126,7 +167,10 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                       >
                         <MatrixCellInput
                           value={g}
+                          out={out}
+                          col={col}
                           onChange={(v) => setGain(t.index, ch, out, v)}
+                          onNavigate={focusCell}
                           label={`Track ${t.index + 1} channel ${ch + 1} to ${out === 0 ? "left" : "right"}`}
                         />
                       </td>
@@ -146,11 +190,17 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
 
 function MatrixCellInput({
   value,
+  out,
+  col,
   onChange,
+  onNavigate,
   label,
 }: {
   value: number;
+  out: number;
+  col: number;
   onChange: (v: number) => void;
+  onNavigate: (out: number, col: number) => void;
   label: string;
 }) {
   const active = value > 0;
@@ -158,10 +208,21 @@ function MatrixCellInput({
   // the pattern of lit cells before reading a single number.
   const fill = Math.min(1, value / MAX_GAIN);
 
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    const step = NAV_STEP[e.key];
+    if (!step) return;
+    // Up and down would otherwise nudge the number and left and right would
+    // move the caret, neither of which helps in a grid this wide. Arriving at
+    // a cell selects its value, so typing still replaces rather than appends.
+    e.preventDefault();
+    onNavigate(out + step[0], col + step[1]);
+  };
+
   return (
     <div
       className={cn(
         "relative h-7 w-11 overflow-hidden rounded-[3px] border transition-colors",
+        "focus-within:ring-2 focus-within:ring-ring",
         active ? "border-primary/40" : "border-border bg-muted/40",
       )}
     >
@@ -180,6 +241,8 @@ function MatrixCellInput({
         step={0.05}
         value={active ? Number(value.toFixed(4)) : 0}
         aria-label={label}
+        data-cell={`${out}-${col}`}
+        onKeyDown={onKeyDown}
         onChange={(e) => {
           const v = Number.parseFloat(e.target.value);
           onChange(Number.isFinite(v) ? v : 0);
