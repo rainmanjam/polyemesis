@@ -2,6 +2,7 @@ package routing
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,12 @@ type Result struct {
 	// Warnings are non-fatal mismatches between the profile and the live
 	// source (e.g. the profile wants track 4 but the ingest sends three).
 	Warnings []string `json:"warnings"`
+	// VideoDelayMS is how long the *video* must be held back, in milliseconds,
+	// to satisfy a negative Profile.DelayMS. Audio cannot be moved earlier than
+	// it arrives, so pulling audio ahead of picture is only expressible as
+	// delaying the picture — which is an output-args concern, not something a
+	// filter graph on the audio side can do. Zero for every other profile.
+	VideoDelayMS int `json:"videoDelayMs,omitempty"`
 }
 
 // Compile turns a routing profile plus the live ingest layout into an FFmpeg
@@ -44,6 +51,12 @@ type Result struct {
 //
 // Simple mode and matrix mode both funnel through this one path: simple mode
 // is expanded to matrix cells using the standard downmix table first.
+//
+// The optional stages are spliced into that skeleton in signal-chain order —
+// denoise per track, then the duck, then the sum, then the loudness target,
+// then the delay, then the resample. Each one is present only when the profile
+// (or, for denoise, the source annotation) asked for it, so a profile that uses
+// none of them produces the string above byte for byte.
 func Compile(p Profile, src Source) (Result, error) {
 	if err := p.Validate(); err != nil {
 		return Result{}, err
@@ -52,8 +65,16 @@ func Compile(p Profile, src Source) (Result, error) {
 	res := Result{OutLabel: OutLabel}
 
 	cells, warns := resolveCells(p, src)
+	selected := len(cells)
+	cells, exWarns := applyRolePolicy(p, src, cells)
+	warns = dedupe(append(warns, exWarns...))
 	res.Warnings = warns
 	if len(cells) == 0 {
+		if selected > 0 {
+			// Say *why* there is no audio. "selects no audio" would send an
+			// operator hunting through checkboxes that are all still ticked.
+			return Result{}, fmt.Errorf("%w: every selected track is excluded by this destination's role policy", ErrNoAudio)
+		}
 		return Result{}, ErrNoAudio
 	}
 
@@ -71,28 +92,63 @@ func Compile(p Profile, src Source) (Result, error) {
 	res.Tracks = tracks
 
 	var chains []string
-	var mixInputs []string
+	label := make(map[int]string, len(tracks))
 	for _, t := range tracks {
-		label := fmt.Sprintf("a_t%d", t)
-		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, PanFilter(byTrack[t]), label))
-		mixInputs = append(mixInputs, "["+label+"]")
+		label[t] = fmt.Sprintf("a_t%d", t)
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, trackChain(src, t, byTrack[t]), label[t]))
+	}
+
+	// Duck before summing: a duck applied to the finished mix would pull the
+	// trigger down along with everything else.
+	legs := make([]string, 0, len(tracks))
+	if d, ok := p.EffectiveDucking(); ok {
+		duckChains, duckLegs, duckWarns := duckGraph(d, src, tracks, label)
+		chains = append(chains, duckChains...)
+		legs = duckLegs
+		if len(duckWarns) > 0 {
+			res.Warnings = dedupe(append(res.Warnings, duckWarns...))
+		}
+	}
+	if len(legs) == 0 {
+		for _, t := range tracks {
+			legs = append(legs, label[t])
+		}
 	}
 
 	// Sum. amix's normalize=1 default divides by the input count, which would
 	// silently drop a 3-track mix by ~9.5 dB. We want the true sum and handle
 	// the resulting clip risk explicitly, below.
-	cur := strings.TrimSuffix(strings.TrimPrefix(mixInputs[0], "["), "]")
-	if len(mixInputs) > 1 {
+	cur := legs[0]
+	if len(legs) > 1 {
 		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[a_mix]",
-			strings.Join(mixInputs, ""), len(mixInputs)))
+			bracket(legs), len(legs)))
 		cur = "a_mix"
 	}
 
 	norm := resolveNorm(p.Normalize, len(tracks))
+	loud, loudOK := p.EffectiveLoudness()
+	if loudOK {
+		// A destination that names a loudness target has asked for loudness
+		// normalization, whatever NormAuto would have picked on its own.
+		// EffectiveLoudness has already refused to override an explicit
+		// NormOff or NormLimiter, so reaching here means it is ours to set.
+		norm = NormLoudnorm
+	}
 	res.Normalization = norm
-	if f := normFilter(norm); f != "" {
+	if f := normFilterFor(norm, loud, loudOK); f != "" {
 		chains = append(chains, fmt.Sprintf("[%s]%s[a_norm]", cur, f))
 		cur = "a_norm"
+	}
+
+	// Delay last but one: holding the finished mix is what "this destination is
+	// 250 ms behind its video" means, and doing it after loudnorm keeps the
+	// loudness measurement looking at the same samples it always did.
+	switch {
+	case p.DelayMS > 0:
+		chains = append(chains, fmt.Sprintf("[%s]adelay=delays=%d:all=1[a_delay]", cur, p.DelayMS))
+		cur = "a_delay"
+	case p.DelayMS < 0:
+		res.VideoDelayMS = -p.DelayMS
 	}
 
 	// Final resample pins the rate the AAC encoder sees and lets FFmpeg absorb
@@ -106,6 +162,152 @@ func Compile(p Profile, src Source) (Result, error) {
 	res.FilterComplex = strings.Join(chains, ";")
 	res.Summary = summarize(tracks)
 	return res, nil
+}
+
+// trackChain renders the filter chain for one contributing track: the pan that
+// selects and downmixes its channels, plus noise suppression when the source
+// says the track needs it.
+func trackChain(src Source, track int, cells []Cell) string {
+	chain := PanFilter(cells)
+	if src.DenoiseTrack(track) {
+		// After the pan, not before: denoising the two channels that survive a
+		// 5.1 downmix costs a third of what denoising all six would, and the
+		// pan only ever selects and scales, so it cannot hide noise from the
+		// denoiser or create any.
+		chain += "," + DenoiseFilter
+	}
+	return chain
+}
+
+// DenoiseFilter is the noise-suppression stage applied to a track annotated
+// Denoise.
+//
+// arnndn sounds better on speech, but it is inert without an .rnnn model file
+// and FFmpeg refuses to build the graph at all when the file is missing — a
+// destination that will not start is a far worse outcome than a slightly noisier
+// one, and this repo has been bitten three times by checks that failed closed.
+// afftdn is always compiled in and needs nothing. track_noise lets it follow a
+// room whose noise floor moves during the stream, which is the live case; the
+// -25 dB starting floor is where it converges from rather than a hard
+// assumption.
+const DenoiseFilter = "afftdn=nr=12:nf=-25:tn=1"
+
+// duckGraph splices a sidechain compressor into the per-track chains: the
+// target tracks are summed into one bus, ducked by a key built from the trigger
+// tracks, and re-enter the mix in place of the first target.
+//
+// The subtlety is that the trigger has to reach the output as well as the
+// detector — an asplit, not a second reference to the same label, because a
+// filter output pad feeds exactly one input.
+//
+// It mutates label for any trigger track it splits, and returns the ordered mix
+// legs. Returning no legs means nothing was ducked and the caller should mix as
+// usual; that is the deliberate response to a duck that cannot be built, since
+// an un-ducked mix is still the operator's audio and a broken graph is silence.
+func duckGraph(d Ducking, src Source, tracks []int, label map[int]string) (chains, legs, warns []string) {
+	inMix := map[int]bool{}
+	for _, t := range tracks {
+		inMix[t] = true
+	}
+
+	isTarget := map[int]bool{}
+	var targets []int
+	for _, t := range sortedSet(d.Target) {
+		if inMix[t] {
+			isTarget[t] = true
+			targets = append(targets, t)
+		}
+	}
+	var triggers []int
+	for _, t := range sortedSet(d.Trigger) {
+		// A trigger that is not in this destination's mix is still usable: tap
+		// the ingest track straight into the detector. That is how a feed which
+		// excludes the mic can still duck its music when the host speaks.
+		if _, present := src.TrackByIndex(t); inMix[t] || present {
+			triggers = append(triggers, t)
+		}
+	}
+
+	if len(targets) == 0 {
+		return nil, nil, []string{"ducking is configured but none of its target tracks are in this destination's mix; no ducking is applied"}
+	}
+	if len(triggers) == 0 {
+		return nil, nil, []string{"ducking is configured but none of its trigger tracks are present on the ingest; no ducking is applied"}
+	}
+
+	var keys []string
+	for _, t := range triggers {
+		if inMix[t] {
+			mixLbl := fmt.Sprintf("a_t%d_mix", t)
+			keyLbl := fmt.Sprintf("a_t%d_key", t)
+			chains = append(chains, fmt.Sprintf("[%s]asplit=2[%s][%s]", label[t], mixLbl, keyLbl))
+			label[t] = mixLbl
+			keys = append(keys, keyLbl)
+			continue
+		}
+		tr, _ := src.TrackByIndex(t)
+		keyLbl := fmt.Sprintf("a_k%d", t)
+		// Downmix the tap the same way a contributing track would, so the two
+		// sidechaincompress inputs always agree on channel layout, and denoise
+		// it if it is annotated: room noise opening the duck is precisely the
+		// failure the annotation exists to prevent.
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, trackChain(src, t, CellsForTrack(t, tr.Channels, 1.0)), keyLbl))
+		keys = append(keys, keyLbl)
+	}
+
+	key := keys[0]
+	if len(keys) > 1 {
+		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[a_duckkey]",
+			bracket(keys), len(keys)))
+		key = "a_duckkey"
+	}
+
+	bus := label[targets[0]]
+	if len(targets) > 1 {
+		in := make([]string, 0, len(targets))
+		for _, t := range targets {
+			in = append(in, label[t])
+		}
+		// Sum the targets before ducking rather than compressing each of them.
+		// amix=normalize=0 is a plain sum, so summing early is arithmetically
+		// identical, and one compressor means one gain-reduction envelope
+		// instead of several that could drift apart.
+		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[a_duckin]",
+			bracket(in), len(in)))
+		bus = "a_duckin"
+	}
+	chains = append(chains, fmt.Sprintf("[%s][%s]sidechaincompress=%s[a_duck]", bus, key, duckParams(d)))
+
+	placed := false
+	for _, t := range tracks {
+		if isTarget[t] {
+			if !placed {
+				legs = append(legs, "a_duck")
+				placed = true
+			}
+			continue
+		}
+		legs = append(legs, label[t])
+	}
+	return chains, legs, nil
+}
+
+// duckParams renders sidechaincompress' parameters.
+//
+// threshold is linear here, not dB: sidechaincompress takes 0.000976563..1 and
+// silently means something else entirely if handed "-24".
+func duckParams(d Ducking) string {
+	return fmt.Sprintf("threshold=%s:ratio=%s:attack=%s:release=%s:detection=rms:link=maximum",
+		fmtCoeff(dbToLinear(d.ThresholdDB)),
+		fmtCoeff(d.Ratio),
+		fmtCoeff(d.AttackMS),
+		fmtCoeff(d.ReleaseMS))
+}
+
+// dbToLinear converts dBFS to the linear amplitude ratio FFmpeg's dynamics
+// filters expect.
+func dbToLinear(db float64) float64 {
+	return math.Pow(10, db/20)
 }
 
 // resolveCells expands a profile into matrix cells validated against the live
@@ -148,6 +350,37 @@ func resolveCells(p Profile, src Source) ([]Cell, []string) {
 
 	warns = dedupe(warns)
 	return out, warns
+}
+
+// applyRolePolicy drops every cell belonging to a track whose role this
+// destination refuses. It is the only place in the compiler where a role
+// changes what is sent, and it does nothing at all unless the destination set
+// ExcludeRoles — an unannotated source, or one nobody has written a policy for,
+// takes the same path it always did.
+func applyRolePolicy(p Profile, src Source, cells []Cell) ([]Cell, []string) {
+	excluded := p.ExcludedTracks(src)
+	if len(excluded) == 0 {
+		return cells, nil
+	}
+	drop := map[int]bool{}
+	for _, t := range excluded {
+		drop[t] = true
+	}
+
+	var warns []string
+	out := make([]Cell, 0, len(cells))
+	for _, c := range cells {
+		if drop[c.Track] {
+			// Loud on purpose. A track vanishing from a mix because of a policy
+			// set weeks ago on a different screen is exactly the kind of silence
+			// nobody can explain at 3am.
+			warns = append(warns, fmt.Sprintf("track %d carries the %q role, which this destination excludes; it is not being sent",
+				c.Track+1, src.RoleOf(c.Track)))
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, dedupe(warns)
 }
 
 // PanFilter renders the pan filter for a single track's cells. Exported
@@ -195,6 +428,15 @@ func resolveNorm(m NormMode, trackCount int) NormMode {
 	return NormOff
 }
 
+// normFilterFor picks the clip-protection stage, preferring a configured
+// loudness target over the fixed one.
+func normFilterFor(m NormMode, l Loudness, haveTarget bool) string {
+	if m == NormLoudnorm && haveTarget {
+		return loudnormFilter(l)
+	}
+	return normFilter(m)
+}
+
 func normFilter(m NormMode) string {
 	switch m {
 	case NormLimiter:
@@ -209,6 +451,19 @@ func normFilter(m NormMode) string {
 	}
 }
 
+// loudnormFilter renders a destination's own programme-loudness target.
+//
+// This is single-pass loudnorm, so the delivered integrated loudness is
+// approximate: it adapts as it goes instead of measuring the programme first,
+// converges over roughly the first minute, and drifts with the material. That
+// is not a shortcoming to fix — two-pass loudnorm needs the whole programme up
+// front, which a live stream by definition does not have, and single-pass is
+// what every live loudness stage in the industry runs.
+func loudnormFilter(l Loudness) string {
+	return fmt.Sprintf("loudnorm=I=%s:TP=%s:LRA=%s",
+		fmtCoeff(l.TargetLUFS), fmtCoeff(l.TruePeakDB), fmtCoeff(l.RangeLU))
+}
+
 // fmtCoeff renders a gain coefficient at 4 decimal places (~0.0009 resolution,
 // far below audibility) with trailing zeros trimmed, so filter strings stay
 // readable and byte-stable across runs.
@@ -220,6 +475,33 @@ func fmtCoeff(g float64) string {
 		return "0"
 	}
 	return s
+}
+
+// bracket wraps filter labels for use as filter inputs: a, b -> "[a][b]".
+func bracket(labels []string) string {
+	var b strings.Builder
+	for _, l := range labels {
+		b.WriteByte('[')
+		b.WriteString(l)
+		b.WriteByte(']')
+	}
+	return b.String()
+}
+
+// sortedSet returns the ascending distinct members of a track list, so the
+// generated graph does not depend on the order the UI happened to send.
+func sortedSet(in []int) []int {
+	seen := map[int]bool{}
+	out := make([]int, 0, len(in))
+	for _, v := range in {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Ints(out)
+	return out
 }
 
 func summarize(tracks []int) string {
