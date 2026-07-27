@@ -30,13 +30,74 @@ import (
 var version = "dev"
 
 func main() {
-	if err := run(); err != nil {
+	// Windows may have been started by the Service Control Manager, which needs
+	// its own handshake before any work begins. Everywhere else, and on a
+	// Windows console, runService reports "not mine" and we run interactively.
+	handled, err := runService()
+	if err == nil && !handled {
+		err = run(nil)
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "\npolyemesis: %v\n\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// hooks lets a platform service manager watch and drive the run loop. The
+// Windows SCM is the only caller: it has to hear progress while a slow FFmpeg
+// probe runs — silence reads as a hung start and gets the process killed — it
+// needs a shutdown trigger besides SIGTERM, and it needs somewhere other than
+// stderr to log, because a service has no stderr. Every method is nil-safe, so
+// the interactive path passes nil and behaves exactly as it did before.
+type hooks struct {
+	// NewHandler, when set, replaces the stderr log handler.
+	NewHandler func(slog.Level) slog.Handler
+	// Progress names the startup phase about to begin.
+	Progress func(phase string)
+	// Ready fires once the listener is up and serving.
+	Ready func()
+	// Stopping fires as graceful teardown begins.
+	Stopping func()
+	// Stop is a shutdown trigger that sits alongside SIGINT/SIGTERM.
+	Stop <-chan struct{}
+}
+
+func (h *hooks) logger(level string) *slog.Logger {
+	l := parseLevel(level)
+	if h == nil || h.NewHandler == nil {
+		return newLogger(level)
+	}
+	return slog.New(h.NewHandler(l))
+}
+
+func (h *hooks) progress(phase string) {
+	if h != nil && h.Progress != nil {
+		h.Progress(phase)
+	}
+}
+
+func (h *hooks) ready() {
+	if h != nil && h.Ready != nil {
+		h.Ready()
+	}
+}
+
+func (h *hooks) stopping() {
+	if h != nil && h.Stopping != nil {
+		h.Stopping()
+	}
+}
+
+// stopped returns the extra shutdown trigger. A nil channel blocks forever in a
+// select, which is exactly what the interactive path wants.
+func (h *hooks) stopped() <-chan struct{} {
+	if h == nil {
+		return nil
+	}
+	return h.Stop
+}
+
+func run(h *hooks) error {
 	var (
 		configPath  = flag.String("config", "config.yaml", "path to config.yaml")
 		addr        = flag.String("addr", "", "HTTP listen address (overrides config)")
@@ -53,8 +114,9 @@ func run() error {
 		return nil
 	}
 
-	log := newLogger(*logLevel)
+	log := h.logger(*logLevel)
 
+	h.progress("loading the configuration")
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
@@ -86,6 +148,7 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	h.progress("detecting ffmpeg")
 	tools, err := ffmpeg.Detect(ctx, cfg.FFmpeg.Binary, cfg.FFmpeg.Probe)
 	if err != nil {
 		return err
@@ -96,12 +159,14 @@ func run() error {
 	// unreadable cert pair or an unwritable tls/ directory is a configuration
 	// mistake, and the operator should hear about it in the same breath as a
 	// missing ffmpeg rather than after the engine has started.
+	h.progress("preparing tls")
 	provider, err := newTLSProvider(cfg)
 	if err != nil {
 		return err
 	}
 	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
 
+	h.progress("opening the database")
 	store, err := db.Open(cfg.DBPath())
 	if err != nil {
 		return err
@@ -119,6 +184,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	h.progress("starting the streaming engine")
 	if err := eng.Start(ctx); err != nil {
 		return fmt.Errorf("starting the streaming engine: %w", err)
 	}
@@ -172,6 +238,8 @@ func run() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
+	h.ready()
+
 	select {
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -180,7 +248,14 @@ func run() error {
 		}
 	case sig := <-sigCh:
 		log.Info("shutting down", "signal", sig.String())
+	case <-h.stopped():
+		// The Windows SCM asked us to stop. It falls through to the identical
+		// teardown below, because finalising recordings is not something a
+		// service stop gets to skip.
+		log.Info("shutting down", "reason", "service stop requested")
 	}
+
+	h.stopping()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer shutdownCancel()
@@ -401,16 +476,18 @@ func ingestPort(s db.Settings) int {
 }
 
 func newLogger(level string) *slog.Logger {
-	var l slog.Level
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: parseLevel(level)}))
+}
+
+func parseLevel(level string) slog.Level {
 	switch strings.ToLower(level) {
 	case "debug":
-		l = slog.LevelDebug
+		return slog.LevelDebug
 	case "warn":
-		l = slog.LevelWarn
+		return slog.LevelWarn
 	case "error":
-		l = slog.LevelError
+		return slog.LevelError
 	default:
-		l = slog.LevelInfo
+		return slog.LevelInfo
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: l}))
 }
