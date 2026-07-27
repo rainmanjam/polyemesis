@@ -108,6 +108,13 @@ func (s *Server) Handler() http.Handler {
 		// handleDownloadCA for the full argument.
 		r.Get("/tls/ca", s.handleDownloadCA)
 
+		// The public player's two reads. Unauthenticated by necessity — a
+		// viewer has no account — but not unguarded: both run the playout
+		// access check, which refuses unless playout is enabled, public, and
+		// either open or presented with the playback token. See playout.go.
+		r.Get("/playout/public", s.handlePlayoutPublic)
+		r.Get("/playout/poster.jpg", s.handlePlayoutPoster)
+
 		// --- authenticated ---
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
@@ -122,6 +129,12 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
 
 			r.Get("/system", s.handleSystem)
+			// Authenticated on purpose: the build number is a fingerprint, and
+			// an unauthenticated scanner should not get to read it. The check
+			// is a POST so requireCSRF covers it and no prefetching browser
+			// can reach out to GitHub on the operator's behalf.
+			r.Get("/version", s.handleVersion)
+			r.Post("/version/check", s.handleCheckUpdate)
 			r.Get("/status", s.handleStatus)
 			r.Get("/source", s.handleSource)
 			r.Get("/stats", s.handleStats)
@@ -145,6 +158,16 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/destinations/{id}/restart", s.handleRestartDestination)
 			r.Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
 
+			// Expert mode: hand-edited FFmpeg arguments for one destination.
+			// Preview and dry-run are POSTs because they carry a candidate
+			// edit in the body, not because they change anything — neither
+			// writes. See expert.go.
+			r.Get("/destinations/{id}/expert", s.handleGetExpert)
+			r.Put("/destinations/{id}/expert", s.handlePutExpert)
+			r.Delete("/destinations/{id}/expert", s.handleDeleteExpert)
+			r.Post("/destinations/{id}/expert/preview", s.handlePreviewExpert)
+			r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
+
 			r.Get("/renditions", s.handleListRenditions)
 			r.Post("/renditions", s.handleCreateRendition)
 			// Static segment first, same as /destinations/order above.
@@ -162,6 +185,14 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/routing/presets", s.handleListPresets)
 			r.Post("/routing/presets/{preset}", s.handleApplyPreset)
 
+			// Playout administration. The media itself is served outside this
+			// group; only the configuration and the operator's view of it are
+			// behind a session.
+			r.Get("/playout", s.handleGetPlayout)
+			r.Put("/playout/publish", s.handlePutPlayoutPublish)
+			r.Post("/playout/token", s.handleRotatePlayoutToken)
+			r.Post("/playout/analytics/reset", s.handleResetPlayoutAnalytics)
+
 			r.Get("/recordings", s.handleListRecordings)
 			r.Get("/recordings/usage", s.handleRecordingUsage)
 			r.Delete("/recordings/{id}", s.handleDeleteRecording)
@@ -169,6 +200,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
 
+			r.Get("/platforms/presets", s.handlePlatformPresets)
 			r.Get("/platforms/guides", s.handlePlatformGuides)
 			r.Get("/platforms/credentials", s.handleListCreds)
 			r.Put("/platforms/credentials/{platform}", s.handlePutCreds)
@@ -215,6 +247,22 @@ func (s *Server) Handler() http.Handler {
 		r.Handle("/hls/*", s.hlsHandler())
 	})
 
+	// --- the public origin ---
+	//
+	// Registered OUTSIDE every authenticated group, which is the whole point:
+	// a viewer has no session and never will. requireAuth is deliberately
+	// absent, and the guard is instead per-request inside the handlers, because
+	// "is this stream public" is a setting an operator flips at runtime and a
+	// route table is built once at startup. Both handlers refuse unless playout
+	// is explicitly enabled; see the access rules at the top of playout.go.
+	r.Handle(PlayoutPrefix+"*", s.playoutHandler())
+	// The player page. It resolves to the same SPA bundle as the admin UI but
+	// through its own route, so the frame-blocking headers can be relaxed for
+	// an embed without relaxing them for the console.
+	watch := s.watchHandler()
+	r.Handle(WatchPath, watch)
+	r.Handle(WatchPath+"/*", watch)
+
 	if h, err := web.Handler(); err == nil {
 		r.NotFound(h.ServeHTTP)
 	} else {
@@ -238,7 +286,10 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		// Health checks, metric scrapes and the stats poll would otherwise
 		// drown the log.
 		if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/metrics" ||
-			strings.HasPrefix(r.URL.Path, "/hls/") {
+			strings.HasPrefix(r.URL.Path, "/hls/") ||
+			// A playout viewer polls a playlist every segment; a busy origin
+			// would fill the log with nothing but segment reads.
+			strings.HasPrefix(r.URL.Path, PlayoutPrefix) {
 			return
 		}
 		level := slog.LevelDebug

@@ -1,14 +1,19 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -179,6 +184,13 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		RTMPPort:      settings.Ingest.RTMP.Port,
 		RTMPApp:       settings.Ingest.RTMP.App,
 		RTMPStreamKey: settings.Ingest.RTMP.StreamKey,
+		// Verbatim, userinfo and all. An rtsp://user:pass@cam/ source does
+		// carry a credential, but this endpoint is authenticated and the same
+		// caller can read the identical string out of GET /settings, so
+		// redacting only here would be theatre — and it would leave the
+		// operator unable to see which source is actually being dialled, which
+		// is the entire reason this field exists.
+		PullURL: settings.Ingest.Pull.URL,
 	}
 	host := r.Host
 	if h, _, ok := strings.Cut(host, ":"); ok {
@@ -201,6 +213,217 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		"dataDir":    s.cfg.DataDir,
 		"uiBuilt":    UIBuilt(),
 	})
+}
+
+// ------------------------------------------------------------ version check
+
+// updateFeedURL is the release feed consulted. A var so a test can point it at
+// a local server; nothing reads it until an operator asks for a check.
+var updateFeedURL = "https://api.github.com/repos/rainmanjam/polyemesis/releases/latest"
+
+const (
+	// updateCheckTTL keeps a bored operator clicking Check from spending the 60
+	// requests an hour GitHub allows an unauthenticated client.
+	updateCheckTTL = 6 * time.Hour
+	// A check is a convenience, so it must never hold a request open long
+	// enough for the console to look hung.
+	updateCheckTimeout = 5 * time.Second
+)
+
+var updateHTTPClient = &http.Client{Timeout: updateCheckTimeout}
+
+// updateCache lives at package scope rather than on Server because there is one
+// server per process and this is the only state the feature has. Mutex-guarded
+// because two open tabs will race.
+var updateCache struct {
+	sync.Mutex
+	at     time.Time
+	latest string
+	url    string
+	failed bool
+}
+
+// versionInfo is what both version endpoints return. Latest, ReleaseURL and
+// CheckedAt stay empty until an operator has run a check at least once.
+type versionInfo struct {
+	Version    string `json:"version"`
+	Latest     string `json:"latest,omitempty"`
+	ReleaseURL string `json:"releaseUrl,omitempty"`
+	// UpdateAvailable is only ever true on a confident comparison of two
+	// semantic versions.
+	UpdateAvailable bool `json:"updateAvailable"`
+	// Comparable is false when either side is not a semantic version — a dev
+	// build or a commit hash. The tag that was found is still reported: saying
+	// "there is a v1.4.0, work out for yourself whether you have it" beats
+	// saying nothing, which is how an operator misses a release entirely.
+	Comparable  bool   `json:"comparable"`
+	CheckedAt   string `json:"checkedAt,omitempty"`
+	CheckFailed bool   `json:"checkFailed,omitempty"`
+}
+
+// handleVersion reports the running build plus whatever a previous check found.
+// It never touches the network. A self-hosted server that phones home without
+// being asked is a trust violation, so reaching GitHub is a separate endpoint
+// the operator has to invoke, nothing schedules it, and startup never waits on
+// it.
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.versionInfo())
+}
+
+// handleCheckUpdate is the opt-in. Invoking it is the consent: no config flag
+// to forget, and an install that never calls it never contacts GitHub.
+func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
+	updateCache.Lock()
+	fresh := !updateCache.at.IsZero() && time.Since(updateCache.at) < updateCheckTTL
+	updateCache.Unlock()
+
+	if !fresh {
+		// The lock is deliberately not held across the request: a five-second
+		// fetch must not block the read endpoint. Two simultaneous clicks
+		// costing two requests is cheaper than that.
+		latest, url, err := fetchLatestRelease(r.Context())
+
+		updateCache.Lock()
+		updateCache.at = time.Now()
+		updateCache.failed = err != nil
+		if err == nil {
+			updateCache.latest, updateCache.url = latest, url
+		}
+		updateCache.Unlock()
+
+		if err != nil {
+			// Quiet on purpose. A server with no outbound internet is a
+			// supported deployment, and it must not grow an error banner for
+			// declining to reach a service it was never promised. The operator
+			// gets checkFailed; the detail is in the log.
+			s.log.Debug("update check failed", "err", err)
+		}
+	}
+	writeJSON(w, http.StatusOK, s.versionInfo())
+}
+
+func (s *Server) versionInfo() versionInfo {
+	info := versionInfo{Version: s.version}
+
+	updateCache.Lock()
+	defer updateCache.Unlock()
+	if updateCache.at.IsZero() {
+		return info
+	}
+	info.CheckedAt = updateCache.at.UTC().Format(time.RFC3339)
+	info.CheckFailed = updateCache.failed
+	info.Latest = updateCache.latest
+	info.ReleaseURL = updateCache.url
+	info.UpdateAvailable, info.Comparable = newerThan(info.Latest, s.version)
+	return info
+}
+
+func fetchLatestRelease(ctx context.Context) (tag, url string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, updateCheckTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, updateFeedURL, nil)
+	if err != nil {
+		return "", "", err
+	}
+	// GitHub rejects a request with no User-Agent outright.
+	req.Header.Set("User-Agent", "polyemesis")
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := updateHTTPClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("release feed returned %s", resp.Status)
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+	}
+	// The real payload is a few kB; the cap stops a hijacked or redirected feed
+	// from being buffered wholesale.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(release.TagName) == "" {
+		return "", "", errors.New("release feed returned no tag")
+	}
+	return release.TagName, release.HTMLURL, nil
+}
+
+// newerThan reports whether latest is strictly newer than current, and whether
+// the two could be compared at all. Both answers are needed: an unparseable
+// version must not be reported as up to date, and it must not be reported as
+// out of date either.
+func newerThan(latest, current string) (newer, comparable bool) {
+	l, ok := parseSemver(latest)
+	if !ok {
+		return false, false
+	}
+	c, ok := parseSemver(current)
+	if !ok {
+		return false, false
+	}
+	return compareSemver(l, c) > 0, true
+}
+
+type semver struct {
+	nums [3]int
+	pre  string
+}
+
+func parseSemver(s string) (semver, bool) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+	// Build metadata never affects precedence.
+	if i := strings.IndexByte(s, '+'); i >= 0 {
+		s = s[:i]
+	}
+
+	var v semver
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		v.pre, s = s[i+1:], s[:i]
+	}
+
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return semver{}, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return semver{}, false
+		}
+		v.nums[i] = n
+	}
+	return v, true
+}
+
+func compareSemver(a, b semver) int {
+	for i := range a.nums {
+		if a.nums[i] != b.nums[i] {
+			if a.nums[i] > b.nums[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+	switch {
+	case a.pre == b.pre:
+		return 0
+	// A release outranks any pre-release of the same numbers, which is what
+	// stops v1.2.0-rc1 from looking newer than the v1.2.0 already installed.
+	case a.pre == "":
+		return 1
+	case b.pre == "":
+		return -1
+	}
+	// Lexical order between two pre-releases. Not full semver precedence, but
+	// the only case it decides is "which release candidate", and being wrong
+	// there costs an operator one glance at the changelog.
+	return strings.Compare(a.pre, b.pre)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -405,6 +628,9 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	row.ID = 0
+	// Expert mode is reachable only through its own routes. See
+	// clearExpertArgs.
+	clearExpertArgs(&row)
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -429,10 +655,19 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
+	saved := expertArgsOf(existing)
 	if !decodeJSON(w, r, existing) {
 		return
 	}
 	existing.ID = id
+	// Whatever the body said about expert arguments, the stored ones win. Only
+	// the expert routes enforce the confirm step and the guard acknowledgement,
+	// and decodeJSON's DisallowUnknownFields means these fields are accepted
+	// here the moment they exist on the model — so a plain PUT carrying
+	// extraOutputArgs would otherwise be a way around both.
+	existing.ExtraInputArgs = saved.InputArgs
+	existing.ExtraOutputArgs = saved.OutputArgs
+	existing.ExpertAckReencode = saved.AckReencode
 
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
@@ -582,6 +817,30 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"profile": profile, "routing": res})
 }
 
+// ------------------------------------------------------- destination presets
+
+// handlePlatformPresets returns the platform destination catalogue: the
+// transport, the ingest URL template and the notes for every platform we can
+// describe, grouped for a picker that has to stay navigable at thirty entries.
+//
+// It is a static catalogue served over HTTP rather than baked into the UI so
+// that scripted setups and any other client get the same answer the dialog
+// gets, and so a preset can be corrected without shipping a new bundle.
+//
+// Presets carry no bitrate or resolution numbers — those belong to renditions,
+// where they are already offered with a disclaimer. What they do carry is a
+// URL that is either documented or an obvious {placeholder} template, and an
+// empty URL wherever the platform issues its ingest per account or per event.
+// The disclaimer travels with the payload because a preset the operator was
+// not warned about is a preset they will trust further than we can.
+func (s *Server) handlePlatformPresets(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"presets":    db.DestinationPresets(),
+		"groups":     db.PresetGroups(),
+		"disclaimer": db.PlatformPresetDisclaimer,
+	})
+}
+
 // ---------------------------------------------------------------- recordings
 
 func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
@@ -668,7 +927,16 @@ func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
+	// Unescaped by hand because chi routes on RawPath whenever it differs from
+	// Path, so URLParam hands back the still-encoded segment. Every process
+	// whose name contains a colon — "dest:1", "rendition:2", "playout:source" —
+	// arrives here as "dest%3A1" and matches nothing. A name that will not
+	// unescape is compared as it arrived rather than rejected: the answer is a
+	// 404 either way, and there is no reason to have two ways of saying it.
 	name := chi.URLParam(r, "name")
+	if decoded, err := url.PathUnescape(name); err == nil {
+		name = decoded
+	}
 	for _, p := range s.eng.Processes() {
 		if p.Name() == name {
 			writeJSON(w, http.StatusOK, map[string]any{
