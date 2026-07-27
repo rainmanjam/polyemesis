@@ -265,3 +265,54 @@ func TestUpdateSourceNeverStoresAnEmptyToken(t *testing.T) {
 		t.Errorf("stored token %q, want %q", back.Token, s.Token)
 	}
 }
+
+func TestCreatingASecondSourceMovesItOffAClashingPort(t *testing.T) {
+	d := testDB(t)
+
+	first, err := d.ListSources()
+	if err != nil || len(first) == 0 {
+		t.Fatalf("ListSources: %v", err)
+	}
+	base := first[0].Ingest.SRT.Port
+
+	// This is exactly what the UI sends: a name, and the default ingest. Every
+	// source starts from the same defaults, so without the move the second one
+	// would be created holding a port the first already binds -- reported as
+	// configured, and silently receiving nothing.
+	extra := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(extra); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	if extra.Ingest.SRT.Port == base {
+		t.Fatalf("second source kept srt port %d, which the first already holds", base)
+	}
+	if extra.Ingest.SRT.Port == extra.Ingest.RTMP.Port {
+		t.Errorf("moved ports collided with each other: srt and rtmp both %d", extra.Ingest.SRT.Port)
+	}
+}
+
+func TestUpdatingASourceOntoAnotherSourcesPortIsRefused(t *testing.T) {
+	d := testDB(t)
+
+	first, err := d.ListSources()
+	if err != nil || len(first) == 0 {
+		t.Fatalf("ListSources: %v", err)
+	}
+	taken := first[0].Ingest.SRT.Port
+
+	extra := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(extra); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+
+	// An edit is the operator naming a port on purpose. Moving it silently
+	// would leave them pointing an encoder at nothing, so this must fail loudly.
+	extra.Ingest.SRT.Port = taken
+	err = d.UpdateSource(extra)
+	if err == nil {
+		t.Fatal("UpdateSource accepted a port another source already listens on")
+	}
+	if !strings.Contains(err.Error(), "already used by source") {
+		t.Errorf("error = %q, want it to name the conflicting source", err)
+	}
+}

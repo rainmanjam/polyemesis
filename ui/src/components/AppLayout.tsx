@@ -9,6 +9,7 @@ import {
   Languages,
   Layers,
   LayoutDashboard,
+  RadioTower,
   Library,
   ListChecks,
   LogOut,
@@ -55,6 +56,7 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
+  { to: "/sources", label: "Sources", icon: RadioTower },
   { to: "/meters", labelKey: "nav.meters", icon: AudioLines },
   { to: "/routing", labelKey: "nav.routing", icon: Sliders },
   { to: "/renditions", labelKey: "nav.renditions", icon: Layers },
