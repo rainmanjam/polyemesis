@@ -101,26 +101,41 @@ test.describe("sources", () => {
     const sw = page.locator('[role="switch"]').nth(before);
     await expect(sw).toHaveAttribute("data-state", "checked");
 
-    // PORT inputs only, identified by their range. Selecting every number
-    // input also collects the latency fields, whose values legitimately repeat
-    // across sources -- the first version of this test failed on "6000,200,
-    // 6001,200" and the product was right.
-    const ports = await page
-      .locator('input[type="number"][max="65535"]')
-      .evaluateAll((els) => (els as HTMLInputElement[]).map((e) => e.value));
-    expect(ports.length, "expected a port field per source").toBeGreaterThan(1);
+    // What has to be distinct is no longer a PORT. Sources share one SRT
+    // listener and are told apart by their publish token, so the token is the
+    // thing that makes a second programme reachable -- and two sources sharing
+    // one would make the second unreachable exactly as a shared port used to.
+    //
+    // Read from the API rather than the DOM: the token is deliberately rendered
+    // masked behind an explicit reveal, and a test that clicked through that
+    // would be asserting on the masking rather than on the tokens.
+    const tokens = await page.evaluate(async () => {
+      const res = await fetch("/api/v1/sources", { credentials: "include" });
+      const rows = (await res.json()) as Array<{ token?: string }>;
+      return rows.map((r) => r.token ?? "");
+    });
+    expect(tokens.length, "expected a token per source").toBeGreaterThan(1);
+    expect(tokens.filter((t) => t === "").length, "a source with no token has no address").toBe(0);
     expect(
-      new Set(ports).size,
-      `two sources cannot share an ingest port, got ${ports.join(",")}`,
-    ).toBe(ports.length);
+      new Set(tokens).size,
+      "two sources cannot share a publish token; one would be unreachable",
+    ).toBe(tokens.length);
   });
 
-  test("port inputs refuse an out-of-range value at the widget", async ({ page }) => {
+  test("listener port inputs refuse an out-of-range value at the widget", async ({ page }) => {
+    // The ports moved to Settings when they stopped being per-source: there is
+    // one SRT listener and one RTMP listener for the whole install. Bounds at
+    // the widget still matter -- port 0 is not an error to the kernel, it means
+    // "any free port", so a listener bound to it comes up, reports itself
+    // listening, and is reachable at an address nobody was told.
     await signIn(page);
-    await page.goto("/sources");
-    const port = page.locator('input[type="number"]').first();
-    await expect(port).toHaveAttribute("min", "1");
-    await expect(port).toHaveAttribute("max", "65535");
+    await page.goto("/settings");
+    for (const id of ["#listener-srt", "#listener-rtmp"]) {
+      const port = page.locator(id);
+      await expect(port).toBeVisible();
+      await expect(port).toHaveAttribute("min", "1");
+      await expect(port).toHaveAttribute("max", "65535");
+    }
   });
 
   test("editing a port does NOT commit on blur", async ({ page }) => {
