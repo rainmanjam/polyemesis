@@ -748,6 +748,10 @@ function RecordingList({
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(0);
+  // Above the early return: a hook after a conditional return runs in a
+  // different order on the render where the list is empty, which is a crash
+  // waiting for the first operator whose library happens to be empty.
+  const confirmDelete = useConfirm<LibraryRecording>();
 
   if (recordings.length === 0) {
     return (
@@ -771,8 +775,6 @@ function RecordingList({
       setBusy(0);
     }
   };
-
-  const confirmDelete = useConfirm<LibraryRecording>();
 
   const remove = async (rec: LibraryRecording) => {
     setBusy(rec.id);
