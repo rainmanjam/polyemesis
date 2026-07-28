@@ -531,6 +531,10 @@ export interface SourceView extends Source {
   tokenEnforced: boolean;
   /** Whether an encoder is live on the shared listener for this source. */
   publishing: boolean;
+  /** What a delete would take with it. Counts, not prose: confirming a number
+   *  is a decision, confirming "and its destinations" is a click. */
+  destinations: number;
+  renditions: number;
   /** Uplink health for that publisher, when there is one. */
   link?: {
     peer: string;

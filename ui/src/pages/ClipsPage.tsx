@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
 import { Download, Loader2, Scissors, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -141,8 +142,9 @@ export function ClipsPage() {
     }
   };
 
+  const confirmDelete = useConfirm<Clip>();
+
   const remove = async (c: Clip) => {
-    if (!window.confirm(`Delete ${c.name}? This permanently removes the file.`)) return;
     try {
       await autoApi.del(`/clips/${encodeURIComponent(c.name)}`);
       toast.success("Clip deleted.");
@@ -301,7 +303,7 @@ export function ClipsPage() {
                             <Button
                               variant="ghost"
                               size="icon-sm"
-                              onClick={() => remove(c)}
+                              onClick={() => confirmDelete.ask(c)}
                               aria-label="Delete"
                               className="text-muted-foreground hover:text-down"
                             >
@@ -395,6 +397,18 @@ export function ClipsPage() {
           </Card>
         </div>
       </div>
+
+      <ConfirmDestructive
+        open={confirmDelete.open}
+        onOpenChange={confirmDelete.onOpenChange}
+        subject={confirmDelete.target?.name ?? ""}
+        title="Delete this clip?"
+        description="A clip is usually the artifact you meant to keep. This removes the file; the recording it came from is untouched."
+        requireTyping
+        onConfirm={async () => {
+          if (confirmDelete.target) await remove(confirmDelete.target);
+        }}
+      />
     </div>
   );
 }
