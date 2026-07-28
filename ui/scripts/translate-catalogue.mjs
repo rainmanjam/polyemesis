@@ -20,7 +20,13 @@ import { dirname, join } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const I18N = join(HERE, "..", "src", "lib", "i18n");
 
-const OLLAMA = process.env.OLLAMA ?? "http://192.168.1.186:11434";
+// localhost, not the machine this happened to be developed against. A LAN
+// address baked in as the default is a detail of one network published in a
+// public repository, and it sends everyone else's first run at a host that is
+// not theirs.
+//
+//   OLLAMA=http://ollama.lan:11434 npm run translate
+const OLLAMA = process.env.OLLAMA ?? "http://127.0.0.1:11434";
 const MODEL = process.env.MODEL ?? "translategemma:27b";
 
 // Right-to-left languages are deliberately absent. The UI sets
