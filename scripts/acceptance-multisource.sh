@@ -185,11 +185,16 @@ docker run -d --name "$CTR" --network "$NET" \
   -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" -p "6100:6100/udp" \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 sleep 14
-AFTER=$(inctr 'ps -o args | grep -c "mode=listener"' | tr -d ' ')
+# Count the SOURCES, not listener processes. Counting FFmpeg listeners was how
+# this used to work, and after the one-port change there are none -- but the
+# pattern matched the `sh -c` carrying it, so the check went on passing for a
+# reason that had nothing to do with persistence. A check that cannot fail is
+# worse than one that is missing, because it reads as coverage.
+AFTER=$(drive tokens "$BASE" | grep -c . || true)
 if [ "${AFTER:-0}" -ge 2 ] 2>/dev/null; then
-  ok "both sources came back after the container was destroyed ($AFTER listeners)"
+  ok "both sources came back after the container was destroyed ($AFTER sources)"
 else
-  bad "only $AFTER listener(s) after restart; a source did not persist"
+  bad "only $AFTER source(s) after restart; a source did not persist"
 fi
 
 step "6. The listener can be moved, and both programmes follow it"

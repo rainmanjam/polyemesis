@@ -90,16 +90,131 @@ jobs:
       - run: make release
       - run: ls -lh dist/
 
+  # The suites that need the shipped IMAGE rather than a host binary: SRT ingest
+  # (Ubuntu's FFmpeg may lack libsrt, the image never does), the one-port
+  # token-routing path, and the browser running against the real artefact.
+  #
+  # Expensive — each builds the image and publishes real streams into it — so
+  # they run on main and on a schedule rather than on every branch push.
   container:
-    name: container acceptance (28 checks)
-    # Expensive: builds the image and publishes real SRT and RTMP streams into
-    # it. Worth it on main and on a schedule, not on every branch push.
+    name: "container: ${{ matrix.suite }}"
     if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - acceptance-docker      # 29 checks: routing, passthrough, persistence
+          - acceptance-multisource # 18 checks: two programmes, one port, by token
+          - acceptance-browser     # 24 checks: Playwright against the image
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - run: ./scripts/acceptance-docker.sh
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # Only the browser suite needs a browser, and it needs the system
+      # libraries too -- a bare `npm i` leaves chromium unable to start.
+      - name: Install Playwright
+        if: matrix.suite == 'acceptance-browser'
+        working-directory: ui
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - run: ./scripts/${{ matrix.suite }}.sh
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.suite }}-logs
+          path: |
+            /tmp/poly-*/**/*.log
+            ui/test-results/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The measurement suites. Everything above proves the code COMPILES and that
+  # its pure functions agree with themselves; these prove the product actually
+  # routes audio, copies video untouched and rides a source switch — by
+  # measuring the output rather than asserting on a return value.
+  #
+  # They ran only on a maintainer's laptop until now, which is exactly the gap
+  # that let three separate bugs through in one day: a missing .gitkeep that
+  # only broke a clean checkout, an FFmpeg listener colliding with the Go one
+  # that hid behind a local FFmpeg without libsrt, and a README publish URL that
+  # stopped working. A laptop is not a clean machine.
+  #
+  # A matrix rather than one job: each suite is a few minutes, they are
+  # independent, and a failure names itself in the checks list instead of being
+  # buried in a combined log.
+  acceptance:
+    name: "acceptance: ${{ matrix.suite }}"
+    runs-on: ubuntu-latest
+    strategy:
+      # Never cancel siblings. When two suites break, both answers are wanted —
+      # fail-fast would hide the second and turn one fix into two round trips.
+      fail-fast: false
+      matrix:
+        suite:
+          - acceptance          # end to end: ingest, fan-out, persistence
+          - acceptance-audio    # per-track RMS through a bandpass
+          - acceptance-renditions
+          - acceptance-encoders
+          - acceptance-tls
+          - acceptance-pull     # dial-out ingest
+          - acceptance-synth    # silence tier and the failover slate
+          - acceptance-failover # switch without restarting a destination
+          - acceptance-postprod
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -qq
+          # lsof as well: three suites read the engine's relay port out of it
+          # to measure the right socket, and they fail obscurely without it.
+          sudo apt-get install -y --no-install-recommends ffmpeg lsof
+          ffmpeg -hide_banner -version | head -1
+          # Not fatal: none of these suites needs SRT (the container ones do,
+          # and they run elsewhere). Logged because a suite behaving oddly is
+          # much easier to read with the build's capabilities in front of you.
+          ffmpeg -hide_banner -protocols | tr " " "\n" | grep -qx srt \
+            && echo "libsrt: yes" || echo "libsrt: no"
+
+      # The suites run the real binary with the UI embedded, so it has to be
+      # the real build rather than `go build ./cmd/...`.
+      - run: make build
+
+      - name: ./scripts/${{ matrix.suite }}.sh
+        run: ./scripts/${{ matrix.suite }}.sh
+
+      # The logs are where a measurement failure is actually diagnosed: the RMS
+      # figures, the process output, what FFmpeg said. Losing them turns a red
+      # check into a guess.
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.suite }}-logs
+          path: |
+            /tmp/polyemesis-acceptance*/**/*.log
+            /tmp/polyemesis-acceptance*/**/server.log
+          if-no-files-found: ignore
+          retention-days: 7
