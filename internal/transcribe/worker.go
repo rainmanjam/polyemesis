@@ -2,6 +2,7 @@ package transcribe
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -463,64 +464,61 @@ func (p *Processor) whisperRun(ctx context.Context, spec WhisperSpec, rep jobs.R
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.WaitDelay = childKillDelay
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, "", err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, "", err
-	}
+	var (
+		mu       sync.Mutex
+		streamed []Segment
+		tail     strings.Builder
+		info     strings.Builder
+	)
+	outw := &lineWriter{fn: func(line string) {
+		if seg, ok := ParseSegmentLine(line); ok {
+			mu.Lock()
+			streamed = append(streamed, seg)
+			mu.Unlock()
+		}
+	}}
+	errw := &lineWriter{fn: func(line string) {
+		if f, ok := ParseProgressLine(line); ok {
+			progress(f)
+			return
+		}
+		mu.Lock()
+		if strings.Contains(line, "system_info") {
+			info.WriteString(line)
+			info.WriteByte('\n')
+		}
+		noteworthy := IsNoteworthy(line)
+		if noteworthy {
+			tail.WriteString(strings.TrimSpace(line))
+			tail.WriteByte('\n')
+		}
+		mu.Unlock()
+		if noteworthy {
+			rep.Logf("whisper: %s", strings.TrimSpace(line))
+		}
+	}}
+	// Assigned rather than piped: see lineWriter. Wait waits for these copies,
+	// so nothing can be truncated by the order of two waits.
+	cmd.Stdout, cmd.Stderr = outw, errw
+
 	if err := cmd.Start(); err != nil {
 		return nil, "", fmt.Errorf("start whisper: %w", err)
 	}
 
-	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		streamed []Segment
-		tail     strings.Builder
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		scanLines(stdout, func(line string) {
-			if seg, ok := ParseSegmentLine(line); ok {
-				mu.Lock()
-				streamed = append(streamed, seg)
-				mu.Unlock()
-			}
-		})
-	}()
-	go func() {
-		defer wg.Done()
-		var info strings.Builder
-		scanLines(stderr, func(line string) {
-			if f, ok := ParseProgressLine(line); ok {
-				progress(f)
-				return
-			}
-			if strings.Contains(line, "system_info") {
-				info.WriteString(line)
-				info.WriteByte('\n')
-			}
-			if IsNoteworthy(line) {
-				rep.Logf("whisper: %s", strings.TrimSpace(line))
-				mu.Lock()
-				tail.WriteString(strings.TrimSpace(line))
-				tail.WriteByte('\n')
-				mu.Unlock()
-			}
-		})
-		// The build's capabilities, learned for free from a run that was going
-		// to happen anyway. This is why detection does not load a model.
-		if b := ParseSystemInfo(info.String()); len(b) > 0 {
-			p.whisper.SetBackends(b)
-		}
-	}()
+	err := cmd.Wait()
+	// A child killed mid-line still has something to say, and when the failure
+	// is the interesting part that last line is often all of it.
+	outw.flush()
+	errw.flush()
 
-	err = cmd.Wait()
-	wg.Wait()
+	// The build's capabilities, learned for free from a run that was going to
+	// happen anyway. This is why detection does not load a model.
+	mu.Lock()
+	backends := ParseSystemInfo(info.String())
+	mu.Unlock()
+	if len(backends) > 0 {
+		p.whisper.SetBackends(backends)
+	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, "", ctxErr
@@ -698,6 +696,72 @@ func scanLines(r io.Reader, fn func(string)) {
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for sc.Scan() {
 		fn(sc.Text())
+	}
+}
+
+// lineWriter is an io.Writer that calls fn once per complete line.
+//
+// It exists so a child's output can be consumed through cmd.Stdout rather than
+// cmd.StdoutPipe, and that distinction is the whole fix for a bug that cost two
+// intermittent CI failures:
+//
+// With StdoutPipe, os/exec hands you the read end and Wait CLOSES it as soon as
+// it sees the process exit -- "it is incorrect to call Wait before all reads
+// from the pipe have completed". Reading in a goroutine and calling Wait first
+// truncates whatever had not been read yet, which lost a transcription's last
+// segment and, worse, lost whisper's own error message so a failure was
+// reported as a bare "exit status 1" and classified on an empty string.
+//
+// Reading first and waiting second is the textbook repair and it DEADLOCKS
+// here. The child is a shell; a shell that spawns `sleep 30` leaves that
+// grandchild holding the same pipe, so killing the shell on cancellation does
+// not produce EOF and the reader blocks until the grandchild exits. Wait's
+// WaitDelay is what force-closes the pipes and unblocks it, so the reader
+// cannot be the thing that goes first.
+//
+// Assigning cmd.Stdout instead removes the dilemma. os/exec copies into this
+// writer from its own goroutine and Wait waits for that copy to finish, so
+// there is no ordering left to get wrong -- and WaitDelay still bounds the
+// orphaned-grandchild case.
+//
+// The mutex is not decoration: when WaitDelay expires, Wait returns while the
+// copy goroutine is still live, so a write can race a read of what was
+// collected.
+type lineWriter struct {
+	mu  sync.Mutex
+	buf []byte
+	fn  func(string)
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimRight(string(w.buf[:i]), "\r")
+		w.buf = w.buf[i+1:]
+		w.fn(line)
+	}
+	// A child that writes an enormous line without a newline must not grow this
+	// without bound; the same ceiling scanLines uses.
+	if len(w.buf) > 1<<20 {
+		w.buf = w.buf[:0]
+	}
+	return len(p), nil
+}
+
+// flush delivers a trailing line that had no newline, which is how a child that
+// dies mid-sentence still gets its last words read.
+func (w *lineWriter) flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.buf) > 0 {
+		w.fn(strings.TrimRight(string(w.buf), "\r"))
+		w.buf = w.buf[:0]
 	}
 }
 
