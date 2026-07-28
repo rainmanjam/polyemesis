@@ -66,7 +66,26 @@ func renditionServer(t *testing.T, tools *ffmpeg.Tools) (http.Handler, *db.DB, f
 		Version: "test",
 	})
 	h := s.Handler()
+	lastTestServer = s
 	return h, store, login(t, h)
+}
+
+// lastTestServer is the Server most recently built by renditionServer.
+//
+// A few tests need the Server itself rather than its handler -- to ask where
+// the stems directory is, or what the data directory resolved to -- and those
+// answers must come from the SAME instance under test, not from a second one
+// built with the same config. Package tests do not run in parallel, so the last
+// one built is the one the caller just asked for.
+var lastTestServer *Server
+
+// serverUnderTest returns the Server behind a handler from renditionServer.
+func serverUnderTest(t *testing.T, _ http.Handler) *Server {
+	t.Helper()
+	if lastTestServer == nil {
+		t.Fatal("no test server has been built")
+	}
+	return lastTestServer
 }
 
 // fakeTools is a detected FFmpeg that reports a plausible encoder list without
