@@ -1,13 +1,18 @@
 {
   "nav.dashboard": "Übersicht",
+  "nav.sources": "Quellen",
   "nav.meters": "Audiopegel",
   "nav.routing": "Routing",
   "nav.renditions": "Varianten",
   "nav.playout": "Playout",
+  "nav.library": "Bibliothek",
+  "nav.clips": "Clips",
+  "nav.chat": "Chat",
+  "nav.jobs": "Aufgaben",
+  "nav.automation": "Automatisierung",
   "nav.recordings": "Aufnahmen",
   "nav.monitoring": "Überwachung",
   "nav.settings": "Einstellungen",
-
   "chrome.toggleNav": "Navigation umschalten",
   "chrome.ingest": "Ingest",
   "chrome.liveCount": "{count} live",
@@ -15,7 +20,6 @@
   "chrome.socketOfflineHint": "Live-Aktualisierung getrennt, Verbindung wird wiederhergestellt",
   "chrome.signOut": "Abmelden",
   "chrome.language": "Sprache",
-
   "common.add": "Hinzufügen",
   "common.cancel": "Abbrechen",
   "common.close": "Schließen",
@@ -33,7 +37,6 @@
   "common.save": "Speichern",
   "common.start": "Starten",
   "common.stop": "Stoppen",
-
   "state.live": "Live",
   "state.reconnecting": "Verbindet neu",
   "state.starting": "Startet",

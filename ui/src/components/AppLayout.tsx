@@ -56,17 +56,17 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
-  { to: "/sources", label: "Sources", icon: RadioTower },
+  { to: "/sources", labelKey: "nav.sources", icon: RadioTower },
   { to: "/meters", labelKey: "nav.meters", icon: AudioLines },
   { to: "/routing", labelKey: "nav.routing", icon: Sliders },
   { to: "/renditions", labelKey: "nav.renditions", icon: Layers },
   { to: "/playout", labelKey: "nav.playout", icon: Radio },
-  { to: "/library", label: "Library", icon: Library },
+  { to: "/library", labelKey: "nav.library", icon: Library },
   { to: "/recordings", labelKey: "nav.recordings", icon: Disc },
-  { to: "/clips", label: "Clips", icon: Scissors },
-  { to: "/chat", label: "Chat", icon: MessagesSquare },
-  { to: "/jobs", label: "Jobs", icon: ListChecks },
-  { to: "/automation", label: "Automation", icon: CalendarClock },
+  { to: "/clips", labelKey: "nav.clips", icon: Scissors },
+  { to: "/chat", labelKey: "nav.chat", icon: MessagesSquare },
+  { to: "/jobs", labelKey: "nav.jobs", icon: ListChecks },
+  { to: "/automation", labelKey: "nav.automation", icon: CalendarClock },
   { to: "/monitoring", labelKey: "nav.monitoring", icon: Activity },
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
 ];
