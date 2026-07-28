@@ -53,7 +53,7 @@
 # ---------- stage 1: build the web UI ----------
 # A copy of the default Dockerfile's stage, deliberately: see Dockerfile.cuda
 # for why these are not factored into a shared base image.
-FROM node:24-alpine AS ui
+FROM node:26-alpine AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json* ./
 RUN npm ci
