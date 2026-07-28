@@ -109,8 +109,15 @@ func arm() {
 	call("PUT", "/jobs/policy", policy)
 
 	rid := int64(recs[0]["id"].(float64))
+	// Deliberately EXPENSIVE. This section has to catch the job in "running"
+	// long enough to kill the server underneath it, and a cheap proxy of a
+	// short test recording finishes between two polls -- the job went
+	// queued -> running -> done unobserved, and the section reported "the
+	// released job never started" about a job that had already finished.
+	// Upscaling to 2160 at crf 0 buys seconds of encode instead of
+	// milliseconds.
 	out := call("POST", fmt.Sprintf("/library/recordings/%d/jobs/media.proxy", rid),
-		map[string]any{"height": 1080, "crf": 6})
+		map[string]any{"height": 2160, "crf": 0})
 	id := int64(out["job"].(map[string]any)["id"].(float64))
 	fmt.Fprintf(os.Stderr, "queued job %d in manual mode\n", id)
 
@@ -118,10 +125,14 @@ func arm() {
 	// changing the policy for every other job of its kind.
 	call("POST", fmt.Sprintf("/jobs/%d/release", id), nil)
 
+	// 100ms, not a second. "running" is a state this job passes THROUGH, and
+	// the sampling interval has to be short relative to how long it lasts --
+	// polling once a second for a state that lasts under a second is a
+	// coin flip dressed up as a check.
 	deadline := time.Now().Add(60 * time.Second)
 	var last map[string]any
 	for time.Now().Before(deadline) {
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 		last = get(fmt.Sprintf("/jobs/%d", id))
 		if last["state"] == "running" {
 			fmt.Println(id) // stdout is the contract with the shell
@@ -130,8 +141,11 @@ func arm() {
 	}
 	// The queue explains itself; quoting it turns "it did not start" into
 	// something actionable rather than a sentence that needs re-derivation.
-	die("the released job never started (state %q, reason %q), so a crash "+
-		"could not be staged", last["state"], last["reason"])
+	// "done" here means the opposite of what the message used to imply: the
+	// job ran and finished, and this poller was too slow to see it.
+	die("never observed the job in 'running' (last state %v, reason %v) -- if "+
+		"that state is 'done' the job was too quick to catch, not stuck",
+		last["state"], last["reason"])
 }
 
 // check runs after the restart.
