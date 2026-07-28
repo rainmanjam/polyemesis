@@ -86,7 +86,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 #
 # Floating at 24.04, not pinned to a point release, so rebuilds collect
 # security updates. Verified to exist on 2026-07-26.
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # Ubuntu 24.04's FFmpeg is built with VA-API (verified: `ffmpeg -encoders` in
 # ubuntu:24.04 lists h264_vaapi, hevc_vaapi, h264_qsv and hevc_qsv). It is NOT
