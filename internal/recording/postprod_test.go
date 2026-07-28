@@ -2,11 +2,13 @@ package recording
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
 // The bug this pins was visible only in a browser: one continuous 70-second
@@ -156,5 +158,101 @@ func TestSweepDerivedTreatsAnEmptyIndexAsUnknownRatherThanOrphaned(t *testing.T)
 	m.sweepDerived()
 	if _, err := os.Stat(kept.Proxy); err != nil {
 		t.Error("the sweep deleted a proxy whose master is still indexed")
+	}
+}
+
+func TestTranscriptsOfDeletedRecordingsAreSwept(t *testing.T) {
+	m, _, store := newManager(t)
+
+	dir := filepath.Join(m.dir, transcribe.TranscriptsSubdir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// One transcript per format for a recording that still exists, and one for
+	// a recording that is gone. Retention capped the recordings directory but
+	// never looked in here, so the orphan used to live forever.
+	for _, name := range []string{
+		"rec-keep.srt", "rec-keep.vtt", "rec-keep.txt",
+		"rec-gone.srt", "rec-gone.vtt",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	if _, err := store.SQL().Exec(
+		`INSERT INTO recordings (filename, started_at) VALUES ('rec-keep.mkv', 1)`); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+
+	m.sweepDerived()
+
+	for _, name := range []string{"rec-keep.srt", "rec-keep.vtt", "rec-keep.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was deleted although its recording still exists", name)
+		}
+	}
+	for _, name := range []string{"rec-gone.srt", "rec-gone.vtt"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s survived although its recording is gone", name)
+		}
+	}
+}
+
+func TestAnEmptyIndexSweepsNoTranscripts(t *testing.T) {
+	m, _, _ := newManager(t)
+	dir := filepath.Join(m.dir, transcribe.TranscriptsSubdir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rec.srt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// An empty index means "cannot tell", never "everything is an orphan" --
+	// a scan that failed halfway must not be read as permission to delete the
+	// lot. Same rule sweepDerived and SweepStems already follow.
+	m.sweepDerived()
+	if _, err := os.Stat(filepath.Join(dir, "rec.srt")); err != nil {
+		t.Error("an empty recordings index was treated as permission to delete transcripts")
+	}
+}
+
+func TestTranscriptSweepKeepsRecordingsWhoseNameContainsDots(t *testing.T) {
+	survives := map[string]bool{"2026-07-27.session.1": true}
+	// The base may itself contain dots, so there is no single "strip the
+	// extension" that is right for every name. Ambiguity resolves towards
+	// keeping: a stray transcript costs kilobytes, deleting a live one loses
+	// the only searchable record of what was said.
+	if !transcriptBelongsToSurvivor("2026-07-27.session.1.srt", survives) {
+		t.Error("a transcript of a surviving dotted recording was treated as an orphan")
+	}
+	if transcriptBelongsToSurvivor("2026-07-27.session.2.srt", survives) {
+		t.Error("a transcript of a different recording was treated as surviving")
+	}
+}
+
+func TestClipsAreNotSweptWithTheirRecording(t *testing.T) {
+	m, _, store := newManager(t)
+
+	// A clip is the thing the operator chose to keep -- often the only reason
+	// the session was recorded at all. Deleting it because the hours-long
+	// master aged out would destroy the artifact rather than the byproduct.
+	clipDir := filepath.Join(m.dir, "clips")
+	if err := os.MkdirAll(clipDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	keep := filepath.Join(clipDir, "rec-gone-highlight.mp4")
+	if err := os.WriteFile(keep, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := store.SQL().Exec(
+		`INSERT INTO recordings (filename, started_at) VALUES ('rec-keep.mkv', 1)`); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+
+	m.sweepDerived()
+
+	if _, err := os.Stat(keep); err != nil {
+		t.Error("a clip was deleted because its source recording is gone; " +
+			"clips need their own retention, not the master's")
 	}
 }

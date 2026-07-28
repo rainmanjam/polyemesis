@@ -56,6 +56,20 @@ publish() {
     -f mpegts "srt://$CTR:$2?mode=caller&latency=200000&transtype=live" >/dev/null 2>&1
 }
 
+# publish_token <name> <sharedPort> <token> <freq> <seconds>
+# Addresses a programme by putting its publish token in the SRT streamid, which
+# is what OBS does. FFmpeg exposes libsrt's streamid directly in the URL.
+publish_token() {
+  docker run -d --rm --name "$1" --network "$NET" --entrypoint ffmpeg "$IMAGE" \
+    -hide_banner -loglevel error -re \
+    -f lavfi -i "testsrc2=size=640x360:rate=30" \
+    -f lavfi -i "sine=frequency=$4:sample_rate=48000" \
+    -map 0:v -map 1:a \
+    -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -b:v 1000k \
+    -c:a aac -b:a 128k -ac 2 -t "$5" \
+    -f mpegts "srt://$CTR:$2?mode=caller&latency=200000&transtype=live&streamid=$3" >/dev/null 2>&1
+}
+
 rms() {
   inctr "cd /data/recordings && ffmpeg -hide_banner -nostats -i $1 \
     -af 'bandpass=f=$2:width_type=h:w=$3,astats=metadata=1:reset=0' -f null - 2>&1 \
@@ -74,7 +88,7 @@ docker volume create "$VOL" >/dev/null 2>&1
 # Both ingest ports published. 6001 is where the second source lands once the
 # server moves it off the first source's 6000.
 docker run -d --name "$CTR" --network "$NET" \
-  -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" \
+  -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" -p "6100:6100/udp" \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 
 healthy=no
@@ -160,7 +174,7 @@ fi
 step "5. Survives a container replacement"
 docker rm -f "$CTR" >/dev/null 2>&1
 docker run -d --name "$CTR" --network "$NET" \
-  -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" \
+  -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" -p "6100:6100/udp" \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 sleep 14
 AFTER=$(inctr 'ps -o args | grep -c "mode=listener"' | tr -d ' ')
@@ -168,6 +182,71 @@ if [ "${AFTER:-0}" -ge 2 ] 2>/dev/null; then
   ok "both sources came back after the container was destroyed ($AFTER listeners)"
 else
   bad "only $AFTER listener(s) after restart; a source did not persist"
+fi
+
+step "6. One-port ingest: both programmes on a single port, routed by token"
+# Until now this suite only exercised per-source ports, so the token-demux path
+# had no Docker coverage at all -- it was proven against a live binary once, by
+# hand. This closes that.
+O=$(drive oneport "$BASE" 6100)
+case "$O" in *ONEPORT_OK*) ok "one-port SRT listener enabled" ;;
+             *) bad "could not enable one-port ingest: $O" ;; esac
+sleep 4
+
+# "<id> <token>" per source.
+TOKENS=$(drive tokens "$BASE")
+TOK1=$(echo "$TOKENS" | awk '$1==1 {print $2}')
+TOK2=$(echo "$TOKENS" | awk -v id="$VID" '$1==id {print $2}')
+if [ -n "$TOK1" ] && [ -n "$TOK2" ]; then
+  ok "both sources have a publish token"
+else
+  bad "could not read publish tokens"
+fi
+
+# Fresh outputs so this section measures its own traffic.
+drive destfor "$BASE" 1 h-oneport h1.mkv 0 >/dev/null
+drive destfor "$BASE" "$VID" v-oneport v1.mkv 0 >/dev/null
+drive startall "$BASE" >/dev/null
+
+# 300 Hz to the horizontal token, 5000 Hz to the vertical one -- SAME PORT.
+publish_token pub-h 6100 "$TOK1" 300 30
+publish_token pub-v 6100 "$TOK2" 5000 30
+sleep 34
+drive stopall "$BASE" >/dev/null
+sleep 12
+
+P3=$(rms h1.mkv 300 100);  P50=$(rms h1.mkv 5000 400)
+Q3=$(rms v1.mkv 300 100);  Q50=$(rms v1.mkv 5000 400)
+if [ -n "$P3" ] && [ -n "$Q50" ]; then
+  printf "        horizontal (token) 300Hz %s   5000Hz %s\n" "$P3" "$P50"
+  printf "        vertical   (token) 300Hz %s   5000Hz %s\n" "$Q3" "$Q50"
+  louder_than "$P3" "-45"  && ok "token-addressed horizontal received its programme" \
+                           || bad "horizontal token delivered nothing (300Hz $P3)"
+  louder_than "$Q50" "-45" && ok "token-addressed vertical received its programme" \
+                           || bad "vertical token delivered nothing (5000Hz $Q50)"
+  # The assertion that matters: one port, and the two programmes still never mix.
+  if louder_than "$P3" "$(awk -v x="$P50" 'BEGIN{print x+20}')"; then
+    ok "on ONE port, the horizontal programme did not receive the vertical one"
+  else
+    bad "programmes crossed on the shared port: horizontal has 5000Hz at $P50 against its own $P3"
+  fi
+  if louder_than "$Q50" "$(awk -v x="$Q3" 'BEGIN{print x+20}')"; then
+    ok "on ONE port, the vertical programme did not receive the horizontal one"
+  else
+    bad "programmes crossed on the shared port: vertical has 300Hz at $Q3 against its own $Q50"
+  fi
+else
+  bad "could not measure the one-port outputs"
+fi
+
+# A wrong token must be refused rather than landing anywhere.
+docker rm -f pub-bad >/dev/null 2>&1
+if publish_token pub-bad 6100 "not-a-real-token" 1000 6; then sleep 9; fi
+BADLOG=$(docker logs "$CTR" 2>&1 | grep -c "token not recognised")
+if [ "${BADLOG:-0}" -ge 1 ] 2>/dev/null; then
+  ok "an unrecognised token was refused"
+else
+  bad "an unrecognised token was not refused"
 fi
 
 printf "\n\033[1m%d passed, %d failed\033[0m\n" "$pass" "$fail"
