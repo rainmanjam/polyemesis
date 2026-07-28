@@ -61,9 +61,18 @@ stop() { pkill -f "polyemesis -addr :$1" 2>/dev/null; sleep 0.6; }
 # mode_line <dir> -> whatever the startup banner said tls resolved to.
 mode_line() { awk '/^  tls /{print $2; exit}' "$1/server.log"; }
 
-# perms <file> -> octal mode, portably enough for macOS and Linux.
+# perms <file> -> octal mode, on both BSD and GNU stat.
+#
+# The obvious spelling -- `stat -f '%Lp' || stat -c '%a'` -- looks portable and
+# is not. On GNU stat, -f is a VALID flag meaning "file system status", so it
+# SUCCEEDS and prints something like `File: "data/tls/ca.key"`. The || never
+# fires, and the caller compares that string against 0600 and reports a
+# permissions failure on a file whose permissions are correct.
+#
+# That is what this suite did on Linux while passing on macOS for two months.
+# GNU first, because its failure on BSD is a real failure.
 perms() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
 }
 
 # fingerprint_file <pem> -> the SHA-256 fingerprint of the first certificate.
