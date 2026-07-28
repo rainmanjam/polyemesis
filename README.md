@@ -283,7 +283,7 @@ Track 1 = everything, track 2 = clean (no music), track 3 = mic only.
 | Field | Value |
 |---|---|
 | FFmpeg Output Type | **Output to URL** |
-| File path or URL | `srt://YOUR_SERVER:6000?mode=caller&transtype=live&latency=200000` |
+| File path or URL | `srt://YOUR_SERVER:6000?mode=caller&transtype=live&latency=200000&streamid=YOUR_TOKEN` |
 | Container Format | `mpegts` |
 | Muxer Settings | *(leave blank)* |
 | Video Bitrate | e.g. `6000 Kbps` |
@@ -297,6 +297,13 @@ Track 1 = everything, track 2 = clean (no music), track 3 = mic only.
 > The `latency` value is in **microseconds**. `200000` is 200 ms and must match
 > the latency set in polyemesis → Settings → Ingest. Writing `200` there gives
 > a 0.2 ms buffer and a stream that falls apart on the first jitter.
+
+> **`streamid` is the address, not an extra.** One SRT port serves every source
+> and they are told apart by their publish token, so a publisher that presents
+> no token — or an unrecognised one — is refused rather than guessed at. Copy
+> the whole URL from **Sources**, which fills the token in for you. Rotating a
+> token keeps the old one working for five minutes, so you can change it
+> without cutting a live stream.
 
 Copy the exact URL from the polyemesis dashboard — it renders your server's
 hostname and current settings, including the passphrase if you set one.
