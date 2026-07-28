@@ -118,6 +118,33 @@ fi
 
 step "Summary"
 printf "  %d passed, %d failed\n\n" "$pass" "$fail"
+
+# A count check, not just a failure check.
+#
+# This suite reported "12 passed, 0 failed / PASSED" and, on a loaded machine,
+# "7 passed, 0 failed / PASSED" -- because a driver that exits non-zero prints
+# FATAL and stops, and the sections after it simply never run. Zero failures
+# out of seven assertions is not a pass, it is five assertions that were never
+# asked, and nothing on screen distinguished the two.
+#
+# Shingo's fixed-value method: confirm the COUNT. A run that performs fewer
+# checks than the suite contains has not passed, whatever its failure tally
+# says.
+#
+# The usual cause is real and environmental rather than a code fault: the job
+# governor defers work while the machine is busy, so on a loaded box the
+# crash-recovery section cannot stage its job. That is the governor behaving as
+# designed. What was wrong was calling it a pass.
+EXPECTED_CHECKS=12
+total=$((pass + fail))
+if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
+  printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran; the rest never executed.\n" \
+    "$total" "$EXPECTED_CHECKS"
+  printf "  A section exited early -- look for FATAL above. On a loaded machine the\n"
+  printf "  job governor defers work, which starves the crash-recovery section.\n\n"
+  exit 1
+fi
+
 if [ "$fail" -eq 0 ]; then
   printf "  \033[32mPOST-PRODUCTION ACCEPTANCE PASSED\033[0m\n\n"
   exit 0
