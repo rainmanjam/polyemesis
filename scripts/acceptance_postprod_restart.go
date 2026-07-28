@@ -68,6 +68,39 @@ func arm() {
 		die("no recordings to submit a job against")
 	}
 
+	// Wait for the queue to DRAIN first.
+	//
+	// Step 2 submits five 1080p media.proxy jobs to measure the governor, and
+	// leaves whatever is still running when it finishes. This section then adds
+	// one more and waits 60s for it to start -- but it is behind those, and a
+	// 1080p transcode on a two-core runner does not clear in a minute. The job
+	// never reached "running" and the section reported that it could not stage
+	// a crash, which reads as a product fault and is not one: it is one test
+	// section inheriting another's work.
+	//
+	// Cheap on a fast machine (the queue is usually already empty) and the
+	// difference between a reliable section and an intermittent one elsewhere.
+	drainDeadline := time.Now().Add(180 * time.Second)
+	for {
+		running := 0
+		if items, isList := get("/jobs?state=running")["jobs"].([]any); isList {
+			for _, it := range items {
+				if m, isMap := it.(map[string]any); isMap && m["state"] == "running" {
+					running++
+				}
+			}
+		}
+		if running == 0 {
+			break
+		}
+		if time.Now().After(drainDeadline) {
+			die("%d job(s) from the previous section never finished, so this one "+
+				"cannot get a clean slot", running)
+		}
+		fmt.Fprintf(os.Stderr, "waiting for %d job(s) to drain\n", running)
+		time.Sleep(2 * time.Second)
+	}
+
 	// Manual mode first, so the job cannot start before we are watching, and
 	// so the stream gate plays no part in this measurement.
 	policy := get("/jobs/policy")["policy"].(map[string]any)
@@ -86,14 +119,19 @@ func arm() {
 	call("POST", fmt.Sprintf("/jobs/%d/release", id), nil)
 
 	deadline := time.Now().Add(60 * time.Second)
+	var last map[string]any
 	for time.Now().Before(deadline) {
 		time.Sleep(time.Second)
-		if get(fmt.Sprintf("/jobs/%d", id))["state"] == "running" {
+		last = get(fmt.Sprintf("/jobs/%d", id))
+		if last["state"] == "running" {
 			fmt.Println(id) // stdout is the contract with the shell
 			return
 		}
 	}
-	die("the released job never started, so a crash could not be staged")
+	// The queue explains itself; quoting it turns "it did not start" into
+	// something actionable rather than a sentence that needs re-derivation.
+	die("the released job never started (state %q, reason %q), so a crash "+
+		"could not be staged", last["state"], last["reason"])
 }
 
 // check runs after the restart.

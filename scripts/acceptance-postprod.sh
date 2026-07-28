@@ -91,12 +91,16 @@ DRIVER=${PIPESTATUS[0]}
 # at startup is the only thing standing between that and a job stranded forever.
 step "3. A job interrupted by a crash is recovered, not stranded"
 
-JOB=$(go run "$SCRIPTS/acceptance_postprod_restart.go" "$PORT" arm 2>/dev/null | tail -1)
+# stderr to a file rather than /dev/null: it carries the diagnosis when arm
+# fails, and discarding it is why this section's failures used to be a bare
+# sentence that had to be re-derived from source every time.
+JOB=$(go run "$SCRIPTS/acceptance_postprod_restart.go" "$PORT" arm 2>"$WORK/arm.err" | tail -1)
 # Numeric, not merely non-empty. "Non-empty" is satisfied by an error message,
 # which is exactly how a failure here once announced itself as a passing check.
 case "$JOB" in ''|*[!0-9]*) JOB="" ;; esac
 if [ -z "$JOB" ]; then
   bad "could not get a job running, so a crash could not be staged"
+  sed 's/^/        /' "$WORK/arm.err" 2>/dev/null | tail -5
 else
   ok "job $JOB is running"
 
