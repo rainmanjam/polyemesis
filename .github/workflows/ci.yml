@@ -24,6 +24,7 @@ jobs:
   go:
     name: go build, vet, test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -51,6 +52,7 @@ jobs:
   ui:
     name: ui typecheck, lint, build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ui
@@ -74,6 +76,7 @@ jobs:
   cross:
     name: cross-compile all release targets
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -100,6 +103,7 @@ jobs:
     name: "container: ${{ matrix.suite }}"
     if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -158,6 +162,12 @@ jobs:
   acceptance:
     name: "acceptance: ${{ matrix.suite }}"
     runs-on: ubuntu-latest
+    # A ceiling, because GitHub's default is SIX HOURS. These suites publish
+    # real streams and wait on them, so the failure mode when something does
+    # not arrive is a wait, not a crash -- exactly the shape that sits there
+    # burning a runner. acceptance-renditions ran 25 minutes against a ~2
+    # minute local baseline before this existed.
+    timeout-minutes: 20
     strategy:
       # Never cancel siblings. When two suites break, both answers are wanted —
       # fail-fast would hide the second and turn one fix into two round trips.
