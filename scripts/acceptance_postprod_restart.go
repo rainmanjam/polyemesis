@@ -225,7 +225,17 @@ func get(path string) map[string]any {
 	return out
 }
 
+// die reports to STDERR, never stdout.
+//
+// stdout is the contract with the shell: `arm` prints the job id there and the
+// caller does JOB=$(... | tail -1). Printing a fatal error to stdout too made
+// the error message BECOME the job id -- so the caller's `[ -z "$JOB" ]` guard
+// saw a non-empty value, announced "job FATAL: the released job never started
+// ... is running" as a PASS, and then 404'd on GET /jobs/0.
+//
+// A real failure was reported as a pass and then surfaced as an unrelated
+// symptom five checks later. That is worse than the failure it was hiding.
 func die(f string, a ...any) {
-	fmt.Printf("FATAL: "+f+"\n", a...)
+	fmt.Fprintf(os.Stderr, "FATAL: "+f+"\n", a...)
 	os.Exit(1)
 }
