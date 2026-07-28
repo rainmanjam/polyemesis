@@ -1322,6 +1322,33 @@ are concentrated, because those are the parts whose bugs are only audible.
 
 Testing without OBS: see [`docs/TESTING.md`](docs/TESTING.md).
 
+## Documentation
+
+[`docs/`](docs/) has an [index](docs/README.md). The ones people reach for most:
+
+| | |
+|---|---|
+| [Quickstart](docs/QUICKSTART.md) | First stream in about five minutes |
+| [Install](docs/INSTALL.md) | Per-platform, including too-old FFmpeg |
+| [Configuration](docs/CONFIGURATION.md) | `config.yaml` vs the UI, and which is which |
+| [API](docs/API.md) | Every route, with authentication and an example |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Organised by what you observe |
+| [FAQ](docs/FAQ.md) | |
+| [Upgrading](docs/UPGRADING.md) | Migrations and rollback |
+
+## Contributing
+
+Pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, the
+conventions, and — importantly — the handful of constraints that are not
+negotiable, so you find out before writing rather than after.
+
+Security problems go through [SECURITY.md](SECURITY.md), not a public issue.
+It also states the threat model plainly, including what polyemesis deliberately
+does *not* defend, which is worth reading before you deploy it anywhere shared.
+
+See also [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Licence
 
 MIT.

@@ -1,0 +1,60 @@
+name: Feature request
+description: Something polyemesis should be able to do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before writing: polyemesis has some constraints that are not negotiable —
+        video is never re-encoded on a destination path, it ships as one static
+        binary with no cgo, and FFmpeg is driven through `os/exec` rather than
+        bindings. [CONTRIBUTING.md](https://github.com/rainmanjam/polyemesis/blob/main/CONTRIBUTING.md)
+        has the full list and the reasoning.
+
+        A request that needs one of those relaxed is still worth raising — just
+        say so, so the conversation starts in the right place.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do, and what stops you today? Describe the
+        situation rather than the feature — the best solution is often not the
+        one that first came to mind.
+      placeholder: |
+        I stream to three platforms and each wants a different loudness target.
+        Today I set one target and the other two are wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. If you already have a shape in mind, describe it.
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do instead right now
+      description: >
+        Genuinely useful. A painful workaround tells us how much this matters,
+        and sometimes reveals that a smaller change would do.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Roughly how big do you think this is
+      description: A guess is fine. It is a conversation starter, not a commitment.
+      options:
+        - A setting or a small change to something that exists
+        - A new capability in an existing area
+        - A new area of the product
+        - No idea
+    validations:
+      required: false
