@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
 import { Copy, Megaphone, Plus, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -398,8 +399,9 @@ export function Dashboard() {
     }
   };
 
-  const remove = async (id: number, name: string) => {
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  const confirmDelete = useConfirm<{ id: number; name: string }>();
+
+  const remove = async (id: number) => {
     await act(id, () => api.deleteDestination(id), "delete the destination");
     toast.success("Destination deleted.");
     setRefreshKey((k) => k + 1);
@@ -683,7 +685,7 @@ export function Dashboard() {
                   act(d.id, () => api.restartDestination(d.id), "restart the destination")
                 }
                 onEdit={() => openEdit(d.id)}
-                onDelete={() => remove(d.id, d.name)}
+                onDelete={() => confirmDelete.ask({ id: d.id, name: d.name })}
                 onRefreshKey={async () => {
                   await act(
                     d.id,
@@ -705,6 +707,17 @@ export function Dashboard() {
         onOpenChange={setDialogOpen}
         destination={editing}
         onSaved={() => setRefreshKey((k) => k + 1)}
+      />
+      <ConfirmDestructive
+        open={confirmDelete.open}
+        onOpenChange={confirmDelete.onOpenChange}
+        subject={confirmDelete.target?.name ?? ""}
+        title={`Delete “${confirmDelete.target?.name}”?`}
+        description="This removes the destination and its routing profile. The platform is untouched, and you can add it back — but the audio routing you set up for it is gone."
+        confirmLabel="Delete destination"
+        onConfirm={async () => {
+          if (confirmDelete.target) await remove(confirmDelete.target.id);
+        }}
       />
     </div>
   );

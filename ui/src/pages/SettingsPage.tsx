@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
+import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
 import {
+  AlertTriangle,
   Check,
   Copy,
   Download,
@@ -18,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useIngestLive } from "@/hooks/useLiveData";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -155,6 +158,10 @@ function IngestSettings({
 }) {
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
+  // This page had no idea whether a broadcast was running: it never read live
+  // state at all, so changing an SRT port mid-stream dropped every viewer with
+  // nothing on screen having said so.
+  const live = useIngestLive();
 
   const copyUrl = async () => {
     if (!system?.ingestUrl) return;
@@ -320,8 +327,28 @@ function IngestSettings({
             </>
           )}
 
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save ingest settings
+          {/* Saving ingest settings reconciles the ingest, which restarts the
+              FFmpeg child and drops every viewer. That is sometimes exactly
+              what an operator means to do -- so this is a warning stating the
+              consequence at the moment of decision, not a control refusing it.
+              The button says what will happen rather than "Save", because a
+              label an operator reads is worth more than a dialog they dismiss. */}
+          {live && (
+            <p className="flex items-start gap-1.5 text-[11px] text-warn">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              A stream is arriving now. Saving restarts the ingest, which
+              disconnects the encoder and drops everyone watching. The encoder
+              will reconnect on its own once it is pointed at the new settings.
+            </p>
+          )}
+          <Button
+            size="sm"
+            variant={live ? "destructive" : "default"}
+            onClick={() => onSave(draft)}
+            disabled={saving}
+          >
+            {saving ? <Loader2 className="animate-spin" /> : <Save />}
+            {live ? "Save and drop the live stream" : "Save ingest settings"}
           </Button>
         </CardContent>
       </Card>
@@ -877,15 +904,16 @@ function PlatformCredCard({
     }
   };
 
+  const confirmCreds = useConfirm<{ name: string }>();
+  const confirmDisconnect = useConfirm<PlatformAccount>();
+
   const remove = async () => {
-    if (!window.confirm(`Remove the ${guide.name} developer credentials?`)) return;
     await api.deleteCreds(guide.platform);
     toast.success("Credentials removed.");
     onChanged();
   };
 
   const disconnect = async (a: PlatformAccount) => {
-    if (!window.confirm(`Disconnect ${a.accountName}?`)) return;
     await api.deleteAccount(a.id);
     toast.success("Account disconnected.");
     onChanged();
@@ -993,7 +1021,7 @@ function PlatformCredCard({
                       <ExternalLink /> Connect an account
                     </a>
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={remove}>
+                  <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
                     <Trash2 /> Remove
                   </Button>
                 </>
@@ -1015,7 +1043,7 @@ function PlatformCredCard({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      onClick={() => disconnect(a)}
+                      onClick={() => confirmDisconnect.ask(a)}
                       aria-label="Disconnect"
                     >
                       <Unplug />
@@ -1031,6 +1059,27 @@ function PlatformCredCard({
           </>
         )}
       </CardContent>
+      <ConfirmDestructive
+        open={confirmCreds.open}
+        onOpenChange={confirmCreds.onOpenChange}
+        subject={confirmCreds.target?.name ?? ""}
+        title="Remove these developer credentials?"
+        description="Every account connected through this app stops refreshing its token and will need reconnecting. The client secret is not recoverable from here — you would create a new app at the platform."
+        requireTyping
+        confirmLabel="Remove credentials"
+        onConfirm={remove}
+      />
+      <ConfirmDestructive
+        open={confirmDisconnect.open}
+        onOpenChange={confirmDisconnect.onOpenChange}
+        subject={confirmDisconnect.target?.accountName ?? ""}
+        title="Disconnect this account?"
+        description="Destinations using it keep their settings but stop refreshing their stream key. You can reconnect the same account afterwards."
+        confirmLabel="Disconnect"
+        onConfirm={async () => {
+          if (confirmDisconnect.target) await disconnect(confirmDisconnect.target);
+        }}
+      />
     </Card>
   );
 }

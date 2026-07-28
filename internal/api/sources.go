@@ -44,6 +44,14 @@ type sourceView struct {
 	// uplink and not about the server -- and answering it per programme is
 	// something Restreamer's UI does not do.
 	Link *srtserver.LinkStats `json:"link,omitempty"`
+	// Destinations and Renditions are what a delete would take with it.
+	//
+	// Counts rather than prose, and computed server-side rather than guessed by
+	// the UI: a confirmation that says "this also removes 3 destinations and 1
+	// rendition" is a decision, and one that says "and its destinations" is a
+	// click. Shingo's fixed-value method -- confirm a number.
+	Destinations int `json:"destinations"`
+	Renditions   int `json:"renditions"`
 	// Running reports whether an engine actually came up for this source. A
 	// source whose ingest port was already taken is stored but not running, and
 	// a UI that showed it as configured-and-fine would be lying about why

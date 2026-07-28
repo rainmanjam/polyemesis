@@ -40,7 +40,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
+import { LIMITS } from "@/lib/limits";
+import { cn } from "@/lib/utils";
 import type { Source, SourceView } from "@/lib/types";
 
 /* ===========================================================================
@@ -216,27 +219,27 @@ export function SourcesPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete “{deleting?.name}”?</DialogTitle>
-            <DialogDescription>
-              Its destinations and renditions go with it — they describe where this
-              programme goes and mean nothing without it. Recordings are kept: the
-              files are still on disk and still playable, they just stop being
-              attributed to a source.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleting(null)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={() => void remove()}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDestructive
+        open={deleting !== null}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        subject={deleting?.name ?? ""}
+        title={`Delete “${deleting?.name}”?`}
+        description={
+          <>
+            Its destinations and renditions go with it — they describe where this
+            programme goes and mean nothing without it. Recordings are kept: the
+            files are still on disk and still playable, they just stop being
+            attributed to a source.
+          </>
+        }
+        requireTyping
+        consequences={[
+          { label: "Destinations", count: deleting?.destinations ?? 0 },
+          { label: "Renditions", count: deleting?.renditions ?? 0 },
+        ]}
+        confirmLabel="Delete source"
+        onConfirm={remove}
+      />
     </div>
   );
 }
@@ -256,9 +259,19 @@ function SourceCard({
   onRotate: () => void;
   onDelete: () => void;
 }) {
-  const ing = source.ingest;
+  // A LOCAL DRAFT, not a per-field commit.
+  //
+  // These fields used to write straight through on blur, and every write
+  // restarts this source's ingest. That turned tabbing out of a port field into
+  // a dropped broadcast -- an outage as the side effect of a keystroke nobody
+  // meant as a decision. Edits now accumulate here and go nowhere until Apply.
+  const [draft, setDraft] = useState(source.ingest);
+  useEffect(() => setDraft(source.ingest), [source.ingest]);
+
+  const ing = draft;
   const setIngest = (changes: Partial<Source["ingest"]>) =>
-    onPatch({ ingest: { ...ing, ...changes } });
+    setDraft((d) => ({ ...d, ...changes }));
+  const dirty = JSON.stringify(draft) !== JSON.stringify(source.ingest);
 
   return (
     <Card className={source.running ? undefined : "border-warn/40"}>
@@ -331,24 +344,25 @@ function SourceCard({
               <NumberField
                 label="SRT port"
                 value={ing.srt.port}
-                onCommit={(n) => setIngest({ srt: { ...ing.srt, port: n } })}
+                min={LIMITS.port.min}
+                max={LIMITS.port.max}
+                onChange={(n) => setIngest({ srt: { ...ing.srt, port: n } })}
               />
               <NumberField
                 label="Latency (ms)"
                 value={ing.srt.latencyMs}
-                onCommit={(n) => setIngest({ srt: { ...ing.srt, latencyMs: n } })}
+                min={LIMITS.srtLatencyMs.min}
+                max={LIMITS.srtLatencyMs.max}
+                onChange={(n) => setIngest({ srt: { ...ing.srt, latencyMs: n } })}
               />
               <div className="flex flex-col gap-1">
                 <Label>Passphrase</Label>
                 <Input
                   className="h-7 text-[11px]"
                   type="password"
-                  defaultValue={ing.srt.passphrase}
+                  value={ing.srt.passphrase}
                   placeholder="10–79 chars"
-                  onBlur={(e) =>
-                    e.target.value !== ing.srt.passphrase &&
-                    setIngest({ srt: { ...ing.srt, passphrase: e.target.value } })
-                  }
+                  onChange={(e) => setIngest({ srt: { ...ing.srt, passphrase: e.target.value } })}
                 />
               </div>
             </>
@@ -359,33 +373,56 @@ function SourceCard({
               <NumberField
                 label="RTMP port"
                 value={ing.rtmp.port}
-                onCommit={(n) => setIngest({ rtmp: { ...ing.rtmp, port: n } })}
+                min={LIMITS.port.min}
+                max={LIMITS.port.max}
+                onChange={(n) => setIngest({ rtmp: { ...ing.rtmp, port: n } })}
               />
               <div className="flex flex-col gap-1">
                 <Label>App</Label>
                 <Input
                   className="h-7 text-[11px]"
-                  defaultValue={ing.rtmp.app}
-                  onBlur={(e) =>
-                    e.target.value !== ing.rtmp.app &&
-                    setIngest({ rtmp: { ...ing.rtmp, app: e.target.value } })
-                  }
+                  value={ing.rtmp.app}
+                  onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, app: e.target.value } })}
                 />
               </div>
               <div className="flex flex-col gap-1">
                 <Label>Stream key</Label>
                 <Input
                   className="h-7 text-[11px]"
-                  defaultValue={ing.rtmp.streamKey}
-                  onBlur={(e) =>
-                    e.target.value !== ing.rtmp.streamKey &&
-                    setIngest({ rtmp: { ...ing.rtmp, streamKey: e.target.value } })
-                  }
+                  value={ing.rtmp.streamKey}
+                  onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, streamKey: e.target.value } })}
                 />
               </div>
             </>
           )}
         </div>
+
+        {dirty && (
+          /* The consequence, at the moment of decision. Applying reconciles
+             this source's ingest, which restarts its FFmpeg child; if an
+             encoder is connected that is a dropped broadcast. Stated on the
+             button rather than in a dialog, because a label is read and a
+             dialog is dismissed. */
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-warn-dim/20 px-2 py-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn" />
+            <span className="min-w-0 flex-1 text-[11px]">
+              {source.publishing
+                ? "An encoder is publishing to this source. Applying restarts its ingest and drops everyone watching."
+                : "Unsaved ingest changes. Applying restarts this source's ingest."}
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setDraft(source.ingest)} disabled={busy}>
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              variant={source.publishing ? "destructive" : "default"}
+              onClick={() => onPatch({ ingest: draft })}
+              disabled={busy}
+            >
+              {source.publishing ? "Apply and drop the stream" : "Apply"}
+            </Button>
+          </div>
+        )}
 
         {/* What to paste into the encoder. */}
         {Object.entries(source.publishUrls).map(([proto, url]) =>
@@ -474,29 +511,50 @@ function SourceCard({
   );
 }
 
-/** A number input that commits on blur rather than per keystroke.
+/** A bounded number input.
  *
- *  Per-keystroke would PUT a partial port — typing "6001" sends 6, 60, 600 —
- *  and each of those restarts the ingest. */
+ *  min/max/step are on the element itself, so the browser refuses an
+ *  out-of-range value before it can be submitted. The server validates the same
+ *  ranges -- that is the real guarantee -- but a form that accepts 70000 into a
+ *  port field and reports the problem a round trip later has made the operator
+ *  do the checking. Refusing the keystroke is the control; validating the
+ *  request is the backstop.
+ *
+ *  Bounds come from lib/limits.ts, which mirrors the Go constants in one place
+ *  rather than being retyped per field. */
 function NumberField({
   label,
   value,
-  onCommit,
+  min,
+  max,
+  onChange,
 }: {
   label: string;
   value: number;
-  onCommit: (n: number) => void;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
 }) {
+  const bad = value < min || value > max;
   return (
     <div className="flex flex-col gap-1">
-      <Label>{label}</Label>
+      <Label>
+        {label}
+        <span className="ml-1 font-normal text-subtle-foreground">
+          {min}–{max}
+        </span>
+      </Label>
       <Input
-        className="tnum h-7 font-mono text-[11px]"
+        className={cn("tnum h-7 font-mono text-[11px]", bad && "border-down")}
         type="number"
-        defaultValue={value}
-        onBlur={(e) => {
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(e) => {
           const n = Number(e.target.value);
-          if (Number.isFinite(n) && n !== value) onCommit(n);
+          if (Number.isFinite(n)) onChange(n);
         }}
       />
     </div>

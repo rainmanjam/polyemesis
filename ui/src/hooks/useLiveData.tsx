@@ -172,6 +172,31 @@ export function useLiveData(): LiveData {
   return ctx;
 }
 
+/** Whether a broadcast is actually going out right now.
+ *
+ *  One definition, in one place, because several pages need to ask and the
+ *  obvious answer is wrong. `status.ingest.state === "running"` is NOT it: an
+ *  SRT listener sits in "running" the whole time it is merely waiting for an
+ *  encoder to connect, so a page trusting that would warn about dropping a
+ *  stream that does not exist — and an operator who is warned about nothing
+ *  stops reading warnings.
+ *
+ *  The honest signal is bytes arriving: the layout has been probed AND the
+ *  recent bitrate is non-zero. Both, because the probe survives the publisher
+ *  going away and the bitrate series briefly reads zero between reconnects.
+ *
+ *  Errs towards saying NOT live. A missed warning costs a stream that was
+ *  probably about to be reconfigured anyway; a false one trains the operator to
+ *  click through the real thing. */
+export function useIngestLive(): boolean {
+  const { source, bitrate } = useLiveData();
+  if (!source?.probed) return false;
+  // The last few seconds only. A stream that stopped a minute ago leaves a
+  // long tail of samples behind it.
+  const recent = bitrate.slice(-5);
+  return recent.some((s) => s.kbps > 0);
+}
+
 /** The ingest track layout, falling back to six stereo tracks before the
  *  stream has been probed so the routing editor always has something to draw. */
 export function useSourceTracks(): SourceTrack[] {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
 import {
   AlertTriangle,
   Bell,
@@ -423,8 +424,9 @@ function AlertRules({
     }
   };
 
+  const confirmDelete = useConfirm<AlertRule>();
+
   const remove = async (r: AlertRule) => {
-    if (!window.confirm(`Delete the alert rule "${r.name}"?`)) return;
     try {
       await autoApi.del(`/alerts/rules/${r.id}`);
       toast.success("Alert rule deleted.");
@@ -533,7 +535,7 @@ function AlertRules({
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => remove(r)}
+                          onClick={() => confirmDelete.ask(r)}
                           aria-label="Delete"
                           className="text-muted-foreground hover:text-down"
                         >
@@ -580,6 +582,17 @@ function AlertRules({
           )}
         </CardContent>
       </Card>
+      <ConfirmDestructive
+        open={confirmDelete.open}
+        onOpenChange={confirmDelete.onOpenChange}
+        subject={confirmDelete.target?.name ?? ""}
+        title="Delete this alert rule?"
+        description="The rule stops firing. Its webhook endpoint is untouched, and you can recreate the rule."
+        confirmLabel="Delete rule"
+        onConfirm={async () => {
+          if (confirmDelete.target) await remove(confirmDelete.target);
+        }}
+      />
     </div>
   );
 }
@@ -807,8 +820,9 @@ function Schedules({
     }
   };
 
+  const confirmDelete = useConfirm<Schedule>();
+
   const remove = async (s: Schedule) => {
-    if (!window.confirm(`Delete the schedule "${s.name}"?`)) return;
     try {
       await autoApi.del(`/schedules/${s.id}`);
       toast.success("Schedule deleted.");
@@ -894,7 +908,7 @@ function Schedules({
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => remove(s)}
+                          onClick={() => confirmDelete.ask(s)}
                           aria-label="Delete"
                           className="text-muted-foreground hover:text-down"
                         >
@@ -942,6 +956,17 @@ function Schedules({
           </p>
         </CardContent>
       </Card>
+      <ConfirmDestructive
+        open={confirmDelete.open}
+        onOpenChange={confirmDelete.onOpenChange}
+        subject={confirmDelete.target?.name ?? ""}
+        title="Delete this schedule?"
+        description="The schedule stops running. Anything it already started is unaffected."
+        confirmLabel="Delete schedule"
+        onConfirm={async () => {
+          if (confirmDelete.target) await remove(confirmDelete.target);
+        }}
+      />
     </div>
   );
 }

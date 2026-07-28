@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
 import {
   AudioLines,
   ChevronDown,
@@ -105,8 +106,9 @@ export function RecordingsPage() {
 
   const stemBytes = useMemo(() => stems.reduce((n, s) => n + s.bytes, 0), [stems]);
 
+  const confirmDelete = useConfirm<Recording>();
+
   const remove = async (rec: Recording) => {
-    if (!window.confirm(`Delete ${rec.filename}? This permanently removes the file.`)) return;
     try {
       await api.deleteRecording(rec.id);
       toast.success("Recording deleted.");
@@ -262,7 +264,7 @@ export function RecordingsPage() {
                               <Button
                                 variant="ghost"
                                 size="icon-sm"
-                                onClick={() => remove(r)}
+                                onClick={() => confirmDelete.ask(r)}
                                 aria-label="Delete"
                                 className="text-muted-foreground hover:text-down"
                               >
@@ -504,6 +506,18 @@ export function RecordingsPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDestructive
+        open={confirmDelete.open}
+        onOpenChange={confirmDelete.onOpenChange}
+        subject={confirmDelete.target?.filename ?? ""}
+        title="Delete this recording?"
+        description="The file is removed from disk, along with its proxies, thumbnails and transcript. This cannot be undone."
+        requireTyping
+        onConfirm={async () => {
+          if (confirmDelete.target) await remove(confirmDelete.target);
+        }}
+      />
     </div>
   );
 }
