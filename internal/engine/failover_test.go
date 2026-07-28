@@ -538,7 +538,13 @@ func TestADestinationRidesAPrimaryDownSlateBackCycleWithoutRestarting(t *testing
 		row: &db.Destination{ID: 1, Name: "twitch"}, proc: proc,
 		port: port, subName: "dest:1", hub: hub, spec: "unchanged",
 	}
+	// Under e.mu: the selector's sweep goroutine is already running and reads
+	// e.dests, so an unguarded write here is a genuine race -- one that only
+	// shows up when the sweep happens to land in the same moment, which is why
+	// it surfaced on CI rather than locally.
+	e.mu.Lock()
 	e.dests[1] = dest
+	e.mu.Unlock()
 	before := proc.Status()
 
 	t0 := time.Now()
@@ -575,7 +581,10 @@ func TestADestinationRidesAPrimaryDownSlateBackCycleWithoutRestarting(t *testing
 		feeds = append(feeds, feed.proc)
 
 		// The measurement, taken at every phase rather than only at the end.
-		if e.dests[1] != dest || dest.proc != proc {
+		e.mu.RLock()
+		stillThere := e.dests[1] == dest
+		e.mu.RUnlock()
+		if !stillThere || dest.proc != proc {
 			t.Fatalf("%s: the destination was replaced", p.name)
 		}
 		if got := proc.Status(); got.Restarts != before.Restarts {
