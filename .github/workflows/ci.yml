@@ -17,6 +17,14 @@ on:
   schedule:
     - cron: "17 6 * * 1"
 
+# One run per branch. A push that supersedes another cancels it rather than
+# leaving both to finish -- which matters here because these suites publish real
+# streams and wait on them, so a superseded run can sit for its full 20-minute
+# ceiling consuming a runner nobody is waiting on.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
