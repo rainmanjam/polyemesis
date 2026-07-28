@@ -321,4 +321,27 @@ else
 fi
 
 printf "\n\033[1m%d passed, %d failed, %d skipped\033[0m\n" "$pass" "$fail" "$skip"
+
+# Fixed-value guard: confirm the COUNT, not just the verdict.
+#
+# Most of this suite lives behind "if the container came up" / "if the file
+# exists" branches, so a run that fell over early still reaches this line and
+# prints "0 failed" -- which reads as success. That is not hypothetical: the
+# postprod suite once reported "7 passed, 0 failed -- PASSED" having silently
+# skipped five checks, and it took a second look to notice the total had moved.
+#
+# Skips count toward the total. A skip is a deliberate, reported decision (an
+# architecture this host cannot build); a check that never ran is not.
+EXPECTED_CHECKS=28
+total=$((pass + fail + skip))
+if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
+  printf "  \033[31mINCOMPLETE\033[0m  only %d of %d checks ran; the run stopped early\n\n" \
+    "$total" "$EXPECTED_CHECKS"
+  exit 1
+fi
+if [ "$total" -gt "$EXPECTED_CHECKS" ]; then
+  printf "  \033[33mNOTE\033[0m  %d checks ran, %d expected. If checks were added,\n" \
+    "$total" "$EXPECTED_CHECKS"
+  printf "        raise EXPECTED_CHECKS so the guard keeps its teeth.\n"
+fi
 [ "$fail" -eq 0 ]
