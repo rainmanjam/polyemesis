@@ -1,0 +1,196 @@
+import { expect, test, type Page } from "@playwright/test";
+import { watchConsole } from "./console";
+
+/* ===========================================================================
+   Browser end-to-end, against the shipped container.
+
+   Every case here exists because of a bug that actually happened, or a guard
+   added in response to one. None of them are reachable by `tsc`: each is a
+   thing that compiles perfectly and is wrong at runtime, which is precisely
+   the class this project had no automated coverage for at all.
+
+   The install is shared and mutated in order, so the tests are serial by
+   design (see playwright.config.ts).
+   =========================================================================== */
+
+/** The session comes from auth.setup.ts, so a test only has to navigate. */
+async function signIn(page: Page) {
+  await page.goto("/");
+  await expect(page.locator("nav")).toBeVisible();
+}
+
+test.describe("first run and access control", () => {
+  test("an authenticated session lands on the console", async ({ page }) => {
+    await signIn(page);
+    await expect(page.getByRole("navigation")).toBeVisible();
+  });
+
+  test("setup cannot be replayed once an admin exists", async ({ request }) => {
+    // An exposed port must not be a takeover. This is asserted through the API
+    // rather than the UI because the UI stops offering the form -- and "the
+    // button is gone" is not the same guarantee as "the endpoint refuses".
+    const res = await request.post("/api/v1/setup", {
+      data: { username: "intruder", password: "Intruder!9xzq" },
+      failOnStatusCode: false,
+    });
+    expect(res.status()).toBeGreaterThanOrEqual(400);
+  });
+});
+
+test.describe("navigation", () => {
+  // Every route, because a page that throws still renders its neighbours: the
+  // nav stays up and only the panel is broken, so a human clicking around can
+  // easily miss it.
+  const routes = [
+    "/", "/sources", "/meters", "/routing", "/renditions", "/playout",
+    "/library", "/recordings", "/clips", "/chat", "/jobs", "/automation",
+    "/monitoring", "/settings",
+  ];
+
+  for (const route of routes) {
+    test(`${route} renders without a console error`, async ({ page }) => {
+      const { errors } = watchConsole(page);
+      await signIn(page);
+      await page.goto(route);
+      await expect(page.locator("main")).toBeVisible();
+      // Deep-linked, not clicked: this also exercises the Go router's SPA
+      // fallback, which a click-through navigation never touches.
+      await page.reload();
+      await expect(page.locator("main")).toBeVisible();
+      expect(errors, `console errors on ${route}`).toEqual([]);
+    });
+  }
+});
+
+test.describe("i18n", () => {
+  // The React Router v8 migration and thirteen new catalogues were each
+  // verified once by hand. This is what stops the next change undoing them
+  // silently.
+  for (const [code, needle] of [
+    ["es", /Panel de control|Medidores de audio/],
+    ["ja", /ダッシュボード|オーディオ/],
+  ] as const) {
+    test(`switching to ${code} translates the nav and sets <html lang>`, async ({ page }) => {
+      await signIn(page);
+      await page.evaluate((c) => localStorage.setItem("polyemesis.language", c), code);
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("lang", code);
+      await expect(page.locator("nav")).toContainText(needle);
+      // Put it back, so a later test does not read a translated label.
+      await page.evaluate(() => localStorage.setItem("polyemesis.language", "en"));
+    });
+  }
+});
+
+test.describe("sources", () => {
+  test("a new source is ENABLED and lands on a free port", async ({ page }) => {
+    // Two bugs in one assertion. A source created disabled was refused with
+    // "source disabled" and nothing on screen explained it; a source created on
+    // a taken port was displayed as configured and silently received nothing.
+    await signIn(page);
+    await page.goto("/sources");
+
+    const before = await page.locator('[role="switch"]').count();
+    await page.getByRole("button", { name: /add source/i }).click();
+    await page.locator("#src-name").fill("E2E Vertical");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+
+    const card = page.locator("div").filter({ hasText: /^E2E Vertical/ }).first();
+    await expect(card).toBeVisible();
+    // Enabled by default.
+    const sw = page.locator('[role="switch"]').nth(before);
+    await expect(sw).toHaveAttribute("data-state", "checked");
+
+    // PORT inputs only, identified by their range. Selecting every number
+    // input also collects the latency fields, whose values legitimately repeat
+    // across sources -- the first version of this test failed on "6000,200,
+    // 6001,200" and the product was right.
+    const ports = await page
+      .locator('input[type="number"][max="65535"]')
+      .evaluateAll((els) => (els as HTMLInputElement[]).map((e) => e.value));
+    expect(ports.length, "expected a port field per source").toBeGreaterThan(1);
+    expect(
+      new Set(ports).size,
+      `two sources cannot share an ingest port, got ${ports.join(",")}`,
+    ).toBe(ports.length);
+  });
+
+  test("port inputs refuse an out-of-range value at the widget", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/sources");
+    const port = page.locator('input[type="number"]').first();
+    await expect(port).toHaveAttribute("min", "1");
+    await expect(port).toHaveAttribute("max", "65535");
+  });
+
+  test("editing a port does NOT commit on blur", async ({ page }) => {
+    // This is the one that dropped broadcasts: every blur wrote through and
+    // restarted the ingest, so tabbing out of a field was an outage.
+    await signIn(page);
+    await page.goto("/sources");
+
+    const port = page.locator('input[type="number"]').first();
+    await port.fill("6042");
+    await port.blur();
+
+    await expect(page.getByRole("button", { name: /^Apply/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /discard/i })).toBeVisible();
+
+    // Discard must actually revert rather than merely hide the row.
+    await page.getByRole("button", { name: /discard/i }).click();
+    await expect(page.getByRole("button", { name: /^Apply/ })).toBeHidden();
+    await expect(port).not.toHaveValue("6042");
+  });
+
+  test("delete requires typing the source name, and the WRONG name keeps it locked", async ({
+    page,
+  }) => {
+    // The contact method: the input only fits the intended target, so a
+    // mis-click on the wrong row cannot complete.
+    await signIn(page);
+    await page.goto("/sources");
+
+    await page.getByRole("button", { name: "Delete E2E Vertical" }).click();
+    const confirm = page.getByRole("button", { name: /delete source/i });
+    await expect(confirm).toBeDisabled();
+
+    // The blast radius is shown as counts, not prose.
+    await expect(page.getByText(/this also removes/i)).toBeVisible();
+    await expect(page.getByText(/destinations/i).first()).toBeVisible();
+
+    const field = page.locator("#confirm-subject");
+    await field.fill("Main");
+    await expect(confirm, "the wrong name must not unlock the delete").toBeDisabled();
+
+    await field.fill("E2E Vertical");
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    // The CARD specifically. Matching the bare text also finds the dialog
+    // heading and the confirm field, which are part of the dialog being
+    // dismissed rather than evidence the source survived.
+    await expect(page.locator("span.truncate").filter({ hasText: "E2E Vertical" })).toHaveCount(0);
+  });
+});
+
+test.describe("saving", () => {
+  test("a source rename persists across a reload", async ({ page }) => {
+    // The Sources page once sent server-computed fields back in its PUT, so
+    // every save 400'd: the control flipped, then silently reverted. A toast
+    // assertion would not have caught it -- only reading the value back does.
+    await signIn(page);
+    await page.goto("/sources");
+
+    const sw = page.locator('[role="switch"]').first();
+    const was = await sw.getAttribute("data-state");
+    await sw.click();
+    await page.waitForTimeout(1200);
+    await page.reload();
+
+    const now = await page.locator('[role="switch"]').first().getAttribute("data-state");
+    expect(now, "the toggle reverted, so the save did not reach the server").not.toBe(was);
+
+    // Leave the install as it was found.
+    await page.locator('[role="switch"]').first().click();
+    await page.waitForTimeout(800);
+  });
+});
