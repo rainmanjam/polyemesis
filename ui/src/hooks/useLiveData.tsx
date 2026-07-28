@@ -197,6 +197,28 @@ export function useIngestLive(): boolean {
   return recent.some((s) => s.kbps > 0);
 }
 
+/** Tracks whether a repeating fetch is currently succeeding.
+ *
+ *  A poll that fails may be silent -- raising a toast every two seconds because
+ *  the network hiccuped is worse than the hiccup. But silence must not be
+ *  indefinite: after a few consecutive failures the panel is showing data that
+ *  is no longer current, and nothing on screen says so. The operator reads a
+ *  bitrate that stopped updating five minutes ago as a bitrate.
+ *
+ *  So: silent while it might recover, explicit once it clearly has not. The
+ *  threshold is consecutive failures rather than elapsed time, because a poll
+ *  that is merely slow is not a poll that is broken. */
+export function useStaleTracker(threshold = 3) {
+  const [failures, setFailures] = useState(0);
+  return {
+    ok: () => setFailures(0),
+    failed: () => setFailures((n) => n + 1),
+    /** True once the data on screen should no longer be trusted as current. */
+    stale: failures >= threshold,
+    failures,
+  };
+}
+
 /** The ingest track layout, falling back to six stereo tracks before the
  *  stream has been probed so the routing editor always has something to draw. */
 export function useSourceTracks(): SourceTrack[] {

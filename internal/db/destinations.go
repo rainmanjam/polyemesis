@@ -73,11 +73,16 @@ type Destination struct {
 	// relay. Whatever the rendition, the destination still does -c:v copy plus
 	// its own audio routing graph.
 	RenditionID *int64 `json:"renditionId,omitempty"`
-	// SourceID is the programme this destination carries. Nil is not "no
-	// source": it means the source was deleted, which the CASCADE makes
-	// unreachable in practice. CreateDestination fills it with the default
-	// source when the caller omits it, so an API client written before sources
-	// existed keeps working and lands on the programme it used to mean.
+	// SourceID is the programme this destination carries.
+	//
+	// It is a pointer only because SQLite would not accept a NOT NULL REFERENCES
+	// column through ALTER TABLE while foreign keys are on -- the nullability is
+	// a migration artefact, not part of the model. In practice it is never nil:
+	// CreateDestination fills it with the default source when a caller omits it,
+	// the foreign key CASCADEs, and scanDestination REFUSES a NULL rather than
+	// propagating one. A destination with no source belongs to no programme, so
+	// no reconciler lists it as work and it would sit there created but never
+	// started.
 	SourceID *int64 `json:"sourceId,omitempty"`
 	// Expert mode: arguments an operator hand-wrote for this destination,
 	// stored as the raw strings they typed so the editor shows them back
@@ -226,6 +231,18 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 	if source.Valid {
 		v := source.Int64
 		d.SourceID = &v
+	} else {
+		// A NULL source_id is a row that no reconciler will ever start: it
+		// belongs to no programme, so nothing lists it as work to do. It is
+		// created successfully, appears in the API, and silently never runs.
+		//
+		// Refused at the boundary rather than propagated, so the impossible
+		// state stops here instead of every caller downstream having to know
+		// about it. CreateDestination fills the field and the FK CASCADEs, so
+		// reaching this means the database was edited by hand or a migration
+		// half-finished -- both worth failing loudly over.
+		return nil, fmt.Errorf("destination %d has no source: it belongs to no "+
+			"programme and would never be started", d.ID)
 	}
 	if err := json.Unmarshal([]byte(profileRaw), &d.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", d.ID, err)
