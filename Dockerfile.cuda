@@ -79,7 +79,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # behind, and a lower floor turns away fewer working machines. If you bump it,
 # bump for the Ubuntu release underneath (which decides the FFmpeg version),
 # not for CUDA features.
-FROM nvidia/cuda:12.6.3-base-ubuntu24.04
+FROM nvidia/cuda:13.3.1-base-ubuntu24.04
 
 # THE SECOND TRAP, and it is invisible: the nvidia/cuda base images ship
 # NVIDIA_DRIVER_CAPABILITIES=compute,utility — verified by reading `env` in
