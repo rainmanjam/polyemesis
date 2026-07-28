@@ -1,0 +1,196 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ===========================================================================
+   polyemesis theme — the entire palette lives here and nowhere else.
+   No component may hardcode a colour; everything below is exposed as a
+   Tailwind token so the bespoke components (meters, mix matrix, track rows)
+   read as native parts of the kit rather than bolted on.
+
+   Design intent: a broadcast console, not a SaaS dashboard.
+   - Surfaces are near-black and low-contrast so the room can be dark.
+   - Exactly one desaturated accent carries interaction (slate blue).
+   - Saturated colour is reserved for SIGNAL ONLY:
+       green = live / healthy       amber = reconnecting
+       red   = down / clipping      cyan  = armed but idle
+     If everything is grey except the thing that is wrong, then the thing that
+     is wrong is readable from across the room.
+   - Dark is the only theme in v1. There is deliberately no light-mode block.
+   =========================================================================== */
+
+:root {
+  /* --- surfaces, darkest to lightest --- */
+  --background: #0b0d11; /* app shell */
+  --surface: #0f1115; /* page background */
+  --card: #141821; /* panels, cards */
+  --card-raised: #1a1f2b; /* hovered rows, nested panels */
+  --popover: #161b24;
+  --muted: #1c222e; /* inert fills, slider tracks */
+
+  /* --- text --- */
+  --foreground: #e6e9ef;
+  --muted-foreground: #8b94a7; /* labels, units, secondary stats */
+  --subtle-foreground: #5d6779; /* disabled, placeholder */
+
+  /* --- one interactive accent, deliberately desaturated --- */
+  --primary: #5b7fc7;
+  --primary-foreground: #0b0d11;
+  --primary-dim: #253148;
+
+  --secondary: #1c222e;
+  --secondary-foreground: #c9d1e0;
+  --accent: #1f2635;
+  --accent-foreground: #e6e9ef;
+
+  /* --- borders & focus --- */
+  --border: #232a38;
+  --border-strong: #303a4d;
+  --input: #232a38;
+  --ring: #5b7fc7;
+
+  /* --- SIGNAL. Saturated on purpose; used nowhere decorative. --- */
+  --live: #3ecf6d; /* running, healthy, on air */
+  --live-dim: #143d25;
+  --warn: #e8a33d; /* reconnecting, degraded, near clip */
+  --warn-dim: #3d2f12;
+  --down: #e5484d; /* failed, clipping, destructive */
+  --down-dim: #401a1c;
+  --armed: #45b5d0; /* configured but idle */
+  --armed-dim: #12333d;
+
+  /* --- broadcast meter gradient stops (green -> yellow -> red) --- */
+  --meter-low: #3ecf6d;
+  --meter-mid: #cfd23e;
+  --meter-high: #e8a33d;
+  --meter-peak: #e5484d;
+  --meter-bg: #12161e;
+  --meter-grid: #232a38;
+  --meter-hold: #e6e9ef;
+
+  --destructive: #e5484d;
+  --destructive-foreground: #fff5f5;
+
+  --radius: 0.375rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-raised: var(--card-raised);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-dim: var(--primary-dim);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-live: var(--live);
+  --color-live-dim: var(--live-dim);
+  --color-warn: var(--warn);
+  --color-warn-dim: var(--warn-dim);
+  --color-down: var(--down);
+  --color-down-dim: var(--down-dim);
+  --color-armed: var(--armed);
+  --color-armed-dim: var(--armed-dim);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-meter-low: var(--meter-low);
+  --color-meter-mid: var(--meter-mid);
+  --color-meter-high: var(--meter-high);
+  --color-meter-peak: var(--meter-peak);
+  --color-meter-bg: var(--meter-bg);
+  --color-meter-grid: var(--meter-grid);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+
+  --font-mono:
+    ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas,
+    monospace;
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--surface);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    /* Dense, information-first layout: the base size is small on purpose. */
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Every number in this app is either compared against another number or
+     watched while it changes. Tabular figures stop columns from dancing. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--surface);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+    border: 2px solid var(--surface);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--subtle-foreground);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+}
+
+@layer utilities {
+  /* A steady pulse for "live". Slow enough to read as a heartbeat rather than
+     an alarm. */
+  @keyframes signal-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  .animate-signal {
+    animation: signal-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  /* Faster, more urgent: reconnecting. */
+  .animate-signal-fast {
+    animation: signal-pulse 0.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}

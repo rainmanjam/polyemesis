@@ -1,0 +1,114 @@
+# polyemesis deployment configuration.
+#
+# Only the things that must be known before the database opens live here.
+# Everything a user can change at runtime — ingest ports, recording retention,
+# platform credentials — is configured in the web UI and stored in SQLite.
+#
+# Copy to config.yaml and edit. Every value can also be overridden by a flag;
+# run `polyemesis -h` for the list.
+
+# HTTP listen address for the web UI and API.
+addr: ":8080"
+
+# Holds polyemesis.db, secret.key, recordings/ and hls/.
+# Back this directory up: secret.key decrypts your stored OAuth tokens.
+dataDir: "./data"
+
+# Built-in TLS.
+#
+#   mode: auto        pick a sensible mode at startup (see below)
+#   mode: acme        get a real certificate from Let's Encrypt
+#   mode: selfsigned  generate a local CA and certificate
+#   mode: manual      serve certFile/keyFile that you supply
+#   mode: off         serve plain HTTP; something in front does TLS
+#
+# "auto" resolves like this, in order:
+#   trustProxyHeaders: true          -> off        (the proxy terminates TLS)
+#   public hostname + acmeEmail set  -> acme
+#   anything else                    -> selfsigned
+# A "public hostname" has a dot, is not an IP address, and does not end in
+# .local .internal .lan .home .arpa or localhost — i.e. a name Let's Encrypt
+# could actually validate.
+#
+# UPGRADING FROM tls.enabled: if your config has no tls.mode, the old boolean
+# still decides, so nothing changes on upgrade:
+#   enabled: true (+ certFile/keyFile) behaves as mode: manual
+#   enabled: false, or no tls block at all, behaves as mode: off
+# An explicit tls.mode always wins, so you can migrate without deleting the
+# old key. New installs starting from this file get mode: auto.
+tls:
+  mode: "auto"
+
+  # The DNS name this server is reached by. ACME issues for it; the
+  # self-signed certificate carries it as its subject name. Left empty in
+  # selfsigned mode, the system hostname is used.
+  hostname: ""
+
+  # Required for acme: Let's Encrypt sends certificate expiry warnings here.
+  # ACME also needs inbound port 80 for the HTTP-01 challenge.
+  acmeEmail: ""
+
+  # manual mode only. The key file is read, never rewritten or logged.
+  certFile: ""
+  keyFile: ""
+
+  # Send Strict-Transport-Security. OPT-IN ON PURPOSE, and leave it off unless
+  # you are sure: HSTS is remembered by the browser, so once a browser has seen
+  # it for this hostname it will refuse plain HTTP to that name until the
+  # max-age elapses, and there is nothing the server can do to take it back.
+  # It is ignored in selfsigned mode (you would be pinning a certificate the
+  # browser cannot validate — a good way to lock yourself out) and ignored when
+  # TLS is off. Both cases log a warning at startup rather than failing.
+  hsts: false
+
+# Worked examples — copy one into the tls: block above.
+#
+# 1. Public server with a DNS name (recommended):
+#      tls:
+#        mode: "auto"            # resolves to acme
+#        hostname: "stream.example.com"
+#        acmeEmail: "ops@example.com"
+#        hsts: true              # safe here: the certificate is publicly trusted
+#
+# 2. Homelab box on the LAN, no public DNS:
+#      tls:
+#        mode: "auto"            # resolves to selfsigned
+#        hostname: "polyemesis.lan"
+#    Browsers will warn once; download the generated CA from the UI and trust
+#    it to make the warning go away. Material lives in <dataDir>/tls/.
+#
+# 3. Behind nginx/Caddy/Traefik that already terminates TLS:
+#      trustProxyHeaders: true
+#      tls:
+#        mode: "auto"            # resolves to off
+#
+# 4. Your own certificate (corporate CA, wildcard, cert-manager):
+#      tls:
+#        mode: "manual"
+#        certFile: "/etc/ssl/polyemesis/fullchain.pem"
+#        keyFile: "/etc/ssl/polyemesis/privkey.pem"
+#
+# 5. Plain HTTP on purpose (a laptop, a private test rig):
+#      tls:
+#        mode: "off"
+#    Binding to all interfaces this way logs a loud startup warning: the login
+#    form and the session cookie cross the network in the clear. Bind to
+#    127.0.0.1 instead if the box is shared.
+
+# Set to true ONLY when polyemesis really is behind a reverse proxy you control.
+# It makes the server trust X-Forwarded-Proto and X-Forwarded-Host when marking
+# session cookies Secure and when building OAuth redirect URIs. With no proxy in
+# front, a client could forge those headers.
+trustProxyHeaders: false
+
+# Pin specific binaries instead of searching $PATH. Leave empty to autodetect.
+ffmpeg:
+  binary: ""
+  probe: ""
+
+# PLACEHOLDER — HAS NO EFFECT. Enhanced RTMP / multitrack FLV ingest (OBS
+# 30.2+) is not implemented. Setting this to true changes nothing: no code
+# branches on it, and RTMP ingest stays single-track either way. It is accepted
+# here only so existing config files keep parsing. For multitrack ingest today,
+# use SRT.
+enhancedRtmp: false

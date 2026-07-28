@@ -1,0 +1,92 @@
+# systemd unit for polyemesis.
+#
+#   sudo cp polyemesis /usr/local/bin/
+#   sudo useradd --system --home /var/lib/polyemesis --shell /usr/sbin/nologin polyemesis
+#   sudo mkdir -p /var/lib/polyemesis /etc/polyemesis
+#   sudo chown polyemesis:polyemesis /var/lib/polyemesis
+#   sudo cp config.example.yaml /etc/polyemesis/config.yaml
+#   sudo cp deploy/polyemesis.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now polyemesis
+#   journalctl -u polyemesis -f
+
+[Unit]
+Description=polyemesis restreaming server
+Documentation=https://github.com/rainmanjam/polyemesis
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polyemesis
+Group=polyemesis
+
+ExecStart=/usr/local/bin/polyemesis \
+    --config /etc/polyemesis/config.yaml \
+    --data /var/lib/polyemesis \
+    --addr :8080
+
+# --- TLS ---
+# As written this serves whatever /etc/polyemesis/config.yaml asks for on :8080.
+#
+# If polyemesis terminates TLS itself (tls.mode acme/selfsigned/manual) it also
+# tries to bind :80 for the HTTP->HTTPS redirect, and in acme mode for the
+# Let's Encrypt HTTP-01 challenge. Ports below 1024 are privileged and this unit
+# runs as an unprivileged user, so that bind fails: polyemesis logs a warning
+# and keeps serving HTTPS, but ACME issuance will never complete.
+#
+# For mode: acme, change --addr to :443 and uncomment both lines below, then
+# check `journalctl -u polyemesis` on the next start to confirm the bind
+# succeeded rather than assuming it did.
+#
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+# CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+#
+# Alternatives, if you would rather grant nothing: set the sysctl
+# net.ipv4.ip_unprivileged_port_start=80, or forward 80/443 to 8080 with an
+# nftables/iptables redirect. Both keep this unit unprivileged, and the redirect
+# also works when something else already owns port 80 on the host.
+#
+# Generated TLS material (the local CA, the ACME cache, private keys) is written
+# under --data, which ReadWritePaths already covers. For mode: manual, note that
+# ProtectHome=true below makes anything under /home unreadable — keep certFile
+# and keyFile somewhere like /etc/ssl/polyemesis/ and make them readable by this
+# user.
+
+# polyemesis shuts its FFmpeg children down in order on SIGTERM, so that a
+# recording is finalised rather than truncated. Give it room to finish.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+# Send the signal to the main process only. polyemesis puts each child in its
+# own process group and tears them down itself; letting systemd kill the whole
+# cgroup first would cut recordings off mid-write.
+KillMode=mixed
+
+Restart=on-failure
+RestartSec=5s
+
+# --- hardening ---
+# polyemesis needs to exec ffmpeg and write to its data directory, and nothing
+# else. NoNewPrivileges is safe because the FFmpeg children need no privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/polyemesis
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# AF_INET/AF_INET6 for HTTP, RTMP and SRT; AF_UNIX for local sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Several FFmpeg processes each hold a handful of descriptors; the default
+# soft limit is fine but headroom costs nothing.
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

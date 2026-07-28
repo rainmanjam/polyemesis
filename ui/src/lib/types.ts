@@ -1,0 +1,1538 @@
+/** Types mirroring the Go API. Kept hand-written and small rather than
+ *  generated, so the shapes the UI actually consumes stay obvious. */
+
+export const MAX_TRACKS = 6;
+
+export type RoutingMode = "simple" | "matrix";
+export type NormalizeMode = "auto" | "off" | "limiter" | "loudnorm";
+
+export interface TrackSel {
+  track: number;
+  enabled: boolean;
+  gain: number;
+}
+
+export interface MatrixCell {
+  track: number;
+  channel: number;
+  /** 0 = left, 1 = right */
+  out: number;
+  gain: number;
+}
+
+// ------------------------------------------------------------- track roles
+//
+// A role is what the operator says a track *is* — "the licensed music", "the
+// Spanish commentary" — as opposed to "track 3". Roles live on the SOURCE,
+// not on a destination, because the answer does not change per platform.
+//
+// Roles are inert by themselves: nothing is filtered unless a destination asks
+// for it through `excludeRoles`. That asymmetry is deliberate and the UI has
+// to preserve it — labelling a track must never silently drop audio.
+
+/** "" is the zero value: a track nobody has described yet. */
+export type TrackRole =
+  | ""
+  | "music"
+  | "mic"
+  | "game"
+  | "commentary"
+  | "clean"
+  | "other";
+
+/** The catalogue, in the order routing.TrackRoles() offers it. "" is absent:
+ *  "no role" is the absence of an annotation, not a choice. */
+export const TRACK_ROLES = [
+  "mic",
+  "commentary",
+  "game",
+  "music",
+  "clean",
+  "other",
+] as const satisfies readonly Exclude<TrackRole, "">[];
+
+export const ROLE_LABEL: Record<Exclude<TrackRole, "">, string> = {
+  mic: "Mic",
+  commentary: "Commentary",
+  game: "Game",
+  music: "Music",
+  clean: "Clean",
+  other: "Other",
+};
+
+/** Matches routing.MaxLabelLen / MaxLangTagLen. */
+export const MAX_LABEL_LEN = 64;
+export const MAX_LANG_TAG_LEN = 35;
+
+/** The operator's description of one ingest track. Keyed by index rather than
+ *  by position, so it survives a track vanishing and coming back. */
+export interface TrackAnnotation {
+  track: number;
+  role?: TrackRole;
+  label?: string;
+  language?: string;
+  denoise?: boolean;
+}
+
+// -------------------------------------------------------- destination audio
+
+/** Programme-loudness target. Absent leaves the fixed loudnorm parameters that
+ *  shipped with `loudnorm` alone, byte for byte. */
+export interface Loudness {
+  targetLufs: number;
+  /** 0 means routing.DefaultTruePeakDB (−1 dBTP). */
+  truePeakDb?: number;
+  /** 0 means routing.DefaultLoudnessLRA (11 LU). */
+  rangeLu?: number;
+}
+
+export const LUFS_STREAMING = -14;
+export const LUFS_PODCAST = -16;
+export const LUFS_BROADCAST = -23;
+export const DEFAULT_TRUE_PEAK_DB = -1;
+export const DEFAULT_LOUDNESS_LRA = 11;
+
+export const MIN_TARGET_LUFS = -70;
+export const MAX_TARGET_LUFS = -5;
+export const MIN_TRUE_PEAK_DB = -9;
+export const MAX_TRUE_PEAK_DB = 0;
+export const MIN_LOUDNESS_LRA = 1;
+export const MAX_LOUDNESS_LRA = 50;
+
+/** Audio against video, in ms. Positive holds AUDIO back (lip-sync repair, a
+ *  moderation delay); negative pulls it ahead, which the compiler pays for by
+ *  holding the VIDEO back instead. The bounds are asymmetric for that reason. */
+export const MIN_DELAY_MS = -2000;
+export const MAX_DELAY_MS = 30000;
+
+/** Pull one group of tracks down whenever another is speaking. `trigger` is
+ *  what causes the duck (the mic), `target` is what gets pushed down (the
+ *  music). They must be disjoint. */
+export interface Ducking {
+  trigger: number[];
+  target: number[];
+  /** Each 0 means the routing default below. */
+  thresholdDb?: number;
+  ratio?: number;
+  attackMs?: number;
+  releaseMs?: number;
+}
+
+export const DEFAULT_DUCK_THRESHOLD_DB = -24;
+export const DEFAULT_DUCK_RATIO = 8;
+export const DEFAULT_DUCK_ATTACK_MS = 20;
+export const DEFAULT_DUCK_RELEASE_MS = 300;
+
+export const MIN_DUCK_THRESHOLD_DB = -60;
+export const MAX_DUCK_THRESHOLD_DB = 0;
+export const MIN_DUCK_RATIO = 1;
+export const MAX_DUCK_RATIO = 20;
+
+export interface RoutingProfile {
+  mode: RoutingMode;
+  tracks: TrackSel[];
+  matrix: MatrixCell[] | null;
+  normalize: NormalizeMode;
+  sampleRate: number;
+
+  /** Every field below is optional and absent means "behaves exactly as
+   *  before". Send them omitted, never as zero values, or a saved profile
+   *  stops compiling to the string it used to. */
+  loudness?: Loudness | null;
+  delayMs?: number;
+  ducking?: Ducking | null;
+  excludeRoles?: TrackRole[] | null;
+}
+
+export interface RoutingResult {
+  filterComplex: string;
+  outLabel: string;
+  summary: string;
+  tracks: number[];
+  normalization: NormalizeMode;
+  warnings: string[] | null;
+  /** How long the VIDEO is held back to satisfy a negative `delayMs`. Zero for
+   *  every other profile. */
+  videoDelayMs?: number;
+}
+
+export interface SourceTrack {
+  index: number;
+  channels: number;
+  codec: string;
+  layout: string;
+  language?: string;
+  title?: string;
+}
+
+export interface VideoStream {
+  codec: string;
+  width: number;
+  height: number;
+  frameRate: number;
+  bitrate: number;
+  pixFmt: string;
+}
+
+export interface SourceInfo {
+  probed: boolean;
+  tracks: SourceTrack[] | null;
+  video?: VideoStream | null;
+  /** `tracks` describes the silence tier's synthetic output rather than the
+   *  ingest's, because the ingest carries no audio at all. */
+  synthetic?: boolean;
+  /** What the operator has said these tracks are. Absent on a server that does
+   *  not persist annotations yet. */
+  annotations?: TrackAnnotation[] | null;
+}
+
+export type DestKind = "rtmp" | "srt" | "file";
+export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
+
+export interface Destination {
+  id: number;
+  name: string;
+  kind: DestKind;
+  platform: Platform;
+  accountId?: number | null;
+  url: string;
+  streamKey: string;
+  enabled: boolean;
+  audioBitrate: number;
+  profile: RoutingProfile;
+  position: number;
+  /** The shared video encode this destination reads. null or absent means
+   *  passthrough: no encode, straight off the ingest relay. */
+  renditionId?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One shared video encode.
+ *
+ *  A rendition re-encodes VIDEO ONLY — every audio track is copied through it
+ *  untouched, and each destination still applies its own routing graph on top.
+ *  That is why there is no audio field here and must never be one. */
+export interface Rendition {
+  id: number;
+  name: string;
+  /** 0 on an axis means "keep the source's", so setting only height rescales
+   *  while preserving aspect. */
+  width: number;
+  height: number;
+  /** 0 keeps the source's frame rate. */
+  fps: number;
+  /** Target video bitrate in kbps. */
+  videoBitrate: number;
+  /** An FFmpeg encoder name. Not a union: which encoders exist is a property
+   *  of the running FFmpeg build, and GET /encoders is the only honest source
+   *  for that. */
+  encoder: string;
+  /** The encoder's own speed/quality knob — "veryfast" for x264, "p4" for
+   *  nvenc. The vocabulary is per-encoder, hence free text. */
+  preset: string;
+  /** Keyframe interval in seconds rather than frames, so it survives an fps
+   *  change. */
+  gopSeconds: number;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A rendition plus its usage. `enabledDestinations` is the ref count the
+ *  engine acts on: at zero there is no process and no CPU burnt. */
+export interface RenditionView {
+  rendition: Rendition;
+  destinations: number;
+  enabledDestinations: number;
+}
+
+/** What deleting a rendition cost. The destinations are not deleted with it —
+ *  they fall back to passthrough, which the warning spells out. */
+export interface RenditionDeleted {
+  status: string;
+  destinations: number;
+  enabledDestinations: number;
+  warning?: string;
+}
+
+/** An editable starting point for the create form. Passthrough is the odd one
+ *  out: it is the absence of a rendition, not a row. */
+export interface RenditionPreset {
+  key: string;
+  label: string;
+  passthrough: boolean;
+  rendition?: Rendition | null;
+}
+
+/** Server-side validation limits, so the form's inputs cannot drift from the
+ *  bounds the store actually enforces. */
+export interface RenditionBounds {
+  minDimension: number;
+  maxDimension: number;
+  maxFps: number;
+  minBitrate: number;
+  maxBitrate: number;
+  minGopSeconds: number;
+  maxGopSeconds: number;
+}
+
+/** The silicon behind an encoder. "software" is libx264/libx265, which drive
+ *  no silicon at all. */
+export type GpuVendor = "intel" | "nvidia" | "amd" | "apple" | "software" | "unknown";
+
+/** One device the encoders could use — on Linux a /dev/dri node.
+ *
+ *  `usable` is the field that matters: a node that exists but cannot be opened
+ *  is the most common hardware-encoding failure there is, and `problem` is
+ *  already phrased as the fix. */
+export interface GpuDevice {
+  path: string;
+  node: string;
+  render: boolean;
+  vendor: GpuVendor;
+  vendorId?: string;
+  usable: boolean;
+  problem?: string;
+}
+
+/** What the machine has, as opposed to what the FFmpeg build lists. Advisory
+ *  only — the test encode decides what works. `notes` are operator-facing and
+ *  already written as instructions, so they are rendered verbatim. */
+export interface GpuInfo {
+  platform: string;
+  devices?: GpuDevice[];
+  vendors?: GpuVendor[];
+  vaapiDevice?: string;
+  nvidia: boolean;
+  nvidiaDriver?: string;
+  appleSilicon?: boolean;
+  notes?: string[];
+}
+
+/** One choice in the encoder list.
+ *
+ *  `available` and `works` are two different questions and the gap between them
+ *  is the whole point: a stock Linux FFmpeg is `available` for nvenc, qsv, vaapi
+ *  and amf on a box with no GPU in it. `works` is the result of actually
+ *  encoding a frame here, and `reason` is FFmpeg's own words when it did not. */
+export interface EncoderInfo {
+  name: string;
+  codec: string;
+  vendor: GpuVendor;
+  hardware: boolean;
+  /** Whether this FFmpeg build registers the encoder. */
+  available: boolean;
+  /** Whether it is usable on this machine. Unknown counts as usable —
+   *  detection that could not run must not take choices away. */
+  works: boolean;
+  /** True when this exact encoder was test-encoded, false when the verdict was
+   *  assumed or inherited from the H.264 encoder of the same family. */
+  measured: boolean;
+  reason?: string;
+  durationMs?: number;
+  /** The one a new rendition starts on. */
+  default: boolean;
+}
+
+/** GET /encoders. `probed` is whether the build's encoder list was readable;
+ *  `tested` is whether anything was actually encoded. Both false means every
+ *  `works` below is an assumption. */
+export interface EncoderList {
+  encoders: EncoderInfo[];
+  default: string;
+  probed: boolean;
+  tested: boolean;
+  /** Working hardware encoders in preference order; empty means software only. */
+  hardware: string[] | null;
+  gpu: GpuInfo;
+}
+
+export type ProcessState =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "reconnecting"
+  | "failed";
+
+export interface Progress {
+  frame: number;
+  fps: number;
+  bitrateKbps: number;
+  totalSize: number;
+  outTimeMs: number;
+  dupFrames: number;
+  dropFrames: number;
+  speed: number;
+  done: boolean;
+}
+
+export interface ProcessStatus {
+  name: string;
+  kind: string;
+  state: ProcessState;
+  pid: number;
+  restarts: number;
+  startedAt?: string;
+  uptimeSec: number;
+  lastError?: string;
+  nextRetryIn?: number;
+  progress: Progress;
+}
+
+export interface DestStatus {
+  id: number;
+  name: string;
+  kind: DestKind;
+  platform: Platform;
+  enabled: boolean;
+  summary: string;
+  tracks: number[] | null;
+  filterComplex: string;
+  normalization: NormalizeMode;
+  warnings: string[] | null;
+  error?: string;
+  process?: ProcessStatus | null;
+  /** The shared encode feeding this destination; absent for passthrough. */
+  renditionId?: number | null;
+  renditionName?: string;
+}
+
+/** One shared video encode's live state.
+ *
+ *  `consumers` is the ref count the engine acted on. A rendition with none has
+ *  no process by design, so an absent `process` reads as idle, not as failed. */
+export interface RenditionStatus {
+  id: number;
+  name: string;
+  width: number;
+  height: number;
+  fps: number;
+  videoBitrate: number;
+  encoder: string;
+  codec: string;
+  consumers: number;
+  relayPort?: number;
+  error?: string;
+  process?: ProcessStatus | null;
+}
+
+export interface RelayStats {
+  port: number;
+  subscribers: string[] | null;
+  rxPackets: number;
+  rxBytes: number;
+  txPackets: number;
+  dropped: number;
+  /** MPEG-TS continuity counters, measured on the ingest side of the relay. */
+  tsPackets: number;
+  tsLost: number;
+  discontinuities: number;
+  lossPercent: number;
+}
+
+export interface Status {
+  ingest?: ProcessStatus | null;
+  recorder?: ProcessStatus | null;
+  preview?: ProcessStatus | null;
+  meters?: ProcessStatus | null;
+  renditions: RenditionStatus[];
+  destinations: DestStatus[];
+  source: SourceInfo;
+  relay: RelayStats;
+}
+
+/** peak[track][channel] and rms[track][channel], in dBFS. */
+export interface Levels {
+  peak: number[][] | null;
+  rms: number[][] | null;
+}
+
+export interface SystemStats {
+  cpuPercent: number;
+  procCpuPercent: number;
+  memUsedBytes: number;
+  memTotalBytes: number;
+  memPercent: number;
+  procMemBytes: number;
+  numCpu: number;
+}
+
+export interface BitrateSample {
+  t: string;
+  kbps: number;
+}
+
+/** `pull` inverts the direction: rather than waiting for an encoder, the server
+ *  dials a source. That is what lets an IP camera, another server's HLS, or a
+ *  looped file become the ingest. */
+export type IngestMode = "srt" | "rtmp" | "pull";
+
+/** The schemes the server will dial. Mirrors ffmpeg.PullSchemes(); the server
+ *  rejects anything else, and quotes this same list when it does. */
+export const PULL_SCHEMES = [
+  "dash",
+  "file",
+  "hls",
+  "http",
+  "https",
+  "rtmp",
+  "rtmps",
+  "rtsp",
+  "rtsps",
+  "srt",
+] as const;
+
+export const RTSP_TRANSPORTS = ["tcp", "udp", "udp_multicast", "http", "https"] as const;
+
+export interface PullSettings {
+  /** A `file://` source is a path RELATIVE to the data directory and may not
+   *  contain "..": the server confines it there the same way file destinations
+   *  are confined. */
+  url: string;
+  /** Caps FFmpeg's HTTP reconnect backoff. 0 uses the built-in default. */
+  reconnectDelayMaxSeconds: number;
+  /** Empty means TCP, which is right for almost every camera. */
+  rtspTransport: string;
+}
+
+/** One ingested programme.
+ *
+ *  Multi-source exists because a horizontal and a vertical feed out of OBS's
+ *  vertical-canvas plugin are two different compositions, not one cropped from
+ *  the other. Each source carries its own ingest, and owns its own
+ *  destinations and renditions. */
+export interface Source {
+  id: number;
+  name: string;
+  enabled: boolean;
+  /** Same shape as Settings.ingest, deliberately: one form serves both. */
+  ingest: Settings["ingest"];
+  /** Publish secret. See SourceView.tokenEnforced before presenting this as
+   *  a security control -- today it is stored but nothing checks it. */
+  token: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A source plus what the server computes about it. */
+export interface SourceView extends Source {
+  /** Ready to paste into an encoder, keyed by protocol, with `<server>` where
+   *  the hostname goes. The token is deliberately NOT in these. */
+  publishUrls: Record<string, string>;
+  /** Whether unscoped API calls act on this source. */
+  isDefault: boolean;
+  /** Whether the publish token actually gates anything: true only while the
+   *  one-port SRT listener is BOUND and serving this source. With per-source
+   *  ports the token is inert and what protects the ingest is the RTMP stream
+   *  key or the SRT passphrase. Follows the running listener, not the setting,
+   *  because a listener that failed to bind enforces nothing. */
+  tokenEnforced: boolean;
+  /** Whether an encoder is live on the shared listener for this source. */
+  publishing: boolean;
+  /** What a delete would take with it. Counts, not prose: confirming a number
+   *  is a decision, confirming "and its destinations" is a click. */
+  destinations: number;
+  renditions: number;
+  /** Uplink health for that publisher, when there is one. */
+  link?: {
+    peer: string;
+    since: string;
+    bytes: number;
+    rttMs: number;
+    lossPackets: number;
+    retransPackets: number;
+  };
+  /** Whether an engine actually came up. A source whose port was already taken
+   *  is stored but not running, and that is the answer to "why is nothing
+   *  arriving". */
+  running: boolean;
+}
+
+export interface Settings {
+  ingest: {
+    mode: IngestMode;
+    srt: { passphrase: string; latencyMs: number };
+    rtmp: { app: string; streamKey: string };
+    /** Optional so a client that predates pull can still PUT settings. */
+    pull?: PullSettings;
+  };
+  /** Where the server binds. Install-wide: there is one SRT listener serving
+   *  every source (told apart by token) and one RTMP listener serving at most
+   *  one. Optional so a client that predates the change can still PUT. */
+  listeners?: { srtPort: number; rtmpPort: number };
+  /** Synthetic sources. Optional for the same reason. */
+  synth?: {
+    /** Synthesises a silent stereo track when the ingest probes with no audio
+     *  at all. On by default: a video-only stream is refused by every major
+     *  platform. It can never affect an ingest that does carry audio. */
+    silenceOnVideoOnly: boolean;
+  };
+  recording: {
+    enabled: boolean;
+    segmentSeconds: number;
+    maxGb: number;
+    maxAgeHours: number;
+    minFreeGb: number;
+  };
+  preview: {
+    enabled: boolean;
+    segmentSeconds: number;
+    videoHeight: number;
+    videoKbps: number;
+    idleTimeoutSeconds: number;
+  };
+  meters: { enabled: boolean; intervalMs: number };
+  logging: {
+    persistProcessLogs: boolean;
+    maxFileMb: number;
+    maxFiles: number;
+  };
+  /** Optional so a client that predates playout can still PUT settings: the
+   *  server merges over the stored value, and an absent key leaves it alone. */
+  playout?: PlayoutSettings;
+}
+
+// ---------------------------------------------------------------- playout
+//
+// Playout is the viewer-facing origin: the stream packaged as public HLS (and
+// optionally DASH) rather than relayed to another platform. It CONSUMES the
+// rendition tier — a variant copies its rendition's video bit-for-bit — so
+// adding a rung costs a muxer, never a second video encode.
+
+export type PlayoutFormat = "hls" | "hls+dash";
+
+/** One publicly served rung. `renditionId` null packages the ingest directly. */
+export interface PlayoutVariant {
+  name: string;
+  enabled: boolean;
+  renditionId?: number | null;
+  /** Which ingest track this rung publishes. A viewer's player wants one
+   *  stereo track; per-destination audio routing is untouched by this. */
+  audioTrack: number;
+}
+
+export interface PlayoutSettings {
+  enabled: boolean;
+  /** Serves playlists and segments without an admin session. Off by default. */
+  public: boolean;
+  /** Sends CORS headers on the media so a player on another site can fetch it,
+   *  and relaxes the frame headers on /watch so the embed renders. */
+  allowCrossOrigin: boolean;
+  format: PlayoutFormat;
+  segmentSeconds: number;
+  playlistSegments: number;
+  /** 0 is live-only. */
+  dvrWindowSeconds: number;
+  maxDiskMb: number;
+  audioKbps: number;
+  sessionIdleSeconds: number;
+  maxSessions: number;
+  variants: PlayoutVariant[];
+}
+
+export interface PlayoutVariantStatus {
+  name: string;
+  renditionId?: number | null;
+  audioTrack: number;
+  running: boolean;
+  error?: string;
+  bandwidth: number;
+  width?: number;
+  height?: number;
+  /** Relative to the playout root; prefix with `/playout/`. */
+  playlist: string;
+  manifest?: string;
+  viewers: number;
+  startedAt?: string;
+}
+
+export interface PlayoutAnalytics {
+  viewers: number;
+  byVariant: Record<string, number> | null;
+  peak: number;
+  peakAt?: string;
+  /** Total sessions opened; a reconnect counts as a new one. */
+  sessions: number;
+  requests: number;
+  /** New viewers that arrived with the table full. They are still served. */
+  uncounted: number;
+  idleSeconds: number;
+  capacity: number;
+}
+
+export interface PlayoutUsage {
+  bytes: number;
+  files: number;
+  limitBytes: number;
+  /** The cap is below one playlist window — raise it or lower the bitrate. */
+  overLimit: boolean;
+  deleted: number;
+}
+
+export interface PlayoutStatus {
+  enabled: boolean;
+  public: boolean;
+  master: string;
+  format: PlayoutFormat;
+  variants: PlayoutVariantStatus[] | null;
+  analytics: PlayoutAnalytics;
+  usage: PlayoutUsage;
+}
+
+/** How an anonymous viewer proves they may watch. `token` is the default and
+ *  the only safe one; `open` means anyone with the URL. */
+export type PlayoutProtection = "token" | "open";
+
+export interface PlayoutUrls {
+  master: string;
+  watch: string;
+  embed: string;
+}
+
+/** The Playout page's single read. `token` is the playback secret in the
+ *  clear — this response is behind the admin session. */
+export interface PlayoutAdminView {
+  status: PlayoutStatus;
+  settings: PlayoutSettings;
+  protection: PlayoutProtection;
+  token: string;
+  title: string;
+  description: string;
+  urls: PlayoutUrls;
+  /** True only when anyone on the internet holding the URL can watch. The
+   *  page leads with this. */
+  exposed: boolean;
+  /** False when the playout manager is not wired up, so the page can say so
+   *  rather than showing an empty ladder. */
+  running: boolean;
+}
+
+/** What the public player page is told. Never carries the token. */
+export interface PlayoutPublicView {
+  enabled: boolean;
+  title: string;
+  description: string;
+  master: string;
+  poster: string;
+  variants: { name: string; playlist: string; width?: number; height?: number }[] | null;
+  viewers: number;
+}
+
+export interface Recording {
+  id: number;
+  filename: string;
+  startedAt: string;
+  finishedAt: string;
+  bytes: number;
+  durationMs: number;
+  tracks: number;
+}
+
+export interface DiskUsage {
+  usedBytes: number;
+  freeBytes: number;
+  totalBytes: number;
+  count: number;
+  storage: StorageState;
+}
+
+/** The free-space guard's verdict on whether the volume can take more footage. */
+export interface StorageState {
+  halted: boolean;
+  reason?: string;
+}
+
+/** A long-lived automation credential. The secret exists only at creation. */
+export interface ApiToken {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
+export interface FFmpegTools {
+  ffmpeg: string;
+  ffprobe: string;
+  version: string;
+  major: number;
+  minor: number;
+  hasLibsrt: boolean;
+  hasLibx264: boolean;
+  /** Every video encoder the binary registers. The candidate set, not the
+   *  answer: this is what the BUILD was compiled with. */
+  videoEncoders?: string[] | null;
+  /** The hardware subset that passed its test encode, in preference order. */
+  hwEncoders?: string[] | null;
+  /** What each candidate did when this machine was asked to encode a frame.
+   *  Empty means the test encode never ran. */
+  encoderCaps?: EncoderCapability[] | null;
+}
+
+/** One encoder's measured answer: what happened when this machine, with these
+ *  drivers, was asked to encode a frame just now. */
+export interface EncoderCapability {
+  name: string;
+  vendor: GpuVendor;
+  works: boolean;
+  reason?: string;
+  durationMs: number;
+}
+
+export interface SystemInfo {
+  version: string;
+  ffmpeg: FFmpegTools;
+  /** What the machine has. It rides alongside `ffmpeg` because the two are only
+   *  meaningful together — an encoder list without the hardware behind it is
+   *  what made the editor offer NVENC on an AMD box. */
+  gpu: GpuInfo;
+  ingestUrl: string;
+  ingestMode: string;
+  maxTracks: number;
+  tlsEnabled: boolean;
+  dataDir: string;
+  uiBuilt: boolean;
+}
+
+// ----------------------------------------------------- music-rights policy
+//
+// A superset of `Platform`: the rights table folds a destination's platform
+// and its kind together, because where the bytes land is the only thing a
+// music policy cares about. A local recording is `file` no matter what
+// platform the row claims. Kept separate from `Platform` so widening this
+// cannot widen the destination editor's platform picker.
+export type PolicyPlatform = Platform | "facebook" | "file";
+
+/** "" follows the platform table; the other two overrule it. */
+export type MusicPolicyChoice = "" | "keep" | "exclude";
+
+/** The resolved answer to "does this destination carry music?", pre-phrased
+ *  for the badge. `reason` names the mechanism ("Twitch DMCA policy"), never a
+ *  legal conclusion, and `overridden` records that a person decided rather
+ *  than the table. */
+export interface MusicDecision {
+  platform: PolicyPlatform;
+  exclude: boolean;
+  overridden: boolean;
+  reason: string;
+  summary: string;
+}
+
+/** The `platform:` prefix routing.PlatformPresetID() puts on the presets
+ *  generated from the music-rights table. */
+export const PLATFORM_PRESET_PREFIX = "platform:";
+
+export interface Preset {
+  id: string;
+  name: string;
+  description: string;
+  needsMusicTrack: boolean;
+  needsMicTrack: boolean;
+  needsSurroundTrack: boolean;
+  needsCleanTrack: boolean;
+  /** Asks for a BCP-47 tag, e.g. "es". */
+  needsLanguage: boolean;
+  /** Set only on the presets generated from the music-rights table. Those
+   *  double as the UI's copy of that table — there is no separate endpoint for
+   *  it, and deriving the badge from the same rows the presets came from is
+   *  what keeps the two from disagreeing. */
+  platform?: PolicyPlatform;
+  policy?: MusicDecision;
+  loudness?: Loudness | null;
+  delayMs?: number;
+}
+
+export interface PresetOpts {
+  musicTrack: number;
+  micTrack: number;
+  surroundTrack: number;
+  cleanTrack: number;
+  language?: string;
+  musicPolicy?: MusicPolicyChoice;
+}
+
+export interface PlatformCreds {
+  platform: Platform;
+  clientId: string;
+  hasSecret: boolean;
+  updatedAt: string;
+}
+
+export interface PlatformAccount {
+  id: number;
+  platform: Platform;
+  accountName: string;
+  accountRef: string;
+  expiresAt: string;
+  scopes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SetupGuide {
+  platform: Platform;
+  name: string;
+  consoleUrl: string;
+  redirectPath: string;
+  steps: string[];
+  scopes: string[] | null;
+  supported: boolean;
+  note?: string;
+}
+
+export interface LogLine {
+  time: string;
+  process: string;
+  text: string;
+  level: "info" | "warning" | "error" | "fatal";
+}
+
+export interface ProcessInfo {
+  status: ProcessStatus;
+  command: string;
+}
+
+/** The five values tls.mode accepts in config.yaml. `auto` only ever appears
+ *  as `TlsStatus.configured`; `TlsStatus.mode` is always already resolved. */
+export type TlsMode = "auto" | "acme" | "selfsigned" | "manual" | "off";
+
+/** The public half of the certificate the server presents. Deliberately has no
+ *  field for key material and must never grow one. */
+export interface CertInfo {
+  subject: string;
+  issuer: string;
+  dnsNames: string[];
+  ipAddresses: string[];
+  notBefore: string;
+  notAfter: string;
+  /** Negative once expired, so "expired 3 days ago" needs no second field. */
+  daysRemaining: number;
+  expired: boolean;
+  /** SHA-256 of the DER, colon-separated uppercase hex. */
+  fingerprint: string;
+  selfSigned: boolean;
+}
+
+export interface TlsStatus {
+  /** What `auto` decided, or the mode as written when it was not `auto`. */
+  mode: TlsMode;
+  configured: TlsMode;
+  hostname: string;
+  servesTls: boolean;
+  trustProxyHeaders: boolean;
+  /** Whether HSTS may be sent. False plus a warning is the interesting case:
+   *  it means the operator asked for it somewhere it would be unsafe. */
+  hsts: boolean;
+  hstsWarning: string;
+  /** Null when TLS is off, or before ACME's first issuance. */
+  certificate: CertInfo | null;
+  certificateError: string;
+  caAvailable: boolean;
+  caFingerprint: string;
+}
+
+export type EventType =
+  | "status"
+  | "levels"
+  | "log"
+  | "stats"
+  | "source"
+  | "recordings"
+  /** One chat message, one event. See ChatMessage. */
+  | "chat"
+  /** The whole per-platform connection table, whenever any part of it moves. */
+  | "chatState";
+
+export interface WsEvent {
+  type: EventType;
+  time: string;
+  data: unknown;
+}
+
+// --------------------------------------------------------------------- chat
+//
+// One pane, one send box, four platforms. Everything below mirrors
+// internal/chat exactly; nothing here re-derives a fact the server already
+// stated, because two answers to "is YouTube connected" is one answer too many.
+
+/** The platforms the chat pane can show. Identical to `Platform` now that
+ *  Facebook has a destination platform of its own, and kept as a separate name
+ *  because chat and destinations gain platforms at different times — the next
+ *  chat-only platform widens this without touching the destination picker. */
+export type ChatPlatform = Platform;
+
+/** A chat connection's condition, in the words the operator would use.
+ *  `degraded` is running-but-limited and always arrives with a reason. */
+export type ChatState =
+  | "connecting"
+  | "live"
+  | "degraded"
+  | "failed"
+  | "stopped";
+
+/** One badge the platform put next to a name. Deliberately loose: Twitch has
+ *  id/version pairs, Kick has labels, YouTube has boolean roles. */
+export interface ChatBadge {
+  id: string;
+  version?: string;
+  label?: string;
+}
+
+/** One inline image, located by RUNE offsets into `text`. `start` is inclusive
+ *  and `end` is exclusive, which is what both Go and JavaScript slice with. */
+export interface ChatEmote {
+  id: string;
+  name?: string;
+  start: number;
+  end: number;
+  url?: string;
+}
+
+export interface ChatAuthor {
+  id?: string;
+  name: string;
+  /** "#rrggbb", or absent when the platform sent none — then the UI picks. */
+  color?: string;
+  badges?: ChatBadge[] | null;
+  moderator?: boolean;
+  subscriber?: boolean;
+  broadcaster?: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  platform: ChatPlatform;
+  /** The platform account this arrived on. Two Twitch channels connected at
+   *  once are two accounts, and merging them is a bug rather than a feature. */
+  account?: string;
+  channel?: string;
+  author: ChatAuthor;
+  text: string;
+  emotes?: ChatEmote[] | null;
+  at: string;
+  /** An /me message: rendered in the author's colour, without a colon. */
+  action?: boolean;
+  replyToId?: string;
+  replyTo?: string;
+  /** Sent by polyemesis itself. */
+  echo?: boolean;
+}
+
+/** YouTube's daily API budget. Present only where a platform has one that can
+ *  silently kill chat for the rest of the day. `estimated` is always true and
+ *  is in the payload so the UI can say so. */
+export interface ChatQuota {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetAt: string;
+  intervalMs: number;
+  paused?: boolean;
+  estimated: boolean;
+}
+
+export interface ChatStatus {
+  platform: ChatPlatform;
+  account?: string;
+  channel?: string;
+  state: ChatState;
+  /** One sentence saying WHY, for every state that is not plainly `live`. */
+  detail?: string;
+  since: string;
+  received: number;
+  sent: number;
+  /** Reconnections. A number that climbs while the state reads `live` is a
+   *  flapping connection, which looks healthy at every instant you check it. */
+  restarts: number;
+  lastError?: string;
+  canSend: boolean;
+  quota?: ChatQuota | null;
+}
+
+/** One platform's outcome from a fan-out send. `skipped` is "this platform
+ *  cannot send", which is a permanent property, not a failure to retry. */
+export interface ChatSendResult {
+  platform: ChatPlatform;
+  account?: string;
+  ok: boolean;
+  skipped?: boolean;
+  detail?: string;
+}
+
+export interface ChatSendResponse {
+  results: ChatSendResult[];
+  sent: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface ChatStats {
+  received: number;
+  deduped: number;
+  stored: number;
+  /** Shed because persistence fell behind. They were still shown live; only
+   *  the scrollback lost them. */
+  dropped: number;
+  pending: number;
+  adapters: number;
+}
+
+/** A platform's published maximum message length. Advisory: the composer warns
+ *  and still sends, because the platform is the authority on its own rules and
+ *  a limit we got wrong would cost the operator a message for nothing. */
+export interface ChatLimit {
+  platform: ChatPlatform;
+  maxChars: number;
+}
+
+export interface ChatOverview {
+  /** False when no chat hub is wired at all — distinct from a hub running with
+   *  nothing attached, because the operator's next move differs. */
+  configured: boolean;
+  statuses: ChatStatus[];
+  stats?: ChatStats | null;
+  messages: ChatMessage[];
+  limits: ChatLimit[];
+  /** The scrollback came from the database rather than a live connection. */
+  stored?: boolean;
+}
+
+// ------------------------------------------------------------------- expert
+//
+// Hand-edited FFmpeg arguments, per destination. Two strings appended to the
+// generated command — one before the input, one before the output — with
+// everything else, including the audio routing graph, untouched.
+
+/** One override the server wants said out loud before it will save. */
+export interface ExpertGuard {
+  arg: string;
+  reason: string;
+}
+
+/** The exact argv a destination would run, rendered for reading. */
+export interface ResolvedCommand {
+  bin: string;
+  argv: string[];
+  /** True when this came from the destination's RUNNING process, so every
+   *  value in it is real. False means it was rebuilt and `note` says which
+   *  parts are stand-ins. */
+  command: string;
+  live: boolean;
+  note?: string;
+}
+
+export interface ExpertArgs {
+  inputArgs: string;
+  outputArgs: string;
+  ackReencode: boolean;
+}
+
+export interface ExpertResponse {
+  destinationId: number;
+  args: ExpertArgs;
+  enabled: boolean;
+  command: ResolvedCommand;
+  guards?: ExpertGuard[];
+  passthrough: boolean;
+  applied: boolean;
+  warning?: string;
+}
+
+/** Three-valued on purpose. An unreachable ingest is not a verdict on the
+ *  arguments, and reporting it as one would refuse an edit for a reason that
+ *  has nothing to do with it. */
+export interface DryRunResult {
+  verdict: "ok" | "invalid" | "inconclusive";
+  message?: string;
+  command: string;
+  output?: string;
+}
+
+// ------------------------------------------------------- background jobs
+//
+// Everything heavy in this product is a queued job governed by a resource
+// policy that yields to the live stream by default. Transcription, proxy
+// encodes and archive compression all cost CPU, and a dropped frame on a live
+// broadcast is unrecoverable while a transcript arriving an hour later costs
+// nothing. These types are how the operator sees and steers that tradeoff.
+
+export type JobState =
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "deferred";
+
+/** How one kind of work is allowed to take the machine.
+ *  - realtime:  never held back
+ *  - deferred:  yields to the stream (the default, and the whole point)
+ *  - scheduled: only inside its windows
+ *  - manual:    only when a human releases it */
+export type JobMode = "realtime" | "deferred" | "scheduled" | "manual";
+
+export const JOB_MODES = ["realtime", "deferred", "scheduled", "manual"] as const;
+
+export const JOB_MODE_LABEL: Record<JobMode, string> = {
+  realtime: "Realtime",
+  deferred: "Yield to stream",
+  scheduled: "Scheduled",
+  manual: "Manual only",
+};
+
+export const JOB_MODE_HINT: Record<JobMode, string> = {
+  realtime: "Runs immediately, even while a broadcast is going out. Only for work you know is cheap.",
+  deferred: "Waits for the ingest to stop and for the machine to be quiet. The safe default.",
+  scheduled: "Only runs inside the windows below — overnight, typically.",
+  manual: "Never starts on its own. You release each job by hand.",
+};
+
+/** Priority is stored as a number; these are the three the API mints. */
+export type JobPriority = number;
+
+export interface Job {
+  id: number;
+  kind: string;
+  /** Opaque to the queue; "recording:<id>" for everything this UI submits. */
+  target: string;
+  params?: unknown;
+  result?: unknown;
+  priority: JobPriority;
+  state: JobState;
+  unique?: boolean;
+  /** Counts STARTS, not failures. */
+  attempts: number;
+  maxAttempts: number;
+  /** 0..1. */
+  progress: number;
+  log?: string[];
+  /** Survives a retry, so a job going wrong is visible before it gives up. */
+  error?: string;
+  createdAt: string;
+  availableAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt: string;
+}
+
+/** A job plus the two things the queue does not store: why it is not running,
+ *  and roughly how long it has left. `reason` is the load-bearing field on the
+ *  jobs page — a paused job with no explanation reads as a broken job. */
+export interface JobView extends Job {
+  recordingId?: number;
+  recording?: string;
+  blocked: boolean;
+  reason?: string;
+  etaSeconds?: number;
+  label?: string;
+}
+
+export interface JobStats {
+  running: number;
+  paused: boolean;
+  started: number;
+  completed: number;
+  failed: number;
+  retried: number;
+  cancelled: number;
+  requeued: number;
+  byKind?: Record<string, number>;
+}
+
+/** A local wall-clock range a scheduled kind may run in. It may wrap midnight,
+ *  and a wrapping window belongs to the day its START falls on. */
+export interface JobWindow {
+  /** IANA zone. Empty means UTC — never the server's local time. */
+  tz?: string;
+  /** Minutes past local midnight. End may be 1440 for the following midnight. */
+  startMinutes: number;
+  endMinutes: number;
+  /** 0 = Sunday. Empty means every day. */
+  days?: number[];
+}
+
+export interface JobKindInfo {
+  kind: string;
+  label: string;
+  description: string;
+  mode: JobMode;
+  windows?: JobWindow[];
+  usesGpu: boolean;
+  ignoreIngest: boolean;
+  /** Whether this kind has a policy row of its own, or inherits the default. */
+  overridden: boolean;
+  /** Fails open: a kind we cannot judge is available. */
+  available: boolean;
+  unavailable?: string;
+}
+
+export interface PowerState {
+  /** False means the platform told us nothing, which gates nothing. */
+  known: boolean;
+  onBattery: boolean;
+  /** -1 when unknown. */
+  percent: number;
+  tempC: number;
+}
+
+export interface GovernorGates {
+  at: string;
+  /** Includes the linger period after the stream stopped. */
+  ingestLive: boolean;
+  /** -1 when unavailable. */
+  cpuPercent: number;
+  cpuOverCeiling: boolean;
+  cpuSustained: boolean;
+  gpuBusy: boolean;
+  onBattery: boolean;
+  tooHot: boolean;
+  power: PowerState;
+}
+
+export interface GovernorVerdict {
+  kind: string;
+  mode: JobMode;
+  /** May a queued job of this kind be claimed now. */
+  start: boolean;
+  /** May one that is ALREADY running keep the machine. */
+  continue: boolean;
+  suspension: "stop" | "finish-then-yield" | string;
+  reason: string;
+}
+
+export interface GovernorSnapshot {
+  at: string;
+  enabled: boolean;
+  gates: GovernorGates;
+  verdicts: GovernorVerdict[];
+  deferred?: number[];
+  suspended?: string[];
+  /** Kinds that should be paused but cannot be, and are finishing instead. */
+  yielding?: string[];
+  paused: boolean;
+}
+
+export interface PostProdKindSettings {
+  kind: string;
+  mode?: JobMode | "";
+  windows?: JobWindow[];
+  usesGpu?: boolean;
+  ignoreIngest?: boolean;
+}
+
+export interface PostProdSettings {
+  enabled: boolean;
+  concurrency: number;
+  defaultMode: JobMode | "";
+  yieldToStream: boolean;
+  cpuCeilingPercent: number;
+  cpuResumePercent: number;
+  cpuSustainedSeconds: number;
+  cpuSettleSeconds: number;
+  avoidGpuWhenStreaming: boolean;
+  gpuBusy: boolean;
+  batteryFloorPercent: number;
+  thermalCeilingC: number;
+  niceLevel: number;
+  idleIo: boolean;
+  ingestLingerSeconds: number;
+  deferSeconds: number;
+  retainDays: number;
+  retainJobs: number;
+  kinds?: PostProdKindSettings[];
+}
+
+/** What this machine can do about speech to text. Reported even when
+ *  whisper.cpp is absent: "install this and the button appears" beats a
+ *  disabled control with no explanation. */
+export interface WhisperInfo {
+  available: boolean;
+  unavailable?: string;
+  binary?: string;
+  version?: string;
+  backends?: string[];
+  backend?: string;
+  models?: string[];
+  defaultModel?: string;
+  realtime: boolean;
+  realtimeNote?: string;
+}
+
+export interface JobsOverview {
+  /** False means no queue is wired on this server. */
+  available: boolean;
+  paused: boolean;
+  stats: JobStats;
+  counts: Record<string, number>;
+  governor?: GovernorSnapshot;
+  policy: PostProdSettings;
+  kinds: JobKindInfo[];
+  active: JobView[];
+  recent: JobView[];
+  whisper: WhisperInfo;
+}
+
+// ------------------------------------------------------------- the library
+//
+// Sessions are the primary unit: a session is one broadcast, and its segments
+// are an implementation detail of how the recorder wrote it down.
+
+export interface RecordingAssets {
+  proxy: boolean;
+  poster: boolean;
+  contactSheet: boolean;
+  sprites: boolean;
+  archive: boolean;
+}
+
+export interface LibraryRecording extends Recording {
+  sessionId?: number;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  hasTranscript: boolean;
+  assets: RecordingAssets;
+  activeJobs?: JobView[];
+}
+
+export interface Session {
+  id: number;
+  title: string;
+  description: string;
+  tags: string[] | null;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  bytes: number;
+  recordings: number;
+  /** False once a human has built or split this session by hand. */
+  auto: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibrarySession extends Session {
+  displayTitle: string;
+  /** The derived still that stands in for the session, if one has been
+   *  generated. Keyed on the recording id, which is what the media URL wants. */
+  posterRecordingId?: number;
+  posterFile?: string;
+  transcribed: number;
+}
+
+export interface LibraryView {
+  sessions: LibrarySession[];
+  ungrouped: LibraryRecording[];
+  tags: string[];
+  speakers: string[];
+  jobsAvailable: boolean;
+  transcribeAvailable: boolean;
+  transcribeNote?: string;
+  /** The sentinels the search wraps matched terms in. Split on these. */
+  markers: [string, string];
+}
+
+/** The editable half of a session or a recording. Kept separate from the
+ *  computed span so an update cannot carry a stale one back. */
+export interface Metadata {
+  title: string;
+  description: string;
+  tags: string[];
+}
+
+export interface TranscriptSegment {
+  id: number;
+  recordingId: number;
+  track: number;
+  speaker?: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+  confidence?: number;
+  confidenceKnown?: boolean;
+}
+
+export interface TranscriptTrack {
+  id: number;
+  recordingId: number;
+  track: number;
+  speaker?: string;
+  role?: string;
+  language?: string;
+  model?: string;
+  backend?: string;
+  createdAt: string;
+  segments?: TranscriptSegment[];
+  count: number;
+  durationMs: number;
+}
+
+export interface Transcript {
+  recordingId: number;
+  recording: string;
+  tracks: TranscriptTrack[];
+}
+
+export interface TranscriptView {
+  transcript: Transcript;
+  /** The free-diarization view: time-ordered, already speaker-attributed
+   *  because each microphone was recorded on its own track. */
+  merged: TranscriptSegment[];
+  speakers: string[];
+  segments: number;
+}
+
+export type TranscriptOrder = "relevance" | "time" | "recent";
+
+export interface TranscriptHit {
+  segmentId: number;
+  recordingId: number;
+  recording: string;
+  sessionId?: number;
+  track: number;
+  speaker?: string;
+  startMs: number;
+  endMs: number;
+  /** Wall-clock instant of the utterance, not an offset. */
+  at: string;
+  text: string;
+  /** Text with matched terms wrapped in the markers. */
+  snippet: string;
+  context?: string;
+  score: number;
+}
+
+/** Everything the transcript search accepts. Every field is optional but the
+ *  text, and the server clamps the numbers, so a caller may pass what it has. */
+export interface SearchParams {
+  q: string;
+  /** Makes the final term a prefix match, which is what makes
+   *  search-as-you-type useful. */
+  prefix?: boolean;
+  /** Passes the text to FTS5 untouched, for someone who knows the syntax. */
+  raw?: boolean;
+  recordingId?: number;
+  sessionId?: number;
+  track?: number;
+  speaker?: string;
+  /** RFC3339 or a bare YYYY-MM-DD. */
+  since?: string;
+  until?: string;
+  order?: TranscriptOrder;
+  limit?: number;
+  offset?: number;
+  /** Neighbouring segments glued either side of the hit; negative for none. */
+  context?: number;
+  snippetTokens?: number;
+}
+
+export interface SearchResults {
+  hits: TranscriptHit[];
+  /** -1 when the count could not be taken; the hits are still good. */
+  total: number;
+  limit: number;
+  offset: number;
+  markers: [string, string];
+}

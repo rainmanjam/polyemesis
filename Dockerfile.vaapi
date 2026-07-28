@@ -1,0 +1,174 @@
+# polyemesis — Intel / AMD container image, via VA-API.
+#
+# Build:  docker build -f Dockerfile.vaapi -t polyemesis:vaapi .
+# Run:    docker run --device /dev/dri:/dev/dri \
+#                    --group-add "$(stat -c '%g' /dev/dri/renderD128)" \
+#                    -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \
+#                    -v polyemesis-data:/data polyemesis:vaapi
+#
+# This image exists because VA-API needs two things the default Alpine image
+# cannot supply: a render node passed in from the host, and a VA-API *driver*
+# for your specific silicon (iHD for modern Intel, radeonsi for AMD). The
+# drivers are ordinary packages, so they are installed below; the render node
+# is not, and has to be handed over at `docker run` time.
+#
+# THE HOST REQUIREMENT, PLAINLY:
+#
+#   1. An Intel iGPU/Arc with Quick Sync, or an AMD GPU/APU with VCN/VCE.
+#      Intel F-suffix desktop parts have the iGPU fused off and cannot do this.
+#   2. A kernel driver bound to it, so that /dev/dri/renderD* exists on the
+#      host. `ls -l /dev/dri` is the whole test.
+#   3. --device /dev/dri:/dev/dri on the run, and a supplementary group so the
+#      container's non-root user may open the node. See below — this is the
+#      part that catches everyone.
+#
+# THE GROUP-ID PROBLEM. On the host, /dev/dri/renderD128 is typically
+# root:render mode 0660: only root and members of the render group may open it.
+# polyemesis runs as an unprivileged user inside the container, so it needs
+# that group — and group membership is resolved by NUMERIC GID against the
+# host's device node, not by name.
+#
+# Two things follow, and both bite:
+#
+#   * The GID differs between distributions. It is 989 on some Arch installs,
+#     in the 100s on Debian and Ubuntu, different again on Fedora — there is no
+#     number worth hardcoding here, which is why this file does not create a
+#     render group at a guessed GID.
+#   * `--group-add render` usually FAILS, because the name has to resolve
+#     inside the container and Ubuntu's base image has no render group at all
+#     (verified: `getent group render` in ubuntu:24.04 returns nothing, while
+#     `video` exists at GID 44). The name that matters is the host's; the
+#     container only ever sees a number.
+#
+# So read the number off the host's own device node and pass that:
+#
+#   docker run --device /dev/dri:/dev/dri \
+#              --group-add "$(stat -c '%g' /dev/dri/renderD128)" ...
+#
+# That form is correct on every distribution without you knowing which one you
+# are on. Skipping it produces "Permission denied" or "Failed to initialise
+# VAAPI connection" from a container that can plainly see the device — see
+# docs/HARDWARE.md.
+
+# ---------- stage 1: build the web UI ----------
+# A copy of the default Dockerfile's stage, deliberately: see Dockerfile.cuda
+# for why these are not factored into a shared base image.
+FROM node:24-alpine AS ui
+WORKDIR /src/ui
+COPY ui/package.json ui/package-lock.json* ./
+RUN npm ci
+COPY ui/ ./
+RUN mkdir -p /src/internal/web && npm run build
+
+# ---------- stage 2: build the Go binary ----------
+# Must stay >= the `go` directive in go.mod; the official golang images set
+# GOTOOLCHAIN=local, so a too-old tag fails the build outright.
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui /src/internal/web/dist ./internal/web/dist
+ARG VERSION=docker-vaapi
+# CGO off means the binary is static, so it runs unchanged on this glibc base.
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION}" \
+      -o /out/polyemesis ./cmd/polyemesis
+
+# ---------- stage 3: runtime ----------
+#
+# Ubuntu 24.04 rather than Alpine: the VA-API driver stack that matters here
+# (intel-media-driver for Gen9 and newer, Mesa's radeonsi for AMD) is packaged,
+# current and tested on Ubuntu, and its FFmpeg 6.1.1 keeps this image on the
+# same 6.1.x series as the default image. Alpine has libva but a much thinner
+# driver selection, and building the Intel media driver by hand is not a thing
+# to inherit from a base-image choice.
+#
+# Floating at 24.04, not pinned to a point release, so rebuilds collect
+# security updates. Verified to exist on 2026-07-26.
+FROM ubuntu:24.04
+
+# Ubuntu 24.04's FFmpeg is built with VA-API (verified: `ffmpeg -encoders` in
+# ubuntu:24.04 lists h264_vaapi, hevc_vaapi, h264_qsv and hevc_qsv). It is NOT
+# built with AMF — there are no *_amf encoders in this build at all, which is
+# why AMD on Linux goes through VA-API here and AMF is a Windows story.
+#
+# Pinned for the same reason the Alpine image pins its FFmpeg: an unpinned
+# transcoder silently changes under a fixed image tag, and the symptom is a
+# broken stream rather than a failed build. The loud failure on a superseded
+# version is the prompt to bump on purpose. To bump:
+#
+#   docker run --rm ubuntu:24.04 sh -c 'apt-get update -qq && apt-cache policy ffmpeg'
+#
+# 7:6.1.1-3ubuntu5 verified present on 2026-07-26 (linux/amd64).
+ARG FFMPEG_VERSION=7:6.1.1-3ubuntu5
+
+# The driver packages are left unpinned on purpose, unlike FFmpeg. They are
+# hardware enablement: a newer intel-media-driver is how a newly released Arc
+# part starts working, and pinning them would freeze the one thing that should
+# track the hardware. They also cannot break a stream the way a transcoder
+# version change can — when a VA-API driver is wrong, the encoder fails to open
+# and polyemesis falls back to software rather than silently changing output.
+#
+#   intel-media-va-driver — the iHD driver, Intel Gen9 (Skylake) and newer,
+#     including Arc. Verified in Ubuntu 24.04 universe at 24.1.0+dfsg1.
+#     There is also intel-media-va-driver-non-free in multiverse, which enables
+#     additional codecs; it is not installed here because "non-free" is not a
+#     thing to pull into someone's image without them choosing it. If you need
+#     what it adds, swap the package name and rebuild.
+#   i965-va-driver — the older Intel driver, for pre-Skylake parts the iHD
+#     driver does not cover.
+#   mesa-va-drivers — radeonsi, which is the AMD encode path on Linux.
+#   vainfo — 4 MB that turns "it does not work" into a readable answer from
+#     inside the container. Worth it; see docs/HARDWARE.md.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      "ffmpeg=${FFMPEG_VERSION}" \
+      intel-media-va-driver \
+      i965-va-driver \
+      mesa-va-drivers \
+      libva-drm2 \
+      vainfo \
+      ca-certificates tzdata wget \
+ && rm -rf /var/lib/apt/lists/* \
+ # `grep srt` would pass on every build, because `srtp` is always listed. -x
+ # makes this a real check that multitrack SRT ingest can work.
+ && ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt \
+ # Asserts the BUILD contains VA-API. It cannot assert this machine can use it
+ # — no builder has a render node — which is exactly why polyemesis probes with
+ # a one-frame test encode at startup rather than trusting a list.
+ && ffmpeg -hide_banner -encoders | awk '{print $2}' | grep -qx h264_vaapi
+
+COPY --from=build /out/polyemesis /usr/local/bin/polyemesis
+
+# No render group is created here, and no GID is guessed. A supplementary group
+# passed with --group-add applies to the process whether or not the group
+# exists in the container's /etc/group, so the correct answer is always the
+# host's number, supplied at run time. Inventing a group here would only make
+# a wrong GID look right.
+RUN useradd --system --uid 10001 --create-home --home-dir /home/polyemesis polyemesis \
+ && mkdir -p /data && chown polyemesis:polyemesis /data
+VOLUME ["/data"]
+USER polyemesis
+WORKDIR /data
+
+# LIBVA_DRIVER_NAME is deliberately NOT set. Unset means libva probes the
+# device and picks the driver that matches it, which is right on Intel and AMD
+# alike. Setting it to `iHD` — as a lot of copied-around Dockerfiles do —
+# breaks every AMD host using this same image, and hardcodes a choice the
+# library already makes correctly. Override it at run time (`-e
+# LIBVA_DRIVER_NAME=i965`) only for an old Intel part the probe gets wrong.
+
+EXPOSE 8080/tcp
+# SRT is UDP. Forgetting the /udp suffix is the classic reason an SRT ingest
+# silently never receives anything.
+EXPOSE 6000/udp
+EXPOSE 1935/tcp
+# Only needed for `tls.mode: acme`; see the default Dockerfile for why.
+EXPOSE 80/tcp
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD wget -qO- http://127.0.0.1:8080/api/v1/health || exit 1
+
+ENTRYPOINT ["polyemesis"]
+CMD ["-addr", ":8080", "-data", "/data"]

@@ -1,0 +1,39 @@
+# Dependency updates.
+#
+# Grouped and weekly rather than one PR per bump: this repository has nine
+# direct Go dependencies on purpose, and a PR per patch release would drown the
+# signal that matters -- a SECURITY advisory.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: "/ui"
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      # Radix ships fourteen packages that move together; fourteen PRs for one
+      # upstream release is noise, not diligence.
+      radix:
+        patterns: ["@radix-ui/*"]
+      dev-tooling:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # The actions are pinned by major tag; this is what notices a v7 -> v8.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+
+  # Base images. The FFmpeg pin inside them is deliberate and NOT managed here
+  # -- see the comment in the Dockerfile about a rebuild silently becoming a
+  # different product.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule: { interval: weekly, day: monday }

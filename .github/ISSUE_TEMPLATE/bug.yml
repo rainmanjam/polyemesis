@@ -1,0 +1,111 @@
+name: Bug report
+description: Something does not work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **If this is a security problem, please close this and follow
+        [SECURITY.md](https://github.com/rainmanjam/polyemesis/blob/main/SECURITY.md)
+        instead** — a public issue is the wrong place for it.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+      placeholder: |
+        Enabling the second destination stopped the first one.
+        I expected both to run.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        From a fresh install if you can. "It happens sometimes" is still worth
+        reporting — say so rather than leaving this blank.
+      placeholder: |
+        1. Fresh install, SRT ingest on 6000
+        2. Add a destination to YouTube, track 1
+        3. Add a second to Twitch, tracks 1 and 2
+        4. Enable the second one
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: polyemesis version
+      description: Output of `polyemesis -version`, or the Docker tag.
+      placeholder: v0.4.1 / ghcr.io/rainmanjam/polyemesis:latest
+    validations:
+      required: true
+
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: FFmpeg version
+      description: >
+        First line of `ffmpeg -version`. If you are using the container, say so
+        and skip this.
+      placeholder: ffmpeg version 8.1.2
+    validations:
+      required: false
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: How is it running
+      options:
+        - Docker / docker compose
+        - Binary on Linux
+        - Binary on macOS
+        - Binary on Windows
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ingest
+    attributes:
+      label: Ingest mode
+      options:
+        - SRT
+        - RTMP
+        - Pull
+        - One-port / token-addressed
+        - Not relevant to this bug
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: >
+        The relevant part, not the whole file. `-log debug` if you can reproduce
+        it on demand — the destination's own FFmpeg output is often the thing
+        that explains it, and it is on the monitoring page under the process.
+
+        Please check for stream keys and passphrases before pasting.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: measured
+    attributes:
+      label: What you measured
+      description: >
+        Only if this is about audio, timing or quality. "The commentary track
+        sounds quiet" is a good start; "the commentary track measures 9 dB below
+        the music track at the destination" is what lets someone fix it in one
+        pass.
+    validations:
+      required: false

@@ -1,0 +1,17 @@
+# The build context was ~260 MB, almost all of it things the image never needs:
+# the UI is compiled inside the image from source, and the host binary is
+# irrelevant to a cross-platform build.
+ui/node_modules/
+node_modules/
+internal/web/dist/
+/polyemesis
+/dist/
+/data/
+.git/
+.playwright-mcp/
+*.db
+*.db-wal
+*.db-shm
+scripts/
+docs/
+.DS_Store

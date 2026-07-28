@@ -1,0 +1,153 @@
+# Release: publish multi-architecture container images and native binaries.
+#
+# Triggered by pushing a version tag:
+#
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# Requires two repository secrets (Settings -> Secrets and variables -> Actions):
+#   DOCKERHUB_USERNAME  your Docker Hub account name
+#   DOCKERHUB_TOKEN     an access token from hub.docker.com/settings/security
+#                       (an access token, NOT your password: it can be scoped
+#                       to read/write and revoked without changing your login)
+#
+# Nothing here publishes on an ordinary push. A tag is the only trigger, so
+# releasing is always a deliberate act.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # Lets you rehearse the whole thing without publishing anything.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build everything but push nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # needed to create the GitHub Release and upload assets
+
+env:
+  IMAGE: rainmanjam/polyemesis
+
+jobs:
+  images:
+    name: container images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # QEMU lets one amd64 runner produce an arm64 image. It is slower than a
+      # native arm64 runner but needs no extra infrastructure.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # metadata-action derives the tag set from the git ref, so v1.2.3 becomes
+      # :1.2.3, :1.2 and :latest. Writing those by hand is how :latest ends up
+      # pointing at a prerelease.
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+
+      # The default image: Alpine + FFmpeg 8.1.2, built for both architectures
+      # that Docker actually runs on. linux/amd64 covers Intel/AMD servers and
+      # Windows via WSL2; linux/arm64 covers Apple Silicon, Graviton/Ampere and
+      # the Raspberry Pi 4/5.
+      - name: Build and push (default, multi-arch)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: ${{ github.event_name == 'push' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The GPU images are linux/amd64 only, and that is not an oversight:
+      # Dockerfile.vaapi's driver stack (intel-media-va-driver) is an amd64
+      # story, and neither image has ever been built on a machine with a GPU
+      # attached. They are published so people with the hardware can try them,
+      # not because they are verified. See docs/HARDWARE.md.
+      - name: Build and push (NVIDIA/NVENC)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.cuda
+          platforms: linux/amd64
+          build-args: VERSION=${{ github.ref_name }}
+          tags: |
+            ${{ env.IMAGE }}:cuda
+            ${{ env.IMAGE }}:${{ github.ref_name }}-cuda
+          push: ${{ github.event_name == 'push' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push (Intel/AMD VA-API)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.vaapi
+          platforms: linux/amd64
+          build-args: VERSION=${{ github.ref_name }}
+          tags: |
+            ${{ env.IMAGE }}:vaapi
+            ${{ env.IMAGE }}:${{ github.ref_name }}-vaapi
+          push: ${{ github.event_name == 'push' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  binaries:
+    name: native binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # Docker is never required to run polyemesis: `make release` produces a
+      # self-contained binary per platform with the web UI embedded, and the
+      # only external requirement is FFmpeg on the host.
+      - name: Cross-compile
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: make release VERSION="$VERSION"
+
+      # Checksums so someone can verify a download they did not build.
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+          # A tag containing a hyphen (v1.0.0-rc1) is a prerelease, and must
+          # not become the download the front page points at.
+          prerelease: ${{ contains(github.ref_name, '-') }}

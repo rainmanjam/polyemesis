@@ -1,0 +1,189 @@
+# Minimal compose file. Docker is optional — see docs/INSTALL.md for the
+# bare-binary, macOS and Windows deployments, and README.md for the systemd
+# unit, which is the primary path on a Linux server.
+#
+# The default service below is CPU-only and stays that way. GPU variants live
+# at the bottom of this file, commented out — one file with three shapes rather
+# than three files that drift apart. Uncomment ONE of them, comment out the
+# default `polyemesis` service, and read docs/HARDWARE.md first: every GPU
+# variant has a host-side requirement that compose cannot check for you.
+
+services:
+  polyemesis:
+    build:
+      context: .
+      args:
+        VERSION: compose
+    # Or, once published: image: polyemesis:latest
+    container_name: polyemesis
+    restart: unless-stopped
+    # Docker's default is 10s, and a measured shutdown with three destinations
+    # live takes ~8.3s: the supervisor gives each child an 8s grace period
+    # (shutdownGrace) before escalating to SIGKILL, and an FFmpeg whose ingest
+    # feed has gone quiet reliably needs that full 8s. 1.7s of headroom is not
+    # a margin, it is a coin flip — and losing it means Docker SIGKILLs the
+    # container mid-shutdown, which is exactly when a file destination has not
+    # yet finalised its container and the recording is truncated.
+    #
+    # 30s is the same shape as the systemd unit's TimeoutStopSec=45.
+    stop_grace_period: 30s
+    ports:
+      - "8080:8080"        # web UI + API
+      - "6000:6000/udp"    # SRT ingest — UDP, not TCP. ONE port for every
+                           # source; they are told apart by publish token,
+                           # so adding a source never changes this file.
+      - "1935:1935"        # RTMP ingest (fallback, single stereo pair,
+                           # and serves at most one source)
+
+      # ACME ONLY. Uncomment together with the config mount below if you want
+      # polyemesis to obtain its own Let's Encrypt certificate: HTTP-01
+      # validation must reach http://<hostname>/.well-known/acme-challenge/… on
+      # port 80 from the public internet, so the port has to be published here,
+      # not merely EXPOSEd in the image.
+      #
+      # It ships commented out on purpose. Publishing :80 unconditionally makes
+      # `docker compose up` fail outright on any host that already runs a web
+      # server, and the default configuration below is plain HTTP with no
+      # certificate at all — so the port would buy nothing and cost a bind
+      # error. Every non-acme TLS mode leaves it unused.
+      # - "80:80"
+
+    volumes:
+      # Database, encryption key and recordings all live here. Back it up.
+      - polyemesis-data:/data
+
+      # Not mounted by default: with no config.yaml the container runs plain
+      # HTTP on :8080, which is the right default behind a reverse proxy or on a
+      # private network. Mount one to configure TLS, and see the "TLS and
+      # certificates" section of the README for which mode you want.
+      # - ./config.yaml:/data/config.yaml:ro
+
+    # FFmpeg is happiest with a decent shared-memory segment when filtering
+    # several destinations at once.
+    shm_size: 256m
+    # Plain HTTP, matching the default config. If you mount a config.yaml that
+    # makes polyemesis terminate TLS on :8080, change this to
+    # `wget --no-check-certificate -qO- https://127.0.0.1:8080/…` or compose
+    # will mark a perfectly healthy container unhealthy and keep restarting it.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+
+# ------------------------------------------------------------------- NVIDIA
+#
+# This prose sits at column 0 and the YAML sits indented, on purpose: only the
+# indented `  # ` lines are meant to be uncommented. Strip `  # ` from those and
+# comment out the `polyemesis` service above — the two share a container_name,
+# so doing only half of it fails immediately and says why.
+#
+# THE HOST NEEDS nvidia-container-toolkit INSTALLED AND WIRED INTO DOCKER.
+# This is not optional and compose cannot tell you it is missing — you get a
+# container that starts fine and fails every NVENC probe with "Cannot load
+# libcuda.so.1". Confirm the host first:
+#   docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi
+# See docs/HARDWARE.md.
+
+  # polyemesis-nvidia:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.cuda
+  #     args:
+  #       VERSION: compose-cuda
+  #   container_name: polyemesis
+  #   restart: unless-stopped
+  #   # Same reason as the default service above: an 8s supervisor grace period
+  #   # does not fit inside Docker's 10s default, and losing the race truncates
+  #   # whatever a file destination was still writing.
+  #   stop_grace_period: 30s
+  #
+  #   # `capabilities` here is not decoration: it becomes
+  #   # NVIDIA_DRIVER_CAPABILITIES inside the container, and it OVERRIDES what
+  #   # Dockerfile.cuda set. Leave `video` out and the toolkit injects
+  #   # libcuda.so.1 but not libnvidia-encode.so.1 — nvidia-smi works, CUDA
+  #   # works, and NVENC alone fails. `gpu` alone is the usual copy-paste, and
+  #   # the usual reason encoding does not work while everything else does.
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu, video]
+  #
+  #   # Recent Compose also accepts the shorthand `gpus: all` in place of the
+  #   # whole `deploy:` block above. It takes no capability list, so it relies
+  #   # on the NVIDIA_DRIVER_CAPABILITIES that Dockerfile.cuda bakes in — which
+  #   # is correct for this image, and wrong for most others.
+  #   # gpus: all
+  #
+  #   ports:
+  #     - "8080:8080"
+  #     - "6000:6000/udp"
+  #     - "1935:1935"
+  #   volumes:
+  #     - polyemesis-data:/data
+  #   shm_size: 256m
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+  #     interval: 30s
+  #     timeout: 3s
+  #     start_period: 10s
+
+# --------------------------------------------------------- Intel / AMD, VA-API
+#
+# As above: uncomment the indented block, comment out `polyemesis`.
+#
+# THE HOST NEEDS /dev/dri/renderD128 TO EXIST — `ls -l /dev/dri` is the whole
+# test — and the container's unprivileged user needs permission to open it.
+# That second part is `group_add` below, and it is where this usually goes
+# wrong: the render node is root:render mode 0660 on the host, and group
+# membership is matched by NUMERIC GID, which differs between distributions.
+#
+# Compose has no way to read the host's GID for you, so print it and paste it:
+#   stat -c '%g' /dev/dri/renderD128
+#
+# `group_add: [render]` does NOT work as a substitute. The name would have to
+# resolve inside the container, and these base images have no render group —
+# Docker refuses with "unable to find group render". See docs/HARDWARE.md.
+
+  # polyemesis-vaapi:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.vaapi
+  #     args:
+  #       VERSION: compose-vaapi
+  #   container_name: polyemesis
+  #   restart: unless-stopped
+  #   # Same reason as the default service above: an 8s supervisor grace period
+  #   # does not fit inside Docker's 10s default, and losing the race truncates
+  #   # whatever a file destination was still writing.
+  #   stop_grace_period: 30s
+  #
+  #   devices:
+  #     # Passing the whole directory rather than one node: which renderD* is
+  #     # yours depends on how many GPUs the host has and the order the kernel
+  #     # bound them, and polyemesis picks the right one at startup.
+  #     - /dev/dri:/dev/dri
+  #   group_add:
+  #     # REPLACE THIS NUMBER. `stat -c '%g' /dev/dri/renderD128` on the host.
+  #     # A wrong number fails exactly like no number at all: "Permission
+  #     # denied" opening a device the container can plainly see.
+  #     - "993"
+  #
+  #   ports:
+  #     - "8080:8080"
+  #     - "6000:6000/udp"
+  #     - "1935:1935"
+  #   volumes:
+  #     - polyemesis-data:/data
+  #   shm_size: 256m
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+  #     interval: 30s
+  #     timeout: 3s
+  #     start_period: 10s
+
+volumes:
+  polyemesis-data:
