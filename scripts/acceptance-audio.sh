@@ -18,6 +18,9 @@ set -uo pipefail
 WORK="${1:-/tmp/polyemesis-acceptance-audio}"
 PORT=8099
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+# Shared teardown. See lib-cleanup.sh: killing the server alone orphans its
+# FFmpeg children, and they corrupt the NEXT run's relay ports.
+. "$SCRIPTS/lib-cleanup.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 
@@ -33,9 +36,8 @@ step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
 note() { printf "  %s\n" "$1"; }
 
 cleanup() {
-  pkill -f "polyemesis -addr :$PORT" 2>/dev/null
   pkill -f "acceptance-source"       2>/dev/null
-  wait 2>/dev/null
+  poly_cleanup "$PORT" "${WORK:-}"
 }
 trap cleanup EXIT
 
