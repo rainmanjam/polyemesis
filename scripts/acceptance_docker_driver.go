@@ -24,6 +24,8 @@
 //	addsource <base> <name>     create a source, print its id and SRT port
 //	destfor   <base> <srcID> <name> <file> <track>
 //	                            create a file destination on one source
+//	oneport   <base> <port>     turn on the one-port SRT listener
+//	tokens    <base>            print "<id> <token>" per source
 package main
 
 import (
@@ -93,6 +95,15 @@ func main() {
 		}
 		login()
 		destFor(os.Args[3], os.Args[4], os.Args[5], os.Args[6])
+	case "oneport":
+		if len(os.Args) < 4 {
+			die("oneport needs a port")
+		}
+		login()
+		onePort(os.Args[3])
+	case "tokens":
+		login()
+		tokens()
 	case "mode":
 		if len(os.Args) < 4 {
 			die("mode needs srt|rtmp")
@@ -339,6 +350,42 @@ func destFor(srcID, name, file, track string) {
 		die(fmt.Sprintf("create %s failed: %d %s", name, code, out))
 	}
 	fmt.Println("DEST_OK")
+}
+
+// onePort enables the shared SRT listener, which is install-wide settings
+// rather than per-source configuration.
+func onePort(port string) {
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		die("bad port " + port)
+	}
+	_, out := do(http.MethodGet, "/settings", nil)
+	var s map[string]any
+	if err := json.Unmarshal(out, &s); err != nil {
+		die("settings unreadable: " + err.Error())
+	}
+	s["sharedIngest"] = map[string]any{"enabled": true, "port": p}
+	code, body := do(http.MethodPut, "/settings", s)
+	if code != http.StatusOK {
+		die(fmt.Sprintf("enable one-port ingest failed: %d %s", code, body))
+	}
+	fmt.Println("ONEPORT_OK")
+}
+
+// tokens prints each source's publish token, which is what an encoder puts in
+// its SRT streamid to address that programme.
+func tokens() {
+	_, out := do(http.MethodGet, "/sources", nil)
+	var rows []struct {
+		ID    int64  `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		die("sources unreadable: " + err.Error())
+	}
+	for _, r := range rows {
+		fmt.Printf("%d %s\n", r.ID, r.Token)
+	}
 }
 
 func setMode(mode string) {

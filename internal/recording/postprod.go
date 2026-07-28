@@ -1,10 +1,14 @@
 package recording
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
 // The post-production tier's two obligations to the recordings directory.
@@ -95,7 +99,88 @@ func (m *Manager) sweepDerived() bool {
 	if len(removed) > 0 {
 		m.log.Info("removed derived media for recordings that are gone", "count", len(removed))
 	}
-	return len(removed) > 0
+	n := m.sweepTranscripts(known)
+	return len(removed) > 0 || n > 0
+}
+
+// sweepTranscripts removes transcript files whose recording is gone.
+//
+// Retention capped the recordings directory but never looked in here, so an
+// install that recorded and transcribed for months kept every transcript of
+// every deleted recording forever. They are small individually, which is
+// exactly why nobody notices until the volume is full.
+//
+// Transcripts are named after their recording minus the extension, which is
+// what makes an orphan identifiable at all. The comparison is built from the
+// index rather than by reconstructing an extension, the same direction
+// media.Sweep uses and for the same reason: guessing ".mkv" would strand
+// anything recorded to a different container.
+//
+// CLIPS ARE DELIBERATELY NOT SWEPT HERE. A clip is the thing an operator chose
+// to keep — often the only reason the session was recorded at all — and
+// deleting it because the hours-long master aged out would destroy the artifact
+// rather than the byproduct. Clips need their own retention, on their own
+// terms; inheriting the master's is worse than having none.
+func (m *Manager) sweepTranscripts(known map[string]bool) int {
+	if len(known) == 0 {
+		return 0
+	}
+	dir := filepath.Join(m.dir, transcribe.TranscriptsSubdir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			m.log.Warn("cannot read the transcripts directory", "err", err)
+		}
+		return 0
+	}
+
+	survives := make(map[string]bool, len(known))
+	for name := range known {
+		base := filepath.Base(name)
+		survives[strings.TrimSuffix(base, filepath.Ext(base))] = true
+	}
+
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		// A transcript is "<recording base>.<format>", and the base may itself
+		// contain dots, so the surviving set is consulted for every prefix
+		// rather than assuming one extension.
+		if transcriptBelongsToSurvivor(e.Name(), survives) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+			m.log.Warn("cannot remove an orphaned transcript", "file", e.Name(), "err", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		m.log.Info("removed transcripts for recordings that are gone", "count", removed)
+	}
+	return removed
+}
+
+// transcriptBelongsToSurvivor reports whether name is a transcript of a
+// recording that still exists.
+//
+// Every prefix is tested because a recording's base name may contain dots, so
+// there is no single "strip the extension" that is right for all of them.
+// Erring towards KEEPING an ambiguous file is deliberate: a stray transcript
+// costs kilobytes, and deleting one that is still referenced loses the only
+// searchable record of what was said.
+func transcriptBelongsToSurvivor(name string, survives map[string]bool) bool {
+	for i := len(name); i > 0; i-- {
+		if i < len(name) && name[i] != '.' {
+			continue
+		}
+		if survives[name[:i]] {
+			return true
+		}
+	}
+	return false
 }
 
 // removeDerived drops one recording's derived files. Best effort and never
