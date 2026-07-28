@@ -1,13 +1,18 @@
 {
   "nav.dashboard": "Dashboard",
+  "nav.sources": "Sources",
   "nav.meters": "Audio meters",
   "nav.routing": "Routing",
   "nav.renditions": "Renditions",
   "nav.playout": "Playout",
+  "nav.library": "Library",
+  "nav.clips": "Clips",
+  "nav.chat": "Chat",
+  "nav.jobs": "Jobs",
+  "nav.automation": "Automation",
   "nav.recordings": "Recordings",
   "nav.monitoring": "Monitoring",
   "nav.settings": "Settings",
-
   "chrome.toggleNav": "Toggle navigation",
   "chrome.ingest": "Ingest",
   "chrome.liveCount": "{count} live",
@@ -15,7 +20,6 @@
   "chrome.socketOfflineHint": "Live updates are disconnected; retrying",
   "chrome.signOut": "Sign out",
   "chrome.language": "Language",
-
   "common.add": "Add",
   "common.cancel": "Cancel",
   "common.close": "Close",
@@ -33,7 +37,6 @@
   "common.save": "Save",
   "common.start": "Start",
   "common.stop": "Stop",
-
   "state.live": "Live",
   "state.reconnecting": "Reconnecting",
   "state.starting": "Starting",

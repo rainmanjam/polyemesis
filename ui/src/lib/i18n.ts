@@ -2,6 +2,19 @@ import { useCallback, useSyncExternalStore } from "react";
 
 import de from "./i18n/de.json";
 import en from "./i18n/en.json";
+import es from "./i18n/es.json";
+import ptBR from "./i18n/pt-BR.json";
+import fr from "./i18n/fr.json";
+import it from "./i18n/it.json";
+import nl from "./i18n/nl.json";
+import pl from "./i18n/pl.json";
+import tr from "./i18n/tr.json";
+import ru from "./i18n/ru.json";
+import uk from "./i18n/uk.json";
+import ja from "./i18n/ja.json";
+import ko from "./i18n/ko.json";
+import zhHans from "./i18n/zh-Hans.json";
+import id from "./i18n/id.json";
 import type { ProcessState } from "./types";
 
 /* polyemesis is a single-admin console, so this is deliberately a hundred lines
@@ -33,6 +46,19 @@ function catalogue<T extends Catalogue>(c: NoStrayKeys<T>): Catalogue {
 export const LANGUAGES = [
   { code: "en", label: "English" },
   { code: "de", label: "Deutsch" },
+  { code: "es", label: "Español" },
+  { code: "pt-BR", label: "Português (Brasil)" },
+  { code: "fr", label: "Français" },
+  { code: "it", label: "Italiano" },
+  { code: "nl", label: "Nederlands" },
+  { code: "pl", label: "Polski" },
+  { code: "tr", label: "Türkçe" },
+  { code: "ru", label: "Русский" },
+  { code: "uk", label: "Українська" },
+  { code: "ja", label: "日本語" },
+  { code: "ko", label: "한국어" },
+  { code: "zh-Hans", label: "简体中文" },
+  { code: "id", label: "Bahasa Indonesia" },
 ] as const;
 
 export type LanguageCode = (typeof LANGUAGES)[number]["code"];
@@ -40,6 +66,19 @@ export type LanguageCode = (typeof LANGUAGES)[number]["code"];
 const CATALOGUES: Record<LanguageCode, Catalogue> = {
   en: catalogue(en),
   de: catalogue(de),
+  es: catalogue(es),
+  "pt-BR": catalogue(ptBR),
+  fr: catalogue(fr),
+  it: catalogue(it),
+  nl: catalogue(nl),
+  pl: catalogue(pl),
+  tr: catalogue(tr),
+  ru: catalogue(ru),
+  uk: catalogue(uk),
+  ja: catalogue(ja),
+  ko: catalogue(ko),
+  "zh-Hans": catalogue(zhHans),
+  id: catalogue(id),
 };
 
 const STORAGE_KEY = "polyemesis.language";
@@ -59,8 +98,32 @@ function initialLanguage(): LanguageCode {
   // Consulted only when the operator has not chosen: honouring the browser on
   // first load is free, and anything we do not ship lands on English rather
   // than on a half-translated catalogue.
-  const preferred = typeof navigator === "undefined" ? "" : navigator.language.slice(0, 2);
-  return isSupported(preferred) ? preferred : "en";
+  if (typeof navigator === "undefined") return "en";
+  for (const tag of navigator.languages ?? [navigator.language]) {
+    const match = matchLanguage(tag);
+    if (match) return match;
+  }
+  return "en";
+}
+
+/** Resolves a BCP-47 tag from the browser onto a catalogue we ship.
+ *
+ *  This used to be `navigator.language.slice(0, 2)`, which was right while every
+ *  code was two letters and silently wrong the moment regional ones arrived: a
+ *  browser reporting `pt-BR` became `pt`, matched nothing, and a Brazilian
+ *  operator got English while a Brazilian catalogue sat unused beside it.
+ *
+ *  Exact match first, then the base language, so `zh-CN` and `zh-SG` both find
+ *  `zh-Hans` while `pt-BR` still beats a bare `pt` if we ever ship both. */
+function matchLanguage(tag: string): LanguageCode | null {
+  const lower = tag.toLowerCase();
+  const exact = LANGUAGES.find((l) => l.code.toLowerCase() === lower);
+  if (exact) return exact.code;
+  const base = lower.split("-")[0];
+  const byBase = LANGUAGES.find(
+    (l) => l.code.toLowerCase().split("-")[0] === base,
+  );
+  return byBase ? byBase.code : null;
 }
 
 let current: LanguageCode = initialLanguage();
@@ -112,7 +175,10 @@ export function translate(
   );
 }
 
-export type Translator = (key: TranslationKey, params?: TranslateParams) => string;
+export type Translator = (
+  key: TranslationKey,
+  params?: TranslateParams,
+) => string;
 
 /** Subscribes the component to language changes. */
 export function useLanguage(): LanguageCode {
@@ -123,7 +189,10 @@ export function useLanguage(): LanguageCode {
  *  Re-renders on a language switch because it reads the store. */
 export function useT(): Translator {
   const lang = useLanguage();
-  return useCallback<Translator>((key, params) => translate(lang, key, params), [lang]);
+  return useCallback<Translator>(
+    (key, params) => translate(lang, key, params),
+    [lang],
+  );
 }
 
 /** The catalogue key for a process state. Lives here rather than in lib/signal.ts
