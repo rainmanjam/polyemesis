@@ -54,7 +54,15 @@ It is right. Set `tls.mode: auto` or use an SSH tunnel.
 
 ## 3. Point OBS at it
 
-The **Sources** page shows the publish URL for your source. Copy it.
+The **Sources** page shows the publish URL for your source. Copy it — it looks
+like this, and the `streamid` is what tells polyemesis which source you are:
+
+```
+srt://your-host:6000?streamid=<token>
+```
+
+Every source shares that one port. The token is the address, so adding a second
+programme later needs no new port and no container restart.
 
 In OBS: **Settings → Stream → Service: Custom**, and paste. For SRT the URL
 already carries everything it needs.

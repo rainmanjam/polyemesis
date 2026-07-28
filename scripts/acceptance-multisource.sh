@@ -110,21 +110,28 @@ else
   bad "could not create a second source"; exit 1
 fi
 
-# It must NOT have landed on the first source's port, or its ingest cannot bind
-# and the programme silently receives nothing.
-if [ "$VPORT" != "6000" ]; then
-  ok "second source moved off the taken port, onto $VPORT"
+# There are no per-source ports to collide any more. What has to be distinct is
+# the TOKEN, because that is now the only thing that tells the two apart -- two
+# sources sharing one would make the second unreachable.
+TOKENS=$(drive tokens "$BASE")
+TOK1=$(echo "$TOKENS" | awk '$1==1 {print $2}')
+TOK2=$(echo "$TOKENS" | awk -v id="$VID" '$1==id {print $2}')
+if [ -n "$TOK1" ] && [ -n "$TOK2" ] && [ "$TOK1" != "$TOK2" ]; then
+  ok "each source has its own publish token"
 else
-  bad "second source kept port 6000, which the first already binds"
+  bad "tokens missing or identical; one of the programmes has no address"
 fi
 
-# Both engines have to be up. One engine for two sources would mean the second
-# programme has no pipeline at all.
-INGESTS=$(inctr 'ps -o args | grep -c "mode=listener"' | tr -d ' ')
-if [ "${INGESTS:-0}" -ge 2 ] 2>/dev/null; then
-  ok "two ingest listeners running ($INGESTS)"
+# And NO ingest listener should be running: SRT is served by the in-process Go
+# listener now, so an FFmpeg listener here would be a second thing on the same
+# socket -- which is exactly the collision this change removed.
+# The bracket keeps the pattern from matching the `sh -c` that carries it --
+# without it this counts its own command line and never reads zero.
+INGESTS=$(inctr 'ps -o args | grep -c "mode=lis[t]ener"' | tr -d ' ')
+if [ "${INGESTS:-0}" -eq 0 ] 2>/dev/null; then
+  ok "no FFmpeg SRT listener competing with the one-port server"
 else
-  bad "only $INGESTS ingest listener(s); the second engine did not start"
+  bad "$INGESTS FFmpeg SRT listener(s) running; they cannot all hold port 6000"
 fi
 
 step "3. A destination on each source"
@@ -135,9 +142,10 @@ ok "one file destination on each source"
 
 step "4. Publish a different programme into each"
 # 300 Hz into the horizontal source, 5000 Hz into the vertical one. Two tones
-# far enough apart that a bandpass cannot confuse them.
-publish pub-h 6000 300 30
-publish pub-v "$VPORT" 5000 30
+# far enough apart that a bandpass cannot confuse them -- and BOTH on port 6000,
+# told apart only by the token in the streamid.
+publish_token pub-h 6000 "$TOK1" 300 30
+publish_token pub-v 6000 "$TOK2" 5000 30
 sleep 34
 drive stopall "$BASE" >/dev/null
 sleep 12
@@ -184,10 +192,11 @@ else
   bad "only $AFTER listener(s) after restart; a source did not persist"
 fi
 
-step "6. One-port ingest: both programmes on a single port, routed by token"
-# Until now this suite only exercised per-source ports, so the token-demux path
-# had no Docker coverage at all -- it was proven against a live binary once, by
-# hand. This closes that.
+step "6. The listener can be moved, and both programmes follow it"
+# Step 4 already proved token routing on the default port. What this adds is
+# that the port is configuration rather than a constant: an operator who has to
+# avoid 6000 can move it, and every source moves with it because none of them
+# owns a port of its own.
 O=$(drive oneport "$BASE" 6100)
 case "$O" in *ONEPORT_OK*) ok "one-port SRT listener enabled" ;;
              *) bad "could not enable one-port ingest: $O" ;; esac

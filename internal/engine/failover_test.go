@@ -776,33 +776,41 @@ func TestFailoverValidationRefusesWhatCannotStart(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "the backup cannot share the primary's SRT port",
+			// Ports are gone, so the collision that used to be possible is
+			// not. Both primary and backup arrive on the one SRT listener and
+			// are told apart by token.
+			name: "an SRT backup alongside an SRT primary is fine",
 			mut: func(s *db.Settings) {
 				s.Failover.Enabled = true
 				s.Failover.Backup.Enabled = true
-				s.Failover.Backup.SRT.Port = s.Ingest.SRT.Port
-			},
-			wantErr: true,
-		},
-		{
-			// A pull primary binds no port at all, so there is nothing to
-			// collide with.
-			name: "a pull primary leaves the backup's port free",
-			mut: func(s *db.Settings) {
-				s.Ingest.Mode = db.IngestPull
-				s.Ingest.Pull.URL = "srt://example.com:9000"
-				s.Failover.Enabled = true
-				s.Failover.Backup.Enabled = true
-				s.Failover.Backup.SRT.Port = s.Ingest.SRT.Port
+				s.Failover.Backup.Mode = db.IngestSRT
 			},
 			wantErr: false,
 		},
 		{
-			// Two listeners that never run together cannot collide, and a
-			// half-filled form must not block saving something else.
-			name: "a disabled backup may hold any port",
+			// The one exclusivity left. There is a single RTMP listener and no
+			// token routing on it, so a primary and a backup cannot both have
+			// it -- and finding that out at runtime means a backup that never
+			// takes over on the night it was needed.
+			name: "an RTMP backup behind an RTMP primary is refused",
 			mut: func(s *db.Settings) {
-				s.Failover.Backup.SRT.Port = s.Ingest.SRT.Port
+				s.Ingest.Mode = db.IngestRTMP
+				s.Ingest.RTMP.App = "live"
+				s.Failover.Enabled = true
+				s.Failover.Backup.Enabled = true
+				s.Failover.Backup.Mode = db.IngestRTMP
+				s.Failover.Backup.RTMP.App = "live"
+			},
+			wantErr: true,
+		},
+		{
+			// An RTMP backup is fine when the primary is not using RTMP.
+			name: "an RTMP backup behind an SRT primary is fine",
+			mut: func(s *db.Settings) {
+				s.Failover.Enabled = true
+				s.Failover.Backup.Enabled = true
+				s.Failover.Backup.Mode = db.IngestRTMP
+				s.Failover.Backup.RTMP.App = "live"
 			},
 			wantErr: false,
 		},

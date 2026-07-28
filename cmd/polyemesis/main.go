@@ -497,9 +497,9 @@ func reportTLS(cfg config.Config, provider *tlsx.Provider, shown string) {
 
 func ingestPort(s db.Settings) int {
 	if s.Ingest.Mode == db.IngestRTMP {
-		return s.Ingest.RTMP.Port
+		return s.Listeners.RTMPPort
 	}
-	return s.Ingest.SRT.Port
+	return s.Listeners.SRTPort
 }
 
 func newLogger(level string) *slog.Logger {

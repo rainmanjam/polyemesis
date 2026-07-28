@@ -52,6 +52,7 @@ import {
 import { api } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
+import { LIMITS } from "@/lib/limits";
 import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
   ApiToken,
@@ -169,8 +170,47 @@ function IngestSettings({
     toast.success("Ingest URL copied.");
   };
 
+  const listeners = draft.listeners ?? { srtPort: 6000, rtmpPort: 1935 };
+  const setListeners = (patch: Partial<typeof listeners>) =>
+    setDraft({ ...draft, listeners: { ...listeners, ...patch } });
+
   return (
     <div className="grid gap-3 lg:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle>Listeners</CardTitle>
+          <CardDescription>
+            Where the server binds, for the whole install. One SRT port serves every source —
+            they are told apart by their publish token, so adding a source never means
+            publishing another port. RTMP has no such routing, so its port serves one source.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="listener-srt">SRT port</Label>
+            <Input
+              id="listener-srt"
+              type="number"
+              min={LIMITS.port.min}
+              max={LIMITS.port.max}
+              value={listeners.srtPort}
+              onChange={(e) => setListeners({ srtPort: Number(e.target.value) })}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="listener-rtmp">RTMP port</Label>
+            <Input
+              id="listener-rtmp"
+              type="number"
+              min={LIMITS.port.min}
+              max={LIMITS.port.max}
+              value={listeners.rtmpPort}
+              onChange={(e) => setListeners({ rtmpPort: Number(e.target.value) })}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Ingest</CardTitle>
@@ -210,23 +250,6 @@ function IngestSettings({
           ) : draft.ingest.mode === "srt" ? (
             <>
               <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="srt-port">Port</Label>
-                  <Input
-                    id="srt-port"
-                    type="number"
-                    value={draft.ingest.srt.port}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        ingest: {
-                          ...draft.ingest,
-                          srt: { ...draft.ingest.srt, port: Number(e.target.value) },
-                        },
-                      })
-                    }
-                  />
-                </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="srt-latency">Latency (ms)</Label>
                   <Input
@@ -271,23 +294,6 @@ function IngestSettings({
           ) : (
             <>
               <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="rtmp-port">Port</Label>
-                  <Input
-                    id="rtmp-port"
-                    type="number"
-                    value={draft.ingest.rtmp.port}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        ingest: {
-                          ...draft.ingest,
-                          rtmp: { ...draft.ingest.rtmp, port: Number(e.target.value) },
-                        },
-                      })
-                    }
-                  />
-                </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="rtmp-app">App</Label>
                   <Input

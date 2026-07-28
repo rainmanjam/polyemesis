@@ -553,11 +553,15 @@ export interface SourceView extends Source {
 export interface Settings {
   ingest: {
     mode: IngestMode;
-    srt: { port: number; passphrase: string; latencyMs: number };
-    rtmp: { port: number; app: string; streamKey: string };
+    srt: { passphrase: string; latencyMs: number };
+    rtmp: { app: string; streamKey: string };
     /** Optional so a client that predates pull can still PUT settings. */
     pull?: PullSettings;
   };
+  /** Where the server binds. Install-wide: there is one SRT listener serving
+   *  every source (told apart by token) and one RTMP listener serving at most
+   *  one. Optional so a client that predates the change can still PUT. */
+  listeners?: { srtPort: number; rtmpPort: number };
   /** Synthetic sources. Optional for the same reason. */
   synth?: {
     /** Synthesises a silent stereo track when the ingest probes with no audio

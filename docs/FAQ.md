@@ -60,7 +60,8 @@ Yes — that is what multi-source is for. Add a second source, point OBS's verti
 plugin at it, and give each its own destinations. They are independent all the
 way down: separate ingest, routing, renditions and recordings.
 
-With one-port ingest they can share a single port, addressed by token.
+They share one SRT port and are told apart by their publish tokens — there are
+no per-source ports to allocate or publish.
 
 ## What happens if my encoder drops?
 

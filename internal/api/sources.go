@@ -3,6 +3,8 @@ package api
 import (
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
@@ -62,15 +64,20 @@ type sourceView struct {
 func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 	var link *srtserver.LinkStats
 	publishing := false
-	// Derived from the running listener rather than from the setting alone: a
-	// shared listener that failed to bind leaves the setting on and enforces
-	// nothing, and reporting that as enforced would be the exact false
-	// assurance this field exists to prevent.
-	tokenEnforced := false
+	// Derived from the RUNNING listener, never from configuration. Tokens are
+	// how every SRT source is addressed now, so the only way they are not
+	// enforced is that the listener is not up -- and reporting "enforced" while
+	// nothing is bound is the exact false assurance this field exists to
+	// prevent.
+	tokenEnforced := src.Ingest.Mode == db.IngestSRT &&
+		s.mgr != nil && s.mgr.SharedIngestListening()
+	// The ports are install-wide, so the publish URL comes from the settings
+	// rather than from the source. Defaults on a read failure: a URL with the
+	// wrong port is more useful than no URL at all, and the Sources page is
+	// where an operator goes precisely when something is not working.
+	listeners := db.DefaultSettings().Listeners
 	if st, err := s.store.GetSettings(); err == nil {
-		tokenEnforced = st.SharedIngest.Enabled &&
-			src.Ingest.Mode == db.IngestSRT &&
-			s.mgr != nil && s.mgr.SharedIngestListening()
+		listeners = st.Listeners
 	}
 	if s.mgr != nil {
 		publishing = s.mgr.SharedIngestPublishing(src.ID)
@@ -86,48 +93,55 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 		Publishing:    publishing,
 		Link:          link,
 		Source:        src,
-		PublishURLs:   publishURLs(src),
+		PublishURLs:   publishURLs(src, listeners),
 		IsDefault:     src.ID == defaultID,
 		TokenEnforced: tokenEnforced,
 		Running:       s.mgr != nil && s.mgr.Engine(src.ID) != nil,
 	}
 }
 
-// publishURLs renders what to paste into an encoder.
+// publishURLs is what the operator pastes into an encoder.
 //
-// It deliberately does NOT put source.Token into these URLs, and that needs
-// saying plainly because the obvious reading of "per-source ingest token" is
-// that it authenticates a publisher. Today it does not, and rendering it as
-// though it did would be a capability claim this build cannot honour.
+// The SRT URL carries the TOKEN as the streamid, because the token is now the
+// only thing that identifies a source: every source is reached on one listener
+// and told apart by it. A URL without the token addresses nothing.
 //
-// What actually separates and protects sources right now:
+// What separates and protects each source:
 //
-//   - Separation is by PORT. Each source listens on its own SRT and RTMP port,
-//     because the listener is FFmpeg's and an FFmpeg SRT listener accepts one
-//     caller per port and never looks at streamid.
-//   - RTMP is enforced by the stream key: it is baked into the listener URL as
-//     rtmp://0.0.0.0:PORT/APP/KEY, so FFmpeg rejects a publisher whose playpath
-//     does not match.
-//   - SRT is enforced by the passphrase, which is real AES encryption rather
-//     than a shared string comparison.
-//
-// The token is stored and rotatable because it is the credential a one-port,
-// streamid-demultiplexed ingest needs -- the shape datarhei Core uses, which
-// requires an in-process SRT server rather than FFmpeg's listener. Until that
-// exists the token is inert, and the UI says so.
-func publishURLs(src *db.Source) map[string]string {
+//   - SRT: the token. One listener, demultiplexed by streamid, matched in
+//     constant time against every source's current and grace-period token. A
+//     publisher presenting nothing, or something unrecognised, is refused with
+//     a typed reason rather than quietly accepted into the wrong programme.
+//   - SRT, additionally: the passphrase, which is real AES encryption rather
+//     than a string comparison.
+//   - RTMP: the stream key, baked into the listener URL as
+//     rtmp://0.0.0.0:PORT/APP/KEY so FFmpeg rejects a mismatched playpath.
+//     RTMP has one listener and therefore one source; see checkRTMPExclusive.
+func publishURLs(src *db.Source, listeners db.ListenerSettings) map[string]string {
 	const host = "<server>"
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(src.Ingest.Mode),
-		SRTPort:       src.Ingest.SRT.Port,
+		SRTPort:       listeners.SRTPort,
 		SRTPassphrase: src.Ingest.SRT.Passphrase,
 		SRTLatencyMS:  src.Ingest.SRT.LatencyMS,
-		RTMPPort:      src.Ingest.RTMP.Port,
+		RTMPPort:      listeners.RTMPPort,
 		RTMPApp:       src.Ingest.RTMP.App,
 		RTMPStreamKey: src.Ingest.RTMP.StreamKey,
 		PullURL:       src.Ingest.Pull.URL,
 	}
-	out := map[string]string{string(src.Ingest.Mode): spec.PublicIngestURL(host)}
+	u := spec.PublicIngestURL(host)
+	if src.Ingest.Mode == db.IngestSRT && src.Token != "" {
+		// The streamid IS the address. Appended here rather than inside
+		// IngestSpec because the spec describes what the SERVER binds, and the
+		// server binds one socket for every source -- the token only means
+		// something on the publisher's side of it.
+		sep := "?"
+		if strings.Contains(u, "?") {
+			sep = "&"
+		}
+		u += sep + "streamid=" + url.QueryEscape(src.Token)
+	}
+	out := map[string]string{string(src.Ingest.Mode): u}
 	if src.Ingest.Mode == db.IngestRTMP {
 		// Separate field: OBS wants the server and the key in two boxes, and
 		// the key is the thing that actually gates this source.

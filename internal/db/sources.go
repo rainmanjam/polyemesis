@@ -155,83 +155,57 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 	return s, err
 }
 
-// portsInUse reports the SRT and RTMP ports every source except one is
-// listening on. excludeID is the row being updated, so a source never conflicts
-// with itself.
-func (d *DB) portsInUse(excludeID int64) (map[int]string, error) {
+// rtmpHolder returns the name of the source already using RTMP ingest, if any.
+// excludeID is the row being updated, so a source never conflicts with itself.
+func (d *DB) rtmpHolder(excludeID int64) (string, error) {
 	rows, err := d.ListSources()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	out := map[int]string{}
 	for _, s := range rows {
-		if s.ID == excludeID {
-			continue
+		if s.ID != excludeID && s.Ingest.Mode == IngestRTMP {
+			return s.Name, nil
 		}
-		out[s.Ingest.SRT.Port] = s.Name
-		out[s.Ingest.RTMP.Port] = s.Name
 	}
-	return out, nil
+	return "", nil
 }
 
-// checkPortConflicts refuses a source that would listen where another already
-// does.
+// checkRTMPExclusive refuses a second source on RTMP ingest.
 //
-// Without this a second source is created successfully, reports itself as
-// configured, and then never receives anything -- because its ingest cannot
-// bind a port the first source already holds, and the only evidence is a
-// retrying child process in the log. Catching it here turns a silent
-// non-functioning programme into a form error naming the source it clashes
-// with.
-func (d *DB) checkPortConflicts(s *Source) error {
-	used, err := d.portsInUse(s.ID)
+// There is one RTMP listener and no way to address a second source through it:
+// RTMP routing would need the app/streamkey path demultiplexed, which needs a
+// real RTMP server rather than the single-connection `ffmpeg -listen 1` this
+// uses. SRT has no such limit because it is addressed by token.
+//
+// Refused at the form rather than at runtime. The alternative is a source that
+// saves cleanly, reports itself configured, and silently never receives
+// anything because the socket is already held.
+func (d *DB) checkRTMPExclusive(s *Source) error {
+	if s.Ingest.Mode != IngestRTMP {
+		return nil
+	}
+	owner, err := d.rtmpHolder(s.ID)
 	if err != nil {
 		return err
 	}
-	if owner, taken := used[s.Ingest.SRT.Port]; taken && s.Ingest.Mode == IngestSRT {
-		return fmt.Errorf("srt port %d is already used by source %q", s.Ingest.SRT.Port, owner)
-	}
-	if owner, taken := used[s.Ingest.RTMP.Port]; taken && s.Ingest.Mode == IngestRTMP {
-		return fmt.Errorf("rtmp port %d is already used by source %q", s.Ingest.RTMP.Port, owner)
+	if owner != "" {
+		return fmt.Errorf("source %q already uses the RTMP listener, and there is only one. "+
+			"Use SRT for this source -- it is addressed by token, so any number can share the port", owner)
 	}
 	return nil
 }
 
-// nextFreePort returns the first port at or above want that no source holds.
-func nextFreePort(want int, used map[int]string) int {
-	for p := want; p < 65535; p++ {
-		if _, taken := used[p]; !taken {
-			return p
-		}
-	}
-	return want
-}
-
-// CreateSource inserts a source, minting a publish token when none was given.
+// CreateSource inserts a source, minting publish tokens when none were given.
 //
-// Ports that clash with an existing source are moved up rather than rejected.
-// The alternative -- refusing the create -- would mean an operator adding a
-// second programme has to know which ports are free before they can name it,
-// and the defaults guarantee a clash because every source starts from the same
-// ones. Moving them is what makes "add a source, then edit it" work.
+// There is no longer any port to allocate or move out of the way: every source
+// arrives on the one SRT listener and is told apart by its token, so adding a
+// source cannot collide with an existing one. The only exclusivity left is
+// RTMP, which has a single listener and no way to address a second source.
 func (d *DB) CreateSource(s *Source) error {
 	if err := validateSource(s); err != nil {
 		return err
 	}
-	used, err := d.portsInUse(0)
-	if err != nil {
-		return err
-	}
-	if _, taken := used[s.Ingest.SRT.Port]; taken {
-		s.Ingest.SRT.Port = nextFreePort(s.Ingest.SRT.Port+1, used)
-		used[s.Ingest.SRT.Port] = s.Name
-	}
-	if _, taken := used[s.Ingest.RTMP.Port]; taken {
-		s.Ingest.RTMP.Port = nextFreePort(s.Ingest.RTMP.Port+1, used)
-	}
-	// Re-validate: moving a port must not have produced one out of range, and
-	// SRT and RTMP must still differ.
-	if err := validateSource(s); err != nil {
+	if err := d.checkRTMPExclusive(s); err != nil {
 		return err
 	}
 	if s.Token == "" {
@@ -276,7 +250,7 @@ func (d *DB) UpdateSource(s *Source) error {
 	// Rejected rather than moved, unlike create: an edit is an operator naming
 	// a specific port, and silently using a different one would leave them
 	// pointing an encoder somewhere nothing is listening.
-	if err := d.checkPortConflicts(s); err != nil {
+	if err := d.checkRTMPExclusive(s); err != nil {
 		return err
 	}
 	if s.Token == "" {

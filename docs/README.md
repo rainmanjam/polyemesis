@@ -31,7 +31,8 @@ duplicated: two copies of setup instructions is two copies to drift.
 | Document | For |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How the pieces fit and why they are separate |
-| [DESIGN-ONE-PORT-INGEST.md](DESIGN-ONE-PORT-INGEST.md) | Token-addressed ingest, and where it improves on the design that inspired it |
+| [DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md) | Why token-addressed SRT is the only SRT path, and what removing per-source ports costs |
+| [DESIGN-ONE-PORT-INGEST.md](DESIGN-ONE-PORT-INGEST.md) | The original token-addressing design, superseded in part by the above |
 | [MODULES.md](MODULES.md) | Inventory of every dependency: version, licence, and whether it ships in the binary |
 | [DEPENDENCIES.md](DEPENDENCIES.md) | Why the significant ones were chosen, and what was rejected |
 | [RESEARCH-COMPETITIVE.md](RESEARCH-COMPETITIVE.md) | What comparable tools do, and the gaps that shaped this one |

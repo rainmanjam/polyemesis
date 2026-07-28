@@ -180,10 +180,10 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	settings := s.eng().Settings()
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(settings.Ingest.Mode),
-		SRTPort:       settings.Ingest.SRT.Port,
+		SRTPort:       settings.Listeners.SRTPort,
 		SRTPassphrase: settings.Ingest.SRT.Passphrase,
 		SRTLatencyMS:  settings.Ingest.SRT.LatencyMS,
-		RTMPPort:      settings.Ingest.RTMP.Port,
+		RTMPPort:      settings.Listeners.RTMPPort,
 		RTMPApp:       settings.Ingest.RTMP.App,
 		RTMPStreamKey: settings.Ingest.RTMP.StreamKey,
 		// Verbatim, userinfo and all. An rtsp://user:pass@cam/ source does

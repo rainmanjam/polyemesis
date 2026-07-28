@@ -65,10 +65,10 @@ These are design decisions, not oversights. Read them as operating instructions.
   need it, it is guarded by a confirmation showing exactly what will be spliced
   in, and it is still a way to make FFmpeg do things. Treat the ability to reach
   it as equivalent to shell access.
-- **The ingest port is not authenticated by default.** An SRT or RTMP listener
-  accepts whoever reaches it unless you set a passphrase or stream key. With
-  one-port ingest the per-source token *is* the address, which closes this — but
-  only when it is enabled.
+- **RTMP ingest is only as protected as its stream key.** SRT is authenticated
+  by construction — the publish token *is* the address, so a publisher that
+  cannot present a valid one is refused. RTMP has no such routing: it is gated
+  by the stream key alone, and it serves at most one source.
 - **Nothing is encrypted on the wire unless you say so.** Plain HTTP means the
   password and session cookie cross the network in clear text. The server warns
   about this at startup; the warning is not decorative.

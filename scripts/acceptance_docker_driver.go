@@ -24,7 +24,7 @@
 //	addsource <base> <name>     create a source, print its id and SRT port
 //	destfor   <base> <srcID> <name> <file> <track>
 //	                            create a file destination on one source
-//	oneport   <base> <port>     turn on the one-port SRT listener
+//	oneport   <base> <port>     move the SRT listener to <port>
 //	tokens    <base>            print "<id> <token>" per source
 package main
 
@@ -364,10 +364,13 @@ func onePort(port string) {
 	if err := json.Unmarshal(out, &s); err != nil {
 		die("settings unreadable: " + err.Error())
 	}
-	s["sharedIngest"] = map[string]any{"enabled": true, "port": p}
+	// There is no longer an "enable": the SRT listener IS the SRT ingest. This
+	// only moves it, which the suite does so the published container port and
+	// the listener agree.
+	s["listeners"] = map[string]any{"srtPort": p, "rtmpPort": 1935}
 	code, body := do(http.MethodPut, "/settings", s)
 	if code != http.StatusOK {
-		die(fmt.Sprintf("enable one-port ingest failed: %d %s", code, body))
+		die(fmt.Sprintf("set the srt listener port failed: %d %s", code, body))
 	}
 	fmt.Println("ONEPORT_OK")
 }

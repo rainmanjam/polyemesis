@@ -19,10 +19,8 @@ func TestMigrationCarriesAnExistingIngestOntoTheFirstSource(t *testing.T) {
 	// If any of this fails to survive, the encoder stops connecting.
 	want := DefaultSettings()
 	want.Ingest.Mode = IngestRTMP
-	want.Ingest.RTMP.Port = 1937
 	want.Ingest.RTMP.App = "live"
 	want.Ingest.RTMP.StreamKey = "secretkey"
-	want.Ingest.SRT.Port = 6123
 	if err := d.PutSettings(want); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
@@ -53,14 +51,8 @@ func TestMigrationCarriesAnExistingIngestOntoTheFirstSource(t *testing.T) {
 	if s.Ingest.Mode != IngestRTMP {
 		t.Errorf("mode = %q, want rtmp", s.Ingest.Mode)
 	}
-	if s.Ingest.RTMP.Port != 1937 {
-		t.Errorf("rtmp port = %d, want 1937 (the encoder is pointed there)", s.Ingest.RTMP.Port)
-	}
 	if s.Ingest.RTMP.StreamKey != "secretkey" {
 		t.Errorf("stream key = %q, want it carried across", s.Ingest.RTMP.StreamKey)
-	}
-	if s.Ingest.SRT.Port != 6123 {
-		t.Errorf("srt port = %d, want 6123", s.Ingest.SRT.Port)
 	}
 	if s.Token == "" {
 		t.Error("migrated source has no publish token")
@@ -156,7 +148,6 @@ func TestSourceByTokenRejectsTheEmptyToken(t *testing.T) {
 func TestSourceByTokenResolvesTheRightSource(t *testing.T) {
 	d := testDB(t)
 	vert := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
-	vert.Ingest.SRT.Port = 6001
 	if err := d.CreateSource(vert); err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -173,7 +164,6 @@ func TestDeletingASourceTakesItsDestinationsButKeepsItsRecordings(t *testing.T) 
 	d := testDB(t)
 
 	extra := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
-	extra.Ingest.SRT.Port = 6001
 	if err := d.CreateSource(extra); err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -233,15 +223,17 @@ func TestTheLastSourceCannotBeDeleted(t *testing.T) {
 func TestSourceValidationRejectsABadIngest(t *testing.T) {
 	d := testDB(t)
 	bad := &Source{Name: "Broken", Enabled: true, Ingest: DefaultSettings().Ingest}
-	bad.Ingest.SRT.Port = 70000
+	// SRT's own constraint: 10..79 characters. Ports are no longer a way to be
+	// invalid, because a source no longer has one.
+	bad.Ingest.SRT.Passphrase = "short"
 	err := d.CreateSource(bad)
 	if err == nil {
-		t.Fatal("CreateSource accepted an out-of-range SRT port")
+		t.Fatal("CreateSource accepted an SRT passphrase SRT itself will refuse")
 	}
 	// Shared with Settings.Validate, so the message the form shows is the same
 	// wording in both places.
-	if !strings.Contains(err.Error(), "srt port") {
-		t.Errorf("error = %q, want it to name the srt port", err)
+	if !strings.Contains(err.Error(), "passphrase") {
+		t.Errorf("error = %q, want it to name the passphrase", err)
 	}
 }
 
@@ -265,57 +257,6 @@ func TestUpdateSourceNeverStoresAnEmptyToken(t *testing.T) {
 	}
 	if back.Token != s.Token {
 		t.Errorf("stored token %q, want %q", back.Token, s.Token)
-	}
-}
-
-func TestCreatingASecondSourceMovesItOffAClashingPort(t *testing.T) {
-	d := testDB(t)
-
-	first, err := d.ListSources()
-	if err != nil || len(first) == 0 {
-		t.Fatalf("ListSources: %v", err)
-	}
-	base := first[0].Ingest.SRT.Port
-
-	// This is exactly what the UI sends: a name, and the default ingest. Every
-	// source starts from the same defaults, so without the move the second one
-	// would be created holding a port the first already binds -- reported as
-	// configured, and silently receiving nothing.
-	extra := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
-	if err := d.CreateSource(extra); err != nil {
-		t.Fatalf("CreateSource: %v", err)
-	}
-	if extra.Ingest.SRT.Port == base {
-		t.Fatalf("second source kept srt port %d, which the first already holds", base)
-	}
-	if extra.Ingest.SRT.Port == extra.Ingest.RTMP.Port {
-		t.Errorf("moved ports collided with each other: srt and rtmp both %d", extra.Ingest.SRT.Port)
-	}
-}
-
-func TestUpdatingASourceOntoAnotherSourcesPortIsRefused(t *testing.T) {
-	d := testDB(t)
-
-	first, err := d.ListSources()
-	if err != nil || len(first) == 0 {
-		t.Fatalf("ListSources: %v", err)
-	}
-	taken := first[0].Ingest.SRT.Port
-
-	extra := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
-	if err := d.CreateSource(extra); err != nil {
-		t.Fatalf("CreateSource: %v", err)
-	}
-
-	// An edit is the operator naming a port on purpose. Moving it silently
-	// would leave them pointing an encoder at nothing, so this must fail loudly.
-	extra.Ingest.SRT.Port = taken
-	err = d.UpdateSource(extra)
-	if err == nil {
-		t.Fatal("UpdateSource accepted a port another source already listens on")
-	}
-	if !strings.Contains(err.Error(), "already used by source") {
-		t.Errorf("error = %q, want it to name the conflicting source", err)
 	}
 }
 
@@ -405,5 +346,95 @@ func TestARenditionWithNoSourceIsRefusedAtTheBoundary(t *testing.T) {
 	}
 	if _, err := d.GetRendition(r.ID); err == nil {
 		t.Fatal("a rendition with no source was read back as valid")
+	}
+}
+
+// One RTMP listener, so one RTMP source. The rule replaced port-conflict
+// detection: with SRT addressed by token there is nothing left to collide, and
+// RTMP is the single case where a second source genuinely cannot be reached.
+func TestOnlyOneSourceMayUseRTMP(t *testing.T) {
+	d := testDB(t)
+	if err := d.MigrateSources(); err != nil {
+		t.Fatalf("MigrateSources: %v", err)
+	}
+	first, err := d.ListSources()
+	if err != nil || len(first) == 0 {
+		t.Fatalf("ListSources: %v", err)
+	}
+	base := first[0]
+	base.Ingest.Mode = IngestRTMP
+	base.Ingest.RTMP.App = "live"
+	if err := d.UpdateSource(base); err != nil {
+		t.Fatalf("putting the first source on RTMP: %v", err)
+	}
+
+	second := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
+	second.Ingest.Mode = IngestRTMP
+	second.Ingest.RTMP.App = "live"
+	err = d.CreateSource(second)
+	if err == nil {
+		t.Fatal("a second RTMP source was accepted; it would never receive anything")
+	}
+	// The message has to name the source holding the listener AND say what to
+	// do instead, because "refused" with no way forward is where an operator
+	// gets stuck.
+	if !strings.Contains(err.Error(), base.Name) {
+		t.Errorf("error = %q, want it to name the source already using RTMP", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "srt") {
+		t.Errorf("error = %q, want it to point at SRT as the answer", err)
+	}
+}
+
+// The same source keeping RTMP across an update must not be refused by its own
+// reservation. An off-by-one on excludeID would make a source unsaveable.
+func TestASourceKeepingRTMPCanStillBeSaved(t *testing.T) {
+	d := testDB(t)
+	if err := d.MigrateSources(); err != nil {
+		t.Fatalf("MigrateSources: %v", err)
+	}
+	rows, _ := d.ListSources()
+	s := rows[0]
+	s.Ingest.Mode = IngestRTMP
+	s.Ingest.RTMP.App = "live"
+	if err := d.UpdateSource(s); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	s.Name = "Renamed"
+	if err := d.UpdateSource(s); err != nil {
+		t.Fatalf("a source that already holds RTMP could not be saved again: %v", err)
+	}
+}
+
+// Nothing in a source binds a port any more, so two sources created from the
+// defaults must both be creatable and both be addressable.
+func TestTwoSRTSourcesCoexistWithoutPorts(t *testing.T) {
+	d := testDB(t)
+	if err := d.MigrateSources(); err != nil {
+		t.Fatalf("MigrateSources: %v", err)
+	}
+	for _, name := range []string{"Vertical", "Third"} {
+		s := &Source{Name: name, Enabled: true, Ingest: DefaultSettings().Ingest}
+		if err := d.CreateSource(s); err != nil {
+			t.Fatalf("creating %q: %v", name, err)
+		}
+	}
+	rows, err := d.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d sources, want 3", len(rows))
+	}
+	// Distinct tokens are what makes them distinguishable now.
+	seen := map[string]bool{}
+	for _, r := range rows {
+		if r.Token == "" {
+			t.Fatalf("source %q has no token, so it has no address", r.Name)
+		}
+		if seen[r.Token] {
+			t.Fatalf("two sources share a token; one of them is unreachable")
+		}
+		seen[r.Token] = true
 	}
 }

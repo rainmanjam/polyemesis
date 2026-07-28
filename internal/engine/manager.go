@@ -172,27 +172,28 @@ func (m *Manager) reconcileSharedIngest() {
 		m.log.Warn("cannot read shared-ingest settings", "err", err)
 		return
 	}
-	want := st.SharedIngest
+	port := st.Listeners.SRTPort
 	// The store does not validate -- Settings.Validate runs in the API handler
 	// -- so the manager is the last place between a stored value and a bound
 	// socket, and it has to check. Port 0 is the one that matters: it is not
 	// an error to the kernel, it means "any free port", so a zero here would
 	// bind something random, report itself as listening, and tell the operator
 	// their token is enforced while nothing they could publish to exists.
-	if want.Port < 1 || want.Port > 65535 {
-		if want.Enabled {
-			m.log.Error("one-port srt ingest not started: port out of range",
-				"port", want.Port)
-		}
-		want.Enabled = false
+	//
+	// There is no longer an "off" to fall back to: this listener IS the SRT
+	// ingest. An out-of-range port is therefore an error that leaves nothing
+	// bound, not a quiet downgrade to per-source ports.
+	ok := port >= 1 && port <= 65535
+	if !ok {
+		m.log.Error("srt ingest not started: listener port out of range", "port", port)
 	}
-	addr := fmt.Sprintf(":%d", want.Port)
+	addr := fmt.Sprintf(":%d", port)
 
 	m.mu.Lock()
 	cur, curAddr := m.srt, m.srtAddr
 	m.mu.Unlock()
 
-	if cur != nil && (!want.Enabled || curAddr != addr) {
+	if cur != nil && (!ok || curAddr != addr) {
 		cur.Stop()
 		m.mu.Lock()
 		m.srt, m.srtAddr = nil, ""
@@ -200,7 +201,7 @@ func (m *Manager) reconcileSharedIngest() {
 		m.log.Info("one-port srt ingest stopped")
 		cur = nil
 	}
-	if !want.Enabled || cur != nil {
+	if !ok || cur != nil {
 		return
 	}
 
@@ -231,8 +232,12 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 		return srtserver.Target{}, false
 	}
 	now := time.Now()
+	type key struct {
+		id     int64
+		backup bool
+	}
 	targets := make([]srtserver.Target, 0, len(rows))
-	tokens := make(map[int64][]string, len(rows))
+	tokens := make(map[key][]string, len(rows))
 	for _, s := range rows {
 		var sink srtserver.Sink
 		// A nil *relay.Hub in an interface is not a nil interface, so the engine
@@ -249,13 +254,40 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 			Passphrase: s.Ingest.SRT.Passphrase,
 			Sink:       sink,
 		})
-		tokens[s.ID] = s.ValidTokens(now)
+		valid := s.ValidTokens(now)
+		tokens[key{s.ID, false}] = valid
+
+		// The failover standby, addressed by "<token>.backup" on this same
+		// listener. Derived rather than stored: one secret per source is one
+		// thing to rotate, one thing to leak, and one thing to explain -- and
+		// rotating the source's token moves the backup's address with it.
+		if eng := m.Engine(s.ID); eng != nil {
+			if bh := eng.BackupHub(); bh != nil {
+				suffixed := make([]string, 0, len(valid))
+				for _, t := range valid {
+					suffixed = append(suffixed, t+backupTokenSuffix)
+				}
+				targets = append(targets, srtserver.Target{
+					SourceID:   s.ID,
+					Name:       s.Name + " (backup)",
+					Enabled:    s.Enabled,
+					Passphrase: s.Ingest.SRT.Passphrase,
+					Sink:       bh,
+					Backup:     true,
+				})
+				tokens[key{s.ID, true}] = suffixed
+			}
+		}
 	}
 	return srtserver.ConstantTimeLookup(
 		func() []srtserver.Target { return targets },
-		func(t srtserver.Target) []string { return tokens[t.SourceID] },
+		func(t srtserver.Target) []string { return tokens[key{t.SourceID, t.Backup}] },
 	)(token)
 }
+
+// backupTokenSuffix turns a source's publish token into its standby's address.
+// A suffix rather than a second secret: see lookupToken.
+const backupTokenSuffix = ".backup"
 
 // SRTLinks reports uplink health for every publisher on the shared listener.
 func (m *Manager) SRTLinks() []srtserver.LinkStats {

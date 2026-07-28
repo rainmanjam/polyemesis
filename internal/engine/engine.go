@@ -389,6 +389,21 @@ func (p *playoutProc) Stop(ctx context.Context) {
 // Hub exposes the relay for the monitoring endpoint.
 func (e *Engine) Hub() *relay.Hub { return e.hub }
 
+// BackupHub is the failover backup's relay, or nil when no backup is running.
+//
+// Exposed for the same reason Hub is: the one-port SRT listener lives on the
+// manager and delivers into whichever hub the presented token belongs to. A
+// backup encoder addresses `<token>.backup`, so the manager needs somewhere to
+// put those datagrams.
+func (e *Engine) BackupHub() *relay.Hub {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.backup == nil {
+		return nil
+	}
+	return e.backup.hub
+}
+
 // Monitor exposes host/bitrate stats.
 func (e *Engine) Monitor() *stats.Monitor { return e.mon }
 
@@ -763,6 +778,21 @@ func (e *Engine) Reconcile() error {
 }
 
 func (e *Engine) reconcileIngest(s, prev db.Settings) {
+	// SRT has NO ingest process. The one-port listener is a Go server owned by
+	// the manager: it accepts the publisher, matches the streamid against every
+	// source's token, and delivers the datagrams straight into this engine's
+	// hub. Spawning FFmpeg here as well would put two things on one socket --
+	// and since the Go server binds first, the FFmpeg one would fail to bind
+	// and crash-loop forever behind a listener that was working fine.
+	//
+	// That is not hypothetical: it is exactly what this did until the port was
+	// made install-wide, and on a host whose FFmpeg lacks libsrt it hid behind
+	// "Protocol not found" rather than showing itself as a conflict.
+	if s.Ingest.Mode == db.IngestSRT {
+		e.stopIngestProcess()
+		return
+	}
+
 	spec := e.ingestSpec(s)
 	sig := hashStrings(append([]string{string(s.Ingest.Mode)}, spec...))
 
@@ -808,13 +838,29 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	e.log.Info("ingest started", "mode", s.Ingest.Mode, "url", e.ingestPublicURL(s))
 }
 
+// stopIngestProcess tears down an FFmpeg ingest if one is running, leaving the
+// engine with no ingest process at all. Used when the mode changes to SRT,
+// where the listener is the manager's Go server rather than a child.
+func (e *Engine) stopIngestProcess() {
+	e.mu.Lock()
+	cur := e.ingest
+	e.ingest, e.ingestSig = nil, ""
+	e.mu.Unlock()
+	if cur == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	cur.Stop(ctx)
+	cancel()
+}
+
 func (e *Engine) ingestSpec(s db.Settings) []string {
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(s.Ingest.Mode),
-		SRTPort:       s.Ingest.SRT.Port,
+		SRTPort:       s.Listeners.SRTPort,
 		SRTPassphrase: s.Ingest.SRT.Passphrase,
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
-		RTMPPort:      s.Ingest.RTMP.Port,
+		RTMPPort:      s.Listeners.RTMPPort,
 		RTMPApp:       s.Ingest.RTMP.App,
 		RTMPStreamKey: s.Ingest.RTMP.StreamKey,
 		// DataDir is the confinement root for a file:// source. Without it a
@@ -832,10 +878,10 @@ func (e *Engine) ingestSpec(s db.Settings) []string {
 func (e *Engine) ingestPublicURL(s db.Settings) string {
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(s.Ingest.Mode),
-		SRTPort:       s.Ingest.SRT.Port,
+		SRTPort:       s.Listeners.SRTPort,
 		SRTPassphrase: s.Ingest.SRT.Passphrase,
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
-		RTMPPort:      s.Ingest.RTMP.Port,
+		RTMPPort:      s.Listeners.RTMPPort,
 		RTMPApp:       s.Ingest.RTMP.App,
 		// In pull mode nobody points an encoder anywhere, so the address the
 		// operator needs to see is the one we dial.
@@ -2925,8 +2971,11 @@ func backupIngestSig(s db.Settings) string {
 	}
 	return hashStrings([]string{
 		string(b.Mode),
-		strconv.Itoa(b.SRT.Port), b.SRT.Passphrase, strconv.Itoa(b.SRT.LatencyMS),
-		strconv.Itoa(b.RTMP.Port), b.RTMP.App, b.RTMP.StreamKey,
+		b.SRT.Passphrase, strconv.Itoa(b.SRT.LatencyMS),
+		b.RTMP.App, b.RTMP.StreamKey,
+		// The listener ports are install-wide now, but they still belong in
+		// this hash: changing one changes the command the backup runs.
+		strconv.Itoa(s.Listeners.SRTPort), strconv.Itoa(s.Listeners.RTMPPort),
 		b.Pull.URL, strconv.Itoa(b.Pull.ReconnectDelayMaxSeconds), b.Pull.RTSPTransport,
 	})
 }
@@ -2969,12 +3018,24 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 		return
 	}
 	b := s.Failover.Backup
+	if b.Mode == db.IngestSRT {
+		// Same reasoning as the primary: the Go listener already holds the
+		// socket, and the backup is reached on it by publishing to
+		// `<token>.backup`. All this tier needs is the hub to receive into,
+		// which was created above.
+		e.mu.Lock()
+		e.backup = &backupIngest{hub: hub, sig: want}
+		e.mu.Unlock()
+		e.log.Info("backup ingest ready", "addressedBy", "<token>.backup",
+			"relayPort", hub.Port())
+		return
+	}
 	spec := ffmpeg.IngestSpec{
 		Kind:                  ffmpeg.IngestKind(b.Mode),
-		SRTPort:               b.SRT.Port,
+		SRTPort:               s.Listeners.SRTPort,
 		SRTPassphrase:         b.SRT.Passphrase,
 		SRTLatencyMS:          b.SRT.LatencyMS,
-		RTMPPort:              b.RTMP.Port,
+		RTMPPort:              s.Listeners.RTMPPort,
 		RTMPApp:               b.RTMP.App,
 		RTMPStreamKey:         b.RTMP.StreamKey,
 		PullURL:               b.Pull.URL,

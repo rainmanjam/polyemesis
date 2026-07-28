@@ -184,7 +184,12 @@ D=$(drive dests)
 case "$D" in *DESTS_OK*) ok "three differently-routed destinations created" ;;
              *)          bad "destination creation failed: $D" ;; esac
 
-publish "srt://$CTR:6000?mode=caller&latency=200000&transtype=live" 30
+# The streamid IS the address now: one listener, every source told apart by its
+# publish token. A publisher presenting none is refused, which is the point.
+TOK=$(drive tokens | head -1 | awk '{print $2}')
+[ -n "$TOK" ] && ok "the default source has a publish token" \
+              || bad "no publish token; nothing can address this source"
+publish "srt://$CTR:6000?mode=caller&latency=200000&transtype=live&streamid=$TOK" 30
 sleep 14
 N=$(drive tracks)
 [ "$N" = "3" ] && ok "SRT ingest probed 3 audio tracks" || bad "SRT ingest probed '$N' tracks, expected 3"
@@ -332,7 +337,7 @@ printf "\n\033[1m%d passed, %d failed, %d skipped\033[0m\n" "$pass" "$fail" "$sk
 #
 # Skips count toward the total. A skip is a deliberate, reported decision (an
 # architecture this host cannot build); a check that never ran is not.
-EXPECTED_CHECKS=28
+EXPECTED_CHECKS=29
 total=$((pass + fail + skip))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  only %d of %d checks ran; the run stopped early\n\n" \

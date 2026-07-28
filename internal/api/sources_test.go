@@ -72,45 +72,24 @@ func TestCreatingASourceNeedsOnlyAName(t *testing.T) {
 	}
 }
 
-// The token is minted and rotatable, but no listener checks it yet, and the API
-// has to say so. A UI presenting "rotate token" as a security control while the
-// ingest ignored it would be worse than not having the field at all.
-func TestSourceReportsThatItsTokenIsNotEnforced(t *testing.T) {
+// The token IS the address now, so it has to appear in the SRT publish URL --
+// the operator pastes that URL into OBS and nothing else identifies the source.
+// The inverse of what this test used to assert, and the change is the feature.
+func TestTheSRTPublishURLCarriesTheToken(t *testing.T) {
 	h, _, sign := sourceServer(t)
 
 	rows := listSources(t, h, sign)
-	if rows[0].TokenEnforced {
-		t.Error("tokenEnforced is true, but nothing checks the token")
+	if rows[0].Token == "" {
+		t.Fatal("source has no token, so it has no address")
 	}
-	// And it must not appear in a publish URL, which would imply it does.
-	for proto, u := range rows[0].PublishURLs {
-		if rows[0].Token != "" && strings.Contains(u, rows[0].Token) {
-			t.Errorf("%s publish URL embeds the token, implying it authenticates: %s", proto, u)
-		}
+	srt := rows[0].PublishURLs["srt"]
+	if srt == "" {
+		t.Fatal("no SRT publish URL offered")
 	}
-}
-
-func TestRotatingASourceTokenChangesItAndReturnsTheNewOne(t *testing.T) {
-	h, _, sign := sourceServer(t)
-
-	before := listSources(t, h, sign)[0]
-	var got sourceRow
-	decodeInto(t, send(t, h, sign, http.MethodPost,
-		"/api/v1/sources/"+strconv.FormatInt(before.ID, 10)+"/token", nil, http.StatusOK), &got)
-
-	if got.Token == "" {
-		t.Fatal("rotate returned no token")
-	}
-	if got.Token == before.Token {
-		t.Error("rotate returned the same token")
-	}
-	// The response carries the URLs too: an operator who rotates and then
-	// cannot see what to paste has taken their own ingest down.
-	if len(got.PublishURLs) == 0 {
-		t.Error("rotate response has no publishUrls")
+	if !strings.Contains(srt, rows[0].Token) {
+		t.Errorf("the SRT publish URL does not carry the token, so it addresses nothing: %s", srt)
 	}
 }
-
 func TestUpdatingASourceWithoutATokenKeepsTheStoredOne(t *testing.T) {
 	h, _, sign := sourceServer(t)
 
@@ -182,12 +161,14 @@ func TestSourceValidationSurfacesThroughTheAPI(t *testing.T) {
 	h, _, sign := sourceServer(t)
 
 	body := send(t, h, sign, http.MethodPost, "/api/v1/sources", map[string]any{
-		"name":   "Broken",
-		"ingest": map[string]any{"mode": "srt", "srt": map[string]any{"port": 70000, "latencyMs": 200}},
+		"name": "Broken",
+		"ingest": map[string]any{"mode": "srt", "srt": map[string]any{
+			"passphrase": "short", "latencyMs": 200,
+		}},
 	}, http.StatusBadRequest)
 
-	if !strings.Contains(string(body), "srt port") {
-		t.Errorf("error body %s, want it to name the srt port", body)
+	if !strings.Contains(string(body), "passphrase") {
+		t.Errorf("error body %s, want it to name the passphrase", body)
 	}
 }
 
@@ -213,28 +194,39 @@ func TestANewSourceIsEnabledUnlessTheCallerSaysOtherwise(t *testing.T) {
 	}
 }
 
+// tokenEnforced must follow the SOCKET, never configuration.
+//
+// There is no longer a flag to read: tokens are how every SRT source is
+// addressed, so the only question is whether the listener is actually bound.
+// Reporting "enforced" while nothing is listening is false assurance about the
+// one control standing between a stranger and an operator's programme.
 func TestTokenEnforcedTracksTheListenerNotTheSetting(t *testing.T) {
 	h, store, sign := sourceServer(t)
+	srv := serverUnderTest(t, h)
 
-	// Per-source ports: the token is stored but nothing checks it.
-	if listSources(t, h, sign)[0].TokenEnforced {
-		t.Error("tokenEnforced is true while no shared listener is running")
+	// The fixture runs a manager, so the listener is up and the field says so.
+	if !listSources(t, h, sign)[0].TokenEnforced {
+		t.Fatal("tokenEnforced is false while the listener is bound")
 	}
 
-	// Turning the setting on is not enough on its own -- a listener that fails
-	// to bind leaves the setting on and enforces nothing. The field has to
-	// follow the listener, because reporting false assurance is the whole thing
-	// it exists to prevent.
+	// Port 0 specifically. To the kernel :0 is not an error, it means "any free
+	// port" -- so without a guard the listener binds something arbitrary and
+	// still calls itself listening.
 	st, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	st.SharedIngest.Enabled = true
-	st.SharedIngest.Port = 0 // cannot bind
+	st.Listeners.SRTPort = 0
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
+	if srv.mgr == nil {
+		t.Fatal("no manager in the fixture")
+	}
+	if err := srv.mgr.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
 	if listSources(t, h, sign)[0].TokenEnforced {
-		t.Error("tokenEnforced went true on the setting alone, with no listener bound")
+		t.Error("tokenEnforced stayed true with nothing bound")
 	}
 }

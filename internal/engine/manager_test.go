@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"path/filepath"
 	"testing"
 
@@ -229,15 +230,47 @@ func TestIngestLiveAndGPUBusyAggregateAcrossProgrammes(t *testing.T) {
 	}
 }
 
-func TestSharedIngestIsOffUntilSettingsAskForIt(t *testing.T) {
+// The SRT listener is no longer optional -- it IS the SRT ingest -- so the
+// thing worth pinning is that it comes up on its own, and that a port it
+// cannot use leaves it down rather than bound to something arbitrary.
+func TestTheSRTListenerBindsWithoutBeingAskedTo(t *testing.T) {
 	m, store := managerFixture(t)
+	// A free port rather than the 6000 default: a unit test that binds a
+	// well-known port fails whenever anything else on the machine holds it,
+	// which makes a real regression indistinguishable from a busy laptop.
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Listeners.SRTPort = freeUDPPort(t)
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// It replaces the ingest path every stream depends on, so it must be opted
-	// into rather than inherited by an upgrade.
-	if m.SharedIngestListening() {
-		t.Fatal("the one-port listener bound without being enabled")
+	// Nothing switched it on: the listener IS the SRT ingest now.
+	if !m.SharedIngestListening() {
+		t.Fatal("the SRT listener did not bind; every source is unreachable")
+	}
+}
+
+// freeUDPPort asks the kernel for a port and gives it straight back. Racy in
+// principle, fine in practice, and far less racy than a hard-coded 6000.
+func freeUDPPort(t *testing.T) int {
+	t.Helper()
+	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("no free udp port: %v", err)
+	}
+	defer c.Close()
+	return c.LocalAddr().(*net.UDPAddr).Port
+}
+
+func TestPortZeroLeavesTheListenerDownRatherThanBoundAtRandom(t *testing.T) {
+	m, store := managerFixture(t)
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
 
 	st, err := store.GetSettings()
@@ -247,10 +280,9 @@ func TestSharedIngestIsOffUntilSettingsAskForIt(t *testing.T) {
 	// Port 0 specifically. The store does not validate -- Settings.Validate
 	// runs in the API handler -- and to the kernel :0 is not an error, it means
 	// "any free port". Without a guard the listener binds something random,
-	// reports itself listening, and tells the operator their token is enforced
-	// while nothing they could publish to exists.
-	st.SharedIngest.Enabled = true
-	st.SharedIngest.Port = 0
+	// reports itself listening, and tells the operator their tokens are
+	// enforced at an address nobody was given.
+	st.Listeners.SRTPort = 0
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
@@ -261,6 +293,6 @@ func TestSharedIngestIsOffUntilSettingsAskForIt(t *testing.T) {
 		t.Error("the listener bound port 0 to a random ephemeral port and called itself listening")
 	}
 	if got := len(m.Engines()); got == 0 {
-		t.Error("a refused shared listener took the engines down with it")
+		t.Error("a refused listener took the engines down with it")
 	}
 }

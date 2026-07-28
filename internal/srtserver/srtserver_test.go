@@ -291,3 +291,36 @@ func TestConstantTimeLookupAcceptsAnyOfASourcesTokens(t *testing.T) {
 		t.Error("lookup accepted the empty token")
 	}
 }
+
+// A source presents two targets on one listener: its primary and its failover
+// standby. They must not be reachable by each other's token — a publisher that
+// could take the primary's slot by presenting the backup address (or the
+// reverse) would silently put the standby feed on air, which is exactly the
+// mix-up failover exists to prevent.
+func TestPrimaryAndBackupTokensDoNotCrossOver(t *testing.T) {
+	primary := Target{SourceID: 1, Name: "Main", Enabled: true}
+	backup := Target{SourceID: 1, Name: "Main (backup)", Enabled: true, Backup: true}
+	toks := map[bool][]string{
+		false: {"tok"},
+		true:  {"tok.backup"},
+	}
+	lookup := ConstantTimeLookup(
+		func() []Target { return []Target{primary, backup} },
+		func(t Target) []string { return toks[t.Backup] },
+	)
+
+	got, ok := lookup("tok")
+	if !ok || got.Backup {
+		t.Errorf(`"tok" resolved to backup=%v ok=%v, want the primary`, got.Backup, ok)
+	}
+	got, ok = lookup("tok.backup")
+	if !ok || !got.Backup {
+		t.Errorf(`"tok.backup" resolved to backup=%v ok=%v, want the standby`, got.Backup, ok)
+	}
+	if _, ok := lookup("tok.BACKUP"); ok {
+		t.Error("token matching is case-insensitive; it must not be")
+	}
+	if _, ok := lookup("nonsense"); ok {
+		t.Error("an unknown token resolved to a target")
+	}
+}

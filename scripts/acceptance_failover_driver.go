@@ -168,9 +168,10 @@ func enableFailover() {
 		rtmp = map[string]any{}
 		ing["rtmp"] = rtmp
 	}
-	rtmp["port"] = ingestPort
 	rtmp["app"] = "live"
 	rtmp["streamKey"] = ""
+	// The port is install-wide now, not a property of the source.
+	s["listeners"] = map[string]any{"srtPort": 6000, "rtmpPort": ingestPort}
 
 	s["failover"] = map[string]any{
 		"enabled":             true,

@@ -69,7 +69,17 @@ type Target struct {
 	// engine is running for it, which must be refused rather than accepted into
 	// a void.
 	Sink Sink
+	// Backup marks the failover standby for a source rather than its primary.
+	// Both are reached on this listener and told apart by token, so one source
+	// can present two targets -- and a publisher must not be able to take over
+	// the primary's slot by presenting the backup's token, or the other way
+	// round.
+	Backup bool
 }
+
+// Key identifies a target uniquely. A source has at most two -- its primary and
+// its failover backup -- and they must not share a token list.
+func (t Target) Key() (int64, bool) { return t.SourceID, t.Backup }
 
 // Lookup resolves a publish token to its target.
 //

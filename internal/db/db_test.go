@@ -466,7 +466,7 @@ func TestGetSettingsFillsDefaultsForFieldsMissingFromAnOlderBlob(t *testing.T) {
 		t.Fatalf("GetSettings: %v", err)
 	}
 
-	if got.Ingest.Mode != IngestRTMP || got.Ingest.RTMP.Port != 1936 || got.Ingest.RTMP.App != "stream" {
+	if got.Ingest.Mode != IngestRTMP || got.Ingest.RTMP.App != "stream" {
 		t.Errorf("stored ingest values were lost: %+v", got.Ingest)
 	}
 
@@ -521,19 +521,29 @@ func TestSettingsValidate(t *testing.T) {
 			wantErr: "srt passphrase must be 10-79 characters (got 80)",
 		},
 		{
-			name:    "srt and rtmp sharing a port is rejected",
-			mutate:  func(s *Settings) { s.Ingest.RTMP.Port = s.Ingest.SRT.Port },
-			wantErr: "srt and rtmp cannot share port 6000",
+			// The listeners are install-wide now; a source has no port to
+			// clash with. What can still collide is the two listeners.
+			name:    "the srt and rtmp listeners sharing a port is rejected",
+			mutate:  func(s *Settings) { s.Listeners.RTMPPort = s.Listeners.SRTPort },
+			wantErr: "srt and rtmp listeners cannot share port 6000",
+		},
+		{
+			name:    "a listener port out of range is rejected",
+			mutate:  func(s *Settings) { s.Listeners.SRTPort = 70000 },
+			wantErr: "srt listener port 70000 out of range",
+		},
+		{
+			// Port 0 is not an error to the kernel -- it means "any free
+			// port" -- so a listener bound to it would come up, report itself
+			// listening, and be reachable at an address nobody was told.
+			name:    "listener port 0 is rejected rather than bound",
+			mutate:  func(s *Settings) { s.Listeners.SRTPort = 0 },
+			wantErr: "srt listener port 0 out of range",
 		},
 		{
 			name:    "an unknown ingest mode is rejected",
 			mutate:  func(s *Settings) { s.Ingest.Mode = "webrtc" },
 			wantErr: `unknown ingest mode "webrtc"`,
-		},
-		{
-			name:    "an out-of-range srt port is rejected",
-			mutate:  func(s *Settings) { s.Ingest.SRT.Port = 70000 },
-			wantErr: "srt port 70000 out of range",
 		},
 	}
 

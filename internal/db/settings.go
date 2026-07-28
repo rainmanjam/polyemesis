@@ -28,9 +28,12 @@ const (
 	IngestPull IngestMode = "pull"
 )
 
-// SRTSettings configures the SRT listener.
+// SRTSettings configures one source's SRT ingest.
+//
+// There is no port here. Every source is reached on the ONE SRT listener and
+// told apart by its token, so a port per source is neither needed nor offered.
+// See docs/DESIGN-ONE-PORT-ONLY.md.
 type SRTSettings struct {
-	Port int `json:"port"`
 	// Passphrase enables AES encryption. SRT requires 10..79 characters.
 	Passphrase string `json:"passphrase"`
 	// LatencyMS is SRT's receive buffer, in milliseconds. Higher survives
@@ -38,10 +41,13 @@ type SRTSettings struct {
 	LatencyMS int `json:"latencyMs"`
 }
 
-// RTMPSettings configures the fallback RTMP listener.
+// RTMPSettings configures the fallback RTMP ingest.
+//
+// No port, for the same reason as SRT — but for a different mechanism. RTMP has
+// no token routing here, so the single RTMP listener serves at most ONE source;
+// a second is refused rather than left to fight over the socket.
 type RTMPSettings struct {
-	Port int    `json:"port"`
-	App  string `json:"app"`
+	App string `json:"app"`
 	// StreamKey is matched against the publisher's playpath, so a stranger
 	// who finds the port still cannot publish.
 	StreamKey string `json:"streamKey"`
@@ -108,9 +114,6 @@ func (i IngestSettings) problems() []string {
 	if err := routing.ValidateAnnotations(i.Annotations); err != nil {
 		add("%v", err)
 	}
-	if i.SRT.Port < 1 || i.SRT.Port > 65535 {
-		add("srt port %d out of range", i.SRT.Port)
-	}
 	// SRT's own constraint, enforced here so the user sees it in a form field
 	// rather than in an FFmpeg stderr line.
 	if p := i.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
@@ -119,14 +122,8 @@ func (i IngestSettings) problems() []string {
 	if i.SRT.LatencyMS < 20 || i.SRT.LatencyMS > 8000 {
 		add("srt latency %dms out of range (20-8000)", i.SRT.LatencyMS)
 	}
-	if i.RTMP.Port < 1 || i.RTMP.Port > 65535 {
-		add("rtmp port %d out of range", i.RTMP.Port)
-	}
 	if i.Mode == IngestRTMP && i.RTMP.App == "" {
 		add("rtmp app name is required")
-	}
-	if i.SRT.Port == i.RTMP.Port {
-		add("srt and rtmp cannot share port %d", i.SRT.Port)
 	}
 	return probs
 }
@@ -521,26 +518,11 @@ func (s SlateSettings) SlateImageProblem() error {
 	return nil
 }
 
-// boundPort is the port this ingest configuration will actually bind, or 0 when
-// it binds nothing. A pull source dials out and listens on no port at all, so
-// asking "do these two conflict" has to start here rather than at the numbers.
-func boundPort(mode IngestMode, srt SRTSettings, rtmp RTMPSettings) int {
-	switch mode {
-	case IngestSRT:
-		return srt.Port
-	case IngestRTMP:
-		return rtmp.Port
-	}
-	return 0
-}
-
 // problems reports the failover configuration that would produce a process that
 // cannot start.
 //
 // Ranges are checked whether or not the feature is enabled, so a half-filled
-// form is caught when it is saved. The port conflict is not: it depends on
-// which listener each side will actually bind, and two ingests that never run
-// together cannot collide.
+// form is caught when it is saved.
 func (f FailoverSettings) problems(primary IngestSettings) []string {
 	var probs []string
 	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
@@ -572,29 +554,24 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	for _, p := range b.Pull.problems() {
 		add("backup ingest: %s", p)
 	}
-	if b.SRT.Port < 1 || b.SRT.Port > 65535 {
-		add("backup srt port %d out of range", b.SRT.Port)
-	}
 	if p := b.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
 		add("backup srt passphrase must be 10-79 characters (got %d)", len(p))
 	}
 	if b.SRT.LatencyMS < 20 || b.SRT.LatencyMS > 8000 {
 		add("backup srt latency %dms out of range (20-8000)", b.SRT.LatencyMS)
 	}
-	if b.RTMP.Port < 1 || b.RTMP.Port > 65535 {
-		add("backup rtmp port %d out of range", b.RTMP.Port)
-	}
 	if b.Mode == IngestRTMP && b.RTMP.App == "" {
 		add("backup rtmp app name is required")
 	}
-	if f.Enabled && b.Enabled {
-		// Both listeners are up at once, which is the whole point, so they
-		// cannot share a socket with each other or with the primary.
-		if bp := boundPort(b.Mode, b.SRT, b.RTMP); bp != 0 {
-			if pp := boundPort(primary.Mode, primary.SRT, primary.RTMP); pp == bp {
-				add("the backup ingest cannot share port %d with the primary", bp)
-			}
-		}
+	// No port collision to check any more. Primary and backup both arrive on
+	// the one SRT listener and are told apart by token, so "which socket does
+	// each bind" is no longer a question that can have a wrong answer.
+	//
+	// The RTMP backup is the exception: it would need the single RTMP listener
+	// that the primary may already hold. Refused here rather than at runtime.
+	if f.Enabled && b.Enabled && b.Mode == IngestRTMP && primary.Mode == IngestRTMP {
+		add("the backup ingest cannot also use RTMP: there is one RTMP listener " +
+			"and the primary has it. Use SRT for the backup, which is addressed by token")
 	}
 	if err := f.Slate.SlateImageProblem(); err != nil {
 		add("%v", err)
@@ -882,43 +859,54 @@ func (p PostProdSettings) problems() []string {
 	return probs
 }
 
-// SharedIngestSettings configures the one-port SRT listener: a single port
-// serving every source, demultiplexed by each source's publish token.
+// ListenerSettings is where the server actually binds. Install-wide, because
+// there is exactly one of each listener however many sources exist.
 //
-// Off by default, and per-source ports keep working when it is on. That is a
-// deliberate difference from datarhei Core, which is one-port only: a dedicated
-// port per programme is genuinely useful for firewall rules, separate NICs and
-// QoS marking, and keeping both means the newer path can be adopted without
-// betting an install on it.
-type SharedIngestSettings struct {
-	Enabled bool `json:"enabled"`
-	Port    int  `json:"port"`
+// This replaced a per-source port on every source plus an opt-in "shared"
+// listener alongside them. The opt-in shipped OFF, defaulted to a port no
+// compose file published and no document mentioned, and reported itself as
+// enforcing while bound to something unreachable. Deleting the choice deleted
+// the trap: there is one SRT port, sources are told apart by token, and adding
+// a source never changes what has to be published.
+//
+// docs/DESIGN-ONE-PORT-ONLY.md has the reasoning, including what it costs.
+type ListenerSettings struct {
+	// SRTPort serves EVERY source, demultiplexed by publish token.
+	SRTPort int `json:"srtPort"`
+	// RTMPPort serves at most one source. RTMP has no token routing here, so
+	// a second RTMP source is refused at validation rather than left to
+	// discover at runtime that it never receives anything.
+	RTMPPort int `json:"rtmpPort"`
 }
 
-func (s SharedIngestSettings) problems() []string {
-	if !s.Enabled {
-		return nil
+func (l ListenerSettings) problems() []string {
+	var probs []string
+	if l.SRTPort < 1 || l.SRTPort > 65535 {
+		probs = append(probs, fmt.Sprintf("srt listener port %d out of range", l.SRTPort))
 	}
-	if s.Port < 1 || s.Port > 65535 {
-		return []string{fmt.Sprintf("shared ingest port %d out of range", s.Port)}
+	if l.RTMPPort < 1 || l.RTMPPort > 65535 {
+		probs = append(probs, fmt.Sprintf("rtmp listener port %d out of range", l.RTMPPort))
 	}
-	return nil
+	if l.SRTPort == l.RTMPPort {
+		probs = append(probs, fmt.Sprintf("srt and rtmp listeners cannot share port %d", l.SRTPort))
+	}
+	return probs
 }
 
 // Settings is everything the user can change from the web UI.
 type Settings struct {
 	Ingest IngestSettings `json:"ingest"`
-	// SharedIngest is install-wide rather than per-source: it is one listener
+	// Listeners is install-wide rather than per-source: it is one socket
 	// for every programme, so it cannot live on a source row.
-	SharedIngest SharedIngestSettings `json:"sharedIngest"`
-	Recording    RecordingSettings    `json:"recording"`
-	Preview      PreviewSettings      `json:"preview"`
-	Playout      PlayoutSettings      `json:"playout"`
-	Failover     FailoverSettings     `json:"failover"`
-	Synth        SynthSettings        `json:"synth"`
-	Meters       MeterSettings        `json:"meters"`
-	Logging      LoggingSettings      `json:"logging"`
-	PostProd     PostProdSettings     `json:"postProd"`
+	Listeners ListenerSettings  `json:"listeners"`
+	Recording RecordingSettings `json:"recording"`
+	Preview   PreviewSettings   `json:"preview"`
+	Playout   PlayoutSettings   `json:"playout"`
+	Failover  FailoverSettings  `json:"failover"`
+	Synth     SynthSettings     `json:"synth"`
+	Meters    MeterSettings     `json:"meters"`
+	Logging   LoggingSettings   `json:"logging"`
+	PostProd  PostProdSettings  `json:"postProd"`
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -926,16 +914,15 @@ func DefaultSettings() Settings {
 	return Settings{
 		Ingest: IngestSettings{
 			Mode: IngestSRT,
-			SRT:  SRTSettings{Port: 6000, LatencyMS: 200},
-			RTMP: RTMPSettings{Port: 1935, App: "live", StreamKey: "stream"},
+			SRT:  SRTSettings{LatencyMS: 200},
+			RTMP: RTMPSettings{App: "live", StreamKey: "stream"},
 			Pull: PullSettings{
 				ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
 				RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
 			},
 		},
-		// Off by default. It replaces the ingest path every stream depends on,
-		// so it is opted into rather than inherited by an upgrade.
-		SharedIngest: SharedIngestSettings{Enabled: false, Port: 6100},
+		// The ports every install publishes. Not configurable per source.
+		Listeners: ListenerSettings{SRTPort: 6000, RTMPPort: 1935},
 		Recording: RecordingSettings{
 			Enabled:        false,
 			SegmentSeconds: 3600,
@@ -984,8 +971,8 @@ func DefaultSettings() Settings {
 			Backup: BackupIngestSettings{
 				Enabled: false,
 				Mode:    IngestSRT,
-				SRT:     SRTSettings{Port: 6001, LatencyMS: 200},
-				RTMP:    RTMPSettings{Port: 1936, App: "live", StreamKey: "backup"},
+				SRT:     SRTSettings{LatencyMS: 200},
+				RTMP:    RTMPSettings{App: "live", StreamKey: "backup"},
 				Pull: PullSettings{
 					ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
 					RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
@@ -1077,7 +1064,7 @@ func (s Settings) Validate() error {
 	for _, p := range s.PostProd.problems() {
 		add("%s", p)
 	}
-	for _, p := range s.SharedIngest.problems() {
+	for _, p := range s.Listeners.problems() {
 		add("%s", p)
 	}
 

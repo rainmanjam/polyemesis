@@ -360,13 +360,6 @@ function SourceCard({
           {ing.mode === "srt" && (
             <>
               <NumberField
-                label="SRT port"
-                value={ing.srt.port}
-                min={LIMITS.port.min}
-                max={LIMITS.port.max}
-                onChange={(n) => setIngest({ srt: { ...ing.srt, port: n } })}
-              />
-              <NumberField
                 label="Latency (ms)"
                 value={ing.srt.latencyMs}
                 min={LIMITS.srtLatencyMs.min}
@@ -388,13 +381,6 @@ function SourceCard({
 
           {ing.mode === "rtmp" && (
             <>
-              <NumberField
-                label="RTMP port"
-                value={ing.rtmp.port}
-                min={LIMITS.port.min}
-                max={LIMITS.port.max}
-                onChange={(n) => setIngest({ rtmp: { ...ing.rtmp, port: n } })}
-              />
               <div className="flex flex-col gap-1">
                 <Label>App</Label>
                 <Input

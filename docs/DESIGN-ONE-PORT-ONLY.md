@@ -111,14 +111,24 @@ Easy to miss, and it falls out of the same change. The backup ingest is a
 so the two cannot share a socket. Under per-source ports it got its own port and
 the validator refused a collision.
 
-With ports gone it needs a different address on the same port, and the model
-already has one: **the backup gets its own token**, minted with the source's and
-rotatable the same way.
+With ports gone it needs a different address on the same port. The address is
+**derived from the source's token** rather than being a second stored secret:
 
 ```
-srt://host:6000?streamid=<token>          the primary encoder
-srt://host:6000?streamid=<backupToken>    the standby encoder
+srt://host:6000?streamid=<token>           the primary encoder
+srt://host:6000?streamid=<token>.backup    the standby encoder
 ```
+
+Derived rather than minted, which was the first shape considered: one secret per
+source is one thing to rotate, one thing to leak, and one thing to explain — and
+rotating the source's token moves the standby's address with it automatically,
+so the two can never drift apart.
+
+The listener holds two targets per source and the token lists are keyed on
+(source, isBackup), so neither address can reach the other's feed. A publisher
+that could take the primary's slot by presenting the backup address would put
+the standby on air without anyone asking, which is precisely the mix-up failover
+exists to prevent.
 
 The alternative considered and rejected was restricting the backup to pull mode
 so it dials out and binds nothing. That is less code, but it removes the most
