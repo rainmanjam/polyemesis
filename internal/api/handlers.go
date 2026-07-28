@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -648,6 +649,28 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// The ingest block ALSO has to reach the default source, or saving it does
+	// nothing at all.
+	//
+	// Before sources existed, settings.ingest WAS the ingest. Afterwards the
+	// engine reads its ingest from the source row -- effectiveSettings does
+	// `settings.Ingest = src.Ingest` -- so this endpoint kept accepting an
+	// ingest block, storing it, returning 200, and having no effect whatever.
+	// The entire ingest editor on the settings page was dead, and an operator
+	// changing an SRT port there got a success toast and an unchanged server.
+	//
+	// Writing it through to the default source restores the old meaning:
+	// settings.ingest edits the programme an unscoped request acts on, which is
+	// exactly what it edited when there was only one.
+	if id, err := s.store.DefaultSourceID(); err == nil {
+		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
+			src.Ingest = settings.Ingest
+			if err := s.store.UpdateSource(src); err != nil {
+				writeError(w, http.StatusBadRequest, "ingest settings: "+err.Error())
+				return
+			}
+		}
+	}
 	// The MANAGER, not the default engine.
 	//
 	// Settings are install-wide, and some of them are owned by the manager
@@ -707,6 +730,23 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 		resp["routingError"] = err.Error()
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ingestEqual compares two ingest blocks by value.
+//
+// Cheap rather than clever: the blocks are small and this runs once per
+// settings save. It exists so an unrelated settings change -- a recording cap,
+// a log level -- does not rewrite the source row and restart a live ingest for
+// nothing.
+func ingestEqual(a, b db.IngestSettings) bool {
+	x, errA := json.Marshal(a)
+	y, errB := json.Marshal(b)
+	if errA != nil || errB != nil {
+		// Cannot tell, so treat as different. A needless restart is visible and
+		// recoverable; a change that silently did nothing is neither.
+		return false
+	}
+	return bytes.Equal(x, y)
 }
 
 // refuseIfSilent rejects a profile that compiles to no audio against the ingest
