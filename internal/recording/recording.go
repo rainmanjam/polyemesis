@@ -547,6 +547,81 @@ func (m *Manager) Resolve(name string) (string, error) {
 	return full, nil
 }
 
+// ResolveForWrite is Resolve for a file a process is about to CREATE: it
+// returns a path that FFmpeg will accept, without ever putting existing footage
+// at risk.
+//
+// FFmpeg refuses an existing output file and exits, so a destination writing to
+// a fixed name dies permanently the first time it restarts — an ingest blip at
+// 3am ends the recording for the night. The obvious repair, passing -y, is
+// worse: every respawn would truncate the file, so a destination that flapped
+// once would hand back an empty recording instead of a broken one.
+//
+// So the rule is: never destroy bytes. A name that is free, or that holds a
+// zero-byte file left by a process that died before writing anything, is used
+// as given — which keeps the ordinary case producing exactly the filename the
+// operator configured. A name that holds real footage yields a timestamped
+// sibling instead, so the restart lands beside the earlier take rather than on
+// top of it.
+//
+// The timestamp is seconds-resolution and the counter covers the rest: two
+// restarts inside one second is a crash loop, and a crash loop must not be able
+// to make this function return a path that already has data in it.
+func (m *Manager) ResolveForWrite(name string) (string, error) {
+	full, err := m.Resolve(name)
+	if err != nil {
+		return "", err
+	}
+	if claim(full) {
+		return full, nil
+	}
+	ext := filepath.Ext(full)
+	stem := strings.TrimSuffix(full, ext)
+	stamp := time.Now().Format("20060102-150405")
+	for n := 0; n < 1000; n++ {
+		cand := fmt.Sprintf("%s-%s%s", stem, stamp, ext)
+		if n > 0 {
+			cand = fmt.Sprintf("%s-%s-%d%s", stem, stamp, n, ext)
+		}
+		if claim(cand) {
+			return cand, nil
+		}
+	}
+	return "", fmt.Errorf("recording %q: no free filename", name)
+}
+
+// claim reports whether a path is now free for FFmpeg to create, clearing an
+// empty leftover if that is all that stands in the way.
+//
+// The removal is what makes this different from a plain existence check.
+// FFmpeg refuses ANY existing output path, so a zero-byte file left by a
+// process that died before writing anything wedges the destination exactly as
+// thoroughly as a full one — and unlike a full one, there is nothing in it to
+// protect.
+func claim(path string) bool {
+	if !usable(path) {
+		return false
+	}
+	err := os.Remove(path)
+	return err == nil || errors.Is(err, os.ErrNotExist)
+}
+
+// usable reports whether a path can be written without losing anything: either
+// nothing is there, or what is there is an empty file.
+//
+// A stat error other than "not found" counts as unusable. Guessing that an
+// unreadable path is safe to overwrite is the one wrong answer here.
+func usable(path string) bool {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular() && info.Size() == 0
+}
+
 // DiskUsage reports total indexed bytes and the free space on the volume.
 type DiskUsage struct {
 	UsedBytes  int64  `json:"usedBytes"`

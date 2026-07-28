@@ -67,6 +67,18 @@ type Spec struct {
 	Bin  string
 	Args []string
 
+	// NextArgs, when set, is called immediately before EVERY spawn and its
+	// result is used instead of Args for that run.
+	//
+	// It exists because a respawn is not always a repeat. A destination writing
+	// to a file cannot re-run the command that produced the file it is already
+	// holding: FFmpeg refuses an existing output and exits, so without this the
+	// first restart ends the destination permanently, and the alternative --
+	// passing -y -- would silently truncate whatever had been recorded so far.
+	// Choosing the path per spawn is the only option that neither destroys the
+	// footage nor wedges the destination.
+	NextArgs func() []string
+
 	// AutoRestart makes the supervisor respawn the child when it exits.
 	// The preview and destinations want this; a one-shot probe does not.
 	AutoRestart bool
@@ -116,6 +128,9 @@ type Process struct {
 	nextRetry time.Time
 	progress  ffmpeg.Progress
 	logs      *ring
+	// liveArgs is the argv of the most recent spawn. Equal to spec.Args unless
+	// spec.NextArgs resolved something different for this run.
+	liveArgs []string
 
 	cmdMu sync.Mutex
 	cmd   *exec.Cmd
@@ -145,14 +160,26 @@ func New(log *slog.Logger, spec Spec) *Process {
 // Name returns the process name.
 func (p *Process) Name() string { return p.spec.Name }
 
+// currentArgs is the argv of the running child, falling back to the configured
+// one before the first spawn.
+func (p *Process) currentArgs() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.liveArgs != nil {
+		return p.liveArgs
+	}
+	return p.spec.Args
+}
+
 // Args returns the command line, for display on the monitoring page.
-func (p *Process) Args() []string { return append([]string{p.spec.Bin}, p.spec.Args...) }
+func (p *Process) Args() []string { return append([]string{p.spec.Bin}, p.currentArgs()...) }
 
 // CommandString renders the full command line for the UI.
 func (p *Process) CommandString() string {
-	parts := make([]string, 0, len(p.spec.Args)+1)
+	live := p.currentArgs()
+	parts := make([]string, 0, len(live)+1)
 	parts = append(parts, p.spec.Bin)
-	for _, a := range p.spec.Args {
+	for _, a := range live {
 		if strings.ContainsAny(a, " \t\"'|&;<>()$`\\") {
 			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
 			continue
@@ -275,7 +302,19 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 
 // runOnce spawns the child and blocks until it exits.
 func (p *Process) runOnce(ctx context.Context) error {
-	cmd := exec.Command(p.spec.Bin, p.spec.Args...)
+	argv := p.spec.Args
+	if p.spec.NextArgs != nil {
+		argv = p.spec.NextArgs()
+	}
+	// Recorded so the monitoring page and the crash-loop log line show the
+	// command that is actually running, not the one this process started life
+	// with. A resolved argv that only the child ever saw would make the one
+	// place an operator looks disagree with reality.
+	p.mu.Lock()
+	p.liveArgs = argv
+	p.mu.Unlock()
+
+	cmd := exec.Command(p.spec.Bin, argv...)
 	// Put the child in its own process group so we can signal the whole tree,
 	// and so a Ctrl-C in the terminal reaches us first rather than killing
 	// children out from under the supervisor.
@@ -305,6 +344,11 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.mu.Unlock()
 	p.setState(StateRunning, "")
 	p.log.Info("process started", "pid", cmd.Process.Pid)
+	// Debug rather than info: this is long, and one line per respawn would
+	// swamp the log. But when a process crash-loops the command line is the
+	// first thing anyone wants, and reading it off the monitoring page is no
+	// help when the failure is a restart loop that never settles.
+	p.log.Debug("process command", "argv", p.CommandString())
 
 	var wg sync.WaitGroup
 	wg.Add(2)

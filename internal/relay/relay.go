@@ -50,6 +50,10 @@ type Hub struct {
 	rxBytes   atomic.Uint64
 	txPackets atomic.Uint64
 	dropped   atomic.Uint64
+	// empty counts zero-length datagrams swallowed by run. See the comment
+	// there: forwarding one takes down every consumer at once, so the count is
+	// the only evidence left that it happened.
+	empty atomic.Uint64
 
 	// cc is touched only by run, so it needs no lock; the totals it feeds are
 	// atomic because Stats reads them from the HTTP goroutine.
@@ -264,6 +268,21 @@ func (h *Hub) run() {
 			default:
 			}
 			h.log.Warn("relay read error", "err", err)
+			continue
+		}
+		if n == 0 {
+			// A zero-length datagram is not a packet, and forwarding it is not
+			// harmless: FFmpeg's UDP demuxer reports a zero-length read as EOF,
+			// so one empty datagram ends every consumer on this hub at once —
+			// every destination, the meters sidecar and each loudness analyser,
+			// all exiting 0 as though they had been asked to stop. They then
+			// respawn, which makes it look like a restart loop with no error in
+			// it anywhere. Dropping it here costs nothing: MPEG-TS carries no
+			// information in an empty datagram.
+			h.empty.Add(1)
+			h.log.Debug("relay dropped a zero-length datagram",
+				"reason", "forwarding it would signal EOF to every consumer",
+				"total", h.empty.Load())
 			continue
 		}
 		h.rxPackets.Add(1)

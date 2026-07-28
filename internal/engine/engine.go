@@ -1631,10 +1631,11 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	url := hub.Subscribe(subName, port)
 
 	target := row.Target()
-	if destWritesAFile(row) {
+	writesAFile := destWritesAFile(row)
+	if writesAFile {
 		// File destinations are confined to the recordings directory; the
 		// path never comes straight from user input.
-		resolved, err := e.recman.Resolve(row.URL)
+		resolved, err := e.recman.ResolveForWrite(row.URL)
 		if err != nil {
 			e.hub.Unsubscribe(subName)
 			e.alloc.Release(port)
@@ -1643,31 +1644,56 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		target = resolved
 	}
 
-	args := ffmpeg.DestinationArgs(ffmpeg.DestSpec{
-		Kind:          ffmpeg.DestKind(row.Kind),
-		Target:        target,
-		RelayURL:      url,
-		FilterComplex: compiled.FilterComplex,
-		AudioOutLabel: compiled.OutLabel,
-		AudioBitrate:  row.AudioBitrate,
-		SampleRate:    row.Profile.SampleRate,
-		CopyVideo:     true,
-		// A negative routing delay pulls audio ahead of picture, which no audio
-		// filter can do, so the compiler hands the amount over here and the
-		// video is held back instead.
-		VideoDelayMS: compiled.VideoDelayMS,
-		// Expert mode. Spliced by DestinationArgs into the two positions FFmpeg
-		// binds options from, which are the same two the operator was shown in
-		// the confirm dialog.
-		ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
-		ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
-	})
+	buildArgs := func(out string) []string {
+		return ffmpeg.DestinationArgs(ffmpeg.DestSpec{
+			Kind:          ffmpeg.DestKind(row.Kind),
+			Target:        out,
+			RelayURL:      url,
+			FilterComplex: compiled.FilterComplex,
+			AudioOutLabel: compiled.OutLabel,
+			AudioBitrate:  row.AudioBitrate,
+			SampleRate:    row.Profile.SampleRate,
+			CopyVideo:     true,
+			// A negative routing delay pulls audio ahead of picture, which no
+			// audio filter can do, so the compiler hands the amount over here
+			// and the video is held back instead.
+			VideoDelayMS: compiled.VideoDelayMS,
+			// Expert mode. Spliced by DestinationArgs into the two positions
+			// FFmpeg binds options from, which are the same two the operator
+			// was shown in the confirm dialog.
+			ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
+			ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
+		})
+	}
+
+	// Only a file destination needs a fresh argv per spawn, and only because
+	// its output path cannot be reused. An RTMP or SRT target is reconnected
+	// to, not recreated, so rebuilding its command line every respawn would be
+	// churn with no benefit — and it would make the argv shown on the
+	// monitoring page differ from the one that has been running all along.
+	var nextArgs func() []string
+	if writesAFile {
+		nextArgs = func() []string {
+			out, err := e.recman.ResolveForWrite(row.URL)
+			if err != nil {
+				// Keep the last known-good path rather than refusing to start:
+				// the resolver only fails when the directory itself is
+				// unusable, and that is already reported by the recorder's own
+				// storage guard.
+				e.log.Error("destination: cannot pick an output filename",
+					"dest", row.Name, "err", err)
+				return buildArgs(target)
+			}
+			return buildArgs(out)
+		}
+	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name:        subName,
 		Kind:        "destination",
 		Bin:         e.tools.FFmpeg,
-		Args:        args,
+		Args:        buildArgs(target),
+		NextArgs:    nextArgs,
 		AutoRestart: true,
 		OnLog:       e.onLog,
 		OnState:     e.onState,
