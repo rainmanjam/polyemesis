@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { SecretInput } from "@/components/SecretInput";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
 import { LIMITS } from "@/lib/limits";
@@ -75,6 +76,7 @@ export function SourcesPage() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [deleting, setDeleting] = useState<SourceView | null>(null);
+  const [rotating, setRotating] = useState<SourceView | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
@@ -181,7 +183,7 @@ export function SourcesPage() {
               busy={busyId === s.id}
               onlyOne={sources.length === 1}
               onPatch={(c) => patch(s, c)}
-              onRotate={() => rotate(s)}
+              onRotate={() => setRotating(s)}
               onDelete={() => setDeleting(s)}
             />
           ))}
@@ -218,6 +220,22 @@ export function SourcesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDestructive
+        open={rotating !== null}
+        onOpenChange={(o) => !o && setRotating(null)}
+        subject={rotating?.name ?? ""}
+        title={`Rotate the token for “${rotating?.name}”?`}
+        description={
+          rotating?.publishing
+            ? "An encoder is publishing to this source right now. The old token keeps working for five minutes, so it will not be cut off — but it must be updated before that window closes."
+            : "A new token is issued immediately. The old one keeps working for five minutes so an encoder already using it is not cut off."
+        }
+        confirmLabel="Rotate token"
+        onConfirm={async () => {
+          if (rotating) await rotate(rotating);
+        }}
+      />
 
       <ConfirmDestructive
         open={deleting !== null}
@@ -387,7 +405,7 @@ function SourceCard({
               </div>
               <div className="flex flex-col gap-1">
                 <Label>Stream key</Label>
-                <Input
+                <SecretInput
                   className="h-7 text-[11px]"
                   value={ing.rtmp.streamKey}
                   onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, streamKey: e.target.value } })}
@@ -479,7 +497,18 @@ function SourceCard({
             >
               <Copy className="h-3 w-3" />
             </Button>
-            <Button size="sm" variant="outline" onClick={onRotate} disabled={busy}>
+            {/* Rotate sat beside Copy with identical weight, though one is
+                idempotent and the other invalidates a credential an encoder may
+                be using right now. Confirmed rather than merely restyled: the
+                consequence is not visual, it is that somebody's publisher stops
+                being able to connect. */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-warn/50 text-warn hover:bg-warn-dim/30"
+              onClick={onRotate}
+              disabled={busy}
+            >
               <KeyRound className="h-3 w-3" /> Rotate
             </Button>
           </div>

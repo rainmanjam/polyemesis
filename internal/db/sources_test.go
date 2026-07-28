@@ -370,3 +370,40 @@ func TestASourceThatHasNeverRotatedAcceptsOnlyItsOwnToken(t *testing.T) {
 		t.Errorf("ValidTokens = %v, want exactly the live token", valid)
 	}
 }
+
+func TestADestinationWithNoSourceIsRefusedAtTheBoundary(t *testing.T) {
+	d := testDB(t)
+	dst, err := d.CreateDestination(&Destination{
+		Name: "orphan", Kind: DestRTMP, URL: "rtmp://example/live"})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	// Only reachable by editing the database by hand or by a half-finished
+	// migration -- which is exactly when it must fail loudly. A row with no
+	// source belongs to no programme, so nothing ever starts it: it would be
+	// listed by the API and silently do nothing forever.
+	if _, err := d.SQL().Exec(`UPDATE destinations SET source_id = NULL WHERE id = ?`, dst.ID); err != nil {
+		t.Fatalf("null the source: %v", err)
+	}
+	if _, err := d.GetDestination(dst.ID); err == nil {
+		t.Fatal("a destination with no source was read back as valid")
+	}
+	if _, err := d.ListDestinations(); err == nil {
+		t.Fatal("listing tolerated a destination with no source")
+	}
+}
+
+func TestARenditionWithNoSourceIsRefusedAtTheBoundary(t *testing.T) {
+	d := testDB(t)
+	r, err := d.CreateRendition(&Rendition{
+		Name: "orphan", Height: 720, VideoBitrate: 3000})
+	if err != nil {
+		t.Fatalf("CreateRendition: %v", err)
+	}
+	if _, err := d.SQL().Exec(`UPDATE renditions SET source_id = NULL WHERE id = ?`, r.ID); err != nil {
+		t.Fatalf("null the source: %v", err)
+	}
+	if _, err := d.GetRendition(r.ID); err == nil {
+		t.Fatal("a rendition with no source was read back as valid")
+	}
+}

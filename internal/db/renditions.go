@@ -329,6 +329,11 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 	if source.Valid {
 		v := source.Int64
 		r.SourceID = &v
+	} else {
+		// Same reasoning as destinations: a rendition with no source is
+		// re-encoding nothing, and no reconciler will start it.
+		return nil, fmt.Errorf("rendition %d has no source: it belongs to no "+
+			"programme and would never be started", r.ID)
 	}
 	r.CreatedAt = time.Unix(created, 0)
 	r.UpdatedAt = time.Unix(updated, 0)
