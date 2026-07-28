@@ -26,7 +26,7 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
-import { useLiveData } from "@/hooks/useLiveData";
+import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { labelForState, toneBadge, toneForState } from "@/lib/signal";
@@ -428,11 +428,25 @@ export function MonitoringPage() {
   }, [logs]);
 
   // Process list changes rarely; poll rather than adding another event type.
+  //
+  // The failure is tracked rather than swallowed. A single failed poll is not
+  // worth a toast -- the next one is five seconds away -- but silence must not
+  // be indefinite, or the table keeps showing processes that stopped existing
+  // and reads as current.
+  const procFreshness = useStaleTracker();
   useEffect(() => {
-    const load = () => api.listProcesses().then(setProcesses).catch(() => {});
+    const load = () =>
+      api
+        .listProcesses()
+        .then((p) => {
+          setProcesses(p);
+          procFreshness.ok();
+        })
+        .catch(procFreshness.failed);
     load();
     const t = window.setInterval(load, 5000);
     return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // The socket only carries lines produced after it connected, so a page opened
@@ -644,6 +658,11 @@ export function MonitoringPage() {
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>Processes</CardTitle>
+              {procFreshness.stale && (
+                <Badge variant="warn" title={`${procFreshness.failures} consecutive failed refreshes`}>
+                  not updating
+                </Badge>
+              )}
           </CardHeader>
           <CardContent className="flex flex-col gap-1.5">
             {processes.length === 0 && (

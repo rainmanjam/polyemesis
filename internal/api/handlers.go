@@ -709,6 +709,37 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// refuseIfSilent rejects a profile that compiles to no audio against the ingest
+// currently arriving.
+//
+// routing.Compile has always returned ErrNoAudio for this -- "every selected
+// track is excluded by this destination's role policy" -- and every caller here
+// wrote `if c, err := Compile(...); err == nil`, using the result and throwing
+// the error away. So a destination that would publish silence saved cleanly and
+// failed later, on air, where the operator cannot hear it.
+//
+// Only refuses when the source has actually been PROBED. With no stream
+// arriving there is nothing to evaluate the profile against, and refusing then
+// would make it impossible to configure a destination before going live --
+// which is when most people configure them. Prove it wrong or allow it; never
+// guess.
+func (s *Server) refuseIfSilent(w http.ResponseWriter, profile routing.Profile) bool {
+	src := s.eng().Source()
+	// No tracks means nothing has been probed yet, so there is nothing to
+	// evaluate the profile against.
+	if len(src.Tracks) == 0 {
+		return false
+	}
+	if _, err := routing.Compile(profile, src); errors.Is(err, routing.ErrNoAudio) {
+		writeError(w, http.StatusBadRequest,
+			"this destination would carry no audio against the stream now arriving: "+
+				err.Error()+". Streaming silence is the one failure this product exists to prevent, "+
+				"so it is refused rather than saved.")
+		return true
+	}
+	return false
+}
+
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
 	var row db.Destination
 	if !decodeJSON(w, r, &row) {
@@ -718,6 +749,9 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
+	if s.refuseIfSilent(w, row.Profile) {
+		return
+	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
