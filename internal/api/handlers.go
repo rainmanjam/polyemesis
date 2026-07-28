@@ -864,7 +864,27 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
+	// The EFFECT, not just the intent.
+	//
+	// This used to answer {"enabled": true} the moment the row was written,
+	// which is a statement about the database rather than about the stream. A
+	// destination whose URL the platform refuses is enabled and not running,
+	// and the UI, told only "enabled", drew it as started. Reading the process
+	// state back means a success response is evidence that something happened.
+	resp := map[string]any{"enabled": enabled}
+	for _, d := range s.eng().Status().Destinations {
+		if d.ID != id {
+			continue
+		}
+		if d.Process != nil {
+			resp["state"] = d.Process.State
+		}
+		if d.Error != "" {
+			resp["error"] = d.Error
+		}
+		break
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleStartDestination(w http.ResponseWriter, r *http.Request) {
