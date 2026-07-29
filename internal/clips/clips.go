@@ -355,8 +355,12 @@ func (c *Capturer) Resolve(name string) (string, error) {
 // not a running capturer — a download handler still has to work after the
 // buffer has been switched off.
 func Resolve(dir, name string) (string, error) {
-	if !IsClip(name) || strings.ContainsRune(name, os.PathSeparator) ||
-		strings.ContainsRune(name, '/') || name == "." || name == ".." {
+	// ContainsAny over BOTH separators, spelled literally. The previous form --
+	// os.PathSeparator or '/' -- reads as "both" and is both only on Windows,
+	// because on Linux that constant IS '/'. See internal/media for the same
+	// note; internal/recording is where this drifted far enough to matter.
+	if !IsClip(name) || strings.ContainsAny(name, `/\`) ||
+		name == "." || name == ".." {
 		return "", fmt.Errorf("invalid clip name %q", name)
 	}
 	base, err := filepath.Abs(dir)
