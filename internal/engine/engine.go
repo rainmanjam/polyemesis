@@ -215,9 +215,9 @@ type Engine struct {
 	sourceName string
 	probed     bool
 	videoInfo  *ffmpeg.VideoStream
-	levels    ffmpeg.Levels
-	levelsAt  time.Time
-	settings  db.Settings
+	levels     ffmpeg.Levels
+	levelsAt   time.Time
+	settings   db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
