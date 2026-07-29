@@ -62,25 +62,56 @@ func TestDrawtextNeverInterpretsOperatorText(t *testing.T) {
 // are metacharacters. On Windows the path is C:\...\Inter-Regular.ttf and
 // carries both, so an unescaped one is a parse error rather than a
 // misplacement.
-func TestDrawtextEscapesAWindowsFontPathAndAwkwardText(t *testing.T) {
+func TestDrawtextEscapesAColonInThePathAndAwkwardText(t *testing.T) {
 	got := drawtextFilter(textSpec(func(s *TextSpec) {
-		s.FontFile = `C:\Program Files\poly\fonts\Inter-Regular.ttf`
+		// A colon is legal in a POSIX filename, so this exercises the
+		// drive-letter hazard on every platform rather than only on Windows.
+		s.FontFile = "/srv/my:fonts/Inter-Regular.ttf"
 		s.Text = `12:30 - Tom's "show"`
 	}), 1280, 720)
 
-	// A raw drive-letter colon would end the fontfile option early.
-	if strings.Contains(got, `C:\`) {
-		t.Errorf("the Windows font path is unescaped, which is a filtergraph parse error: %s", got)
+	// An unescaped colon ends the fontfile option early and the next thing the
+	// parser looks for is an option name.
+	if strings.Contains(got, "my:fonts") {
+		t.Errorf("a colon in the font path is unescaped, which is a parse error: %s", got)
 	}
-	if !strings.Contains(got, `C\:`) {
-		t.Errorf("the drive-letter colon was not escaped: %s", got)
+	// `\\:`, not `\:`. A filtergraph is unescaped TWICE, so a single backslash
+	// is eaten by the first pass and the colon arrives bare at the second.
+	// Measured against the real parser -- see escapeLavfiArg for the table, and
+	// TestAFontPathContainingAColonOpens for the end-to-end proof. Asserting
+	// the single-escaped form here is what let the Windows break through.
+	if !strings.Contains(got, `my\\:fonts`) {
+		t.Errorf("the colon was not escaped for BOTH unescape passes: %s", got)
 	}
-	// The text's own colon and quote must survive as escaped literals.
-	if !strings.Contains(got, `12\:30`) {
-		t.Errorf("a colon in the text was not escaped: %s", got)
+	if !strings.Contains(got, `12\\:30`) {
+		t.Errorf("a colon in the text was not escaped for both passes: %s", got)
 	}
-	if !strings.Contains(got, `\'`) {
-		t.Errorf("an apostrophe in the text was not escaped: %s", got)
+	if !strings.Contains(got, `\\'`) {
+		t.Errorf("an apostrophe in the text was not escaped for both passes: %s", got)
+	}
+}
+
+// The Windows form, asserted through filterPath rather than through a literal.
+//
+// filepath.ToSlash is a NO-OP on POSIX -- deliberately, because a backslash is
+// a legal character in a POSIX filename and rewriting it would rename the file
+// (the bug internal/clipper's fileURL shipped). So this test cannot check the
+// Windows rendering by feeding it a Windows-shaped string on Linux; what it CAN
+// pin is that the two properties hold on whichever platform it runs on:
+// separators come out as the filtergraph wants them, and colons are escaped.
+func TestFilterPathLeavesNoUnescapedSeparatorHazard(t *testing.T) {
+	got := filterPath(filepath.Join("srv", "poly fonts", "Inter-Regular.ttf"))
+
+	// Whatever the platform, no bare backslash may survive: on Windows ToSlash
+	// removed them, and on POSIX there were none to begin with. A `\\` here is
+	// the exact shape that broke the Windows runner, because a filtergraph
+	// unescapes twice and it collapses at the wrong moment.
+	if strings.Contains(got, `\\`) {
+		t.Errorf("filterPath produced a doubled backslash, which the filtergraph "+
+			"unescapes twice and mis-parses: %s", got)
+	}
+	if strings.Contains(got, `:`) && !strings.Contains(got, `\:`) {
+		t.Errorf("an unescaped colon survived: %s", got)
 	}
 }
 
@@ -259,6 +290,50 @@ func TestDrawtextGraphRunsAndDoesNotExpandAPercentSign(t *testing.T) {
 		t.Errorf("the box drew %d pixels against %d unboxed; it did not render", boxed, plain)
 	}
 	t.Logf("plain=%d withPercent=%d boxed=%d", plain, pct, boxed)
+}
+
+// The escaping, proven against the real parser rather than against a string.
+//
+// A colon is legal in a POSIX filename, which is what makes the Windows
+// drive-letter hazard reproducible here: if the escaping is wrong, FFmpeg fails
+// to parse the graph exactly as it did on the Windows runner. Without this the
+// only place the bug could be caught was CI.
+func TestAFontPathContainingAColonOpens(t *testing.T) {
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	tools := &Tools{FFmpeg: bin}
+	tools.checkFilters(context.Background())
+	if !tools.HasFilter("drawtext") {
+		t.Skip("this FFmpeg has no drawtext; run ./scripts/test-in-docker.sh")
+	}
+	if os.PathSeparator != '/' {
+		t.Skip("a colon cannot appear in a Windows path component")
+	}
+
+	// A directory whose NAME contains a colon, holding a real font.
+	dir := filepath.Join(t.TempDir(), "my:fonts")
+	if err := EnsureFonts(dir); err != nil {
+		t.Fatalf("EnsureFonts into a colon path: %v", err)
+	}
+	font, err := FontPath(dir, DefaultFont)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(t.TempDir(), "f.png")
+	graph := "color=c=black:s=320x120:d=1," + drawtextFilter(&TextSpec{
+		Text: "OK", FontFile: font, SizePct: 0.5, Color: "white",
+	}, 320, 120)
+	b, err := exec.Command(bin, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", graph, "-frames:v", "1", "-y", out).CombinedOutput()
+	if err != nil {
+		t.Fatalf("FFmpeg rejected a font path containing a colon: %v\ngraph: %s\n%s", err, graph, b)
+	}
+	if n := nonBlackPixels(t, bin, out); n < 100 {
+		t.Errorf("the graph parsed but drew %d pixels; the font did not load", n)
+	}
 }
 
 // A font written by EnsureFonts must survive the round trip into a real

@@ -3,6 +3,7 @@ package ffmpeg
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 )
 
@@ -82,7 +83,8 @@ const (
 //   - The font path and the text both go into FILTER ARGUMENTS, where ':' and
 //     '\' are metacharacters. On Windows the font path is
 //     C:\...\Inter-Regular.ttf and carries both, so an unescaped path is a parse
-//     error rather than merely wrong. escapeLavfiValue handles exactly these.
+//     error rather than merely wrong. escapeLavfiArg handles them at the TWO
+//     levels a filtergraph unescapes; see there.
 //   - fontsize is computed in Go rather than expressed as a filter variable, for
 //     the reason overlayWidthPx gives: the value is already known here, and an
 //     expression would differ across FFmpeg versions.
@@ -95,17 +97,17 @@ func drawtextFilter(t *TextSpec, outW, outH int) string {
 
 	var b strings.Builder
 	b.WriteString("drawtext=fontfile=")
-	b.WriteString(escapeLavfiValue(t.FontFile))
+	b.WriteString(filterPath(t.FontFile))
 	b.WriteString(":text=")
-	b.WriteString(escapeLavfiValue(t.Text))
+	b.WriteString(escapeLavfiArg(t.Text))
 	fmt.Fprintf(&b, ":fontsize=%d:fontcolor=%s:x=%s:y=%s",
-		size, escapeLavfiValue(textColorOr(t.Color, DefaultTextColor)), x, y)
+		size, escapeLavfiArg(textColorOr(t.Color, DefaultTextColor)), x, y)
 
 	if t.Box {
 		// boxborderw scales with the type, so the padding looks the same on a
 		// 360p rendition and a 1080p one rather than vanishing on the larger.
 		fmt.Fprintf(&b, ":box=1:boxcolor=%s:boxborderw=%d",
-			escapeLavfiValue(boxColorWithAlpha(t)), maxInt(2, size/4))
+			escapeLavfiArg(boxColorWithAlpha(t)), maxInt(2, size/4))
 	}
 	// LAST, and never omitted. See the note above: this is what stops operator
 	// text being treated as a template.
@@ -117,6 +119,63 @@ func drawtextFilter(t *TextSpec, outW, outH int) string {
 	// error anywhere. See TestDrawtextGraphRunsAndDoesNotExpandAPercentSign.
 	b.WriteString(":expansion=none")
 	return b.String()
+}
+
+// escapeLavfiArg protects a value inside a FILTER ARGUMENT within a filtergraph
+// description. That is one level deeper than escapeLavfiValue, and the extra
+// level is not cosmetic.
+//
+// A filtergraph is unescaped TWICE: once when the description is split into
+// chains and filters, and again when a filter's arguments are split on ':'. So
+// a single `\:` is consumed by the first pass and the colon arrives bare at the
+// second. Measured against the real parser, with a font in a directory called
+// "my:fonts":
+//
+//	/tmp/my:fonts/f.ttf      fails
+//	/tmp/my\:fonts/f.ttf     fails   <- what escapeLavfiValue produces
+//	/tmp/my\\:fonts/f.ttf    works
+//
+// This is what broke the Windows runner: C:\... escaped once became
+// `C\:\\Users\\...`, and FFmpeg reported "No option name near '\Users...'".
+//
+// A literal backslash needs four, for the same reason: two passes halve it
+// twice.
+var lavfiArgEscaper = strings.NewReplacer(
+	`\`, `\\\\`,
+	`:`, `\\:`,
+	`,`, `\\,`,
+	`'`, `\\'`,
+	`[`, `\\[`,
+	`]`, `\\]`,
+	`;`, `\\;`,
+)
+
+func escapeLavfiArg(v string) string { return lavfiArgEscaper.Replace(v) }
+
+// filterPath renders a filesystem path for use INSIDE a filter argument.
+//
+// Escaping alone is not enough on Windows, and the failure is not subtle: even
+// filtergraph is unescaped TWICE -- once when the description is split into
+// chains and filters, and again when a filter's arguments are split on ':' --
+// so escapeLavfiValue's `\` -> `\\` collapses back to a single backslash at the
+// separator is converted rather than escaped. The real error, from
+// the Windows CI runner:
+//
+//	drawtext=fontfile=C\:\\Users\\RUNNER~1\\...\\Inter-Regular.ttf
+//	[AVFilterGraph] No option name near '\Users\RUNNER~1\...'
+//
+// Windows accepts forward slashes in paths at the API level, so converting
+// first leaves only the colon to escape and sidesteps the double-unescape
+// entirely. This is the form every working example in the wild uses.
+//
+// filepath.ToSlash, and here it is CORRECT -- which is the exact opposite of
+// internal/clipper's fileURL, where it was a bug. The difference is where the
+// string is going. This path is handed to an FFmpeg running on THIS machine, so
+// depending on this platform's separator is the whole point. An OTIO media
+// reference is written to a file that is opened on a DIFFERENT machine, so
+// depending on this platform's separator silently renamed the file.
+func filterPath(p string) string {
+	return escapeLavfiArg(filepath.ToSlash(p))
 }
 
 // textSizePx converts the stored percentage into a pixel size.
