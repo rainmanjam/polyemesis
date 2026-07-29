@@ -25,6 +25,14 @@ updates:
       dev-tooling:
         dependency-type: development
         update-types: [minor, patch]
+    ignore:
+      # @types/node's major must match the Node the Dockerfiles run, and that
+      # is pinned to an LTS -- see the docker section below for the date this
+      # comes off. Without this, Dependabot reopens the major every week and
+      # the PR is unmergeable on its own: it would typecheck against a Node
+      # this project does not ship.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # The actions are pinned by major tag; this is what notices a v7 -> v8.
   - package-ecosystem: github-actions
@@ -37,3 +45,22 @@ updates:
   - package-ecosystem: docker
     directory: "/"
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # Node MAJORS are held to LTS releases, and this is a dated hold rather
+      # than a permanent one.
+      #
+      # Node 26 was released 2026-05-05 and does not become LTS until
+      # 2026-10-28. Node 24 is Active LTS with support to 2028-04-30, so there
+      # is no pressure and nothing to gain from running a Current release in an
+      # image people deploy and leave running for months.
+      #
+      # REMOVE THIS AFTER 2026-10-28. An ignore rule with no stated trigger
+      # becomes permanent by accident, which is how a project ends up on an
+      # end-of-life runtime while its dependency bot sits quiet.
+      #
+      # Bumping it is a THREE-part change that Dependabot cannot do alone: the
+      # node: tag in all three Dockerfiles, the five node-version pins across
+      # ci.yml and release.yml, and @types/node's major. ci.yml says so at the
+      # first pin. Merging any one of them alone breaks that invariant quietly.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
