@@ -53,7 +53,9 @@ import type {
   GpuInfo,
   GpuVendor,
   Rendition,
+  RenditionAspectMode,
   RenditionBounds,
+  RenditionDeinterlace,
   RenditionPreset,
   RenditionStatus,
   RenditionView,
@@ -790,9 +792,67 @@ function emptyForm(defaultEncoder: string) {
     encoder: defaultEncoder,
     preset: "veryfast",
     gopSeconds: 2,
+    aspectMode: "stretch" as AspectKey,
+    padColor: "",
+    deinterlace: "off" as DeinterlaceKey,
     note: "",
   };
 }
+
+// Radix's SelectItem refuses an empty value, and the empty string is precisely
+// what the server stores for both zero values. So the form carries a sentinel
+// and converts at the boundary -- never in between, or the two vocabularies
+// leak into each other and a saved "stretch" becomes an unknown mode the API
+// rejects.
+type AspectKey = "stretch" | "crop" | "pad" | "blurpad";
+type DeinterlaceKey = "off" | "auto" | "all";
+
+const ASPECT_MODES: { key: AspectKey; label: string; hint: string }[] = [
+  {
+    key: "stretch",
+    label: "Stretch to fit",
+    hint: "Scales to the target size and lets the picture distort if the source disagrees. What every rendition did before the other modes existed.",
+  },
+  {
+    key: "crop",
+    label: "Crop to fill",
+    hint: "Centre-crops to the target shape, then scales. Subjects keep their on-screen size; the edges of the frame are gone.",
+  },
+  {
+    key: "pad",
+    label: "Letterbox",
+    hint: "Scales the whole frame to fit and fills the rest with a flat colour. Nothing is lost, but a 16:9 source on a 9:16 canvas is mostly bars.",
+  },
+  {
+    key: "blurpad",
+    label: "Blurred fill",
+    hint: "Fills the remainder with a blurred, cropped-to-fill copy of the frame itself. This is the convention vertical feeds have settled on.",
+  },
+];
+
+const DEINTERLACE_MODES: { key: DeinterlaceKey; label: string; hint: string }[] = [
+  {
+    key: "off",
+    label: "Off",
+    hint: "Right for the progressive sources almost everyone has. Deinterlacing one softens it for no gain.",
+  },
+  {
+    key: "auto",
+    label: "Only interlaced frames",
+    hint: "Touches only frames the source flagged as interlaced, so progressive frames pass through untouched. The right choice for anything mixed.",
+  },
+  {
+    key: "all",
+    label: "Every frame",
+    hint: "For sources that are interlaced but do not say so. Plenty of SDI bridges and capture cards flag everything progressive regardless of what they were fed, and on those “only interlaced” is a no-op that looks like a broken setting.",
+  },
+];
+
+const toAspectKey = (v: string | undefined): AspectKey => (v ? (v as AspectKey) : "stretch");
+const fromAspectKey = (k: AspectKey): RenditionAspectMode => (k === "stretch" ? "" : k);
+const toDeinterlaceKey = (v: string | undefined): DeinterlaceKey =>
+  v ? (v as DeinterlaceKey) : "off";
+const fromDeinterlaceKey = (k: DeinterlaceKey): RenditionDeinterlace => (k === "off" ? "" : k);
 
 function sizeKeyFor(width: number, height: number): string {
   const match = SIZES.find((s) => s.width === width && s.height === height);
@@ -850,6 +910,9 @@ function RenditionDialog({
         encoder: rendition.encoder,
         preset: rendition.preset,
         gopSeconds: rendition.gopSeconds,
+        aspectMode: toAspectKey(rendition.aspectMode),
+        padColor: rendition.padColor ?? "",
+        deinterlace: toDeinterlaceKey(rendition.deinterlace),
         note: rendition.note,
       });
       setSizeKey(sizeKeyFor(rendition.width, rendition.height));
@@ -881,6 +944,9 @@ function RenditionDialog({
         : defaultEncoder,
       preset: t.preset,
       gopSeconds: t.gopSeconds,
+      aspectMode: toAspectKey(t.aspectMode),
+      padColor: t.padColor ?? "",
+      deinterlace: toDeinterlaceKey(t.deinterlace),
       note: t.note,
     });
     setSizeKey(sizeKeyFor(t.width, t.height));
@@ -919,6 +985,11 @@ function RenditionDialog({
   const nameOk = form.name.trim().length > 0;
   const bitrateOk =
     form.videoBitrate >= bounds.minBitrate && form.videoBitrate <= bounds.maxBitrate;
+  // An aspect conversion is defined by the target shape, so it needs both axes.
+  // With one free, the plain scale already preserves the aspect ratio and the
+  // mode would be inert -- the server refuses the pair rather than storing a
+  // control that quietly does nothing, and the form says so before the save.
+  const aspectApplies = form.width > 0 && form.height > 0;
 
   const save = async () => {
     setBusy(true);
@@ -932,6 +1003,14 @@ function RenditionDialog({
         encoder: form.encoder,
         preset: form.preset.trim(),
         gopSeconds: form.gopSeconds,
+        // The server refuses an aspect mode when either axis is free, because
+        // there is no target shape to convert to. Sending one anyway would turn
+        // a disabled control into a save error the user cannot connect to
+        // anything they touched, so it is cleared here to match what the form
+        // shows.
+        aspectMode: aspectApplies ? fromAspectKey(form.aspectMode) : "",
+        padColor: aspectApplies && form.aspectMode === "pad" ? form.padColor.trim() : "",
+        deinterlace: fromDeinterlaceKey(form.deinterlace),
         note: form.note.trim(),
       };
       if (rendition) {
@@ -1107,6 +1186,71 @@ function RenditionDialog({
               </span>
             </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="rend-aspect">Aspect handling</Label>
+              <Select
+                value={form.aspectMode}
+                onValueChange={(v) => set("aspectMode", v as AspectKey)}
+                disabled={!aspectApplies}
+              >
+                <SelectTrigger id="rend-aspect">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ASPECT_MODES.map((m) => (
+                    <SelectItem key={m.key} value={m.key} title={m.hint}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-[10px] text-muted-foreground">
+                {!aspectApplies
+                  ? "Needs both a width and a height — with one axis free the scale already preserves the aspect ratio."
+                  : (ASPECT_MODES.find((m) => m.key === form.aspectMode)?.hint ?? "")}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="rend-deint">Deinterlace</Label>
+              <Select
+                value={form.deinterlace}
+                onValueChange={(v) => set("deinterlace", v as DeinterlaceKey)}
+              >
+                <SelectTrigger id="rend-deint">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEINTERLACE_MODES.map((m) => (
+                    <SelectItem key={m.key} value={m.key} title={m.hint}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-[10px] text-muted-foreground">
+                {DEINTERLACE_MODES.find((m) => m.key === form.deinterlace)?.hint ?? ""}
+              </span>
+            </div>
+          </div>
+
+          {aspectApplies && form.aspectMode === "pad" && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="rend-padcolor">Letterbox colour</Label>
+              <Input
+                id="rend-padcolor"
+                value={form.padColor}
+                placeholder="black"
+                onChange={(e) => set("padColor", e.target.value)}
+              />
+              <span className="text-[10px] text-muted-foreground">
+                Empty means black. One word — <code>black</code>, <code>0x101010</code> — because it
+                lands on a filter graph where a comma would end the argument.
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">

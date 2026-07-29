@@ -113,6 +113,52 @@ The rendition editor offers these as editable starting points:
 Keyframe interval is set in **seconds**, not frames, so it stays correct when
 you change the frame rate. Two seconds suits every live platform we know of.
 
+## Aspect handling — one ladder rung, not a second pipeline
+
+When the rendition's shape does not match the source's, something has to give.
+A 9:16 rendition of a 16:9 ingest is **one more entry in the ladder**, encoded
+once and shared, rather than a parallel pipeline.
+
+| Mode | What happens |
+|---|---|
+| **Stretch to fit** | Scales to the target size and lets the picture distort. Anamorphic, almost never what anyone wants — but it is what renditions did before the other modes existed, so it stays the default |
+| **Crop to fill** | Centre-crops to the target shape, then scales. Subjects keep their on-screen size; the edges of the frame are gone |
+| **Letterbox** | Scales the whole frame to fit and fills the rest with a flat colour. Nothing is lost, but a 16:9 source on a 9:16 canvas is mostly bars |
+| **Blurred fill** | Fills the remainder with a blurred, cropped-to-fill copy of the frame itself |
+
+Blurred fill is the convention vertical feeds have settled on, and it is the
+difference between a repurposed landscape stream looking deliberate and looking
+lazy. The blur is computed on a 1/8-scale proxy, because a gaussian wide enough
+to read as "background" costs more per frame at 1080p than the H.264 encode it
+feeds — and the upscale back to full size does most of the blurring for free.
+
+**Aspect handling needs both a width and a height.** With one axis free the
+scale already preserves the aspect ratio, so there is no shape to convert to and
+the control is disabled rather than saved as something quietly inert.
+
+## Deinterlacing
+
+For SDI bridges, capture cards and legacy broadcast kit. Progressive sources —
+which is almost everyone — should leave this off, because deinterlacing a
+progressive frame softens it for no gain.
+
+| Mode | What happens |
+|---|---|
+| **Off** | Default |
+| **Only interlaced frames** | Touches only frames the source flagged as interlaced, so progressive frames pass through untouched. The right choice for anything mixed — a camera that switches modes, a playout chain splicing SD and HD |
+| **Every frame** | Unconditional. For sources that are interlaced but do not say so — plenty of capture kit flags everything progressive regardless of what it was fed, and on those "only interlaced" is a no-op that looks like a broken setting |
+
+It uses `bwdif` rather than `yadif` — the same idea done better, for a few
+percent more CPU — in `send_frame` mode, which emits one progressive frame per
+input frame rather than one per *field*. `send_field` would double the frame
+rate, which silently doubles the bitrate the platform receives and breaks the
+keyframe arithmetic computed from the source rate.
+
+**Deinterlacing runs first, before any scaling.** That ordering is load-bearing
+rather than tidy: scaling interlaced content blends the two fields together, and
+once that has happened the combing is baked into the pixels and no later filter
+can remove it.
+
 ## Hardware encoders
 
 At startup polyemesis **encodes one frame** with each encoder your FFmpeg
