@@ -1986,6 +1986,7 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig, dataDir string
 		// The overlay's SHAPE. Every field, because each one changes the filter
 		// graph: a different anchor, width or opacity is a different encode.
 		overlaySig(r.Overlay, dataDir),
+		textSig(r.Text, dataDir),
 		// Which relay it reads. RenditionArgs copies audio with -map 0:a, so a
 		// tier started against the raw ingest of a video-only stream produces a
 		// video-only hub; it has to be restarted onto the silence tier when one
@@ -2032,6 +2033,87 @@ func overlaySig(o db.RenditionOverlay, dataDir string) string {
 	return strings.Join(parts, "\x00")
 }
 
+// textSig is overlaySig for burned-in text.
+//
+// The FONT FILE is stat'ed as well as named, for exactly the reason the overlay
+// image is: an operator who replaces MyStation.ttf in the fonts directory with
+// a corrected version has changed what the stream looks like, and a signature
+// built only from the stored name would not notice. Naming a missing font
+// rather than omitting it means the encode restarts the moment the file
+// appears.
+func textSig(t db.RenditionText, dataDir string) string {
+	if !t.Active() {
+		return ""
+	}
+	parts := []string{
+		t.Content, t.Font, t.Anchor, t.Color, t.BoxColor,
+		strconv.FormatFloat(t.SizePct, 'g', -1, 64),
+		strconv.FormatFloat(t.MarginXPct, 'g', -1, 64),
+		strconv.FormatFloat(t.MarginYPct, 'g', -1, 64),
+		strconv.FormatBool(t.Box),
+		strconv.FormatFloat(t.BoxOpacity, 'g', -1, 64),
+	}
+	if p, err := textFontPath(t.Font, dataDir); err == nil {
+		if fi, err := os.Stat(p); err == nil {
+			parts = append(parts,
+				strconv.FormatInt(fi.Size(), 10),
+				strconv.FormatInt(fi.ModTime().UnixNano(), 10))
+		} else {
+			parts = append(parts, "missing")
+		}
+	} else {
+		parts = append(parts, "unresolved")
+	}
+	return strings.Join(parts, "\x00")
+}
+
+// textFontPath resolves a stored font NAME to an absolute path.
+//
+// Empty means the built-in default, which is how a rendition that asks for text
+// and names no font still draws: the shipping image has no system fonts, so
+// leaving fontfile unset would fall through to fontconfig and find nothing.
+func textFontPath(name, dataDir string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		name = ffmpeg.DefaultFont
+	}
+	return ffmpeg.FontPath(filepath.Join(dataDir, ffmpeg.FontsDirName), name)
+}
+
+// textSpecOf maps the stored text onto the filter's spec.
+//
+// A font that will not resolve yields NO TEXT rather than an error or a
+// fallback. The alternatives are both worse: erroring takes the whole rendition
+// off air over a caption, and silently substituting a different font ships a
+// frame the operator did not design. Validation refuses a bad name at save
+// time, so reaching here means the file was removed from under a running
+// install -- and textSig has already made that a restart trigger, so the text
+// returns by itself when the font does.
+func textSpecOf(t db.RenditionText, dataDir string) *ffmpeg.TextSpec {
+	if !t.Active() {
+		return nil
+	}
+	font, err := textFontPath(t.Font, dataDir)
+	if err != nil {
+		// No logger here on purpose: this is called from renditionSpecOf, which
+		// is a pure mapping the tests drive directly. The one production caller
+		// notices the Active-but-nil case and logs it, so the silence is local
+		// rather than total.
+		return nil
+	}
+	return &ffmpeg.TextSpec{
+		Text:       t.Content,
+		FontFile:   font,
+		Anchor:     ffmpeg.OverlayAnchor(t.Anchor),
+		SizePct:    t.SizePct,
+		Color:      t.Color,
+		MarginXPct: t.MarginXPct,
+		MarginYPct: t.MarginYPct,
+		Box:        t.Box,
+		BoxColor:   t.BoxColor,
+		BoxOpacity: t.BoxOpacity,
+	}
+}
+
 // overlaySpecOf resolves the stored relative path against the data directory.
 //
 // Joined to an absolute path only here, at process-build time, exactly as the
@@ -2069,6 +2151,7 @@ func overlaySpecOf(o db.RenditionOverlay, dataDir string) *ffmpeg.OverlaySpec {
 func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDevice, dataDir string) ffmpeg.RenditionSpec {
 	return ffmpeg.RenditionSpec{
 		Overlay:     overlaySpecOf(r.Overlay, dataDir),
+		Text:        textSpecOf(r.Text, dataDir),
 		Deinterlace: ffmpeg.DeinterlaceMode(r.Deinterlace),
 		// Only meaningful for the VAAPI encoders, and empty everywhere else.
 		// Until this was threaded through, every VAAPI rendition fell back to
@@ -2196,7 +2279,17 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 
 	subName := fmt.Sprintf("rendition:%d", row.ID)
 	in := upstream.Subscribe(subName, port)
-	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir))
+	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
+	// Configured text that produced no spec means the font could not be
+	// resolved. Validation refuses a bad name at save time, so this is a font
+	// removed from under a running install. Said out loud, because the operator
+	// otherwise sees a stream that starts fine and simply has no caption --
+	// which is the failure mode this whole feature keeps trying to avoid.
+	if row.Text.Active() && rspec.Text == nil {
+		e.log.Warn("rendition text has no usable font, so no text is drawn",
+			"rendition", row.ID, "font", row.Text.Font)
+	}
+	args := ffmpeg.RenditionArgs(rspec)
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: subName, Kind: "rendition", Bin: e.tools.FFmpeg, Args: args,

@@ -57,6 +57,7 @@ import type {
   RenditionBounds,
   RenditionDeinterlace,
   OverlayAnchor,
+  FontInfo,
   RenditionPreset,
   RenditionStatus,
   RenditionView,
@@ -370,6 +371,7 @@ export function RenditionsPage() {
   const [caps, setCaps] = useState<EncoderList | null>(null);
   const [redetecting, setRedetecting] = useState(false);
   const [presets, setPresets] = useState<RenditionPreset[]>([]);
+  const [fonts, setFonts] = useState<FontsResponse | null>(null);
   const [disclaimer, setDisclaimer] = useState(FALLBACK_DISCLAIMER);
   const [bounds, setBounds] = useState<RenditionBounds>(FALLBACK_BOUNDS);
   const [loading, setLoading] = useState(true);
@@ -407,6 +409,12 @@ export function RenditionsPage() {
         setBounds(p.bounds ?? FALLBACK_BOUNDS);
       })
       .catch(() => {});
+    // The fonts and whether drawtext exists are properties of the machine and
+    // its data directory, not of the rows, so they are fetched with the rest.
+    api
+      .fonts()
+      .then(setFonts)
+      .catch(() => setFonts(null));
   }, []);
 
   // Reload the rows whenever the live snapshot shows a different set of
@@ -587,6 +595,7 @@ export function RenditionsPage() {
         redetecting={redetecting}
         onRedetect={redetect}
         presets={presets}
+        fonts={fonts}
         disclaimer={disclaimer}
         bounds={bounds}
         source={sourceVideo}
@@ -805,6 +814,16 @@ function emptyForm(defaultEncoder: string) {
     overlayMarginX: 4,
     overlayMarginY: 4,
     overlayOpacity: 100,
+    textContent: "",
+    textFont: "",
+    textAnchor: "bottom-left" as OverlayAnchor,
+    textSize: 6,
+    textColor: "white",
+    textMarginX: 4,
+    textMarginY: 4,
+    textBox: true,
+    textBoxColor: "black",
+    textBoxOpacity: 50,
     note: "",
   };
 }
@@ -870,6 +889,18 @@ const DEINTERLACE_MODES: { key: DeinterlaceKey; label: string; hint: string }[] 
   },
 ];
 
+// The font picker's "use the built-in" option. A sentinel rather than "",
+// because a Select cannot hold an empty string as a value -- it reads as
+// "nothing selected" and the trigger renders blank.
+const DEFAULT_FONT_KEY = "__default__";
+
+type FontsResponse = {
+  fonts: FontInfo[];
+  defaultFont: string;
+  dir: string;
+  textSupported: boolean;
+};
+
 // Stored fractions (0-1) become whole percents for the form. A zero or missing
 // value takes the default rather than showing "0", which would read as a
 // deliberate choice of an invisible overlay.
@@ -895,6 +926,7 @@ function RenditionDialog({
   redetecting,
   onRedetect,
   presets,
+  fonts,
   disclaimer,
   bounds,
   source,
@@ -911,6 +943,7 @@ function RenditionDialog({
   redetecting: boolean;
   onRedetect: () => void;
   presets: RenditionPreset[];
+  fonts: FontsResponse | null;
   disclaimer: string;
   bounds: RenditionBounds;
   source: VideoStream | null;
@@ -941,6 +974,16 @@ function RenditionDialog({
         aspectMode: toAspectKey(rendition.aspectMode),
         padColor: rendition.padColor ?? "",
         deinterlace: toDeinterlaceKey(rendition.deinterlace),
+        textContent: rendition.text?.content ?? "",
+        textFont: rendition.text?.font ?? "",
+        textAnchor: rendition.text?.anchor ?? "bottom-left",
+        textSize: pctToForm(rendition.text?.sizePct, 6),
+        textColor: rendition.text?.color ?? "white",
+        textMarginX: pctToForm(rendition.text?.marginXPct, 4),
+        textMarginY: pctToForm(rendition.text?.marginYPct, 4),
+        textBox: rendition.text?.box ?? true,
+        textBoxColor: rendition.text?.boxColor ?? "black",
+        textBoxOpacity: pctToForm(rendition.text?.boxOpacity, 50),
         overlayImage: rendition.overlay?.image ?? "",
         overlayAnchor: rendition.overlay?.anchor ?? "bottom-right",
         overlayWidth: pctToForm(rendition.overlay?.widthPct, 12),
@@ -981,6 +1024,16 @@ function RenditionDialog({
       aspectMode: toAspectKey(t.aspectMode),
       padColor: t.padColor ?? "",
       deinterlace: toDeinterlaceKey(t.deinterlace),
+      textContent: t.text?.content ?? "",
+      textFont: t.text?.font ?? "",
+      textAnchor: t.text?.anchor ?? "bottom-left",
+      textSize: pctToForm(t.text?.sizePct, 6),
+      textColor: t.text?.color ?? "white",
+      textMarginX: pctToForm(t.text?.marginXPct, 4),
+      textMarginY: pctToForm(t.text?.marginYPct, 4),
+      textBox: t.text?.box ?? true,
+      textBoxColor: t.text?.boxColor ?? "black",
+      textBoxOpacity: pctToForm(t.text?.boxOpacity, 50),
       overlayImage: t.overlay?.image ?? "",
       overlayAnchor: t.overlay?.anchor ?? "bottom-right",
       overlayWidth: pctToForm(t.overlay?.widthPct, 12),
@@ -1035,6 +1088,10 @@ function RenditionDialog({
   // number when the arguments are built. It also needs an image -- the geometry
   // fields alone are not an overlay.
   const overlayApplies = aspectApplies && form.overlayImage.trim() !== "";
+  // Text needs both axes for the same reason, plus its own content: the type is
+  // sized as a percentage of the output HEIGHT, so that height has to be a
+  // number when the arguments are built.
+  const textApplies = aspectApplies && form.textContent.trim() !== "";
 
   const save = async () => {
     setBusy(true);
@@ -1071,6 +1128,21 @@ function RenditionDialog({
               opacity: form.overlayOpacity / 100,
             }
           : { image: "" },
+        // Cleared rather than sent and rejected, for the reason overlay is.
+        text: textApplies
+          ? {
+              content: form.textContent.trim(),
+              font: form.textFont.trim(),
+              anchor: form.textAnchor,
+              sizePct: form.textSize / 100,
+              color: form.textColor.trim(),
+              marginXPct: form.textMarginX / 100,
+              marginYPct: form.textMarginY / 100,
+              box: form.textBox,
+              boxColor: form.textBoxColor.trim(),
+              boxOpacity: form.textBoxOpacity / 100,
+            }
+          : { content: "" },
         note: form.note.trim(),
       };
       if (rendition) {
@@ -1408,6 +1480,175 @@ function RenditionDialog({
                 <span className="text-[10px] text-muted-foreground">
                   Everything is a percentage of the frame, so the same settings are correct on a
                   16:9 tier and a 9:16 one. Margins are ignored on a centred axis.
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="rend-text-content">Burned-in text</Label>
+              {!aspectApplies && (
+                <span className="text-[10px] text-muted-foreground">
+                  needs a fixed width and height
+                </span>
+              )}
+              {aspectApplies && fonts && !fonts.textSupported && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                  this FFmpeg has no drawtext
+                </span>
+              )}
+            </div>
+            <Input
+              id="rend-text-content"
+              value={form.textContent}
+              disabled={!aspectApplies || (fonts ? !fonts.textSupported : false)}
+              maxLength={200}
+              placeholder="MY STATION"
+              onChange={(e) => set("textContent", e.target.value)}
+            />
+            <span className="text-[10px] text-muted-foreground">
+              Drawn on top of the watermark. One line — a line break would end the filter argument.
+              The text is never interpreted, so a <code>%</code> is just a percent sign.
+            </span>
+            {fonts && !fonts.textSupported && (
+              <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                This FFmpeg was built without libfreetype, so it has no <code>drawtext</code> filter
+                and text would never render. The setting is disabled rather than accepted and
+                silently ignored.
+              </span>
+            )}
+
+            {textApplies && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label>Font</Label>
+                    <Select
+                      value={form.textFont === "" ? DEFAULT_FONT_KEY : form.textFont}
+                      onValueChange={(v) => set("textFont", v === DEFAULT_FONT_KEY ? "" : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={DEFAULT_FONT_KEY}>Built-in default</SelectItem>
+                        {(fonts?.fonts ?? []).map((f) => (
+                          <SelectItem key={f.name} value={f.name}>
+                            {f.name}
+                            {f.builtIn ? " (built in)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label>Position</Label>
+                    <Select
+                      value={form.textAnchor}
+                      onValueChange={(v) => set("textAnchor", v as OverlayAnchor)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {OVERLAY_ANCHORS.map((a) => (
+                          <SelectItem key={a.key} value={a.key}>
+                            {a.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <span className="text-[10px] text-muted-foreground">
+                  Drop a <code>.ttf</code> or <code>.otf</code> into <code>&lt;data&gt;/fonts/</code>{" "}
+                  to add your own — any font works, including one downloaded from Google Fonts. The
+                  built-in ones are rewritten on every start, so replace those by adding a new file
+                  rather than editing them.
+                </span>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-text-size">Size (% of height)</Label>
+                    <Input
+                      id="rend-text-size"
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={form.textSize}
+                      onChange={(e) => set("textSize", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-text-mx">Margin X (%)</Label>
+                    <Input
+                      id="rend-text-mx"
+                      type="number"
+                      min={0}
+                      max={45}
+                      value={form.textMarginX}
+                      onChange={(e) => set("textMarginX", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-text-my">Margin Y (%)</Label>
+                    <Input
+                      id="rend-text-my"
+                      type="number"
+                      min={0}
+                      max={45}
+                      value={form.textMarginY}
+                      onChange={(e) => set("textMarginY", Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-text-color">Text colour</Label>
+                    <Input
+                      id="rend-text-color"
+                      value={form.textColor}
+                      placeholder="white"
+                      onChange={(e) => set("textColor", e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-text-boxcolor">Box colour</Label>
+                    <Input
+                      id="rend-text-boxcolor"
+                      value={form.textBoxColor}
+                      disabled={!form.textBox}
+                      placeholder="black"
+                      onChange={(e) => set("textBoxColor", e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-text-boxopacity">Box opacity (%)</Label>
+                    <Input
+                      id="rend-text-boxopacity"
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={form.textBoxOpacity}
+                      disabled={!form.textBox}
+                      onChange={(e) => set("textBoxOpacity", Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={form.textBox}
+                    onChange={(e) => set("textBox", e.target.checked)}
+                  />
+                  Draw a box behind the text
+                </label>
+                <span className="text-[10px] text-muted-foreground">
+                  The box is what keeps white text readable over a white shirt. Colours are one word
+                  — <code>white</code>, <code>0x101010</code> — because they land on a filter graph.
                 </span>
               </>
             )}

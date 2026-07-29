@@ -263,6 +263,10 @@ export interface Rendition {
    *  thing that makes a rendition re-encode differently from before, so it is
    *  always present in the payload and empty when there is none. */
   overlay: RenditionOverlay;
+  /** An optional line of text burned into this tier, drawn ON TOP of the
+   *  overlay. Always present in the payload and empty when there is none, for
+   *  the same reason `overlay` is. */
+  text: RenditionText;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -298,6 +302,44 @@ export interface RenditionOverlay {
   marginYPct?: number;
   /** 0-1; 0 is treated as fully opaque. */
   opacity?: number;
+}
+
+/** A line of text burned into a rendition.
+ *
+ *  Every measurement is a FRACTION of the output (0-1), never pixels, for the
+ *  reason RenditionOverlay gives. Size is a fraction of the output HEIGHT
+ *  rather than width, because legibility is set by how tall a glyph is and a
+ *  portrait tier would otherwise get unreadably small type. */
+export interface RenditionText {
+  /** The literal string drawn. Never interpreted: the filter is built with
+   *  expansion=none, so a percent sign is a glyph rather than a directive. */
+  content?: string;
+  /** A BARE FILENAME in the fonts directory, never a path. Empty means the
+   *  built-in default. Fetch the choices from GET /api/v1/fonts rather than
+   *  hardcoding them -- operators add their own fonts to that directory. */
+  font?: string;
+  anchor?: OverlayAnchor;
+  /** Type size as a fraction of the output HEIGHT. */
+  sizePct?: number;
+  /** An FFmpeg colour: a name, 0xRRGGBB, or either with @alpha. */
+  color?: string;
+  /** Gap from the anchored edges. Ignored on a centred axis. */
+  marginXPct?: number;
+  marginYPct?: number;
+  /** A filled rectangle behind the text. It is what keeps white text readable
+   *  over a white shirt. */
+  box?: boolean;
+  boxColor?: string;
+  /** 0-1. A box at full opacity hides the picture behind it. */
+  boxOpacity?: number;
+}
+
+/** One font available to a text overlay, from GET /api/v1/fonts. */
+export interface FontInfo {
+  name: string;
+  /** polyemesis rewrites the built-ins on every startup, so replacing one is
+   *  undone by a restart. Warn rather than forbid. */
+  builtIn: boolean;
 }
 
 /** A rendition plus its usage. `enabledDestinations` is the ref count the

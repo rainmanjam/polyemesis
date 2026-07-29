@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -226,6 +227,60 @@ func (s *Server) handleRenditionPresets(w http.ResponseWriter, r *http.Request) 
 			"maxBitrate":    db.MaxRenditionBitrate,
 			"minGopSeconds": db.MinRenditionGOP,
 			"maxGopSeconds": db.MaxRenditionGOP,
+		},
+	})
+}
+
+// ------------------------------------------------------------------- fonts
+
+// handleListFonts is what the text overlay's font picker is built from.
+//
+// It reports the fonts actually ON DISK rather than a list compiled into the
+// UI, because the whole point of <dataDir>/fonts is that an operator can drop
+// their own in. A hardcoded list would show the two built-ins forever and the
+// feature would look broken to the first person who added a third.
+//
+// It also reports whether this FFmpeg can draw text at all. drawtext needs
+// libfreetype compiled in, and a build without it has no such filter -- a
+// Homebrew FFmpeg on macOS is exactly that. Saying so here lets the editor
+// explain why the controls are disabled instead of accepting settings that
+// silently never render.
+func (s *Server) handleListFonts(w http.ResponseWriter, r *http.Request) {
+	names, err := ffmpeg.ListFonts(filepath.Join(s.cfg.DataDir, ffmpeg.FontsDirName))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	builtin := map[string]bool{}
+	for _, b := range ffmpeg.BuiltinFonts {
+		builtin[b] = true
+	}
+	type fontInfo struct {
+		Name string `json:"name"`
+		// BuiltIn marks the ones polyemesis rewrites on every startup. The UI
+		// warns rather than forbids: an operator who replaces one will find it
+		// restored after a restart, and that is worth saying before they try.
+		BuiltIn bool `json:"builtIn"`
+	}
+	out := make([]fontInfo, 0, len(names))
+	for _, n := range names {
+		out = append(out, fontInfo{Name: n, BuiltIn: builtin[n]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"fonts":       out,
+		"defaultFont": ffmpeg.DefaultFont,
+		// The directory, spelled out, so the UI can tell the operator WHERE to
+		// put a font rather than leaving them to guess.
+		"dir":           filepath.Join(s.cfg.DataDir, ffmpeg.FontsDirName),
+		"textSupported": s.eng().Tools().HasFilter("drawtext"),
+		"bounds": map[string]any{
+			"maxTextLen":      db.MaxTextLen,
+			"minSizePct":      db.MinTextSizePct,
+			"maxSizePct":      db.MaxTextSizePct,
+			"maxMarginPct":    db.MaxTextMarginPct,
+			"anchors":         ffmpeg.OverlayAnchors,
+			"defaultColor":    ffmpeg.DefaultTextColor,
+			"defaultBoxColor": ffmpeg.DefaultTextBoxColor,
 		},
 	})
 }

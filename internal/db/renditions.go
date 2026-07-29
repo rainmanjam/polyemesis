@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +134,12 @@ type Rendition struct {
 	// Empty OverlayImage is no overlay, so every rendition that predates this
 	// keeps producing exactly the frame it always did.
 	Overlay RenditionOverlay `json:"overlay"`
+	// Text is an optional line of text burned into this tier, drawn on top of
+	// Overlay. Columns rather than a table for the reason Overlay gives.
+	//
+	// Empty Content is no text, so every rendition that predates this keeps
+	// producing exactly the frame it always did.
+	Text RenditionText `json:"text"`
 	// Note is the "what is this tier for" line. Preset-derived renditions
 	// arrive with one already filled in; the user can rewrite it.
 	Note string `json:"note"`
@@ -248,6 +255,192 @@ func (o RenditionOverlay) problems(width, height int) []string {
 		add("overlay opacity %.3f out of range (0-1)", o.Opacity)
 	}
 	return probs
+}
+
+// Text bounds. Percentages are 0-1 for the reason the overlay's are.
+const (
+	// MaxTextLen is generous for a station ident or a lower third and well
+	// short of anything that would push a filtergraph past a command-line
+	// limit.
+	MaxTextLen = 200
+	// MaxTextFontName matches the fonts directory's own naming: a bare
+	// filename, not a path.
+	MaxTextFontName = 128
+	// MinTextSizePct is where type stops surviving encoding. 1% of a 360p
+	// rendition is under four pixels tall.
+	MinTextSizePct = 0.01
+	// MaxTextSizePct at 0.5 means half the frame height, which is already a
+	// full-screen caption; above it nothing legible fits.
+	MaxTextSizePct   = 0.5
+	MaxTextMarginPct = 0.45
+	MaxTextColorLen  = 32
+)
+
+// RenditionText is a line of text burned into a rendition.
+//
+// Separate from RenditionOverlay rather than folded into it: either, both or
+// neither may be active, and a rendition with a logo and no caption must not
+// have to carry empty text fields that validation then has to special-case.
+type RenditionText struct {
+	// Content is the literal string drawn. It is never interpreted -- see
+	// ffmpeg.drawtextFilter, which sets expansion=none precisely so that a
+	// percent sign in a station name is a glyph rather than a directive.
+	Content string `json:"content,omitempty"`
+	// Font is a BARE FILENAME in the fonts directory, never a path. Empty
+	// means the built-in default. The engine resolves it through
+	// ffmpeg.FontPath, which is where the confinement lives.
+	Font string `json:"font,omitempty"`
+	// Anchor is which corner, edge or centre the text is pinned to.
+	Anchor string `json:"anchor,omitempty"`
+	// SizePct is the type size as a fraction of the output HEIGHT.
+	SizePct float64 `json:"sizePct,omitempty"`
+	// Color is an FFmpeg colour: a name, 0xRRGGBB, or either with @alpha.
+	Color string `json:"color,omitempty"`
+	// MarginXPct and MarginYPct are the gap from the anchored edges. Ignored
+	// on a centred axis.
+	MarginXPct float64 `json:"marginXPct,omitempty"`
+	MarginYPct float64 `json:"marginYPct,omitempty"`
+	// Box draws a filled rectangle behind the text. It is what makes white
+	// text readable over a white shirt.
+	Box        bool    `json:"box,omitempty"`
+	BoxColor   string  `json:"boxColor,omitempty"`
+	BoxOpacity float64 `json:"boxOpacity,omitempty"`
+}
+
+// Active reports whether this rendition actually draws text.
+func (t RenditionText) Active() bool { return strings.TrimSpace(t.Content) != "" }
+
+// problems reports everything wrong with the text, given the output size.
+func (t RenditionText) problems(width, height int) []string {
+	if !t.Active() {
+		return nil
+	}
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	// Same rule as the overlay, and the same failure it prevents: the type is
+	// sized as a percentage of the OUTPUT height, so that height has to resolve
+	// to a number when the arguments are built. With one axis free it does not,
+	// and the operator gets a stream that starts, looks fine and has no
+	// caption, with nothing anywhere saying why.
+	if width <= 0 || height <= 0 {
+		add("text needs the rendition to have an explicit width AND height, " +
+			"because the type is sized as a percentage of the output")
+	}
+
+	if len(t.Content) > MaxTextLen {
+		add("text is %d characters, longer than the %d allowed", len(t.Content), MaxTextLen)
+	}
+	// A newline would end the filter argument, and a NUL truncates the C
+	// string FFmpeg receives -- so both are rejected rather than escaped.
+	// drawtext can draw multiple lines, but that is a feature with its own
+	// line-spacing question and is not this one.
+	if strings.ContainsAny(t.Content, "\x00\n\r") {
+		add("text contains a line break or control character; it must be a single line")
+	}
+
+	if p := textFontProblem(t.Font); p != "" {
+		add("%s", p)
+	}
+	if t.Anchor != "" && !knownAnchor(t.Anchor) {
+		// Refused rather than accepted, for the reason an unknown overlay
+		// anchor is: the filter builder degrades an unrecognised anchor to
+		// top-left, so the operator gets a caption in a corner they did not
+		// choose with nothing to tell them which is running.
+		add("unknown text anchor %q", t.Anchor)
+	}
+	if t.SizePct < MinTextSizePct || t.SizePct > MaxTextSizePct {
+		add("text size %.3f out of range (%.2f-%.2f of the output height)",
+			t.SizePct, MinTextSizePct, MaxTextSizePct)
+	}
+	for _, m := range []struct {
+		name string
+		v    float64
+	}{{"horizontal", t.MarginXPct}, {"vertical", t.MarginYPct}} {
+		if m.v < 0 || m.v > MaxTextMarginPct {
+			add("text %s margin %.3f out of range (0-%.2f)", m.name, m.v, MaxTextMarginPct)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		v    string
+	}{{"text colour", t.Color}, {"box colour", t.BoxColor}} {
+		if p := colorProblem(c.name, c.v); p != "" {
+			add("%s", p)
+		}
+	}
+	if t.BoxOpacity < 0 || t.BoxOpacity > 1 {
+		add("box opacity %.3f out of range (0-1)", t.BoxOpacity)
+	}
+	return probs
+}
+
+func knownAnchor(a string) bool {
+	for _, k := range ffmpeg.OverlayAnchors {
+		if string(k) == a {
+			return true
+		}
+	}
+	return false
+}
+
+// textFontProblem checks the font NAME. It cannot check that the file exists --
+// this package does not know the data directory -- so it checks the shape, and
+// ffmpeg.FontPath does the existence and confinement check at the point of use.
+//
+// Both separators, spelled literally. `strings.ContainsRune(name,
+// os.PathSeparator)` is a check whose meaning changes with GOOS, and this
+// codebase has shipped that mistake twice; see internal/recording.Resolve.
+func textFontProblem(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "" // the built-in default
+	}
+	if len(name) > MaxTextFontName {
+		return fmt.Sprintf("font name is longer than %d characters", MaxTextFontName)
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return fmt.Sprintf("font %q must be a bare filename in the fonts directory", name)
+	}
+	if strings.ContainsAny(name, "\x00\n\r") {
+		return "font name contains control characters"
+	}
+	return ""
+}
+
+// colorProblem refuses anything that is not plainly a colour.
+//
+// This is stricter than FFmpeg's own parser ON PURPOSE. The value becomes a
+// filter argument, and although escapeLavfiArg escapes it, a validator that
+// accepts arbitrary punctuation here is one escaping bug away from letting a
+// database row rewrite the filtergraph. Names, hex and an optional @alpha
+// cover every colour anyone actually sets.
+func colorProblem(field, v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "" // the default
+	}
+	if len(v) > MaxTextColorLen {
+		return fmt.Sprintf("%s is longer than %d characters", field, MaxTextColorLen)
+	}
+	name, alpha, hasAlpha := strings.Cut(v, "@")
+	if name == "" {
+		return fmt.Sprintf("%s %q has no colour before the @", field, v)
+	}
+	for _, r := range name {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' || r == '#'
+		if !ok {
+			return fmt.Sprintf("%s %q must be a colour name or 0xRRGGBB, optionally @alpha", field, v)
+		}
+	}
+	if hasAlpha {
+		f, err := strconv.ParseFloat(alpha, 64)
+		if err != nil || f < 0 || f > 1 {
+			return fmt.Sprintf("%s alpha %q must be a number from 0 to 1", field, alpha)
+		}
+	}
+	return ""
 }
 
 // overlayPathProblem confines the image to the data directory.
@@ -407,6 +600,9 @@ func (r Rendition) Validate() error {
 	for _, p := range r.Overlay.problems(r.Width, r.Height) {
 		add("%s", p)
 	}
+	for _, p := range r.Text.problems(r.Width, r.Height) {
+		add("%s", p)
+	}
 
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid rendition: %s", strings.Join(probs, "; "))
@@ -488,6 +684,9 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 		&r.Encoder, &r.Preset, &r.GOPSeconds, &r.AspectMode, &r.PadColor,
 		&r.Deinterlace, &r.Overlay.Image, &r.Overlay.Anchor, &r.Overlay.WidthPct,
 		&r.Overlay.MarginXPct, &r.Overlay.MarginYPct, &r.Overlay.Opacity,
+		&r.Text.Content, &r.Text.Font, &r.Text.Anchor, &r.Text.SizePct, &r.Text.Color,
+		&r.Text.MarginXPct, &r.Text.MarginYPct, &r.Text.Box, &r.Text.BoxColor,
+		&r.Text.BoxOpacity,
 		&r.Note, &source, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -510,6 +709,9 @@ const renditionColumns = `id, name, width, height, fps, video_bitrate,
 	encoder, preset, gop_seconds, aspect_mode, pad_color, deinterlace,
 	overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
 	overlay_margin_y_pct, overlay_opacity,
+	text_content, text_font, text_anchor, text_size_pct, text_color,
+	text_margin_x_pct, text_margin_y_pct, text_box, text_box_color,
+	text_box_opacity,
 	note, source_id, created_at, updated_at`
 
 // applyRenditionDefaults fills in the fields an API payload is allowed to
@@ -598,12 +800,18 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 		 aspect_mode, pad_color, deinterlace,
 		 overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
 		 overlay_margin_y_pct, overlay_opacity,
+		 text_content, text_font, text_anchor, text_size_pct, text_color,
+		 text_margin_x_pct, text_margin_y_pct, text_box, text_box_color,
+		 text_box_opacity,
 		 note, source_id, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
 		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Deinterlace,
 		r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
 		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
+		r.Text.Content, r.Text.Font, r.Text.Anchor, r.Text.SizePct, r.Text.Color,
+		r.Text.MarginXPct, r.Text.MarginYPct, r.Text.Box, r.Text.BoxColor,
+		r.Text.BoxOpacity,
 		r.Note, r.SourceID, now, now)
 	if err != nil {
 		return nil, err
@@ -625,11 +833,17 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 		encoder=?, preset=?, gop_seconds=?, aspect_mode=?, pad_color=?,
 		deinterlace=?, overlay_image=?, overlay_anchor=?, overlay_width_pct=?,
 		overlay_margin_x_pct=?, overlay_margin_y_pct=?, overlay_opacity=?,
+		text_content=?, text_font=?, text_anchor=?, text_size_pct=?, text_color=?,
+		text_margin_x_pct=?, text_margin_y_pct=?, text_box=?, text_box_color=?,
+		text_box_opacity=?,
 		note=?, source_id=?, updated_at=? WHERE id=?`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
 		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor,
 		r.Deinterlace, r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
 		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
+		r.Text.Content, r.Text.Font, r.Text.Anchor, r.Text.SizePct, r.Text.Color,
+		r.Text.MarginXPct, r.Text.MarginYPct, r.Text.Box, r.Text.BoxColor,
+		r.Text.BoxOpacity,
 		r.Note, r.SourceID, time.Now().Unix(), r.ID)
 	if err != nil {
 		return nil, err
@@ -733,6 +947,20 @@ func (d *DB) MigrateRenditionAspect() error {
 		{"overlay_margin_x_pct", `ALTER TABLE renditions ADD COLUMN overlay_margin_x_pct REAL NOT NULL DEFAULT 0`},
 		{"overlay_margin_y_pct", `ALTER TABLE renditions ADD COLUMN overlay_margin_y_pct REAL NOT NULL DEFAULT 0`},
 		{"overlay_opacity", `ALTER TABLE renditions ADD COLUMN overlay_opacity REAL NOT NULL DEFAULT 0`},
+
+		// The text columns. All default to the no-text value, so every
+		// rendition that predates them keeps producing exactly the frame it
+		// always did -- the same guarantee the overlay columns above carry.
+		{"text_content", `ALTER TABLE renditions ADD COLUMN text_content TEXT NOT NULL DEFAULT ''`},
+		{"text_font", `ALTER TABLE renditions ADD COLUMN text_font TEXT NOT NULL DEFAULT ''`},
+		{"text_anchor", `ALTER TABLE renditions ADD COLUMN text_anchor TEXT NOT NULL DEFAULT ''`},
+		{"text_size_pct", `ALTER TABLE renditions ADD COLUMN text_size_pct REAL NOT NULL DEFAULT 0`},
+		{"text_color", `ALTER TABLE renditions ADD COLUMN text_color TEXT NOT NULL DEFAULT ''`},
+		{"text_margin_x_pct", `ALTER TABLE renditions ADD COLUMN text_margin_x_pct REAL NOT NULL DEFAULT 0`},
+		{"text_margin_y_pct", `ALTER TABLE renditions ADD COLUMN text_margin_y_pct REAL NOT NULL DEFAULT 0`},
+		{"text_box", `ALTER TABLE renditions ADD COLUMN text_box INTEGER NOT NULL DEFAULT 0`},
+		{"text_box_color", `ALTER TABLE renditions ADD COLUMN text_box_color TEXT NOT NULL DEFAULT ''`},
+		{"text_box_opacity", `ALTER TABLE renditions ADD COLUMN text_box_opacity REAL NOT NULL DEFAULT 0`},
 	} {
 		has, err := columnExists(d.sql, "renditions", col.name)
 		if err != nil {

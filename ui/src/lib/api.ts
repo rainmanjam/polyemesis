@@ -27,6 +27,7 @@ import type {
   RenditionBounds,
   RenditionDeleted,
   RenditionPreset,
+  FontInfo,
   RenditionView,
   RoutingProfile,
   RoutingResult,
@@ -246,6 +247,20 @@ export const api = {
       disclaimer: string;
       bounds: RenditionBounds;
     }>("/renditions/presets"),
+  /** The fonts on disk for text overlays, plus whether this FFmpeg can draw
+   *  text at all.
+   *
+   *  A listing rather than a compiled-in list: <data>/fonts holds the built-ins
+   *  AND anything the operator dropped in, and a hardcoded array would show two
+   *  entries forever. `textSupported` is false on a build without libfreetype,
+   *  where drawtext does not exist and the settings would never render. */
+  fonts: () =>
+    get<{
+      fonts: FontInfo[];
+      defaultFont: string;
+      dir: string;
+      textSupported: boolean;
+    }>("/fonts"),
   /** Every known encoder, each with whether it actually encoded a frame on this
    *  machine and why not when it did not. The list is deliberately complete:
    *  "h264_nvenc — no NVENC capable device found" tells the user their container

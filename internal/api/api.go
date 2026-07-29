@@ -239,6 +239,9 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/renditions", s.handleCreateRendition)
 			// Static segment first, same as /destinations/order above.
 			r.Get("/renditions/presets", s.handleRenditionPresets)
+			// The font picker for text overlays. A listing rather than a
+			// compiled-in list, because operators add their own fonts.
+			r.Get("/fonts", s.handleListFonts)
 			r.Get("/renditions/{id}", s.handleGetRendition)
 			r.Put("/renditions/{id}", s.handleUpdateRendition)
 			r.Delete("/renditions/{id}", s.handleDeleteRendition)
