@@ -26,6 +26,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/eclipse/paho.golang/autopaho"
@@ -194,6 +195,10 @@ func dump(broker, prefix string, wait time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), wait+15*time.Second)
 	defer cancel()
 
+	// got is written from paho's delivery goroutine and read from this one, so
+	// it needs a lock. The sleep below is not synchronisation: it bounds how
+	// long we collect, and nothing in it establishes a happens-before edge.
+	var mu sync.Mutex
 	got := map[string]string{}
 	ready := make(chan struct{})
 	var once bool
@@ -224,7 +229,9 @@ func dump(broker, prefix string, wait time.Duration) {
 			ClientID: fmt.Sprintf("acceptance-dump-%d", time.Now().UnixNano()),
 			OnPublishReceived: []func(paho.PublishReceived) (bool, error){
 				func(pr paho.PublishReceived) (bool, error) {
+					mu.Lock()
 					got[pr.Packet.Topic] = string(pr.Packet.Payload)
+					mu.Unlock()
 					return true, nil
 				},
 			},
@@ -242,6 +249,8 @@ func dump(broker, prefix string, wait time.Duration) {
 	time.Sleep(wait)
 	_ = cm.Disconnect(context.Background())
 
+	mu.Lock()
+	defer mu.Unlock()
 	topics := make([]string, 0, len(got))
 	for topic := range got {
 		topics = append(topics, topic)

@@ -184,18 +184,18 @@ step "7. No credential reaches any topic"
 if [ "$count1" -eq 0 ]; then
   bad "no payloads to search -- the leak check cannot run and must not report a pass"
   bad "no payloads to search for credential-shaped field names either"
-elif grep -q "$SECRET" <<<"$dump1"; then
-  bad "the destination's stream key appears on a topic"
-  grep -n "$SECRET" <<<"$dump1" | head -3 | sed 's/^/        /'
 else
-  ok "the stream key appears on no topic"
-fi
-if [ "$count1" -eq 0 ]; then
-  : # already counted as a failure above
-elif grep -qiE '"(url|streamKey|token|password|passphrase)"' <<<"$dump1"; then
-  bad "a credential-shaped field name appears in a payload"
-else
-  ok "no credential-shaped field name appears in any payload"
+  if grep -q "$SECRET" <<<"$dump1"; then
+    bad "the destination's stream key appears on a topic"
+    grep -n "$SECRET" <<<"$dump1" | head -3 | sed 's/^/        /'
+  else
+    ok "the stream key appears on no topic"
+  fi
+  if grep -qiE '"(url|streamKey|token|password|passphrase)"' <<<"$dump1"; then
+    bad "a credential-shaped field name appears in a payload"
+  else
+    ok "no credential-shaped field name appears in any payload"
+  fi
 fi
 
 step "8. Home Assistant discovery"

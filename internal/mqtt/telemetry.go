@@ -107,10 +107,18 @@ func (t *Telemetry) Publish(ctx context.Context, snap Snapshot) error {
 		}
 		if err := t.pub.Publish(ctx, topic, QoS, true, body); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", topic, err))
-			// Deliberately NOT recorded as published. A failed publish that
+			// Two things must NOT happen here, and they pull in opposite
+			// directions.
+			//
+			// t.published is deliberately not updated: a failed publish that
 			// updated the cache would be suppressed on every later tick, and
 			// the topic would stay permanently stale with nothing retrying it.
-			delete(seen, topic)
+			//
+			// But the topic must STAY in `seen`. Removing it makes sweep treat
+			// it as an orphan and publish a zero-byte delete -- so one transient
+			// failure would destroy retained state that was perfectly good a
+			// second ago, which is worse than the staleness above. The thing
+			// still exists; only this tick's write to it failed.
 			return
 		}
 		t.published[topic] = key

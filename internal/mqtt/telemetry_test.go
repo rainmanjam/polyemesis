@@ -30,12 +30,19 @@ type fakeBroker struct {
 	// failOn makes a publish to this topic fail, so the partial-tick paths can
 	// be exercised.
 	failOn string
+	// failOnce clears failOn after it has fired once. A permanent failure is
+	// the wrong model for testing recovery: the sweep's own publish to the same
+	// topic would fail too, so the test could never observe what the sweep did.
+	failOnce bool
 }
 
 func newFakeBroker() *fakeBroker { return &fakeBroker{up: true} }
 
 func (f *fakeBroker) Publish(_ context.Context, topic string, qos byte, retain bool, payload []byte) error {
 	if topic == f.failOn {
+		if f.failOnce {
+			f.failOn = ""
+		}
 		return errors.New("broker refused")
 	}
 	f.msgs = append(f.msgs, message{topic: topic, qos: qos, retain: retain, payload: payload})
@@ -269,5 +276,76 @@ func TestAnnouncePublishesRetainedOnline(t *testing.T) {
 	m := f.msgs[0]
 	if m.topic != "polyemesis/studio/status" || string(m.payload) != Online || !m.retain || m.qos != 1 {
 		t.Errorf("Announce published %+v on %q, want a retained QoS 1 %q", string(m.payload), m.topic, Online)
+	}
+}
+
+// A transient failure on one topic must not destroy retained state that is
+// perfectly good.
+//
+// The first draft removed the topic from `seen` on a publish error, which made
+// sweep treat it as an orphan and publish a zero-byte delete. The thing still
+// exists; only this tick's write to it failed. Wiping it is strictly worse than
+// leaving the previous value in place, and a subscriber would see the entity
+// vanish and come back.
+func TestAFailedPublishDoesNotClearThePreviousRetainedValue(t *testing.T) {
+	tel, f := newTelemetry(t)
+	ctx := context.Background()
+	snap := sampleSnapshot()
+
+	if err := tel.Publish(ctx, snap); err != nil {
+		t.Fatalf("first Publish: %v", err)
+	}
+	hostTopic := tel.topics.State()
+	f.reset()
+
+	// The same state again, but now the broker refuses that one topic. Force a
+	// republish so the change-suppression does not skip it.
+	f.failOn, f.failOnce = hostTopic, true
+	tel.Resync()
+	if err := tel.Publish(ctx, snap); err == nil {
+		t.Error("a refused publish produced no error")
+	}
+
+	for _, m := range f.msgs {
+		if m.topic == hostTopic && len(m.payload) == 0 {
+			t.Fatalf("a zero-byte delete was published to %s after a transient failure; "+
+				"that destroys retained state which was good a moment ago", hostTopic)
+		}
+	}
+}
+
+// The complement: something genuinely gone must still be swept, so the fix
+// above cannot have been "never sweep anything".
+func TestTheSweepStillClearsRealOrphansAfterAFailureElsewhere(t *testing.T) {
+	tel, f := newTelemetry(t)
+	ctx := context.Background()
+
+	if err := tel.Publish(ctx, sampleSnapshot()); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	var destTopic string
+	for _, m := range f.msgs {
+		if strings.Contains(m.topic, "/dest/") {
+			destTopic = m.topic
+		}
+	}
+	f.reset()
+
+	// The destination is deleted AND an unrelated topic fails.
+	snap := sampleSnapshot()
+	snap.Sources[0].Dests = nil
+	f.failOn = tel.topics.State()
+	tel.Resync()
+	_ = tel.Publish(ctx, snap)
+
+	var cleared bool
+	for _, m := range f.msgs {
+		if m.topic == destTopic && len(m.payload) == 0 && m.retain {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Errorf("the deleted destination's topic %s was not cleared; a failure on an "+
+			"unrelated topic must not stop the sweep", destTopic)
 	}
 }

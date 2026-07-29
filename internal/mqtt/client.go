@@ -244,7 +244,7 @@ func parseBroker(raw string) (*url.URL, error) {
 	switch u.Scheme {
 	case "mqtt", "tcp", "mqtts", "ssl", "ws", "wss":
 	default:
-		return nil, fmt.Errorf("mqtt broker scheme %q is not one of mqtt, mqtts, ws or wss", u.Scheme)
+		return nil, fmt.Errorf("mqtt broker scheme %q is not one of mqtt, mqtts, tcp, ssl, ws or wss", u.Scheme)
 	}
 	if u.Host == "" {
 		return nil, fmt.Errorf("mqtt broker URL %q has no host", raw)

@@ -689,7 +689,7 @@ func (m MQTTSettings) problems() []string {
 		switch u.Scheme {
 		case "mqtt", "tcp", "mqtts", "ssl", "ws", "wss":
 		default:
-			add("mqtt broker scheme %q is not one of mqtt, mqtts, ws or wss", u.Scheme)
+			add("mqtt broker scheme %q is not one of mqtt, mqtts, tcp, ssl, ws or wss", u.Scheme)
 		}
 	}
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -105,9 +106,7 @@ func (r *mqttRunner) reconcile(ctx context.Context) {
 		return
 	}
 
-	sig := fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%s\x00%s\x00%d\x00%t\x00%t\x00%t",
-		cfg.BrokerURL, cfg.Username, len(password), cfg.Prefix, cfg.Instance,
-		cfg.ClientID, cfg.KeepAliveSec, cfg.TLSSkipVerify, cfg.Discovery, cfg.Enabled)
+	sig := mqttSig(cfg, password)
 
 	r.mu.Lock()
 	unchanged := r.client != nil && r.sig == sig
@@ -118,6 +117,25 @@ func (r *mqttRunner) reconcile(ctx context.Context) {
 
 	r.disconnect(ctx)
 	r.connect(ctx, cfg, password, sig)
+}
+
+// mqttSig hashes everything a live connection was built from. Comparing it is
+// what stops an unrelated settings save from cycling a healthy connection --
+// the same trick the engine's *Sig fields play.
+//
+// The password is HASHED, not measured. A first draft used len(password), which
+// cannot see a change from one password to a different one of the same length
+// -- the overwhelmingly common case, since operators rotate to another password
+// of the same shape. The runner would then keep the old connection alive
+// forever, and the symptom is a broker refusing a credential nobody can see is
+// stale. The hash never reaches a log line or an error string.
+//
+// A free function so it can be tested without a database behind it.
+func mqttSig(cfg db.MQTTSettings, password string) string {
+	pwSum := sha256.Sum256([]byte(password))
+	return fmt.Sprintf("%s\x00%s\x00%x\x00%s\x00%s\x00%s\x00%d\x00%t\x00%t\x00%t",
+		cfg.BrokerURL, cfg.Username, pwSum, cfg.Prefix, cfg.Instance,
+		cfg.ClientID, cfg.KeepAliveSec, cfg.TLSSkipVerify, cfg.Discovery, cfg.Enabled)
 }
 
 // connect opens a new link and starts its telemetry loop.
