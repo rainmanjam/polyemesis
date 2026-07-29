@@ -207,9 +207,14 @@ type Engine struct {
 	// source is the probed ingest layout. Until the ingest carries a stream,
 	// this is DefaultSource() so the routing editor still has something to
 	// render.
-	source    routing.Source
-	probed    bool
-	videoInfo *ffmpeg.VideoStream
+	source routing.Source
+	// sourceName is the operator's label for this programme, refreshed on every
+	// reconcile. Cached rather than read on demand: Status() runs per WebSocket
+	// push and per telemetry tick, and a database read on that path buys
+	// nothing -- a rename cannot happen without a reconcile.
+	sourceName string
+	probed     bool
+	videoInfo  *ffmpeg.VideoStream
 	levels    ffmpeg.Levels
 	levelsAt  time.Time
 	settings  db.Settings
@@ -738,11 +743,32 @@ func (e *Engine) effectiveSettings() (db.Settings, error) {
 		return settings, nil
 	}
 	settings.Ingest = src.Ingest
+
+	// Cached here rather than read on demand because Status() is assembled on
+	// every WebSocket push and on every telemetry tick, and the name changes
+	// only when the operator renames the source -- which goes through a
+	// reconcile.
+	e.mu.Lock()
+	e.sourceName = src.Name
+	e.mu.Unlock()
+
 	return settings, nil
 }
 
 // SourceID reports which programme this engine owns.
 func (e *Engine) SourceID() int64 { return e.sourceID }
+
+// SourceName is the operator's label for this programme, empty until the first
+// reconcile has read the row.
+//
+// It exists because every external consumer that groups by source needs a
+// stable human-readable handle: an id is meaningless in an MQTT topic or on a
+// Home Assistant entity, and the id is the only thing Status carried before.
+func (e *Engine) SourceName() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.sourceName
+}
 
 // Reconcile makes the running processes match the database. It is safe to call
 // repeatedly and from any handler.
@@ -3381,6 +3407,12 @@ func (e *Engine) Source() routing.Source {
 
 // SourceInfo is the ingest layout as the API reports it.
 type SourceInfo struct {
+	// ID and Name identify the programme this snapshot belongs to. They are
+	// here because a Status handed to anything outside the WebSocket -- MQTT
+	// telemetry, Home Assistant discovery -- has to say which source it
+	// describes, and until now nothing in the payload did.
+	ID     int64               `json:"id"`
+	Name   string              `json:"name"`
 	Probed bool                `json:"probed"`
 	Tracks []routing.Track     `json:"tracks"`
 	Video  *ffmpeg.VideoStream `json:"video,omitempty"`
@@ -3400,6 +3432,7 @@ type SourceInfo struct {
 func (e *Engine) SourceInfo() SourceInfo {
 	e.mu.RLock()
 	probed, src, video := e.probed, e.source, e.videoInfo
+	name := e.sourceName
 	synthetic := e.silence != nil && e.silence.hub != nil
 	e.mu.RUnlock()
 
@@ -3407,6 +3440,7 @@ func (e *Engine) SourceInfo() SourceInfo {
 		src = synthTrack()
 	}
 	return SourceInfo{
+		ID: e.sourceID, Name: name,
 		Probed: probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
 		Annotations: e.Settings().Ingest.Annotations,
 	}

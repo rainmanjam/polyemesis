@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -608,6 +609,124 @@ type MeterSettings struct {
 	IntervalMS int `json:"intervalMs"`
 }
 
+// ------------------------------------------------------------------- mqtt
+
+// MQTT bounds. The interval floor is 1s because the underlying state is
+// republished only on change, so a fast tick costs a comparison rather than a
+// message; the ceiling is an hour because past that a retained topic is a
+// historical record rather than telemetry.
+const (
+	MinMQTTIntervalSeconds = 1
+	MaxMQTTIntervalSeconds = 3600
+	MaxMQTTPrefixLength    = 128
+	MaxMQTTInstanceLength  = 64
+	MaxMQTTClientIDLength  = 128
+)
+
+// MQTTSettings publishes retained telemetry to a broker.
+//
+// The password is deliberately NOT here. It lives sealed in its own table, the
+// same way an OAuth client secret does, because this struct is marshalled into
+// the settings blob and served to the settings page. See DB.PutMQTTPassword.
+type MQTTSettings struct {
+	Enabled bool `json:"enabled"`
+	// BrokerURL is mqtt://, mqtts://, ws:// or wss://. Credentials in the URL
+	// are refused rather than accepted: a password in a URL reaches logs, `ps`
+	// output and error strings, and there is no taking it back afterwards.
+	BrokerURL string `json:"brokerUrl"`
+	Username  string `json:"username"`
+	// HasPassword reports that a sealed password exists, so the settings page
+	// can show that one is set without ever receiving it.
+	HasPassword bool `json:"hasPassword"`
+	// Prefix roots the topic tree. Separators are preserved, not slugged: an
+	// operator who writes `home/av` means two levels.
+	Prefix string `json:"prefix"`
+	// Instance distinguishes two polyemesis installs sharing one broker, and is
+	// what a Home Assistant device is keyed on. Slugged before use.
+	Instance string `json:"instance"`
+	// ClientID must be unique on the broker. A collision is the number-one
+	// cause of an unexplained reconnect loop: the broker disconnects the older
+	// session on every connect and both clients reconnect forever. Empty means
+	// "derive one from Instance", which is unique for the same reason Instance
+	// is.
+	ClientID       string `json:"clientId"`
+	IntervalSecond int    `json:"intervalSeconds"`
+	KeepAliveSec   int    `json:"keepAliveSeconds"`
+	// TLSSkipVerify accepts a self-signed broker certificate. Named for what it
+	// does rather than for what an operator wishes it did.
+	TLSSkipVerify bool `json:"tlsSkipVerify"`
+	// Discovery publishes Home Assistant device-discovery payloads. Separate
+	// from Enabled because a Node-RED or Telegraf consumer wants the telemetry
+	// and not the discovery topics.
+	Discovery bool `json:"discovery"`
+}
+
+// problems reports everything wrong with the MQTT block.
+//
+// Nothing here is checked when MQTT is switched off. A half-configured block an
+// operator is still filling in must not block saving an unrelated setting, and
+// a disabled publisher cannot misbehave.
+func (m MQTTSettings) problems() []string {
+	if !m.Enabled {
+		return nil
+	}
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	switch u, err := url.Parse(strings.TrimSpace(m.BrokerURL)); {
+	case strings.TrimSpace(m.BrokerURL) == "":
+		add("mqtt is enabled but no broker URL is set")
+	case err != nil:
+		add("mqtt broker URL is unparseable: %v", err)
+	case u.Host == "":
+		add("mqtt broker URL %q has no host", m.BrokerURL)
+	case u.User != nil:
+		// Refused rather than quietly moved into the username and password
+		// fields, because the operator needs to know the URL they pasted would
+		// have been written to a log.
+		add("mqtt broker URL carries credentials; put the username and password in their own fields so the password is sealed and never logged")
+	default:
+		switch u.Scheme {
+		case "mqtt", "tcp", "mqtts", "ssl", "ws", "wss":
+		default:
+			add("mqtt broker scheme %q is not one of mqtt, mqtts, ws or wss", u.Scheme)
+		}
+	}
+
+	// A `$` prefix is refused rather than escaped. Brokers reserve those
+	// topics, and a subscriber using `#` -- which is what anyone debugging
+	// reaches for first -- is specified never to receive them, so the telemetry
+	// would publish successfully and be invisible in exactly the view the
+	// operator would use to look for it.
+	if strings.HasPrefix(strings.TrimSpace(m.Prefix), "$") {
+		add("mqtt topic prefix must not begin with $: brokers reserve those topics and a '#' subscription never receives them")
+	}
+	if strings.ContainsAny(m.Prefix, "+#\x00") {
+		add("mqtt topic prefix %q contains a wildcard or NUL, which are legal in a subscription filter but not in a published topic", m.Prefix)
+	}
+	if len(m.Prefix) > MaxMQTTPrefixLength {
+		add("mqtt topic prefix is %d characters (maximum %d)", len(m.Prefix), MaxMQTTPrefixLength)
+	}
+	if len(m.Instance) > MaxMQTTInstanceLength {
+		add("mqtt instance name is %d characters (maximum %d)", len(m.Instance), MaxMQTTInstanceLength)
+	}
+	if len(m.ClientID) > MaxMQTTClientIDLength {
+		add("mqtt client id is %d characters (maximum %d)", len(m.ClientID), MaxMQTTClientIDLength)
+	}
+	if m.IntervalSecond < MinMQTTIntervalSeconds || m.IntervalSecond > MaxMQTTIntervalSeconds {
+		add("mqtt publish interval %ds out of range (%d-%d)",
+			m.IntervalSecond, MinMQTTIntervalSeconds, MaxMQTTIntervalSeconds)
+	}
+	// The MQTT keep-alive is a 16-bit field. 0 is legal on the wire and means
+	// "no keep-alive", which would leave a half-open connection looking healthy
+	// forever and the will message -- the entire availability story -- never
+	// firing.
+	if m.KeepAliveSec < 1 || m.KeepAliveSec > 65535 {
+		add("mqtt keep-alive %ds out of range (1-65535); 0 disables the liveness check the will message depends on", m.KeepAliveSec)
+	}
+	return probs
+}
+
 // ---------------------------------------------------------- post-production
 
 // Post-production bounds. Wide on purpose: they catch a unit mix-up or a typo,
@@ -907,6 +1026,7 @@ type Settings struct {
 	Meters    MeterSettings     `json:"meters"`
 	Logging   LoggingSettings   `json:"logging"`
 	PostProd  PostProdSettings  `json:"postProd"`
+	MQTT      MQTTSettings      `json:"mqtt"`
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -1016,6 +1136,23 @@ func DefaultSettings() Settings {
 			RetainDays:            30,
 			RetainJobs:            200,
 		},
+		// Off, and pre-filled with values that work the moment it is switched
+		// on. An operator who enables MQTT should have to supply a broker URL
+		// and nothing else.
+		//
+		// The literals below duplicate mqtt.DefaultPrefix and
+		// mqtt.DefaultKeepAliveSec on purpose: importing internal/mqtt here
+		// would link paho into the database layer, which has no business
+		// speaking a network protocol. TestMQTTDefaultsMatchTheMQTTPackage is a
+		// test-only import that keeps the two in step.
+		MQTT: MQTTSettings{
+			Enabled:        false,
+			Prefix:         "polyemesis",
+			Instance:       "polyemesis",
+			IntervalSecond: 10,
+			KeepAliveSec:   30,
+			Discovery:      true,
+		},
 	}
 }
 
@@ -1074,6 +1211,9 @@ func (s Settings) Validate() error {
 		add("%s", p)
 	}
 	for _, p := range s.Listeners.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.MQTT.problems() {
 		add("%s", p)
 	}
 

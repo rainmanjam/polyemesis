@@ -126,6 +126,15 @@ CREATE TABLE IF NOT EXISTS destinations (
 );
 
 -- The operator's own OAuth developer app. polyemesis cannot ship these.
+-- The MQTT broker password, sealed. Its own table rather than a field in the
+-- settings blob because that blob is served to the settings page: a password
+-- in it would be handed to every browser that opened Settings.
+CREATE TABLE IF NOT EXISTS mqtt_creds (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    password_enc BLOB NOT NULL,          -- secretbox sealed
+    updated_at   INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick
     client_id         TEXT NOT NULL,
