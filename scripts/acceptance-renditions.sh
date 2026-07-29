@@ -155,17 +155,27 @@ else
   # Top-left 20% x 15%, comfortably inside a box drawn at 12% of height.
   TEXT_LUMA=$(mean_luma "$OUT/rendition-a.mkv" "iw*0.2:ih*0.15:0:0")
   BASE_LUMA=$(mean_luma "$OUT/passthrough.mkv" "iw*0.2:ih*0.15:0:0")
-  if [ -n "$TEXT_LUMA" ] && [ "$TEXT_LUMA" -ge 170 ]; then
-    ok "the text box is on screen (top-left luma ${TEXT_LUMA}, passthrough ${BASE_LUMA:-?})"
+  # A DIFFERENCE, not an absolute level, and that choice is the whole point.
+  #
+  # The first version of this check demanded luma >= 170 and CI measured 180 --
+  # a ten-point margin on a number that legitimately moves, because font
+  # rasterisation differs between FreeType versions and the crop covers more
+  # area than the box does. That is a flake waiting for an FFmpeg bump.
+  #
+  # The signal is that the corner got BRIGHTER, and the measured gap is large:
+  # 84 without the box, 180 with it. Requiring 40 sits comfortably inside that
+  # while still failing outright if nothing was drawn, and it survives a change
+  # to the test pattern that an absolute threshold would not.
+  if [ -z "$TEXT_LUMA" ] || [ -z "$BASE_LUMA" ]; then
+    # Named separately from a failed comparison. An empty reading means the
+    # measurement itself broke -- which is exactly how this check first failed,
+    # reporting "the caption did not render" when the truth was that ffmpeg had
+    # printed nothing for it to parse.
+    bad "the luma measurement produced no reading (text='${TEXT_LUMA:-}' passthrough='${BASE_LUMA:-}'); the check is broken, not the caption"
+  elif [ "$((TEXT_LUMA - BASE_LUMA))" -ge 40 ]; then
+    ok "the text box is on screen (top-left luma ${TEXT_LUMA} against ${BASE_LUMA} without it)"
   else
-    bad "top-left luma is ${TEXT_LUMA:-?} against a passthrough ${BASE_LUMA:-?}; the caption did not render"
-  fi
-  # The control. Without it a source that happened to be white everywhere
-  # would pass the check above while proving nothing.
-  if [ -n "$BASE_LUMA" ] && [ -n "$TEXT_LUMA" ] && [ "$TEXT_LUMA" -gt "$BASE_LUMA" ]; then
-    ok "the same corner is darker without the overlay (${BASE_LUMA} vs ${TEXT_LUMA})"
-  else
-    bad "passthrough luma ${BASE_LUMA:-?} is not below the rendition's ${TEXT_LUMA:-?}, so the measurement proves nothing"
+    bad "top-left luma ${TEXT_LUMA} is not meaningfully above the passthrough's ${BASE_LUMA}; the caption did not render"
   fi
 
   # The passthrough must be UNTOUCHED. Text lives on a rendition; a
