@@ -22,7 +22,25 @@ on:
 # streams and wait on them, so a superseded run can sit for its full 20-minute
 # ceiling consuming a runner nobody is waiting on.
 concurrency:
-  group: ci-${{ github.ref }}
+  # head_ref || ref_name, NOT github.ref, and the difference is a doubling of
+  # this workflow's cost.
+  #
+  # Every push to a PR branch fires this twice -- once for `push` and once for
+  # `pull_request`. github.ref differs between those two events
+  # (refs/heads/BRANCH versus refs/pull/N/merge), so a group keyed on it puts
+  # the twins in SEPARATE groups and neither dedupes the other: two full runs,
+  # 17 jobs each, eleven of them acceptance suites that publish real streams.
+  #
+  # github.head_ref is the source branch on a pull_request and empty on a push;
+  # github.ref_name is the bare branch name on a push. Together they resolve to
+  # the same string for both events, so the twins share one group and the second
+  # cancels the first.
+  #
+  # The alternative -- `push: branches: [main]` and let PRs cover the rest --
+  # gives exactly one run with no cancellation at all, but silently drops CI for
+  # a branch with no PR open. `branches: ["**"]` above looks deliberate, so this
+  # keeps it.
+  group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
