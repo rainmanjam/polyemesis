@@ -121,6 +121,25 @@ func main() {
 		"encoder":      "libx264",
 		"preset":       "veryfast",
 		"gopSeconds":   2,
+		// The image watermark, anchored BOTTOM-RIGHT at half opacity.
+		//
+		// Deliberately the opposite corner from the text above, because that is
+		// what makes the anchor testable: a shell that finds the logo in the
+		// bottom-right and background in the top-right has proved the anchor
+		// was honoured, where a full-frame check would pass even if the filter
+		// ignored the anchor entirely.
+		//
+		// 50% opacity, because the alpha path is a DIFFERENT filter graph:
+		// colourchannelmixer is omitted entirely at 100%, so an opaque overlay
+		// never exercises it and a broken alpha would ship unnoticed.
+		"overlay": map[string]any{
+			"image":      "overlays/logo.png",
+			"anchor":     "bottom-right",
+			"widthPct":   0.2,
+			"marginXPct": 0.0,
+			"marginYPct": 0.0,
+			"opacity":    0.5,
+		},
 		"text": map[string]any{
 			"content":    "POLYEMESIS",
 			"anchor":     "top-left",
@@ -138,6 +157,9 @@ func main() {
 	// Read back rather than trusting the POST: a field that round-trips to ""
 	// is a column the store dropped, and the pixel check further down would
 	// then fail for a reason nobody could locate.
+	ovl := mapOf(created["rendition"].(map[string]any)["overlay"])
+	facts["OVERLAY_IMAGE_STORED"] = str(ovl["image"])
+	facts["OVERLAY_ANCHOR_STORED"] = str(ovl["anchor"])
 	txt := mapOf(created["rendition"].(map[string]any)["text"])
 	facts["TEXT_CONTENT_STORED"] = str(txt["content"])
 	facts["TEXT_BOX_STORED"] = boolStr(txt["box"] == true)

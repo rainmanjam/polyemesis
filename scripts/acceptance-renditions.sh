@@ -46,6 +46,17 @@ trap cleanup EXIT
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 
+# A watermark for the image-overlay checks, written before the server starts so
+# the path exists the moment the rendition references it.
+#
+# Solid WHITE at 20% of the frame, because both properties under test are
+# measured as luma against a testsrc2 background that averages far below it:
+# a bright crop in the anchored corner proves position, and HOW bright proves
+# the opacity was applied rather than ignored.
+mkdir -p data/overlays
+ffmpeg -hide_banner -loglevel error -f lavfi -i "color=c=white:s=200x200:d=1" \
+  -frames:v 1 -y data/overlays/logo.png
+
 # ---------------------------------------------------------------- 1. server
 step "1. Start the binary"
 "$BIN" -addr ":$PORT" -data ./data -log warn > server.log 2>&1 &
@@ -186,6 +197,70 @@ else
     -of default=nw=1:nk=1 "$OUT/passthrough.mkv" >/dev/null 2>&1 \
     && ok "the passthrough destination still decodes as video" \
     || bad "the passthrough output is unreadable"
+fi
+
+step "3c. Verify the image watermark landed where it was asked to"
+
+# Overlays v0.5 shipped an image watermark with NO end-to-end coverage, and the
+# text checks above did not close that gap: both compile through overlayGraph,
+# but only the image exercises the second input, eof_action=repeat and the
+# alpha stage.
+#
+# Two properties, each with a control that fails if the other explanation is
+# true. A bright bottom-right corner alone would also pass if the filter
+# painted the whole frame; a dark top-right alone would pass if nothing
+# rendered. Together they mean the anchor was honoured.
+[ "${OVERLAY_IMAGE_STORED:-}" = "overlays/logo.png" ] \
+  && ok "the overlay path round-tripped through the store" \
+  || bad "overlay image came back as '${OVERLAY_IMAGE_STORED:-}'"
+[ "${OVERLAY_ANCHOR_STORED:-}" = "bottom-right" ] \
+  && ok "the overlay anchor survived the store" \
+  || bad "overlay anchor came back as '${OVERLAY_ANCHOR_STORED:-}'"
+
+# Bottom-right 20%x25%, inside a logo drawn at 20% of the width in that corner.
+LOGO_LUMA=$(mean_luma "$OUT/rendition-a.mkv" "iw*0.2:ih*0.25:iw*0.8:ih*0.75")
+# The SAME crop of the passthrough, which carries no overlay at all.
+LOGO_BASE=$(mean_luma "$OUT/passthrough.mkv" "iw*0.2:ih*0.25:iw*0.8:ih*0.75")
+# The opposite corner of the SAME rendition. No logo there, and no text either.
+CLEAN_LUMA=$(mean_luma "$OUT/rendition-a.mkv" "iw*0.2:ih*0.25:iw*0.8:0")
+
+if [ -z "$LOGO_LUMA" ] || [ -z "$LOGO_BASE" ] || [ -z "$CLEAN_LUMA" ]; then
+  bad "the overlay luma measurement produced no reading (logo='${LOGO_LUMA:-}' base='${LOGO_BASE:-}' clean='${CLEAN_LUMA:-}'); the check is broken, not the overlay"
+else
+  if [ "$((LOGO_LUMA - LOGO_BASE))" -ge 30 ]; then
+    ok "the watermark is in the bottom-right (luma ${LOGO_LUMA} against ${LOGO_BASE} without it)"
+  else
+    bad "bottom-right luma ${LOGO_LUMA} is not above the passthrough's ${LOGO_BASE}; the watermark did not render"
+  fi
+
+  # The anchor, proven by absence. If this corner is as bright as the logo
+  # corner, the overlay is not anchored -- it is everywhere.
+  if [ "$((LOGO_LUMA - CLEAN_LUMA))" -ge 30 ]; then
+    ok "the opposite corner is clean, so the anchor was honoured (${CLEAN_LUMA} vs ${LOGO_LUMA})"
+  else
+    bad "top-right luma ${CLEAN_LUMA} is as bright as the anchored corner ${LOGO_LUMA}; the overlay ignored its anchor"
+  fi
+
+  # Opacity, asserted against the value the operator ASKED for rather than
+  # merely "not opaque".
+  #
+  # A white logo at alpha a over a background b composites to a*255+(1-a)*b, so
+  # 50% predicts the midpoint. Checking only "below 255" would pass at 90%
+  # opacity and at 10%; checking the midpoint proves the requested alpha
+  # actually reached colourchannelmixer.
+  #
+  # This is worth pinning because the alpha stage is a DIFFERENT filter graph:
+  # colourchannelmixer is omitted entirely at 100%, so no opaque overlay ever
+  # exercises it and a wrong alpha would ship unnoticed.
+  WANT=$(( (255 + LOGO_BASE) / 2 ))
+  DIFF=$(( LOGO_LUMA > WANT ? LOGO_LUMA - WANT : WANT - LOGO_LUMA ))
+  # 15 of tolerance: the composite is deterministic -- no font rasterisation is
+  # involved -- so the only spread is encoder rounding on a lossy tier.
+  if [ "$DIFF" -le 15 ]; then
+    ok "the watermark is composited at the requested 50% (luma ${LOGO_LUMA}, predicted ${WANT} over a ${LOGO_BASE} background)"
+  else
+    bad "bottom-right luma ${LOGO_LUMA} is ${DIFF} away from the ${WANT} a 50% white logo predicts over ${LOGO_BASE}; the opacity is not the one that was set"
+  fi
 fi
 
 step "4. Verify audio routing survived the shared video encode"
