@@ -834,6 +834,21 @@ function PipelineSettings({
                   a URL reaches log lines and <code>ps</code> output, and there is no taking it
                   back. Put it in the field below, where it is encrypted at rest.
                 </span>
+                {/* Said at the point of configuration rather than left to the
+                    docs, because the credential is encrypted at rest and then
+                    sent in the clear -- which is the sort of gap an operator
+                    reasonably assumes has been closed. Not a refusal: mqtt:// on
+                    a trusted LAN is the normal Home Assistant setup and what our
+                    own documentation recommends. */}
+                {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                    <code>mqtt://</code> is unencrypted. MQTT sends the username and password in
+                    its CONNECT packet, so both cross the network in the clear — fine on a
+                    trusted LAN, which is the usual Home Assistant case, and not fine over
+                    anything you do not control. Use <code>mqtts://</code> if the broker offers
+                    it.
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">

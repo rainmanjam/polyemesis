@@ -66,12 +66,39 @@ func TestSlugLeavesAnAlreadyCleanNameAlone(t *testing.T) {
 }
 
 func TestSlugIsDeterministic(t *testing.T) {
-	// Retained topics are addressed by name across restarts. A slug that
-	// varied per process would orphan every topic on every restart and leave
-	// the broker accumulating dead state forever.
-	for _, n := range []string{"Twitch (main)", "clean", ""} {
-		if Slug(n) != Slug(n) {
-			t.Errorf("Slug(%q) is not deterministic", n)
+	// Retained topics are addressed by name ACROSS RESTARTS. A slug that varied
+	// per process would orphan every topic on every restart and leave the
+	// broker accumulating dead state forever.
+	//
+	// Pinned GOLDEN VALUES, and that is the whole point of this test rather
+	// than a detail.
+	//
+	// It previously called Slug twice and compared the results to each other,
+	// which cannot detect the failure this comment describes. A per-process
+	// seed -- rand seeded at init, or Go's randomised map hash -- returns the
+	// SAME value twice within one process and a different one after a restart,
+	// so the old form passed while the exact hazard was live. Only a value
+	// fixed in the source catches drift between processes.
+	//
+	// These are sha256-derived, so they are stable by construction. If one of
+	// them changes, every retained topic and every Home Assistant entity id
+	// already deployed changes with it -- that is a migration, not a test
+	// failure to paper over.
+	for _, tc := range []struct{ in, want string }{
+		{"Twitch (main)", "twitch-main-3f17ba2c"},
+		// Already safe, so it passes through untouched and carries no suffix.
+		{"clean", "clean"},
+		// Empty is not a valid topic segment, so it becomes a fixed stand-in.
+		{"", "x-e3b0c442"},
+		// A non-ASCII dash: substituted, not dropped, so two names that differ
+		// only in punctuation cannot collide.
+		{"Studio B — Feed 2", "studio-b-feed-2-af1bda19"},
+		// Already shaped like a hashed slug, and hashed anyway -- otherwise a
+		// name could impersonate another destination's topic.
+		{"already-deadbeef", "already-deadbeef-8ba32f01"},
+	} {
+		if got := Slug(tc.in); got != tc.want {
+			t.Errorf("Slug(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

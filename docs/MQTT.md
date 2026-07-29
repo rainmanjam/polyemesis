@@ -159,6 +159,14 @@ freezing on their last value.
 If you use the Mosquitto add-on, point the broker URL at
 `mqtt://homeassistant.local:1883` and use the add-on's username and password.
 
+`mqtt://` is **unencrypted**, and that is worth stating plainly rather than
+leaving implied. MQTT sends the username and password in its CONNECT packet, so
+both cross the network in the clear. polyemesis encrypts the password at rest
+and refuses one embedded in the URL, neither of which changes what goes on the
+wire. On the trusted LAN this add-on assumes, that is the normal and expected
+setup. Over anything you do not control, use `mqtts://` — the broker URL field
+warns when it sees a plaintext scheme.
+
 ## Node-RED and everything else
 
 Turn discovery off and subscribe to `polyemesis/+/#`. Payloads are plain JSON
