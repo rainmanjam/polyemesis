@@ -293,13 +293,26 @@ already researched and written down in the roadmap doc -- read them, especially:
   - Twitch CCLs READ as a flat list and WRITE as [{"id":..,"is_enabled":true}].
     MatureGame is readable and NOT writable.
 
-**Overlays v1 text (~10 d of the original 16). READ THIS FIRST: the dev machine
-has no drawtext.** Verify `ffmpeg -filters | grep drawtext` on whatever machine
-picks this up. If it is absent, the pixel-measurement tests will skip and a
-green run proves nothing -- either install an FFmpeg with libfreetype or do the
-work where one exists. The probe from PR #23 is what the validation should gate
-on: a text overlay on a build without drawtext must be refused at SAVE time with
-a clear message, never discovered at process start.
+**Overlays v1 text (~10 d of the original 16). NOT BLOCKED -- use Docker.**
+
+`./scripts/test-in-docker.sh ./internal/ffmpeg/ -run TestOverlay`
+
+The dev machine's Homebrew FFmpeg has NO drawtext (481 filters). Alpine 3.24
+carries FFmpeg 8.1.2 -- the SAME version this project pins -- built WITH
+libfreetype (516 filters, drawtext true), and that is what the Docker image
+ships. So the container is not a substitute environment, it is the real one.
+Run every pixel-measurement test there; a green run on the host means nothing,
+because those tests SKIP without drawtext.
+
+**The shipping image has ZERO FONTS.** fontconfig is installed and finds
+nothing: `drawtext=text=hi` -> "Cannot find a valid font for the family Sans".
+The design's go:embed-a-font requirement is therefore confirmed, not assumed.
+DO NOT add a font package to the test image -- it is deliberately absent, and
+adding one destroys the only environment that can catch a missing embedded font.
+
+Validation must gate on Tools.HasFilter("drawtext") from PR #23: a text overlay
+on a build without it is refused at SAVE time with a clear message, never
+discovered at process start.
  `docs/roadmap/OVERLAYS.md`. Text,
 clock, externally-fed text, multiple overlays per rendition, the one-frame
 preview endpoint, the embedded font, and the drawtext filter probe (detect.go
