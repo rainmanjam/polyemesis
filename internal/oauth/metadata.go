@@ -37,6 +37,12 @@ const (
 	FieldPrivacy     MetadataField = "privacy"
 	FieldMadeForKids MetadataField = "madeForKids"
 	FieldLabels      MetadataField = "contentLabels"
+	// Broadcast settings. See youtube_broadcast.go -- these live on a
+	// different resource from title and description, and most of them stop
+	// being writable partway through a broadcast's life.
+	FieldScheduledStart MetadataField = "scheduledStart"
+	FieldContentDetails MetadataField = "contentDetails"
+	FieldTags           MetadataField = "tags"
 )
 
 // Metadata is what the operator typed once in the go-live composer. An empty
@@ -237,7 +243,15 @@ const ytCategoryRegion = "US"
 
 func (y *YouTube) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
-		Fields:        []MetadataField{FieldTitle, FieldDescription, FieldCategory},
+		// The broadcast fields are advertised here so the composer can offer
+		// them for YouTube and grey them out elsewhere. Twitch has no
+		// broadcast resource at all and Kick's whole surface is three fields,
+		// so a control that appears for every platform would be a control that
+		// silently does nothing on most of them.
+		Fields: []MetadataField{
+			FieldTitle, FieldDescription, FieldCategory,
+			FieldTags, FieldScheduledStart, FieldContentDetails,
+		},
 		CategoryLabel: "Category",
 		CategoryHint:  "A YouTube video category, e.g. Gaming, Music, Science & Technology.",
 		// YouTube's documented snippet limits.
@@ -257,6 +271,20 @@ type ytBroadcast struct {
 	Status struct {
 		LifeCycleStatus string `json:"lifeCycleStatus"`
 	} `json:"status"`
+	// ContentDetails is read so that a write can carry every field of the part
+	// back unchanged. liveBroadcasts.update is destructive BY PART: omitting a
+	// field from a part it is sending reverts that field to its default, so
+	// the current values are the starting point for every write rather than
+	// the zero value.
+	ContentDetails struct {
+		EnableDvr       bool `json:"enableDvr"`
+		EnableAutoStart bool `json:"enableAutoStart"`
+		EnableAutoStop  bool `json:"enableAutoStop"`
+		MonitorStream   struct {
+			EnableMonitorStream    bool `json:"enableMonitorStream"`
+			BroadcastStreamDelayMs int  `json:"broadcastStreamDelayMs"`
+		} `json:"monitorStream"`
+	} `json:"contentDetails"`
 }
 
 // broadcastRank orders candidates: whatever is on air now, then whatever is
@@ -285,7 +313,7 @@ func (y *YouTube) liveBroadcast(ctx context.Context, accessToken string) (*ytBro
 		Items []ytBroadcast `json:"items"`
 	}
 	err := getJSON(ctx,
-		ytAPIBase+"/liveBroadcasts?part=id,snippet,status&broadcastStatus=all&broadcastType=all&maxResults=50",
+		ytAPIBase+"/liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=all&broadcastType=all&maxResults=50",
 		accessToken, nil, &list)
 	if err != nil {
 		return nil, err

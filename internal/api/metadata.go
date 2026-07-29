@@ -199,6 +199,12 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		Description string  `json:"description"`
 		Category    string  `json:"category"`
 		AccountIDs  []int64 `json:"accountIds"`
+		// Broadcast is the YouTube-only settings that live on a different
+		// resource: tags, the scheduled start, and the contentDetails toggles.
+		// Every field is a pointer, so an omitted one means "leave it alone"
+		// and an explicit false means "turn it off". See
+		// oauth/youtube_broadcast.go.
+		Broadcast oauth.BroadcastSettings `json:"broadcast"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -208,9 +214,12 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Category:    req.Category,
 	}.Trimmed()
-	if meta.Empty() {
+	// Either half is enough to be worth pushing. A broadcast-only push is a
+	// real thing an operator does -- turning the DVR off before going live
+	// without retyping a title that is already correct.
+	if meta.Empty() && req.Broadcast.Empty() {
 		writeError(w, http.StatusBadRequest,
-			"enter a title, a description or a category before pushing")
+			"enter a title, a description, a category or a broadcast setting before pushing")
 		return
 	}
 
@@ -263,10 +272,96 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 
 	// Detached from the request context on purpose: the response returns in
 	// milliseconds and would otherwise cancel the very work it just started.
-	go s.runMetadataPush(job.ID, meta, targets)
+	go s.runMetadataPush(job.ID, meta, req.Broadcast, targets)
 
 	snap, _ := metadataRegistry.snapshot(job.ID)
 	writeJSON(w, http.StatusAccepted, snap)
+}
+
+// broadcastWindower reports what is still editable on an account's current
+// broadcast. Optional for the same reason broadcastPusher is.
+type broadcastWindower interface {
+	BroadcastWindow(ctx context.Context, accessToken string) (*oauth.BroadcastWindow, error)
+}
+
+// broadcastWindowRow is one account's answer, including the ones that failed.
+//
+// A failure is a row rather than an error on the whole response: an operator
+// with two YouTube accounts and an expired token on one still needs the
+// controls enabled for the other.
+type broadcastWindowRow struct {
+	AccountID   int64       `json:"accountId"`
+	Platform    db.Platform `json:"platform"`
+	AccountName string      `json:"accountName"`
+	// Window is nil when this account could not be read, or when the platform
+	// has no broadcast resource at all.
+	Window *oauth.BroadcastWindow `json:"window,omitempty"`
+	// Supported is false for a platform with no broadcast concept, which the
+	// composer shows differently from an error: Twitch is not broken, it
+	// simply has no DVR toggle.
+	Supported bool   `json:"supported"`
+	Error     string `json:"error,omitempty"`
+}
+
+// handleBroadcastWindow answers "what can still be changed" BEFORE the operator
+// edits anything.
+//
+// This is the whole point of the disable-when-locked design: YouTube freezes
+// the contentDetails toggles once a broadcast leaves created/ready, and an
+// operator who only discovers that from a 403 discovers it mid-broadcast.
+//
+// It is deliberately NOT on any hot path. Each row is a live API call, so this
+// is fetched when the composer opens rather than polled, and a failure here
+// disables nothing -- the write still happens and the 403 is still the
+// authority.
+func (s *Server) handleBroadcastWindow(w http.ResponseWriter, r *http.Request) {
+	targets, err := s.metadataTargets()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	rows := make([]broadcastWindowRow, 0, len(targets))
+	for _, t := range targets {
+		row := broadcastWindowRow{
+			AccountID:   t.AccountID,
+			Platform:    t.Platform,
+			AccountName: t.AccountName,
+		}
+		pusher, ok := oauth.MetadataFor(t.Platform)
+		if !ok {
+			rows = append(rows, row)
+			continue
+		}
+		wr, ok := pusher.(broadcastWindower)
+		if !ok {
+			// Not an error. This platform has no broadcast resource.
+			rows = append(rows, row)
+			continue
+		}
+		row.Supported = true
+
+		ctx, cancel := context.WithTimeout(r.Context(), metadataPushTimeout)
+		acct, err := s.tokenFor(ctx, t.AccountID)
+		if err != nil {
+			row.Error = err.Error()
+			cancel()
+			rows = append(rows, row)
+			continue
+		}
+		win, err := wr.BroadcastWindow(ctx, acct.AccessToken)
+		cancel()
+		if err != nil {
+			// A channel with no upcoming broadcast lands here, which is an
+			// ordinary state rather than a fault: the operator has not
+			// scheduled one yet.
+			row.Error = err.Error()
+			rows = append(rows, row)
+			continue
+		}
+		row.Window = win
+		rows = append(rows, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": rows})
 }
 
 func (s *Server) handleMetadataJob(w http.ResponseWriter, r *http.Request) {
@@ -345,13 +440,13 @@ func fieldList(fields []oauth.MetadataField) string {
 // runMetadataPush pushes to every target concurrently. Concurrency is the
 // whole point: two platforms that each take fifteen seconds should cost
 // fifteen seconds, and a wedged one must not delay the report for a healthy one.
-func (s *Server) runMetadataPush(jobID string, meta oauth.Metadata, targets []metadataTarget) {
+func (s *Server) runMetadataPush(jobID string, meta oauth.Metadata, bc oauth.BroadcastSettings, targets []metadataTarget) {
 	var wg sync.WaitGroup
 	for i, t := range targets {
 		wg.Add(1)
 		go func(i int, t metadataTarget) {
 			defer wg.Done()
-			out := s.pushOne(meta, t)
+			out := s.pushOne(meta, bc, t)
 			now := time.Now()
 			out.FinishedAt = &now
 			metadataRegistry.with(jobID, func(j *metadataJob) { j.Results[i] = out })
@@ -366,9 +461,20 @@ func (s *Server) runMetadataPush(jobID string, meta oauth.Metadata, targets []me
 	})
 }
 
+// broadcastPusher is the optional half of a metadata provider: the settings
+// that live on a broadcast rather than on a channel.
+//
+// Optional on purpose. Only YouTube has a broadcast resource with a scheduled
+// start, a DVR flag and an editing window; putting these on the shared
+// MetadataPusher interface would force Twitch and Kick to carry stubs whose
+// only behaviour is to refuse.
+type broadcastPusher interface {
+	PushBroadcastSettings(ctx context.Context, clientID, accessToken string, s oauth.BroadcastSettings) (*oauth.MetadataResult, error)
+}
+
 // pushOne is one account's whole story: refresh the token, call the platform,
 // and turn whatever came back into a row a human can act on.
-func (s *Server) pushOne(meta oauth.Metadata, t metadataTarget) metadataOutcome {
+func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t metadataTarget) metadataOutcome {
 	out := metadataOutcome{
 		AccountID:   t.AccountID,
 		Platform:    t.Platform,
@@ -406,12 +512,53 @@ func (s *Server) pushOne(meta oauth.Metadata, t metadataTarget) metadataOutcome 
 		return out
 	}
 
-	res, err := pusher.PushMetadata(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, meta)
-	if err != nil {
-		out.State = metaError
-		out.Message = err.Error()
-		s.log.Warn("metadata push failed", "platform", t.Platform, "account", t.AccountName, "err", err)
-		return out
+	// A broadcast-only push skips this entirely rather than sending an empty
+	// Metadata. PushMetadata on an empty block would either write nothing or,
+	// worse on a destructive-by-part API, blank the fields it was handed
+	// nothing for.
+	res := &oauth.MetadataResult{}
+	if !meta.Empty() {
+		var err error
+		res, err = pusher.PushMetadata(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, meta)
+		if err != nil {
+			out.State = metaError
+			out.Message = err.Error()
+			s.log.Warn("metadata push failed", "platform", t.Platform, "account", t.AccountName, "err", err)
+			return out
+		}
+	}
+
+	// The broadcast settings, where the platform has them. YouTube is the only
+	// one today; Twitch has no equivalent and Kick's entire surface is three
+	// fields. A type assertion rather than a method on the shared interface,
+	// so a platform that never grows these does not carry a stub that returns
+	// "unsupported" for every operator who tries.
+	if !bc.Empty() {
+		if bp, ok := pusher.(broadcastPusher); ok {
+			bres, err := bp.PushBroadcastSettings(ctx, creds.ClientID, acct.AccessToken, bc)
+			switch {
+			case err != nil:
+				// Reported, not fatal. The metadata write above may already
+				// have landed, and failing the whole row would send the
+				// operator back to redo work that took.
+				out.Warnings = append(out.Warnings, err.Error())
+				out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{oauth.FieldContentDetails})
+			case bres != nil:
+				res.Applied = append(res.Applied, bres.Applied...)
+				res.Skipped = append(res.Skipped, bres.Skipped...)
+				res.Warnings = append(res.Warnings, bres.Warnings...)
+				if res.Target == "" {
+					res.Target = bres.Target
+				}
+			}
+		} else {
+			// Named rather than silently dropped: an operator who set a DVR
+			// toggle and saw nothing happen on Twitch deserves to know the
+			// platform has no such thing.
+			out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{
+				oauth.FieldScheduledStart, oauth.FieldContentDetails, oauth.FieldTags,
+			})
+		}
 	}
 
 	out.Applied = res.Applied

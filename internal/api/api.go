@@ -377,6 +377,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/metadata", s.handleMetadataOverview)
 			r.Post("/metadata/push", s.handlePushMetadata)
 			r.Get("/metadata/push/{id}", s.handleMetadataJob)
+			// What is still editable on each account's current broadcast.
+			// Fetched when the composer opens, never polled -- every row is a
+			// live platform call.
+			r.Get("/metadata/broadcast-window", s.handleBroadcastWindow)
 
 			// Unified chat. Live messages arrive on the WebSocket, not here;
 			// these four are the scrollback a freshly opened pane needs plus
