@@ -26,6 +26,7 @@ claim is often more instructive than the right one.
 | **7** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | ready | Largest, riskiest, and the one that puts the audio differentiator in play |
 | **8** | [WebRTC — WHEP](WEBRTC.md) | **8–12 d** | **deferred** | The sub-second preview tier. Independent of everything else; slots in whenever latency becomes the priority |
 | **9** | [Teams and roles](TEAMS-AND-ROLES.md) | **20–30 d** | ready | A security boundary retrofitted across ~120 routes. Do it when it is the priority, not alongside other work |
+| **10** | [Destination settings & metadata](DESTINATION-SETTINGS.md) | **14–19 d** in 4 parts | ready | Three metadata fields against a documented ten-plus, two of which are compliance items. Starts with a **0.5-day** fix that removes a documented limitation |
 
 [WHIP](WEBRTC.md#whip-design) ingest is a separate decision, deliberately not
 given a number: it carries one audio track, so it has RTMP's exact limitation
