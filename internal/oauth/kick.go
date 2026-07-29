@@ -88,6 +88,13 @@ func (k *Kick) Scopes() []string {
 		"chat:write",                     // send chat as the user or a bot
 		"moderation:chat_message:manage", // delete a message from the unified chat
 		"events:subscribe",               // webhooks for chat and livestream state
+		// The stream key. NOT covered by channel:read, which is what made this
+		// look impossible for so long: the key rides as stream.key on the very
+		// same GET /public/v1/channels response that channel:read already
+		// fetches, but the field is omitted unless this scope was granted too.
+		// There is no /streamkey endpoint to find, so reading the endpoint list
+		// suggests the capability does not exist.
+		"streamkey:read",
 	}
 }
 
@@ -165,6 +172,11 @@ type kickChannel struct {
 		ViewerCount int    `json:"viewer_count"`
 		StartTime   string `json:"start_time"`
 		Language    string `json:"language"`
+		// The ingest pair, present only when the token carries streamkey:read.
+		// Absent — not empty-and-present — for a token granted before that
+		// scope was requested, which is what Ingest distinguishes on.
+		URL string `json:"url"`
+		Key string `json:"key"`
 	} `json:"stream"`
 }
 
@@ -203,17 +215,53 @@ func (k *Kick) Account(ctx context.Context, clientID, accessToken string) (*Acco
 // follows it. It carries no URL on purpose: an ingest hostname invented to make
 // the message look complete is exactly the failure this provider exists to
 // avoid, and the Kick preset already links the dashboard.
+// ManualKeyReason is no longer the normal path. Kick DOES expose the key, on
+// the channels resource, behind the streamkey:read scope — see Ingest. This is
+// what an operator sees when their token predates that scope, which is the one
+// case left where the key really cannot be fetched.
 func (k *Kick) ManualKeyReason() string {
-	return "Kick's public API does not expose a stream key — it is absent from the channels, " +
-		"livestreams and users resources alike, so there is nothing for polyemesis to fetch. " +
-		"Open your Kick creator dashboard, go to Settings → Stream, and paste the stream URL and " +
-		"key into this destination. Connecting the account is still worth doing: it pushes your " +
-		"title and category, resolves categories by name, and reports viewer counts."
+	return "This Kick account was connected before polyemesis asked for the stream-key " +
+		"scope, and granting a scope never upgrades a token that has already been issued. " +
+		"Disconnect the account and connect it again — once, and the key is fetched " +
+		"automatically from then on. Until then, paste the stream URL and key from your " +
+		"Kick dashboard under Settings → Stream."
 }
 
-// Ingest always fails, and says why in a way the operator can act on.
+// Ingest reads the channel's stream URL and key.
+//
+// This used to return ErrNoStreamKeyAPI unconditionally, and the reasoning
+// recorded for that was wrong in an instructive way. Kick publishes no
+// /streamkey endpoint, so an endpoint-by-endpoint reading of the API finds
+// nothing and concludes the capability is absent. The key is actually a field
+// on the channels resource we were ALREADY fetching for identity and live
+// state -- withheld unless the token also carries streamkey:read, which the
+// Get Channels page does not list under its required scopes.
+//
+// So the field was invisible twice over: absent from the endpoint list, and
+// absent from the response we were looking at.
 func (k *Kick) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
-	return nil, fmt.Errorf("%w. %s", ErrNoStreamKeyAPI, k.ManualKeyReason())
+	c, err := k.channel(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	if c.Stream.Key == "" {
+		// Almost always a token minted before streamkey:read was requested.
+		// Granting a scope never upgrades a token already issued, so the only
+		// fix is a reconnect -- and saying that is the whole value of this
+		// branch, because the symptom otherwise looks like Kick being broken.
+		return nil, fmt.Errorf("%w. %s", ErrNoStreamKeyAPI, k.ManualKeyReason())
+	}
+	if c.Stream.URL == "" {
+		// Deliberately NOT defaulted to a hardcoded ingest host. Kick fronts
+		// its ingest with a CDN and the host has changed before; a stale
+		// constant here would publish to nowhere and look like a polyemesis
+		// bug. Returning the key we did read, and asking for the URL, is the
+		// honest failure.
+		return nil, fmt.Errorf("Kick returned a stream key but no ingest URL. "+
+			"Copy the Stream URL from your Kick dashboard (Settings %s Stream) "+
+			"into this destination; the key has been filled in for you", "→")
+	}
+	return &Ingest{URL: c.Stream.URL, Key: c.Stream.Key}, nil
 }
 
 // ---------------------------------------------------------------- categories

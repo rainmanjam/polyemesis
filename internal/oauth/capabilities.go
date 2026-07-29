@@ -254,7 +254,7 @@ var platformCapabilities = []PlatformCapability{
 		HelpURL:   "https://kick.com/dashboard/settings/stream",
 		Caps: map[Capability]Support{
 			CapSSO:         SupportYes,
-			CapStreamKey:   SupportManual,
+			CapStreamKey:   SupportYes,
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportYes,
@@ -263,7 +263,13 @@ var platformCapabilities = []PlatformCapability{
 		},
 		Reasons: map[Capability]string{
 			CapSSO:       "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
-			CapStreamKey: "Checked against Kick's published Channels, Livestreams and Users endpoints — none of them return a stream key. This is a documented absence, not a missing feature on our side, and it does not hold back anything else.",
+			CapStreamKey: "Fetched from the channels resource, over the streamkey:read scope. " +
+				"This was recorded here as impossible for a long time, and the reasoning is worth keeping: " +
+				"Kick publishes no /streamkey endpoint, so reading the endpoint list finds nothing — " +
+				"the key rides as stream.key on the same channels response we already fetch, and is " +
+				"withheld unless streamkey:read was granted, which the Get Channels page does not list " +
+				"among its required scopes. An account connected before that scope was requested must be " +
+				"reconnected once.",
 			CapMetadata:  "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
 			CapChatRead:  "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
 			CapModeration: "Delete a message, over moderation:chat_message:manage. Banning and timing out are not " +

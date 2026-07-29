@@ -31,7 +31,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **YouTube Live** | Works | Works | Works | Works | Works | Unverified | Unverified |
 | **Twitch** | Works | Works | Works | Works | Works | Unverified | Unverified |
 | **Facebook Live** | Works | Works | Works | Works | Unverified | Unverified | Unverified |
-| **Kick** | Works | **By hand** | Works | Works | Works | Works | Works |
+| **Kick** | Works | Works | Works | Works | Works | Works | Works |
 | **X (Twitter)** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
 | **Rumble** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
@@ -63,13 +63,20 @@ measured in days. Start it before you need it. Facebook also issues a fresh
 ingest and key per broadcast, so connecting the account is what creates the
 broadcast — there is no permanent key to reuse.
 
-**Kick — sign in *and* paste a key.** This is the mixed case, and both halves
-are real at once. Kick's OAuth 2.1 flow (PKCE, which Kick requires) gets you
-chat both ways, deleting a chat message, title and category push, and viewer
-counts. It does not get you a stream key: none of Kick's published Channels,
-Livestreams or Users endpoints return one. That is a documented absence rather
-than something missing on our side, and it holds nothing else back. Connect the
-account, then paste the ingest URL and key from **Kick → Settings → Stream**.
+**Kick — fully automated, and it took a correction to get there.** Kick's
+OAuth 2.1 flow (PKCE, which Kick requires) gets you chat both ways, deleting a
+chat message, title and category push, viewer counts — **and the stream key**.
+
+This page said for a long time that the key was unfetchable, and the reasoning
+was understandable but wrong. Kick publishes no `/streamkey` endpoint, so
+reading the endpoint list finds nothing. The key is a field —
+`stream.key` — on the **channels resource polyemesis already fetches** for
+identity and live state, withheld unless the token carries the `streamkey:read`
+scope, which Kick's own Get Channels page does not list among its required
+scopes. Invisible twice over.
+
+**An account connected before this landed must be disconnected and reconnected
+once.** Granting a scope never upgrades a token that has already been issued.
 
 **X (Twitter) — paste your key, there is no API.** X's developer platform covers
 posts, users, media and the post firehose. "Streaming" in its documentation
@@ -173,16 +180,15 @@ once, and neither is a workaround for the other.
 3. Paste the client ID and secret into polyemesis, then **Connect account**.
    Kick speaks OAuth 2.1, so polyemesis sends a PKCE challenge automatically —
    it is the first provider here that does.
-4. Open **Kick → Settings → Stream** and paste the Stream URL and Stream Key
-   into your Kick destination. polyemesis cannot fetch these: the key is absent
-   from Kick's published Channels, Livestreams and Users endpoints alike.
+4. Nothing to paste. The ingest URL and stream key are fetched for you over
+   the `streamkey:read` scope.
 
 Connecting is worth doing anyway — it pushes your title and category (resolving
 categories by name rather than by numeric id), carries chat both ways, and
 reports viewer counts.
 
 Scopes requested: `user:read`, `channel:read`, `channel:write`, `chat:write`,
-`moderation:chat_message:manage`, `events:subscribe`. `moderation:ban` is
+`moderation:chat_message:manage`, `events:subscribe`, `streamkey:read`. `moderation:ban` is
 deliberately not requested: nothing in polyemesis bans or times out a viewer.
 
 Kick delivers chat over a webhook rather than a socket, so the chat pane needs a
