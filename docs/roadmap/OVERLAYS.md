@@ -1,8 +1,38 @@
 # Overlays: text, logo, watermark, channel name
 
-**Status: DEFERRED (2026-07-28).** Not scheduled. The research below is complete
-and current; it is parked rather than abandoned, so picking it up later does not
-mean redoing it.
+> **Status: v0.5 SHIPPED — image watermarks only.** One still per rendition,
+> percentage geometry, nine anchors, opacity. Operator page:
+> [../RENDITIONS.md](../RENDITIONS.md#watermarks).
+>
+> **Not built, and still designed below:** text, clock, externally-fed data,
+> multiple overlays per rendition, the one-frame preview endpoint, the embedded
+> font, and the `drawtext` filter probe. The v1 estimate for the remainder is
+> the ~16 days below minus the ~6 spent.
+>
+> **Three things building it changed.**
+>
+> 1. **`scale2ref` is deprecated in FFmpeg 8.1.2** and warns on every start. Its
+>    documented replacement -- a two-input `scale=rw:rh` -- works, but the
+>    reference input has to come from a `split` of the main chain, costing a
+>    frame copy per frame. So the image width is computed in Go instead, which
+>    means **a watermarked rendition needs an explicit width and height**. That
+>    is a real restriction the design did not anticipate, and it is enforced at
+>    validation time rather than discovered as a stream with no logo.
+> 2. **Columns, not tables.** The design argues for `overlays` +
+>    `rendition_overlays` because the full feature has several overlays per
+>    rendition and reuses rows across renditions. v0.5 has neither, and a join
+>    table for a strictly 1:1 relationship is structure with nothing in it.
+>    Growing to the table later is a six-column data migration.
+> 3. **`r.Deinterlace` was missing from `renditionSig`** -- found while adding
+>    the overlay to it. Changing a rendition's deinterlace mode was stored,
+>    shown in the UI, and never reached the running encoder. Dates from the
+>    item-0 work; fixed here.
+>
+> The hardware-encoder finding held exactly as written: the overlay is an
+> ordinary software stage appended before VAAPI's one-way `format=nv12,hwupload`
+> tail, and nothing changed for the other four encoder families.
+
+**Status: DEFERRED (2026-07-28).** Superseded by the note above.
 
 **Evidence:** the most-repeated unmet request on the competitor's tracker —
 asked **five separate times** (6+5+4+2+1 reactions across distinct issues), every
