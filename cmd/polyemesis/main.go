@@ -142,6 +142,16 @@ func run(h *hooks) error {
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
+	// Text overlays need a font FILE, and the image polyemesis ships has no
+	// system fonts at all -- fontconfig is installed and finds nothing. The
+	// embedded copies are written out here so drawtext has a real path to open.
+	//
+	// Every startup, not just the first: it keeps the built-ins in step with
+	// the binary across an upgrade, and repairs one that was truncated. An
+	// operator's own fonts in the same directory are left alone.
+	if err := ffmpeg.EnsureFonts(cfg.FontsDir()); err != nil {
+		return err
+	}
 
 	// FFmpeg is checked before anything else is opened: a missing or too-old
 	// binary is a hard, immediately actionable failure and there is no point

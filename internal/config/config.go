@@ -381,6 +381,16 @@ func (c Config) ModelsDir() string { return filepath.Join(c.DataDir, "models", "
 // TestPlayoutDirMatchesThePlayoutPackage pins the two against each other.
 func (c Config) PlayoutDir() string { return filepath.Join(c.DataDir, "playout") }
 
+// FontsDir holds the fonts text overlays draw with: the two polyemesis embeds
+// and writes at startup, and any the operator drops in beside them.
+//
+// One directory for both, so there is a single resolution rule and the picker
+// is just a listing. Spelled out rather than calling ffmpeg.FontsDirName for
+// the reason PlayoutDir gives -- config is a leaf package, and importing ffmpeg
+// would drag its dependencies in behind it. TestFontsDirMatchesTheFfmpegPackage
+// pins the two against each other.
+func (c Config) FontsDir() string { return filepath.Join(c.DataDir, "fonts") }
+
 // TLS material lives under DataDir so the one directory operators are told to
 // back up carries everything the server cannot cheaply regenerate — an ACME
 // cache that survives a redeploy is what keeps Let's Encrypt rate limits from
@@ -410,6 +420,9 @@ func (c Config) EnsureDirs() error {
 		{c.RecordingsDir(), 0o755},
 		{c.HLSDir(), 0o755},
 		{c.PlayoutDir(), 0o755},
+		// 0755, not private: these are public typefaces, and the operator has
+		// to be able to drop their own in without fighting permissions.
+		{c.FontsDir(), 0o755},
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d.path, d.perm); err != nil {
