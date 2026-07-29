@@ -2280,12 +2280,30 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	subName := fmt.Sprintf("rendition:%d", row.ID)
 	in := upstream.Subscribe(subName, port)
 	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
+	// An FFmpeg with no drawtext filter must not be handed one.
+	//
+	// This is not a cosmetic guard. Found by running the renditions acceptance
+	// suite against a Homebrew FFmpeg built without libfreetype: the graph is
+	// rejected with "No such filter: 'drawtext'", the encode dies, the
+	// supervisor restarts it, and it dies again. The whole rendition is off
+	// air -- along with every destination feeding from it -- because somebody
+	// asked for a caption.
+	//
+	// Dropping the text keeps the picture up. The same choice the unresolvable
+	// font makes below, and for the same reason: a missing caption is a
+	// disappointment, a missing stream is an outage.
+	if rspec.Text != nil && !e.tools.HasFilter("drawtext") {
+		rspec.Text = nil
+		e.log.Warn("this FFmpeg has no drawtext filter, so no text is drawn; "+
+			"the rendition runs without it rather than failing to start",
+			"rendition", row.ID)
+	}
 	// Configured text that produced no spec means the font could not be
 	// resolved. Validation refuses a bad name at save time, so this is a font
 	// removed from under a running install. Said out loud, because the operator
 	// otherwise sees a stream that starts fine and simply has no caption --
 	// which is the failure mode this whole feature keeps trying to avoid.
-	if row.Text.Active() && rspec.Text == nil {
+	if row.Text.Active() && rspec.Text == nil && e.tools.HasFilter("drawtext") {
 		e.log.Warn("rendition text has no usable font, so no text is drawn",
 			"rendition", row.ID, "font", row.Text.Font)
 	}

@@ -114,6 +114,63 @@ check_video "$OUT/passthrough.mkv"  "passthrough"  1920 1080 60
 check_video "$OUT/rendition-a.mkv"  "720p30 dest A" 1280 720 30
 check_video "$OUT/rendition-b.mkv"  "720p30 dest B" 1280 720 30
 
+step "3b. Verify burned-in text actually reached the pixels"
+
+# Measured, not asserted. drawtext that renders nothing EXITS 0 -- proven
+# earlier by removing expansion=none, where "100% LIVE" drew zero pixels and
+# FFmpeg reported success -- so nothing about the process's exit status or the
+# stored settings can tell you whether the caption is on screen.
+#
+# The rendition draws a WHITE box at full opacity across the top-left 12% of
+# the frame. testsrc2 puts a colour-bar field there, so a crop of that corner
+# is bright ONLY if the box rendered.
+mean_luma() { # mean_luma <file> <crop>
+  ffmpeg -v error -i "$1" -vf "crop=$2,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG" \
+    -frames:v 1 -f null - 2>&1 | awk -F= '/YAVG/{print int($NF)}' | tail -1
+}
+
+if [ "${TEXT_SUPPORTED:-no}" != "yes" ]; then
+  # Reported rather than silently skipped, and NOT counted as a pass: an
+  # FFmpeg without libfreetype has no drawtext filter at all, and a green run
+  # that quietly checked nothing is the outcome this suite exists to prevent.
+  printf "  \033[33m--\033[0m text: this FFmpeg has no drawtext filter, so the pixel check cannot run\n"
+else
+  [ "${TEXT_CONTENT_STORED:-}" = "POLYEMESIS" ] \
+    && ok "text round-tripped through the store" \
+    || bad "text content came back as '${TEXT_CONTENT_STORED:-}'"
+  [ "${TEXT_BOX_STORED:-no}" = "yes" ] \
+    && ok "the text box flag survived the store" \
+    || bad "the box flag came back as '${TEXT_BOX_STORED:-}'"
+  [ "${FONT_COUNT:-0}" -ge 2 ] \
+    && ok "the fonts endpoint lists ${FONT_COUNT} fonts on disk" \
+    || bad "the fonts endpoint listed ${FONT_COUNT:-0} fonts; the embedded ones were not written out"
+
+  # Top-left 20% x 15%, comfortably inside a box drawn at 12% of height.
+  TEXT_LUMA=$(mean_luma "$OUT/rendition-a.mkv" "iw*0.2:ih*0.15:0:0")
+  BASE_LUMA=$(mean_luma "$OUT/passthrough.mkv" "iw*0.2:ih*0.15:0:0")
+  if [ -n "$TEXT_LUMA" ] && [ "$TEXT_LUMA" -ge 170 ]; then
+    ok "the text box is on screen (top-left luma ${TEXT_LUMA}, passthrough ${BASE_LUMA:-?})"
+  else
+    bad "top-left luma is ${TEXT_LUMA:-?} against a passthrough ${BASE_LUMA:-?}; the caption did not render"
+  fi
+  # The control. Without it a source that happened to be white everywhere
+  # would pass the check above while proving nothing.
+  if [ -n "$BASE_LUMA" ] && [ -n "$TEXT_LUMA" ] && [ "$TEXT_LUMA" -gt "$BASE_LUMA" ]; then
+    ok "the same corner is darker without the overlay (${BASE_LUMA} vs ${TEXT_LUMA})"
+  else
+    bad "passthrough luma ${BASE_LUMA:-?} is not below the rendition's ${TEXT_LUMA:-?}, so the measurement proves nothing"
+  fi
+
+  # The passthrough must be UNTOUCHED. Text lives on a rendition; a
+  # destination doing -c:v copy has no mechanism by which a copied bitstream
+  # acquires a caption, and if it ever did the product's central promise
+  # would be broken.
+  ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
+    -of default=nw=1:nk=1 "$OUT/passthrough.mkv" >/dev/null 2>&1 \
+    && ok "the passthrough destination still decodes as video" \
+    || bad "the passthrough output is unreadable"
+fi
+
 step "4. Verify audio routing survived the shared video encode"
 
 band() {  # band <file> <freq>  -> RMS dBFS in a narrow band

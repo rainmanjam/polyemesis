@@ -99,6 +99,19 @@ func main() {
 	}
 
 	fmt.Println("creating the 720p30 rendition")
+	// Burned-in text rides along on this rendition.
+	//
+	// A WHITE BOX at full opacity, top-left, 12% of the frame height. That
+	// shape is chosen to be measurable rather than to be pretty: the shell
+	// crops exactly that corner and asserts its mean luma is near white.
+	// testsrc2 puts a mid-grey/colour-bar field there, so a crop that comes
+	// back bright can only be the box -- and a drawtext that silently rendered
+	// nothing (the failure mode that exits 0) leaves it dark.
+	//
+	// No font is named, so this also exercises the built-in default and the
+	// path that materialises it into <data>/fonts at startup. On a build with
+	// no drawtext filter the server refuses nothing and simply draws nothing,
+	// which is why the shell reports whether the filter exists before judging.
 	created := call("POST", "/renditions", map[string]any{
 		"name":         "720p30",
 		"width":        1280,
@@ -108,9 +121,31 @@ func main() {
 		"encoder":      "libx264",
 		"preset":       "veryfast",
 		"gopSeconds":   2,
+		"text": map[string]any{
+			"content":    "POLYEMESIS",
+			"anchor":     "top-left",
+			"sizePct":    0.12,
+			"color":      "black",
+			"marginXPct": 0.0,
+			"marginYPct": 0.0,
+			"box":        true,
+			"boxColor":   "white",
+			"boxOpacity": 1.0,
+		},
 	})
 	rid := int64(created["rendition"].(map[string]any)["id"].(float64))
 	facts["RENDITION_ID"] = strconv.FormatInt(rid, 10)
+	// Read back rather than trusting the POST: a field that round-trips to ""
+	// is a column the store dropped, and the pixel check further down would
+	// then fail for a reason nobody could locate.
+	txt := mapOf(created["rendition"].(map[string]any)["text"])
+	facts["TEXT_CONTENT_STORED"] = str(txt["content"])
+	facts["TEXT_BOX_STORED"] = boolStr(txt["box"] == true)
+	fonts := get("/fonts")
+	facts["TEXT_SUPPORTED"] = boolStr(fonts["textSupported"] == true)
+	facts["DEFAULT_FONT"] = str(fonts["defaultFont"])
+	nf, _ := fonts["fonts"].([]any)
+	facts["FONT_COUNT"] = strconv.Itoa(len(nf))
 	fmt.Printf("  rendition %d created\n", rid)
 
 	// A brand-new rendition nothing selects must not be burning CPU.
