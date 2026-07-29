@@ -376,6 +376,21 @@ done < compat.txt
 
 # ------------------------------------------------------------------ summary
 step "Summary"
+total=$((pass + fail))
 printf "  %d passed, %d failed\n\n" "$pass" "$fail"
+
+# Fixed-value guard, which this suite did not have and needed.
+#
+# The stem checks live behind `find`: when no file matches a role, the three
+# name checks FAIL and the nine check_stem measurements below them never run at
+# all, because check_stem returns early on an empty filename. CI reported
+# "23 passed, 3 failed" and looked like three ordinary failures -- nine checks
+# had silently not happened, and nothing said so.
+EXPECTED_CHECKS=35
+if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
+  printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran; the rest never executed.\n\n" \
+    "$total" "$EXPECTED_CHECKS"
+  exit 1
+fi
 [ "$fail" -eq 0 ] || exit 1
 echo "  AUDIO ACCEPTANCE PASSED"

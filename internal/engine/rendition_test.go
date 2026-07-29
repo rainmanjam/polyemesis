@@ -9,6 +9,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -488,4 +489,69 @@ func TestZeroOpacityIsTreatedAsOpaque(t *testing.T) {
 	if spec == nil || spec.Opacity != 1 {
 		t.Errorf("Opacity = %v, want 1", spec.Opacity)
 	}
+}
+
+// The acceptance-audio flake, pinned.
+//
+// Until the ingest is probed, e.source is routing.DefaultSource() -- six
+// placeholder tracks that exist so the routing editor has something to render.
+// Planning stems from it makes the recorder ask FFmpeg to map audio streams
+// that do not exist, and FFmpeg treats that as fatal rather than skipping them:
+//
+//	Stream map '0:a:3' matches no streams.
+//
+// The recorder then crash-loops until a later reconcile replaces the plan.
+func TestStemsAreNotPlannedBeforeTheIngestIsProbed(t *testing.T) {
+	rec := db.RecordingSettings{Enabled: true, Stems: true, StemCodec: ffmpeg.StemFLAC}
+
+	if plan := stemPlanFor(rec, routing.DefaultSource(), false); len(plan) != 0 {
+		t.Errorf("planned %d stems from the UNPROBED placeholder layout: %v. "+
+			"Every one of those becomes a -map for a stream that may not exist, "+
+			"and FFmpeg refuses to start rather than skipping it.", len(plan), plan)
+	}
+
+	// The positive case. Without it this would be satisfied by never planning
+	// stems at all, which would remove the feature rather than fix the bug.
+	probedSrc := routing.Source{Tracks: []routing.Track{
+		{Index: 0, Channels: 2, Codec: "aac", Layout: "stereo"},
+		{Index: 1, Channels: 2, Codec: "aac", Layout: "stereo"},
+		{Index: 2, Channels: 2, Codec: "aac", Layout: "stereo"},
+	}}
+	plan := stemPlanFor(rec, probedSrc, true)
+	if len(plan) != 3 {
+		t.Fatalf("planned %d stems for a probed 3-track ingest, want 3", len(plan))
+	}
+	for _, st := range plan {
+		if st.Track < 0 || st.Track >= 3 {
+			t.Errorf("stem %q maps track %d, which the probed ingest does not have",
+				st.Name, st.Track)
+		}
+	}
+
+	// Stems switched off means no plan, probed or not.
+	off := rec
+	off.Stems = false
+	if plan := stemPlanFor(off, probedSrc, true); len(plan) != 0 {
+		t.Errorf("planned %d stems with stems disabled", len(plan))
+	}
+}
+
+// The reason the guard has to exist at all: the placeholder layout claims six
+// tracks, so a plan built from it references streams a normal ingest lacks.
+func TestTheUnprobedPlaceholderLayoutWouldMapTracksThatDoNotExist(t *testing.T) {
+	plan := recording.PlanStems(routing.DefaultSource(), ffmpeg.StemFLAC)
+	if len(plan) <= 3 {
+		t.Skipf("DefaultSource now yields %d tracks; the hazard this documents is gone", len(plan))
+	}
+	var beyond int
+	for _, st := range plan {
+		if st.Track >= 3 {
+			beyond++
+		}
+	}
+	if beyond == 0 {
+		t.Error("expected the placeholder layout to reference tracks beyond a typical ingest")
+	}
+	t.Logf("the placeholder layout plans %d stems, %d of them beyond a 3-track ingest",
+		len(plan), beyond)
 }

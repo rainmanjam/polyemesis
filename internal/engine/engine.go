@@ -929,12 +929,46 @@ func stemPlanSig(plan []recording.Stem) string {
 	return strings.Join(parts, ",")
 }
 
+// stemPlanFor decides which stems the recorder writes.
+//
+// The stem plan is derived from the probed track set and its roles, so all
+// three belong in the signature: renaming track 2 from "track2" to "mic"
+// has to move the file the next segment is written to.
+//
+// PROBED is the load-bearing word, and it was missing. Until the ingest has
+// been probed, e.source is routing.DefaultSource() -- six placeholder tracks
+// that exist so the routing editor has something to render, not a claim
+// about what is arriving. Planning stems from it asks FFmpeg to
+// `-map 0:a:3` on a three-track ingest, and FFmpeg treats a map that
+// matches no stream as fatal:
+//
+//	Stream map '0:a:3' matches no streams.
+//	Error parsing options for output file .../rec-%Y%m%d-%H%M%S-track4.flac
+//
+// The recorder then crash-loops until the probe lands and a later reconcile
+// replaces the plan. On a fast machine that is over in a second and leaves
+// nothing but a stray set of track-named stems; on a slow one it is a
+// restart storm whose outcome depends on what finishes first. That is the
+// acceptance-audio flake.
+//
+// The main recording is deliberately NOT gated on this. It maps `0:v` and
+// `0:a` wholesale, which is correct whatever arrives, and an operator who
+// switched recording on wants the programme captured from the first frame
+// -- waiting for a probe would lose the opening seconds for nothing.
+func stemPlanFor(rec db.RecordingSettings, src routing.Source, probed bool) []recording.Stem {
+	if !rec.Stems || !probed {
+		return nil
+	}
+	return recording.PlanStems(src, rec.StemCodec)
+}
+
 func (e *Engine) reconcileRecorder(s db.Settings) {
 	e.mu.RLock()
 	cur := e.recorder
 	// Read here rather than through e.Source(): that takes the same RLock, and
 	// this function holds it again further down.
 	src := e.source
+	probed := e.probed
 	e.mu.RUnlock()
 	src = e.annotate(src)
 
@@ -946,13 +980,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		}
 		return
 	}
-	// The stem plan is derived from the probed track set and its roles, so all
-	// three belong in the signature: renaming track 2 from "track2" to "mic"
-	// has to move the file the next segment is written to.
-	var plan []recording.Stem
-	if s.Recording.Stems {
-		plan = recording.PlanStems(src, s.Recording.StemCodec)
-	}
+	plan := stemPlanFor(s.Recording, src, probed)
 	sig := strconv.Itoa(s.Recording.SegmentSeconds) + "|" +
 		strconv.FormatBool(s.Recording.Stems) + "|" + string(s.Recording.StemCodec) + "|" +
 		stemPlanSig(plan)
@@ -1227,9 +1255,17 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	// The layout the meters will actually see, which is the synthetic one when
 	// the silence tier is running — a meter built from a zero-track probe would
 	// parse nothing while the destinations downstream carry a track.
-	src := e.effectiveSource()
+	//
+	// `known` is what stops a meter being built from the placeholder layout.
+	// The zero-track check below cannot catch that: DefaultSource() has SIX
+	// tracks, so an unprobed engine sails past it and compiles
+	// `[0:a:0]...[0:a:5]amerge=inputs=6` against a three-track ingest. FFmpeg
+	// reports "Stream specifier ':a:3' ... matches no streams" and exits, and
+	// the meters crash-loop until the probe lands -- burning CPU on the
+	// smallest machines, which are the ones least able to spare it.
+	src, known := e.effectiveSourceKnown()
 
-	if !s.Meters.Enabled || len(src.Tracks) == 0 {
+	if !s.Meters.Enabled || len(src.Tracks) == 0 || !known {
 		if cur != nil {
 			e.stopAux(&e.meters, "meters")
 		}

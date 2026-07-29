@@ -323,6 +323,37 @@ software stage appended before VAAPI's one-way `format=nv12,hwupload` tail.
 - Bash tool cwd persists between calls. `cd ui` then a repo-root command fails.
   Use absolute paths.
 
+## Reading CI results (cost several round trips to learn)
+
+- **`gh pr checks` renders `cancelled` as `fail`.** Every force-push kills
+  in-flight runs, so a rebased stack accumulates phantom failures that look
+  exactly like real ones. Distinguish them with the check-runs API, where
+  `cancelled` and `failure` are separate values:
+  `gh api repos/OWNER/REPO/commits/$SHA/check-runs --jq '.check_runs[] | select(.conclusion=="failure") | .name'`
+- **A skipped step is not a passing step.** The static-checks job runs
+  gofmt -> build -> vet -> test in sequence. gofmt failed, so `go build` never
+  ran and showed as `-`. Two separate defects were hidden this way, one behind
+  the other.
+- **SonarCloud scores "New Code" relative to EACH PR's OWN BASE.** The tip of a
+  stack can pass while the branch below it fails on identical code, because the
+  code is not "new" to the tip. A green tip says nothing about the stack.
+- **SonarCloud is advisory here** -- `main` is not protected, so it does not
+  block merge. Its current complaint is the shell rule "use `[[` instead of
+  `[`", which it files under *reliability*. The repo uses `[` uniformly (zero
+  `[[` in any acceptance script) and every use is quoted, so this was
+  deliberately NOT changed.
+- Annotation `message` fields are just a URL; the actual rule is in `title`.
+
+## Known flakes (pre-existing, not caused by the roadmap work)
+
+- **`acceptance-audio`**: stems occasionally land as `rec-...-track1.flac`
+  instead of `music.flac` -- the track annotations have not been applied when
+  the recorder starts, so it falls back to indices. Seen once in ~7 runs;
+  passes 3/3 locally with 35 checks. NOT diagnosed further, NOT fixed.
+- **`internal/relay` TestStatsReportsNoLossForACleanStream**: FIXED. The test
+  waited on rxPackets and asserted TSPackets; run() increments rxPackets
+  before measuring, so it raced the last datagram. `waitForTS` added.
+
 ## Verification commands
 
 ```sh
