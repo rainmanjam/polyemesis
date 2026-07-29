@@ -195,6 +195,21 @@ func run(h *hooks) error {
 	h.progress("starting the background job queue")
 	pp := startPostProd(ctx, log, cfg, store, eng, tools)
 
+	// Retained MQTT telemetry. Started unconditionally and inert until an
+	// operator switches it on: the runner watches the stored settings, so
+	// enabling it does not need a restart. Nothing in the streaming path can
+	// block on or fail because of a broker.
+	stopMQTT := startMQTT(ctx, log, store, box, eng, version)
+	defer func() {
+		// Its own bounded context, because this runs after ctx is cancelled and
+		// a clean `offline` is exactly what must still get out. Without it the
+		// instance sits on the broker reading `online` until the keep-alive
+		// times out.
+		shutdown, done := context.WithTimeout(context.Background(), 5*time.Second)
+		defer done()
+		stopMQTT(shutdown)
+	}()
+
 	// The unified chat fan-in. Built unconditionally: a Hub with nothing
 	// attached is the difference between "no platform is connected" and "this
 	// build has no chat", and the operator needs to be told which.

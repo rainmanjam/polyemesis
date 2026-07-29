@@ -32,11 +32,12 @@ Go toolchain: **1.26.5**.
 
 ## Direct Go dependencies
 
-Nine, deliberately. Each one earns its place below.
+Ten, deliberately. Each one earns its place below.
 
 | Module | Version | Used by |
 | --- | --- | --- |
 | `github.com/datarhei/gosrt` | v0.6.0 | `internal/srtserver` |
+| `github.com/eclipse/paho.golang` | v0.23.0 | `internal/mqtt` |
 | `github.com/go-chi/chi/v5` | v5.3.1 | `internal/api` |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | `internal/auth` |
 | `github.com/gorilla/websocket` | v1.5.3 | `internal/api` |
@@ -72,6 +73,35 @@ Pure Go, MIT, and `CGO_ENABLED=0` clean.
 > gosrt reaches `github.com/benburkert/openpgp` for AES key wrapping, and that
 > module ships no LICENSE file despite every source file carrying the Go
 > Authors' BSD header.
+
+### `github.com/eclipse/paho.golang` — the second protocol dependency
+
+Added for [retained MQTT telemetry](MQTT.md), and it clears the bar gosrt set
+more easily than gosrt did: **FFmpeg does not speak MQTT at all**, so there was
+no "does the tool we already ship cover this" question to answer.
+
+The measured cost is the smallest of any dependency here. Its build graph is
+three modules — itself, `gorilla/websocket` and `golang.org/x/net` — and
+polyemesis already had both of the latter as direct dependencies. **Net-new
+modules: exactly one.** Binary cost, measured against a paired build rather than
+quoted: **+586 KB on 25.4 MB (+2.4%)**.
+
+Pure Go, EPL-2.0/BSD dual, and `CGO_ENABLED=0` clean on all four shipping
+targets.
+
+Two things an operator has to know, both consequences of the library rather than
+of our code:
+
+- **It implements MQTT 5.0 only.** Its own README says so. A broker pinned to
+  3.1.1 will not complete a connection — not a degraded mode, a failure to
+  connect.
+- **`autopaho`'s `Queue: nil` is silently replaced with an in-memory queue**
+  (`auto.go:271`), contradicting the field's own comment. It is harmless here
+  because `Publish` never touches the queue, but anyone reaching for
+  `PublishViaQueue` needs to know the default is not "no buffering".
+
+`paho.mqtt.golang` — the older sibling — was not taken: it is in maintenance
+mode and speaks 3.1.1, which is the wrong direction for a new integration.
 
 ### `modernc.org/sqlite` — and why not `mattn/go-sqlite3`
 

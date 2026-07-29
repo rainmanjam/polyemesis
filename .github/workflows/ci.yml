@@ -192,6 +192,10 @@ jobs:
           - acceptance-synth    # silence tier and the failover slate
           - acceptance-failover # switch without restarting a destination
           - acceptance-postprod
+          # Retained MQTT telemetry. Brings up eclipse-mosquitto as a container
+          # rather than installing a broker on the runner, so it needs no
+          # apt step of its own -- Docker is already present on ubuntu-latest.
+          - acceptance-mqtt
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
