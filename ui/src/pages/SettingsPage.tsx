@@ -1515,8 +1515,27 @@ function PlatformCredCard({
                     className="flex items-center justify-between rounded border border-border bg-background px-2 py-1.5"
                   >
                     <div className="min-w-0">
-                      <div className="truncate text-[12px]">{a.accountName}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-[12px]">{a.accountName}</span>
+                        {a.reconnect?.needed && (
+                          <Badge variant="outline" className="border-amber-500 text-[9px] text-amber-600 dark:text-amber-500">
+                            reconnect needed
+                          </Badge>
+                        )}
+                      </div>
                       <div className="font-mono text-[10px] text-muted-foreground">{a.accountRef}</div>
+                      {/* Said in full rather than as a bare badge. "Reconnect"
+                          with no reason reads as a fault the operator caused;
+                          the point is that a token cannot gain a permission it
+                          was not issued with, which is nobody's mistake. */}
+                      {a.reconnect?.needed && (
+                        <div className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-500">
+                          {a.reconnect.reason}
+                          {a.reconnect.missing && a.reconnect.missing.length > 0 && (
+                            <> Missing: <code>{a.reconnect.missing.join(", ")}</code></>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <Button
                       variant="ghost"

@@ -157,6 +157,10 @@ CREATE TABLE IF NOT EXISTS platform_accounts (
     refresh_token_enc BLOB,
     expires_at        INTEGER NOT NULL DEFAULT 0,
     scopes            TEXT    NOT NULL DEFAULT '',
+    -- The provider's ScopeVersion when this account was connected. Compared
+    -- against the provider's current version to spot a token issued before a
+    -- scope was added; 0 means the row predates the column.
+    scope_ver         INTEGER NOT NULL DEFAULT 0,
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     UNIQUE (platform, account_ref)

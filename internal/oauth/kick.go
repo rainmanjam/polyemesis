@@ -101,6 +101,12 @@ func (k *Kick) Scopes() []string {
 // PKCE is on, and unlike the other providers it is not optional: Kick's
 // authorization server speaks OAuth 2.1, which folds RFC 7636 into the
 // authorization-code grant itself. An exchange without a verifier is refused.
+// ScopeVersion 1 includes streamkey:read, which was added after the first
+// release and is exactly the case this mechanism exists for: an account
+// connected before it landed holds a token without the scope, and the stream
+// key silently never arrives.
+func (k *Kick) ScopeVersion() int { return 1 }
+
 func (k *Kick) PKCE() bool { return true }
 
 func (k *Kick) AuthURL(clientID, redirectURI, state, challenge string) string {

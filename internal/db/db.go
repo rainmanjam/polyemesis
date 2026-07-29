@@ -58,6 +58,9 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	// And once more for the rendition aspect-conversion columns.
+	if err := d.MigratePlatformAccountScopeVer(); err != nil {
+		return nil, err
+	}
 	if err := d.MigrateRenditionAspect(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)

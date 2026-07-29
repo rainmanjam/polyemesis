@@ -52,6 +52,27 @@ type Provider interface {
 	// Scopes are requested at authorization time and shown in the UI so the
 	// user knows what they are granting.
 	Scopes() []string
+	// ScopeVersion is bumped BY HAND whenever Scopes changes, and is stored
+	// alongside the account it was granted under.
+	//
+	// This exists because an OAuth token carries exactly the scopes it was
+	// issued with, and adding a scope to the application does NOT upgrade a
+	// token somebody already holds. Without this, an operator who connected
+	// before a feature shipped silently lacks permission for it and finds out
+	// from a 401 during a broadcast. polyemesis previously handled that with a
+	// line in the documentation, twice.
+	//
+	// A developer-bumped integer rather than a diff of the granted scope
+	// strings, and that is deliberate. Diffing means comparing against what
+	// the PLATFORM returned, and platforms rename scopes, grant supersets and
+	// reorder them -- which produces spurious "reconnect" prompts, and a
+	// prompt that cries wolf is a prompt operators learn to dismiss. The
+	// version is cruder and always right about the only question that matters:
+	// did WE change what we ask for.
+	//
+	// Keep the constant next to Scopes in each provider. The pairing is the
+	// only thing that makes forgetting to bump it visible in review.
+	ScopeVersion() int
 	// PKCE reports whether this platform accepts RFC 7636 parameters. It is
 	// opt-in per provider rather than on by default: a platform whose
 	// /authorize endpoint validates its query string strictly rejects an

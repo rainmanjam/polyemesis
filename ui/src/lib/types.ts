@@ -1069,8 +1069,30 @@ export interface PlatformAccount {
   accountRef: string;
   expiresAt: string;
   scopes: string;
+  /** The provider's scope version when this account was connected. Compared
+   *  against the running build's to spot a token issued before a permission
+   *  was added. 0 means the row predates the field. */
+  scopeVer: number;
   createdAt: string;
   updatedAt: string;
+  /** Whether this account still holds the permissions this build needs.
+   *
+   *  Computed per request rather than stored, because the answer changes when
+   *  the BINARY changes, not when the row does — upgrading polyemesis can turn
+   *  a fine account into one that needs reconnecting. */
+  reconnect?: ReconnectReason;
+}
+
+/** Why an account should be reconnected.
+ *
+ *  An OAuth token carries exactly the scopes it was issued with, and granting a
+ *  new scope never upgrades a token that already exists. */
+export interface ReconnectReason {
+  needed: boolean;
+  reason?: string;
+  /** Named scopes the stored grant lacks, when that is how the verdict was
+   *  reached. Absent when the verdict came from the version. */
+  missing?: string[];
 }
 
 export interface SetupGuide {

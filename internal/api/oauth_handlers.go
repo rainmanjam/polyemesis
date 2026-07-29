@@ -95,13 +95,28 @@ func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// accountView is a stored account plus whether it still holds the permissions
+// this build needs.
+//
+// Computed here rather than stored, because the answer changes when the BINARY
+// changes, not when the row does: an operator who upgrades polyemesis has the
+// same account row and a different verdict.
+type accountView struct {
+	db.PlatformAccount
+	Reconnect oauth.ReconnectReason `json:"reconnect"`
+}
+
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, accts)
+	out := make([]accountView, 0, len(accts))
+	for _, a := range accts {
+		out = append(out, accountView{PlatformAccount: a, Reconnect: oauth.AccountNeedsReconnect(a)})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +228,11 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		RefreshToken: tok.RefreshToken,
 		ExpiresAt:    tok.ExpiresAt,
 		Scopes:       tok.Scopes,
+		// Stamped at CONNECT time, which is the only moment the granted scopes
+		// and the requested scopes are known to agree. Comparing later would
+		// mean trusting whatever the platform echoed back, which is exactly
+		// what ScopeVersion exists to avoid.
+		ScopeVer: provider.ScopeVersion(),
 	})
 	if err != nil {
 		s.oauthDone(w, r, "", err.Error())

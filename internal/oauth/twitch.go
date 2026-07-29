@@ -48,6 +48,12 @@ func (t *Twitch) Scopes() []string {
 // this stays off until Twitch documents support. The flow is still a
 // confidential client: the secret never leaves the server, the code is bound to
 // a whitelisted redirect URI, and the state is single-use.
+// ScopeVersion 1 is the set above: stream key, channel write, and the two
+// chat scopes. Bump it whenever Scopes changes -- an operator holding a token
+// issued before the change does not gain the new permission, and the failure
+// arrives as a 401 mid-broadcast.
+func (t *Twitch) ScopeVersion() int { return 1 }
+
 func (t *Twitch) PKCE() bool { return false }
 
 func (t *Twitch) AuthURL(clientID, redirectURI, state, _ string) string {

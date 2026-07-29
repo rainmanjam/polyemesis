@@ -26,6 +26,11 @@ func (y *YouTube) Scopes() []string {
 // token endpoint. It costs nothing and it means a leaked authorization code —
 // through a proxy log, a referrer header, a shared machine's history — is
 // useless to anyone but this process.
+// ScopeVersion 1 is the single youtube scope above. Bump whenever Scopes
+// changes; see the Provider interface for why this is a hand-bumped integer
+// rather than a diff of what the platform granted.
+func (y *YouTube) ScopeVersion() int { return 1 }
+
 func (y *YouTube) PKCE() bool { return true }
 
 func (y *YouTube) AuthURL(clientID, redirectURI, state, challenge string) string {

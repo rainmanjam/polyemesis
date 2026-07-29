@@ -83,7 +83,9 @@ scope, which Kick's own Get Channels page does not list among its required
 scopes. Invisible twice over.
 
 **An account connected before this landed must be disconnected and reconnected
-once.** Granting a scope never upgrades a token that has already been issued.
+once.** Granting a scope never upgrades a token that has already been issued —
+and Settings → Platforms flags exactly this, so it does not have to be
+remembered from a page of documentation.
 
 **X (Twitter) — paste your key, there is no API.** X's developer platform covers
 posts, users, media and the post firehose. "Streaming" in its documentation
@@ -175,6 +177,13 @@ pane).
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, disconnect and reconnect once.
+
+polyemesis now says so itself. Each platform carries a scope version that is
+stored with the account, and **Settings → Platforms marks an account
+"reconnect needed"** when the running build asks for more than that account was
+granted. Accounts connected before the version existed are judged on the scopes
+the platform actually returned, so an account that already holds everything is
+left alone rather than nagged.
 
 ### Facebook Live (Meta)
 
