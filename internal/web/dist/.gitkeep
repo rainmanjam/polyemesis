@@ -1,0 +1,10 @@
+This file exists so `go build ./...` works in a clean checkout.
+
+//go:embed all:dist in web.go needs the directory to contain at least one
+file; without it the build fails with "pattern all:dist: no matching files
+found" -- and only in a fresh clone, because any machine that has run
+`make build` has a populated dist/ and never sees it.
+
+The real UI is written here by `make ui`. Everything else in this directory
+is a build artefact and is gitignored; this file is the single exception
+(see the negation in .gitignore).
