@@ -23,3 +23,5 @@ internal/web/dist/*
 # going, not artefacts of the project, and they go stale the moment the work
 # they describe lands.
 .work/
+.docker-gocache/
+.docker-gomod/

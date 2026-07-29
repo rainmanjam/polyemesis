@@ -1,6 +1,6 @@
 # Roadmap batch — progress and hand-off
 
-**Last updated:** 2026-07-29, after Part D's compliance slice (PR #22).
+**Last updated:** 2026-07-29, after the FFmpeg filter probe (PR #23).
 **Task:** build roadmap items **0, 1, 2, 3, 6**. Delivery: **one PR per item**,
 stacked. Read `docs/roadmap/README.md` for the sequence and each item's design.
 
@@ -221,6 +221,7 @@ main
                                      └─ feat/dest-resilience   PR #20  Part C
                                          └─ feat/dest-audio        PR #21  Part B
                                              └─ feat/dest-compliance   PR #22  Part D (compliance)
+                                                 └─ feat/overlays-v1-probe PR #23  filter probe
 ```
 
 ## DONE this session (PRs #18-#20)
@@ -270,7 +271,15 @@ MatureGame is readable-not-writable. MadeForKids is a *bool so "not for
 children" is distinguishable from "not said". Types live in internal/db because
 oauth already imports db (cycle otherwise).
 
-## NEXT TASK — the rest of Part D, then overlays v1
+**PR #23 — FFmpeg filter probe.** detect.go probed ENCODERS only. Added
+checkFilters/HasFilter, surfaced as a badge. **CRITICAL FINDING: this machine's
+FFmpeg has NO drawtext** (481 filters, built without libfreetype), so text
+overlays CANNOT be developed or verified here. CI's Ubuntu ffmpeg 6.1.1 almost
+certainly does have it -- confirm before starting the text work, because the
+measurement tests will silently skip on a build without it and a green local run
+would mean nothing. HasFilter returns TRUE when unprobed, deliberately.
+
+## NEXT TASK — the rest of Part D, then overlays v1 text
 
 **Part D REMAINDER (~5-9 d).** The compliance items are DONE (PR #22). What is
 left is the rest of YouTube's metadata surface plus the update-window UI. Traps
@@ -284,7 +293,14 @@ already researched and written down in the roadmap doc -- read them, especially:
   - Twitch CCLs READ as a flat list and WRITE as [{"id":..,"is_enabled":true}].
     MatureGame is readable and NOT writable.
 
-**Overlays v1 (~10 d of the original 16).** `docs/roadmap/OVERLAYS.md`. Text,
+**Overlays v1 text (~10 d of the original 16). READ THIS FIRST: the dev machine
+has no drawtext.** Verify `ffmpeg -filters | grep drawtext` on whatever machine
+picks this up. If it is absent, the pixel-measurement tests will skip and a
+green run proves nothing -- either install an FFmpeg with libfreetype or do the
+work where one exists. The probe from PR #23 is what the validation should gate
+on: a text overlay on a build without drawtext must be refused at SAVE time with
+a clear message, never discovered at process start.
+ `docs/roadmap/OVERLAYS.md`. Text,
 clock, externally-fed text, multiple overlays per rendition, the one-frame
 preview endpoint, the embedded font, and the drawtext filter probe (detect.go
 parses -encoders only; it needs -filters). Use `textfile=`, NEVER `text=` --
