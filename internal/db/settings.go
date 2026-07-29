@@ -609,6 +609,36 @@ type MeterSettings struct {
 	IntervalMS int `json:"intervalMs"`
 }
 
+// DestinationSettings is install-wide destination policy.
+type DestinationSettings struct {
+	// StaggerMS spaces out the FIRST connection of destinations brought up in
+	// the same reconcile. 0 is off, which is what every install did before it
+	// existed.
+	//
+	// Going live means every destination opening a connection, negotiating TLS
+	// and starting to encode audio in the same tick. On a small box that is
+	// the moment most likely to drop frames, and it is the exact moment an
+	// operator is watching -- because it is when they went live.
+	//
+	// It never delays a RECONNECT. A destination that drops at 3am has to come
+	// back immediately, not wait its turn behind processes that are already
+	// healthy.
+	StaggerMS int `json:"staggerMs"`
+}
+
+// MaxDestinationStaggerMS is five seconds. Beyond that, bringing up eight
+// destinations takes most of a minute and the operator is watching a progress
+// bar rather than a stream.
+const MaxDestinationStaggerMS = 5000
+
+func (d DestinationSettings) problems() []string {
+	if d.StaggerMS < 0 || d.StaggerMS > MaxDestinationStaggerMS {
+		return []string{fmt.Sprintf("destination stagger %dms out of range (0-%d, 0 for none)",
+			d.StaggerMS, MaxDestinationStaggerMS)}
+	}
+	return nil
+}
+
 // ------------------------------------------------------------------- mqtt
 
 // MQTT bounds. The interval floor is 1s because the underlying state is
@@ -1027,6 +1057,9 @@ type Settings struct {
 	Logging   LoggingSettings   `json:"logging"`
 	PostProd  PostProdSettings  `json:"postProd"`
 	MQTT      MQTTSettings      `json:"mqtt"`
+	// Destinations is install-wide destination policy; per-destination
+	// settings live on the destination row.
+	Destinations DestinationSettings `json:"destinations"`
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -1214,6 +1247,9 @@ func (s Settings) Validate() error {
 		add("%s", p)
 	}
 	for _, p := range s.MQTT.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.Destinations.problems() {
 		add("%s", p)
 	}
 

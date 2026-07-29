@@ -103,9 +103,13 @@ type Destination struct {
 	// no FFmpeg arguments at all, so a destination that has not opted in
 	// produces exactly the command it always did.
 	Transport DestTransport `json:"transport"`
-	Position  int           `json:"position"`
-	CreatedAt time.Time     `json:"createdAt"`
-	UpdatedAt time.Time     `json:"updatedAt"`
+	// Resilience is how hard this destination is retried, and when to stop.
+	// Its zero value is the behaviour every destination had before it existed:
+	// retry forever, 1s to 30s.
+	Resilience DestResilience `json:"resilience"`
+	Position   int            `json:"position"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
 }
 
 // ExpertArgsSet reports whether this destination has any hand-written
@@ -127,6 +131,77 @@ const (
 	// ordinary jitter and turns a healthy stream into a restart loop.
 	MinRWTimeoutSeconds = 1
 )
+
+// Resilience bounds.
+const (
+	MinDestBackoffSeconds = 1
+	MaxDestBackoffSeconds = 300
+	// MaxDestGiveUpAfter is generous: a platform that has refused a thousand
+	// times is not coming back, but the number exists to catch a typo rather
+	// than to express an opinion.
+	MaxDestGiveUpAfter = 1000
+)
+
+// DestResilience is the per-destination reconnect policy.
+//
+// The one global knob that existed before this was
+// settings.ingest.pull.reconnectDelayMaxSeconds, and that governs PULL INGEST
+// -- the dial-out source -- not destinations. Destinations had no policy at
+// all: every one retried forever on the same 1s-to-30s curve, whatever it was
+// and however hopeless.
+type DestResilience struct {
+	// MinBackoffSeconds and MaxBackoffSeconds bracket the retry curve. 0 takes
+	// the supervisor's defaults, which are 1 and 30.
+	MinBackoffSeconds int `json:"minBackoffSeconds,omitempty"`
+	MaxBackoffSeconds int `json:"maxBackoffSeconds,omitempty"`
+	// GiveUpAfter stops retrying after this many CONSECUTIVE failed restarts.
+	// 0 is forever, which is the historical behaviour and still the right
+	// answer for a platform that is merely slow to come back.
+	//
+	// Consecutive, not cumulative: a destination that reconnects cleanly once
+	// an hour for a week must never accumulate its way to the limit. A run
+	// that lasts past the supervisor's stability window resets the count.
+	//
+	// The point is not to save CPU. It is that a destination retrying forever
+	// is INDISTINGUISHABLE from one that works -- the card says
+	// "reconnecting", and nothing ever says this endpoint is not coming back.
+	// Giving up moves it to failed, which the alert rules already treat as an
+	// incident, so the operator is told once rather than never.
+	GiveUpAfter int `json:"giveUpAfter,omitempty"`
+}
+
+// Active reports whether any resilience policy is set.
+func (r DestResilience) Active() bool {
+	return r.MinBackoffSeconds > 0 || r.MaxBackoffSeconds > 0 || r.GiveUpAfter > 0
+}
+
+func (r DestResilience) problems() []string {
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	for _, b := range []struct {
+		name string
+		v    int
+	}{{"minimum", r.MinBackoffSeconds}, {"maximum", r.MaxBackoffSeconds}} {
+		if b.v != 0 && (b.v < MinDestBackoffSeconds || b.v > MaxDestBackoffSeconds) {
+			add("%s reconnect delay %ds out of range (%d-%d, 0 for the default)",
+				b.name, b.v, MinDestBackoffSeconds, MaxDestBackoffSeconds)
+		}
+	}
+	// Refused rather than silently swapped. An inverted pair is a typo, and
+	// quietly reordering it would hide the typo AND produce a retry curve the
+	// operator did not ask for.
+	if r.MinBackoffSeconds > 0 && r.MaxBackoffSeconds > 0 &&
+		r.MinBackoffSeconds > r.MaxBackoffSeconds {
+		add("minimum reconnect delay %ds is greater than the maximum %ds",
+			r.MinBackoffSeconds, r.MaxBackoffSeconds)
+	}
+	if r.GiveUpAfter < 0 || r.GiveUpAfter > MaxDestGiveUpAfter {
+		add("give up after %d retries out of range (0-%d, 0 to retry forever)",
+			r.GiveUpAfter, MaxDestGiveUpAfter)
+	}
+	return probs
+}
 
 // DestTransport is the per-destination muxer and socket tuning.
 //
@@ -278,6 +353,9 @@ func (d Destination) Validate() error {
 	for _, p := range d.Transport.problems() {
 		add("%s", p)
 	}
+	for _, p := range d.Resilience.problems() {
+		add("%s", p)
+	}
 
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))
@@ -300,6 +378,8 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
 		&d.Transport.NoDurationFilesize, &d.Transport.MuxQueuePackets,
 		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
+		&d.Resilience.MinBackoffSeconds, &d.Resilience.MaxBackoffSeconds,
+		&d.Resilience.GiveUpAfter,
 		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -342,6 +422,7 @@ const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
+	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 	position, created_at, updated_at`
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
@@ -465,13 +546,16 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id, source_id,
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
+		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
+		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
+		dst.Resilience.GiveUpAfter,
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -505,12 +589,15 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
 		tr_rw_timeout_seconds=?,
+		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
+		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
+		dst.Resilience.GiveUpAfter,
 		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
@@ -645,6 +732,10 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		{"tr_mux_queue_packets", `ALTER TABLE destinations ADD COLUMN tr_mux_queue_packets INTEGER NOT NULL DEFAULT 0`},
 		{"tr_mux_queue_bytes", `ALTER TABLE destinations ADD COLUMN tr_mux_queue_bytes INTEGER NOT NULL DEFAULT 0`},
 		{"tr_rw_timeout_seconds", `ALTER TABLE destinations ADD COLUMN tr_rw_timeout_seconds INTEGER NOT NULL DEFAULT 0`},
+		// Reconnect policy. 0 everywhere is "the behaviour you already had".
+		{"rs_min_backoff_seconds", `ALTER TABLE destinations ADD COLUMN rs_min_backoff_seconds INTEGER NOT NULL DEFAULT 0`},
+		{"rs_max_backoff_seconds", `ALTER TABLE destinations ADD COLUMN rs_max_backoff_seconds INTEGER NOT NULL DEFAULT 0`},
+		{"rs_give_up_after", `ALTER TABLE destinations ADD COLUMN rs_give_up_after INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)

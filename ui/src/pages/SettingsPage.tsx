@@ -572,6 +572,44 @@ function PipelineSettings({
 
       <Card>
         <CardHeader>
+          <CardTitle>Going live</CardTitle>
+          <CardDescription>
+            What happens when several destinations start at once.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="dest-stagger">Stagger connections (ms)</Label>
+            <Input
+              id="dest-stagger"
+              type="number"
+              min={0}
+              max={5000}
+              value={draft.destinations?.staggerMs ?? 0}
+              onChange={(e) =>
+                setDraft({ ...draft, destinations: { staggerMs: Number(e.target.value) } })
+              }
+              className="w-28"
+            />
+            <span className="text-[10px] text-muted-foreground">
+              0 is off. Going live otherwise means every destination opening a connection,
+              negotiating TLS and starting to encode audio in the same tick &mdash; on a small box
+              that is the moment most likely to drop frames, and it is the exact moment you are
+              watching, because it is when you went live. A few hundred milliseconds is plenty.
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              It never delays a <em>reconnect</em>. A destination that drops at 3am comes back
+              immediately rather than waiting its turn behind processes that are already healthy.
+            </span>
+          </div>
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Failover</CardTitle>
           <CardDescription>
             A standby input and a holding card, for when the live source stops delivering. Off by

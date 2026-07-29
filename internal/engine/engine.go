@@ -1582,6 +1582,12 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 	}
 	slices.Sort(ids)
 
+	// Spacing for destinations started in THIS sweep. Counted per actually-
+	// started process, not per id, so a reconcile that leaves seven running and
+	// starts one does not make that one wait seven slots for nothing.
+	stagger := time.Duration(e.Settings().Destinations.StaggerMS) * time.Millisecond
+	started := 0
+
 	for _, id := range ids {
 		p := plans[id]
 
@@ -1619,12 +1625,14 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			continue
 		}
 
-		if err := e.startDest(p.row, p.compiled, p.spec, hub); err != nil {
+		if err := e.startDest(p.row, p.compiled, p.spec, hub, stagger*time.Duration(started)); err != nil {
 			e.log.Error("start destination", "dest", p.row.Name, "err", err)
 			e.mu.Lock()
 			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: err.Error()}
 			e.mu.Unlock()
+			continue
 		}
+		started++
 	}
 }
 
@@ -1694,7 +1702,25 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		strconv.Itoa(row.Transport.MuxQueuePackets),
 		strconv.Itoa(row.Transport.MuxQueueBytes),
 		strconv.Itoa(row.Transport.RWTimeoutSeconds),
+		// The reconnect policy is a property of the SUPERVISOR, not of the
+		// command line, so it does not show up in the argv -- which is exactly
+		// why it has to be named here. Without it, raising a give-up threshold
+		// would be stored and never reach the process it governs.
+		strconv.Itoa(row.Resilience.MinBackoffSeconds),
+		strconv.Itoa(row.Resilience.MaxBackoffSeconds),
+		strconv.Itoa(row.Resilience.GiveUpAfter),
 	})
+}
+
+// secondsOr converts a settings value in seconds to a Duration, returning the
+// fallback when the operator has not set one. Zero means "the supervisor's
+// default", never "no delay at all" -- a zero backoff would be a spin loop
+// against a platform that is refusing us.
+func secondsOr(v int, fallback time.Duration) time.Duration {
+	if v <= 0 {
+		return fallback
+	}
+	return time.Duration(v) * time.Second
 }
 
 // expertArgv parses a destination's hand-written arguments into an argv.
@@ -1738,7 +1764,7 @@ func destWritesAFile(row *db.Destination) bool {
 	}
 }
 
-func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub) error {
+func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
 	port, err := e.alloc.Allocate()
 	if err != nil {
 		return err
@@ -1820,9 +1846,18 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		Args:        buildArgs(target),
 		NextArgs:    nextArgs,
 		AutoRestart: true,
-		OnLog:       e.onLog,
-		OnState:     e.onState,
-		LogSink:     logSink{e},
+		// Per-destination reconnect policy. Zero values leave the supervisor's
+		// own defaults in place, which is what every destination ran on before
+		// this was configurable.
+		MinBackoff:  secondsOr(row.Resilience.MinBackoffSeconds, 0),
+		MaxBackoff:  secondsOr(row.Resilience.MaxBackoffSeconds, 0),
+		MaxRestarts: row.Resilience.GiveUpAfter,
+		// Spaced out so going live does not spawn every destination in the
+		// same tick. First spawn only -- a reconnect is never delayed.
+		StartDelay: startDelay,
+		OnLog:      e.onLog,
+		OnState:    e.onState,
+		LogSink:    logSink{e},
 	})
 
 	e.mu.Lock()

@@ -195,6 +195,9 @@ export interface Destination {
   /** Optional muxer and socket tuning. Always present in a server response and
    *  empty for a destination that has not opted in. */
   transport?: DestTransport;
+  /** Reconnect policy. Always present in a server response and empty for a
+   *  destination that has not opted in. */
+  resilience?: DestResilience;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -654,6 +657,8 @@ export interface Settings {
   failover?: FailoverSettings;
   /** Retained MQTT telemetry. Optional for the same reason. */
   mqtt?: MQTTSettings;
+  /** Install-wide destination policy. Optional for the same reason. */
+  destinations?: { staggerMs: number };
 }
 
 // ---------------------------------------------------------------- failover
@@ -1261,6 +1266,22 @@ export interface DestTransport {
    *  sees a live process, and the stream is off air with nothing reporting
    *  it. 0 disables. */
   rwTimeoutSeconds?: number;
+}
+
+/** How hard a destination is retried, and when to stop.
+ *
+ *  The zero value is the behaviour every destination had before this existed:
+ *  retry forever, 1s to 30s. */
+export interface DestResilience {
+  minBackoffSeconds?: number;
+  maxBackoffSeconds?: number;
+  /** Stop after this many CONSECUTIVE failed restarts; 0 retries forever.
+   *
+   *  The point is not to save CPU. A destination retrying forever is
+   *  indistinguishable from one that works -- the card says "reconnecting",
+   *  and nothing ever says this endpoint is not coming back. Giving up moves
+   *  it to failed, which the alert rules already treat as an incident. */
+  giveUpAfter?: number;
 }
 
 // ------------------------------------------------------------------- expert

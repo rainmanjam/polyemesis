@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import type {
   Destination,
   DestTransport,
+  DestResilience,
   DestKind,
   Platform,
   PlatformAccount,
@@ -873,6 +874,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // every destination that predates this carries, and what the server turns
   // into no FFmpeg arguments at all.
   const [transport, setTransport] = useState<DestTransport>({});
+  // Reconnect policy. Empty is "retry forever, 1s to 30s", which is what every
+  // destination did before this existed.
+  const [resilience, setResilience] = useState<DestResilience>({});
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -899,12 +903,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setStreamKey(destination.streamKey);
       setBitrate(destination.audioBitrate);
       setTransport(destination.transport ?? {});
+      setResilience(destination.resilience ?? {});
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
       setRenditionId(destination.renditionId ? String(destination.renditionId) : PASSTHROUGH);
     } else {
       setTransport({});
+      setResilience({});
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -1002,6 +1008,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         // null is passthrough: no encode, no process, straight off the ingest.
         renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
         transport,
+        resilience,
       };
       if (editing) {
         await api.updateDestination(destination.id, payload);
@@ -1463,6 +1470,66 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 be refused. Raise them if a destination reports interleave errors &mdash; the audio
                 path here has variable latency, because loudness normalisation reads ahead.
               </span>
+
+              <div className="border-t border-border pt-3">
+                <p className="text-xs font-medium">Reconnecting</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-minbo">Retry after (seconds)</Label>
+                  <Input
+                    id="dest-minbo"
+                    type="number"
+                    min={0}
+                    max={300}
+                    value={resilience.minBackoffSeconds ?? 0}
+                    onChange={(e) =>
+                      setResilience({ ...resilience, minBackoffSeconds: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-maxbo">…backing off to</Label>
+                  <Input
+                    id="dest-maxbo"
+                    type="number"
+                    min={0}
+                    max={300}
+                    value={resilience.maxBackoffSeconds ?? 0}
+                    onChange={(e) =>
+                      setResilience({ ...resilience, maxBackoffSeconds: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                0 on both takes the default, 1s doubling to 30s. A destination that stays up past a
+                minute is treated as healthy and starts again from the shorter delay.
+              </span>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="dest-giveup">Give up after (retries)</Label>
+                <Input
+                  id="dest-giveup"
+                  type="number"
+                  min={0}
+                  max={1000}
+                  value={resilience.giveUpAfter ?? 0}
+                  onChange={(e) =>
+                    setResilience({ ...resilience, giveUpAfter: Number(e.target.value) })
+                  }
+                  className="w-24"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  0 retries forever, which is the default and is right for a platform that is
+                  merely slow to come back. Set it when you would rather be TOLD: a destination
+                  retrying forever looks exactly like one that works &mdash; the card says
+                  "reconnecting" and nothing ever says this endpoint is not coming back. Giving up
+                  marks it failed, which your alert rules already treat as an incident.
+                  Consecutive failures only; a clean run resets the count.
+                </span>
+              </div>
             </div>
           </details>
 
