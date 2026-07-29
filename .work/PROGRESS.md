@@ -1,6 +1,6 @@
 # Roadmap batch — progress and hand-off
 
-**Last updated:** 2026-07-29, after destination-settings Part B (PR #21).
+**Last updated:** 2026-07-29, after Part D's compliance slice (PR #22).
 **Task:** build roadmap items **0, 1, 2, 3, 6**. Delivery: **one PR per item**,
 stacked. Read `docs/roadmap/README.md` for the sequence and each item's design.
 
@@ -220,6 +220,7 @@ main
                                  └─ feat/dest-transport     PR #19  Part A
                                      └─ feat/dest-resilience   PR #20  Part C
                                          └─ feat/dest-audio        PR #21  Part B
+                                             └─ feat/dest-compliance   PR #22  Part D (compliance)
 ```
 
 ## DONE this session (PRs #18-#20)
@@ -259,12 +260,21 @@ RTMP defines a mapping) and no mainstream ingest accepts it. Mono turned out NOT
 to need a routing-matrix change -- it is a downmix (`-ac 1`) of the operator's
 stereo mix; re-routing tracks to one channel is a different feature.
 
-## NEXT TASK — Part D, then overlays v1
+**PR #22 — Part D, compliance slice.** privacyStatus, selfDeclaredMadeForKids,
+Twitch CCLs. Three traps each pinned by a test that fails when the trap is
+restored: part=status is destructive BY PART (omitting privacyStatus reverts to
+default -- can make a private broadcast public); madeForKids goes through
+videos.update NOT liveBroadcasts.update; Twitch labels write as
+[{"id":..,"is_enabled":..}] not as the flat list they read back as, and
+MatureGame is readable-not-writable. MadeForKids is a *bool so "not for
+children" is distinguishable from "not said". Types live in internal/db because
+oauth already imports db (cycle otherwise).
 
-**Part D, metadata (~7-12 d).** The compliance items first, since they are the
-only ones with a legal edge: selfDeclaredMadeForKids (COPPA), privacyStatus,
-Twitch content_classification_labels. Traps already researched and written down
-in the roadmap doc -- read them, especially:
+## NEXT TASK — the rest of Part D, then overlays v1
+
+**Part D REMAINDER (~5-9 d).** The compliance items are DONE (PR #22). What is
+left is the rest of YouTube's metadata surface plus the update-window UI. Traps
+already researched and written down in the roadmap doc -- read them, especially:
   - liveBroadcasts.update needs FOUR properties on EVERY call
   - it is destructive BY PART, not by field: `part=status` without privacyStatus
     reverts privacy to the default. A naive PATCH can make a private broadcast

@@ -922,6 +922,13 @@ export interface FFmpegTools {
   /** What each candidate did when this machine was asked to encode a frame.
    *  Empty means the test encode never ran. */
   encoderCaps?: EncoderCapability[] | null;
+  /** Every filter the binary registers.
+   *
+   *  A filter is as optional as an encoder and fails just as hard. drawtext
+   *  needs --enable-libfreetype and is genuinely missing from ordinary builds,
+   *  so a feature that needs it has to check rather than assume. Empty means
+   *  the probe never ran, which everything reads as "assume the best". */
+  filters?: string[] | null;
 }
 
 /** One encoder's measured answer: what happened when this machine, with these

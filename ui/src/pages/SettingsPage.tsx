@@ -428,6 +428,21 @@ function IngestSettings({
               <Badge variant={system.ffmpeg.hasLibx264 ? "outline" : "warn"}>
                 x264 {system.ffmpeg.hasLibx264 ? "yes" : "no"}
               </Badge>
+              {/* Only shown once the filter probe has run. An absent list means
+                  the probe did not happen, and reporting "no" for that would be
+                  a claim nobody measured. */}
+              {(system.ffmpeg.filters?.length ?? 0) > 0 && (
+                <Badge
+                  variant={system.ffmpeg.filters?.includes("drawtext") ? "outline" : "warn"}
+                  title={
+                    system.ffmpeg.filters?.includes("drawtext")
+                      ? "This build can draw text on video."
+                      : "This build has no drawtext filter, so text overlays are unavailable. It needs an FFmpeg built with libfreetype."
+                  }
+                >
+                  text overlays {system.ffmpeg.filters?.includes("drawtext") ? "yes" : "no"}
+                </Badge>
+              )}
             </div>
           )}
         </CardContent>
