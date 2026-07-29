@@ -19,7 +19,7 @@ import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { labelForState, toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
-import type { Destination, SystemInfo } from "@/lib/types";
+import type { Destination, MetaField, SystemInfo } from "@/lib/types";
 
 // hls.js is a few hundred kilobytes that only the preview needs, and the
 // preview is off entirely for some installs. Load it alongside the dashboard
@@ -33,17 +33,10 @@ const PreviewPlayer = lazy(() =>
 // Set the title, description and category once and push them to every
 // connected account. The shapes below mirror internal/api/metadata.go; they
 // live here rather than in lib/types.ts because nothing else renders them.
-
-type MetaField =
-  | "title"
-  | "description"
-  | "category"
-  // The broadcast fields. YouTube only -- Twitch has no broadcast resource and
-  // Kick's entire metadata surface is three fields, so the composer greys
-  // these out rather than offering controls that go nowhere.
-  | "tags"
-  | "scheduledStart"
-  | "contentDetails";
+//
+// MetaField is the exception and now lives in lib/types.ts: a push RESULT names
+// those fields, so the union is an API contract rather than a detail of this
+// page -- and internal/oauth has a drift guard that reads it there.
 
 /** What YouTube will still accept on the current broadcast.
  *

@@ -45,6 +45,22 @@ const (
 	FieldTags           MetadataField = "tags"
 )
 
+// AllMetadataFields is every field a MetadataResult can name.
+//
+// Enumerated by hand because Go cannot reflect over a set of string constants,
+// which makes this the one place a new field can be forgotten. It is also what
+// TestUITypesCanNameEveryMetadataField reads: the UI renders Applied and
+// Skipped straight from a push result, so a field it cannot name is a field an
+// operator sees as nothing at all.
+//
+// Order is the order a human would group them: what you type, what you must
+// declare, and what lives on the broadcast rather than the channel.
+var AllMetadataFields = []MetadataField{
+	FieldTitle, FieldDescription, FieldCategory,
+	FieldPrivacy, FieldMadeForKids, FieldLabels,
+	FieldScheduledStart, FieldContentDetails, FieldTags,
+}
+
 // Metadata is what the operator typed once in the go-live composer. An empty
 // field means "leave whatever the platform already has" — blanking a live
 // title by accident is far worse than requiring a second, explicit edit.

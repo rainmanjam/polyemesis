@@ -334,6 +334,32 @@ export interface RenditionText {
   boxOpacity?: number;
 }
 
+/** One thing a platform may accept in a metadata push.
+ *
+ *  Mirrors oauth.AllMetadataFields. Kept HERE rather than in the page that
+ *  renders it, because a push result names these in `applied` and `skipped` and
+ *  the union is therefore an API contract, not a component detail.
+ *
+ *  TestUITypesCanNameEveryMetadataField in internal/oauth fails if the Go side
+ *  gains a field this union does not have, AND if this union gains one no Go
+ *  constant produces. A field the UI cannot name is one an operator sees as
+ *  nothing at all. */
+export type MetaField =
+  // What the operator types.
+  | "title"
+  | "description"
+  | "category"
+  // What a platform requires them to declare. Pushed through the compliance
+  // path rather than the composer, but a result still names them.
+  | "privacy"
+  | "madeForKids"
+  | "contentLabels"
+  // What lives on the broadcast rather than the channel. YouTube only, and
+  // most of it stops being writable once a broadcast goes live.
+  | "scheduledStart"
+  | "contentDetails"
+  | "tags";
+
 /** One font available to a text overlay, from GET /api/v1/fonts. */
 export interface FontInfo {
   name: string;
