@@ -1686,6 +1686,14 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// which is the worst of both worlds: the operator is told it applied
 		// and the process is still running the old command line.
 		row.ExtraInputArgs, row.ExtraOutputArgs,
+		// Transport tuning, for exactly the same reason. Every one of these
+		// changes the command line, and a setting that is stored and never
+		// reaches the running process is the failure this repo keeps paying
+		// for -- most recently r.Deinterlace on renditions.
+		strconv.FormatBool(row.Transport.NoDurationFilesize),
+		strconv.Itoa(row.Transport.MuxQueuePackets),
+		strconv.Itoa(row.Transport.MuxQueueBytes),
+		strconv.Itoa(row.Transport.RWTimeoutSeconds),
 	})
 }
 
@@ -1771,6 +1779,15 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 			// was shown in the confirm dialog.
 			ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
 			ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
+			// Muxer and socket tuning. Its zero value emits nothing, so a
+			// destination that has not opted in produces exactly the command
+			// it always did.
+			Transport: ffmpeg.TransportSpec{
+				NoDurationFilesize: row.Transport.NoDurationFilesize,
+				MuxQueuePackets:    row.Transport.MuxQueuePackets,
+				MuxQueueBytes:      row.Transport.MuxQueueBytes,
+				RWTimeoutSeconds:   row.Transport.RWTimeoutSeconds,
+			},
 		})
 	}
 

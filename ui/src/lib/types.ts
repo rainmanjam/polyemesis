@@ -192,6 +192,9 @@ export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
 export interface Destination {
   id: number;
   name: string;
+  /** Optional muxer and socket tuning. Always present in a server response and
+   *  empty for a destination that has not opted in. */
+  transport?: DestTransport;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -1236,6 +1239,28 @@ export interface ChatOverview {
   limits: ChatLimit[];
   /** The scrollback came from the database rather than a live connection. */
   stored?: boolean;
+}
+
+/** Per-destination muxer and socket tuning.
+ *
+ *  Everything here was probed against the pinned FFmpeg before it shipped, and
+ *  every field is off by default: a destination that has not opted in produces
+ *  exactly the command it always did. */
+export interface DestTransport {
+  /** Drops FLV's zero duration and filesize metadata. Some RTMP ingests treat
+   *  a zero duration as a malformed file rather than as a live stream. RTMP
+   *  only; ignored on every other kind. */
+  noDurationFilesize?: boolean;
+  /** The interleave buffer. These are a PAIR: FFmpeg applies the packet cap
+   *  only once the queue has passed the byte threshold, so a threshold with no
+   *  cap does nothing at all and the server refuses it. */
+  muxQueuePackets?: number;
+  muxQueueBytes?: number;
+  /** Breaks a half-open socket. Without it a far end that vanished without a
+   *  FIN blocks the muxer indefinitely: FFmpeg keeps running, the supervisor
+   *  sees a live process, and the stream is off air with nothing reporting
+   *  it. 0 disables. */
+  rwTimeoutSeconds?: number;
 }
 
 // ------------------------------------------------------------------- expert

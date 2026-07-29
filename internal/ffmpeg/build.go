@@ -473,6 +473,81 @@ type DestSpec struct {
 	// end they would attach to nothing and silently do nothing.
 	ExtraInputArgs  []string
 	ExtraOutputArgs []string
+
+	// Transport is the optional muxer and socket tuning. Its zero value emits
+	// nothing at all, so a destination that has not opted in produces exactly
+	// the argv it always did.
+	Transport TransportSpec
+}
+
+// TransportSpec is the per-destination muxer and socket tuning.
+//
+// Every field is off by default and every one was probed against the pinned
+// FFmpeg before it was designed around -- a third of the first draft of this
+// block did not survive `ffmpeg -h`, which is why the probe results are written
+// down here rather than remembered.
+type TransportSpec struct {
+	// NoDurationFilesize sets `-flvflags no_duration_filesize`.
+	//
+	// FLV carries duration and filesize in its metadata, and for a live stream
+	// both are necessarily zero. Some RTMP ingests treat a zero duration as a
+	// malformed file rather than as a live stream. Confirmed `E..........` on
+	// the flv muxer, and applied ONLY to RTMP -- handing it to the mpegts muxer
+	// would be an unknown option, which FFmpeg warns about on every start.
+	NoDurationFilesize bool
+
+	// MuxQueuePackets sets `-max_muxing_queue_size` and MuxQueueBytes sets
+	// `-muxing_queue_data_threshold`. They are a PAIR, and that is the
+	// correction the probe produced.
+	//
+	// The roadmap doc had these as alternatives -- max_muxing_queue_size for
+	// stream init, muxing_queue_data_threshold for the steady state. FFmpeg's
+	// own help says otherwise: the threshold is "the threshold after which
+	// max_muxing_queue_size is taken into account". So the packet cap applies
+	// only once the queue has grown past the byte threshold, and setting the
+	// threshold alone does nothing whatsoever.
+	//
+	// Both matter here because polyemesis's audio path has variable latency --
+	// loudnorm has lookahead -- so the interleave between a copied video stream
+	// and a filtered audio one genuinely can diverge.
+	MuxQueuePackets int
+	MuxQueueBytes   int
+
+	// RWTimeoutSeconds sets `-rw_timeout`, in microseconds on the wire.
+	//
+	// A half-open TCP connection -- the far end gone without a FIN, which is
+	// what a platform behind a load balancer does -- otherwise blocks the muxer
+	// indefinitely. FFmpeg keeps running, the supervisor sees a live process,
+	// and the stream is off air with nothing reporting it. Confirmed
+	// `ED.........`, so it is settable on an output and not only on an input,
+	// and confirmed to parse on an `rtmp://` target.
+	RWTimeoutSeconds int
+}
+
+// transportOutputArgs renders the muxer tuning that belongs immediately before
+// the target. Empty for a destination that has not opted in.
+func transportOutputArgs(s DestSpec) []string {
+	var args []string
+	t := s.Transport
+	// FLV only. The flag does not exist on any other muxer, and passing an
+	// option a muxer does not own makes FFmpeg warn on every single start --
+	// noise that trains an operator to ignore the log.
+	if t.NoDurationFilesize && s.Kind == DestRTMP {
+		args = append(args, "-flvflags", "no_duration_filesize")
+	}
+	if t.MuxQueuePackets > 0 {
+		args = append(args, "-max_muxing_queue_size", strconv.Itoa(t.MuxQueuePackets))
+	}
+	if t.MuxQueueBytes > 0 {
+		args = append(args, "-muxing_queue_data_threshold", strconv.Itoa(t.MuxQueueBytes))
+	}
+	if t.RWTimeoutSeconds > 0 {
+		// Microseconds on the wire; seconds in the settings, because nobody
+		// reasons about a socket timeout in microseconds and a stray factor of
+		// a thousand is a timeout that never fires.
+		args = append(args, "-rw_timeout", strconv.Itoa(t.RWTimeoutSeconds*1_000_000))
+	}
+	return args
 }
 
 // SpliceExtraArgs inserts hand-written arguments into a generated FFmpeg
@@ -610,6 +685,7 @@ func DestinationArgs(s DestSpec) []string {
 		"-ac", "2",
 		"-ar", strconv.Itoa(s.SampleRate),
 	)
+	args = append(args, transportOutputArgs(s)...)
 	switch s.Kind {
 	case DestRTMP:
 		args = append(args, "-f", "flv")
@@ -675,6 +751,9 @@ func audioOutputArgs(s DestSpec) []string {
 		// listeners get a file download where they expected a stream.
 		args = append(args, "-content_type", f.contentType)
 	}
+	// Transport tuning applies to an audio-only destination too: an Icecast
+	// mount behind a dead proxy hangs exactly the way an RTMP one does.
+	args = append(args, transportOutputArgs(s)...)
 	return append(args, "-f", f.muxer, s.Target)
 }
 

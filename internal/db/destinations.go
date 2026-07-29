@@ -98,15 +98,95 @@ type Destination struct {
 	// an argument here overrides something the product otherwise guarantees.
 	// Stored rather than treated as a one-shot confirmation, so a later edit
 	// that keeps the same override does not lose the record of who agreed.
-	ExpertAckReencode bool      `json:"expertAckReencode,omitempty"`
-	Position          int       `json:"position"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ExpertAckReencode bool `json:"expertAckReencode,omitempty"`
+	// Transport is the optional muxer and socket tuning. Its zero value emits
+	// no FFmpeg arguments at all, so a destination that has not opted in
+	// produces exactly the command it always did.
+	Transport DestTransport `json:"transport"`
+	Position  int           `json:"position"`
+	CreatedAt time.Time     `json:"createdAt"`
+	UpdatedAt time.Time     `json:"updatedAt"`
 }
 
 // ExpertArgsSet reports whether this destination has any hand-written
 // arguments. Two empty strings and no row at all must both read as "expert
 // mode off".
+// Transport bounds. Wide on purpose: these catch a unit mix-up or a typo, not
+// an opinion about how somebody runs their box.
+const (
+	// MaxMuxQueuePackets is FFmpeg's own practical ceiling; beyond this the
+	// queue is a memory leak with a limit rather than a buffer.
+	MaxMuxQueuePackets = 1 << 20
+	// MaxMuxQueueBytes is 1 GiB. A threshold larger than the machine's RAM is
+	// a typo, not a policy.
+	MaxMuxQueueBytes = 1 << 30
+	// MaxRWTimeoutSeconds is an hour. Anything longer is indistinguishable
+	// from the hang the timeout exists to break.
+	MaxRWTimeoutSeconds = 3600
+	// MinRWTimeoutSeconds is 1. A sub-second timeout on a live socket fires on
+	// ordinary jitter and turns a healthy stream into a restart loop.
+	MinRWTimeoutSeconds = 1
+)
+
+// DestTransport is the per-destination muxer and socket tuning.
+//
+// Everything here was probed against the pinned FFmpeg before it was designed
+// around. See ffmpeg.TransportSpec for the probe results, including the one
+// that corrected the roadmap: max_muxing_queue_size and
+// muxing_queue_data_threshold are a PAIR, not alternatives.
+type DestTransport struct {
+	// NoDurationFilesize drops FLV's zero duration and filesize metadata.
+	// RTMP only; ignored elsewhere rather than refused, because a destination
+	// switched from RTMP to SRT should not become unsavable.
+	NoDurationFilesize bool `json:"noDurationFilesize,omitempty"`
+	// MuxQueuePackets and MuxQueueBytes bound the interleave buffer. The
+	// packet cap applies only once the queue passes the byte threshold, so
+	// setting the threshold alone does nothing -- which is why the UI offers
+	// them together.
+	MuxQueuePackets int `json:"muxQueuePackets,omitempty"`
+	MuxQueueBytes   int `json:"muxQueueBytes,omitempty"`
+	// RWTimeoutSeconds breaks a half-open socket. Without it a far end that
+	// vanished without a FIN blocks the muxer indefinitely: FFmpeg keeps
+	// running, the supervisor sees a live process, and the stream is off air
+	// with nothing reporting it.
+	RWTimeoutSeconds int `json:"rwTimeoutSeconds,omitempty"`
+}
+
+// Active reports whether any transport tuning is set.
+func (t DestTransport) Active() bool {
+	return t.NoDurationFilesize || t.MuxQueuePackets > 0 || t.MuxQueueBytes > 0 ||
+		t.RWTimeoutSeconds > 0
+}
+
+// problems reports everything wrong with the transport block.
+func (t DestTransport) problems() []string {
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	if t.MuxQueuePackets < 0 || t.MuxQueuePackets > MaxMuxQueuePackets {
+		add("muxing queue %d packets out of range (0-%d, 0 for the FFmpeg default)",
+			t.MuxQueuePackets, MaxMuxQueuePackets)
+	}
+	if t.MuxQueueBytes < 0 || t.MuxQueueBytes > MaxMuxQueueBytes {
+		add("muxing queue %d bytes out of range (0-%d, 0 for the FFmpeg default)",
+			t.MuxQueueBytes, MaxMuxQueueBytes)
+	}
+	// Refused rather than quietly accepted, because a byte threshold with no
+	// packet cap is a setting that appears to do something and does nothing:
+	// FFmpeg documents the threshold as "the threshold after which
+	// max_muxing_queue_size is taken into account".
+	if t.MuxQueueBytes > 0 && t.MuxQueuePackets == 0 {
+		add("a muxing queue byte threshold does nothing without a packet limit: " +
+			"FFmpeg only applies the packet cap once the queue passes the threshold")
+	}
+	if t.RWTimeoutSeconds != 0 &&
+		(t.RWTimeoutSeconds < MinRWTimeoutSeconds || t.RWTimeoutSeconds > MaxRWTimeoutSeconds) {
+		add("socket timeout %ds out of range (%d-%d, 0 to disable)",
+			t.RWTimeoutSeconds, MinRWTimeoutSeconds, MaxRWTimeoutSeconds)
+	}
+	return probs
+}
+
 func (d Destination) ExpertArgsSet() bool {
 	return strings.TrimSpace(d.ExtraInputArgs) != "" ||
 		strings.TrimSpace(d.ExtraOutputArgs) != ""
@@ -195,6 +275,10 @@ func (d Destination) Validate() error {
 		add("%v", err)
 	}
 
+	for _, p := range d.Transport.problems() {
+		add("%s", p)
+	}
+
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))
 	}
@@ -214,6 +298,8 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
 		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
 		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
+		&d.Transport.NoDurationFilesize, &d.Transport.MuxQueuePackets,
+		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
 		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -255,6 +341,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
+	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 	position, created_at, updated_at`
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
@@ -376,11 +463,16 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
 		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id, source_id,
-		 extra_input_args, extra_output_args, expert_ack_reencode, position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 extra_input_args, extra_output_args, expert_ack_reencode,
+		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
+		 position, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
-		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode, dst.Position, now, now)
+		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
+		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
+		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
+		dst.Position, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -411,10 +503,14 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
 		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
 		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
+		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
+		tr_rw_timeout_seconds=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
+		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
+		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
@@ -543,6 +639,12 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		{"extra_input_args", `ALTER TABLE destinations ADD COLUMN extra_input_args TEXT NOT NULL DEFAULT ''`},
 		{"extra_output_args", `ALTER TABLE destinations ADD COLUMN extra_output_args TEXT NOT NULL DEFAULT ''`},
 		{"expert_ack_reencode", `ALTER TABLE destinations ADD COLUMN expert_ack_reencode INTEGER NOT NULL DEFAULT 0`},
+		// Transport tuning. Every default is the no-op value, so an upgraded
+		// install emits exactly the FFmpeg command it did yesterday.
+		{"tr_no_duration_filesize", `ALTER TABLE destinations ADD COLUMN tr_no_duration_filesize INTEGER NOT NULL DEFAULT 0`},
+		{"tr_mux_queue_packets", `ALTER TABLE destinations ADD COLUMN tr_mux_queue_packets INTEGER NOT NULL DEFAULT 0`},
+		{"tr_mux_queue_bytes", `ALTER TABLE destinations ADD COLUMN tr_mux_queue_bytes INTEGER NOT NULL DEFAULT 0`},
+		{"tr_rw_timeout_seconds", `ALTER TABLE destinations ADD COLUMN tr_rw_timeout_seconds INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)

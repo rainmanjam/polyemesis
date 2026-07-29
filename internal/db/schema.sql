@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS renditions (
     FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
 
+-- Note: the transport tuning columns (tr_*) and the expert-args columns are
+-- added by MigrateDestinationExpertArgs (destinations.go) rather than here, so
+-- fresh and upgraded databases get them from exactly one place and cannot
+-- disagree about the default.
 CREATE TABLE IF NOT EXISTS destinations (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT    NOT NULL,
@@ -125,7 +129,6 @@ CREATE TABLE IF NOT EXISTS destinations (
     FOREIGN KEY (rendition_id) REFERENCES renditions(id) ON DELETE SET NULL
 );
 
--- The operator's own OAuth developer app. polyemesis cannot ship these.
 -- The MQTT broker password, sealed. Its own table rather than a field in the
 -- settings blob because that blob is served to the settings page: a password
 -- in it would be handed to every browser that opened Settings.
@@ -135,6 +138,7 @@ CREATE TABLE IF NOT EXISTS mqtt_creds (
     updated_at   INTEGER NOT NULL
 );
 
+-- The operator's own OAuth developer app. polyemesis cannot ship these.
 CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick
     client_id         TEXT NOT NULL,

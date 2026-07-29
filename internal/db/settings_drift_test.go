@@ -129,3 +129,50 @@ func walk(t *testing.T, rt reflect.Type, prefix string, visit func(path, name st
 		visit(path, name)
 	}
 }
+
+// The rendition guard's twin, for destinations.
+//
+// Destination gained a whole transport block, and nothing was watching that
+// side of the tree either. Same reflection-driven shape as
+// TestUITypesCarryEveryRenditionField so a field added to the Go struct is
+// covered the day it lands.
+func TestUITypesCanNameEveryDestinationField(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "lib", "types.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	src := string(raw)
+
+	skip := map[string]string{
+		// The UI scopes destinations by the source it is already viewing and
+		// never round-trips the id, exactly as it does for renditions.
+		"sourceId": "the UI scopes by the source it is already viewing",
+		// Server-assigned ordering, moved by drag rather than typed.
+		"position": "reordered by drag, never entered as a number",
+		// Expert mode is fully reachable, through its own endpoint and its own
+		// payload shape: MonitoringPage edits ExpertArgs{inputArgs, outputArgs,
+		// ackReencode}. The names differ from these json tags because the
+		// endpoint returns the resolved command alongside them, so a
+		// name-matching guard cannot see it. Reachable, differently named.
+		"extraInputArgs":    "edited through the expert-mode endpoint as ExpertArgs.inputArgs",
+		"extraOutputArgs":   "edited through the expert-mode endpoint as ExpertArgs.outputArgs",
+		"expertAckReencode": "edited through the expert-mode endpoint as ExpertArgs.ackReencode",
+	}
+
+	var missing []string
+	walk(t, reflect.TypeOf(Destination{}), "", func(path, name string) {
+		if _, ok := skip[path]; ok {
+			return
+		}
+		if regexp.MustCompile(`(^|[{;,\s])` + regexp.QuoteMeta(name) + `\??\s*:`).MatchString(src) {
+			return
+		}
+		missing = append(missing, path)
+	})
+
+	for _, p := range missing {
+		t.Errorf("Destination.%s has no name anywhere in the UI's types. "+
+			"A field the UI cannot name is a feature no operator can reach.", p)
+	}
+}

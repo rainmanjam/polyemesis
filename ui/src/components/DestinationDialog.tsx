@@ -21,8 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { Switch } from "@/components/ui/switch";
 import type {
   Destination,
+  DestTransport,
   DestKind,
   Platform,
   PlatformAccount,
@@ -867,6 +869,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [url, setUrl] = useState("");
   const [streamKey, setStreamKey] = useState("");
   const [bitrate, setBitrate] = useState(160);
+  // Muxer and socket tuning. An empty object is "no opt-in", which is what
+  // every destination that predates this carries, and what the server turns
+  // into no FFmpeg arguments at all.
+  const [transport, setTransport] = useState<DestTransport>({});
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -892,11 +898,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setUrl(destination.url);
       setStreamKey(destination.streamKey);
       setBitrate(destination.audioBitrate);
+      setTransport(destination.transport ?? {});
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
       setRenditionId(destination.renditionId ? String(destination.renditionId) : PASSTHROUGH);
     } else {
+      setTransport({});
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -993,6 +1001,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         accountId: accountId === "none" ? null : Number(accountId),
         // null is passthrough: no encode, no process, straight off the ingest.
         renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
+        transport,
       };
       if (editing) {
         await api.updateDestination(destination.id, payload);
@@ -1366,6 +1375,96 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               on — a rendition never touches audio.
             </span>
           </div>
+
+          <details className="rounded-md border border-border p-2">
+            <summary className="cursor-pointer text-xs font-medium">
+              Transport &amp; muxer
+              {(transport.noDurationFilesize ||
+                (transport.muxQueuePackets ?? 0) > 0 ||
+                (transport.rwTimeoutSeconds ?? 0) > 0) && (
+                <span className="ml-2 text-[10px] text-muted-foreground">(customised)</span>
+              )}
+            </summary>
+            <div className="mt-2 flex flex-col gap-3">
+              <span className="text-[10px] text-muted-foreground">
+                Leave all of these alone unless a platform is misbehaving. Every one is off by
+                default, and off means polyemesis sends exactly the FFmpeg command it always has.
+              </span>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="dest-rwt">Socket timeout (seconds)</Label>
+                <Input
+                  id="dest-rwt"
+                  type="number"
+                  min={0}
+                  max={3600}
+                  value={transport.rwTimeoutSeconds ?? 0}
+                  onChange={(e) =>
+                    setTransport({ ...transport, rwTimeoutSeconds: Number(e.target.value) })
+                  }
+                  className="w-24"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  0 disables it. Worth setting on a platform behind a load balancer: a far end that
+                  disappears without closing the connection otherwise blocks the muxer forever.
+                  FFmpeg keeps running, polyemesis sees a healthy process, and the stream is off air
+                  with nothing saying so.
+                </span>
+              </div>
+
+              {kind === "rtmp" && (
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="dest-flv" className="font-normal">
+                    Drop FLV duration &amp; filesize metadata
+                  </Label>
+                  <Switch
+                    id="dest-flv"
+                    checked={transport.noDurationFilesize ?? false}
+                    onCheckedChange={(v) => setTransport({ ...transport, noDurationFilesize: v })}
+                  />
+                </div>
+              )}
+              {kind === "rtmp" && (
+                <span className="text-[10px] text-muted-foreground">
+                  Both are necessarily zero on a live stream, and some ingests read a zero duration
+                  as a broken file rather than as a live one. RTMP only.
+                </span>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-mqp">Muxing queue (packets)</Label>
+                  <Input
+                    id="dest-mqp"
+                    type="number"
+                    min={0}
+                    value={transport.muxQueuePackets ?? 0}
+                    onChange={(e) =>
+                      setTransport({ ...transport, muxQueuePackets: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-mqb">…above (bytes)</Label>
+                  <Input
+                    id="dest-mqb"
+                    type="number"
+                    min={0}
+                    value={transport.muxQueueBytes ?? 0}
+                    onChange={(e) =>
+                      setTransport({ ...transport, muxQueueBytes: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                These are a <strong>pair</strong>: FFmpeg applies the packet cap only once the queue
+                has grown past the byte threshold, so a threshold on its own does nothing and will
+                be refused. Raise them if a destination reports interleave errors &mdash; the audio
+                path here has variable latency, because loudness normalisation reads ahead.
+              </span>
+            </div>
+          </details>
 
           {selectedPreset && (
             <div className="flex flex-col gap-1 rounded-md border border-dashed p-2">

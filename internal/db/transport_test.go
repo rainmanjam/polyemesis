@@ -1,0 +1,107 @@
+package db
+
+import (
+	"strings"
+	"testing"
+)
+
+func transportDest() *Destination {
+	d := validDest()
+	d.Transport = DestTransport{
+		NoDurationFilesize: true,
+		MuxQueuePackets:    2048,
+		MuxQueueBytes:      8 << 20,
+		RWTimeoutSeconds:   10,
+	}
+	return d
+}
+
+func TestAValidTransportBlockIsAccepted(t *testing.T) {
+	// The positive case. Without it every refusal below would be satisfied by
+	// a validator that refused everything.
+	if err := transportDest().Validate(); err != nil {
+		t.Fatalf("a well-formed transport block was refused: %v", err)
+	}
+	// And the zero value must stay valid, or every pre-existing destination
+	// becomes unsavable.
+	d := validDest()
+	if err := d.Validate(); err != nil {
+		t.Fatalf("a destination with no transport tuning was refused: %v", err)
+	}
+	if d.Transport.Active() {
+		t.Error("a zero transport block reports itself active")
+	}
+}
+
+func TestTransportValidationRefusesWhatWouldNotWork(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mut  func(*Destination)
+		want string
+	}{
+		{"negative packets", func(d *Destination) { d.Transport.MuxQueuePackets = -1 }, "packets out of range"},
+		{"absurd packets", func(d *Destination) { d.Transport.MuxQueuePackets = MaxMuxQueuePackets + 1 }, "packets out of range"},
+		{"absurd bytes", func(d *Destination) { d.Transport.MuxQueueBytes = MaxMuxQueueBytes + 1 }, "bytes out of range"},
+		{"sub-second timeout", func(d *Destination) { d.Transport.RWTimeoutSeconds = -5 }, "socket timeout"},
+		{"hour-plus timeout", func(d *Destination) { d.Transport.RWTimeoutSeconds = MaxRWTimeoutSeconds + 1 }, "socket timeout"},
+		// The one that is a real FFmpeg semantic rather than a range: the byte
+		// threshold is "the threshold after which max_muxing_queue_size is
+		// taken into account", so on its own it does nothing at all. Accepting
+		// it would give the operator a control that appears to work.
+		{"threshold with no cap", func(d *Destination) {
+			d.Transport = DestTransport{MuxQueueBytes: 1 << 20}
+		}, "does nothing without a packet limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := transportDest()
+			tc.mut(d)
+			err := d.Validate()
+			if err == nil {
+				t.Fatalf("%s was accepted", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error was %q, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A setting that is reachable in the UI and lost on save is the same class of
+// bug as one that is unreachable.
+func TestTransportSurvivesTheDatabaseRoundTrip(t *testing.T) {
+	d := testDB(t)
+	in := transportDest()
+	src, err := d.DefaultSourceID()
+	if err != nil {
+		t.Fatalf("default source: %v", err)
+	}
+	in.SourceID = &src
+
+	created, err := d.CreateDestination(in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Transport != in.Transport {
+		t.Fatalf("transport came back as %+v, want %+v", created.Transport, in.Transport)
+	}
+
+	created.Transport.RWTimeoutSeconds = 30
+	created.Transport.NoDurationFilesize = false
+	updated, err := d.UpdateDestination(created)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Transport.RWTimeoutSeconds != 30 || updated.Transport.NoDurationFilesize {
+		t.Errorf("the updated transport came back as %+v", updated.Transport)
+	}
+
+	// Clearing it must actually clear it.
+	updated.Transport = DestTransport{}
+	cleared, err := d.UpdateDestination(updated)
+	if err != nil {
+		t.Fatalf("clearing: %v", err)
+	}
+	if cleared.Transport.Active() {
+		t.Errorf("the transport tuning survived being cleared: %+v", cleared.Transport)
+	}
+}
