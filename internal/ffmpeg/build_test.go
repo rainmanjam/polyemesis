@@ -622,8 +622,13 @@ func TestPreviewArgs(t *testing.T) {
 	if !strings.Contains(s, "0:a:0?") {
 		t.Errorf("audio map should be optional: %s", s)
 	}
-	if args[len(args)-1] != "/data/hls/index.m3u8" {
-		t.Errorf("playlist must be last: %s", s)
+	// filepath.Join, not a literal: this is a local filesystem path handed to
+	// FFmpeg, so \data\hls\index.m3u8 is the CORRECT rendering on Windows and
+	// the hardcoded forward-slash expectation was the bug. Contrast fileURL in
+	// internal/clipper, where the platform must NOT influence the result --
+	// there the output is a URL that travels to another machine.
+	if want := filepath.Join("/data/hls", "index.m3u8"); args[len(args)-1] != want {
+		t.Errorf("playlist must be last, got %q want %q: %s", args[len(args)-1], want, s)
 	}
 }
 

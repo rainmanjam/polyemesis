@@ -261,7 +261,16 @@ func TestFileURLSurvivesAWindowsPath(t *testing.T) {
 		{in: "/rec/a b.mkv", want: "file:///rec/a%20b.mkv"},
 		// A backslash is a legal character in a POSIX filename. Treating it as a
 		// separator would turn one file into two directories.
+		//
+		// This case is the whole reason the function does not use
+		// filepath.ToSlash: with it, this passed on Linux and produced
+		// file:///rec/my/clip.mkv on Windows -- a URL pointing at a file that
+		// does not exist. Same input, same function, different answer per
+		// platform, in a file format whose entire job is to be opened somewhere
+		// else.
 		{in: `/rec/my\clip.mkv`, want: `file:///rec/my%5Cclip.mkv`},
+		// UNC: the server is the URL host, not the first path segment.
+		{in: `\\nas\media\rec.mkv`, want: "file://nas/media/rec.mkv"},
 		{in: "", want: ""},
 	}
 	for _, tc := range tests {
