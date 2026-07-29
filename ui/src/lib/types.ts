@@ -201,6 +201,9 @@ export interface Destination {
   /** Output audio encoding. Always present in a server response and empty for
    *  a destination that has not opted in. */
   audio?: AudioEncoding;
+  /** Compliance metadata. Always present in a server response and empty for a
+   *  destination that has not set any. */
+  compliance?: Compliance;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -1301,6 +1304,36 @@ export interface AudioEncoding {
   /** Folds the routing graph's stereo output to one channel. A downmix of your
    *  mix, not a re-route. */
   mono?: boolean;
+}
+
+/** YouTube broadcast visibility. Empty means LEAVE IT ALONE, and that
+ *  distinction matters: YouTube's update is destructive by PART, so a status
+ *  write that omits privacyStatus reverts the broadcast to its default rather
+ *  than leaving it. */
+export type PrivacyStatus = "" | "private" | "unlisted" | "public";
+
+/** Twitch content classification labels Twitch will WRITE.
+ *
+ *  MatureGame is deliberately absent: it is readable and not writable, so
+ *  offering it would be a control that silently never applies. */
+export const TWITCH_LABELS = [
+  "DebatedSocialIssuesAndPolitics",
+  "DrugsIntoxication",
+  "Gambling",
+  "ProfanityVulgarity",
+  "SexualThemes",
+  "ViolentGraphic",
+] as const;
+
+/** Obligation metadata: who the programme is for, who may see it, what a
+ *  viewer is about to be shown. Every zero value means "do not touch". */
+export interface Compliance {
+  privacy?: PrivacyStatus;
+  /** COPPA self-declaration. undefined is "not said"; false is the real
+   *  declaration "this is not for children", and the two are different. */
+  madeForKids?: boolean;
+  /** Twitch labels, id -> enabled. A key set to false actively CLEARS it. */
+  labels?: Record<string, boolean>;
 }
 
 // ------------------------------------------------------------------- expert

@@ -32,6 +32,11 @@ const (
 	FieldTitle       MetadataField = "title"
 	FieldDescription MetadataField = "description"
 	FieldCategory    MetadataField = "category"
+	// Compliance fields. Separate from the three above because they describe
+	// an obligation rather than a description -- see compliance.go.
+	FieldPrivacy     MetadataField = "privacy"
+	FieldMadeForKids MetadataField = "madeForKids"
+	FieldLabels      MetadataField = "contentLabels"
 )
 
 // Metadata is what the operator typed once in the go-live composer. An empty

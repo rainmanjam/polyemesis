@@ -1,6 +1,6 @@
 # Roadmap batch — progress and hand-off
 
-**Last updated:** 2026-07-29, after destination-settings Part C (PR #20).
+**Last updated:** 2026-07-29, after destination-settings Part B (PR #21).
 **Task:** build roadmap items **0, 1, 2, 3, 6**. Delivery: **one PR per item**,
 stacked. Read `docs/roadmap/README.md` for the sequence and each item's design.
 
@@ -219,6 +219,7 @@ main
                              └─ feat/unreachable-settings PR #18
                                  └─ feat/dest-transport     PR #19  Part A
                                      └─ feat/dest-resilience   PR #20  Part C
+                                         └─ feat/dest-audio        PR #21  Part B
 ```
 
 ## DONE this session (PRs #18-#20)
@@ -248,14 +249,17 @@ Resilience had to be added to the destination restart signature BY HAND because
 it is a supervisor property with no trace in the argv -- the r.Deinterlace bug
 in a new place.
 
-## NEXT TASK — Part B, then Part D, then overlays v1
+**PR #21 — Part B, audio.** Two of three shipped; the third REFUTED.
+**AAC profile is not buildable**: FFmpeg's native aac encoder has NO -profile
+option and `-profile:a aac_he` -> "Profile not supported!" with no output at
+all. HE-AAC needs nonfree libfdk_aac. The GOAL (good audio under 64 kbps) is met
+by Opus instead, which is free and already in the build. Opus is REFUSED on
+RTMP: FFmpeg will mux it into FLV (probe produced a valid 8.6 KB file, Enhanced
+RTMP defines a mapping) and no mainstream ingest accepts it. Mono turned out NOT
+to need a routing-matrix change -- it is a downmix (`-ac 1`) of the operator's
+stereo mix; re-routing tracks to one channel is a different feature.
 
-**Part B, audio encoding (~3 d).** `docs/roadmap/DESTINATION-SETTINGS.md`.
-AAC profile (LC / HE-AAC v1 / v2), mono output, codec choice for SRT/Icecast.
-**PROBE FIRST** -- check `ffmpeg -h encoder=aac` for the profile spelling before
-designing around it. The awkward one is MONO: the routing model has exactly
-OutL/OutR, so mono is a change to the matrix, not a flag. Consider whether
-`-ac 1` after the graph is honest enough, or whether it needs a routing change.
+## NEXT TASK — Part D, then overlays v1
 
 **Part D, metadata (~7-12 d).** The compliance items first, since they are the
 only ones with a legal edge: selfDeclaredMadeForKids (COPPA), privacyStatus,

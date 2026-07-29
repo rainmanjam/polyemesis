@@ -109,10 +109,14 @@ type Destination struct {
 	Resilience DestResilience `json:"resilience"`
 	// Audio is the output encoding choice. Its zero value is AAC stereo, which
 	// is what every destination emitted before it existed.
-	Audio     AudioEncoding `json:"audio"`
-	Position  int           `json:"position"`
-	CreatedAt time.Time     `json:"createdAt"`
-	UpdatedAt time.Time     `json:"updatedAt"`
+	Audio AudioEncoding `json:"audio"`
+	// Compliance is the obligation metadata: who the programme is for, who may
+	// see it, what a viewer is about to be shown. Its zero value touches
+	// nothing -- see oauth.Compliance.
+	Compliance Compliance `json:"compliance"`
+	Position   int        `json:"position"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
 // ExpertArgsSet reports whether this destination has any hand-written
@@ -426,6 +430,12 @@ func (d Destination) Validate() error {
 	for _, p := range d.Audio.problems(d.Kind) {
 		add("%s", p)
 	}
+	// Refused at save time rather than at go-live. A compliance field that
+	// fails when the operator presses "go live" fails at the one moment they
+	// cannot stop to fix it.
+	for _, p := range d.Compliance.Problems() {
+		add("%s", p)
+	}
 
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))
@@ -440,8 +450,11 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		rendition  sql.NullInt64
 		source     sql.NullInt64
 		profileRaw string
-		created    int64
-		updated    int64
+		// Defaulted to "{}" so a row written before the column existed decodes
+		// to a zero Compliance -- touch nothing -- rather than failing the scan.
+		complianceJSON = "{}"
+		created        int64
+		updated        int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
 		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
@@ -450,7 +463,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
 		&d.Resilience.MinBackoffSeconds, &d.Resilience.MaxBackoffSeconds,
 		&d.Resilience.GiveUpAfter,
-		&d.Audio.Codec, &d.Audio.Mono,
+		&d.Audio.Codec, &d.Audio.Mono, &complianceJSON,
 		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -481,6 +494,11 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		return nil, fmt.Errorf("destination %d has no source: it belongs to no "+
 			"programme and would never be started", d.ID)
 	}
+	if complianceJSON != "" {
+		if err := json.Unmarshal([]byte(complianceJSON), &d.Compliance); err != nil {
+			return nil, fmt.Errorf("destination %d has unreadable compliance metadata: %w", d.ID, err)
+		}
+	}
 	if err := json.Unmarshal([]byte(profileRaw), &d.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", d.ID, err)
 	}
@@ -494,7 +512,7 @@ const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
-	au_codec, au_mono,
+	au_codec, au_mono, compliance,
 	position, created_at, updated_at`
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
@@ -606,6 +624,10 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	compliance, err := json.Marshal(dst.Compliance)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().Unix()
 
 	var maxPos sql.NullInt64
@@ -619,9 +641,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
-		 au_codec, au_mono,
+		 au_codec, au_mono, compliance,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
@@ -629,7 +651,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
-		dst.Audio.Codec, dst.Audio.Mono,
+		dst.Audio.Codec, dst.Audio.Mono, string(compliance),
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -657,6 +679,10 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	compliance, err := json.Marshal(dst.Compliance)
+	if err != nil {
+		return nil, err
+	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
 		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
@@ -664,7 +690,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
 		tr_rw_timeout_seconds=?,
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
-		au_codec=?, au_mono=?,
+		au_codec=?, au_mono=?, compliance=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
@@ -673,7 +699,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
-		dst.Audio.Codec, dst.Audio.Mono,
+		dst.Audio.Codec, dst.Audio.Mono, string(compliance),
 		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
@@ -816,6 +842,9 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		// destination emitted before these existed.
 		{"au_codec", `ALTER TABLE destinations ADD COLUMN au_codec TEXT NOT NULL DEFAULT ''`},
 		{"au_mono", `ALTER TABLE destinations ADD COLUMN au_mono INTEGER NOT NULL DEFAULT 0`},
+		// Compliance rides as one JSON blob rather than four columns: it is a
+		// map plus two scalars, edited as a unit, and '{}' is "touch nothing".
+		{"compliance", `ALTER TABLE destinations ADD COLUMN compliance TEXT NOT NULL DEFAULT '{}'`},
 	}
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)

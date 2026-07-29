@@ -146,3 +146,49 @@ func TestAudioEncodingValidation(t *testing.T) {
 		t.Errorf("mono on RTMP was refused: %v", err)
 	}
 }
+
+// Compliance must survive the round trip, and its zero value must stay zero:
+// a destination that has never set any must produce no platform writes at all.
+func TestComplianceSurvivesTheDatabaseRoundTrip(t *testing.T) {
+	d := testDB(t)
+	src, err := d.DefaultSourceID()
+	if err != nil {
+		t.Fatalf("default source: %v", err)
+	}
+	no := false
+	in := validDest()
+	in.SourceID = &src
+	in.Compliance = Compliance{
+		Privacy:     PrivacyUnlisted,
+		MadeForKids: &no,
+		Labels:      map[string]bool{"Gambling": true, "SexualThemes": false},
+	}
+
+	created, err := d.CreateDestination(in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Compliance.Privacy != PrivacyUnlisted {
+		t.Errorf("privacy came back as %q", created.Compliance.Privacy)
+	}
+	// The pointer is the whole reason "not for children" is expressible.
+	if created.Compliance.MadeForKids == nil || *created.Compliance.MadeForKids {
+		t.Errorf("madeForKids came back as %v, want an explicit false",
+			created.Compliance.MadeForKids)
+	}
+	if !created.Compliance.Labels["Gambling"] || created.Compliance.Labels["SexualThemes"] {
+		t.Errorf("labels came back as %v", created.Compliance.Labels)
+	}
+
+	// A destination with none must decode to a zero block rather than failing,
+	// which is what a row written before the column existed looks like.
+	plain := validDest()
+	plain.SourceID = &src
+	p2, err := d.CreateDestination(plain)
+	if err != nil {
+		t.Fatalf("create plain: %v", err)
+	}
+	if !p2.Compliance.Empty() {
+		t.Errorf("a destination with no compliance decoded to %+v", p2.Compliance)
+	}
+}

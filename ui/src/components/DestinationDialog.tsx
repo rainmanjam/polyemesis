@@ -22,11 +22,14 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { Switch } from "@/components/ui/switch";
+import { TWITCH_LABELS } from "@/lib/types";
 import type {
   Destination,
   DestTransport,
   DestResilience,
   AudioEncoding,
+  Compliance,
+  PrivacyStatus,
   DestKind,
   Platform,
   PlatformAccount,
@@ -880,6 +883,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [resilience, setResilience] = useState<DestResilience>({});
   // Output audio encoding. Empty is AAC stereo.
   const [audio, setAudio] = useState<AudioEncoding>({});
+  // Obligation metadata. Empty means "touch nothing", which is what every
+  // destination that has never set any carries.
+  const [compliance, setCompliance] = useState<Compliance>({});
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -908,6 +914,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setTransport(destination.transport ?? {});
       setResilience(destination.resilience ?? {});
       setAudio(destination.audio ?? {});
+      setCompliance(destination.compliance ?? {});
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -916,6 +923,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setTransport({});
       setResilience({});
       setAudio({});
+      setCompliance({});
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -1015,6 +1023,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         transport,
         resilience,
         audio,
+        compliance,
       };
       if (editing) {
         await api.updateDestination(destination.id, payload);
@@ -1431,6 +1440,111 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </span>
             </div>
           </div>
+
+          {(platform === "youtube" || platform === "twitch") && (
+            <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
+              <p className="text-xs font-medium">Compliance</p>
+              <span className="text-[10px] text-muted-foreground">
+                Not cosmetic. COPPA is a law, Twitch requires labels for several content classes,
+                and going live publicly by accident cannot be undone once people have seen it.
+                Anything left unset is not sent at all &mdash; polyemesis never overwrites a
+                setting you did not choose.
+              </span>
+
+              {platform === "youtube" && (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <Label>Visibility</Label>
+                    <Select
+                      value={compliance.privacy || "unset"}
+                      onValueChange={(v) =>
+                        setCompliance({
+                          ...compliance,
+                          privacy: v === "unset" ? "" : (v as PrivacyStatus),
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
+                        <SelectItem value="private">Private</SelectItem>
+                        <SelectItem value="unlisted">Unlisted</SelectItem>
+                        <SelectItem value="public">Public</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-[10px] text-muted-foreground">
+                      "Leave as it is" is the safe default and means no visibility write happens at
+                      all. That matters: YouTube's update is destructive by section, so a write
+                      that omitted this would revert your broadcast to its default rather than
+                      leaving it alone.
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <Label>Made for kids (COPPA)</Label>
+                    <Select
+                      value={
+                        compliance.madeForKids === undefined
+                          ? "unset"
+                          : compliance.madeForKids
+                            ? "yes"
+                            : "no"
+                      }
+                      onValueChange={(v) =>
+                        setCompliance({
+                          ...compliance,
+                          madeForKids: v === "unset" ? undefined : v === "yes",
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
+                        <SelectItem value="no">No &mdash; not made for kids</SelectItem>
+                        <SelectItem value="yes">Yes &mdash; made for kids</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-[10px] text-muted-foreground">
+                      "No" is a declaration, not the absence of one, so it is sent. This is written
+                      through YouTube's video resource rather than the broadcast, because that is
+                      the only place it is settable once a broadcast exists.
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {platform === "twitch" && (
+                <div className="flex flex-col gap-1">
+                  <Label>Content labels</Label>
+                  <div className="flex flex-col gap-1">
+                    {TWITCH_LABELS.map((id) => (
+                      <div key={id} className="flex items-center justify-between gap-2">
+                        <span className="text-[11px]">{id.replace(/([A-Z])/g, " $1").trim()}</span>
+                        <Switch
+                          checked={compliance.labels?.[id] ?? false}
+                          onCheckedChange={(v) =>
+                            setCompliance({
+                              ...compliance,
+                              labels: { ...compliance.labels, [id]: v },
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    Twitch requires these for mature games, sexual themes, drugs, gambling and
+                    graphic violence. "Mature game" is not here because Twitch derives it from the
+                    category and refuses to let anything set it.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           <details className="rounded-md border border-border p-2">
             <summary className="cursor-pointer text-xs font-medium">
