@@ -2,6 +2,7 @@ package clipper
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,10 +31,10 @@ func TestFastCutIsOneStreamCopy(t *testing.T) {
 		"-c:v", "copy", "-c:a", "copy",
 		"-avoid_negative_ts", "make_zero",
 		"-f", "matroska",
-		"/clips/out.mkv",
+		testOutPath,
 	}
 	assertArgs(t, cmds[0].Args, want)
-	if cmds[0].Output != "/clips/out.mkv" {
+	if cmds[0].Output != testOutPath {
 		t.Errorf("output = %s", cmds[0].Output)
 	}
 	if len(cmds[0].Files) != 0 {
@@ -86,7 +87,7 @@ func TestPreciseCutIsHeadThenTailThenJoin(t *testing.T) {
 		"-map", "0", "-c", "copy",
 		"-avoid_negative_ts", "make_zero",
 		"-f", "matroska",
-		"/clips/out.mkv",
+		testOutPath,
 	})
 
 	if len(cmds[2].Files) != 1 {
@@ -115,7 +116,7 @@ func TestAPreciseCutInsideOneGOPIsASingleEncode(t *testing.T) {
 	if got := names(cmds); !equalStrings(got, []string{"head"}) {
 		t.Fatalf("commands = %v, want a single head", got)
 	}
-	if cmds[0].Output != "/clips/out.mkv" {
+	if cmds[0].Output != testOutPath {
 		t.Errorf("output = %s, want the final path", cmds[0].Output)
 	}
 }
@@ -163,7 +164,7 @@ func TestACutSpanningSegmentsFeedsFFmpegAConcatList(t *testing.T) {
 		"-c:v", "copy", "-c:a", "copy",
 		"-avoid_negative_ts", "make_zero",
 		"-f", "matroska",
-		"/clips/out.mkv",
+		testOutPath,
 	})
 	if len(cmds[0].Files) != 1 {
 		t.Fatalf("no concat list was produced")
@@ -279,9 +280,9 @@ func TestAMixCarriesItsBitrateOnlyWhenTheCodecIsLossy(t *testing.T) {
 		wantFlag  bool
 		wantCodec string
 	}{
-		{name: "flac ignores a bitrate", outPath: "/clips/out.mkv", kbps: 192, wantCodec: "flac"},
-		{name: "aac takes one", outPath: "/clips/out.mp4", kbps: 192, wantFlag: true, wantCodec: "aac"},
-		{name: "aac with no bitrate keeps the encoder default", outPath: "/clips/out.mp4", wantCodec: "aac"},
+		{name: "flac ignores a bitrate", outPath: testOutPath, kbps: 192, wantCodec: "flac"},
+		{name: "aac takes one", outPath: filepath.Join(testClipDir, "out.mp4"), kbps: 192, wantFlag: true, wantCodec: "aac"},
+		{name: "aac with no bitrate keeps the encoder default", outPath: filepath.Join(testClipDir, "out.mp4"), wantCodec: "aac"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -311,10 +312,10 @@ func TestTheContainerFollowsTheOutputExtension(t *testing.T) {
 		path string
 		want []string
 	}{
-		{path: "/clips/out.mkv", want: []string{"-f", "matroska"}},
-		{path: "/clips/out.mp4", want: []string{"-movflags", "+faststart", "-f", "mp4"}},
-		{path: "/clips/out.ts", want: []string{"-f", "mpegts"}},
-		{path: "/clips/out.unknown", want: []string{"-f", "matroska"}},
+		{path: testOutPath, want: []string{"-f", "matroska"}},
+		{path: filepath.Join(testClipDir, "out.mp4"), want: []string{"-movflags", "+faststart", "-f", "mp4"}},
+		{path: filepath.Join(testClipDir, "out.ts"), want: []string{"-f", "mpegts"}},
+		{path: filepath.Join(testClipDir, "out.unknown"), want: []string{"-f", "matroska"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {

@@ -217,8 +217,8 @@ func TestFromPlanNamesTheTimelineAfterTheClip(t *testing.T) {
 		out   string
 		want  string
 	}{
-		{name: "an explicit title wins", title: "The goal", out: "/clips/a.mkv", want: "The goal"},
-		{name: "otherwise the filename", out: "/clips/clip-20240115.mkv", want: "clip-20240115"},
+		{name: "an explicit title wins", title: "The goal", out: filepath.Join(testClipDir, "a.mkv"), want: "The goal"},
+		{name: "otherwise the filename", out: filepath.Join(testClipDir, "clip-20240115.mkv"), want: "clip-20240115"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -3,6 +3,8 @@ package clipper
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +33,30 @@ func oneHourTimeline(t *testing.T) Timeline {
 	return tl
 }
 
+// testOutPath is an absolute output path on the platform the test is RUNNING
+// on, not on the one it was written on.
+//
+// filepath.Join(testClipDir, "out.mkv") is absolute on Unix and is NOT absolute on Windows, where
+// filepath.IsAbs wants a drive letter or a UNC share. PlanCut refuses a
+// non-absolute output -- correctly -- so every test here failed on Windows
+// while the code under test was doing exactly the right thing.
+//
+// Found by the cross-platform CI matrix on its first run. Nothing had ever
+// executed this package on Windows before, even though `make release` has been
+// shipping a Windows binary all along.
+//
+// os.TempDir() rather than a separator-joined literal. The obvious fix --
+// filepath.Join(string(filepath.Separator)+"clips", ...) -- yields
+// `\clips\out.mkv` on Windows, which is ROOTED and still not ABSOLUTE, so it
+// would have failed in exactly the same way. os.TempDir() returns a real
+// absolute path on every platform, drive letter included.
+// testClipDir is an absolute directory on the platform the test is RUNNING on.
+var testClipDir = filepath.Join(os.TempDir(), "polyemesis-clips")
+
+var testOutPath = filepath.Join(testClipDir, "out.mkv")
+
 func req(in, out time.Duration, mut ...func(*Request)) Request {
-	r := Request{In: in, Out: out, OutPath: "/clips/out.mkv"}
+	r := Request{In: in, Out: out, OutPath: testOutPath}
 	for _, fn := range mut {
 		fn(&r)
 	}
@@ -465,7 +489,7 @@ func TestPlanCutRefusesOnlyWhatItCannotDo(t *testing.T) {
 		},
 		{
 			name:    "an out-point at the in-point",
-			req:     Request{In: time.Second, Out: time.Second, OutPath: "/clips/out.mkv"},
+			req:     Request{In: time.Second, Out: time.Second, OutPath: filepath.Join(testClipDir, "out.mkv")},
 			wantErr: ErrEmptyRange,
 		},
 		{
@@ -535,7 +559,7 @@ func TestAudioSelectionResolvesToAMixOnlyWhenAsked(t *testing.T) {
 
 	t.Run("a mix into mp4 falls back to a codec mp4 players can read", func(t *testing.T) {
 		p, err := PlanCut(tl, kf, req(0, 10*time.Second, mixOfTracks(0, 1), func(r *Request) {
-			r.OutPath = "/clips/out.mp4"
+			r.OutPath = filepath.Join(testClipDir, "out.mp4")
 		}))
 		if err != nil {
 			t.Fatalf("PlanCut: %v", err)
