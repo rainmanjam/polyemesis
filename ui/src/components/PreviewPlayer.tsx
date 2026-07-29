@@ -35,6 +35,17 @@ export function PreviewPlayer({
           // Tuned for a monitor feed: stay near the live edge and prefer
           // skipping to catching up smoothly.
           lowLatencyMode: true,
+          // Load-bearing, and it was missing. hls.js gates its whole
+          // catch-up controller on
+          //   !lowLatencyMode || maxLiveSyncPlaybackRate === 1
+          // and maxLiveSyncPlaybackRate DEFAULTS TO 1 (verified in the
+          // installed 1.6.16 build), so lowLatencyMode alone returned early
+          // every time and the player never nudged itself back toward the
+          // edge. 1.08 is fast enough to recover a second of drift within a
+          // few seconds and slow enough that nobody hears the pitch shift.
+          maxLiveSyncPlaybackRate: 1.08,
+          // Target latency is liveSyncDurationCount x EXT-X-TARGETDURATION.
+          // At the 1s segments the server now emits, that is 2s.
           liveSyncDurationCount: 2,
           liveMaxLatencyDurationCount: 6,
           maxBufferLength: 6,

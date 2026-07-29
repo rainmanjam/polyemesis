@@ -764,7 +764,14 @@ func PreviewArgs(s PreviewSpec) []string {
 	if s.VideoKbps == 0 {
 		s.VideoKbps = 800
 	}
-	gop := s.SegmentSeconds * 30
+	// The live window has to stay wide enough that a player sitting at the far
+	// edge of its allowed latency can still fetch the segment it is asking for.
+	// hls.js will seek when it falls liveMaxLatencyDurationCount (6) target
+	// durations behind, so a window of listSize x SegmentSeconds against a
+	// threshold of 6 x SegmentSeconds is exactly equal at every segment length
+	// -- the ratio is scale-invariant, and a constant 6 gives no margin at all.
+	// Derived so shorter segments buy some.
+	listSize := max(6, (8+s.SegmentSeconds-1)/s.SegmentSeconds)
 
 	args := commonArgs()
 	args = append(args, progressArgs()...)
@@ -783,16 +790,38 @@ func PreviewArgs(s PreviewSpec) []string {
 		"-vf", fmt.Sprintf("scale=-2:%d", s.Height),
 		// Keyframe interval must divide the segment length exactly, or HLS
 		// segments drift off the GOP boundary and players stall on each one.
-		"-g", strconv.Itoa(gop),
-		"-keyint_min", strconv.Itoa(gop),
+		//
+		// Expressed in SECONDS rather than frames. `-g SegmentSeconds*30` was
+		// a 30 fps assumption baked into a field the operator never sets: on a
+		// 25 fps ingest every segment overshot by 20%, measured as EXTINF
+		// 1.200000 for a requested 1s. force_key_frames states the interval
+		// exactly and is right at every frame rate.
+		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", s.SegmentSeconds),
+		// Still needed: it is what stops x264 inserting its own keyframes
+		// between the forced ones on a scene change.
 		"-sc_threshold", "0",
 		"-c:a", "aac",
 		"-b:a", "96k",
 		"-ac", "2",
 		"-f", "hls",
 		"-hls_time", strconv.Itoa(s.SegmentSeconds),
-		"-hls_list_size", "6",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+		"-hls_list_size", strconv.Itoa(listSize),
+		// program_date_time is not decoration. It stamps the first segment with
+		// a wall-clock time, so live-edge latency becomes a NUMBER an operator
+		// and a test can both read -- EXT-X-PROGRAM-DATE-TIME plus the
+		// cumulative EXTINF, subtracted from now. Without it, latency can only
+		// be claimed. internal/playout already sets it, for the same reason.
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
+		// Default is 1, meaning a segment is unlinked the moment it leaves the
+		// playlist. Keeping one extra lets a player's already-issued request
+		// for the segment that just aged out still complete.
+		"-hls_delete_threshold", "2",
+		// MPEG-TS, deliberately. fMP4 measured ~8-9% smaller and buys ZERO
+		// latency, while costing an init.mp4 lifecycle that has to survive the
+		// on-demand stop/start cycle and an explicit content type for Safari's
+		// native path. Its only strategic argument was as the prerequisite for
+		// a Go-side LL-HLS packager, which docs/roadmap/LL-HLS.md declines to
+		// build.
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", filepath.Join(s.OutputDir, "seg_%05d.ts"),
 		filepath.Join(s.OutputDir, "index.m3u8"),

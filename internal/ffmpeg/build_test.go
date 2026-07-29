@@ -1,8 +1,13 @@
 package ffmpeg
 
 import (
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -566,15 +571,48 @@ func TestPreviewArgs(t *testing.T) {
 	if f, _ := argsAfter(args, "-f"); f != "hls" {
 		t.Errorf("-f = %q", f)
 	}
-	// GOP must divide the segment length exactly or players stall at each
-	// segment boundary.
-	g, _ := argsAfter(args, "-g")
-	kmin, _ := argsAfter(args, "-keyint_min")
-	if g != "60" || kmin != "60" {
-		t.Errorf("-g/%s -keyint_min/%s must both be segment*30 = 60", g, kmin)
+	// The keyframe interval is stated in SECONDS, not frames. `-g segment*30`
+	// was a 30 fps assumption baked into a field nobody sets, and it made every
+	// segment on a 25 fps ingest 20% too long.
+	if fkf, _ := argsAfter(args, "-force_key_frames"); fkf != "expr:gte(t,n_forced*2)" {
+		t.Errorf("-force_key_frames = %q, want the segment length in seconds", fkf)
+	}
+	for _, gone := range []string{"-g", "-keyint_min"} {
+		if _, ok := argsAfter(args, gone); ok {
+			t.Errorf("%s is still present; it is a frame count and cannot be "+
+				"correct at more than one frame rate", gone)
+		}
+	}
+	// Without this x264 inserts its own keyframes between the forced ones on a
+	// scene change, and the segments stop landing on GOP boundaries again.
+	if sc, _ := argsAfter(args, "-sc_threshold"); sc != "0" {
+		t.Errorf("-sc_threshold = %q, want 0", sc)
 	}
 	if !strings.Contains(s, "delete_segments") {
 		t.Error("preview must delete old segments or it fills the disk")
+	}
+	// The only mechanism by which live-edge latency is a measured number rather
+	// than a claimed one.
+	if !strings.Contains(s, "program_date_time") {
+		t.Error("program_date_time missing; latency becomes unmeasurable")
+	}
+	// A player at the edge of its allowed latency must still be able to fetch
+	// the segment it is asking for. hls.js seeks at 6 target durations, and the
+	// window is listSize x segment -- equal at every segment length with a
+	// constant 6, so the size is derived to buy margin at short segments.
+	if ls, _ := argsAfter(args, "-hls_list_size"); ls != "6" {
+		t.Errorf("-hls_list_size at 2s segments = %q, want 6", ls)
+	}
+	short := PreviewArgs(PreviewSpec{
+		RelayURL: "udp://127.0.0.1:20003", OutputDir: "/data/hls",
+		SegmentSeconds: 1, Height: 360, VideoKbps: 800,
+	})
+	if ls, _ := argsAfter(short, "-hls_list_size"); ls != "8" {
+		t.Errorf("-hls_list_size at 1s segments = %q, want 8 so the window "+
+			"does not shrink with the segment", ls)
+	}
+	if fkf, _ := argsAfter(short, "-force_key_frames"); fkf != "expr:gte(t,n_forced*1)" {
+		t.Errorf("1s -force_key_frames = %q", fkf)
 	}
 	if !strings.Contains(s, "scale=-2:360") {
 		t.Errorf("scale filter missing: %s", s)
@@ -586,6 +624,85 @@ func TestPreviewArgs(t *testing.T) {
 	}
 	if args[len(args)-1] != "/data/hls/index.m3u8" {
 		t.Errorf("playlist must be last: %s", s)
+	}
+}
+
+// TestPreviewSegmentsAreTheLengthTheyClaim runs the real keyframe expression
+// through the real FFmpeg at a NON-30 frame rate, because that is the only way
+// to catch the bug this replaced.
+//
+// `-g SegmentSeconds*30` looked right and passed every string test: 1s at 30fps
+// is 30 frames. On a 25 fps ingest it is 30 frames of a 25 fps stream, i.e.
+// 1.2 seconds, and every segment overshoots by 20% forever. Nothing that
+// inspects arguments can see that; it needs a measurement at a frame rate the
+// old constant was wrong about.
+func TestPreviewSegmentsAreTheLengthTheyClaim(t *testing.T) {
+	bins := needFFmpeg(t, "ffmpeg")
+	const segment = 1
+
+	args := PreviewArgs(PreviewSpec{
+		RelayURL: "udp://127.0.0.1:20003", OutputDir: "/tmp",
+		SegmentSeconds: segment, Height: 360, VideoKbps: 800,
+	})
+	expr, ok := argsAfter(args, "-force_key_frames")
+	if !ok {
+		t.Fatal("no -force_key_frames in the preview arguments")
+	}
+
+	dir := t.TempDir()
+	for _, fps := range []int{25, 30} {
+		t.Run(fmt.Sprintf("%dfps", fps), func(t *testing.T) {
+			out := filepath.Join(dir, fmt.Sprintf("i%d.m3u8", fps))
+			cmd := exec.Command(bins[0], "-hide_banner", "-loglevel", "error",
+				"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=320x180:rate=%d", fps),
+				"-t", "6",
+				"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+				"-force_key_frames", expr,
+				"-sc_threshold", "0",
+				"-f", "hls",
+				"-hls_time", strconv.Itoa(segment),
+				"-hls_list_size", "0",
+				"-hls_segment_filename", filepath.Join(dir, fmt.Sprintf("s%d_%%03d.ts", fps)),
+				out)
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("ffmpeg: %v\n%s", err, b)
+			}
+
+			pl, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatalf("playlist: %v", err)
+			}
+			// Skip the last EXTINF: the final segment is whatever remains when
+			// the input ends and is legitimately short.
+			var durs []float64
+			for _, line := range strings.Split(string(pl), "\n") {
+				if !strings.HasPrefix(line, "#EXTINF:") {
+					continue
+				}
+				v, err := strconv.ParseFloat(strings.TrimSuffix(
+					strings.TrimPrefix(line, "#EXTINF:"), ","), 64)
+				if err == nil {
+					durs = append(durs, v)
+				}
+			}
+			if len(durs) < 3 {
+				t.Fatalf("only %d segments; not enough to judge", len(durs))
+			}
+			durs = durs[:len(durs)-1]
+
+			// One frame of tolerance. The old -g form produced a flat 1.2 on
+			// the 25 fps case, which is 5x this budget away.
+			tol := 1.0 / float64(fps)
+			for i, d := range durs {
+				if math.Abs(d-float64(segment)) > tol {
+					t.Errorf("segment %d is %.4fs, want %ds +/- one frame (%.4fs). "+
+						"A keyframe interval counted in FRAMES cannot be right at "+
+						"more than one frame rate.", i, d, segment, tol)
+				}
+			}
+			t.Logf("%d fps: %d segments, first %.4fs, last %.4fs",
+				fps, len(durs), durs[0], durs[len(durs)-1])
+		})
 	}
 }
 

@@ -933,8 +933,17 @@ func DefaultSettings() Settings {
 			StemCodec:      ffmpeg.DefaultStemCodec,
 		},
 		Preview: PreviewSettings{
-			Enabled:            true,
-			SegmentSeconds:     2,
+			Enabled: true,
+			// One second, not two. The player holds back
+			// liveSyncDurationCount (2) x the target duration, so the segment
+			// length is multiplied on its way to the screen: halving it takes
+			// roughly 2.5s off the preview, measured, for +0.9% bytes and no
+			// measurable quality cost (PSNR at 360p/800k was marginally HIGHER
+			// with the shorter GOP).
+			//
+			// This is the DEFAULT only. An operator who has stored a value
+			// keeps it -- see docs/roadmap/LL-HLS.md.
+			SegmentSeconds:     1,
 			VideoHeight:        360,
 			VideoKbps:          800,
 			IdleTimeoutSeconds: 30,
