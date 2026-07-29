@@ -98,7 +98,7 @@ See [TESTING.md](TESTING.md) for how to run it.
 
 - [OBS.md](OBS.md#2-assign-sources-to-tracks) — assigning sources to tracks in OBS
 - [RENDITIONS.md](RENDITIONS.md) — shared video encodes, which never touch audio
-- [ARCHITECTURE.md](ARCHITECTURE.md#3-audio-routing-engine-internalrouting) — the
+- [ARCHITECTURE.md](ARCHITECTURE.md#2-audio-routing-engine-internalrouting) — the
   routing engine's model and compilation
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-audio-is-wrong) — when the audio is
   wrong

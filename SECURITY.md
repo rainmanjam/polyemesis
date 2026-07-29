@@ -72,6 +72,13 @@ These are design decisions, not oversights. Read them as operating instructions.
 - **Nothing is encrypted on the wire unless you say so.** Plain HTTP means the
   password and session cookie cross the network in clear text. The server warns
   about this at startup; the warning is not decorative.
+- **There is no audit log.** Nothing records which change was made when, or from
+  where. With one operator that is a gap rather than a hazard, but do not deploy
+  this expecting to reconstruct events after an incident.
+- **The ingest port is reachable even when the UI is not.** Binding the web UI
+  to loopback does not move the ingest listener, which must stay reachable for
+  your encoder. A valid token is the only thing standing in front of it, plus
+  the SRT passphrase if you set one.
 
 ### Deploying it safely
 
@@ -93,4 +100,4 @@ HSTS is opt-in and is never sent over a self-signed certificate. This is
 deliberate: an HSTS header from a self-signed instance pins the browser to HTTPS
 for that host for months, and if the certificate is later lost or the instance
 moves, the operator is locked out of their own tool with no obvious way back.
-The README section *TLS and certificates* explains the full reasoning.
+[docs/TLS.md](docs/TLS.md#hsts-is-opt-in-and-here-is-why) has the full reasoning.
