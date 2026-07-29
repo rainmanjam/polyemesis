@@ -188,6 +188,7 @@ jobs:
           - acceptance-encoders
           - acceptance-tls
           - acceptance-pull     # dial-out ingest
+          - acceptance-playlist-phase0 # scheduled file broadcast, no encoder
           - acceptance-synth    # silence tier and the failover slate
           - acceptance-failover # switch without restarting a destination
           - acceptance-postprod
