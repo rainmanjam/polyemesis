@@ -19,6 +19,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AnchorGrid } from "@/components/AnchorGrid";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -828,18 +829,6 @@ function emptyForm(defaultEncoder: string) {
   };
 }
 
-const OVERLAY_ANCHORS: { key: OverlayAnchor; label: string }[] = [
-  { key: "top-left", label: "Top left" },
-  { key: "top-center", label: "Top centre" },
-  { key: "top-right", label: "Top right" },
-  { key: "middle-left", label: "Middle left" },
-  { key: "center", label: "Centre" },
-  { key: "middle-right", label: "Middle right" },
-  { key: "bottom-left", label: "Bottom left" },
-  { key: "bottom-center", label: "Bottom centre" },
-  { key: "bottom-right", label: "Bottom right" },
-];
-
 // Radix's SelectItem refuses an empty value, and the empty string is precisely
 // what the server stores for both zero values. So the form carries a sentinel
 // and converts at the boundary -- never in between, or the two vocabularies
@@ -1410,24 +1399,10 @@ function RenditionDialog({
             {overlayApplies && (
               <>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="flex flex-col gap-1">
-                    <Label>Position</Label>
-                    <Select
-                      value={form.overlayAnchor}
-                      onValueChange={(v) => set("overlayAnchor", v as OverlayAnchor)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {OVERLAY_ANCHORS.map((a) => (
-                          <SelectItem key={a.key} value={a.key}>
-                            {a.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <AnchorGrid
+                    value={form.overlayAnchor}
+                    onChange={(v) => set("overlayAnchor", v)}
+                  />
                   <div className="flex flex-col gap-1">
                     <Label htmlFor="rend-overlay-width">Width (% of frame)</Label>
                     <Input
@@ -1542,24 +1517,10 @@ function RenditionDialog({
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <Label>Position</Label>
-                    <Select
-                      value={form.textAnchor}
-                      onValueChange={(v) => set("textAnchor", v as OverlayAnchor)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {OVERLAY_ANCHORS.map((a) => (
-                          <SelectItem key={a.key} value={a.key}>
-                            {a.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <AnchorGrid
+                    value={form.textAnchor}
+                    onChange={(v) => set("textAnchor", v)}
+                  />
                 </div>
                 <span className="text-[10px] text-muted-foreground">
                   Drop a <code>.ttf</code> or <code>.otf</code> into <code>&lt;data&gt;/fonts/</code>{" "}
