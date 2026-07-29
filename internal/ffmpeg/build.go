@@ -478,6 +478,79 @@ type DestSpec struct {
 	// nothing at all, so a destination that has not opted in produces exactly
 	// the argv it always did.
 	Transport TransportSpec
+
+	// Audio is the optional output-encoding choice. Its zero value is AAC
+	// stereo, which is what every destination emitted before this existed.
+	Audio AudioSpec
+}
+
+// Audio codec names, spelled the way FFmpeg spells them because these strings
+// are written straight onto the command line.
+const (
+	AudioCodecAAC  = "aac"
+	AudioCodecOpus = "libopus"
+)
+
+// AudioSpec is the per-destination audio encoding choice.
+//
+// Deliberately small. The roadmap asked for three things here and one of them
+// does not exist -- see AACProfileUnavailable below.
+type AudioSpec struct {
+	// Codec is empty for AAC, which is the only thing every platform takes.
+	// AudioCodecOpus is meaningfully better below ~64 kbps and is the reason
+	// this field exists at all.
+	Codec string
+	// Mono folds the routing graph's stereo output down to one channel.
+	//
+	// A DOWNMIX of the operator's mix, not a re-route. The routing matrix still
+	// produces OutL and OutR and this sums them; wiring individual tracks to a
+	// single channel would be a change to the matrix and a different feature.
+	// For talk content that is exactly what is wanted, and it halves the
+	// bitrate for no perceptual loss.
+	Mono bool
+}
+
+// AACProfileUnavailable records why there is no HE-AAC option here.
+//
+// The roadmap listed "AAC profile (LC / HE-AAC v1 / v2)" as a Part B item, on
+// the grounds that HE-AAC is meaningfully better below 64 kbps. It is, and it
+// is not reachable: FFmpeg's native `aac` encoder exposes NO -profile option at
+// all, and `-profile:a aac_he` makes it refuse to open with
+//
+//	[aac] Profile not supported!
+//
+// producing no output whatever rather than falling back. HE-AAC needs
+// libfdk_aac, which is nonfree and cannot ship in a redistributable build.
+//
+// The underlying GOAL -- good audio well below 64 kbps -- is met by Opus
+// instead, which is free, in the pinned build, and better than HE-AAC at those
+// rates. So the item is answered rather than abandoned, by a different means
+// than the one that was proposed.
+const AACProfileUnavailable = "FFmpeg's native AAC encoder supports only LC; HE-AAC needs the nonfree libfdk_aac"
+
+// audioCodecArgs renders the codec and channel count for a video destination.
+//
+// Opus is refused on RTMP, and that refusal is the interesting part. FFmpeg
+// will happily WRITE Opus into FLV -- it produced a valid 8.6 KB file when
+// probed -- because Enhanced RTMP defines a mapping for it. No mainstream
+// ingest accepts it. A stream that muxes cleanly, uploads cleanly and is
+// rejected by the platform is the worst failure mode available: it looks
+// correct everywhere the operator can see.
+func audioCodecArgs(s DestSpec) []string {
+	codec := AudioCodecAAC
+	if s.Audio.Codec == AudioCodecOpus && s.Kind != DestRTMP {
+		codec = AudioCodecOpus
+	}
+	channels := "2"
+	if s.Audio.Mono {
+		channels = "1"
+	}
+	return []string{
+		"-c:a", codec,
+		"-b:a", strconv.Itoa(s.AudioBitrate) + "k",
+		"-ac", channels,
+		"-ar", strconv.Itoa(s.SampleRate),
+	}
 }
 
 // TransportSpec is the per-destination muxer and socket tuning.
@@ -679,12 +752,7 @@ func DestinationArgs(s DestSpec) []string {
 			s.ExtraInputArgs, s.ExtraOutputArgs)
 	}
 
-	args = append(args,
-		"-c:a", "aac",
-		"-b:a", strconv.Itoa(s.AudioBitrate)+"k",
-		"-ac", "2",
-		"-ar", strconv.Itoa(s.SampleRate),
-	)
+	args = append(args, audioCodecArgs(s)...)
 	args = append(args, transportOutputArgs(s)...)
 	switch s.Kind {
 	case DestRTMP:
@@ -742,9 +810,14 @@ func audioOutputArgs(s DestSpec) []string {
 	if !f.lossless {
 		args = append(args, "-b:a", strconv.Itoa(s.AudioBitrate)+"k")
 	}
-	// Still stereo, still at the profile's rate: an audio-only destination is a
-	// destination, and the promise is one summed stereo mix per destination.
-	args = append(args, "-ac", "2", "-ar", strconv.Itoa(s.SampleRate))
+	// One summed mix per destination, at the profile's rate. Stereo unless the
+	// operator asked for mono -- the codec here is still chosen by the target's
+	// extension, because an Icecast mount's format is part of its URL.
+	channels := "2"
+	if s.Audio.Mono {
+		channels = "1"
+	}
+	args = append(args, "-ac", channels, "-ar", strconv.Itoa(s.SampleRate))
 
 	if isIcecast(s.Target) {
 		// FFmpeg only assumes audio/mpeg. Anything else has to be declared or

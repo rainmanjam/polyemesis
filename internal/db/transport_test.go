@@ -105,3 +105,44 @@ func TestTransportSurvivesTheDatabaseRoundTrip(t *testing.T) {
 		t.Errorf("the transport tuning survived being cleared: %+v", cleared.Transport)
 	}
 }
+
+func TestAudioEncodingValidation(t *testing.T) {
+	// The positive case first.
+	d := validDest()
+	d.Kind = DestSRT
+	d.URL = "srt://a.example:9000"
+	d.Audio = AudioEncoding{Codec: DestAudioOpus, Mono: true}
+	if err := d.Validate(); err != nil {
+		t.Fatalf("opus on an SRT destination was refused: %v", err)
+	}
+
+	// Opus on RTMP is refused at SAVE time rather than downgraded at start
+	// time. A silent downgrade leaves the operator looking at a destination
+	// whose settings say Opus and whose stream is AAC, with nothing anywhere
+	// saying which is running.
+	r := validDest()
+	r.Kind = DestRTMP
+	r.Audio = AudioEncoding{Codec: DestAudioOpus}
+	err := r.Validate()
+	if err == nil {
+		t.Fatal("opus on an RTMP destination was accepted")
+	}
+	if !strings.Contains(err.Error(), "no mainstream RTMP ingest accepts it") {
+		t.Errorf("error was %q; it should say WHY rather than just refusing", err)
+	}
+
+	// An unknown codec is refused rather than silently treated as AAC.
+	u := validDest()
+	u.Audio = AudioEncoding{Codec: "flac"}
+	if err := u.Validate(); err == nil || !strings.Contains(err.Error(), "unknown audio codec") {
+		t.Errorf("an unknown codec produced %v", err)
+	}
+
+	// Mono is legal everywhere, including RTMP.
+	m := validDest()
+	m.Kind = DestRTMP
+	m.Audio = AudioEncoding{Mono: true}
+	if err := m.Validate(); err != nil {
+		t.Errorf("mono on RTMP was refused: %v", err)
+	}
+}

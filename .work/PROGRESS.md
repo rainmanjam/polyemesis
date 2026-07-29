@@ -1,6 +1,6 @@
 # Roadmap batch — progress and hand-off
 
-**Last updated:** 2026-07-28, after overlays v0.5 (PR #17). ALL FIVE ITEMS DONE.
+**Last updated:** 2026-07-29, after destination-settings Part C (PR #20).
 **Task:** build roadmap items **0, 1, 2, 3, 6**. Delivery: **one PR per item**,
 stacked. Read `docs/roadmap/README.md` for the sequence and each item's design.
 
@@ -205,7 +205,81 @@ docs/RENDITIONS.md#watermarks.
 **Measured:** 18 rendered anchor x canvas combinations, +/-2px bbox. Swapping
 the margin axes fails 17 of 18. Scale invariance proven at 1280x720 vs 720x1280.
 
-## NEXT TASK — nothing assigned
+## Branch stack, current
+
+```
+main
+ └─ docs/restructure           PR #11
+     └─ feat/rendition-ui-controls  PR #12   item 0
+         └─ feat/playlist-phase-0   PR #13   item 1
+             └─ feat/hls-latency        PR #14   item 2
+                 └─ feat/destination-settings PR #15  doc + Kick key
+                     └─ feat/mqtt-telemetry     PR #16  item 3
+                         └─ feat/overlays-v05       PR #17  item 6 + audio flake fix
+                             └─ feat/unreachable-settings PR #18
+                                 └─ feat/dest-transport     PR #19  Part A
+                                     └─ feat/dest-resilience   PR #20  Part C
+```
+
+## DONE this session (PRs #18-#20)
+
+**PR #18 — three unreachable settings blocks.** The rendition drift guard only
+walked db.Rendition, so the whole SETTINGS tree was unguarded.
+`TestUITypesCanNameEverySettingsField` walks it recursively and found: failover
+(incl. slate.imagePath, the field originally asked about), MQTT (no UI at all --
+MY regression from PR #16), and the MQTT broker password having NO API ENDPOINT
+whatsoever. Password gets its own route because the settings blob travels
+outward on every read. `recording.stems` was a FALSE POSITIVE -- reachable via a
+local `as {...}` cast. Guard limits documented in the test.
+
+**PR #19 — Part A, transport/muxer.** -rw_timeout (confirmed ED, settable on an
+output, parses on rtmp://), -flvflags no_duration_filesize (RTMP only), and the
+muxing-queue PAIR. **Roadmap correction:** the doc had max_muxing_queue_size and
+muxing_queue_data_threshold as ALTERNATIVES; FFmpeg's help says the threshold is
+"the threshold after which max_muxing_queue_size is taken into account", so a
+threshold alone does nothing and the validator refuses it. Also added a
+Destination drift guard; the 3 expert-mode fields it flags are FALSE POSITIVES
+(reachable via ExpertArgs{inputArgs,...}), skip-listed with reasons.
+
+**PR #20 — Part C, resilience.** Per-destination backoff, supervisor
+MaxRestarts (CONSECUTIVE, resets on a healthy run, stays given up), and
+StartDelay for staggered go-live (first spawn only; interruptible by Stop).
+Resilience had to be added to the destination restart signature BY HAND because
+it is a supervisor property with no trace in the argv -- the r.Deinterlace bug
+in a new place.
+
+## NEXT TASK — Part B, then Part D, then overlays v1
+
+**Part B, audio encoding (~3 d).** `docs/roadmap/DESTINATION-SETTINGS.md`.
+AAC profile (LC / HE-AAC v1 / v2), mono output, codec choice for SRT/Icecast.
+**PROBE FIRST** -- check `ffmpeg -h encoder=aac` for the profile spelling before
+designing around it. The awkward one is MONO: the routing model has exactly
+OutL/OutR, so mono is a change to the matrix, not a flag. Consider whether
+`-ac 1` after the graph is honest enough, or whether it needs a routing change.
+
+**Part D, metadata (~7-12 d).** The compliance items first, since they are the
+only ones with a legal edge: selfDeclaredMadeForKids (COPPA), privacyStatus,
+Twitch content_classification_labels. Traps already researched and written down
+in the roadmap doc -- read them, especially:
+  - liveBroadcasts.update needs FOUR properties on EVERY call
+  - it is destructive BY PART, not by field: `part=status` without privacyStatus
+    reverts privacy to the default. A naive PATCH can make a private broadcast
+    public.
+  - most contentDetails toggles freeze once the broadcast leaves created/ready
+  - selfDeclaredMadeForKids is insert-only; set it via videos.update afterwards
+  - Twitch CCLs READ as a flat list and WRITE as [{"id":..,"is_enabled":true}].
+    MatureGame is readable and NOT writable.
+
+**Overlays v1 (~10 d of the original 16).** `docs/roadmap/OVERLAYS.md`. Text,
+clock, externally-fed text, multiple overlays per rendition, the one-frame
+preview endpoint, the embedded font, and the drawtext filter probe (detect.go
+parses -encoders only; it needs -filters). Use `textfile=`, NEVER `text=` --
+lavfiEscaper does not escape `%`, which drawtext expands.
+
+**A fifth thing found and NOT done:** SettingsPage does not edit db.Settings
+.Playout or .PostProd either; those have their own pages (PlayoutPage,
+JobsPage), so they are probably fine, but nobody has checked field by field.
+The Settings drift guard only proves NAMEABLE, not REACHABLE.
 
 All five items the user asked for (0, 1, 2, 3, 6) are shipped as PRs #12-#17.
 Remaining known work, none of it started:

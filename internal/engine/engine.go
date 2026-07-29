@@ -1709,7 +1709,20 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		strconv.Itoa(row.Resilience.MinBackoffSeconds),
 		strconv.Itoa(row.Resilience.MaxBackoffSeconds),
 		strconv.Itoa(row.Resilience.GiveUpAfter),
+		// Audio encoding: both change the command line.
+		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
 	})
+}
+
+// audioCodecOf maps the stored codec name onto the FFmpeg encoder name. An
+// unrecognised value falls back to AAC rather than reaching the command line:
+// a destination row written by a newer build must still stream, and AAC is the
+// one codec every platform takes.
+func audioCodecOf(stored string) string {
+	if stored == db.DestAudioOpus {
+		return ffmpeg.AudioCodecOpus
+	}
+	return ffmpeg.AudioCodecAAC
 }
 
 // secondsOr converts a settings value in seconds to a Duration, returning the
@@ -1808,6 +1821,11 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 			// Muxer and socket tuning. Its zero value emits nothing, so a
 			// destination that has not opted in produces exactly the command
 			// it always did.
+			// Output audio encoding. Zero value is AAC stereo.
+			Audio: ffmpeg.AudioSpec{
+				Codec: audioCodecOf(row.Audio.Codec),
+				Mono:  row.Audio.Mono,
+			},
 			Transport: ffmpeg.TransportSpec{
 				NoDurationFilesize: row.Transport.NoDurationFilesize,
 				MuxQueuePackets:    row.Transport.MuxQueuePackets,

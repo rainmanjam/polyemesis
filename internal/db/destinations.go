@@ -107,9 +107,12 @@ type Destination struct {
 	// Its zero value is the behaviour every destination had before it existed:
 	// retry forever, 1s to 30s.
 	Resilience DestResilience `json:"resilience"`
-	Position   int            `json:"position"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	UpdatedAt  time.Time      `json:"updatedAt"`
+	// Audio is the output encoding choice. Its zero value is AAC stereo, which
+	// is what every destination emitted before it existed.
+	Audio     AudioEncoding `json:"audio"`
+	Position  int           `json:"position"`
+	CreatedAt time.Time     `json:"createdAt"`
+	UpdatedAt time.Time     `json:"updatedAt"`
 }
 
 // ExpertArgsSet reports whether this destination has any hand-written
@@ -199,6 +202,70 @@ func (r DestResilience) problems() []string {
 	if r.GiveUpAfter < 0 || r.GiveUpAfter > MaxDestGiveUpAfter {
 		add("give up after %d retries out of range (0-%d, 0 to retry forever)",
 			r.GiveUpAfter, MaxDestGiveUpAfter)
+	}
+	return probs
+}
+
+// Audio codec choices for a destination.
+const (
+	// DestAudioAAC is the default and the only thing every platform takes.
+	DestAudioAAC = ""
+	// DestAudioOpus is meaningfully better below ~64 kbps. SRT and file
+	// destinations only -- see DestAudio.Codec.
+	DestAudioOpus = "opus"
+)
+
+// DestAudioCodecs is every codec a destination may name, in the order to offer
+// them: the universal one first.
+var DestAudioCodecs = []string{DestAudioAAC, DestAudioOpus}
+
+// AudioEncoding is the per-destination output encoding.
+//
+// Smaller than the roadmap asked for, because one of its three items does not
+// exist. "AAC profile (LC / HE-AAC v1 / v2)" is NOT BUILDABLE: FFmpeg's native
+// aac encoder exposes no -profile option, and `-profile:a aac_he` makes it
+// refuse to open outright ("Profile not supported!"). HE-AAC needs the nonfree
+// libfdk_aac, which cannot ship in a redistributable build.
+//
+// The goal behind that item -- good audio well below 64 kbps -- is met by Opus,
+// which is free, already in the pinned build, and better than HE-AAC at those
+// rates. Answered by a different means rather than abandoned.
+type AudioEncoding struct {
+	// Codec is empty for AAC. Opus is refused on RTMP: FFmpeg will write it
+	// into FLV, because Enhanced RTMP defines a mapping, and no mainstream
+	// ingest accepts it. A stream that muxes cleanly and is rejected by the
+	// platform looks correct everywhere the operator can see.
+	Codec string `json:"codec,omitempty"`
+	// Mono folds the routing graph's stereo output to one channel. A DOWNMIX
+	// of the operator's mix, not a re-route: the matrix still produces OutL and
+	// OutR and this sums them. Halves the bitrate on talk content for no
+	// perceptual loss.
+	Mono bool `json:"mono,omitempty"`
+}
+
+func (a AudioEncoding) problems(kind DestKind) []string {
+	var probs []string
+	add := func(f string, v ...any) { probs = append(probs, fmt.Sprintf(f, v...)) }
+
+	known := false
+	for _, c := range DestAudioCodecs {
+		if c == a.Codec {
+			known = true
+			break
+		}
+	}
+	if !known {
+		add("unknown audio codec %q (aac, opus)", a.Codec)
+	}
+	// Refused at save time rather than silently downgraded at start time. A
+	// downgrade would leave the operator looking at a destination whose
+	// settings say Opus and whose stream is AAC, with nothing anywhere saying
+	// which is running -- the exact failure the deinterlace validation exists
+	// to prevent.
+	if a.Codec == DestAudioOpus && kind == DestRTMP {
+		add("opus cannot be used on an RTMP destination: FFmpeg will mux it, " +
+			"but no mainstream RTMP ingest accepts it, so the stream would " +
+			"upload cleanly and be rejected")
 	}
 	return probs
 }
@@ -356,6 +423,9 @@ func (d Destination) Validate() error {
 	for _, p := range d.Resilience.problems() {
 		add("%s", p)
 	}
+	for _, p := range d.Audio.problems(d.Kind) {
+		add("%s", p)
+	}
 
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))
@@ -380,6 +450,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
 		&d.Resilience.MinBackoffSeconds, &d.Resilience.MaxBackoffSeconds,
 		&d.Resilience.GiveUpAfter,
+		&d.Audio.Codec, &d.Audio.Mono,
 		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -423,6 +494,7 @@ const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
+	au_codec, au_mono,
 	position, created_at, updated_at`
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
@@ -547,8 +619,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
+		 au_codec, au_mono,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
@@ -556,6 +629,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
+		dst.Audio.Codec, dst.Audio.Mono,
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -590,6 +664,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
 		tr_rw_timeout_seconds=?,
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
+		au_codec=?, au_mono=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
@@ -598,6 +673,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
+		dst.Audio.Codec, dst.Audio.Mono,
 		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
@@ -736,6 +812,10 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		{"rs_min_backoff_seconds", `ALTER TABLE destinations ADD COLUMN rs_min_backoff_seconds INTEGER NOT NULL DEFAULT 0`},
 		{"rs_max_backoff_seconds", `ALTER TABLE destinations ADD COLUMN rs_max_backoff_seconds INTEGER NOT NULL DEFAULT 0`},
 		{"rs_give_up_after", `ALTER TABLE destinations ADD COLUMN rs_give_up_after INTEGER NOT NULL DEFAULT 0`},
+		// Audio encoding. '' is AAC and 0 is stereo, which is what every
+		// destination emitted before these existed.
+		{"au_codec", `ALTER TABLE destinations ADD COLUMN au_codec TEXT NOT NULL DEFAULT ''`},
+		{"au_mono", `ALTER TABLE destinations ADD COLUMN au_mono INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)

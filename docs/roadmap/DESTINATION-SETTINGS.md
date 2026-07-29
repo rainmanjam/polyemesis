@@ -148,16 +148,41 @@ What survives, as an optional advanced block per destination:
 Note the SRT row: these are reachable today, so this is a UI and validation task,
 which makes it the cheapest and least urgent part.
 
-## Part B — Audio encoding (~3 days)
+## Part B — Audio encoding (SHIPPED, with one item refuted)
 
-| Setting | Today | Why |
-|---|---|---|
-| **AAC profile** (LC / HE-AAC v1 / v2) | fixed LC | Meaningfully better below ~64 kbps; matters for audio-only destinations |
-| **Mono output** | stereo always | Talk content halves its audio bitrate for no perceptual loss |
-| **Codec choice** | AAC fixed for video destinations | Icecast already picks its own; SRT receivers may want Opus |
+> **`AAC profile` is NOT BUILDABLE — refuted by probe.**
+>
+> FFmpeg's native `aac` encoder exposes **no `-profile` option at all**, and
+> `-profile:a aac_he` makes it refuse to open outright:
+>
+> ```
+> [aac] Profile not supported!
+> ```
+>
+> producing no output whatever rather than falling back. HE-AAC needs
+> `libfdk_aac`, which is nonfree and cannot ship in a redistributable build.
+>
+> **The goal is met a different way.** What the item actually wanted was good
+> audio well below 64 kbps. Opus does that better than HE-AAC, is free, and is
+> already in the pinned build — so "codec choice" below answers it, and the
+> profile selector is dropped rather than deferred.
+>
+> **A second probe result worth keeping:** FFmpeg *will* write Opus into FLV —
+> it produced a valid 8.6 KB file — because Enhanced RTMP defines a mapping. No
+> mainstream ingest accepts it. Opus is therefore refused on RTMP at save time,
+> because a stream that muxes cleanly, uploads cleanly and is rejected by the
+> platform looks correct everywhere the operator can see.
 
-Mono is the awkward one: the routing model has exactly `OutL`/`OutR`, so mono is
-a change to the matrix, not a flag.
+| Setting | Status |
+|---|---|
+| ~~AAC profile~~ | **refuted** — needs nonfree libfdk_aac |
+| **Mono output** | shipped |
+| **Codec choice** (AAC / Opus, non-RTMP) | shipped |
+
+Mono turned out not to be the awkward one. It is a **downmix of the operator's
+mix**, not a re-route: the routing matrix still produces `OutL`/`OutR` and
+`-ac 1` sums them. Wiring individual tracks to a single channel would be a
+change to the matrix, and that is a different feature.
 
 ## Part C — Resilience (~2 days)
 

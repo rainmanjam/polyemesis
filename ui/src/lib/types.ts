@@ -198,6 +198,9 @@ export interface Destination {
   /** Reconnect policy. Always present in a server response and empty for a
    *  destination that has not opted in. */
   resilience?: DestResilience;
+  /** Output audio encoding. Always present in a server response and empty for
+   *  a destination that has not opted in. */
+  audio?: AudioEncoding;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -1282,6 +1285,22 @@ export interface DestResilience {
    *  and nothing ever says this endpoint is not coming back. Giving up moves
    *  it to failed, which the alert rules already treat as an incident. */
   giveUpAfter?: number;
+}
+
+/** Per-destination audio encoding.
+ *
+ *  Note what is NOT here: an AAC profile. FFmpeg's native AAC encoder supports
+ *  only LC, and refuses to open at all when asked for HE-AAC; HE-AAC needs the
+ *  nonfree libfdk_aac. Opus answers the same goal -- good audio well below
+ *  64 kbps -- and is already in the build. */
+export interface AudioEncoding {
+  /** Empty is AAC. "opus" is refused on RTMP: FFmpeg will mux it, but no
+   *  mainstream RTMP ingest accepts it, so the stream would upload cleanly and
+   *  be rejected. */
+  codec?: "" | "opus";
+  /** Folds the routing graph's stereo output to one channel. A downmix of your
+   *  mix, not a re-route. */
+  mono?: boolean;
 }
 
 // ------------------------------------------------------------------- expert

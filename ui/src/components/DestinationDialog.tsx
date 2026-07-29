@@ -26,6 +26,7 @@ import type {
   Destination,
   DestTransport,
   DestResilience,
+  AudioEncoding,
   DestKind,
   Platform,
   PlatformAccount,
@@ -877,6 +878,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // Reconnect policy. Empty is "retry forever, 1s to 30s", which is what every
   // destination did before this existed.
   const [resilience, setResilience] = useState<DestResilience>({});
+  // Output audio encoding. Empty is AAC stereo.
+  const [audio, setAudio] = useState<AudioEncoding>({});
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -904,6 +907,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setBitrate(destination.audioBitrate);
       setTransport(destination.transport ?? {});
       setResilience(destination.resilience ?? {});
+      setAudio(destination.audio ?? {});
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -911,6 +915,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     } else {
       setTransport({});
       setResilience({});
+      setAudio({});
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -1009,6 +1014,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
         transport,
         resilience,
+        audio,
       };
       if (editing) {
         await api.updateDestination(destination.id, payload);
@@ -1381,6 +1387,49 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               Mixed here from this destination's own routing profile, whichever rendition it is
               on — a rendition never touches audio.
             </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <Label>Audio codec</Label>
+              <Select
+                value={audio.codec || "aac"}
+                onValueChange={(v) =>
+                  setAudio({ ...audio, codec: v === "aac" ? "" : (v as "opus") })
+                }
+                disabled={kind === "rtmp"}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="aac">AAC — every platform takes it</SelectItem>
+                  <SelectItem value="opus">Opus — better below 64 kbps</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-[10px] text-muted-foreground">
+                {kind === "rtmp"
+                  ? "RTMP is AAC. FFmpeg will mux Opus into FLV, but no mainstream ingest accepts it — the stream would upload cleanly and be rejected."
+                  : "Opus is worth it for a low-bitrate feed. Check the receiver takes it."}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="dest-mono">Channels</Label>
+              <div className="flex h-9 items-center gap-2">
+                <Switch
+                  id="dest-mono"
+                  checked={audio.mono ?? false}
+                  onCheckedChange={(v) => setAudio({ ...audio, mono: v })}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {audio.mono ? "Mono" : "Stereo"}
+                </span>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                Mono folds your mix down rather than re-routing it, and halves the bitrate on talk
+                content for no perceptual loss.
+              </span>
+            </div>
           </div>
 
           <details className="rounded-md border border-border p-2">
