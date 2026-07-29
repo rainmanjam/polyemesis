@@ -65,7 +65,14 @@ broadcast — there is no permanent key to reuse.
 
 **Kick — fully automated, and it took a correction to get there.** Kick's
 OAuth 2.1 flow (PKCE, which Kick requires) gets you chat both ways, deleting a
-chat message, title and category push, viewer counts — **and the stream key**.
+chat message, title, category and tag push, viewer counts — **and the stream
+key**.
+
+Kick's entire metadata surface is three fields — `stream_title`, `category_id`
+and `custom_tags` — on one channel PATCH. There is no description, no
+thumbnail and no scheduling, so the composer skips those for Kick and says so
+rather than reporting them as failures. Tags **replace** rather than merge, as
+they do on YouTube; clearing the field removes every tag.
 
 This page said for a long time that the key was unfetchable, and the reasoning
 was understandable but wrong. Kick publishes no `/streamkey` endpoint, so

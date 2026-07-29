@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -816,4 +817,115 @@ func TestEveryRegisteredProviderHasASetupGuide(t *testing.T) {
 			t.Errorf("provider %q has no setup guide", platform)
 		}
 	}
+}
+
+// ------------------------------------------------------- broadcast settings
+
+// Kick's whole metadata surface is three fields, and tags is the one it shares
+// with YouTube. Everything else on BroadcastSettings has no Kick equivalent and
+// must be REPORTED rather than silently ignored: an operator who set a DVR
+// toggle and saw nothing happen deserves to know the platform has no such
+// thing.
+func TestKickTakesTagsAndSaysWhatItCannotDo(t *testing.T) {
+	var body map[string]any
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch && r.URL.Path == "/public/v1/channels" {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	tags := []string{"speedrun", "chill"}
+	dvr := false
+	when := "2026-08-01T20:00:00Z"
+	res, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+		BroadcastSettings{Tags: &tags, EnableDvr: &dvr, ScheduledStart: &when})
+	if err != nil {
+		t.Fatalf("PushBroadcastSettings: %v", err)
+	}
+
+	got, _ := body["custom_tags"].([]any)
+	if len(got) != 2 || got[0] != "speedrun" {
+		t.Errorf("custom_tags = %v, want the two requested", body["custom_tags"])
+	}
+	// The title and category must NOT be sent. This call is about tags, and a
+	// stream_title key here would blank the operator's title.
+	if _, ok := body["stream_title"]; ok {
+		t.Errorf("a tags-only write sent a stream_title: %v", body)
+	}
+	if _, ok := body["category_id"]; ok {
+		t.Errorf("a tags-only write sent a category_id: %v", body)
+	}
+
+	if !containsField(res.Applied, FieldTags) {
+		t.Errorf("tags were written but not reported as applied: %v", res.Applied)
+	}
+	for _, want := range []MetadataField{FieldScheduledStart, FieldContentDetails} {
+		if !containsField(res.Skipped, want) {
+			t.Errorf("%s has no Kick equivalent and was not reported as skipped: %v", want, res.Skipped)
+		}
+	}
+	if len(res.Warnings) < 2 {
+		t.Errorf("skipped fields carried no explanation: %v", res.Warnings)
+	}
+}
+
+// Clearing every tag is a real edit, and it is the case an empty-versus-nil
+// slip hides: a nil slice means "not mentioned" and must send nothing, while an
+// EMPTY one means "remove them all" and must send [].
+func TestKickCanClearEveryTag(t *testing.T) {
+	var body map[string]any
+	var patched bool
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch && r.URL.Path == "/public/v1/channels" {
+			patched = true
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	empty := []string{}
+	if _, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+		BroadcastSettings{Tags: &empty}); err != nil {
+		t.Fatalf("PushBroadcastSettings: %v", err)
+	}
+	if !patched {
+		t.Fatal("clearing the tags sent no request at all, so they can never be removed")
+	}
+	got, ok := body["custom_tags"].([]any)
+	if !ok || len(got) != 0 {
+		t.Errorf("custom_tags = %v, want an empty list", body["custom_tags"])
+	}
+}
+
+// A block with nothing Kick handles must not write at all.
+func TestKickWritesNothingWhenThereAreNoTags(t *testing.T) {
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			t.Errorf("a settings block with no tags still wrote to %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	dvr := true
+	res, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+		BroadcastSettings{EnableDvr: &dvr})
+	if err != nil {
+		t.Fatalf("PushBroadcastSettings: %v", err)
+	}
+	if len(res.Applied) != 0 {
+		t.Errorf("nothing was written but %v was reported as applied", res.Applied)
+	}
+}
+
+func containsField(list []MetadataField, want MetadataField) bool {
+	for _, f := range list {
+		if f == want {
+			return true
+		}
+	}
+	return false
 }

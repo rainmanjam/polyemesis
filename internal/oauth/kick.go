@@ -361,12 +361,52 @@ func (k *Kick) UpdateChannel(ctx context.Context, accessToken string, u KickChan
 	return requestJSON(ctx, http.MethodPatch, kickAPIBase+"/public/v1/channels", accessToken, body, nil, nil)
 }
 
+// PushBroadcastSettings writes the one field of BroadcastSettings that Kick
+// has: custom_tags.
+//
+// Kick has no broadcast RESOURCE at all -- no scheduled start, no DVR, no
+// editing window -- so most of this type does not apply and is reported as
+// skipped rather than silently ignored. An operator who set a DVR toggle and
+// saw nothing happen deserves to be told the platform has no such thing.
+//
+// Implementing the same optional interface as YouTube rather than inventing a
+// second path: the field the two share is tags, and one code path in the API
+// layer beats two that must be kept in step.
+func (k *Kick) PushBroadcastSettings(ctx context.Context, clientID, accessToken string, s BroadcastSettings) (*MetadataResult, error) {
+	res := &MetadataResult{}
+	if s.ScheduledStart != nil {
+		res.Skipped = append(res.Skipped, FieldScheduledStart)
+		res.Warnings = append(res.Warnings,
+			"Kick has no scheduled start; it has no broadcast resource to schedule")
+	}
+	if s.TouchesContentDetails() {
+		res.Skipped = append(res.Skipped, FieldContentDetails)
+		res.Warnings = append(res.Warnings,
+			"Kick has no DVR, auto-start or monitor-stream settings")
+	}
+	if s.Tags == nil {
+		return res, nil
+	}
+
+	// Tags REPLACE, exactly as they do on YouTube. Kick documents a limit of
+	// ten and this does not enforce it, for the reason KickChannelUpdate
+	// gives: Kick's own rejection names the limit and stays right if it moves.
+	if err := k.UpdateChannel(ctx, accessToken, KickChannelUpdate{CustomTags: *s.Tags}); err != nil {
+		return nil, scopeAdvice(err, db.PlatformKick, k.MetadataCaps().Scope)
+	}
+	res.Applied = append(res.Applied, FieldTags)
+	return res, nil
+}
+
 func (k *Kick) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
 		// No description: a Kick channel has a description, but the live
 		// broadcast does not, and the channel update accepts only a title, a
 		// category and tags. Saying so here keeps it out of the failure list.
-		Fields:        []MetadataField{FieldTitle, FieldCategory},
+		// Tags ARE supported: custom_tags is one of the three fields the
+		// channel PATCH takes. Advertised so the composer offers the control
+		// for Kick as well as YouTube rather than greying it out.
+		Fields:        []MetadataField{FieldTitle, FieldCategory, FieldTags},
 		CategoryLabel: "Category",
 		CategoryHint:  "A Kick category, e.g. Just Chatting, Grand Theft Auto V. A numeric category id also works.",
 		// TitleMax is left at zero: Kick publishes no title length, and a limit
