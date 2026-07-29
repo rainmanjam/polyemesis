@@ -196,6 +196,9 @@ func (s *Server) Handler() http.Handler {
 
 			r.Get("/settings", s.handleGetSettings)
 			r.Put("/settings", s.handlePutSettings)
+			// Its own route because the password must never travel outward in
+			// the settings blob -- see handlePutMQTTPassword.
+			r.Put("/settings/mqtt-password", s.handlePutMQTTPassword)
 
 			r.Get("/tls", s.handleTLSStatus)
 

@@ -172,6 +172,14 @@ export const api = {
   // --- settings ---
   getSettings: () => get<Settings>("/settings"),
   putSettings: (s: Settings) => put<Settings>("/settings", s),
+  /** The MQTT broker password, on its own route.
+   *
+   *  Not a field on the settings blob: that blob travels outward on every
+   *  settings read, and a write-only field inside a read-write payload is a
+   *  trap -- a client that PUT back what it GOT would blank the password every
+   *  time. An empty string CLEARS the stored password. */
+  putMqttPassword: (password: string) =>
+    put<{ hasPassword: boolean }>("/settings/mqtt-password", { password }),
 
   // --- transport security ---
   /** Read-only: TLS lives in config.yaml because it has to be right before the

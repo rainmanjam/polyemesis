@@ -627,7 +627,44 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// HasPassword is derived, never stored in the settings blob.
+	//
+	// The blob is served straight to the settings page, so a password in it
+	// would be handed to every browser that opened Settings. The page gets a
+	// boolean instead: enough to render "a password is set" and to offer to
+	// clear it, and nothing more.
+	if has, err := s.store.HasMQTTPassword(); err == nil {
+		settings.MQTT.HasPassword = has
+	} else {
+		s.log.Warn("cannot tell whether an MQTT password is stored", "err", err)
+	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// handlePutMQTTPassword sets or clears the broker password.
+//
+// Its own endpoint rather than a field on the settings blob, for the reason
+// above: the blob travels outward on every settings read, and a write-only
+// field in a read-write payload is a trap -- a client that PUT back what it
+// GOT would blank the password every time.
+//
+// An empty password CLEARS the stored one. That is the only way to move to an
+// anonymous broker without leaving a stale credential behind to be sent to it.
+func (s *Server) handlePutMQTTPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.store.PutMQTTPassword(s.box, req.Password); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// No reconcile call: the MQTT runner polls the settings and notices the
+	// password changed by its hash, which is also what makes a rotation to a
+	// different password of the same length take effect.
+	writeJSON(w, http.StatusOK, map[string]bool{"hasPassword": req.Password != ""})
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {

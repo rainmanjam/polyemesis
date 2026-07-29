@@ -346,10 +346,16 @@ software stage appended before VAAPI's one-way `format=nv12,hwupload` tail.
 
 ## Known flakes (pre-existing, not caused by the roadmap work)
 
-- **`acceptance-audio`**: stems occasionally land as `rec-...-track1.flac`
-  instead of `music.flac` -- the track annotations have not been applied when
-  the recorder starts, so it falls back to indices. Seen once in ~7 runs;
-  passes 3/3 locally with 35 checks. NOT diagnosed further, NOT fixed.
+- **`acceptance-audio`**: FIXED. My first guess -- an annotation/recorder
+  ordering race -- was WRONG. The CI artifacts (always download them:
+  `gh api repos/O/R/actions/artifacts/<id>/zip`) showed the real cause:
+  until the ingest is probed, `e.source` is `routing.DefaultSource()`, which
+  has SIX placeholder tracks. Both the recorder's stem plan and the meters'
+  filtergraph compiled that onto a command line, so FFmpeg got `-map 0:a:3`
+  on a three-track ingest and refused to start. Both tiers crash-looped from
+  startup on EVERY run, including passing ones -- on a 2-core runner that
+  becomes a restart storm and the outcome is a race. Both now wait for a real
+  layout (`effectiveSourceKnown`). Suite also gained EXPECTED_CHECKS=35.
 - **`internal/relay` TestStatsReportsNoLossForACleanStream**: FIXED. The test
   waited on rxPackets and asserted TSPackets; run() increments rxPackets
   before measuring, so it raced the last datagram. `waitForTS` added.

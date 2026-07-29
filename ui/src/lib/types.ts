@@ -624,6 +624,12 @@ export interface Settings {
     maxGb: number;
     maxAgeHours: number;
     minFreeGb: number;
+    /** One lossless file per ingest track, alongside the muxed recording.
+     *  Named from the track roles, so a stem is `mic.flac` rather than
+     *  `track3.flac`. Optional so a client that predates stems can still PUT. */
+    stems?: boolean;
+    /** flac or wav. Empty takes the server's default. */
+    stemCodec?: StemCodec;
   };
   preview: {
     enabled: boolean;
@@ -641,6 +647,90 @@ export interface Settings {
   /** Optional so a client that predates playout can still PUT settings: the
    *  server merges over the stored value, and an absent key leaves it alone. */
   playout?: PlayoutSettings;
+  /** The source-selector tier. Optional for the same reason. */
+  failover?: FailoverSettings;
+  /** Retained MQTT telemetry. Optional for the same reason. */
+  mqtt?: MQTTSettings;
+}
+
+// ---------------------------------------------------------------- failover
+
+export type StemCodec = "flac" | "wav";
+
+/** What happens when the current source goes quiet and comes back. */
+export type FailoverReturn = "manual" | "auto";
+
+/** The still shown while no source is live.
+ *
+ *  A slate is the difference between a platform seeing a dead stream and a
+ *  platform seeing a holding card, so it is the one part of failover that
+ *  matters even to an install with a single source. */
+export interface SlateSettings {
+  enabled: boolean;
+  /** A path INSIDE the data directory, e.g. `slate/holding.png`. Empty paints
+   *  `color` instead, which is the fallback precisely because a flat colour
+   *  has no file that can fail to open. */
+  imagePath?: string;
+  /** Any spelling FFmpeg's colour parser takes. Empty means black. */
+  color?: string;
+  videoKbps?: number;
+  encoder?: string;
+  preset?: string;
+}
+
+/** One standby input, used when the primary stops delivering. */
+export interface FailoverBackup {
+  mode?: IngestMode;
+  srt?: { passphrase: string; latencyMs: number };
+  rtmp?: { app: string; streamKey: string };
+  pull?: PullSettings;
+}
+
+export interface FailoverSettings {
+  enabled: boolean;
+  /** How long the live source may deliver nothing before the tier switches.
+   *  Longer than a reconnect on purpose: an encoder re-establishing an RTMP
+   *  connection is normal operation, not a failure. */
+  graceSeconds?: number;
+  /** `manual` keeps the backup on air until somebody switches back --
+   *  the default, because an automatic return can flap. */
+  return?: FailoverReturn;
+  /** With `auto`, how long the primary must stay healthy before it is trusted
+   *  again. */
+  returnStableSeconds?: number;
+  backup?: FailoverBackup;
+  slate?: SlateSettings;
+}
+
+// -------------------------------------------------------------------- mqtt
+
+/** Retained MQTT telemetry.
+ *
+ *  polyemesis speaks MQTT 5.0 only -- the client library implements the 5.0
+ *  specification and nothing earlier, so a broker pinned to 3.1.1 will not
+ *  complete a connection at all. */
+export interface MQTTSettings {
+  enabled: boolean;
+  /** mqtt://, mqtts://, ws:// or wss://. Credentials in the URL are REFUSED:
+   *  a URL reaches log lines and `ps` output, and there is no taking it back. */
+  brokerUrl?: string;
+  username?: string;
+  /** Read-only. The password itself is never returned by any API. */
+  hasPassword?: boolean;
+  /** Roots the topic tree. Separators are preserved, so `home/av` means two
+   *  levels rather than one. */
+  prefix?: string;
+  /** Distinguishes two installs sharing one broker, and keys the Home
+   *  Assistant device. */
+  instance?: string;
+  /** Must be unique on the broker. Empty derives one from `instance`. */
+  clientId?: string;
+  intervalSeconds?: number;
+  keepAliveSeconds?: number;
+  /** Accepts a self-signed broker certificate. Named for what it does. */
+  tlsSkipVerify?: boolean;
+  /** Publishes Home Assistant device-discovery payloads. */
+  discovery?: boolean;
 }
 
 // ---------------------------------------------------------------- playout
