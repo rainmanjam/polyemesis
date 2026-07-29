@@ -135,6 +135,11 @@ type RenditionSpec struct {
 	// discovered as a stream that will not start.
 	Overlay *OverlaySpec
 
+	// Text is burned-in text, drawn AFTER Overlay so a caption sits on top of
+	// a logo rather than under it. Independent of Overlay: either, both or
+	// neither may be active.
+	Text *TextSpec
+
 	// FPS is the output frame rate; 0 keeps the source rate.
 	FPS float64
 	// SourceFPS is the probed ingest rate. Only used for the GOP arithmetic
@@ -391,8 +396,12 @@ func deinterlaceFilter(mode DeinterlaceMode) string {
 }
 
 // videoFilter renders the scale chain, or "" when there is nothing to do.
+//
+// Text is included here because on the -vf path there is no composite to draw
+// it after. overlayGraph asks for the chain WITHOUT text and adds it itself,
+// after the image is composited -- see there.
 func videoFilter(s RenditionSpec, prof encoderProfile) string {
-	return videoFilterChain(s, prof)
+	return videoFilterChain(s, prof, true)
 }
 
 // videoFilterChain is videoFilter's body, split out so overlayGraph can reuse
@@ -403,7 +412,7 @@ func videoFilter(s RenditionSpec, prof encoderProfile) string {
 // overlay case -- there the overlay has to be composited in system memory
 // before the upload, so overlayGraph appends the tail itself, after the
 // composite. Passing a zero profile is how it asks for the chain without it.
-func videoFilterChain(s RenditionSpec, prof encoderProfile) string {
+func videoFilterChain(s RenditionSpec, prof encoderProfile, includeText bool) string {
 	var chain []string
 	// Deinterlace FIRST, before any scaling.
 	//
@@ -420,6 +429,14 @@ func videoFilterChain(s RenditionSpec, prof encoderProfile) string {
 		chain = append(chain, fit)
 	} else if scale := scaleFilter(s.Width, s.Height); scale != "" {
 		chain = append(chain, scale)
+	}
+	// Text BEFORE the VAAPI tail, for the same reason the image overlay goes
+	// before it: drawtext is an ordinary software filter and cannot run on the
+	// GPU surfaces that hwupload produces.
+	if includeText {
+		if dt := drawtextFilter(s.Text, s.Width, s.Height); dt != "" {
+			chain = append(chain, dt)
+		}
 	}
 	if prof.vaapi {
 		// VAAPI encodes from GPU surfaces, so even an unscaled rendition needs

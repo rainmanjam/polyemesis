@@ -110,7 +110,9 @@ func overlayGraph(s RenditionSpec, prof encoderProfile, outW, outH int) string {
 		return ""
 	}
 
-	main := videoFilterChain(s, encoderProfile{}) // the VAAPI tail is added last, below
+	// includeText=false: text is drawn AFTER the composite, below, so a caption
+	// sits on top of the logo rather than under it.
+	main := videoFilterChain(s, encoderProfile{}, false) // the VAAPI tail is added last, below
 	var b strings.Builder
 
 	b.WriteString("[0:v:0]")
@@ -136,6 +138,10 @@ func overlayGraph(s RenditionSpec, prof encoderProfile, outW, outH int) string {
 	// The composite.
 	x, y := overlayPosition(o, outW, outH)
 	fmt.Fprintf(&b, "%s%soverlay=x=%s:y=%s:eof_action=repeat", labelBase, labelOverlay, x, y)
+	// Text after the composite, so it draws over the logo.
+	if dt := drawtextFilter(s.Text, outW, outH); dt != "" {
+		b.WriteString("," + dt)
+	}
 	b.WriteString(",format=yuv420p")
 	if prof.vaapi {
 		b.WriteString(",format=nv12,hwupload")
