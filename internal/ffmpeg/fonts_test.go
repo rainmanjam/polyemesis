@@ -215,12 +215,19 @@ func TestDrawtextRendersWithTheEmbeddedFont(t *testing.T) {
 	// The font path goes into a FILTER argument, where ':' and '\' are
 	// metacharacters. On Windows the path is C:\...\Inter-Regular.ttf and
 	// carries both, so an unescaped path is not merely wrong there -- it is a
-	// parse error. escapeLavfiValue is what the rest of this package uses.
+	// parse error.
+	//
+	// filterPath, NOT escapeLavfiValue. This test used the latter and the
+	// Windows runner rejected the graph it built -- `C\:\\Users\\...`, with
+	// "No option name near '\Users...'" -- while text.go had already been
+	// fixed. A test that hand-rolls what the production code does is a test
+	// that can be right about the product and wrong about itself, so it now
+	// calls the same function the product calls.
 	frame := func(text string) string {
 		out := filepath.Join(t.TempDir(), "f.png")
 		graph := "color=c=black:s=320x120:d=1"
 		if text != "" {
-			graph += ",drawtext=fontfile=" + escapeLavfiValue(font) +
+			graph += ",drawtext=fontfile=" + filterPath(font) +
 				":text=" + text + ":fontcolor=white:fontsize=48:x=10:y=30"
 		}
 		cmd := exec.Command(bin, "-hide_banner", "-loglevel", "error",
