@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -410,17 +411,32 @@ func (c Config) EnsureDirs() error {
 		{c.HLSDir(), 0o755},
 		{c.PlayoutDir(), 0o755},
 	}
-	// Private keys land in these two, so they are 0700 and are only created
-	// when the resolved mode actually needs them.
-	switch c.ResolvedTLSMode() {
-	case ModeACME:
-		dirs = append(dirs, dirSpec{c.ACMECacheDir(), 0o700})
-	case ModeSelfSigned:
-		dirs = append(dirs, dirSpec{c.TLSDir(), 0o700})
-	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d.path, d.perm); err != nil {
 			return fmt.Errorf("create %s: %w", d.path, err)
+		}
+	}
+	// Private keys land in one of these, so they go through fsperm rather than
+	// MkdirAll, and only the mode that actually needs them creates one.
+	//
+	// fsperm.SecureDir, not os.MkdirAll(.., 0o700): a FileMode is a Unix
+	// concept and Windows discards it, so the 0700 that used to be here
+	// compiled, succeeded, and restricted nothing on that platform. See
+	// internal/fsperm.
+	var private []string
+	switch c.ResolvedTLSMode() {
+	case ModeACME:
+		// BOTH, parent first. SecureDir creates missing parents but only
+		// restricts the leaf, and under ACME the tls/ directory exists solely
+		// to hold the acme cache -- leaving it open would be a strange thing to
+		// have deliberately arranged.
+		private = []string{c.TLSDir(), c.ACMECacheDir()}
+	case ModeSelfSigned:
+		private = []string{c.TLSDir()}
+	}
+	for _, p := range private {
+		if err := fsperm.SecureDir(p); err != nil {
+			return err
 		}
 	}
 	return nil

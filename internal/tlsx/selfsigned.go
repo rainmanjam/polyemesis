@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 )
 
 const (
@@ -62,7 +64,11 @@ type material struct {
 // outside polyemesis interfered, and quietly replacing a CA the user has
 // already installed would be worse than saying so.
 func ensureSelfSigned(dir, hostname string, now func() time.Time) (*material, error) {
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
+	// fsperm.SecureDir rather than os.MkdirAll(.., 0o700): the CA key and the
+	// server key are written in here, and a FileMode restricts nothing on
+	// Windows. Established here rather than left to config.EnsureDirs because
+	// this function is reachable without it.
+	if err := fsperm.SecureDir(dir); err != nil {
 		return nil, fmt.Errorf("tlsx: cannot create %s: %w", dir, err)
 	}
 

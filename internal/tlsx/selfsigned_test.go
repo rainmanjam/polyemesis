@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 )
 
 func TestSelfSignedMaterialIsReusedAcrossRestarts(t *testing.T) {
@@ -32,31 +34,27 @@ func TestPrivateKeysAreWrittenUnreadableToEveryoneElse(t *testing.T) {
 	dir := t.TempDir()
 	newSelfSigned(t, dir, "box.local", 0)
 
-	tests := []struct {
-		file string
-		want os.FileMode
-	}{
-		{caKeyFile, 0o600},
-		{serverKeyFile, 0o600},
-		{caCertFile, 0o644},
-		{serverCertFile, 0o644},
-	}
-	for _, tc := range tests {
-		path := filepath.Join(Dir(dir), tc.file)
-		st, err := os.Stat(path)
-		if err != nil {
-			t.Errorf("stat %s: %v", tc.file, err)
-			continue
-		}
-		if got := st.Mode().Perm(); got != tc.want {
-			t.Errorf("%s mode = %#o, want %#o", tc.file, got, tc.want)
+	// The PROPERTY, not the mode bits.
+	//
+	// This read `mode == 0600` until the cross-platform matrix ran it on
+	// Windows, where a FileMode is discarded by the syscall layer: the
+	// assertion was true by construction there while the keys were readable by
+	// every account on the host. See internal/fsperm.
+	for _, f := range []string{caKeyFile, serverKeyFile} {
+		if err := fsperm.CheckPrivate(filepath.Join(Dir(dir), f)); err != nil {
+			t.Errorf("%s is not private: %v", f, err)
 		}
 	}
-
-	if st, err := os.Stat(Dir(dir)); err != nil {
-		t.Errorf("stat %s: %v", Dir(dir), err)
-	} else if got := st.Mode().Perm(); got != 0o700 {
-		t.Errorf("%s mode = %#o, want %#o", Dir(dir), got, 0o700)
+	// Nothing is asserted about the certificates beyond their existing. A
+	// certificate is public by nature -- it is handed to every client that
+	// connects -- so its permissions are not a security property to pin.
+	for _, f := range []string{caCertFile, serverCertFile} {
+		if _, err := os.Stat(filepath.Join(Dir(dir), f)); err != nil {
+			t.Errorf("stat %s: %v", f, err)
+		}
+	}
+	if err := fsperm.CheckPrivate(Dir(dir)); err != nil {
+		t.Errorf("the directory holding the keys is exposed: %v", err)
 	}
 }
 

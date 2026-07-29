@@ -42,7 +42,20 @@ the software actually promises.
   only, so a restart never strands you outside your own instance.
 - **Secrets at rest.** Platform OAuth tokens and client secrets are encrypted
   with NaCl secretbox. API tokens are stored as hashes. TLS private keys live in
-  `<dataDir>/tls/` with the directory `0700` and keys `0600`.
+  `<dataDir>/tls/`, restricted to the account the server runs as — `0700` on the
+  directory and `0600` on the keys on Linux and macOS, and an explicit DACL
+  granting only that account and `SYSTEM` on Windows.
+
+  The Windows half is stated separately because it is not the same mechanism.
+  Go's `os.FileMode` is a Unix concept that the Windows syscall layer discards,
+  so `os.MkdirAll(dir, 0700)` succeeds there and restricts nothing. polyemesis
+  sets a **protected** DACL instead (see `internal/fsperm`), which detaches the
+  directory from the inheritable permissions it would otherwise pick up from its
+  parent — under the default ACL on a system drive those include `BUILTIN\Users`.
+  The grant is marked inheritable so that files written into the directory later
+  are covered too, which is what protects the ACME account key: `autocert`
+  creates that file through its own code path, so inheritance is the only
+  mechanism that can reach it.
 - **Secrets in transit to you.** No stream key, client secret, API token or TLS
   private key is ever returned by an API or written to a log. Webhook URLs — which
   carry their credential in the path — are masked in every response.
