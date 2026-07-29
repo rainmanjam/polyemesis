@@ -533,7 +533,22 @@ func (m *Manager) Delete(id int64) error {
 // package goes through it, because the filename ultimately originates from a
 // database row and must never be trusted as a path.
 func (m *Manager) Resolve(name string) (string, error) {
-	if name == "" || strings.ContainsRune(name, os.PathSeparator) || name == "." || name == ".." {
+	// BOTH separators, on every platform -- not just the local one.
+	//
+	// This read `strings.ContainsRune(name, os.PathSeparator)`, which is a
+	// check whose MEANING CHANGES WITH GOOS: on Windows that constant is '\',
+	// so a forward slash passed validation and filepath.Join happily turned
+	// "a/b" into a path pointing into a subdirectory. Resolve("/etc/passwd")
+	// returned <recordings>\etc\passwd instead of an error.
+	//
+	// The final prefix check below still contained it, so this was a breach of
+	// the "a recording name is a bare filename" contract rather than a live
+	// escape -- but it was the outer of two defences failing silently, and the
+	// name it is validating comes from a database row. Note that the sibling
+	// checks in internal/clips, internal/media and internal/api all had the
+	// two-separator form already; this one copy drifted.
+	if name == "" || name == "." || name == ".." ||
+		strings.ContainsAny(name, `/\`) {
 		return "", fmt.Errorf("invalid recording name %q", name)
 	}
 	base, err := filepath.Abs(m.dir)

@@ -55,6 +55,13 @@ var testClipDir = filepath.Join(os.TempDir(), "polyemesis-clips")
 
 var testOutPath = filepath.Join(testClipDir, "out.mkv")
 
+// testWorkDir stands in for the scratch directory Commands is handed. In
+// production that is an os.MkdirTemp under the clips directory, so it is always
+// absolute and always rendered with the platform's own separator -- which is
+// why the expectations that use it are built with filepath.Join rather than
+// written out with forward slashes.
+var testWorkDir = filepath.Join(os.TempDir(), "polyemesis-clipwork")
+
 func req(in, out time.Duration, mut ...func(*Request)) Request {
 	r := Request{In: in, Out: out, OutPath: testOutPath}
 	for _, fn := range mut {

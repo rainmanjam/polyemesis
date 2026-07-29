@@ -2,6 +2,7 @@ package clipper
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestFastCutIsOneStreamCopy(t *testing.T) {
 func TestPreciseCutIsHeadThenTailThenJoin(t *testing.T) {
 	p := planPrecise(t, 5*time.Second, 15*time.Second)
 
-	cmds, err := p.Commands("/work")
+	cmds, err := p.Commands(testWorkDir)
 	if err != nil {
 		t.Fatalf("Commands: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestPreciseCutIsHeadThenTailThenJoin(t *testing.T) {
 		"-c:a", "copy",
 		"-avoid_negative_ts", "make_zero",
 		"-f", "matroska",
-		"/work/head.mkv",
+		filepath.Join(testWorkDir, "head.mkv"),
 	})
 	assertArgs(t, cmds[1].Args, []string{
 		"-hide_banner", "-nostdin", "-loglevel", "warning", "-y",
@@ -79,11 +80,11 @@ func TestPreciseCutIsHeadThenTailThenJoin(t *testing.T) {
 		"-c:v", "copy", "-c:a", "copy",
 		"-avoid_negative_ts", "make_zero",
 		"-f", "matroska",
-		"/work/tail.mkv",
+		filepath.Join(testWorkDir, "tail.mkv"),
 	})
 	assertArgs(t, cmds[2].Args, []string{
 		"-hide_banner", "-nostdin", "-loglevel", "warning", "-y",
-		"-f", "concat", "-safe", "0", "-i", "/work/join.txt",
+		"-f", "concat", "-safe", "0", "-i", filepath.Join(testWorkDir, "join.txt"),
 		"-map", "0", "-c", "copy",
 		"-avoid_negative_ts", "make_zero",
 		"-f", "matroska",
@@ -95,7 +96,12 @@ func TestPreciseCutIsHeadThenTailThenJoin(t *testing.T) {
 	}
 	// Head first. The other order produces a clip that plays the end before the
 	// beginning, which is the sort of bug that ships.
-	wantList := "file '/work/head.mkv'\nfile '/work/tail.mkv'\n"
+	// Built with Join rather than written out: on Windows these are
+	// \work\head.mkv, and a backslash inside the concat demuxer's single
+	// quotes is LITERAL (verified against the real demuxer), so that list is
+	// correct there -- it just is not this string.
+	wantList := fmt.Sprintf("file '%s'\nfile '%s'\n",
+		filepath.Join(testWorkDir, "head.mkv"), filepath.Join(testWorkDir, "tail.mkv"))
 	if cmds[2].Files[0].Content != wantList {
 		t.Errorf("join list = %q, want %q", cmds[2].Files[0].Content, wantList)
 	}
@@ -109,7 +115,7 @@ func TestAPreciseCutInsideOneGOPIsASingleEncode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanCut: %v", err)
 	}
-	cmds, err := p.Commands("/work")
+	cmds, err := p.Commands(testWorkDir)
 	if err != nil {
 		t.Fatalf("Commands: %v", err)
 	}
@@ -150,14 +156,14 @@ func TestACutSpanningSegmentsFeedsFFmpegAConcatList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanCut: %v", err)
 	}
-	cmds, err := p.Commands("/work")
+	cmds, err := p.Commands(testWorkDir)
 	if err != nil {
 		t.Fatalf("Commands: %v", err)
 	}
 	assertArgs(t, cmds[0].Args, []string{
 		"-hide_banner", "-nostdin", "-loglevel", "warning", "-y",
 		// The seek is on the OUTPUT side, because the concat demuxer cannot seek.
-		"-f", "concat", "-safe", "0", "-i", "/work/sources.txt",
+		"-f", "concat", "-safe", "0", "-i", filepath.Join(testWorkDir, "sources.txt"),
 		"-ss", "9.000000",
 		"-t", "3.000000",
 		"-map", "0:v:0?", "-map", "0:a?",
@@ -344,7 +350,7 @@ func TestTheTitleIsWrittenOnlyOntoTheFinalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanCut: %v", err)
 	}
-	cmds, err := p.Commands("/work")
+	cmds, err := p.Commands(testWorkDir)
 	if err != nil {
 		t.Fatalf("Commands: %v", err)
 	}
@@ -366,7 +372,7 @@ func TestTheHeadEncodeHonoursAThreadCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanCut: %v", err)
 	}
-	cmds, err := p.Commands("/work")
+	cmds, err := p.Commands(testWorkDir)
 	if err != nil {
 		t.Fatalf("Commands: %v", err)
 	}
@@ -410,13 +416,13 @@ func TestCommandsRefuseWhatTheyCannotWrite(t *testing.T) {
 		{
 			name:    "a plan with no sources",
 			mut:     func(p *Plan) { p.Sources = nil },
-			workDir: "/work",
+			workDir: testWorkDir,
 			wantErr: ErrNoSegments,
 		},
 		{
 			name:    "an empty range",
 			mut:     func(p *Plan) { p.Out = p.In },
-			workDir: "/work",
+			workDir: testWorkDir,
 			wantErr: ErrEmptyRange,
 		},
 		{
