@@ -14,20 +14,41 @@ claim is often more instructive than the right one.
 
 ## The sequence
 
-| # | Item | Effort | Why here |
-|---|---|---|---|
-| **0** | [Unreachable features](UNREACHABLE-FEATURES.md) | **1–2 d** | Two features are already built and no user can reach them. Cheapest work on the list by an order of magnitude |
-| **1** | [Playlist — Phase 0](PLAYLIST-AND-COMPOSITING.md#playlist-the-mostly-wiring-claim-is-half-right) | **1 d** | Scheduled file broadcast *already works*. Documenting and testing it answers three tracker requests at zero risk |
-| **2** | [LL-HLS](LL-HLS.md) | **3 d** | Preview latency 4.2–6.2 s → 2.2–3.2 s with zero new dependencies. Now the only low-latency path, since WHEP is deferred |
-| **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | Exactly one net-new module. Retained telemetry has no existing path at all |
-| **4** | Selector generalisation | **~3–5 d** | Shared prerequisite for playlist and compositing. Doing it once is much safer than twice in the most safety-critical pure function in the tree |
-| **5** | [Playlist — full](PLAYLIST-AND-COMPOSITING.md#sequencing-take-the-concat-demuxer) | **17–22 d** | Most-requested by volume; lower technical risk than compositing |
-| **6** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | Largest, riskiest, and the one that puts the audio differentiator in play |
-| **7** | [Teams and roles](TEAMS-AND-ROLES.md) | **20–30 d** | A security boundary retrofitted across ~120 routes. Do it when it is the priority, not alongside other work |
+| # | Item | Effort | Status | Why here |
+|---|---|---|---|---|
+| **0** | [Unreachable features](UNREACHABLE-FEATURES.md) | **1–2 d** | ready | Two features are already built and no user can reach them. Cheapest work on the list by an order of magnitude |
+| **1** | [Playlist — Phase 0](PLAYLIST-AND-COMPOSITING.md#playlist-the-mostly-wiring-claim-is-half-right) | **1 d** | ready | Scheduled file broadcast *already works*. Documenting and testing it answers three tracker requests at zero risk |
+| **2** | [LL-HLS](LL-HLS.md) | **3 d** | ready | Preview latency 4.2–6.2 s → 2.2–3.2 s with zero new dependencies |
+| **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | ready | Exactly one net-new module. Retained telemetry has no existing path at all |
+| **4** | Selector generalisation | **~3–5 d** | ready | Shared prerequisite for 5 and 7. Doing it once is much safer than twice in the most safety-critical pure function in the tree |
+| **5** | [Playlist — full](PLAYLIST-AND-COMPOSITING.md#sequencing-take-the-concat-demuxer) | **17–22 d** | ready | Most-requested by volume; lower technical risk than compositing |
+| **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **deferred** | The most-repeated unmet request. Sits before 7 because it extracts the `overlay`/`evenExpr` helpers compositing then reuses |
+| **7** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | ready | Largest, riskiest, and the one that puts the audio differentiator in play |
+| **8** | [WebRTC — WHEP](WEBRTC.md) | **8–12 d** | **deferred** | The sub-second preview tier. Independent of everything else; slots in whenever latency becomes the priority |
+| **9** | [Teams and roles](TEAMS-AND-ROLES.md) | **20–30 d** | ready | A security boundary retrofitted across ~120 routes. Do it when it is the priority, not alongside other work |
 
-**Deferred, research complete and current:**
-[Overlays](OVERLAYS.md) (~16 d, or a 6-day v0.5) ·
-[WebRTC WHEP/WHIP](WEBRTC.md) (8–12 d WHEP).
+[WHIP](WEBRTC.md#whip-design) ingest is a separate decision, deliberately not
+given a number: it carries one audio track, so it has RTMP's exact limitation
+and cannot feed the per-destination routing this product exists for. Decide it
+after WHEP has seen real use, if at all.
+
+**Deferred** means not scheduled, not abandoned. The research for both is
+complete and current — including a measured pion dependency audit that will not
+need repeating — so picking either up is a scheduling decision rather than a
+fresh investigation.
+
+### Two consequences of the current deferrals
+
+**Deferring WHEP makes LL-HLS the only low-latency path.** At ~2.7 s that is a
+real improvement and it is not sub-second. If sub-second monitoring becomes a
+requirement, item 8 is the answer and item 2 cannot be tuned into it — the
+remaining gap is structural, not a matter of flags.
+
+**Deferring overlays leaves item 7 doing its own helper extraction.** Compositing
+reuses the `overlay=` construction and the `evenExpr` chroma-grid alignment that
+the overlays work would have factored out of `rendition.go`. Built in this order
+it is a few days cheaper; built in the other order, compositing pays that cost
+itself. Neither blocks the other.
 
 ## The first five days
 
@@ -40,7 +61,14 @@ the only items with no architectural risk at all:
   rather than an accident of `file://` pull;
 - **preview latency roughly halves.**
 
-Nothing after that is under two weeks.
+After that the next two are still small — MQTT telemetry at 5–6 days and the
+overlays v0.5 at 6 — but both introduce something new: MQTT takes a dependency
+and a broker, and overlays restructure the rendition argument builder. **Items 4
+onward are all multi-week**, and item 4 is the point at which the selector, the
+most safety-critical pure function in the tree, gets opened up.
+
+So the honest shape is three tiers, not two: a week of pure win, a fortnight of
+small-but-real features, and then everything else.
 
 ## What the verification pass changed
 
