@@ -74,6 +74,11 @@ func TestMetadataRoutesRequireASession(t *testing.T) {
 		{"overview", http.MethodGet, "/api/v1/metadata"},
 		{"push", http.MethodPost, "/api/v1/metadata/push"},
 		{"job", http.MethodGet, "/api/v1/metadata/push/anything"},
+		// This list is enumerated by hand, so a route added without a line
+		// here is a route nothing checks for auth. broadcast-window reads a
+		// connected account's live broadcast state, which is exactly the sort
+		// of thing that must not answer an unauthenticated caller.
+		{"broadcast window", http.MethodGet, "/api/v1/metadata/broadcast-window"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,6 +149,71 @@ func TestPushMetadataRejectsAnEmptyComposer(t *testing.T) {
 				t.Fatalf("status = %d, want 400 (body %s)", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+// The other side of that rule, and the reason the empty check had to change.
+//
+// A broadcast-only push carries no title, description or category at all --
+// turning the DVR off before going live without retyping a title that is
+// already correct. The old check called that empty and refused it, so a
+// composer offering broadcast controls would have had a Push button that
+// rejected exactly the edit it was built for.
+//
+// 400 is the failure being guarded against here. Any other status means the
+// request got past validation, which is all this test claims: with no
+// connected account it still cannot reach a platform.
+func TestPushMetadataAcceptsABroadcastOnlyEdit(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/metadata/push", map[string]any{
+		"broadcast": map[string]any{"enableDvr": false},
+	})
+	sign(r)
+	w := do(t, h, r)
+	if w.Code == http.StatusBadRequest {
+		t.Fatalf("a broadcast-only push was refused as empty: %s", w.Body.String())
+	}
+}
+
+// false must survive the JSON round trip as "turn it off" rather than
+// decoding to the zero value and reading as "not mentioned".
+//
+// This is the pointer design crossing the wire, and it is the one place it
+// could quietly break: a plain bool in the request struct would decode both an
+// absent field and an explicit false to the same thing, and the push would
+// stop being able to turn a toggle off at all.
+func TestAnExplicitFalseSurvivesTheRequestDecode(t *testing.T) {
+	var req struct {
+		Broadcast oauth.BroadcastSettings `json:"broadcast"`
+	}
+	if err := json.Unmarshal([]byte(`{"broadcast":{"enableDvr":false}}`), &req); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if req.Broadcast.EnableDvr == nil {
+		t.Fatal("an explicit false decoded to nil, so it reads as \"leave it alone\" " +
+			"and the operator can never turn the DVR off")
+	}
+	if *req.Broadcast.EnableDvr {
+		t.Error("an explicit false decoded to true")
+	}
+	if req.Broadcast.Empty() {
+		t.Error("a block containing an explicit false reads as empty, so it would never be sent")
+	}
+
+	// And the absent case must stay absent.
+	var none struct {
+		Broadcast oauth.BroadcastSettings `json:"broadcast"`
+	}
+	if err := json.Unmarshal([]byte(`{"broadcast":{}}`), &none); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if none.Broadcast.EnableDvr != nil {
+		t.Error("an omitted field decoded to a value, so untouched settings would be written")
+	}
+	if !none.Broadcast.Empty() {
+		t.Error("an empty block does not read as empty")
 	}
 }
 
