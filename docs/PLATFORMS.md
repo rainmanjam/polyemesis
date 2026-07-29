@@ -133,6 +133,28 @@ Scope requested: `https://www.googleapis.com/auth/youtube`. Write access is
 needed because polyemesis creates a reusable ingest stream if your channel has
 none.
 
+**Broadcast settings have an editing window.** Alongside title, description and
+category, polyemesis can push tags, the scheduled start, and YouTube's DVR,
+auto-start and auto-stop toggles. The last three **stop being editable once a
+broadcast leaves `created` or `ready`** — YouTube refuses them with errors such
+as `enableDvrModificationNotAllowed` from that point on.
+
+The go-live composer reads each account's broadcast state when it opens and
+disables those controls once they have locked, naming the state that caused it.
+That is advice, not enforcement: a broadcast can go live between the read and
+the write, so the platform's refusal is still what decides, and it is reported
+against the account it came from.
+
+Set DVR and auto-start **before** going live. Everything else — title,
+description, category, tags, scheduled start — stays editable throughout.
+
+Each toggle also has a *Leave unchanged* option, which is the default and is
+not the same as *Off*. Leaving one alone omits it from the request entirely so
+YouTube keeps whatever it has; choosing *Off* actively turns the feature off.
+The distinction matters because the API is destructive by part: a field omitted
+from a part that IS being sent reverts to its default, so polyemesis reads the
+current broadcast and carries every untouched field through on every write.
+
 ### Twitch
 
 1. <https://dev.twitch.tv/console/apps> → **Register Your Application**.

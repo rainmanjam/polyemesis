@@ -34,7 +34,37 @@ const PreviewPlayer = lazy(() =>
 // connected account. The shapes below mirror internal/api/metadata.go; they
 // live here rather than in lib/types.ts because nothing else renders them.
 
-type MetaField = "title" | "description" | "category";
+type MetaField =
+  | "title"
+  | "description"
+  | "category"
+  // The broadcast fields. YouTube only -- Twitch has no broadcast resource and
+  // Kick's entire metadata surface is three fields, so the composer greys
+  // these out rather than offering controls that go nowhere.
+  | "tags"
+  | "scheduledStart"
+  | "contentDetails";
+
+/** What YouTube will still accept on the current broadcast.
+ *
+ *  Fetched when the composer opens, never polled: every row is a live platform
+ *  call. A row that failed to read disables nothing -- the write still happens
+ *  and the platform's 403 remains the authority. */
+interface BroadcastWindowRow {
+  accountId: number;
+  platform: string;
+  accountName: string;
+  window?: {
+    broadcastId: string;
+    title: string;
+    lifeCycleStatus: string;
+    contentDetailsLocked: boolean;
+    lockedReason?: string;
+  };
+  /** false for a platform with no broadcast concept, which is not an error. */
+  supported: boolean;
+  error?: string;
+}
 type MetaState = "pending" | "ok" | "partial" | "error";
 
 interface MetaCaps {
@@ -126,6 +156,16 @@ function GoLiveComposer() {
   const [category, setCategory] = useState("");
   const [job, setJob] = useState<MetaJob | null>(null);
   const [pushing, setPushing] = useState(false);
+  const [tags, setTags] = useState("");
+  const [scheduledStart, setScheduledStart] = useState("");
+  // Tri-state: "" means the operator has not touched it, so the field is
+  // omitted from the push and the platform keeps whatever it has. That
+  // distinction is the whole reason the API takes pointers -- "off" and
+  // "unmentioned" must not collapse into the same request.
+  const [dvr, setDvr] = useState("");
+  const [autoStart, setAutoStart] = useState("");
+  const [autoStop, setAutoStop] = useState("");
+  const [windows, setWindows] = useState<BroadcastWindowRow[] | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -143,6 +183,18 @@ function GoLiveComposer() {
         }
       })
       .catch(() => setTargets([]));
+    // What is still editable, read once when the composer opens. Deliberately
+    // not polled: each row is a live platform call, and a broadcast that goes
+    // live mid-edit is caught by the write's own 403 rather than by a timer.
+    metaFetch<{ accounts: BroadcastWindowRow[] }>("/metadata/broadcast-window")
+      .then((data) => {
+        if (live) setWindows(data.accounts ?? []);
+      })
+      .catch(() => {
+        // A failed read must not disable the controls. The operator can still
+        // push; the platform decides.
+        if (live) setWindows([]);
+      });
     return () => {
       live = false;
     };
@@ -192,10 +244,37 @@ function GoLiveComposer() {
   const categoryHint = (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
   const noDescription = (targets ?? []).filter((t) => !t.caps.fields.includes("description"));
 
+  // Locked when EVERY account that supports broadcast settings says so. With
+  // two YouTube accounts and one still in "ready", the controls stay enabled --
+  // disabling them would block an edit that would have worked on one of them.
+  const broadcastAccounts = (windows ?? []).filter((w) => w.supported);
+  const lockedRows = broadcastAccounts.filter((w) => w.window?.contentDetailsLocked);
+  const contentDetailsLocked =
+    broadcastAccounts.length > 0 && lockedRows.length === broadcastAccounts.length;
+  const lockedReason = lockedRows[0]?.window?.lockedReason ?? "";
+
+  // A tri-state select maps to a pointer: absent when untouched.
+  const boolOrUndef = (v: string) => (v === "" ? undefined : v === "on");
+
   const push = async () => {
     setPushing(true);
     try {
-      const started = await metaFetch<MetaJob>("/metadata/push", { title, description, category });
+      const broadcast = {
+        tags: tags.trim() === "" ? undefined : tags.split(",").map((t) => t.trim()).filter(Boolean),
+        scheduledStart: scheduledStart.trim() === "" ? undefined : new Date(scheduledStart).toISOString(),
+        // Omitted entirely when locked. Sending them would earn a 403 that
+        // reads as though the whole push failed, when the title half of it
+        // very likely succeeded.
+        enableDvr: contentDetailsLocked ? undefined : boolOrUndef(dvr),
+        enableAutoStart: contentDetailsLocked ? undefined : boolOrUndef(autoStart),
+        enableAutoStop: contentDetailsLocked ? undefined : boolOrUndef(autoStop),
+      };
+      const started = await metaFetch<MetaJob>("/metadata/push", {
+        title,
+        description,
+        category,
+        broadcast,
+      });
       setJob(started);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not push the metadata.");
@@ -206,7 +285,12 @@ function GoLiveComposer() {
 
   if (targets === null) return null;
 
-  const empty = !title.trim() && !description.trim() && !category.trim();
+  // A broadcast-only push is a real thing an operator does: turning the DVR
+  // off before going live without retyping a title that is already correct.
+  const broadcastTouched =
+    tags.trim() !== "" || scheduledStart.trim() !== "" ||
+    dvr !== "" || autoStart !== "" || autoStop !== "";
+  const empty = !title.trim() && !description.trim() && !category.trim() && !broadcastTouched;
   const busy = pushing || (job !== null && !job.done);
 
   return (
@@ -291,6 +375,82 @@ function GoLiveComposer() {
                 </p>
               )}
             </div>
+
+            {broadcastAccounts.length > 0 && (
+              <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Broadcast settings</Label>
+                  <span className="text-[10px] text-muted-foreground">
+                    {broadcastAccounts.map((w) => w.platform).join(", ")} only
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="golive-tags">Tags</Label>
+                    <Input
+                      id="golive-tags"
+                      value={tags}
+                      placeholder="live, house, dj set"
+                      onChange={(e) => setTags(e.target.value)}
+                    />
+                    <span className="text-[10px] text-muted-foreground">
+                      Comma separated. These REPLACE the video's existing tags rather than adding
+                      to them, because that is what the API does.
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="golive-start">Scheduled start</Label>
+                    <Input
+                      id="golive-start"
+                      type="datetime-local"
+                      value={scheduledStart}
+                      onChange={(e) => setScheduledStart(e.target.value)}
+                    />
+                    <span className="text-[10px] text-muted-foreground">
+                      Leave empty to keep the current one.
+                    </span>
+                  </div>
+                </div>
+
+                {contentDetailsLocked && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-500">
+                    {lockedReason ||
+                      "YouTube stops accepting these once a broadcast leaves \"created\" or \"ready\"."}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "dvr", label: "DVR", value: dvr, set: setDvr },
+                    { id: "autostart", label: "Auto-start", value: autoStart, set: setAutoStart },
+                    { id: "autostop", label: "Auto-stop", value: autoStop, set: setAutoStop },
+                  ].map((f) => (
+                    <div key={f.id} className="flex flex-col gap-1">
+                      <Label htmlFor={`golive-${f.id}`}>{f.label}</Label>
+                      <select
+                        id={`golive-${f.id}`}
+                        className="h-9 rounded-md border border-input bg-transparent px-2 text-sm disabled:opacity-50"
+                        value={f.value}
+                        disabled={contentDetailsLocked}
+                        onChange={(e) => f.set(e.target.value)}
+                      >
+                        {/* "Leave alone" is the DEFAULT and is not the same as
+                            "off". An omitted field keeps whatever the platform
+                            has; sending false turns the feature off. */}
+                        <option value="">Leave unchanged</option>
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <span className="text-[10px] text-muted-foreground">
+                  “Leave unchanged” sends nothing at all, so the platform keeps what it has.
+                  Choosing On or Off writes that value.
+                </span>
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={push} disabled={empty || busy}>
