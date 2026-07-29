@@ -1,8 +1,18 @@
 # WebRTC: WHEP output, and WHIP input
 
-**Status:** proposed, not started.
-**Recommendation:** build **WHEP**. Ship it *beside* the HLS preview, not instead
-of it. Treat **WHIP** as a separate decision made after WHEP has seen real use.
+**Status: DEFERRED (2026-07-28).** Not scheduled. The research below is complete
+and current — including a measured dependency audit that will not need repeating
+— so picking it up later does not mean redoing it.
+
+**Recommendation when it is picked up:** build **WHEP**. Ship it *beside* the HLS
+preview, not instead of it. Treat **WHIP** as a separate decision made after WHEP
+has seen real use.
+
+**One consequence for the rest of the roadmap:** deferring WHEP removes the
+sub-second answer to preview latency, which raises the stakes on
+[LL-HLS](LL-HLS.md). Where WHEP reaches under a second, tuned HLS reaches
+roughly 2–5. If low latency matters now, LL-HLS is the only path left on the
+schedule.
 
 ---
 
@@ -159,7 +169,7 @@ RTP carrying H.264 and Opus.
 
 **Rejected — re-mux in Go.** Depayload RTP, rebuild Annex-B, hand-write an
 MPEG-TS muxer. This is precisely what
-[ARCHITECTURE.md](../ARCHITECTURE.md#96-why-ffmpegs-rtmp-listener-not-yutoppgo-rtmp)
+[ARCHITECTURE.md](../ARCHITECTURE.md#why-ffmpegs-rtmp-listener-not-yutoppgo-rtmp)
 already refused for go-rtmp — *"a large, subtle surface area for zero
 user-visible gain"*. Same verdict, same reason.
 

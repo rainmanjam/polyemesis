@@ -1,6 +1,9 @@
 # Overlays: text, logo, watermark, channel name
 
-**Status:** proposed, not started.
+**Status: DEFERRED (2026-07-28).** Not scheduled. The research below is complete
+and current; it is parked rather than abandoned, so picking it up later does not
+mean redoing it.
+
 **Evidence:** the most-repeated unmet request on the competitor's tracker —
 asked **five separate times** (6+5+4+2+1 reactions across distinct issues), every
 one closed unimplemented.
