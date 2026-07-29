@@ -262,7 +262,7 @@ var platformCapabilities = []PlatformCapability{
 			CapViewerStats: SupportYes,
 		},
 		Reasons: map[Capability]string{
-			CapSSO:       "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
+			CapSSO: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
 			CapStreamKey: "Fetched from the channels resource, over the streamkey:read scope. " +
 				"This was recorded here as impossible for a long time, and the reasoning is worth keeping: " +
 				"Kick publishes no /streamkey endpoint, so reading the endpoint list finds nothing — " +
@@ -270,8 +270,8 @@ var platformCapabilities = []PlatformCapability{
 				"withheld unless streamkey:read was granted, which the Get Channels page does not list " +
 				"among its required scopes. An account connected before that scope was requested must be " +
 				"reconnected once.",
-			CapMetadata:  "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
-			CapChatRead:  "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
+			CapMetadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
+			CapChatRead: "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
 			CapModeration: "Delete a message, over moderation:chat_message:manage. Banning and timing out are not " +
 				"implemented and the moderation:ban scope is deliberately not requested: nothing in polyemesis bans a " +
 				"viewer, and asking a restreamer's audience for that power would be overreach. Use Kick's own " +
