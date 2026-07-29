@@ -1364,7 +1364,7 @@ func (e *Engine) reconcileOutputs() error {
 	srcSig := upstreamSig(selSig, silenceSig)
 
 	wantRends := wantedRenditions(rendRows, counts, func(r *db.Rendition) string {
-		return renditionSig(r, fps, srcSig)
+		return renditionSig(r, fps, srcSig, e.cfg.DataDir)
 	})
 	e.mu.RLock()
 	haveRends := make(map[int64]string, len(e.rends))
@@ -1862,7 +1862,7 @@ func diffRenditions(want, running map[int64]string) (start, stop []int64) {
 // destinations riding it. The source frame rate is folded in only when the
 // rendition inherits it, since that is the only case where the keyframe
 // interval — counted in frames — depends on what the ingest is doing.
-func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string {
+func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig, dataDir string) string {
 	parts := []string{
 		strconv.Itoa(r.Width), strconv.Itoa(r.Height), strconv.Itoa(r.FPS),
 		strconv.Itoa(r.VideoBitrate), string(r.Encoder), r.Preset,
@@ -1871,6 +1871,15 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string 
 		// dimension, so it has to be named here or picking a mode would be
 		// saved and never encoded.
 		r.AspectMode, r.PadColor,
+		// Deinterlace, for exactly the same reason -- and it was missing until
+		// the overlay work went looking. Changing a rendition from progressive
+		// to `all` was stored, shown in the UI, and never reached the running
+		// encoder, because nothing in this list changed and the supervisor had
+		// no reason to restart it.
+		r.Deinterlace,
+		// The overlay's SHAPE. Every field, because each one changes the filter
+		// graph: a different anchor, width or opacity is a different encode.
+		overlaySig(r.Overlay, dataDir),
 		// Which relay it reads. RenditionArgs copies audio with -map 0:a, so a
 		// tier started against the raw ingest of a video-only stream produces a
 		// video-only hub; it has to be restarted onto the silence tier when one
@@ -1883,14 +1892,77 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string 
 	return hashStrings(parts)
 }
 
+// overlaySig hashes the overlay's shape, plus the image file's size and
+// modification time.
+//
+// The file stat is here on purpose. Everything else in the signature is a
+// database field, but an operator who replaces logo.png with a new one has
+// changed the encode without changing a single row -- and without the stat the
+// running encoder would keep compositing the old image until something
+// unrelated restarted it. The file's CONTENTS are not read: a stat per
+// reconcile is cheap, and hashing the bytes on every sweep is not.
+func overlaySig(o db.RenditionOverlay, dataDir string) string {
+	if !o.Active() {
+		return ""
+	}
+	parts := []string{
+		o.Image, o.Anchor,
+		strconv.FormatFloat(o.WidthPct, 'g', -1, 64),
+		strconv.FormatFloat(o.MarginXPct, 'g', -1, 64),
+		strconv.FormatFloat(o.MarginYPct, 'g', -1, 64),
+		strconv.FormatFloat(o.Opacity, 'g', -1, 64),
+	}
+	if fi, err := os.Stat(filepath.Join(dataDir, filepath.FromSlash(o.Image))); err == nil {
+		parts = append(parts,
+			strconv.FormatInt(fi.Size(), 10),
+			strconv.FormatInt(fi.ModTime().UnixNano(), 10))
+	} else {
+		// A missing file is itself a state worth restarting on: once the
+		// operator puts it there, the encode has to pick it up. Naming the
+		// absence -- rather than silently omitting the stat -- means the
+		// signature changes the moment the file appears.
+		parts = append(parts, "missing")
+	}
+	return strings.Join(parts, "\x00")
+}
+
+// overlaySpecOf resolves the stored relative path against the data directory.
+//
+// Joined to an absolute path only here, at process-build time, exactly as the
+// slate image is. The stored value stays relative so it cannot be an absolute
+// read primitive for whoever reaches the renditions API; db validation refuses
+// traversal, and this is the one place the two halves meet.
+func overlaySpecOf(o db.RenditionOverlay, dataDir string) *ffmpeg.OverlaySpec {
+	if !o.Active() {
+		return nil
+	}
+	opacity := o.Opacity
+	if opacity <= 0 {
+		// A row stored before opacity existed, or one saved as 0. Treated as
+		// fully opaque rather than fully transparent: an invisible watermark is
+		// indistinguishable from a broken one, and the operator asked for a
+		// watermark.
+		opacity = 1
+	}
+	return &ffmpeg.OverlaySpec{
+		ImagePath:  filepath.Join(dataDir, filepath.FromSlash(o.Image)),
+		Anchor:     ffmpeg.OverlayAnchor(o.Anchor),
+		WidthPct:   o.WidthPct,
+		MarginXPct: o.MarginXPct,
+		MarginYPct: o.MarginYPct,
+		Opacity:    opacity,
+	}
+}
+
 // renditionSpecOf maps a stored rendition onto the encode's command line.
 //
 // There is no audio field to map, and there must never be one: RenditionArgs
 // copies every audio track through with -c:a copy, which is what leaves the
 // per-destination routing graphs downstream with the full multitrack ingest to
 // work from.
-func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDevice string) ffmpeg.RenditionSpec {
+func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDevice, dataDir string) ffmpeg.RenditionSpec {
 	return ffmpeg.RenditionSpec{
+		Overlay:     overlaySpecOf(r.Overlay, dataDir),
 		Deinterlace: ffmpeg.DeinterlaceMode(r.Deinterlace),
 		// Only meaningful for the VAAPI encoders, and empty everywhere else.
 		// Until this was threaded through, every VAAPI rendition fell back to
@@ -2018,7 +2090,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 
 	subName := fmt.Sprintf("rendition:%d", row.ID)
 	in := upstream.Subscribe(subName, port)
-	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row)))
+	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir))
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: subName, Kind: "rendition", Bin: e.tools.FFmpeg, Args: args,

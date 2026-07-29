@@ -124,6 +124,17 @@ type RenditionSpec struct {
 	// modes.
 	PadColor string
 
+	// Overlay is an optional image watermark. nil, which is what every
+	// rendition that predates this feature has, produces argv byte-identical to
+	// before -- an overlay is the ONLY thing that switches this builder from
+	// -vf to -filter_complex.
+	//
+	// It needs both Width and Height, because the image is scaled to a
+	// percentage of the output and that percentage has to resolve to a number.
+	// db.Rendition refuses the combination rather than leaving it to be
+	// discovered as a stream that will not start.
+	Overlay *OverlaySpec
+
 	// FPS is the output frame rate; 0 keeps the source rate.
 	FPS float64
 	// SourceFPS is the probed ingest rate. Only used for the GOP arithmetic
@@ -244,10 +255,35 @@ func RenditionArgs(s RenditionSpec) []string {
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
 		"-i", RelayInputURL(s.InRelayURL),
+	)
+
+	// The overlay image is a second -i, and it goes AFTER the relay so the relay
+	// stays input 0. That is what keeps `-map 0:a -c:a copy` below correct
+	// without a single character changing.
+	//
+	// api/expert.go refuses a second -i on a DESTINATION for precisely the
+	// opposite reason: a destination has a compiled routing graph whose
+	// `[0:a:N]` labels would silently renumber. A rendition has no routing
+	// graph -- it copies every audio track through untouched -- so adding an
+	// input here is safe. Written down because it looks like the same hazard
+	// and is not, and someone will otherwise "fix" it wrongly.
+	overlay := overlayGraph(s, prof, s.Width, s.Height)
+	if overlay != "" {
+		args = append(args, "-i", s.Overlay.ImagePath)
+	}
+
+	// The video map names the filtergraph's output when there is one, and the
+	// input stream otherwise. The AUDIO map is identical in both branches, and
+	// deliberately so: it is the line the whole product rests on.
+	videoMap := "0:v:0"
+	if overlay != "" {
+		videoMap = labelOut
+	}
+	args = append(args,
 		// Explicit maps only. Default stream selection would take one audio
 		// track and drop the rest, which is the exact failure this feature
 		// exists to avoid.
-		"-map", "0:v:0",
+		"-map", videoMap,
 		"-map", "0:a",
 		"-c:v", s.Encoder,
 	)
@@ -259,7 +295,14 @@ func RenditionArgs(s RenditionSpec) []string {
 		"-bufsize", strconv.Itoa(s.BufsizeKbps)+"k",
 	)
 
-	if vf := videoFilter(s, prof); vf != "" {
+	// -filter_complex REPLACES -vf; they are mutually exclusive on one output.
+	// With no overlay this branch is never taken and the argv below is
+	// byte-identical to what it has always been -- which is the whole safety
+	// argument for this change, and what TestRenditionArgsWithoutAnOverlayAre
+	// UnchangedByTheOverlayWork asserts.
+	if overlay != "" {
+		args = append(args, "-filter_complex", overlay)
+	} else if vf := videoFilter(s, prof); vf != "" {
 		args = append(args, "-vf", vf)
 	}
 	if s.FPS > 0 {
@@ -349,6 +392,18 @@ func deinterlaceFilter(mode DeinterlaceMode) string {
 
 // videoFilter renders the scale chain, or "" when there is nothing to do.
 func videoFilter(s RenditionSpec, prof encoderProfile) string {
+	return videoFilterChain(s, prof)
+}
+
+// videoFilterChain is videoFilter's body, split out so overlayGraph can reuse
+// the exact same stages inside -filter_complex.
+//
+// It takes the profile rather than a bool because the VAAPI tail is genuinely
+// part of the chain in the -vf case, and genuinely NOT part of it in the
+// overlay case -- there the overlay has to be composited in system memory
+// before the upload, so overlayGraph appends the tail itself, after the
+// composite. Passing a zero profile is how it asks for the chain without it.
+func videoFilterChain(s RenditionSpec, prof encoderProfile) string {
 	var chain []string
 	// Deinterlace FIRST, before any scaling.
 	//

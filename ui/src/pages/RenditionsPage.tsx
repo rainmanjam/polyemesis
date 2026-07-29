@@ -56,6 +56,7 @@ import type {
   RenditionAspectMode,
   RenditionBounds,
   RenditionDeinterlace,
+  OverlayAnchor,
   RenditionPreset,
   RenditionStatus,
   RenditionView,
@@ -795,9 +796,30 @@ function emptyForm(defaultEncoder: string) {
     aspectMode: "stretch" as AspectKey,
     padColor: "",
     deinterlace: "off" as DeinterlaceKey,
+    overlayImage: "",
+    overlayAnchor: "bottom-right" as OverlayAnchor,
+    // Percentages are held as whole numbers in the form and divided at the
+    // boundary. An operator types "12", not "0.12", and the conversion belongs
+    // in one place rather than in every field.
+    overlayWidth: 12,
+    overlayMarginX: 4,
+    overlayMarginY: 4,
+    overlayOpacity: 100,
     note: "",
   };
 }
+
+const OVERLAY_ANCHORS: { key: OverlayAnchor; label: string }[] = [
+  { key: "top-left", label: "Top left" },
+  { key: "top-center", label: "Top centre" },
+  { key: "top-right", label: "Top right" },
+  { key: "middle-left", label: "Middle left" },
+  { key: "center", label: "Centre" },
+  { key: "middle-right", label: "Middle right" },
+  { key: "bottom-left", label: "Bottom left" },
+  { key: "bottom-center", label: "Bottom centre" },
+  { key: "bottom-right", label: "Bottom right" },
+];
 
 // Radix's SelectItem refuses an empty value, and the empty string is precisely
 // what the server stores for both zero values. So the form carries a sentinel
@@ -847,6 +869,12 @@ const DEINTERLACE_MODES: { key: DeinterlaceKey; label: string; hint: string }[] 
     hint: "For sources that are interlaced but do not say so. Plenty of SDI bridges and capture cards flag everything progressive regardless of what they were fed, and on those “only interlaced” is a no-op that looks like a broken setting.",
   },
 ];
+
+// Stored fractions (0-1) become whole percents for the form. A zero or missing
+// value takes the default rather than showing "0", which would read as a
+// deliberate choice of an invisible overlay.
+const pctToForm = (v: number | undefined, fallback: number): number =>
+  v === undefined || v === null || v <= 0 ? fallback : Math.round(v * 100);
 
 const toAspectKey = (v: string | undefined): AspectKey => (v ? (v as AspectKey) : "stretch");
 const fromAspectKey = (k: AspectKey): RenditionAspectMode => (k === "stretch" ? "" : k);
@@ -913,6 +941,12 @@ function RenditionDialog({
         aspectMode: toAspectKey(rendition.aspectMode),
         padColor: rendition.padColor ?? "",
         deinterlace: toDeinterlaceKey(rendition.deinterlace),
+        overlayImage: rendition.overlay?.image ?? "",
+        overlayAnchor: rendition.overlay?.anchor ?? "bottom-right",
+        overlayWidth: pctToForm(rendition.overlay?.widthPct, 12),
+        overlayMarginX: pctToForm(rendition.overlay?.marginXPct, 4),
+        overlayMarginY: pctToForm(rendition.overlay?.marginYPct, 4),
+        overlayOpacity: pctToForm(rendition.overlay?.opacity, 100),
         note: rendition.note,
       });
       setSizeKey(sizeKeyFor(rendition.width, rendition.height));
@@ -947,6 +981,12 @@ function RenditionDialog({
       aspectMode: toAspectKey(t.aspectMode),
       padColor: t.padColor ?? "",
       deinterlace: toDeinterlaceKey(t.deinterlace),
+      overlayImage: t.overlay?.image ?? "",
+      overlayAnchor: t.overlay?.anchor ?? "bottom-right",
+      overlayWidth: pctToForm(t.overlay?.widthPct, 12),
+      overlayMarginX: pctToForm(t.overlay?.marginXPct, 4),
+      overlayMarginY: pctToForm(t.overlay?.marginYPct, 4),
+      overlayOpacity: pctToForm(t.overlay?.opacity, 100),
       note: t.note,
     });
     setSizeKey(sizeKeyFor(t.width, t.height));
@@ -990,6 +1030,11 @@ function RenditionDialog({
   // mode would be inert -- the server refuses the pair rather than storing a
   // control that quietly does nothing, and the form says so before the save.
   const aspectApplies = form.width > 0 && form.height > 0;
+  // An overlay needs both axes for the same reason and one more: the image is
+  // scaled to a percentage of the OUTPUT width, so that width has to be a
+  // number when the arguments are built. It also needs an image -- the geometry
+  // fields alone are not an overlay.
+  const overlayApplies = aspectApplies && form.overlayImage.trim() !== "";
 
   const save = async () => {
     setBusy(true);
@@ -1011,6 +1056,21 @@ function RenditionDialog({
         aspectMode: aspectApplies ? fromAspectKey(form.aspectMode) : "",
         padColor: aspectApplies && form.aspectMode === "pad" ? form.padColor.trim() : "",
         deinterlace: fromDeinterlaceKey(form.deinterlace),
+        // The server refuses an overlay on a rendition with a free axis,
+        // because the image is sized as a percentage of the output and that has
+        // to resolve to a number. Cleared here rather than sent and rejected,
+        // for the same reason aspectMode is: a save error the operator cannot
+        // connect to anything they touched is worse than a disabled control.
+        overlay: overlayApplies
+          ? {
+              image: form.overlayImage.trim(),
+              anchor: form.overlayAnchor,
+              widthPct: form.overlayWidth / 100,
+              marginXPct: form.overlayMarginX / 100,
+              marginYPct: form.overlayMarginY / 100,
+              opacity: form.overlayOpacity / 100,
+            }
+          : { image: "" },
         note: form.note.trim(),
       };
       if (rendition) {
@@ -1251,6 +1311,107 @@ function RenditionDialog({
               </span>
             </div>
           )}
+
+          <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="rend-overlay-image">Watermark image</Label>
+              {!aspectApplies && (
+                <span className="text-[10px] text-muted-foreground">
+                  needs a fixed width and height
+                </span>
+              )}
+            </div>
+            <Input
+              id="rend-overlay-image"
+              value={form.overlayImage}
+              disabled={!aspectApplies}
+              placeholder="overlays/logo.png"
+              onChange={(e) => set("overlayImage", e.target.value)}
+            />
+            <span className="text-[10px] text-muted-foreground">
+              A path inside the data directory — put the file in{" "}
+              <code>&lt;data&gt;/overlays/</code>. Leave empty for a clean feed. A watermark
+              re-encodes nothing extra: it costs a few percent CPU on an encode that is already
+              running.
+            </span>
+
+            {overlayApplies && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label>Position</Label>
+                    <Select
+                      value={form.overlayAnchor}
+                      onValueChange={(v) => set("overlayAnchor", v as OverlayAnchor)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {OVERLAY_ANCHORS.map((a) => (
+                          <SelectItem key={a.key} value={a.key}>
+                            {a.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-overlay-width">Width (% of frame)</Label>
+                    <Input
+                      id="rend-overlay-width"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={form.overlayWidth}
+                      onChange={(e) => set("overlayWidth", Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-overlay-mx">Margin X (%)</Label>
+                    <Input
+                      id="rend-overlay-mx"
+                      type="number"
+                      min={0}
+                      max={45}
+                      value={form.overlayMarginX}
+                      onChange={(e) => set("overlayMarginX", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-overlay-my">Margin Y (%)</Label>
+                    <Input
+                      id="rend-overlay-my"
+                      type="number"
+                      min={0}
+                      max={45}
+                      value={form.overlayMarginY}
+                      onChange={(e) => set("overlayMarginY", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="rend-overlay-opacity">Opacity (%)</Label>
+                    <Input
+                      id="rend-overlay-opacity"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={form.overlayOpacity}
+                      onChange={(e) => set("overlayOpacity", Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <span className="text-[10px] text-muted-foreground">
+                  Everything is a percentage of the frame, so the same settings are correct on a
+                  16:9 tier and a 9:16 one. Margins are ignored on a centred axis.
+                </span>
+              </>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">

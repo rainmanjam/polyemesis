@@ -112,7 +112,7 @@ func TestSilenceRestartsEveryConsumer(t *testing.T) {
 	}
 
 	r := testRendition(1, "1080p60")
-	if renditionSig(r, 60, "") == renditionSig(r, 60, "silence-sig") {
+	if renditionSig(r, 60, "", "") == renditionSig(r, 60, "silence-sig", "") {
 		t.Error("a rendition does not restart when the silence tier appears")
 	}
 }

@@ -247,6 +247,10 @@ export interface Rendition {
   /** Strips field combing before any scaling: "" off, "auto" only frames the
    *  source flagged interlaced, "all" unconditionally. */
   deinterlace?: RenditionDeinterlace;
+  /** An optional image watermark burned into this tier. An overlay is the one
+   *  thing that makes a rendition re-encode differently from before, so it is
+   *  always present in the payload and empty when there is none. */
+  overlay: RenditionOverlay;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -256,6 +260,33 @@ export interface Rendition {
 export type RenditionAspectMode = "" | "crop" | "pad" | "blurpad";
 /** Mirrors ffmpeg.DeinterlaceModes. */
 export type RenditionDeinterlace = "" | "auto" | "all";
+
+/** Where an overlay is pinned. Nine positions, named the way an operator would
+ *  point at them rather than as coordinates. */
+export type OverlayAnchor =
+  | "top-left" | "top-center" | "top-right"
+  | "middle-left" | "center" | "middle-right"
+  | "bottom-left" | "bottom-center" | "bottom-right";
+
+/** An image watermark on a rendition.
+ *
+ *  Every measurement is a FRACTION of the output (0-1), never pixels. That is
+ *  the point rather than a detail: the same overlay has to be correct on a
+ *  1920x1080 tier and a 1080x1920 one, and pixel geometry that looks right on
+ *  the first lands off-canvas on the second. */
+export interface RenditionOverlay {
+  /** A path relative to the data directory. Empty means no overlay. */
+  image?: string;
+  anchor?: OverlayAnchor;
+  /** Width as a fraction of the output width. */
+  widthPct?: number;
+  /** Gap from the anchored edges, as fractions of output width and height.
+   *  Ignored on a centred axis. */
+  marginXPct?: number;
+  marginYPct?: number;
+  /** 0-1; 0 is treated as fully opaque. */
+  opacity?: number;
+}
 
 /** A rendition plus its usage. `enabledDestinations` is the ref count the
  *  engine acts on: at zero there is no process and no CPU burnt. */

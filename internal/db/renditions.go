@@ -120,6 +120,19 @@ type Rendition struct {
 	// PadColor is the bar colour for the padding modes, in any syntax FFmpeg's
 	// colour parser takes. Empty means black.
 	PadColor string `json:"padColor,omitempty"`
+	// Overlay is an optional image watermark burned into this tier.
+	//
+	// Stored as columns rather than as its own table, which is a deliberate
+	// narrowing of the roadmap design. That design wants a table because the
+	// full feature has several overlays per rendition and reuses one row across
+	// renditions; v0.5 has neither -- one image, one rendition -- and a join
+	// table for a strictly 1:1 relationship is structure with nothing in it.
+	// Growing to the table later is a data migration of six columns, which is
+	// cheaper than carrying the join now. See docs/roadmap/OVERLAYS.md.
+	//
+	// Empty OverlayImage is no overlay, so every rendition that predates this
+	// keeps producing exactly the frame it always did.
+	Overlay RenditionOverlay `json:"overlay"`
 	// Note is the "what is this tier for" line. Preset-derived renditions
 	// arrive with one already filled in; the user can rewrite it.
 	Note string `json:"note"`
@@ -130,6 +143,136 @@ type Rendition struct {
 	SourceID  *int64    `json:"sourceId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Overlay bounds. Percentages are stored 0-1 rather than 0-100 because that is
+// what the filter arithmetic wants, and converting at one boundary is fewer
+// places to get it wrong than converting at every use.
+const (
+	// MaxOverlayImagePath matches the slate's cap, and for the same reason.
+	MaxOverlayImagePath = 512
+	// MinOverlayWidthPct stops a watermark being scaled to something invisible
+	// that an operator then hunts for in the encoder logs.
+	MinOverlayWidthPct  = 0.01
+	MaxOverlayWidthPct  = 1.0
+	MaxOverlayMarginPct = 0.45
+)
+
+// RenditionOverlay is an image watermark burned into a rendition.
+//
+// Geometry is percentage-based, and that is the whole point rather than a
+// detail: the same overlay has to be correct on a 1920x1080 tier and a
+// 1080x1920 one, and pixel geometry that looks right on the first lands
+// off-canvas on the second with nothing to report it.
+type RenditionOverlay struct {
+	// Image is a path relative to the data directory, confined the same way a
+	// slate image and a file:// pull source are. Empty means no overlay.
+	Image string `json:"image,omitempty"`
+	// Anchor is which corner, edge or centre the image is pinned to.
+	Anchor string `json:"anchor,omitempty"`
+	// WidthPct is the image's width as a fraction of the output width.
+	WidthPct float64 `json:"widthPct,omitempty"`
+	// MarginXPct and MarginYPct are the gap from the anchored edges, as
+	// fractions of the output width and height. Ignored on a centred axis.
+	MarginXPct float64 `json:"marginXPct,omitempty"`
+	MarginYPct float64 `json:"marginYPct,omitempty"`
+	// Opacity is 0-1; 0 is treated as 1 so a row saved before this field
+	// existed does not render an invisible watermark.
+	Opacity float64 `json:"opacity,omitempty"`
+}
+
+// Active reports whether this rendition actually carries a watermark.
+func (o RenditionOverlay) Active() bool { return strings.TrimSpace(o.Image) != "" }
+
+// problems reports everything wrong with the overlay, given the rendition's
+// output size. Nothing is checked when no image is set: half-filled geometry on
+// a rendition with no watermark cannot misbehave.
+func (o RenditionOverlay) problems(width, height int) []string {
+	if !o.Active() {
+		return nil
+	}
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	// The rule that would otherwise be discovered as a watermark that silently
+	// is not there.
+	//
+	// The image is scaled to a percentage of the OUTPUT width, so that width has
+	// to resolve to a number when the arguments are built. With one axis free
+	// it does not, and the filter builder degrades to no overlay at all --
+	// which reaches the operator as a stream that starts, looks fine, and has
+	// no logo, with nothing anywhere saying why. Exactly the failure the
+	// deinterlace validation was added for.
+	if width <= 0 || height <= 0 {
+		add("an overlay needs the rendition to have an explicit width AND height, " +
+			"because the image is sized as a percentage of the output")
+	}
+
+	if err := overlayPathProblem(o.Image); err != nil {
+		add("%v", err)
+	}
+
+	if o.Anchor != "" {
+		known := false
+		for _, a := range ffmpeg.OverlayAnchors {
+			if string(a) == o.Anchor {
+				known = true
+				break
+			}
+		}
+		// Refused rather than accepted, for the same reason an unknown
+		// deinterlace mode is: the filter builder degrades an unrecognised
+		// anchor to top-left, so the operator would get a logo in a corner they
+		// did not choose with nothing to tell them which one is running.
+		if !known {
+			add("unknown overlay anchor %q", o.Anchor)
+		}
+	}
+
+	if o.WidthPct < MinOverlayWidthPct || o.WidthPct > MaxOverlayWidthPct {
+		add("overlay width %.3f out of range (%.2f-%.2f of the output width)",
+			o.WidthPct, MinOverlayWidthPct, MaxOverlayWidthPct)
+	}
+	for _, m := range []struct {
+		name string
+		v    float64
+	}{{"horizontal", o.MarginXPct}, {"vertical", o.MarginYPct}} {
+		// Capped well below 0.5 because a margin at half the canvas pushes an
+		// edge-anchored logo past the opposite edge, and a watermark rendered
+		// off-frame is indistinguishable from one that never rendered.
+		if m.v < 0 || m.v > MaxOverlayMarginPct {
+			add("overlay %s margin %.3f out of range (0-%.2f)", m.name, m.v, MaxOverlayMarginPct)
+		}
+	}
+	if o.Opacity < 0 || o.Opacity > 1 {
+		add("overlay opacity %.3f out of range (0-1)", o.Opacity)
+	}
+	return probs
+}
+
+// overlayPathProblem confines the image to the data directory.
+//
+// The same confinement as a slate image and a file:// pull source, and for the
+// same reason: the path is operator input that becomes an FFmpeg argument, and
+// an absolute path here would be a read primitive for whoever reaches the
+// renditions API.
+func overlayPathProblem(p string) error {
+	p = strings.TrimSpace(p)
+	if len(p) > MaxOverlayImagePath {
+		return fmt.Errorf("overlay image path is longer than %d characters", MaxOverlayImagePath)
+	}
+	if strings.ContainsAny(p, "\x00\n\r") {
+		return errors.New("overlay image path contains control characters")
+	}
+	// Backslashes are separators on Windows, so normalise before the traversal
+	// check or "..\..\secret.key" walks straight past it.
+	rel := strings.ReplaceAll(p, `\`, "/")
+	switch {
+	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
+		len(rel) > 1 && rel[1] == ':':
+		return errors.New("overlay image must be a relative path inside the data directory")
+	}
+	return nil
 }
 
 // Codec reports the bitstream this rendition produces.
@@ -261,6 +404,10 @@ func (r Rendition) Validate() error {
 		}
 	}
 
+	for _, p := range r.Overlay.problems(r.Width, r.Height) {
+		add("%s", p)
+	}
+
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid rendition: %s", strings.Join(probs, "; "))
 	}
@@ -339,7 +486,9 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 	)
 	err := s.Scan(&r.ID, &r.Name, &r.Width, &r.Height, &r.FPS, &r.VideoBitrate,
 		&r.Encoder, &r.Preset, &r.GOPSeconds, &r.AspectMode, &r.PadColor,
-		&r.Deinterlace, &r.Note, &source, &created, &updated)
+		&r.Deinterlace, &r.Overlay.Image, &r.Overlay.Anchor, &r.Overlay.WidthPct,
+		&r.Overlay.MarginXPct, &r.Overlay.MarginYPct, &r.Overlay.Opacity,
+		&r.Note, &source, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +507,10 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 }
 
 const renditionColumns = `id, name, width, height, fps, video_bitrate,
-	encoder, preset, gop_seconds, aspect_mode, pad_color, deinterlace, note, source_id, created_at, updated_at`
+	encoder, preset, gop_seconds, aspect_mode, pad_color, deinterlace,
+	overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
+	overlay_margin_y_pct, overlay_opacity,
+	note, source_id, created_at, updated_at`
 
 // applyRenditionDefaults fills in the fields an API payload is allowed to
 // omit, so a create request can be as short as {"name","height","videoBitrate"}.
@@ -443,10 +595,16 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO renditions
 		(name, width, height, fps, video_bitrate, encoder, preset, gop_seconds,
-		 aspect_mode, pad_color, deinterlace, note, source_id, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 aspect_mode, pad_color, deinterlace,
+		 overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
+		 overlay_margin_y_pct, overlay_opacity,
+		 note, source_id, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
-		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Deinterlace, r.Note, r.SourceID, now, now)
+		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Deinterlace,
+		r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
+		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
+		r.Note, r.SourceID, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -465,10 +623,14 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 	res, err := d.sql.Exec(`UPDATE renditions SET
 		name=?, width=?, height=?, fps=?, video_bitrate=?,
 		encoder=?, preset=?, gop_seconds=?, aspect_mode=?, pad_color=?,
-		deinterlace=?, note=?, source_id=?, updated_at=? WHERE id=?`,
+		deinterlace=?, overlay_image=?, overlay_anchor=?, overlay_width_pct=?,
+		overlay_margin_x_pct=?, overlay_margin_y_pct=?, overlay_opacity=?,
+		note=?, source_id=?, updated_at=? WHERE id=?`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
 		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor,
-		r.Deinterlace, r.Note, r.SourceID, time.Now().Unix(), r.ID)
+		r.Deinterlace, r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
+		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
+		r.Note, r.SourceID, time.Now().Unix(), r.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -562,6 +724,15 @@ func (d *DB) MigrateRenditionAspect() error {
 		{"aspect_mode", `ALTER TABLE renditions ADD COLUMN aspect_mode TEXT NOT NULL DEFAULT ''`},
 		{"pad_color", `ALTER TABLE renditions ADD COLUMN pad_color TEXT NOT NULL DEFAULT ''`},
 		{"deinterlace", `ALTER TABLE renditions ADD COLUMN deinterlace TEXT NOT NULL DEFAULT ''`},
+		// The overlay columns. All default to the no-overlay value, so an
+		// upgraded install re-encodes exactly the frame it did yesterday until
+		// somebody picks an image.
+		{"overlay_image", `ALTER TABLE renditions ADD COLUMN overlay_image TEXT NOT NULL DEFAULT ''`},
+		{"overlay_anchor", `ALTER TABLE renditions ADD COLUMN overlay_anchor TEXT NOT NULL DEFAULT ''`},
+		{"overlay_width_pct", `ALTER TABLE renditions ADD COLUMN overlay_width_pct REAL NOT NULL DEFAULT 0`},
+		{"overlay_margin_x_pct", `ALTER TABLE renditions ADD COLUMN overlay_margin_x_pct REAL NOT NULL DEFAULT 0`},
+		{"overlay_margin_y_pct", `ALTER TABLE renditions ADD COLUMN overlay_margin_y_pct REAL NOT NULL DEFAULT 0`},
+		{"overlay_opacity", `ALTER TABLE renditions ADD COLUMN overlay_opacity REAL NOT NULL DEFAULT 0`},
 	} {
 		has, err := columnExists(d.sql, "renditions", col.name)
 		if err != nil {

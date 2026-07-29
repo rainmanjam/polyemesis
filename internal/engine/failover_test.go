@@ -306,7 +306,7 @@ func TestTheRestartHashDoesNotMoveWhenTheSourceDoes(t *testing.T) {
 	if destSpec(row, compiled, on) != destSpec(row, compiled, afterProbeCleared) {
 		t.Error("a destination's restart hash moved across a source switch")
 	}
-	if renditionSig(rend, 60, on) != renditionSig(rend, 60, afterProbeCleared) {
+	if renditionSig(rend, 60, on, "") != renditionSig(rend, 60, afterProbeCleared, "") {
 		t.Error("a rendition's restart hash moved across a source switch")
 	}
 }
