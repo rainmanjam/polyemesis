@@ -124,8 +124,15 @@ step "3b. Verify burned-in text actually reached the pixels"
 # The rendition draws a WHITE box at full opacity across the top-left 12% of
 # the frame. testsrc2 puts a colour-bar field there, so a crop of that corner
 # is bright ONLY if the box rendered.
-mean_luma() { # mean_luma <file> <crop>
-  ffmpeg -v error -i "$1" -vf "crop=$2,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG" \
+mean_luma() { # mean_luma <file> <crop>  -> 0-255, or empty
+  # -v info, NOT -v error. `metadata=print` writes at INFO level, so -v error
+  # suppresses the one line this parses and the function returns nothing --
+  # which reads as "the caption did not render" and is wrong. The band()
+  # helper below uses -v info for exactly the same reason.
+  #
+  # Measured: on a white frame this prints 255 and on a black one 0; with
+  # -v error both print nothing at all.
+  ffmpeg -v info -i "$1" -vf "crop=$2,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG" \
     -frames:v 1 -f null - 2>&1 | awk -F= '/YAVG/{print int($NF)}' | tail -1
 }
 
