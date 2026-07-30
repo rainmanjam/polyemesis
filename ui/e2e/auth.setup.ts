@@ -13,7 +13,17 @@ import { existsSync } from "node:fs";
  *  same volume: this handles first-run and returning-user, and nothing else has
  *  to. */
 const STATE = "e2e/.auth/state.json";
-const PASSWORD = "BrowserE2E!9xz";
+
+/* Overridable because something else may have completed first-run already.
+ *
+ * scripts/capture-media.sh seeds a demo install before Playwright starts, so
+ * the admin account exists with whatever password the seeder chose. With the
+ * value hard-coded here, this file found no "Create account" button, tried to
+ * sign in with a password nobody had set, and failed on a missing <nav> — a
+ * symptom several steps removed from the cause. One variable now drives both
+ * sides; the default keeps the browser suite working with no environment at
+ * all. */
+const PASSWORD = process.env.E2E_PASSWORD ?? "BrowserE2E!9xz";
 
 setup("authenticate", async ({ page }) => {
   await page.goto("/");

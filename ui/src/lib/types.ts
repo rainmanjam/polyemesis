@@ -1990,3 +1990,20 @@ export interface SearchResults {
   offset: number;
   markers: [string, string];
 }
+
+/** A media file the server holds.
+ *
+ *  `origin` says where it came from and is DERIVED server-side from which store
+ *  the item was read out of, never stored beside it — a row in the recordings
+ *  table is something the server captured, by construction. */
+export type MediaOrigin = "recorded" | "uploaded" | "clip";
+
+export interface MediaFile {
+  name: string;
+  origin: MediaOrigin;
+  bytes: number;
+  modified: string;
+  /** Paste into a pull source. Relative to the data directory, which is what
+   *  ffmpeg's file:// handling resolves against. */
+  pullUrl: string;
+}
