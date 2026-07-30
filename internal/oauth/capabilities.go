@@ -248,11 +248,15 @@ var platformCapabilities = []PlatformCapability{
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportUnknown,
-			CapModeration:  SupportUnknown,
+			CapModeration:  SupportYes,
 			CapViewerStats: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapStreamKey: "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
+			CapModeration: "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off " +
+				"the public thread without destroying it, because its live chat is a comment thread. Acting on a " +
+				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +
+				"so an app that shows you the thread can still be refused when you act on it.",
 			CapMetadata:  "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
 			CapChatRead:  "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was pasted by hand has no live-video id to attach to, and the chat pane says so.",
 		},
@@ -260,8 +264,7 @@ var platformCapabilities = []PlatformCapability{
 	{
 		PresetID: "kick", Name: "Kick", Platform: db.PlatformKick,
 		Tier:      TierPartial,
-		Summary:   "Sign in with Kick for chat, moderation, metadata and viewer stats — then paste the stream key, because Kick's public API does not publish one.",
-		ReadFirst: "Both halves of this destination are real at once: click Connect account for everything Kick's API does offer, and paste the ingest URL and key from Kick → Settings → Stream. Neither replaces the other, and the paste is not a workaround for a broken connection.",
+		Summary: "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
 		HelpURL:   "https://kick.com/dashboard/settings/stream",
 		Caps: map[Capability]Support{
 			CapSSO:         SupportYes,

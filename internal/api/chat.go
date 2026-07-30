@@ -259,3 +259,71 @@ func (s *Server) handleChatDeleteMessage(w http.ResponseWriter, r *http.Request)
 	// two different rooms.
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
+
+// handleChatHideMessage takes a message off a feed without destroying it.
+//
+// Two different scopes, and the difference is the whole point:
+//
+//	scope=platform  the platform hides it from viewers. Only Facebook can, and
+//	                only because its live chat is a comment thread with an
+//	                is_hidden field.
+//	scope=local     polyemesis stops showing it. Works everywhere, including
+//	                platforms with no moderation API at all, because it asks
+//	                nobody's permission — and every viewer still sees it.
+//
+// The response says which happened in words, not just a status. An operator who
+// believes a local hide removed a message from their audience's screens has been
+// misled by their own tool, and that is worse than the tool refusing.
+func (s *Server) handleChatHideMessage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	id := strings.TrimSpace(q.Get("id"))
+	if platform == "" || id == "" {
+		writeError(w, http.StatusBadRequest, "platform and id are required")
+		return
+	}
+
+	// Local is the default deliberately. It is the one that cannot fail and
+	// cannot overreach, so a caller that omits the parameter gets the harmless
+	// half rather than an unintended platform write.
+	switch scope := strings.TrimSpace(q.Get("scope")); scope {
+	case "", "local":
+		if err := s.chat.HideLocally(platform, account, id); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "hidden",
+			"scope":  "local",
+			"detail": "Hidden in polyemesis only. Everyone watching on " + string(platform) +
+				" can still see this message.",
+		})
+
+	case "platform":
+		// hidden=false is how a mistaken hide is undone. Only the platform
+		// scope can be reversed; a local hide is forgotten, not flagged.
+		hidden := strings.TrimSpace(q.Get("hidden")) != "false"
+		if err := s.chat.Hide(r.Context(), platform, account, id, hidden); err != nil {
+			// The sentence is the payload, as with delete.
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		detail := "Hidden from the public thread on " + string(platform) +
+			". Its author and their friends may still see it; that is the platform's rule, not ours."
+		if !hidden {
+			detail = "Restored to the public thread on " + string(platform) +
+				". It will not reappear in this pane — polyemesis does not re-fetch what it has dropped."
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "hidden", "scope": "platform", "detail": detail,
+		})
+
+	default:
+		writeError(w, http.StatusBadRequest,
+			`scope must be "local" (hide it here only) or "platform" (hide it from viewers)`)
+	}
+}

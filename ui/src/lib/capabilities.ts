@@ -195,12 +195,14 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       metadata: "yes",
       chatRead: "yes",
       chatSend: "unknown",
-      moderation: "unknown",
+      moderation: "yes",
       viewerStats: "unknown",
     },
     reasons: {
       streamKey:
         "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
+      moderation:
+        "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off the public thread without destroying it, because its live chat is a comment thread. Acting on a Page's comments needs the MODERATE task permission, which is separate from being able to read them, so an app that shows you the thread can still be refused when you act on it.",
       metadata:
         "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
       chatRead:

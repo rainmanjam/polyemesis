@@ -1,7 +1,13 @@
 package chat
 
+// Facebook is the only platform of the four with a reversible moderation
+// primitive, because its live chat is a comment thread rather than a chat room.
+// That makes hide worth having explicitly: a comment hidden in error costs an
+// apology, and a comment deleted in error costs the thing itself.
+
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -268,5 +274,96 @@ func TestNewFacebookWithoutATokenIsAConfigurationState(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("error %q does not read as a configuration state", err)
+	}
+}
+
+// ---------------------------------------------------------------- moderation
+
+// Facebook's live chat IS the comment thread, so moderating it is comment
+// moderation: DELETE /{comment_id}, with no chat-specific endpoint to find.
+func TestFacebookDeleteRemovesTheComment(t *testing.T) {
+	var method, path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		fmt.Fprint(w, `{"success":true}`)
+	}))
+	defer srv.Close()
+
+	a := fbAdapter(t, srv.URL, nil)
+	if err := a.Delete(context.Background(), "comment-9"); err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodDelete {
+		t.Fatalf("method = %s, want DELETE", method)
+	}
+	if !strings.HasSuffix(path, "/comment-9") {
+		t.Fatalf("path = %q, want the comment id as the node", path)
+	}
+}
+
+// Hide is the reversible one, and the only such primitive across all four
+// platforms. It must send is_hidden rather than deleting anything.
+func TestFacebookHideIsReversibleAndNotADelete(t *testing.T) {
+	for _, hidden := range []bool{true, false} {
+		var method string
+		var body map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			method = r.Method
+			json.NewDecoder(r.Body).Decode(&body)
+			fmt.Fprint(w, `{"success":true}`)
+		}))
+
+		a := fbAdapter(t, srv.URL, nil)
+		if err := a.Hide(context.Background(), "comment-9", hidden); err != nil {
+			t.Fatal(err)
+		}
+		if method == http.MethodDelete {
+			t.Fatal("Hide issued a DELETE; hiding must not destroy the comment")
+		}
+		if got, ok := body["is_hidden"].(bool); !ok || got != hidden {
+			t.Fatalf("body = %+v, want is_hidden=%v", body, hidden)
+		}
+		srv.Close()
+	}
+}
+
+// A 403 here is the permission story that costs people a day: an app can read a
+// Page's comments and still be unable to act on them without MODERATE.
+func TestFacebookModerationNamesTheModeratePermission(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"message":"permissions"}}`)
+	}))
+	defer srv.Close()
+
+	a := fbAdapter(t, srv.URL, nil)
+	err := a.Delete(context.Background(), "comment-9")
+	if err == nil {
+		t.Fatal("a 403 was reported as success")
+	}
+	if !strings.Contains(err.Error(), "MODERATE") {
+		t.Fatalf("error = %q, want it to name the MODERATE task permission", err)
+	}
+	if IsFatal(err) {
+		t.Fatal("a permissions 403 was Fatal, which would tear down a working comment poll")
+	}
+}
+
+func TestFacebookModerationRefusesABlankID(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+
+	a := fbAdapter(t, srv.URL, nil)
+	if err := a.Delete(context.Background(), "  "); err == nil {
+		t.Fatal("a blank comment id was accepted for delete")
+	}
+	if err := a.Hide(context.Background(), "  ", true); err == nil {
+		t.Fatal("a blank comment id was accepted for hide")
+	}
+	if called {
+		t.Fatal("a blank comment id reached the Graph API")
 	}
 }

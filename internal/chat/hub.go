@@ -629,6 +629,72 @@ func (h *Hub) Delete(ctx context.Context, p db.Platform, account, messageID stri
 	return nil
 }
 
+// Hide takes a message off the platform's public feed without destroying it,
+// where the platform can do that.
+//
+// Only Facebook can today. The refusal for everything else names the platform
+// and says what it can do instead, the same way Delete's does — a sentence an
+// operator can act on beats "unsupported".
+func (h *Hub) Hide(ctx context.Context, p db.Platform, account, messageID string, hidden bool) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	hd, ok := r.adapter.(Hider)
+	if !ok {
+		return fmt.Errorf("chat: %s has no way to hide a message without deleting it. "+
+			"Delete it instead, or use the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	if err := hd.Hide(ctx, messageID, hidden); err != nil {
+		return err
+	}
+	// Hiding removes it from the pane; unhiding does NOT put it back. The
+	// scrollback is not a mirror of the platform and never was -- a message
+	// restored on Facebook will simply not reappear here, which is honest about
+	// what this server actually knows rather than pretending to a sync it does
+	// not have.
+	if hidden {
+		h.retract(r, messageID)
+	}
+	return nil
+}
+
+// HideLocally removes a message from THIS SERVER only, leaving the platform
+// untouched.
+//
+// The one moderation action that works on every platform, including the ones
+// with no moderation API at all, because it asks nobody's permission. It is for
+// the case the others cannot serve: something is on the operator's screen — or
+// on an overlay fed from it — that they do not want there, on a platform
+// polyemesis cannot moderate.
+//
+// It is NOT moderation and callers must not present it as such. Every viewer on
+// the platform still sees the message. The API says so in its response and the
+// UI has to repeat it; a control that looks like a delete and is not would be
+// worse than having no control at all.
+func (h *Hub) HideLocally(p db.Platform, account, messageID string) error {
+	if strings.TrimSpace(messageID) == "" {
+		return fmt.Errorf("no message id to hide")
+	}
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	// Deliberately works whether or not an adapter is attached. A disconnected
+	// platform's messages are still on screen, and being unable to clear them
+	// because the socket dropped would be the wrong answer.
+	if r == nil {
+		r = &runner{platform: p, account: account, hub: h}
+	}
+	h.retract(r, messageID)
+	return nil
+}
+
 // ------------------------------------------------------------------- status
 
 // Statuses reports every attached adapter, ordered so the UI does not reshuffle

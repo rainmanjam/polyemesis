@@ -94,6 +94,23 @@ type Deleter interface {
 	Delete(ctx context.Context, messageID string) error
 }
 
+// Hider is the optional capability for taking a message off the public feed
+// WITHOUT destroying it.
+//
+// Only Facebook has this, because only Facebook's live chat is a comment thread
+// with an is_hidden field. It is kept separate from Deleter rather than folded
+// in behind a flag: a moderator choosing between "hide" and "destroy" should
+// have to say which, and a platform that can only do one of the two should not
+// be able to silently do the other.
+//
+// "Hidden" is the platform's definition, not ours. Facebook keeps a hidden
+// comment visible to its author and their friends, so this means "off the public
+// thread", never "gone".
+type Hider interface {
+	Adapter
+	Hide(ctx context.Context, messageID string, hidden bool) error
+}
+
 // Retractor is the optional half of Sink, for a platform that reports its OWN
 // deletions back to us.
 //

@@ -390,6 +390,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/chat", s.handleChatOverview)
 			r.Get("/chat/messages", s.handleChatMessages)
 			r.Delete("/chat/messages", s.handleChatDeleteMessage)
+			// Hiding is POST rather than DELETE because it is reversible, and
+			// separate from delete because the two are different decisions:
+			// one takes a message off the public feed, the other destroys it.
+			r.Post("/chat/messages/hide", s.handleChatHideMessage)
 			r.Post("/chat/send", s.handleChatSend)
 		})
 
