@@ -120,9 +120,15 @@ usually the least painful route.
 
 ## Is Windows supported?
 
-It compiles, the service wrapper and process-group teardown are written, and the
-installer scripts exist — but **nobody has run the binary on a Windows host**.
-Treat it as untested. There is a known unresolved question about recording
+Partly. CI builds the binary on `windows-latest` every push, starts it, and
+checks it serves — so "it compiles" is no longer the only thing known, and the
+cross-platform job has already caught real Windows-specific bugs: a `file://`
+URL corrupted by path separators, TLS keys written world-readable because
+`os.FileMode` is a no-op there, and path traversal reaching four resolvers
+through `/`.
+
+What is still untested is *use*. Nobody has run a real broadcast through it on
+a Windows host, and there is a known unresolved question about recording
 truncation on service stop.
 
 Linux and Docker are the primary targets.
