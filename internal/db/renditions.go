@@ -714,6 +714,20 @@ const renditionColumns = `id, name, width, height, fps, video_bitrate,
 	text_box_opacity,
 	note, source_id, created_at, updated_at`
 
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	renditionBySourceQuery = `SELECT ` + renditionColumns + ` FROM renditions WHERE source_id = ? ORDER BY id`
+	renditionListQuery     = `SELECT ` + renditionColumns + ` FROM renditions ORDER BY id`
+	renditionByIDQuery     = `SELECT ` + renditionColumns + ` FROM renditions WHERE id = ?`
+)
+
 // applyRenditionDefaults fills in the fields an API payload is allowed to
 // omit, so a create request can be as short as {"name","height","videoBitrate"}.
 func (r *Rendition) applyDefaults() {
@@ -733,7 +747,7 @@ func (r *Rendition) applyDefaults() {
 // is what a per-source engine reconciles against.
 func (d *DB) ListRenditionsBySource(sourceID int64) ([]*Rendition, error) {
 	rows, err := d.sql.Query(
-		`SELECT `+renditionColumns+` FROM renditions WHERE source_id = ? ORDER BY id`, sourceID)
+		renditionBySourceQuery, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -751,7 +765,7 @@ func (d *DB) ListRenditionsBySource(sourceID int64) ([]*Rendition, error) {
 }
 
 func (d *DB) ListRenditions() ([]*Rendition, error) {
-	rows, err := d.sql.Query(`SELECT ` + renditionColumns + ` FROM renditions ORDER BY id`)
+	rows, err := d.sql.Query(renditionListQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -770,7 +784,7 @@ func (d *DB) ListRenditions() ([]*Rendition, error) {
 
 // GetRendition loads one rendition.
 func (d *DB) GetRendition(id int64) (*Rendition, error) {
-	row := d.sql.QueryRow(`SELECT `+renditionColumns+` FROM renditions WHERE id = ?`, id)
+	row := d.sql.QueryRow(renditionByIDQuery, id)
 	r, err := scanRendition(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

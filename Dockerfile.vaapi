@@ -56,7 +56,7 @@
 FROM node:24-alpine AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json* ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 COPY ui/ ./
 RUN mkdir -p /src/internal/web && npm run build
 

@@ -129,6 +129,21 @@ var ErrEmptyQuery = errors.New("empty search query")
 
 const transcriptTrackColumns = `id, recording_id, track, speaker, role, language, model, backend, created_at`
 
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	transcriptTracksQuery = `SELECT ` + transcriptTrackColumns + `,
+			(SELECT COUNT(*) FROM transcript_segments s WHERE s.track_id = t.id),
+			(SELECT COALESCE(MAX(s.end_ms), 0) FROM transcript_segments s WHERE s.track_id = t.id)
+		FROM transcript_tracks t WHERE recording_id = ? ORDER BY track`
+)
+
 // SaveTranscript replaces the stored transcript for the tracks it carries.
 //
 // Per track, not per recording: re-running track 2 with a bigger model must
@@ -212,10 +227,7 @@ func (d *DB) GetTranscript(recordingID int64) (*Transcript, error) {
 // ListTranscriptTracks returns the per-track headers with their counts, and no
 // segment text at all. This is what the recordings page asks for.
 func (d *DB) ListTranscriptTracks(recordingID int64) ([]TranscriptTrack, error) {
-	rows, err := d.sql.Query(`SELECT `+transcriptTrackColumns+`,
-			(SELECT COUNT(*) FROM transcript_segments s WHERE s.track_id = t.id),
-			(SELECT COALESCE(MAX(s.end_ms), 0) FROM transcript_segments s WHERE s.track_id = t.id)
-		FROM transcript_tracks t WHERE recording_id = ? ORDER BY track`, recordingID)
+	rows, err := d.sql.Query(transcriptTracksQuery, recordingID)
 	if err != nil {
 		return nil, err
 	}

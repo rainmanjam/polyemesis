@@ -20,6 +20,21 @@ const jobColumns = `id, kind, target, params, result, priority, state, unique_ta
 	attempts, max_attempts, progress, log_tail, last_error,
 	created_at, available_at, started_at, finished_at, updated_at`
 
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	jobByIDQuery   = `SELECT ` + jobColumns + ` FROM jobs WHERE id = ?`
+	jobActiveQuery = `SELECT ` + jobColumns + ` FROM jobs
+		WHERE kind = ? AND target = ? AND state IN ('queued','running','deferred')
+		ORDER BY id LIMIT 1`
+)
+
 // claimableStates is what ClaimJob will take. Deferred is in here on purpose:
 // a deferral is a time, not a lock, so work held back by a resource policy that
 // then died still comes back on its own.
@@ -105,7 +120,7 @@ func (d *DB) EnqueueJob(j jobs.Job) (*jobs.Job, error) {
 
 // GetJob loads one job.
 func (d *DB) GetJob(id int64) (*jobs.Job, error) {
-	j, err := scanJob(d.sql.QueryRow(`SELECT `+jobColumns+` FROM jobs WHERE id = ?`, id))
+	j, err := scanJob(d.sql.QueryRow(jobByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -139,6 +154,17 @@ func (d *DB) ListJobs(f jobs.Filter) ([]jobs.Job, error) {
 		args = append(args, f.Target)
 	}
 
+	// This one query stays assembled at run time, unlike every other read in
+	// this package, because the shape of the WHERE genuinely varies with the
+	// filter: a caller may ask for any combination of states, kinds and target.
+	//
+	// It is still safe, and the reason is worth stating rather than trusting:
+	// every fragment appended above is a STRING LITERAL, and the only part that
+	// varies in length is a run of "?" generated from len(f.States) and
+	// len(f.Kinds). No caller value is ever concatenated — each one is appended
+	// to args and travels as a bound parameter. A static analyser cannot see
+	// that and will flag this line; a reader can check it in the twenty lines
+	// above.
 	q := `SELECT ` + jobColumns + ` FROM jobs`
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, " AND ")
@@ -170,9 +196,7 @@ func (d *DB) ListJobs(f jobs.Filter) ([]jobs.Job, error) {
 // (nil, nil) when there is none. It is what stops a second click from starting
 // a second transcription of the same recording.
 func (d *DB) FindActiveJob(kind jobs.Kind, target string) (*jobs.Job, error) {
-	j, err := scanJob(d.sql.QueryRow(`SELECT `+jobColumns+` FROM jobs
-		WHERE kind = ? AND target = ? AND state IN ('queued','running','deferred')
-		ORDER BY id LIMIT 1`, string(kind), target))
+	j, err := scanJob(d.sql.QueryRow(jobActiveQuery, string(kind), target))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -201,6 +225,11 @@ func (d *DB) ClaimJob(kinds []jobs.Kind, now time.Time) (*jobs.Job, error) {
 	}
 	defer tx.Rollback()
 
+	// Assembled rather than constant for the same reason as ListJobs: the
+	// number of accepted kinds is known only at the call. jobColumns and
+	// claimableStates are both consts, and strings.Join(ph, ",") produces
+	// nothing but "?" and commas — ph is filled with the literal "?" above,
+	// one per kind, and the kinds themselves go into args as bound parameters.
 	j, err := scanJob(tx.QueryRow(`SELECT `+jobColumns+` FROM jobs
 		WHERE state IN `+claimableStates+` AND available_at <= ? AND kind IN (`+strings.Join(ph, ",")+`)
 		ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1`, args...))

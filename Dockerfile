@@ -33,7 +33,7 @@ FROM --platform=$BUILDPLATFORM node:24-alpine AS ui
 WORKDIR /src/ui
 # Copy manifests first so a dependency-only change reuses the install layer.
 COPY ui/package.json ui/package-lock.json* ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 COPY ui/ ./
 # The Vite config writes to ../internal/web/dist, so that path must exist.
 RUN mkdir -p /src/internal/web && npm run build

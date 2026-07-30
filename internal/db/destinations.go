@@ -515,6 +515,20 @@ const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	au_codec, au_mono, compliance,
 	position, created_at, updated_at`
 
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	destBySourceQuery = `SELECT ` + destColumns + ` FROM destinations WHERE source_id = ? ORDER BY position, id`
+	destListQuery     = `SELECT ` + destColumns + ` FROM destinations ORDER BY position, id`
+	destByIDQuery     = `SELECT ` + destColumns + ` FROM destinations WHERE id = ?`
+)
+
 // checkRendition rejects a rendition_id that names no rendition. The foreign
 // key would catch it anyway, but only as "FOREIGN KEY constraint failed",
 // which tells the user nothing about which field is wrong. A nil id is
@@ -539,7 +553,7 @@ func (d *DB) checkRendition(id *int64) error {
 // worst failure this feature can have.
 func (d *DB) ListDestinationsBySource(sourceID int64) ([]*Destination, error) {
 	rows, err := d.sql.Query(
-		`SELECT `+destColumns+` FROM destinations WHERE source_id = ? ORDER BY position, id`, sourceID)
+		destBySourceQuery, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +571,7 @@ func (d *DB) ListDestinationsBySource(sourceID int64) ([]*Destination, error) {
 }
 
 func (d *DB) ListDestinations() ([]*Destination, error) {
-	rows, err := d.sql.Query(`SELECT ` + destColumns + ` FROM destinations ORDER BY position, id`)
+	rows, err := d.sql.Query(destListQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -576,7 +590,7 @@ func (d *DB) ListDestinations() ([]*Destination, error) {
 
 // GetDestination loads one destination.
 func (d *DB) GetDestination(id int64) (*Destination, error) {
-	row := d.sql.QueryRow(`SELECT `+destColumns+` FROM destinations WHERE id = ?`, id)
+	row := d.sql.QueryRow(destByIDQuery, id)
 	dst, err := scanDestination(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
