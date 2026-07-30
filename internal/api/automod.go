@@ -1,12 +1,15 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
 // Automod's configuration rides inside Settings, so GET/PUT /settings already
@@ -166,4 +169,70 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 		lim.IdleEviction = time.Duration(h.IdleEvictionSeconds) * time.Second
 	}
 	return lim
+}
+
+// ApplyAutomod builds the engine from stored settings and attaches it.
+//
+// Called at startup and again on every settings save, for the same reason
+// ApplyChatRetention is: a value that works until the first restart and then
+// silently reverts is worse than one that never worked, because the operator
+// has already stopped checking.
+//
+// Every failure here DEGRADES rather than stops. A build that cannot compile
+// one rule pattern must still serve chat, still flag, and still run the history
+// detectors — refusing to moderate at all because one regex is malformed is the
+// wrong trade in both directions.
+func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings) {
+	if hub == nil {
+		return
+	}
+	if !a.Enabled {
+		// Detaching rather than leaving a disabled engine attached: the global
+		// switch should stop the work, not merely stop the actions.
+		hub.SetModerator(nil)
+		return
+	}
+
+	rules, err := rulesFromSettings(a)
+	if err != nil {
+		// Named loudly. A rule that does not compile is a protection the
+		// operator believes they have.
+		log.Error("automod rules did not compile; running without them", "err", err)
+		rules = nil
+	}
+
+	var model *automod.Model
+	if a.Model.Enabled {
+		cfg := automod.DefaultModelConfig()
+		cfg.Enabled = true
+		cfg.Endpoint = a.Model.Endpoint
+		cfg.Model = a.Model.Model
+		cfg.MaxCallsPerHour = a.Model.MaxCallsPerHour
+		cfg.MinConfidence = a.Model.MinConfidence
+		cfg.Instruction = a.Model.Instruction
+		if a.Model.TimeoutSeconds > 0 {
+			cfg.Timeout = time.Duration(a.Model.TimeoutSeconds) * time.Second
+		}
+		if automod.KnownActions(automod.Action(a.Model.Action)) {
+			cfg.Action = automod.Action(a.Model.Action)
+		}
+		if key, err := store.GetAutomodKey(box); err == nil {
+			cfg.APIKey = key
+		} else {
+			// Fail open, consistent with the connector itself: a key that
+			// cannot be read means the model checker cannot run, not that chat
+			// stops.
+			log.Warn("automod model key unreadable; the model checker will fail open", "err", err)
+		}
+		model = automod.NewModel(cfg)
+	}
+
+	engine := automod.New(
+		matrixFromSettings(a),
+		automod.PlatformCaps{},
+		rules,
+		automod.NewHistory(historyFromSettings(a)),
+		model,
+	)
+	hub.SetModerator(engine)
 }

@@ -743,6 +743,11 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// setting that stores, returns 200 and keeps sweeping on the old numbers is
 	// the same silent no-op the ingest block above documents.
 	ApplyChatRetention(s.chat, settings.Chat)
+	// Same argument for automod: a matrix that stores, returns 200 and keeps
+	// deciding on the old cells is the silent no-op this file already warns
+	// about twice. Rebuilding the engine here is also what recompiles a changed
+	// rule -- without it a new pattern would not apply until the next restart.
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod)
 	writeJSON(w, http.StatusOK, settings)
 }
 

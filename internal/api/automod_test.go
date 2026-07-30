@@ -178,3 +178,31 @@ func TestAnUnknownStoredCellIsIgnored(t *testing.T) {
 		}
 	}
 }
+
+// A rule that does not compile must DEGRADE automod, not stop chat. Refusing to
+// moderate at all because one regex is malformed is the wrong trade in both
+// directions: the operator loses the working rules AND the history detectors.
+func TestABadRuleDoesNotStopAutomod(t *testing.T) {
+	h, _, sign := sourceServer(t)
+
+	var before map[string]any
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &before)
+	am := before["automod"].(map[string]any)
+	am["enabled"] = true
+	am["rules"] = []map[string]any{
+		{"id": 1, "name": "fine", "enabled": true, "pattern": "spam", "action": "delete"},
+		{"id": 2, "name": "broken", "enabled": true, "pattern": "([unclosed", "action": "delete"},
+	}
+	// The save must still succeed: the setting is stored, and the engine is
+	// rebuilt without the rules rather than the request failing.
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", before, http.StatusOK)
+
+	// And the matrix still answers, which is the proof automod is still running.
+	var got struct {
+		Enabled bool `json:"enabled"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/automod/matrix", nil, http.StatusOK), &got)
+	if !got.Enabled {
+		t.Fatal("automod switched itself off because one rule would not compile")
+	}
+}
