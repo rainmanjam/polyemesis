@@ -17,7 +17,7 @@ claim is often more instructive than the right one.
 | # | Item | Effort | Status | Why here |
 |---|---|---|---|---|
 | **0** | [Unreachable features](UNREACHABLE-FEATURES.md) | 1–2 d | ✅ **done** | Two features were already built and no user could reach them. Also closed a validation gap found on the way in |
-| **1** | [Playlist — Phase 0](PLAYLIST-AND-COMPOSITING.md#playlist-the-mostly-wiring-claim-is-half-right) | **1 d** | ready | Scheduled file broadcast *already works*. Documenting and testing it answers three tracker requests at zero risk |
+| **1** | [Playlist — Phase 0](PLAYLIST-AND-COMPOSITING.md#playlist-the-mostly-wiring-claim-is-half-right) | 1 d | ✅ **done** | Scheduled file broadcast already worked. Now documented, and pinned by a 15-check suite in CI |
 | **2** | [LL-HLS](LL-HLS.md) | **3 d** | ready | Preview latency 4.2–6.2 s → 2.2–3.2 s with zero new dependencies |
 | **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | ready | Exactly one net-new module. Retained telemetry has no existing path at all |
 | **4** | Selector generalisation | **~3–5 d** | ready | Shared prerequisite for 5 and 7. Doing it once is much safer than twice in the most safety-critical pure function in the tree |

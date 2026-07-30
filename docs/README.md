@@ -21,6 +21,7 @@ deliberately does not do, and how to get it running. These are the details.
 | [AUDIO-ROUTING.md](AUDIO-ROUTING.md) | Simple mode, the mix matrix, clip protection, loudness and delay |
 | [RENDITIONS.md](RENDITIONS.md) | Shared video encodes, ref counting, presets and hardware encoders |
 | [PLATFORMS.md](PLATFORMS.md) | What each platform's published API allows, and the OAuth app setup for the four that sign in |
+| [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md) | Going live from a file, on a schedule, with no encoder attached |
 | [MONITORING.md](MONITORING.md) | Prometheus metrics, alerts, and automation with API tokens |
 | [API.md](API.md) | Every HTTP route, authentication, and a worked example |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Organised by what you observe |

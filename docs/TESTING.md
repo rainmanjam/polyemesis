@@ -316,6 +316,7 @@ tests that can fail on something the unit tests cannot see.
 ./scripts/acceptance-renditions.sh   # one shared encode serving two destinations
 ./scripts/acceptance-tls.sh          # every TLS mode, including the old configs
 ./scripts/acceptance-encoders.sh     # hardware-encoder detection
+./scripts/acceptance-playlist-phase0.sh  # scheduled file broadcast, no encoder
 ```
 
 `acceptance-encoders.sh` is the odd one out, because the thing it tests is a
