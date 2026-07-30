@@ -3,7 +3,7 @@ module github.com/rainmanjam/polyemesis
 go 1.26.5
 
 require (
-	github.com/datarhei/gosrt v0.6.0
+	github.com/datarhei/gosrt v0.11.0
 	github.com/eclipse/paho.golang v0.23.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
