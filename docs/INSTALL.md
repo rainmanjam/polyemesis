@@ -55,20 +55,31 @@ fails or if you want to know what it did.
 ## Platform maturity
 
 These are not four equal targets, and pretending otherwise would cost you a
-weekend. Three words, used the same way here and in the
-[README](../README.md#platform-maturity):
+weekend. But they are equal on one axis, and separating that from the rest is
+the honest way to say it. Same framing as the
+[README](../README.md#platform-maturity).
 
-- **Primary** — developed against, deployed, and run in earnest.
-- **Verified** — every push builds it, runs the full test suite, and pushes a
-  measured broadcast through it. Not the same as run in earnest.
-- **Unproven** — nobody operates it there, whatever CI says.
+**The shared CI floor, identical on every push for all three operating
+systems:** build, vet, the full Go test suite with FFmpeg installed, the binary
+started and confirmed serving, and a three-track broadcast pushed through it
+with per-band energy measured in each destination's output. Two destinations
+take different track selections and the unselected tone must measure 25–40 dB
+down, so a wrong mix fails rather than passing quietly.
 
-| Platform | Status |
-|---|---|
-| **Linux (server)** | **Primary.** Where it is developed against, deployed and exercised. |
-| **Docker** | **Primary.** The image is built from this repo and bundles a pinned FFmpeg. |
-| **macOS** | **Verified.** Developed on daily; fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below. |
-| **Windows** | **Verified, and unproven in operation.** Every push runs the full Go suite on `windows-latest` with FFmpeg, then pushes a broadcast through the binary and measures what comes out. What nobody has done is operate it: no live broadcast to a platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is unresolved. |
+Everything past that floor is where they diverge:
+
+| Platform | Beyond the shared floor | Operationally |
+|---|---|---|
+| **Linux (server)** | The race detector, 11 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
+| **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
+| **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
+| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect |
+
+The distinction that matters for choosing: Windows is **tested, not operated**.
+The broadcast path demonstrably works there and that job has already caught
+Windows-only bugs — a `file://` URL corrupted by path separators, TLS keys left
+world-readable because `os.FileMode` does nothing on Windows. What has never
+happened is somebody running a real show on it.
 
 If you are choosing where to run this, run it on Linux.
 

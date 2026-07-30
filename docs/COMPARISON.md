@@ -54,7 +54,7 @@ Ranked by how often it was asked for, which is the honest ordering.
 | **Multi-input compositing / video grid** | 1 reaction | **Missing.** Natural once multi-source is settled |
 | **MQTT** | Core tracker | ✅ **Have.** Retained telemetry with Home Assistant discovery, so the stream appears as entities in a dashboard the operator already runs. Alert webhooks exist alongside it — see [MQTT.md](MQTT.md) |
 | **HDR 10-bit HEVC** | 3 reactions, closed | **Partial.** `libx265` and `hevc_nvenc` exist; no HDR tone-map path |
-| **LL-HLS** | 2 reactions, closed | **Declined, and the preview tuned instead.** True LL-HLS needs a Go-side packager FFmpeg will not give us; [roadmap/LL-HLS.md](roadmap/LL-HLS.md) says why it is not worth it. One-second segments took ~2.5s off the preview for +0.9% bytes — measured — which is most of the benefit for none of the subsystem |
+| **LL-HLS** | 2 reactions, closed | **Addressed by tuning, not by building LL-HLS.** FFmpeg cannot emit LL-HLS partial segments at all — verified against the pinned binary — so the protocol would need a Go-side packager, which [roadmap/LL-HLS.md](roadmap/LL-HLS.md) declines. Tuning instead took preview latency from **4.2–6.2 s to 2.2–3.2 s**, measured. Two of the wins were bug fixes rather than knobs: a wrong GOP calculation, and a player flag that was inert because of an unrelated default |
 | Maturity | — | Restreamer is established; polyemesis is pre-release with one maintainer |
 
 **One caveat on Restreamer's side.** Two of its four most-reacted open issues are

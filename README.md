@@ -87,20 +87,27 @@ roadmap.
 
 ### Platform maturity
 
-Four targets, not four equal targets. Three words are used consistently
-wherever this table appears:
+Four targets, not four equal targets — but they are equal in one specific way
+that is worth separating out, because "tested" and "trusted" are different
+claims.
 
-- **Primary** — developed against, deployed, and run in earnest.
-- **Verified** — every push builds it, runs the full test suite, and pushes a
-  measured broadcast through it. Not the same as run in earnest.
-- **Unproven** — nobody operates it there, whatever CI says.
+**Every platform below clears the same CI floor on every push:** build, vet, the
+full Go test suite with FFmpeg present, the binary started and serving, and a
+three-track broadcast pushed through it with per-band energy measured in each
+destination's output. On that axis Linux, macOS and Windows are identical.
 
-| Platform | Status |
-|---|---|
-| **Linux (server)** | **Primary.** Developed against, deployed, exercised. |
-| **Docker** | **Primary.** Image built from this repo, FFmpeg pinned and bundled. |
-| **macOS** | **Verified.** Developed on daily; a good workstation and test rig. Homebrew's FFmpeg has no SRT — [see INSTALL.md](docs/INSTALL.md#ffmpeg-on-macos-the-version-is-fine-srt-is-not). |
-| **Windows** | **Verified, and unproven in operation.** CI builds it, runs the suite, and pushes a broadcast through it every push — and has caught real Windows-only bugs doing so. But nobody runs it in earnest: the service wrapper and installer scripts have never been exercised on a live host, and recording truncation on service stop is unresolved. |
+What differs is everything after that:
+
+| Platform | Beyond the shared CI floor | Operationally |
+|---|---|---|
+| **Linux (server)** | The race detector, 11 acceptance suites, and 3 container suites — none of which run anywhere else | **Primary.** Developed against, deployed, exercised |
+| **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, FFmpeg pinned and bundled |
+| **macOS** | Nothing further | **Daily driver.** A good workstation and test rig, not a deployment target. Homebrew's FFmpeg has no SRT — [see INSTALL.md](docs/INSTALL.md#ffmpeg-on-macos-the-version-is-fine-srt-is-not) |
+| **Windows** | Nothing further | **Unproven.** Nobody runs it in earnest. The service wrapper and installer scripts have never been exercised on a live host, and recording truncation on service stop is a known unresolved defect |
+
+So: Windows is no longer *untested* — the broadcast path demonstrably works
+there, and that job has caught real Windows-only bugs. It is *unoperated*, which
+is a different and smaller claim than it used to be.
 
 ### Project status
 
