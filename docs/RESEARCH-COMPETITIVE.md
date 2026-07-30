@@ -39,7 +39,7 @@ Restreamer, polyemesis already ships ten.
 | Analytics / statistics | 2 (closed) | have | Playout analytics, stats |
 | Low latency mode | 2 (closed) | partial | SRT latency is configurable; no LL-HLS |
 | Video grid / multiple inputs | 1 (closed) | **GAP** | |
-| Deinterlacing | 1 (closed) | **built, unreachable** | See the correction below |
+| Deinterlacing | 1 (closed) | **have** | Was built-but-unreachable; the control landed 2026-07-28. See the correction below |
 | MQTT (core tracker) | — | **GAP** | Alert webhooks exist; no MQTT |
 | Single token per RTMP endpoint (core) | — | **GAP** | Falls out of multi-source |
 
@@ -116,10 +116,11 @@ own feed without HLS's 10-30s delay — not public playback. Sizeable subsystem.
 broadcast crowd. It needs an FFmpeg built with `decklink`, which Alpine's
 package is not, so it implies a third image variant. Real work, narrow audience.
 
-**4. Deinterlacing.** 1 reaction, and a prerequisite for anyone feeding
-polyemesis from SDI or legacy broadcast kit. **Already built in Go — the gap is
-the UI control, nothing else.** See the correction above. Still the cheapest
-item on this list, now by a wider margin.
+**4. Deinterlacing.** ~~1 reaction, and a prerequisite for anyone feeding
+polyemesis from SDI or legacy broadcast kit.~~ **Done, 2026-07-28.** It was
+already built in Go; the gap was the UI control, and closing it also closed a
+validation hole where an unknown mode was silently ignored. See the correction
+above.
 
 **5. Playlist / scheduled pre-recorded broadcast.** Asked as "playlist files"
 (4), "on demand streaming" (4), "stream from MP4" (2), "virtual input: looping

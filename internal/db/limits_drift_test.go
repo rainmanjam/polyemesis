@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -55,6 +56,75 @@ func TestUIBoundsMatchTheGoValidators(t *testing.T) {
 				name, got[0], got[1], bounds[0], bounds[1])
 		}
 	}
+}
+
+// The bounds check above guards one axis of the mirroring hazard: a number that
+// stops matching. It does not guard the other, which is a field the UI never
+// grows at all -- and that is the axis that actually drifted.
+//
+// aspectMode, padColor and deinterlace were added to Rendition, persisted,
+// validated, compiled into FFmpeg arguments and covered by tests, and never
+// reached ui/src/lib/types.ts. Dual-format vertical output and deinterlacing
+// were complete in every layer except the one a person touches, and nothing
+// failed. It was the third time this project shipped a feature nobody could
+// reach; DESIGN-ONE-PORT-ONLY.md records the first.
+//
+// A naive set difference over every mirrored type is NOT the fix. Measured on
+// the tree the day this was written, that approach reported 19 missing fields
+// across 5 types, and 16 of them were legitimate structural difference:
+// ChatMessage nests its author fields in a ChatAuthor object, Destination
+// models expert mode as its own ExpertArgs/ExpertGuard shape, Settings.failover
+// is fetched separately. A check that cries wolf gets switched off within a
+// month, so this one names the types it covers and requires a deliberate line
+// to add another.
+func TestUITypesCarryEveryRenditionField(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "lib", "types.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	iface, ok := tsInterface(string(raw), "Rendition")
+	if !ok {
+		t.Fatalf("no `export interface Rendition` in %s", path)
+	}
+
+	// Every json tag on db.Rendition, derived by reflection rather than typed
+	// out here, so a field added to the Go struct is covered the day it lands.
+	rt := reflect.TypeOf(Rendition{})
+	for i := range rt.NumField() {
+		tag := rt.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" {
+			continue
+		}
+		// sourceId is deliberately absent: the UI scopes renditions by the
+		// source it is already viewing and never round-trips the id.
+		if name == "sourceId" {
+			continue
+		}
+		if !regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(name) + `\??\s*:`).MatchString(iface) {
+			t.Errorf("Rendition.%s is absent from the UI's Rendition interface. "+
+				"A field the UI cannot name is a feature no operator can reach -- "+
+				"either add it to types.ts and give it a control, or add it to the "+
+				"skip list above with a reason", name)
+		}
+	}
+}
+
+// tsInterface returns the body of `export interface <name> { ... }`.
+func tsInterface(src, name string) (string, bool) {
+	start := strings.Index(src, "export interface "+name+" {")
+	if start < 0 {
+		return "", false
+	}
+	end := strings.Index(src[start:], "\n}")
+	if end < 0 {
+		return "", false
+	}
+	return src[start : start+end], true
 }
 
 // parseBound pulls `name: { min: N, max: M }` out of the TypeScript, tolerating

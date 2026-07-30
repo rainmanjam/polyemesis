@@ -244,6 +244,23 @@ func (r Rendition) Validate() error {
 		add("pad colour %q must be a single word of letters, digits, '-', '_' or '.' (e.g. black, 0x101010)", r.PadColor)
 	}
 
+	// Refused here for exactly the reason an unknown aspect mode is: the filter
+	// builder degrades an unrecognised mode to OFF, so the operator would get an
+	// interlaced picture from a rendition whose stored setting says otherwise,
+	// with nothing anywhere to tell them which one is running.
+	if r.Deinterlace != "" {
+		known := false
+		for _, m := range ffmpeg.DeinterlaceModes {
+			if string(m) == r.Deinterlace {
+				known = true
+				break
+			}
+		}
+		if !known {
+			add("unknown deinterlace mode %q", r.Deinterlace)
+		}
+	}
+
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid rendition: %s", strings.Join(probs, "; "))
 	}

@@ -234,10 +234,28 @@ export interface Rendition {
   /** Keyframe interval in seconds rather than frames, so it survives an fps
    *  change. */
   gopSeconds: number;
+  /** How a frame whose shape does not match width x height is reconciled:
+   *  "" stretches (the historical behaviour), "crop" centre-crops, "pad"
+   *  letterboxes with padColor, "blurpad" fills with a blurred copy of the
+   *  frame. Only meaningful when BOTH width and height are set — with one axis
+   *  free the scale already preserves aspect and the server refuses the pair. */
+  aspectMode?: RenditionAspectMode;
+  /** The "pad" fill colour; empty means black. Ignored by the other modes.
+   *  A single token, because it lands on a filter graph where a comma would
+   *  end the argument. */
+  padColor?: string;
+  /** Strips field combing before any scaling: "" off, "auto" only frames the
+   *  source flagged interlaced, "all" unconditionally. */
+  deinterlace?: RenditionDeinterlace;
   note: string;
   createdAt: string;
   updatedAt: string;
 }
+/** Mirrors ffmpeg.AspectModes. The empty string is the zero value and the
+ *  historical behaviour, so it must stay in the union. */
+export type RenditionAspectMode = "" | "crop" | "pad" | "blurpad";
+/** Mirrors ffmpeg.DeinterlaceModes. */
+export type RenditionDeinterlace = "" | "auto" | "all";
 
 /** A rendition plus its usage. `enabledDestinations` is the ref count the
  *  engine acts on: at zero there is no process and no CPU burnt. */

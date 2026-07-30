@@ -1,8 +1,12 @@
 # Item zero: features that are built and cannot be reached
 
-**Status:** confirmed by measurement, 2026-07-28.
-**Estimated cost:** 1–2 days.
-**Recommendation:** do this before starting any new feature on the roadmap.
+**Status: DONE.** Found by measurement 2026-07-28, fixed the same day.
+
+The three fields now have controls in the rendition editor, the drift guard
+covers field presence as well as numeric bounds, and an unknown deinterlace mode
+is refused by the validator instead of being silently ignored. What follows is
+the record of what was wrong and why it stayed wrong, kept because the failure
+mode is more useful than the fix.
 
 ---
 
@@ -99,26 +103,46 @@ wolf on every intentional restructuring and be switched off within a month. What
 it can do honestly is assert an **explicit allowlist of known-different shapes**,
 so a *new* divergence fails the build while the four deliberate ones stay quiet.
 
-## The work
+## What was done
 
-1. Add `aspectMode`, `padColor`, `deinterlace` to the TypeScript `Rendition`
-   interface.
-2. Add the controls to `RenditionsPage.tsx`, beside the existing size and rate
-   fields: aspect mode as a select with the four modes in the order
-   `AspectModes` already declares (no-op first, then increasing work),
-   pad colour behind `pad`, deinterlace as a three-way select.
-3. Explain them where they are, not in a tooltip. `blurpad` needs one sentence
-   about what it is for; `auto` vs `all` deinterlace needs the sentence about
-   capture cards that flag everything progressive.
-4. Extend the drift guard to field presence, with the allowlist described above.
-5. An end-to-end check that a rendition created through the UI with
-   `aspectMode: blurpad` actually produces the filter — the existing
-   `rendition_test.go` bbox harness already proves the filter itself, so this
-   only needs to prove the value survives the round trip.
+1. **The three fields are in the TypeScript `Rendition` interface**, with
+   `RenditionAspectMode` and `RenditionDeinterlace` string unions that mirror
+   `ffmpeg.AspectModes` and `ffmpeg.DeinterlaceModes`. The empty string stays in
+   both unions because it is the zero value and the historical behaviour.
+2. **Controls in `RenditionsPage.tsx`**, beside the size and rate fields:
+   aspect mode as a select in the order `AspectModes` declares (no-op first,
+   then increasing work), deinterlace as a three-way select, and the letterbox
+   colour appearing only under `pad`.
+3. **Each mode explains itself in the form**, under the control rather than in a
+   tooltip — the selected mode's sentence is rendered live. `blurpad` says what
+   the convention is for; `auto` versus `all` carries the sentence about capture
+   cards that flag everything progressive regardless of what they were fed.
+4. **The aspect select disables itself when either axis is 0**, because the
+   server refuses that pair and a disabled control beats a save error the
+   operator cannot connect to anything they touched. The payload clears the mode
+   to match what the form shows.
+5. **The drift guard now covers field presence**, and it was verified by
+   deleting `aspectMode` from `types.ts` and watching it fail with the intended
+   message before being restored. A guard that has never failed proves nothing.
 
-Then update [COMPARISON.md](../COMPARISON.md) and
-[RESEARCH-COMPETITIVE.md](../RESEARCH-COMPETITIVE.md), where deinterlacing is
-now recorded as "built, unreachable" rather than missing.
+### One thing found while fixing it
+
+`Validate()` checked `AspectMode` and `PadColor` and **did not check
+`Deinterlace` at all** — while `deinterlaceFilter` degrades an unrecognised mode
+to *off*. So a rendition could store `deinterlace: "yadif"`, report it back
+through the API, and quietly emit no deinterlace filter at all.
+
+That is precisely the case the aspect-mode check already existed to prevent, in
+its own words:
+
+> An unknown mode is refused here rather than at start time, because the filter
+> builder degrades it to a plain scale — which is a silently different picture,
+> and the operator would have no way to tell that the mode they chose is not the
+> one running.
+
+Now validated, with both a rejection case and — following this project's rule
+about confinement tests that pass by refusing everything — positive cases for
+`auto` and `all`.
 
 ## The question worth asking after this
 

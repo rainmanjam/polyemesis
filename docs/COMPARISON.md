@@ -43,7 +43,7 @@ Ranked by how often it was asked for, which is the honest ordering.
 | **Overlays** — text, logo, watermark, channel name | Asked 5 separate times (6+5+4+2+1 reactions), every one closed unimplemented | **Missing.** Planned on renditions, where re-encoding is already the contract |
 | **WebRTC / WHIP output** | 6 reactions, closed unimplemented | **Missing.** Sizeable subsystem; the real use case is sub-second self-monitoring |
 | **Decklink / SDI capture**, in and out | 4 + 2 reactions | **Missing.** Needs an FFmpeg built with `decklink`, so a third image variant |
-| **Deinterlacing** | 1 reaction | **Built, but unreachable.** `bwdif` with off/auto/all modes exists in the encoder and the schema; there is no UI control, so no operator can switch it on ([correction](RESEARCH-COMPETITIVE.md#correction-2026-07-28-deinterlacing-is-built-but-unreachable)) |
+| **Deinterlacing** | 1 reaction | ✅ **Have.** `bwdif` with off / only-interlaced / every-frame, placed first in the filter chain because scaling interlaced content bakes the combing in |
 | **Playlist / scheduled file broadcast** | Five issues circling one capability | **Partial.** Pull ingest reads `file://` and schedules exist; no playlist sequencing |
 | **Multi-input compositing / video grid** | 1 reaction | **Missing.** Natural once multi-source is settled |
 | **MQTT** | Core tracker | **Missing.** Alert webhooks exist instead |
