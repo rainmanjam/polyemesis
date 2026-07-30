@@ -201,6 +201,13 @@ Bugs worth naming, because each was found by measurement rather than by review:
   loss, so tabbing out of a field was an outage. Changes are now explicit.
 - **The relay forwarded zero-length datagrams**, which FFmpeg reports as EOF —
   one empty datagram would have ended every consumer on a hub at once.
+- **The VA-API image could not be built at all.** An automated
+  `bump ubuntu from 24.04 to 26.04` changed `Dockerfile.vaapi`'s `FROM` line and
+  left the FFmpeg pin at a 24.04 archive revision that does not exist on 26.04.
+  Nothing caught it: the release workflow runs only on a tag, and the container
+  suites run only on `main`. Found by rehearsing the release. The image now
+  pins Ubuntu 26.04's FFmpeg **8.0.1**, up from 6.1.1, which also brings AV1
+  VA-API and QSV encoders.
 
 ### Testing
 
@@ -270,7 +277,7 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Enhanced RTMP / multitrack FLV is not implemented.** The `enhancedRtmp`
   config key parses and nothing branches on it.
 
-#### Platforms
+#### Operating systems
 
 - **Windows is tested, not operated.** It clears the same CI floor as Linux and
   macOS including a measured broadcast, but nobody has run a real show on it,
@@ -301,7 +308,7 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **LL-HLS is not implemented and was declined deliberately** — FFmpeg cannot
   emit partial segments at all. Preview latency was tuned to 2.2–3.2 s instead.
 
-#### Platform support
+#### Streaming platforms
 
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.

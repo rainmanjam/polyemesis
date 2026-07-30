@@ -88,20 +88,35 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # security updates. Verified to exist on 2026-07-26.
 FROM ubuntu:26.04
 
-# Ubuntu 24.04's FFmpeg is built with VA-API (verified: `ffmpeg -encoders` in
-# ubuntu:24.04 lists h264_vaapi, hevc_vaapi, h264_qsv and hevc_qsv). It is NOT
-# built with AMF — there are no *_amf encoders in this build at all, which is
-# why AMD on Linux goes through VA-API here and AMF is a Windows story.
+# Ubuntu 26.04's FFmpeg is built with VA-API (verified: `ffmpeg -encoders` in
+# ubuntu:26.04 lists h264_vaapi, hevc_vaapi, av1_vaapi, h264_qsv, hevc_qsv and
+# av1_qsv). It is NOT built with AMF — there are no *_amf encoders in this build
+# at all, which is why AMD on Linux goes through VA-API here and AMF is a
+# Windows story.
+#
+# THIS PIN IS COUPLED TO THE `FROM` ABOVE. It is an Ubuntu archive revision, so
+# changing the base distribution invalidates it — and that is not a theoretical
+# note. An automated `bump ubuntu from 24.04 to 26.04` changed the FROM line
+# alone and left the 24.04 revision pinned here, which no build caught until a
+# release was attempted: the release workflow only runs on a tag, and the
+# container suites only run on main. The failure was
+# `E: Version '7:6.1.1-3ubuntu5' for 'ffmpeg' was not found`.
+#
+# If you change the FROM, re-run the command below and update this pin in the
+# same commit.
 #
 # Pinned for the same reason the Alpine image pins its FFmpeg: an unpinned
 # transcoder silently changes under a fixed image tag, and the symptom is a
 # broken stream rather than a failed build. The loud failure on a superseded
 # version is the prompt to bump on purpose. To bump:
 #
-#   docker run --rm ubuntu:24.04 sh -c 'apt-get update -qq && apt-cache policy ffmpeg'
+#   docker run --rm --platform linux/amd64 ubuntu:26.04 \
+#     sh -c 'apt-get update -qq && apt-cache policy ffmpeg'
 #
-# 7:6.1.1-3ubuntu5 verified present on 2026-07-26 (linux/amd64).
-ARG FFMPEG_VERSION=7:6.1.1-3ubuntu5
+# 7:8.0.1-3ubuntu2 verified present on 2026-07-30 (linux/amd64), with both
+# build-time assertions below re-run against it: libsrt present, h264_vaapi
+# present.
+ARG FFMPEG_VERSION=7:8.0.1-3ubuntu2
 
 # The driver packages are left unpinned on purpose, unlike FFmpeg. They are
 # hardware enablement: a newer intel-media-driver is how a newly released Arc

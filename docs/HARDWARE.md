@@ -111,7 +111,7 @@ host at `docker run` time or it does not arrive.
 |---|---|---|
 | `Dockerfile` | Alpine | The default. CPU / `libx264`. Nothing to configure. |
 | `Dockerfile.cuda` | `nvidia/cuda:*-base-ubuntu24.04` | NVIDIA / NVENC |
-| `Dockerfile.vaapi` | `ubuntu:24.04` | Intel and AMD / VA-API and QSV |
+| `Dockerfile.vaapi` | `ubuntu:26.04` | Intel and AMD / VA-API and QSV |
 
 `docker-compose.yml` carries all three as one file: the default service is
 active, the two GPU variants are commented out just below it. Uncomment one,
