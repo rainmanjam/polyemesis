@@ -25,3 +25,11 @@ internal/web/dist/*
 .work/
 .docker-gocache/
 .docker-gomod/
+
+# Agent scratch. Same reasoning as .work/ above: notes about how the work is
+# going, not artefacts of it.
+#
+# .claude/worktrees holds git worktrees INSIDE the repository, so leaving it
+# tracked would commit an entire second checkout into the tree.
+.claude/
+.superpowers/
