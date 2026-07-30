@@ -88,6 +88,11 @@ type Hub struct {
 	// that moderation is happening somewhere polyemesis cannot see.
 	retracted int64
 
+	// moderator is the deciding half of automod, and nil when none is wired.
+	// The Hub acts; it never decides -- see automod.go.
+	moderator   Moderator
+	automodJobs chan automodJob
+
 	store     Store
 	bus       Publisher
 	log       *slog.Logger
@@ -398,6 +403,12 @@ func (h *Hub) deliver(r *runner, m Message) {
 	if h.bus != nil {
 		h.bus.Publish(events.TypeChat, m)
 	}
+
+	// AFTER publishing, never before. The message is on screen by the time
+	// automod looks at it; a verdict may retract it a moment later. Blocking
+	// display on a check -- even a fast one -- is how chat starts feeling
+	// broken, and the retraction path exists for exactly this.
+	h.checkAutomod(m)
 }
 
 // retract removes one message the platform says is gone.
