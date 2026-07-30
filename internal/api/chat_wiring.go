@@ -176,6 +176,12 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:             s.chatToken(a.ID),
 			PublicURL:         publicBaseURL(s.cfg),
 			CallbackSecret:    s.kickCallbackSecret(),
+			// The signature check. Without this line the adapter refuses every
+			// delivery — which is the point: the previous version of this
+			// construction site simply omitted it, and the handler's nil guard
+			// turned that omission into unauthenticated chat injection rather
+			// than into a visible failure.
+			Verify: chat.KickVerifier(s.kickKeys),
 		})
 
 	case db.PlatformFacebook:
@@ -248,7 +254,7 @@ func (s *Server) setFacebookBroadcast(accountRef, liveVideoID string) {
 // "wrong secret" that they would not learn from "no such route".
 func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 	want := s.kickCallbackSecret()
-	if want == "" || chi.URLParam(r, "secret") != want {
+	if want == "" || !secretEqual(chi.URLParam(r, "secret"), want) {
 		http.NotFound(w, r)
 		return
 	}

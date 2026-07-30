@@ -65,13 +65,17 @@ type KickConfig struct {
 	// "https://stream.example.com". Empty is a supported state and produces a
 	// clear explanation rather than a failure.
 	PublicURL string
-	// CallbackSecret makes the callback path unguessable. Kick does not
-	// document a signature scheme this code can verify, so the secrecy of the
-	// path is what stops a stranger posting fake chat into the pane. A blank
-	// one is generated.
+	// CallbackSecret makes the callback path unguessable. It is defence in
+	// depth rather than the authentication — a secret in a URL leaks through
+	// proxy logs, Referer headers and any plain-HTTP hop, which is what Verify
+	// below is for. A blank one is generated.
 	CallbackSecret string
-	// Verify, when set, authenticates a delivery — the hook for Kick's
-	// signature header once its scheme is documented. Nothing here invents one.
+	// Verify authenticates a delivery. Required: the handler refuses every POST
+	// when it is nil rather than accepting unverified events.
+	//
+	// It stays a function rather than a concrete type so a test can sign with
+	// its own key, and so the signature scheme lives in kick_verify.go where it
+	// can be read against Kick's documentation side by side.
 	Verify func(r *http.Request, body []byte) error
 
 	// Probe replaces the reachability check, for tests.
@@ -340,11 +344,21 @@ func (k *KickAdapter) Handler() http.Handler {
 			http.Error(w, "could not read the request body", http.StatusBadRequest)
 			return
 		}
-		if k.cfg.Verify != nil {
-			if err := k.cfg.Verify(r, body); err != nil {
-				http.Error(w, "signature rejected", http.StatusUnauthorized)
-				return
-			}
+		// Fail closed. A nil Verify used to mean "skip the check", which is how
+		// this adapter shipped with signature verification silently switched
+		// off: the hook existed, the nil guard existed, and no construction
+		// site ever assigned it. An unconfigured verifier is now a refused
+		// delivery, so the same omission would surface as chat that does not
+		// arrive rather than as chat that arrives unauthenticated.
+		if k.cfg.Verify == nil {
+			http.Error(w, "webhook verification is not configured", http.StatusServiceUnavailable)
+			return
+		}
+		if err := k.cfg.Verify(r, body); err != nil {
+			// 401 and nothing else. Which part of a forgery failed is not
+			// information the sender is owed.
+			http.Error(w, "signature rejected", http.StatusUnauthorized)
+			return
 		}
 
 		k.ingest(r.Header.Get("Kick-Event-Type"), body)

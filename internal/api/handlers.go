@@ -167,7 +167,17 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Re-issue: a password change should refresh the session, not end it.
+	// SetPassword bumped the user's token epoch, so every session token issued
+	// before this moment — including the one that authenticated this very
+	// request — is now refused. That is the point: a password change is what an
+	// operator does when they think somebody else is holding their session, and
+	// it has to actually end that session.
+	//
+	// Re-issuing here means the operator changing their own password stays
+	// logged in on this device while every other copy of the old token stops
+	// working. If the re-issue fails, the response still reports success,
+	// because the password genuinely did change; the operator lands back at the
+	// login screen on their next request, which is the safe direction to fail.
 	token, err := s.sessions.Issue(user.ID, user.Username)
 	if err == nil {
 		_ = s.sessions.SetSession(w, r, token)

@@ -29,6 +29,13 @@ func kickAdapter(t *testing.T, opts func(*KickConfig)) *KickAdapter {
 			_, nonce, _ := strings.Cut(endpoint, "?probe=")
 			return nonce, nil
 		},
+		// The real verifier against the package test key, not a permissive
+		// stub. Every handler test therefore exercises signature checking on
+		// the way in, and a test that posts an unsigned body gets the 401 a
+		// stranger would — which is the behaviour worth defending.
+		Verify: func(r *http.Request, body []byte) error {
+			return VerifyKickSignature(&testKickKey(t).PublicKey, r, body)
+		},
 	}
 	if opts != nil {
 		opts(&cfg)
@@ -177,6 +184,7 @@ func TestKickHandlerDeliversAndAlwaysAcknowledges(t *testing.T) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(body))
 		req.Header.Set("Kick-Event-Type", eventType)
+		signKick(t, testKickKey(t), req, []byte(body))
 		resp, err := srv.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -250,6 +258,44 @@ func TestKickHandlerRejectsADeliveryThatFailsVerification(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestKickHandlerRefusesEveryDeliveryWhenNoVerifierIsConfigured(t *testing.T) {
+	// The regression guard for the finding this whole change exists to fix.
+	//
+	// A nil Verify used to mean "skip the check", so a construction site that
+	// forgot to set it produced an endpoint anybody could post chat to. It now
+	// means "refuse", which turns the same omission into an obvious outage
+	// instead of a silent hole. This test fails if that inverts back.
+	a := kickAdapter(t, func(c *KickConfig) { c.Verify = nil })
+	srv := httptest.NewServer(a.Handler())
+	defer srv.Close()
+
+	resp, err := srv.Client().Post(srv.URL, "application/json", strings.NewReader(kickFullEvent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: an unconfigured verifier must refuse "+
+			"the delivery, not accept it unverified", resp.StatusCode)
+	}
+}
+
+func TestKickHandlerRejectsAnUnsignedDelivery(t *testing.T) {
+	// What a stranger who found the callback URL would actually send.
+	a := kickAdapter(t, nil) // the default fixture verifies for real
+	srv := httptest.NewServer(a.Handler())
+	defer srv.Close()
+
+	resp, err := srv.Client().Post(srv.URL, "application/json", strings.NewReader(kickFullEvent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("an unsigned POST returned %d, want 401", resp.StatusCode)
 	}
 }
 

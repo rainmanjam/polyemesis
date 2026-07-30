@@ -72,6 +72,11 @@ type Server struct {
 	// above it: a build with no chat wired serves the pane read-only from the
 	// stored scrollback rather than hiding it.
 	chat *chat.Hub
+
+	// kickKeys caches Kick's webhook signing key. One per server rather than
+	// one per adapter: the key belongs to Kick, not to an account, so two
+	// connected Kick channels share the fetch.
+	kickKeys *chat.KickKeyFetcher
 }
 
 // Options configures the server.
@@ -121,6 +126,7 @@ func New(o Options) *Server {
 		version:   o.Version,
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
+		kickKeys:  &chat.KickKeyFetcher{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
@@ -129,6 +135,10 @@ func New(o Options) *Server {
 			// that is genuinely terminating TLS.
 			o.Config.ServesTLS(),
 			o.Config.TrustProxyHeaders,
+			// Session revocation. Reading it through the store rather than
+			// caching it means a password change takes effect on the very next
+			// request, with no window in which a revoked token still works.
+			o.DB.TokenEpoch,
 		),
 	}
 }

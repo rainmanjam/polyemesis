@@ -65,6 +65,12 @@ func Open(path string) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// users.token_epoch, so a password change can revoke sessions that are
+	// already signed and in somebody's cookie jar.
+	if err := d.MigrateUserTokenEpoch(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest

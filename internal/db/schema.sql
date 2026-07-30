@@ -1,11 +1,18 @@
 -- polyemesis schema. Applied idempotently at startup.
 
+-- token_epoch is what makes a session revocable. Sessions are stateless JWTs,
+-- so clearing the cookie at logout does not stop anyone holding a copy of the
+-- token from continuing to use it until it expires. The epoch is embedded in
+-- every token issued and checked on every request; bumping it here invalidates
+-- every token already in the wild, which is what "change my password because I
+-- think someone else has my session" has to mean.
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
     created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL
+    updated_at    INTEGER NOT NULL,
+    token_epoch   INTEGER NOT NULL DEFAULT 0
 );
 
 -- Long-lived credentials for automation, so a script never needs the admin
