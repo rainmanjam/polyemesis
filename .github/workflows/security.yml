@@ -1,0 +1,179 @@
+# Security scanning.
+#
+# Separate from ci.yml because it fails for different reasons and on a different
+# clock: a new CVE published against a dependency turns this red without a line
+# of this repository changing, and that is the signal, not a flake. Keeping it
+# out of ci.yml means a red badge here never blocks a merge on work that is
+# unrelated to it, and the weekly schedule catches advisories that land between
+# pushes.
+name: security
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    # Monday morning, offset from ci.yml's 06:17 so the two do not contend.
+    - cron: "43 6 * * 1"
+
+concurrency:
+  group: security-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Go dependency vulnerabilities, filtered by reachability. govulncheck is the
+  # right tool here rather than a generic SCA: it reports what your code
+  # actually CALLS, so an advisory against a package you import but never reach
+  # does not become a ticket nobody can action.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # JavaScript dependencies.
+  npm-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      # Production dependencies only. A moderate advisory in a build-time dev
+      # dependency does not ship to anybody, and treating it as urgent is how a
+      # team learns to pass --force.
+      - run: npm audit --omit=dev --audit-level=high
+
+  # Committed credentials, across the full history.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The whole history. A secret that was committed and then "removed"
+          # in a later commit is still a secret that was published, and a
+          # shallow clone cannot see it.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # Static analysis.
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v7
+
+      # No --error here. The gate is the two steps below, in that order:
+      # prove the scan happened, THEN judge what it found. --error would exit
+      # before the proof step ever ran.
+      #
+      # Two rules are excluded, each because the finding was traced and is not
+      # a vulnerability in this codebase:
+      #
+      #   dangerous-exec-command — 18 hits, all exec.CommandContext(bin, argv...)
+      #     invocations of ffmpeg/ffprobe. Arguments travel as a []string, never
+      #     through a shell, so there is no injection path. Excluded rather than
+      #     suppressed per-line because the pattern is the correct one and will
+      #     recur every time a new probe is added.
+      #
+      #   filepath-clean-misuse — 1 hit, internal/web/web.go. path.Clean is
+      #     applied to a URL path before the prefix is trimmed, which is the
+      #     right order; the rule matches the shape, not the bug.
+      #
+      #   detect-insecure-websocket — 6 hits, every one inside a COMMENT
+      #     listing the URL schemes an MQTT broker may use ("mqtt://, mqtts://,
+      #     ws:// or wss://"), in .go and .md files the rule should not have
+      #     been applied to at all. Plain ws:// to a LAN broker is a supported,
+      #     operator-chosen deployment, surfaced in the UI as exactly that.
+      #
+      # Anything else at ERROR severity fails the job.
+      - name: semgrep
+        run: |
+          semgrep \
+            --config=r/go \
+            --config=r/javascript.react \
+            --config=r/javascript.lang \
+            --exclude-rule=go.lang.security.audit.dangerous-exec-command.dangerous-exec-command \
+            --exclude-rule=go.lang.security.filepath-clean-misuse.filepath-clean-misuse \
+            --exclude-rule=javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket \
+            --json --output=semgrep.json \
+            --exclude=node_modules --exclude=dist --exclude=ui/dist
+
+      # The assertion this job exists to make.
+      #
+      # A semgrep run that fails to load its rules exits reporting zero
+      # findings and zero scanned files, and "0 findings" is indistinguishable
+      # from a clean pass unless somebody looks at the second number. That is
+      # not hypothetical: the first scan of this repository reported TOTAL 0
+      # and had examined nothing at all, because one registry config failed to
+      # parse and rule loading aborted.
+      #
+      # A security job that can pass forever while testing nothing is worse
+      # than no job, because it is also a green badge. So: prove files were
+      # read before believing anything about what was in them.
+      - name: assert semgrep actually scanned the tree
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open('semgrep.json'))
+          scanned = len(d.get('paths', {}).get('scanned', []))
+          errs = d.get('errors', [])
+          fatal = [e for e in errs if e.get('level') == 'error']
+          warn = [e for e in errs if e.get('level') != 'error']
+
+          print(f"semgrep scanned {scanned} files "
+                f"({len(fatal)} fatal, {len(warn)} non-fatal diagnostics)")
+
+          # Non-fatal diagnostics are printed, not failed on. One is expected:
+          # semgrep's TypeScript grammar does not accept `const satisfies` in
+          # ui/src/lib/types.ts and reports a partial parse of that one file.
+          # Surfacing it keeps it from quietly growing into "half the tree did
+          # not parse".
+          for e in warn:
+              print(f"::warning::semgrep: {e.get('message', e)}")
+
+          if fatal:
+              for e in fatal:
+                  print(f"::error::semgrep: {e.get('message', e)}")
+              print("::error::semgrep failed to run cleanly; a partial scan is not a pass")
+              sys.exit(1)
+
+          # The floor. This repository has ~255 scannable files; 50 is well
+          # under that and still far above the zero a broken rule-load yields.
+          if scanned < 50:
+              print(f"::error::semgrep scanned {scanned} files, expected the whole tree.")
+              print("::error::A zero-finding result from a zero-file scan is not a clean bill of health.")
+              sys.exit(1)
+          PY
+
+      # Only now, having established that the scan was real, is it worth
+      # believing what it did or did not find.
+      - name: fail on high-severity findings
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          results = json.load(open('semgrep.json'))['results']
+          errs = [r for r in results if r['extra']['severity'] == 'ERROR']
+          for r in errs:
+              print(f"::error file={r['path']},line={r['start']['line']}::"
+                    f"{r['check_id']}: {r['extra']['message'].splitlines()[0]}")
+          print(f"{len(errs)} ERROR-severity findings, {len(results)} total")
+          sys.exit(1 if errs else 0)
+          PY
