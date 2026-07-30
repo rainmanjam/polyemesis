@@ -220,11 +220,17 @@ var platformCapabilities = []PlatformCapability{
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportYes,
-			CapModeration:  SupportUnknown,
+			CapModeration:  SupportYes,
 			CapViewerStats: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapMetadata: "Title and category, over the channel:manage:broadcast scope.",
+			CapModeration: "Delete a message, over moderator:manage:chat_messages. An account connected before this " +
+				"existed holds a token without that scope — the account list says so and asks you to reconnect, " +
+				"rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete " +
+				"anything older than six hours, and refuses the broadcaster's own messages and other moderators'. " +
+				"Banning and timing out are not implemented and moderator:manage:banned_users is deliberately not " +
+				"requested — see docs/roadmap/CHAT-MODERATION.md.",
 		},
 	},
 	{

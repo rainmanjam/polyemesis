@@ -19,6 +19,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,6 +72,34 @@ type TwitchConfig struct {
 	// Dial replaces the TLS dial. It is the seam the tests use, and nothing at
 	// runtime sets it.
 	Dial func(ctx context.Context) (net.Conn, error)
+
+	// ---- Helix, for moderation only ----
+	//
+	// Reading and sending are IRC; deleting is not. Twitch has no IRC command
+	// for it any more (/delete was removed), so this half of the adapter speaks
+	// HTTP and needs identifiers IRC never carries.
+
+	// HelixToken supplies a fresh access token. Separate from Token because IRC
+	// writes its token once at connect and reconnects to refresh, while a Helix
+	// call an hour later needs the current one.
+	HelixToken TokenFunc
+	// ClientID is required on every Helix request alongside the bearer token.
+	// A request with a valid token and no Client-Id is rejected.
+	ClientID string
+	// BroadcasterID is the numeric id of the CHANNEL being moderated, and
+	// ModeratorID the numeric id of the account acting. They are equal for a
+	// streamer moderating their own chat, which is the normal case, and differ
+	// when an operator moderates someone else's channel.
+	//
+	// Empty BroadcasterID means the id was never resolved -- the adapter is
+	// reading a channel by name and nothing has looked up its id. Delete says
+	// so rather than guessing, because guessing here would address a moderation
+	// call at the wrong channel.
+	BroadcasterID string
+	ModeratorID   string
+
+	APIBase string
+	HTTP    *http.Client
 }
 
 // TwitchAdapter reads and writes one Twitch channel's chat.
@@ -274,6 +304,74 @@ func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Sink) (bool, error
 		retractUser(sink, l.Tags["target-user-id"])
 	}
 	return false, nil
+}
+
+// TwitchHelixBase is Twitch's REST API. Overridden in tests.
+const TwitchHelixBase = "https://api.twitch.tv/helix"
+
+// Delete removes one message from the channel's chat.
+//
+// Over Helix, not IRC: Twitch removed the /delete chat command, so the only way
+// to do this is DELETE /helix/moderation/chat with the moderator's own id
+// alongside the broadcaster's.
+//
+// THE EMPTY ID IS THE DANGEROUS CASE. Twitch documents message_id as optional,
+// and omitting it does not fail -- it deletes EVERY message in the room. A
+// blank id reaching this endpoint would turn one moderator removing one message
+// into a wiped chat. It is refused twice below, before the URL is built and
+// again by never constructing the query without it.
+func (t *TwitchAdapter) Delete(ctx context.Context, messageID string) error {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		// Not a defensive nicety. See above: an empty id clears the channel.
+		return fmt.Errorf("no message id to delete, and Twitch reads a missing id as " +
+			"\"delete every message in this chat\"")
+	}
+	if t.cfg.ClientID == "" || t.cfg.HelixToken == nil {
+		return fmt.Errorf("this Twitch connection cannot moderate: it was built without API " +
+			"credentials. Reconnect the Twitch account in Settings → Platforms")
+	}
+	if t.cfg.BroadcasterID == "" || t.cfg.ModeratorID == "" {
+		return fmt.Errorf("polyemesis does not know the numeric channel id for %s, so it cannot "+
+			"address a moderation call at it. This happens when reading a channel other than the "+
+			"connected account's own", firstNonEmpty(t.cfg.Channel, "this channel"))
+	}
+
+	base := t.cfg.APIBase
+	if base == "" {
+		base = TwitchHelixBase
+	}
+	q := url.Values{
+		"broadcaster_id": {t.cfg.BroadcasterID},
+		"moderator_id":   {t.cfg.ModeratorID},
+		"message_id":     {messageID},
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodDelete,
+		base+"/moderation/chat?"+q.Encode(),
+		t.cfg.HelixToken, map[string]string{"Client-Id": t.cfg.ClientID}, nil, nil)
+	if err == nil {
+		return nil
+	}
+
+	// Each of these is a different thing to do about it, which is the whole
+	// reason they are not one sentence.
+	switch statusOf(err) {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("Twitch refused the deletion. An account connected before moderation "+
+			"existed never granted moderator:manage:chat_messages — disconnect and reconnect it in "+
+			"Settings → Platforms. Twitch said: %w", err)
+	case http.StatusForbidden:
+		return fmt.Errorf("Twitch says this account does not moderate %s. The connected account has "+
+			"to be the broadcaster or a moderator of that channel: %w",
+			firstNonEmpty(t.cfg.Channel, "that channel"), err)
+	case http.StatusNotFound:
+		return fmt.Errorf("Twitch no longer has that message. It refuses to delete anything older "+
+			"than six hours, and this one may simply have aged out: %w", err)
+	case http.StatusBadRequest:
+		return fmt.Errorf("Twitch will not delete that message. It refuses deletion of the "+
+			"broadcaster's own messages and those of other moderators: %w", err)
+	}
+	return err
 }
 
 func (t *TwitchAdapter) dial(ctx context.Context) (net.Conn, error) {

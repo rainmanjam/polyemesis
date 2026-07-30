@@ -4,7 +4,11 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -520,6 +524,140 @@ func TestTwitchReportsItsOwnDeletions(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after the context was cancelled")
+	}
+}
+
+// helixStub is a fake Helix, recording the request Delete builds.
+func helixStub(t *testing.T, status int, body string) (*httptest.Server, *url.Values, *string) {
+	t.Helper()
+	var got url.Values
+	var clientID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		clientID = r.Header.Get("Client-Id")
+		w.WriteHeader(status)
+		if body != "" {
+			fmt.Fprint(w, body)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &got, &clientID
+}
+
+func twitchForDelete(t *testing.T, base string) *TwitchAdapter {
+	t.Helper()
+	a, err := NewTwitch(TwitchConfig{
+		Nick: "streamer", Channel: "streamer", AccountRef: "42", Token: "tok",
+		HelixToken:    func(context.Context) (string, error) { return "helix-tok", nil },
+		ClientID:      "client-abc",
+		BroadcasterID: "42",
+		ModeratorID:   "42",
+		APIBase:       base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func TestTwitchDeleteAddressesOneMessage(t *testing.T) {
+	srv, got, clientID := helixStub(t, http.StatusNoContent, "")
+	a := twitchForDelete(t, srv.URL)
+
+	if err := a.Delete(context.Background(), "msg-7"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("message_id") != "msg-7" {
+		t.Fatalf("message_id = %q", got.Get("message_id"))
+	}
+	// Both ids are required, and Twitch 403s when moderator_id is not a
+	// moderator of broadcaster_id.
+	if got.Get("broadcaster_id") != "42" || got.Get("moderator_id") != "42" {
+		t.Fatalf("ids = broadcaster %q moderator %q, want both 42",
+			got.Get("broadcaster_id"), got.Get("moderator_id"))
+	}
+	// Helix rejects a valid bearer token that arrives without a Client-Id.
+	if *clientID != "client-abc" {
+		t.Fatalf("Client-Id header = %q, want it set", *clientID)
+	}
+}
+
+// The one that matters most in this file.
+//
+// Twitch documents message_id as OPTIONAL on this endpoint, and omitting it does
+// not fail -- it deletes every message in the channel. So a blank id must never
+// reach the wire: the bug would turn "remove this message" into "wipe the chat",
+// and it would look like a successful moderation action while doing it.
+func TestTwitchDeleteRefusesABlankIDBecauseItWouldClearTheChat(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	a := twitchForDelete(t, srv.URL)
+
+	for _, id := range []string{"", "   ", "\t"} {
+		called = false
+		err := a.Delete(context.Background(), id)
+		if err == nil {
+			t.Fatalf("Delete(%q) was accepted; Twitch reads a missing id as \"delete everything\"", id)
+		}
+		if called {
+			t.Fatalf("Delete(%q) reached the API, which would have cleared the channel", id)
+		}
+		if !strings.Contains(err.Error(), "every message") {
+			t.Fatalf("error = %q, want it to explain the consequence", err)
+		}
+	}
+}
+
+// Four failures, four different things to do about them. Collapsing these into
+// one sentence is how an operator ends up reconnecting an account to fix a
+// message that was merely too old.
+func TestTwitchDeleteFailuresSayWhatToDo(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		wantSub string
+	}{
+		{"401 means the scope was never granted", http.StatusUnauthorized, "reconnect"},
+		{"403 means not a moderator there", http.StatusForbidden, "moderate"},
+		{"404 is usually the six-hour limit", http.StatusNotFound, "six hours"},
+		{"400 is a message Twitch protects", http.StatusBadRequest, "broadcaster's own"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := helixStub(t, tc.status, `{"message":"nope"}`)
+			a := twitchForDelete(t, srv.URL)
+
+			err := a.Delete(context.Background(), "msg-7")
+			if err == nil {
+				t.Fatalf("status %d reported as success", tc.status)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error = %q, want it to mention %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+
+// An adapter built without Helix details must say so rather than send a request
+// that cannot work — and must not be Fatal, because chat itself is fine.
+func TestTwitchDeleteWithoutCredentialsExplainsItself(t *testing.T) {
+	a, err := NewTwitch(TwitchConfig{Nick: "streamer", Channel: "streamer", AccountRef: "42", Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	derr := a.Delete(context.Background(), "msg-7")
+	if derr == nil {
+		t.Fatal("a Delete with no API credentials claimed success")
+	}
+	if !strings.Contains(derr.Error(), "credentials") {
+		t.Fatalf("error = %q, want it to name the missing credentials", derr)
+	}
+	if IsFatal(derr) {
+		t.Fatal("a missing-credentials Delete was Fatal, which would tear down a working chat connection")
 	}
 }
 

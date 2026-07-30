@@ -74,6 +74,17 @@ func reasonOf(err error) string {
 // package can leak it — which is exactly how tokens escape in projects that
 // pass ?access_token=.
 func doJSON(ctx context.Context, hc *http.Client, method, endpoint string, token TokenFunc, payload, out any) error {
+	return doJSONHeaders(ctx, hc, method, endpoint, token, nil, payload, out)
+}
+
+// doJSONHeaders is doJSON with extra request headers.
+//
+// It exists for Twitch's Helix API, which rejects a request carrying a valid
+// bearer token but no Client-Id. Kept as a separate entry point rather than
+// widening doJSON's signature at thirty call sites, and headers are for
+// IDENTIFIERS only -- the Authorization header is still built here from the
+// TokenFunc, so no caller is able to route a credential through this map.
+func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string, token TokenFunc, headers map[string]string, payload, out any) error {
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultHTTPTimeout}
 	}
@@ -102,6 +113,14 @@ func doJSON(ctx context.Context, hc *http.Client, method, endpoint string, token
 	req.Header.Set("Accept", "application/json")
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	// After Authorization, never before: a caller cannot overwrite the bearer
+	// token by putting "Authorization" in this map.
+	for k, v := range headers {
+		if strings.EqualFold(k, "Authorization") {
+			continue
+		}
+		req.Header.Set(k, v)
 	}
 
 	resp, err := hc.Do(req)
