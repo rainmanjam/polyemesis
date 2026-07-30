@@ -283,6 +283,146 @@ func TestDuplicateMessagesAreDeliveredOnce(t *testing.T) {
 	}
 }
 
+// A message the platform says is gone must leave the pane.
+//
+// The history ring is what the REST scrollback and every late-joining browser
+// read, so a retraction that only fired an event would leave the message to
+// reappear on the next reload -- which is the same bug in a slower costume.
+func TestARetractedMessageLeavesTheHistory(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "keep-1", Text: "fine", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "gone", Text: "deleted later", Author: Author{ID: "9"}})
+			sink.Deliver(Message{ID: "keep-2", Text: "also fine", Author: Author{ID: "7"}})
+			// Only reachable because the Hub hands adapters a sink that is a
+			// Retractor. A SinkFunc would drop this silently.
+			retract(sink, "gone")
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "the retraction to apply", func() bool { return len(h.History(0)) == 2 })
+
+	var ids []string
+	for _, m := range h.History(0) {
+		ids = append(ids, m.ID)
+	}
+	// Order matters: the ring is rebuilt compactly rather than tombstoned, and
+	// a rebuild that reorders the conversation would be worse than the leak.
+	if len(ids) != 2 || ids[0] != "keep-1" || ids[1] != "keep-2" {
+		t.Fatalf("history = %v, want [keep-1 keep-2] in order", ids)
+	}
+	if got := h.Stats().Retracted; got != 1 {
+		t.Fatalf("Retracted = %d, want 1", got)
+	}
+}
+
+// A timeout removes everything one author said, and the platform names the
+// AUTHOR rather than the messages.
+func TestRetractingAUserClearsOnlyThatAuthor(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "a1", Text: "hello", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "b1", Text: "spam", Author: Author{ID: "99"}})
+			sink.Deliver(Message{ID: "a2", Text: "how are you", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "b2", Text: "more spam", Author: Author{ID: "99"}})
+			retractUser(sink, "99")
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "the timeout to apply", func() bool { return len(h.History(0)) == 2 })
+	time.Sleep(20 * time.Millisecond)
+
+	for _, m := range h.History(0) {
+		if m.Author.ID == "99" {
+			t.Fatalf("history still holds %q from the timed-out author", m.ID)
+		}
+	}
+	if n := len(h.History(0)); n != 2 {
+		t.Fatalf("history holds %d messages, want the 2 from the untouched author", n)
+	}
+	if got := h.Stats().Retracted; got != 2 {
+		t.Fatalf("Retracted = %d, want 2 (both of that author's messages)", got)
+	}
+}
+
+// An empty author id is the platform clearing the whole room, not a no-op.
+func TestRetractingAnEmptyUserClearsTheRoom(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "a1", Text: "one", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "b1", Text: "two", Author: Author{ID: "99"}})
+			retractUser(sink, "")
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "the room to clear", func() bool { return len(h.History(0)) == 0 })
+}
+
+// A retraction naming a message from a DIFFERENT platform must not touch ours.
+//
+// Message ids are platform-scoped and nothing guarantees they are unique across
+// platforms, so an id-only match would let a Twitch deletion silently remove a
+// Kick message that happened to share a string.
+func TestARetractionIsScopedToItsOwnPlatform(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	kick := &fakeAdapter{platform: db.PlatformKick, account: "kk",
+		messages: []Message{{ID: "shared-id", Text: "kick message"}}}
+	if err := h.Attach(ctx, kick); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the kick message", func() bool { return len(h.History(0)) == 1 })
+
+	tw := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "tw-1", Text: "twitch message"})
+			retract(sink, "shared-id") // same id, different platform
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, tw); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the twitch message", func() bool { return len(h.History(0)) == 2 })
+	time.Sleep(20 * time.Millisecond)
+
+	var found bool
+	for _, m := range h.History(0) {
+		if m.Platform == db.PlatformKick && m.ID == "shared-id" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a Twitch retraction deleted a Kick message that merely shared an id")
+	}
+}
+
 func TestMessagesInheritTheAdaptersPlatformAndAccount(t *testing.T) {
 	h := testHub(t)
 	ctx, cancel := context.WithCancel(context.Background())

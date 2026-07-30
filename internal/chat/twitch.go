@@ -249,6 +249,29 @@ func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Sink) (bool, error
 			t.setHealth(StateLive, "")
 			sink.Deliver(m)
 		}
+
+	// CLEARMSG and CLEARCHAT arrive because the CAP REQ above asks for
+	// twitch.tv/commands. They were being received and dropped, which meant
+	// that following polyemesis's own advice -- "use the Twitch dashboard" for
+	// anything it cannot do itself -- desynchronised the pane: the message
+	// stayed on screen, and on any overlay fed from it, until retention aged it
+	// out up to two hours later.
+	//
+	// Nothing here needs a scope. This is Twitch volunteering what it already
+	// decided, not polyemesis asking for authority.
+
+	case "CLEARMSG":
+		// One message deleted. target-msg-id names it.
+		retract(sink, l.Tags["target-msg-id"])
+
+	case "CLEARCHAT":
+		// A user was banned or timed out, which removes everything they said;
+		// or, with no user named, the whole room was cleared.
+		//
+		// Twitch puts the user in the trailing parameter, not in a tag, and
+		// target-user-id is the id that matches Author.ID. Preferring the id
+		// over the login is what makes this work for a renamed account.
+		retractUser(sink, l.Tags["target-user-id"])
 	}
 	return false, nil
 }

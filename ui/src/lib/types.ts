@@ -1193,7 +1193,14 @@ export type EventType =
   /** One chat message, one event. See ChatMessage. */
   | "chat"
   /** The whole per-platform connection table, whenever any part of it moves. */
-  | "chatState";
+  | "chatState"
+  /** Messages that were delivered and are now gone — deleted here, or deleted
+   *  on the platform's own dashboard and reported back to us. See ChatRetraction.
+   *
+   *  The one event in this union that must not be dropped on the floor. Missing
+   *  a "chat" costs a line of conversation; missing this one leaves a message on
+   *  screen that a moderator deliberately removed. */
+  | "chatRetract";
 
 export interface WsEvent {
   type: EventType;
@@ -1325,8 +1332,33 @@ export interface ChatStats {
   /** Shed because persistence fell behind. They were still shown live; only
    *  the scrollback lost them. */
   dropped: number;
+  /** Withdrawn after delivery — deleted here, or deleted on the platform's own
+   *  dashboard and reported back. A number climbing while nobody is using the
+   *  pane's delete button means moderation is happening somewhere polyemesis
+   *  cannot see. */
+  retracted: number;
   pending: number;
   adapters: number;
+}
+
+/** Messages that are gone. Carried by the "chatRetract" event.
+ *
+ *  A list rather than one id because a timeout removes everything one author
+ *  said, and one event per message would let the pane render a half-applied
+ *  timeout — some of the offender's messages gone, some still there. */
+export interface ChatRetraction {
+  platform: ChatPlatform;
+  account?: string;
+  /** What the server was actually holding and has dropped. NOT necessarily
+   *  everything the platform removed: anything already out of the server's
+   *  history ring cannot be named. */
+  messageIds: string[];
+  /** Set when the platform named a user rather than a message, so a client
+   *  holding its own longer buffer can apply the same rule to messages the
+   *  server no longer has. */
+  authorId?: string;
+  /** The platform cleared the entire room. */
+  all?: boolean;
 }
 
 /** A platform's published maximum message length. Advisory: the composer warns

@@ -253,13 +253,9 @@ func (s *Server) handleChatDeleteMessage(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if s.store != nil {
-		if err := s.store.DeleteChatMessage(platform, account, id); err != nil {
-			// The platform already removed it, which is what the operator
-			// asked for. A stale row in our own scrollback is not worth
-			// reporting the deletion as failed.
-			s.log.Debug("chat message deleted on platform but not locally", "err", err)
-		}
-	}
+	// The local scrollback and the broadcast to every other browser are the
+	// Hub's job now, on the same path an upstream deletion takes. Doing it here
+	// as well was how one moderator action could leave two operators looking at
+	// two different rooms.
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

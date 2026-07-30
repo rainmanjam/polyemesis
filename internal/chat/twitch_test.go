@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -411,6 +412,112 @@ func TestTwitchHandshakeAndPingPong(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run returned %v after a cancel, want nil", err)
 		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after the context was cancelled")
+	}
+}
+
+// recordingSink is a Sink that also hears retractions, which is the whole point
+// of the type: a plain SinkFunc silently ignores them, and a test written
+// against one would pass whether or not the adapter said anything.
+type recordingSink struct {
+	mu        sync.Mutex
+	messages  []Message
+	retracted []string
+	users     []string
+}
+
+func (s *recordingSink) Deliver(m Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messages = append(s.messages, m)
+}
+
+func (s *recordingSink) Retract(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retracted = append(s.retracted, id)
+}
+
+func (s *recordingSink) RetractUser(authorID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Appended even when empty: "" is Twitch clearing the whole room, which is
+	// a real event and not an absent one.
+	s.users = append(s.users, authorID)
+}
+
+func (s *recordingSink) snapshot() ([]string, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.retracted...), append([]string(nil), s.users...)
+}
+
+// Twitch tells us when a moderator deletes something on its own dashboard, and
+// polyemesis used to ignore it.
+//
+// The CAP REQ this adapter already sends asks for twitch.tv/commands, which is
+// exactly what makes CLEARMSG and CLEARCHAT arrive. Before this, the command
+// switch handled PRIVMSG only -- so following polyemesis's own advice ("use the
+// Twitch dashboard") left the deleted message on screen, and on any overlay fed
+// from the pane, until retention aged it out up to two hours later.
+//
+// Run over the real read loop rather than by calling handle directly: the tag
+// names are the entire feature, and a test that constructs an ircLine by hand
+// would keep passing if the parser stopped populating them.
+func TestTwitchReportsItsOwnDeletions(t *testing.T) {
+	a, srv := newTwitchOverPipe(t, TwitchConfig{Nick: "streamer", Channel: "streamer", AccountRef: "42"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sink := &recordingSink{}
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, sink) }()
+
+	for i := 0; i < 3; i++ {
+		srv.readLine(t) // CAP, PASS, NICK
+	}
+	srv.write(t, ":tmi.twitch.tv 001 streamer :Welcome, GLHF!")
+	srv.readLine(t) // JOIN
+
+	// A moderator deleted one message. target-msg-id is the tag Twitch uses;
+	// getting this name wrong makes the whole feature a silent no-op, which is
+	// why it is asserted rather than assumed.
+	srv.write(t, "@login=ronni;room-id=1;target-msg-id=abc-123-def;tmi-sent-ts=164 :tmi.twitch.tv CLEARMSG #streamer :HeyGuys")
+
+	// A user was timed out, which removes everything they said. Twitch names the
+	// USER here, never the messages -- ban-duration marks a timeout rather than
+	// a permanent ban, and both clear the same way.
+	srv.write(t, "@ban-duration=600;room-id=1;target-user-id=99;tmi-sent-ts=164 :tmi.twitch.tv CLEARCHAT #streamer :offender")
+
+	// No target-user-id at all is Twitch clearing the entire room.
+	srv.write(t, "@room-id=1;tmi-sent-ts=164 :tmi.twitch.tv CLEARCHAT #streamer")
+
+	deadline := time.After(2 * time.Second)
+	for {
+		ids, users := sink.snapshot()
+		if len(ids) >= 1 && len(users) >= 2 {
+			if ids[0] != "abc-123-def" {
+				t.Fatalf("CLEARMSG retracted %q, want the target-msg-id", ids[0])
+			}
+			if users[0] != "99" {
+				t.Fatalf("CLEARCHAT retracted user %q, want target-user-id 99", users[0])
+			}
+			if users[1] != "" {
+				t.Fatalf("a CLEARCHAT with no target-user-id retracted %q, want \"\" meaning the whole room", users[1])
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("CLEARMSG/CLEARCHAT never reached the sink: ids=%v users=%v", ids, users)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after the context was cancelled")
 	}

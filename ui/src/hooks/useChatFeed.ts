@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
-import type { ChatLimit, ChatMessage, ChatPlatform, ChatStats, ChatStatus } from "@/lib/types";
+import type {
+  ChatLimit,
+  ChatMessage,
+  ChatPlatform,
+  ChatRetraction,
+  ChatStats,
+  ChatStatus,
+} from "@/lib/types";
 
 /* ===========================================================================
    One socket for the whole app, refcounted, so mounting the dashboard panel and
@@ -99,6 +106,40 @@ function forgetMessage(m: { platform: ChatPlatform; account?: string; id: string
   emit({ messages: feed.messages.filter((x) => messageKey(x) !== key) });
 }
 
+/** Apply a retraction pushed by the server.
+ *
+ *  This is what makes "use the platform's dashboard" a coherent instruction. A
+ *  moderator deletes on Twitch, Twitch tells the server, the server tells us,
+ *  and the message leaves this pane — and anything mirroring it — instead of
+ *  sitting there until the scrollback ages out.
+ *
+ *  Two rules are applied, not one. The id list covers what the server was
+ *  holding; authorId covers everything else that author said, because this
+ *  browser's buffer can outlive the server's history ring and a timeout that
+ *  half-applied would be worse than one that did not apply at all. */
+function applyRetraction(r: ChatRetraction) {
+  if (!r?.platform) return;
+  const ids = new Set(r.messageIds ?? []);
+  const sameSource = (m: ChatMessage) =>
+    m.platform === r.platform && (m.account ?? "") === (r.account ?? "");
+
+  const doomed = (m: ChatMessage) => {
+    if (!sameSource(m)) return false;
+    if (r.all) return true;
+    if (r.authorId && m.author.id === r.authorId) return true;
+    return ids.has(m.id);
+  };
+
+  const kept = feed.messages.filter((m) => !doomed(m));
+  if (kept.length === feed.messages.length) return;
+
+  // The seen-keys of removed messages are deliberately NOT released. If the
+  // platform re-sends something it has already told us to delete, that is the
+  // platform contradicting itself, and re-showing a deleted message on the
+  // strength of it is the failure this whole path exists to prevent.
+  emit({ messages: kept });
+}
+
 async function loadHistory() {
   try {
     const view = await api.chatOverview(CLIENT_LIMIT);
@@ -147,6 +188,8 @@ function openSocket() {
     } else if (msg.type === "chatState") {
       // A state event is proof a hub exists, whatever the last overview said.
       emit({ statuses: (msg.data as ChatStatus[]) ?? [], configured: true, stored: false });
+    } else if (msg.type === "chatRetract") {
+      applyRetraction(msg.data as ChatRetraction);
     }
   };
   ws.onclose = () => {

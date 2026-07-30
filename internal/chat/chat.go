@@ -94,6 +94,61 @@ type Deleter interface {
 	Delete(ctx context.Context, messageID string) error
 }
 
+// Retractor is the optional half of Sink, for a platform that reports its OWN
+// deletions back to us.
+//
+// This exists because the instruction polyemesis gives an operator -- "use the
+// platform's dashboard" for anything it cannot do itself -- used to desynchronise
+// the pane the moment they followed it. A moderator deleted a message on Twitch,
+// Twitch said so, and polyemesis kept showing it to the operator (and to any
+// overlay fed from the pane) until retention aged it out up to two hours later.
+//
+// Optional on the SINK rather than a method on Sink, so SinkFunc and every test
+// double stay valid. Adapters reach it through retract below rather than
+// asserting inline, so there is one place that knows the sink might not care.
+type Retractor interface {
+	// Retract reports that the platform removed messageID. Idempotent: a
+	// platform may say so more than once, and a retraction for something we
+	// never saw is normal rather than an error.
+	Retract(messageID string)
+}
+
+// retract tells the sink a message is gone, when the sink can hear it.
+//
+// A sink that is not a Retractor is a legitimate answer -- a test double
+// collecting messages does not need to model deletion -- so this is a silent
+// no-op rather than a failure.
+func retract(sink Sink, messageID string) {
+	if messageID == "" {
+		return
+	}
+	if r, ok := sink.(Retractor); ok {
+		r.Retract(messageID)
+	}
+}
+
+// RetractAll is the sink half of a platform clearing its whole chat, or timing
+// out a user, which removes every message that user has sent.
+//
+// Separate from Retract because the platforms address it differently: Twitch's
+// CLEARCHAT names a USER (or nobody at all, meaning the entire room), never a
+// message. Collapsing that into a list of message ids would mean guessing which
+// messages the platform meant, and guessing wrong deletes something a viewer
+// can still see.
+type RetractorAll interface {
+	// RetractUser removes every message from one author. An empty author means
+	// the platform cleared the entire chat.
+	RetractUser(authorID string)
+}
+
+// retractUser tells the sink every message from one author is gone, or -- with
+// an empty authorID -- that the whole room was cleared.
+func retractUser(sink Sink, authorID string) {
+	if r, ok := sink.(RetractorAll); ok {
+		r.RetractUser(authorID)
+	}
+}
+
 // Healther is the optional self-report. An adapter that knows more about its
 // own condition than "running or not" — YouTube and its quota budget, Kick and
 // its webhook reachability — implements this, and the Hub prefers its answer to
@@ -205,6 +260,35 @@ type Publisher interface {
 // Store persists the bounded history. *db.DB satisfies it.
 type Store interface {
 	AppendChatMessages(msgs []db.ChatMessage) (int, error)
+}
+
+// Retraction is what the UI is told when messages disappear, whether because a
+// moderator used polyemesis or because they used the platform's own dashboard.
+//
+// It carries a LIST rather than one id because a timeout removes everything one
+// author said, and sending N events for one moderator action would let the pane
+// render a half-applied timeout.
+type Retraction struct {
+	Platform db.Platform `json:"platform"`
+	Account  string      `json:"account,omitempty"`
+	// MessageIDs is what polyemesis was actually holding and has now dropped.
+	// It is not "every message the platform removed" -- anything already out of
+	// the history ring cannot be named, and claiming otherwise would be a lie
+	// the UI then has to render.
+	MessageIDs []string `json:"messageIds"`
+	// AuthorID is set when the platform named a user rather than a message, so
+	// a client keeping its own buffer can apply the same rule to messages this
+	// server no longer holds.
+	AuthorID string `json:"authorId,omitempty"`
+	// All marks the platform clearing the entire room.
+	All bool `json:"all,omitempty"`
+}
+
+// Remover is the optional half of Store for deleting one stored message. A
+// Store without it simply keeps the row until retention takes it, which is
+// survivable: the live pane has already dropped the message. *db.DB satisfies it.
+type Remover interface {
+	DeleteChatMessage(p db.Platform, account, messageID string) error
 }
 
 // Purger is the optional half of Store that bounds the table. A Store without
