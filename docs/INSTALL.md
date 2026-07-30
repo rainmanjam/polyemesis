@@ -6,6 +6,7 @@ The dependency is **FFmpeg 6.0 or newer**, and it is where essentially every
 installation problem comes from. Read the FFmpeg part of your platform's
 section even if you skip the rest.
 
+- [The scripted install](#the-scripted-install)
 - [Platform maturity](#platform-maturity)
 - [The FFmpeg requirement](#the-ffmpeg-requirement)
 - [Docker](#docker)
@@ -17,17 +18,57 @@ section even if you skip the rest.
 
 ---
 
+## The scripted install
+
+On Linux, `scripts/install.sh` does everything on this page interactively —
+asks how you want it installed, checks the things that actually go wrong, and
+rolls back cleanly if a step fails:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
+less install.sh          # it runs as root; read it first
+sudo bash install.sh
+```
+
+It offers two modes. **Docker** bundles a known-good FFmpeg with libsrt, so
+nothing on the host matters. **Binary** installs the static binary plus a
+systemd unit, and refuses to proceed if your FFmpeg is below 6.0 — naming your
+distribution's actual version when it recognises it — rather than installing a
+service that cannot start.
+
+What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
+the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
+truncated, a firewall rule for **udp**/6000, and `CAP_NET_BIND_SERVICE` on the
+unit when you choose ACME, without which the `:80` bind fails and issuance
+never completes.
+
+It never asks for an admin password. polyemesis has no account until you create
+one on the first-run screen, so there is no credential for an installer to
+handle. In binary mode it verifies the download against the release's published
+`SHA256SUMS` and refuses to install on a mismatch.
+
+The rest of this page is the manual version, and is worth reading if the script
+fails or if you want to know what it did.
+
+---
+
 ## Platform maturity
 
 These are not four equal targets, and pretending otherwise would cost you a
-weekend.
+weekend. Three words, used the same way here and in the
+[README](../README.md#platform-maturity):
+
+- **Primary** — developed against, deployed, and run in earnest.
+- **Verified** — every push builds it, runs the full test suite, and pushes a
+  measured broadcast through it. Not the same as run in earnest.
+- **Unproven** — nobody operates it there, whatever CI says.
 
 | Platform | Status |
 |---|---|
-| **Linux (server)** | Primary target. Where it is developed against, deployed and exercised. |
-| **Docker** | Primary target. The image is built from this repo and bundles a pinned FFmpeg. |
-| **macOS** | Developed on daily. Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below. |
-| **Windows** | **Builds and runs; not broadcast-tested.** Every push runs the full Go suite on `windows-latest` with FFmpeg installed, then starts the binary and checks it serves — so the process demonstrably comes up. What nobody has done is put a real broadcast through it, and recording truncation on service stop is a known open question. |
+| **Linux (server)** | **Primary.** Where it is developed against, deployed and exercised. |
+| **Docker** | **Primary.** The image is built from this repo and bundles a pinned FFmpeg. |
+| **macOS** | **Verified.** Developed on daily; fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below. |
+| **Windows** | **Verified, and unproven in operation.** Every push runs the full Go suite on `windows-latest` with FFmpeg, then pushes a broadcast through the binary and measures what comes out. What nobody has done is operate it: no live broadcast to a platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is unresolved. |
 
 If you are choosing where to run this, run it on Linux.
 

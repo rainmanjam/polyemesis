@@ -87,14 +87,20 @@ roadmap.
 
 ### Platform maturity
 
-Four targets, not four equal targets:
+Four targets, not four equal targets. Three words are used consistently
+wherever this table appears:
+
+- **Primary** — developed against, deployed, and run in earnest.
+- **Verified** — every push builds it, runs the full test suite, and pushes a
+  measured broadcast through it. Not the same as run in earnest.
+- **Unproven** — nobody operates it there, whatever CI says.
 
 | Platform | Status |
 |---|---|
-| **Linux (server)** | Primary target. Developed against, deployed, exercised. |
-| **Docker** | Primary target. Image built from this repo, FFmpeg pinned and bundled. |
-| **macOS** | Developed on daily. Good workstation and test rig. Homebrew's FFmpeg has no SRT — [see INSTALL.md](docs/INSTALL.md#ffmpeg-on-macos-the-version-is-fine-srt-is-not). |
-| **Windows** | **Implemented but never executed on Windows.** It compiles, the service wrapper and process-group teardown are written, the installer scripts exist — but nobody has run the binary on a Windows host. Treat it as untested. |
+| **Linux (server)** | **Primary.** Developed against, deployed, exercised. |
+| **Docker** | **Primary.** Image built from this repo, FFmpeg pinned and bundled. |
+| **macOS** | **Verified.** Developed on daily; a good workstation and test rig. Homebrew's FFmpeg has no SRT — [see INSTALL.md](docs/INSTALL.md#ffmpeg-on-macos-the-version-is-fine-srt-is-not). |
+| **Windows** | **Verified, and unproven in operation.** CI builds it, runs the suite, and pushes a broadcast through it every push — and has caught real Windows-only bugs doing so. But nobody runs it in earnest: the service wrapper and installer scripts have never been exercised on a live host, and recording truncation on service stop is unresolved. |
 
 ### Project status
 

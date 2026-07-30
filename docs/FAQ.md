@@ -120,16 +120,20 @@ usually the least painful route.
 
 ## Is Windows supported?
 
-Partly. CI builds the binary on `windows-latest` every push, starts it, and
-checks it serves — so "it compiles" is no longer the only thing known, and the
-cross-platform job has already caught real Windows-specific bugs: a `file://`
-URL corrupted by path separators, TLS keys written world-readable because
-`os.FileMode` is a no-op there, and path traversal reaching four resolvers
-through `/`.
+**Verified, and unproven in operation** — the same two words the
+[platform table](../README.md#platform-maturity) uses.
 
-What is still untested is *use*. Nobody has run a real broadcast through it on
-a Windows host, and there is a known unresolved question about recording
-truncation on service stop.
+Verified: every push runs the full Go suite on `windows-latest` with FFmpeg
+installed, then pushes a three-track broadcast through the binary and measures
+per-band energy in each destination's output. That job has already caught real
+Windows-only bugs — a `file://` URL corrupted by path separators, TLS keys
+written world-readable because `os.FileMode` is a no-op there, and path
+traversal reaching four resolvers through `/`.
+
+Unproven: nobody *operates* it on Windows. No live broadcast has gone to a real
+platform from a Windows host, the Service Control Manager wrapper and installer
+scripts have never run anywhere but a developer's imagination, and recording
+truncation on service stop is a known unresolved problem.
 
 Linux and Docker are the primary targets.
 
