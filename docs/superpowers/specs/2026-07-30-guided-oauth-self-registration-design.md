@@ -172,7 +172,8 @@ valid would be obstructive. The state is reported, not enforced.
 
 ## 3. Redirect-URI preflight
 
-`GET /api/v1/oauth/guides` already returns `origin + RedirectPath`. It gains a
+`GET /api/v1/platforms/guides` (`api.go:374`, handler `handlePlatformGuides`)
+already returns `origin + RedirectPath`. It gains a
 `redirectWarnings []string`, computed server-side where the configuration
 actually lives (`cfg.TLS.Hostname`, `ServesTLS()`, `TrustProxyHeaders`, `r.Host`).
 

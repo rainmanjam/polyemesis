@@ -6,11 +6,21 @@
 // resulting tokens encrypted (see internal/secrets), and refreshes them
 // automatically.
 //
-// On Kick: Kick's public API exposes the channel, the category directory, chat
-// and livestream stats, but no stream key — confirmed absent from Channels,
-// Livestreams and Users. Kick is therefore a full Provider whose Ingest returns
-// ErrNoStreamKeyAPI; see ManualKey in kick.go. Signing in is still worth doing,
-// because everything except the key is available once you have.
+// On Kick: its stream key WAS recorded here as unavailable — "confirmed absent
+// from Channels, Livestreams and Users" — and that was wrong. There is no
+// /streamkey endpoint to find, so reading the endpoint list suggests the
+// capability does not exist; the key in fact rides as stream.key on the same
+// GET /public/v1/channels response the adapter already fetches, withheld unless
+// streamkey:read was granted. Kick.Ingest reads it like any other provider.
+//
+// ErrNoStreamKeyAPI survives for exactly one case: a token minted before that
+// scope was requested, which reads as an empty key and is fixed by reconnecting
+// once. Granting a scope never upgrades a token already issued.
+//
+// The stale claim outlived the fix in three other places — the capability
+// matrix, the setup guide, and this comment. guide_drift_test.go now pins the
+// guide against the matrix; this paragraph is pinned by nothing, so re-read it
+// against kick.go before trusting it.
 package oauth
 
 import (
