@@ -649,6 +649,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.log.Warn("cannot tell whether an MQTT password is stored", "err", err)
 	}
+	// Same for the automod model key, and for the same reason: the page needs
+	// to know one is set without ever being handed it.
+	if has, err := s.store.HasAutomodKey(); err == nil {
+		settings.Automod.Model.HasAPIKey = has
+	} else {
+		s.log.Warn("cannot tell whether an automod model key is stored", "err", err)
+	}
 	writeJSON(w, http.StatusOK, settings)
 }
 

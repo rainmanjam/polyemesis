@@ -1,0 +1,169 @@
+package api
+
+import (
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/db"
+)
+
+// Automod's configuration rides inside Settings, so GET/PUT /settings already
+// carries the matrix, the rules and the model config. Only three things need
+// endpoints of their own:
+//
+//   - the RENDERED matrix, because which cells are available is derived from
+//     platform capability and must never be stored. A stored availability could
+//     disagree with reality, and the failure is an operator believing a channel
+//     is protected when nothing is wired to it.
+//   - model spend, which is state rather than configuration.
+//   - the model's API key, sealed separately for the same reason the MQTT
+//     broker password is: a secret in the settings blob is a secret returned by
+//     GET /settings.
+
+// handleAutomodMatrix returns every cell with its availability and reason.
+func (s *Server) handleAutomodMatrix(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	m := matrixFromSettings(settings.Automod)
+	caps := automod.PlatformCaps{}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":         m.Enabled,
+		"platformEnabled": m.PlatformEnabled,
+		"cells":           m.Cells(caps),
+		"summary":         m.Summary(caps),
+		// The vocabularies, so the UI renders rows and columns from the server's
+		// list rather than a second copy that can drift out of step.
+		"actions":   automod.Actions,
+		"checkers":  automod.Checkers,
+		"platforms": automod.Platforms,
+	})
+}
+
+// handleAutomodStats reports model spend and health.
+func (s *Server) handleAutomodStats(w http.ResponseWriter, r *http.Request) {
+	// Stats live on the engine, which the chat hub owns. Until that wiring
+	// lands this reports an honest zero rather than inventing numbers.
+	writeJSON(w, http.StatusOK, automod.ModelStats{})
+}
+
+// handlePutAutomodKey sets or clears the model API key.
+//
+// Its own endpoint, exactly like handlePutMQTTPassword: the key is sealed and
+// never appears in the settings blob, so it cannot be returned by GET /settings
+// and cannot reach a log through one.
+func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key string `json:"key"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	// An empty key clears the row, which is how the model checker is turned off
+	// without leaving a credential behind. Sealing happens in the store, the
+	// same shape as the MQTT broker password.
+	key := strings.TrimSpace(req.Key)
+	if err := s.store.PutAutomodKey(s.box, key); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hasApiKey": key != ""})
+}
+
+// matrixFromSettings converts the stored shape into the engine's.
+//
+// Two shapes rather than one because they answer different questions: the
+// stored form is what round-trips through the settings blob, and the engine's
+// is what the checkers consult. Keeping them apart means adding a checker does
+// not change the database schema.
+func matrixFromSettings(a db.AutomodSettings) automod.Matrix {
+	m := automod.Matrix{
+		Enabled:         a.Enabled,
+		PlatformEnabled: map[db.Platform]bool{},
+		On:              map[string]bool{},
+	}
+	for p, on := range a.PlatformEnabled {
+		m.PlatformEnabled[p] = on
+	}
+	for k, on := range a.On {
+		if !on {
+			continue
+		}
+		// A key from a newer version is DROPPED rather than kept, so an
+		// unrecognised action cannot be silently treated as one we know.
+		key, err := automod.ParseKey(k)
+		if err != nil ||
+			!automod.KnownPlatform(key.Platform) ||
+			!automod.KnownActions(key.Action) ||
+			!automod.KnownChecker(key.Checker) {
+			continue
+		}
+		m.On[k] = true
+	}
+	return m
+}
+
+// rulesFromSettings compiles the stored rules.
+//
+// A bad pattern fails the whole set rather than being skipped: silently
+// dropping one leaves an operator believing a protection exists when it does
+// not, which is the same silent-failure shape the capability gate prevents.
+func rulesFromSettings(a db.AutomodSettings) (*automod.RuleSet, error) {
+	rules := make([]automod.Rule, 0, len(a.Rules))
+	for _, r := range a.Rules {
+		rules = append(rules, automod.Rule{
+			ID:             r.ID,
+			Name:           r.Name,
+			Enabled:        r.Enabled,
+			Pattern:        r.Pattern,
+			Action:         automod.Action(r.Action),
+			TimeoutSeconds: r.TimeoutSeconds,
+		})
+	}
+	return automod.NewRuleSet(rules)
+}
+
+// historyFromSettings converts the stored bounds.
+func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
+	h := a.History
+	lim := automod.DefaultHistoryLimits()
+	if h.WindowSeconds > 0 {
+		lim.Window = time.Duration(h.WindowSeconds) * time.Second
+	}
+	if h.MaxMessages > 0 {
+		lim.MaxMessages = h.MaxMessages
+	}
+	if h.MaxRepeats > 0 {
+		lim.MaxRepeats = h.MaxRepeats
+	}
+	if h.MaxLinks > 0 {
+		lim.MaxLinks = h.MaxLinks
+	}
+	if h.MaxMentionsPerMessage > 0 {
+		lim.MaxMentionsPerMessage = h.MaxMentionsPerMessage
+	}
+	if h.MinLengthForCaps > 0 {
+		lim.MinLengthForCaps = h.MinLengthForCaps
+	}
+	if h.MaxCapsRatio > 0 {
+		lim.MaxCapsRatio = h.MaxCapsRatio
+	}
+	if h.Action != "" && automod.KnownActions(automod.Action(h.Action)) {
+		lim.Action = automod.Action(h.Action)
+	}
+	if h.TimeoutSeconds > 0 {
+		lim.TimeoutSeconds = h.TimeoutSeconds
+	}
+	if h.RetainPerAuthor > 0 {
+		lim.Retain = h.RetainPerAuthor
+	}
+	if h.IdleEvictionSeconds > 0 {
+		lim.IdleEviction = time.Duration(h.IdleEvictionSeconds) * time.Second
+	}
+	return lim
+}
