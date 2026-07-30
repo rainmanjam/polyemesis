@@ -1787,6 +1787,15 @@ export interface PostProdSettings {
   retainDays: number;
   retainJobs: number;
   kinds?: PostProdKindSettings[];
+  /** Transcription model for jobs that name none. Empty keeps the
+   *  hardware-derived choice, which is the right default and stays it.
+   *
+   *  Model choice IS the transcription decision — speed against accuracy
+   *  against memory — and the right answer depends partly on hardware
+   *  polyemesis can measure and partly on how much you care about the
+   *  transcript, which it cannot. See WhisperInfo.models for what this machine
+   *  has. */
+  whisperModel?: string;
 }
 
 /** What this machine can do about speech to text. Reported even when

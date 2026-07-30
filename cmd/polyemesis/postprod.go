@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/clipper"
@@ -92,7 +93,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	// be applied to work that had already started.
 	q.SetAdmit(gov.MayStart)
 
-	registerProcessors(log, cfg, store, gov, q, tools, whisper)
+	registerProcessors(log, cfg, store, gov, q, tools, whisper, settings.PostProd)
 
 	// Registration before Run, always: Run calls Recover() before it claims
 	// anything, and a kind claimed with no worker registered costs a tick.
@@ -123,15 +124,23 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 // missing. A processor that fails a job with "whisper.cpp is not installed"
 // tells an operator what to do; a button that silently does not exist tells
 // them the feature is broken. This is the fail-open rule applied to a queue.
-func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *jobs.Governor, q *jobs.Queue, tools *ffmpeg.Tools, whisper *transcribe.Tools) {
+func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *jobs.Governor, q *jobs.Queue, tools *ffmpeg.Tools, whisper *transcribe.Tools, pp db.PostProdSettings) {
 	reg := func(kind jobs.Kind, err error) {
 		if err != nil {
 			log.Error("cannot register a job kind", "kind", kind, "error", err)
 		}
 	}
 
-	tp := transcribe.NewProcessor(log, tools, whisper, cfg.RecordingsDir(), cfg.ModelsDir(),
-		transcribe.WithNice(niceWrapper(gov)))
+	// The operator's model choice, when they have made one. Empty leaves the
+	// hardware-derived default, which is what every install ran before this was
+	// reachable -- transcribe.WithDefaultModel existed from the start and
+	// nothing ever called it, so the guess was the only available answer.
+	tpOpts := []transcribe.Option{transcribe.WithNice(niceWrapper(gov))}
+	if m := strings.TrimSpace(pp.WhisperModel); m != "" {
+		tpOpts = append(tpOpts, transcribe.WithDefaultModel(m))
+		log.Info("transcription default model set by settings", "model", m)
+	}
+	tp := transcribe.NewProcessor(log, tools, whisper, cfg.RecordingsDir(), cfg.ModelsDir(), tpOpts...)
 	// Concurrency 1: whisper saturates every core it is given, so a second
 	// transcription buys nothing and costs the first one half the machine.
 	reg(transcribe.KindTranscribe, q.Register(transcribe.KindTranscribe, 1, tp))

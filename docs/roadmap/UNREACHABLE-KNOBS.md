@@ -44,8 +44,8 @@ What remains is below.
 
 | Knob | Fixed at | What it would unlock | Verdict |
 |---|---|---|---|
-| `relay.WithListenIP` | IPv4 loopback | **IPv6 consumers, and a relay spanning hosts.** Every call site is `relay.New(log, 0)`, so the wildcard/dual-stack path the option documents has never run | **Highest value here.** A capability, not a tuning knob |
-| `relay.WithAdvertiseIP` | derived from the bind | Correct addresses when the hub binds a wildcard or sits behind a different route than it listens on | Pairs with the above; ship together or neither |
+| `relay.WithListenIP` | IPv4 loopback | Nothing, today — see [Why the relay pair must stay unwired](#why-the-relay-pair-must-stay-unwired) | **Do not wire.** I ranked this highest and was wrong |
+| `relay.WithAdvertiseIP` | derived from the bind | Only meaningful alongside a non-loopback bind | **Do not wire.** Same |
 | `transcribe.WithDefaultModel` | hardware-derived | An install-wide Whisper model choice. The API accepts a per-job `Model` ([library.go:908](../../internal/api/library.go)) and **the UI never sends it**, so model choice — the main speed/accuracy/RAM tradeoff in transcription — is unreachable by clicking and undefaultable | **High.** Small change, direct operator value |
 | `chat.WithHistory` | 500 messages | The in-memory ring a late-joining browser reads before falling back to the database. Pairs directly with the retention work just shipped: retention sets how deep a user card goes, this sets how much arrives without a query | **Medium.** Natural companion to `settings.chat` |
 | `alerts.WithRetry` | package default | The retry budget for a webhook that is down. Currently one fixed answer for "how hard do we chase a dead endpoint" | **Medium.** The one alerts knob with a real failure story behind it |
@@ -67,17 +67,49 @@ That is the drift guard having done its job, and it is worth stating plainly:
 the class of bug UNREACHABLE-FEATURES documented is now closed, and this
 document exists because closing it revealed a different one underneath.
 
+## Why the relay pair must stay unwired
+
+This section is a correction. The first draft of this document called the relay
+pair the highest-value item here, on the reasoning that IPv4-loopback-only is a
+ceiling on what polyemesis can be deployed as. That reasoning does not survive
+reading the code, and the conclusion inverts.
+
+**The hub does not know who sent a datagram.** `run` calls `h.conn.Read(buf)`,
+not `ReadFrom`: there is no source address to check and nothing checks one. The
+socket reads, and whatever arrives is fanned out to every subscriber.
+
+That is entirely safe on loopback, where the only writer is polyemesis's own
+ingest. Bind it wider and it becomes an **unauthenticated injection path into the
+live programme** — anything that can reach that UDP port lands in every
+destination, the recorder, and the meters, with no way for an operator to see
+where it came from.
+
+**And it buys nothing today.** Every subscriber is a local FFmpeg child process:
+
+    recorder   preview   meters   playout   silence   selector
+
+each handed a `udp://127.0.0.1:port` URL and spawned on this host. The
+cross-host entry point that would justify a wider bind is `SubscribeAddr`, and
+that has **no production caller either** — so the remote-consumer case the option
+was written for does not exist anywhere in the product.
+
+Wiring this would therefore add a setting, a validator, a UI control and a
+drift-guard entry whose principal effect is to let an operator open a hole in
+their own broadcast, in exchange for a capability nothing uses. The option should
+stay exactly where it is: available to a future caller that has a remote consumer
+AND a source-validation story, and reachable by nobody until then.
+
+If that future arrives, the order is: add source filtering to `run` first, then
+the bind option, then the setting. Not the reverse.
+
 ## Recommendation
 
-Two are worth doing and the rest are not, on current evidence:
+One is worth doing:
 
-1. **The relay pair.** IPv4-loopback-only is a real ceiling on what polyemesis
-   can be deployed as, and the code to lift it is already written and tested —
-   only the wiring is missing. Anyone who wants IPv6 or a second host hits this
-   and has no way past it.
-2. **`transcribe.WithDefaultModel`.** Model choice is the transcription decision,
+1. **`transcribe.WithDefaultModel`.** Model choice is the transcription decision,
    the API already accepts it per job, and there is no way to express a default
-   or to pick one from the UI at all.
+   or to pick one from the UI at all. No security dimension: it selects which
+   local model file a local process loads.
 
 The `Low` rows should be left alone. Each is one fixed number chosen against a
 measured shape, and exposing a knob nobody has a reason to turn adds a setting to

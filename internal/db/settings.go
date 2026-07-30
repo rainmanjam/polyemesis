@@ -866,6 +866,25 @@ type PostProdSettings struct {
 
 	// Kinds are the per-kind overrides.
 	Kinds []PostProdKindSettings `json:"kinds,omitempty"`
+
+	// WhisperModel is the transcription model a job gets when it names none.
+	// Empty keeps the hardware-derived choice, which is the right default and
+	// stays the default.
+	//
+	// It is here because model choice IS the transcription decision -- it trades
+	// speed, accuracy and memory against each other, and the right answer
+	// depends on hardware polyemesis can measure and on how much the operator
+	// cares about the transcript, which it cannot. The per-job API already
+	// accepted a model; nothing could express a preference for every job, and
+	// the UI never sent one at all, so the hardware guess was the only reachable
+	// answer.
+	//
+	// NOT validated against a fixed list. transcribe.Models() is the catalogue
+	// and it can grow, an operator may have a model file this build has never
+	// heard of, and a name we reject here is a model they cannot use for a
+	// reason they cannot see. The worker reports an unknown model when it tries
+	// to load it, which is the layer that actually knows.
+	WhisperModel string `json:"whisperModel,omitempty"`
 }
 
 // Policy converts the stored settings into the governor's own policy, which is

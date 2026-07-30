@@ -55,6 +55,7 @@ import {
   type JobsOverview,
   type PostProdKindSettings,
   type PostProdSettings,
+  type WhisperInfo,
 } from "@/lib/types";
 
 // The jobs page is where the user controls the CPU tradeoff this whole tier is
@@ -299,6 +300,7 @@ export function JobsPage() {
               dirty={dirty}
               busy={busy}
               onPatch={patch}
+              whisper={view.whisper}
               onSave={savePolicy}
               onRevert={() => {
                 setDraft(view.policy);
@@ -649,6 +651,7 @@ function ProgressCell({ job }: { job: JobView }) {
 function PolicyEditor({
   draft,
   kinds,
+  whisper,
   dirty,
   busy,
   onPatch,
@@ -657,6 +660,10 @@ function PolicyEditor({
 }: {
   draft: PostProdSettings;
   kinds: JobKindInfo[];
+  /** What this machine can do about speech to text. The model picker needs it
+   *  to offer real choices rather than a hard-coded list that could name a
+   *  model this install does not have. */
+  whisper: WhisperInfo;
   dirty: boolean;
   busy: boolean;
   onPatch: (p: Partial<PostProdSettings>) => void;
@@ -896,6 +903,49 @@ function PolicyEditor({
                 max={120}
                 onChange={(n) => onPatch({ thermalCeilingC: n })}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Transcription</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              <Label htmlFor="jobs-whisper-model">Default model</Label>
+              <select
+                id="jobs-whisper-model"
+                value={draft.whisperModel ?? ""}
+                onChange={(e) => onPatch({ whisperModel: e.target.value })}
+                className="h-8 w-56 rounded border border-border bg-card-raised px-2 text-[12px]"
+              >
+                {/* Empty is first and is the default, because the
+                    hardware-derived choice is the right answer until an operator
+                    has a reason to override it. */}
+                <option value="">Automatic (chosen from this hardware)</option>
+                {(whisper.models ?? []).map((m: string) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] text-muted-foreground">
+                What a transcribe job uses when it does not name a model. Bigger models are more
+                accurate, slower, and want more memory &mdash; and this machine currently picks{" "}
+                <strong>{whisper.defaultModel || "nothing, because whisper.cpp is missing"}</strong>{" "}
+                on its own.
+              </span>
+              {!whisper.available && (
+                <span className="text-[10px] text-warn">
+                  whisper.cpp is not installed here, so this has no effect yet. It is still worth
+                  setting: the choice applies as soon as it is.
+                </span>
+              )}
+              {(whisper.models ?? []).length === 0 && whisper.available && (
+                <span className="text-[10px] text-warn">
+                  No model files were found in the models directory. Automatic will download the one
+                  it picks; naming a specific model here only works once that file exists.
+                </span>
+              )}
             </CardContent>
           </Card>
 

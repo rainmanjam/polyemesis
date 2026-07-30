@@ -573,3 +573,28 @@ func TestKindIsStableAndTargetsUseTheCanonicalSpelling(t *testing.T) {
 // a signature drift is a build failure rather than a runtime registration
 // error.
 var _ jobs.Worker = (*Processor)(nil)
+
+// WithDefaultModel has to actually change what a job with no model gets.
+//
+// It existed from the start with no production caller, so nothing proved it did
+// anything. That is the whole class of bug docs/roadmap/UNREACHABLE-KNOBS.md is
+// about: an option that is real, documented, tested for compilation, and dead.
+func TestWithDefaultModelOverridesTheHardwareGuess(t *testing.T) {
+	p := NewProcessor(testLogger(), nil, nil, t.TempDir(), t.TempDir(),
+		WithDefaultModel("medium"))
+	if p.defaultModel != "medium" {
+		t.Fatalf("defaultModel = %q, want the option's value", p.defaultModel)
+	}
+}
+
+// Empty must LEAVE the hardware-derived choice rather than blanking it, because
+// that is what an operator who has expressed no preference is asking for.
+func TestWithDefaultModelEmptyLeavesTheGuessAlone(t *testing.T) {
+	base := NewProcessor(testLogger(), nil, nil, t.TempDir(), t.TempDir())
+	withEmpty := NewProcessor(testLogger(), nil, nil, t.TempDir(), t.TempDir(),
+		WithDefaultModel(""))
+	if withEmpty.defaultModel != base.defaultModel {
+		t.Fatalf("empty override changed the default from %q to %q",
+			base.defaultModel, withEmpty.defaultModel)
+	}
+}
