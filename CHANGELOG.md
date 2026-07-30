@@ -8,9 +8,18 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing has been tagged yet. Everything below is on `main` and is what a first
-release will contain. Entries are grouped by what they do for an operator rather
-than by which package changed.
+Nothing yet.
+
+## [0.1.0] — 2026-07-30
+
+The first tagged release. Entries are grouped by what they do for an operator
+rather than by which package changed.
+
+**What it is for:** one encoder in, many platforms out, and **a different audio
+mix for each destination**. Video is never re-encoded on a destination path, so
+a dozen destinations cost roughly what one does.
+
+**Read [Known limitations](#known-limitations-at-010) before deploying it.**
 
 ### Multi-source ingest
 
@@ -232,7 +241,70 @@ than reading for tone. What it found is why it was worth doing:
   and the editor declines to offer VA-API on the strength of it.
 - `INSTALL.md` claimed `make release` emits no Windows target. It emits two.
 - The stale "nobody has run this on Windows" claim appeared on four separate
-  pages. Platform status now uses one vocabulary — **Primary**, **Verified**,
-  **Unproven** — defined once and used identically everywhere.
+  pages. Platform status is now stated on two axes instead of one adjective —
+  what CI proves, which is identical for Linux, macOS and Windows, and what
+  operating it proves, which is not — so a reader can see where the platforms
+  are equal rather than inferring it from a word.
+- Every file link and all 110 anchor links across 51 markdown files were
+  machine-checked and resolve.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/commits/main
+### Known limitations at 0.1.0
+
+Stated here rather than discovered later. None is a bug; each is a boundary.
+
+#### Access and identity
+
+- **One user, no roles.** Access to the UI is full control of the server's
+  streaming and — through expert mode and file destinations — meaningful control
+  of the machine. Put a reverse proxy in front if you need access control.
+- **No audit log.** Nothing records which change was made when, or from where.
+- **OAuth needs your own developer app.** Signing in to YouTube, Twitch, Kick or
+  Facebook works, but each operator registers their own application per platform;
+  there is no shared one. Stream URL and key need none of this. See
+  [PLATFORMS.md](docs/PLATFORMS.md).
+
+#### Ingest
+
+- **RTMP serves at most one source**, carries a single stereo pair, and is
+  unencrypted. SRT is the path that makes this product worth running.
+- **Enhanced RTMP / multitrack FLV is not implemented.** The `enhancedRtmp`
+  config key parses and nothing branches on it.
+
+#### Platforms
+
+- **Windows is tested, not operated.** It clears the same CI floor as Linux and
+  macOS including a measured broadcast, but nobody has run a real show on it,
+  and **stopping the service truncates an in-progress recording** — the graceful
+  stop is a `CTRL_BREAK_EVENT`, which Windows delivers only through a console.
+- **linux/arm64 is built and verified at the ELF level, not run.**
+- **Homebrew's FFmpeg on macOS has no libsrt.** Use Docker or a build with
+  `--enable-libsrt`.
+
+#### Video
+
+- **No hardware encode has ever been run on real GPU hardware.** Detection,
+  refusal and fallback are all tested with shims; a successful NVENC, QSV or
+  VA-API encode has not been observed. See [HARDWARE.md](docs/HARDWARE.md).
+- **The VA-API probe names `/dev/dri/renderD128` unconditionally**, so on a
+  multi-GPU host it can test the wrong device and decline to offer VA-API on
+  the strength of it. Detection picks the right node; the probe was never wired
+  to it.
+- **FFmpeg 6.x cuts a copied clip up to one GOP long.** Use 8.x for exact
+  out-points.
+- No HDR tone-map path, no compositing or video grid, no Decklink/SDI.
+
+#### Playout
+
+- **Scheduled file broadcast joins mid-file, not at frame 0**, and there is no
+  playlist sequencing. See
+  [SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md).
+- **LL-HLS is not implemented and was declined deliberately** — FFmpeg cannot
+  emit partial segments at all. Preview latency was tuned to 2.2–3.2 s instead.
+
+#### Platform support
+
+- **Instagram Live cannot work** and is marked unsupported rather than shipped
+  as a preset that never connects.
+
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/rainmanjam/polyemesis/releases/tag/v0.1.0
