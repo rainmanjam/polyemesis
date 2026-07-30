@@ -196,7 +196,7 @@ POST   /api/v1/chat/messages/hide?platform=&account=&id=&scope=local|platform[&h
 POST   /api/v1/chat/bans?platform=&account=&userId=[&seconds=][&reason=]
 DELETE /api/v1/chat/bans?platform=&account=&userId=
 PATCH  /api/v1/chat/settings?platform=&account=
-```http
+```
 
 `scope` defaults to `local` on the hide route deliberately: a caller that omits
 it gets the half that cannot overreach, rather than an unintended write to
