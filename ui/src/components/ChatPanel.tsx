@@ -27,6 +27,7 @@ import {
   splitMessage,
 } from "@/lib/chat";
 import { messageKey, useChatFeed } from "@/hooks/useChatFeed";
+import { ChatUserCard } from "@/components/ChatUserCard";
 import type {
   ChatLimit,
   ChatMessage,
@@ -95,10 +96,13 @@ function MessageBody({ m }: { m: ChatMessage }) {
 function MessageRow({
   m,
   onDelete,
+  onOpenUser,
   compact,
 }: {
   m: ChatMessage;
   onDelete?: (m: ChatMessage) => void;
+  /** Open the moderator's user card for whoever said this. */
+  onOpenUser?: (m: ChatMessage) => void;
   compact?: boolean;
 }) {
   const accent = accentFor(m.platform);
@@ -143,13 +147,34 @@ function MessageRow({
         <Shield className="mr-0.5 inline h-3 w-3 align-text-bottom text-armed" aria-label="Moderator" />
       )}
 
-      <span
-        className={cn("font-semibold", !m.author.color && nameTone(m.author.name))}
+      {/* The name is the way in to moderation, which is where every chat tool
+          puts it: you read a bad line, you click who said it. A separate
+          moderation button per row would compete with Delete for the same
+          corner and make the common case (read, judge, act) three clicks. */}
+      <button
+        type="button"
+        disabled={!onOpenUser || !m.author.id}
+        onClick={() => onOpenUser?.(m)}
+        aria-label={m.author.id ? `Moderate ${m.author.name}` : m.author.name}
+        title={
+          m.author.id
+            ? `What ${m.author.name} has said, and what to do about it`
+            : // A platform that sent no author id cannot be addressed by any
+              // moderation call, so the name is not a button. Saying why beats a
+              // control that silently does nothing.
+              `${m.author.name} — ${m.platform} sent no user id for this message, so it cannot be moderated`
+        }
+        className={cn(
+          "font-semibold",
+          !m.author.color && nameTone(m.author.name),
+          onOpenUser && m.author.id
+            ? "cursor-pointer hover:underline focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none"
+            : "cursor-default",
+        )}
         style={m.author.color ? { color: m.author.color } : undefined}
-        title={(m.author.badges ?? []).map((b) => b.label || b.id).join(", ") || undefined}
       >
         {m.author.name}
-      </span>
+      </button>
       <span className="text-subtle-foreground">{m.action ? " " : ": "}</span>
       <span
         className={cn(
@@ -184,11 +209,13 @@ function MessageRow({
 export function ChatTimeline({
   messages,
   onDelete,
+  onOpenUser,
   compact,
   empty,
 }: {
   messages: ChatMessage[];
   onDelete?: (m: ChatMessage) => void;
+  onOpenUser?: (m: ChatMessage) => void;
   compact?: boolean;
   empty?: React.ReactNode;
 }) {
@@ -232,6 +259,7 @@ export function ChatTimeline({
                 key={messageKey(m)}
                 m={m}
                 onDelete={onDelete}
+                onOpenUser={onOpenUser}
                 compact={compact}
               />
             ))}
@@ -555,6 +583,11 @@ export function ChatPanel({
       return next;
     });
 
+  // The message whose author's card is open. Holding the MESSAGE rather than
+  // just an id keeps the platform and account with it, which the card needs to
+  // address a moderation call and cannot re-derive.
+  const [card, setCard] = useState<ChatMessage | null>(null);
+
   const del = useCallback(
     async (m: ChatMessage) => {
       try {
@@ -570,6 +603,16 @@ export function ChatPanel({
 
   return (
     <div className={cn("flex min-h-0 flex-col rounded-md border border-border bg-card", className)}>
+      {card && (
+        <ChatUserCard
+          platform={card.platform}
+          account={card.account}
+          authorId={card.author.id ?? ""}
+          authorName={card.author.name}
+          open
+          onOpenChange={(o) => !o && setCard(null)}
+        />
+      )}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
         <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12px] font-semibold">Chat</span>
@@ -591,6 +634,7 @@ export function ChatPanel({
       <ChatTimeline
         messages={visible}
         onDelete={del}
+        onOpenUser={setCard}
         compact
         empty={
           <ChatEmpty loading={loading} configured={configured} error={error} statuses={statuses} />

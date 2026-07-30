@@ -249,3 +249,93 @@ func TestChatEdgeCasesDoNotError(t *testing.T) {
 		}
 	}
 }
+
+// The moderator's user card reads from OUR store, because no platform publishes
+// a user-chat-history API. That makes two properties load-bearing.
+func TestChatMessagesByAuthor(t *testing.T) {
+	d := testDB(t)
+
+	msgs := []ChatMessage{
+		{Platform: PlatformTwitch, MessageID: "t1", AuthorID: "7", AuthorName: "Bob", Text: "first", At: time.UnixMilli(1000)},
+		{Platform: PlatformTwitch, MessageID: "t2", AuthorID: "9", AuthorName: "Eve", Text: "other person", At: time.UnixMilli(2000)},
+		{Platform: PlatformTwitch, MessageID: "t3", AuthorID: "7", AuthorName: "Bob", Text: "second", At: time.UnixMilli(3000)},
+		// Same author id on a DIFFERENT platform. Ids are platform-scoped and
+		// nothing makes them unique across platforms, so a card for Twitch's
+		// user 7 must not show Kick's user 7 — they are different people.
+		{Platform: PlatformKick, MessageID: "k1", AuthorID: "7", AuthorName: "Someone else", Text: "kick", At: time.UnixMilli(4000)},
+	}
+	if _, err := d.AppendChatMessages(msgs); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.ChatMessagesByAuthor(PlatformTwitch, "7", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want the 2 from Twitch user 7: %+v", len(got), got)
+	}
+	// Oldest first, like every other chat read: a card is read top to bottom.
+	if got[0].Text != "first" || got[1].Text != "second" {
+		t.Fatalf("order = %q, %q; want oldest first", got[0].Text, got[1].Text)
+	}
+	for _, m := range got {
+		if m.Platform != PlatformTwitch {
+			t.Fatalf("a Kick message leaked into a Twitch user's card: %+v", m)
+		}
+	}
+}
+
+// The limit is what makes Truncated meaningful upstream, so it has to actually
+// bound the read.
+func TestChatMessagesByAuthorRespectsTheLimit(t *testing.T) {
+	d := testDB(t)
+	var msgs []ChatMessage
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, ChatMessage{
+			Platform: PlatformTwitch, MessageID: fmt.Sprintf("m%d", i),
+			AuthorID: "7", AuthorName: "Bob", Text: "line", At: time.UnixMilli(int64(1000 + i)),
+		})
+	}
+	if _, err := d.AppendChatMessages(msgs); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.ChatMessagesByAuthor(PlatformTwitch, "7", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d, want 3", len(got))
+	}
+	// The NEWEST three, not the oldest: a moderator wants what was just said.
+	if got[2].Text != "line" || got[2].At.UnixMilli() != 1009 {
+		t.Fatalf("last message = %+v, want the newest", got[2])
+	}
+}
+
+func TestChatMessagesByAuthorRefusesAnEmptyAuthor(t *testing.T) {
+	d := testDB(t)
+	if _, err := d.AppendChatMessages([]ChatMessage{
+		{Platform: PlatformTwitch, MessageID: "t1", AuthorID: "", Text: "anonymous", At: time.UnixMilli(1)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Both spellings, and the EMPTY one is the load-bearing case.
+	//
+	// author_id defaults to '' for any platform that sends none, so without the
+	// guard `ChatMessagesByAuthor(p, "")` matches every anonymous message and
+	// pools unrelated strangers into one person's card. A whitespace query alone
+	// does not prove that: `author_id = '  '` matches nothing whether or not the
+	// guard exists, so a test using only that passes against a broken build.
+	// This was found by removing the guard and watching the test still pass.
+	for _, id := range []string{"", "  "} {
+		got, err := d.ChatMessagesByAuthor(PlatformTwitch, id, 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("author id %q returned %d messages; anonymous authors would be "+
+				"pooled into one card", id, len(got))
+		}
+	}
+}

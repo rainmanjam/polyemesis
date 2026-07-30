@@ -459,6 +459,14 @@ CREATE INDEX IF NOT EXISTS idx_transcript_tracks_recording ON transcript_tracks(
 -- platform, and the purge walks the same order backwards.
 CREATE INDEX IF NOT EXISTS idx_chat_messages_recent ON chat_messages(at_ms DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_platform ON chat_messages(platform, at_ms DESC, id DESC);
+-- "Everything this person has said", which is what a moderator reads before
+-- deciding whether one bad message was a bad moment or a pattern. Without this
+-- the query is a full scan of the table on every card open, and the card opens
+-- from a hover.
+--
+-- author_id and not author_name: a display name is not an identity, and on every
+-- platform here a name can change while the id cannot.
+CREATE INDEX IF NOT EXISTS idx_chat_messages_author ON chat_messages(platform, author_id, at_ms DESC, id DESC);
 
 -- NOTE: nothing here may reference destinations.rendition_id. This file runs
 -- against databases created before renditions existed, where CREATE TABLE IF

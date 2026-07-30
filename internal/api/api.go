@@ -389,6 +389,9 @@ func (s *Server) Handler() http.Handler {
 			// survive a path segment. See chat.go.
 			r.Get("/chat", s.handleChatOverview)
 			r.Get("/chat/messages", s.handleChatMessages)
+			// The moderator's user card: what one person has said. Read from
+			// our own scrollback, because no platform publishes this.
+			r.Get("/chat/users", s.handleChatUser)
 			r.Delete("/chat/messages", s.handleChatDeleteMessage)
 			// Hiding is POST rather than DELETE because it is reversible, and
 			// separate from delete because the two are different decisions:

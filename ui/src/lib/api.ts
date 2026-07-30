@@ -3,6 +3,9 @@ import type {
   SourceView,
   ApiToken,
   ChatMessage,
+  ChatModerationResult,
+  ChatSettings,
+  ChatUserCard,
   ChatOverview,
   ChatPlatform,
   ChatSendResponse,
@@ -124,6 +127,11 @@ const post = <T,>(p: string, body?: unknown) =>
   request<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
 const put = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: "PUT", body: JSON.stringify(body) });
+// PATCH is not PUT with a different name here: the one caller sends a partial
+// body where an omitted field means "leave it alone", and sending that to a PUT
+// endpoint would ask the server to treat absent as empty.
+const patch = <T,>(p: string, body: unknown) =>
+  request<T>(p, { method: "PATCH", body: JSON.stringify(body) });
 const del = <T,>(p: string) => request<T>(p, { method: "DELETE" });
 
 /** `?t=<token>` when a playback token is in play, empty otherwise. The public
@@ -540,6 +548,59 @@ export const api = {
     const q = new URLSearchParams({ platform: m.platform, id: m.id });
     if (m.account) q.set("account", m.account);
     return del<{ status: string }>(`/chat/messages?${q.toString()}`);
+  },
+
+  /** Hide a message. scope "local" affects this server only and viewers still
+   *  see it; scope "platform" hides it from viewers, and only Facebook can. */
+  hideChatMessage: (m: {
+    platform: ChatPlatform;
+    account?: string;
+    id: string;
+    scope: "local" | "platform";
+    hidden?: boolean;
+  }) => {
+    const q = new URLSearchParams({ platform: m.platform, id: m.id, scope: m.scope });
+    if (m.account) q.set("account", m.account);
+    if (m.hidden === false) q.set("hidden", "false");
+    return post<ChatModerationResult>(`/chat/messages/hide?${q.toString()}`, {});
+  },
+
+  /** Ban or time a viewer out. Seconds, always — the server converts for the
+   *  platforms that count in minutes. Omit seconds for a permanent ban. */
+  banChatUser: (m: {
+    platform: ChatPlatform;
+    account?: string;
+    userId: string;
+    seconds?: number;
+    reason?: string;
+  }) => {
+    const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
+    if (m.account) q.set("account", m.account);
+    if (m.seconds && m.seconds > 0) q.set("seconds", String(m.seconds));
+    if (m.reason) q.set("reason", m.reason);
+    return post<ChatModerationResult>(`/chat/bans?${q.toString()}`, {});
+  },
+
+  unbanChatUser: (m: { platform: ChatPlatform; account?: string; userId: string }) => {
+    const q = new URLSearchParams({ platform: m.platform, userId: m.userId });
+    if (m.account) q.set("account", m.account);
+    return del<ChatModerationResult>(`/chat/bans?${q.toString()}`);
+  },
+
+  /** One person's recent messages, from this server's own scrollback. No
+   *  platform publishes a chat-history API; see ChatUserCard. */
+  chatUser: (m: { platform: ChatPlatform; authorId: string; limit?: number }) => {
+    const q = new URLSearchParams({ platform: m.platform, authorId: m.authorId });
+    if (m.limit) q.set("limit", String(m.limit));
+    return get<ChatUserCard>(`/chat/users?${q.toString()}`);
+  },
+
+  /** Channel-wide chat rules. Only Twitch publishes an API for these, and an
+   *  omitted field means "leave it alone" rather than "turn it off". */
+  updateChatSettings: (platform: ChatPlatform, account: string | undefined, s: ChatSettings) => {
+    const q = new URLSearchParams({ platform });
+    if (account) q.set("account", account);
+    return patch<{ status: string }>(`/chat/settings?${q.toString()}`, s);
   },
 
   // --- platforms ---

@@ -436,3 +436,85 @@ func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
+
+// chatUserCard is what a moderator sees before deciding.
+type chatUserCard struct {
+	Platform db.Platform `json:"platform"`
+	AuthorID string      `json:"authorId"`
+	// Name and the role flags come from the most recent message rather than
+	// from a platform lookup: they are what this person looked like when they
+	// last spoke, which is the thing being judged.
+	Name        string `json:"name,omitempty"`
+	Color       string `json:"color,omitempty"`
+	Moderator   bool   `json:"moderator,omitempty"`
+	Subscriber  bool   `json:"subscriber,omitempty"`
+	Broadcaster bool   `json:"broadcaster,omitempty"`
+
+	Messages []chat.Message `json:"messages"`
+	// Truncated says the limit was reached, so "12 messages" is a floor and not
+	// a count. The distinction matters: a moderator reading a bounded window as
+	// a complete record judges a pattern from a sample.
+	Truncated bool `json:"truncated"`
+	// RetentionNote explains, in words, why this history is as deep as it is.
+	// Without it the card silently understates a talkative person as quiet.
+	RetentionNote string `json:"retentionNote"`
+}
+
+// handleChatUser answers with one person's recent messages and their roles.
+//
+// This is the equivalent of Twitch's moderator card, and it is built from
+// polyemesis's own store because NO platform publishes a user-chat-history API.
+// Twitch's card is a web-app feature over internal endpoints; Helix has Get
+// Chatters and Get Moderators, neither of which is a history. The others have
+// nothing.
+//
+// Being local makes it work identically on all four platforms — something
+// Twitch's own card cannot do — at the cost of depth, which is why the response
+// carries RetentionNote and Truncated rather than presenting a slice as a total.
+func (s *Server) handleChatUser(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	authorID := strings.TrimSpace(q.Get("authorId"))
+	if platform == "" || authorID == "" {
+		writeError(w, http.StatusBadRequest, "platform and authorId are required")
+		return
+	}
+	limit := chatLimitParam(r)
+
+	out := chatUserCard{
+		Platform: platform,
+		AuthorID: authorID,
+		Messages: []chat.Message{},
+		RetentionNote: "Read from this server's own scrollback, not from " + string(platform) +
+			". No platform offers an API for a viewer's chat history, so this is as far back as " +
+			"polyemesis kept — see the chat retention setting.",
+	}
+	if s.store == nil {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	rows, err := s.store.ChatMessagesByAuthor(platform, authorID, limit)
+	if err != nil {
+		// Same posture as the rest of this file: an unreadable scrollback
+		// answers empty rather than failing, so the card still opens and its
+		// moderation actions still work. Refusing to show the card because
+		// history is unavailable would take away the buttons too.
+		s.log.Debug("chat user history unavailable", "err", err)
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	for _, row := range rows {
+		out.Messages = append(out.Messages, chat.FromDB(row))
+	}
+	out.Truncated = len(rows) >= limit
+	if n := len(rows); n > 0 {
+		last := rows[n-1]
+		out.Name = last.AuthorName
+		out.Color = last.AuthorColor
+		out.Moderator = last.Moderator
+		out.Subscriber = last.Subscriber
+		out.Broadcaster = last.Broadcaster
+	}
+	writeJSON(w, http.StatusOK, out)
+}

@@ -1341,6 +1341,62 @@ export interface ChatStats {
   adapters: number;
 }
 
+/** What a moderation call did, in the server's own words.
+ *
+ *  `detail` is not decoration and must be shown. It carries the difference
+ *  between "hidden from viewers" and "hidden only here, everyone can still see
+ *  it" — a distinction the status field alone cannot make, and one a moderator
+ *  who gets it wrong acts on for the rest of the broadcast. */
+export interface ChatModerationResult {
+  status: string;
+  scope?: string;
+  detail?: string;
+}
+
+/** Channel-wide chat rules. Only Twitch publishes an API for these.
+ *
+ *  Every field is optional and an omitted one means LEAVE IT ALONE, not "off".
+ *  Twitch takes all of these in one body, so sending a full object would switch
+ *  off follower-only mode as a side effect of adjusting slow mode. */
+export interface ChatSettings {
+  slowMode?: boolean;
+  slowModeSeconds?: number;
+  followerMode?: boolean;
+  followerModeMinutes?: number;
+  subscriberMode?: boolean;
+  emoteMode?: boolean;
+  uniqueChatMode?: boolean;
+  nonModeratorChatDelay?: boolean;
+  nonModeratorChatDelaySeconds?: number;
+}
+
+/** One viewer's recent messages and roles — the moderator's user card.
+ *
+ *  Read from polyemesis's own scrollback, because NO platform publishes an API
+ *  for a viewer's chat history. Twitch's mod card is a Twitch web-app feature
+ *  over internal endpoints; Helix offers "who is here now" and "who are the
+ *  moderators", neither of which is a history. The others have nothing.
+ *
+ *  Being local makes it work identically on all four platforms, which Twitch's
+ *  own card cannot do. The cost is depth, which is why `truncated` and
+ *  `retentionNote` exist and must be rendered: a moderator who reads a bounded
+ *  window as a complete record judges a pattern from a sample. */
+export interface ChatUserCard {
+  platform: ChatPlatform;
+  authorId: string;
+  /** As they appeared when they last spoke, not a fresh platform lookup. */
+  name?: string;
+  color?: string;
+  moderator?: boolean;
+  subscriber?: boolean;
+  broadcaster?: boolean;
+  messages: ChatMessage[];
+  /** The limit was reached, so the count is a floor and not a total. */
+  truncated: boolean;
+  /** Why the history is only this deep. Show it. */
+  retentionNote: string;
+}
+
 /** Messages that are gone. Carried by the "chatRetract" event.
  *
  *  A list rather than one id because a timeout removes everything one author

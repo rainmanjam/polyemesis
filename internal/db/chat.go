@@ -128,6 +128,56 @@ func (d *DB) RecentChatMessagesFor(p Platform, limit int) ([]ChatMessage, error)
 	return d.recentChat(p, limit)
 }
 
+// ChatMessagesByAuthor returns what one person has said, newest last.
+//
+// This is the data behind the moderator's user card, and it is worth saying why
+// it is a local query rather than a platform call: NO platform here publishes an
+// API for a user's message history. Twitch's mod card — the window that opens
+// when a moderator clicks a name — is a Twitch web-app feature backed by
+// internal endpoints, not by anything in Helix; Helix offers Get Chatters (who
+// is present now) and Get Moderators, neither of which is a history. YouTube,
+// Kick and Facebook publish nothing comparable at all.
+//
+// polyemesis does not need one. Every message it has ever stored carries
+// author_id, on all four platforms, so this works uniformly — and across
+// platforms, which Twitch's own card cannot do.
+//
+// The honest limitation is depth, not breadth: this reads polyemesis's own
+// retained scrollback, which defaults to two hours or 2000 messages. It is
+// shallower than Twitch's card and the UI has to say so, because a moderator who
+// reads "3 messages" as "this person has said three things ever" has been misled
+// by a window that was only ever showing them a slice.
+func (d *DB) ChatMessagesByAuthor(p Platform, authorID string, limit int) ([]ChatMessage, error) {
+	if limit <= 0 || strings.TrimSpace(authorID) == "" {
+		return []ChatMessage{}, nil
+	}
+	rows, err := d.sql.Query(`SELECT `+chatColumns+` FROM chat_messages
+		WHERE platform = ? AND author_id = ?
+		ORDER BY at_ms DESC, id DESC LIMIT ?`, p, authorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ChatMessage{}
+	for rows.Next() {
+		m, err := scanChat(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Oldest first, like every other chat read here: a card is read top to
+	// bottom the same way the pane is.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
 func (d *DB) recentChat(p Platform, limit int) ([]ChatMessage, error) {
 	if limit <= 0 {
 		return []ChatMessage{}, nil
