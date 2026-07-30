@@ -902,10 +902,17 @@ function PipelineSettings({
             <>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="mq-url">Broker URL</Label>
+                {/* The placeholder suggests mqtts, not mqtt. A placeholder is a
+                    suggestion, and the encrypted scheme is the better thing to
+                    suggest — the help below already says all four schemes work,
+                    and the warning under it explains when plaintext is a
+                    reasonable choice on a trusted LAN. It also stops
+                    SonarCloud's S5332 reading illustrative text in an empty
+                    field as an insecure connection. */}
                 <Input
                   id="mq-url"
                   value={draft.mqtt?.brokerUrl ?? ""}
-                  placeholder="mqtt://broker.local:1883"
+                  placeholder="mqtts://broker.local:8883"
                   onChange={(e) =>
                     setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, brokerUrl: e.target.value } })
                   }
