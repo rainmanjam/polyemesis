@@ -1055,8 +1055,8 @@ func (r *runner) runOnce(ctx context.Context) (err error) {
 // one message, and retract everything from one author.
 type runnerSink struct{ r *runner }
 
-func (s runnerSink) Deliver(m Message)         { s.r.hub.deliver(s.r, m) }
-func (s runnerSink) Retract(messageID string)  { s.r.hub.retract(s.r, messageID) }
+func (s runnerSink) Deliver(m Message)           { s.r.hub.deliver(s.r, m) }
+func (s runnerSink) Retract(messageID string)    { s.r.hub.retract(s.r, messageID) }
 func (s runnerSink) RetractUser(authorID string) { s.r.hub.retractUser(s.r, authorID) }
 
 func (r *runner) send(ctx context.Context, text string) SendResult {
