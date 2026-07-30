@@ -228,7 +228,7 @@ reasoning — percentages, not pixels:
 | Setting | Means |
 |---|---|
 | **Content** | the line to draw |
-| **Font** | Inter Regular or Inter Bold, both shipped embedded |
+| **Font** | Inter Regular or Inter Bold, shipped embedded — or your own, dropped in `<data-directory>/fonts/` |
 | **Position** | the same nine anchors a watermark uses |
 | **Size** | as a percentage of frame height |
 | **Colour** | the text colour |
