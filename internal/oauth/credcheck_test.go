@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -40,5 +41,77 @@ func TestYouTubeIsTheDeclaredUnverifiableOne(t *testing.T) {
 	if _, ok := unverifiableProviders[db.PlatformYouTube]; !ok {
 		t.Fatal("YouTube is expected to be unverifiable: Google offers no way to " +
 			"validate a client ID/secret pair without a user consent round-trip")
+	}
+}
+
+// CheckCredentialsFor is the file's primary exported entry point, and every
+// branch of it is reachable today via YouTube -- it is already registered and
+// already in unverifiableProviders, so Task 2's Twitch/Kick/Facebook methods
+// are not required to exercise the dispatch, the empty-field guard, or the
+// format complaint.
+func TestCheckCredentialsForYouTube(t *testing.T) {
+	const (
+		secret = "s3cr3t-do-not-leak-me"
+	)
+
+	cases := []struct {
+		name         string
+		clientID     string
+		clientSecret string
+		wantState    CheckState
+		wantMethod   CheckMethod
+	}{
+		{
+			name:         "empty client ID",
+			clientID:     "",
+			clientSecret: secret,
+			wantState:    CheckRejected,
+			wantMethod:   MethodFormat,
+		},
+		{
+			name:         "empty client secret",
+			clientID:     "12345.apps.googleusercontent.com",
+			clientSecret: "",
+			wantState:    CheckRejected,
+			wantMethod:   MethodFormat,
+		},
+		{
+			name:         "malformed client ID",
+			clientID:     "not-a-google-client-id",
+			clientSecret: secret,
+			wantState:    CheckRejected,
+			wantMethod:   MethodFormat,
+		},
+		{
+			name:         "well-formed pair",
+			clientID:     "12345.apps.googleusercontent.com",
+			clientSecret: secret,
+			wantState:    CheckUnverified,
+			wantMethod:   MethodFormat,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CheckCredentialsFor(context.Background(), db.PlatformYouTube, tc.clientID, tc.clientSecret)
+
+			if got.State != tc.wantState {
+				t.Errorf("State = %q, want %q", got.State, tc.wantState)
+			}
+			if got.Method != tc.wantMethod {
+				t.Errorf("Method = %q, want %q", got.Method, tc.wantMethod)
+			}
+			if strings.TrimSpace(got.Detail) == "" {
+				t.Error("Detail is empty; it is what the UI renders instead of a verdict")
+			}
+			// Global constraint: the secret must never come back in a
+			// UI-rendered field, however the check turned out. Pinned here,
+			// at the moment a rejection message is built, because that is
+			// the code path most likely to interpolate the input it just
+			// rejected.
+			if tc.clientSecret != "" && strings.Contains(got.Detail, tc.clientSecret) {
+				t.Errorf("Detail contains the client secret: %q", got.Detail)
+			}
+		})
 	}
 }
