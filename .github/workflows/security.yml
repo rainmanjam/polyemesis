@@ -109,25 +109,57 @@ jobs:
       # "No leaks found" cannot distinguish a correct allowlist from one that
       # silences everything. So: plant a secret in an allowlisted file and
       # require that it is still caught.
+      #
+      # The planted value is assembled at run time rather than written out as a
+      # literal. Spelling a credential-shaped string directly in this file
+      # makes THIS file a gitleaks finding — which is exactly what happened on
+      # the first attempt, and it was only caught because the scan runs against
+      # committed history rather than the working tree. The parts below carry
+      # no keyword before the `=`, so the rule does not fire on them.
       - name: verify the allowlist is not over-broad
         run: |
-          printf '\nconst plantedKey = "live_999888777_zQ1wErTyUiOpAsDfGhJkL"\n' \
-            >> internal/alerts/redact_test.go
-          if gitleaks detect --no-banner --redact --no-git --config .gitleaks.toml; then
-            echo "::error::A planted secret in an allowlisted file was NOT detected."
-            echo "::error::The allowlist in .gitleaks.toml is too broad to be trusted."
-            git checkout internal/alerts/redact_test.go
+          target=internal/alerts/redact_test.go
+
+          # A non-zero exit from gitleaks means "something was found", not
+          # "the plant was found". Asserting on the exit code alone would pass
+          # on any unrelated finding — the same mistake as reading "0 findings"
+          # from a scan that examined 0 files. So: establish a clean baseline,
+          # then assert on the specific file.
+          if ! gitleaks detect --no-banner --redact --no-git \
+                 --config .gitleaks.toml --report-path before.json; then
+            echo "::error::the working tree already has findings; this check cannot prove anything"
             exit 1
           fi
-          echo "planted secret was correctly detected; the allowlist is scoped"
-          git checkout internal/alerts/redact_test.go
+
+          prefix="live_999888777"
+          body="zQ1wErTyUiOpAsDfGhJkL"
+          printf '\nconst plantedKey = "%s_%s"\n' "$prefix" "$body" >> "$target"
+
+          gitleaks detect --no-banner --redact --no-git \
+            --config .gitleaks.toml --report-path after.json || true
+          git checkout "$target"
+
+          python3 - "$target" <<'PY'
+          import json, sys
+          target = sys.argv[1]
+          found = json.load(open('after.json'))
+          hits = [f for f in found if f.get('File') == target]
+          if not hits:
+              print("::error::A secret planted in an allowlisted file was NOT detected.")
+              print("::error::.gitleaks.toml is too broad: it is exempting the file, not the fixtures.")
+              print(f"::error::findings seen: {[f.get('File') for f in found]}")
+              sys.exit(1)
+          print(f"planted secret detected in {target}; the allowlist is scoped to values, not files")
+          PY
+
           # Scoped to the file this step touched. A whole-tree check would fail
           # for anything else that happened to be modified, which is a
           # confusing way to report "the plant was not cleaned up".
-          git diff --quiet -- internal/alerts/redact_test.go || {
+          git diff --quiet -- "$target" || {
             echo "::error::the planted secret was not removed from the working tree"
             exit 1
           }
+          rm -f before.json after.json
 
       - name: scan
         run: gitleaks detect --no-banner --redact --config .gitleaks.toml
