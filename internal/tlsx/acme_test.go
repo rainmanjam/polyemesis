@@ -15,6 +15,8 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/acme/autocert"
+
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 )
 
 func TestHostPolicyPinsIssuanceToExactlyTheConfiguredName(t *testing.T) {
@@ -83,12 +85,16 @@ func TestACMECacheLivesUnderTheDataDirAndIsPrivate(t *testing.T) {
 	}
 
 	// The cache holds the ACME account key and every issued private key.
-	st, err := os.Stat(ACMECacheDir(dir))
-	if err != nil {
+	//
+	// Asserted as a property rather than as mode 0700: autocert creates the
+	// files inside this directory itself, through a code path polyemesis never
+	// calls, so the directory's own protection is the only thing between that
+	// account key and every other account on the host.
+	if _, err := os.Stat(ACMECacheDir(dir)); err != nil {
 		t.Fatalf("stat the cache dir: %v", err)
 	}
-	if got := st.Mode().Perm(); got != 0o700 {
-		t.Errorf("cache dir mode = %#o, want %#o", got, 0o700)
+	if err := fsperm.CheckPrivate(ACMECacheDir(dir)); err != nil {
+		t.Errorf("the ACME cache is exposed: %v", err)
 	}
 }
 

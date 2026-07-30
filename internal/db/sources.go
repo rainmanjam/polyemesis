@@ -126,9 +126,23 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 
 const sourceColumns = `id, name, enabled, ingest, token, prev_token, prev_token_until, position, created_at, updated_at`
 
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	sourceListQuery    = `SELECT ` + sourceColumns + ` FROM sources ORDER BY position, id`
+	sourceByIDQuery    = `SELECT ` + sourceColumns + ` FROM sources WHERE id = ?`
+	sourceByTokenQuery = `SELECT ` + sourceColumns + ` FROM sources WHERE token = ?`
+)
+
 // ListSources returns every source in display order.
 func (d *DB) ListSources() ([]*Source, error) {
-	rows, err := d.sql.Query(`SELECT ` + sourceColumns + ` FROM sources ORDER BY position, id`)
+	rows, err := d.sql.Query(sourceListQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +161,7 @@ func (d *DB) ListSources() ([]*Source, error) {
 
 // GetSource returns one source.
 func (d *DB) GetSource(id int64) (*Source, error) {
-	row := d.sql.QueryRow(`SELECT `+sourceColumns+` FROM sources WHERE id = ?`, id)
+	row := d.sql.QueryRow(sourceByIDQuery, id)
 	s, err := scanSource(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSourceNotFound
@@ -365,7 +379,7 @@ func (d *DB) SourceByToken(token string) (*Source, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, ErrSourceNotFound
 	}
-	row := d.sql.QueryRow(`SELECT `+sourceColumns+` FROM sources WHERE token = ?`, token)
+	row := d.sql.QueryRow(sourceByTokenQuery, token)
 	s, err := scanSource(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSourceNotFound

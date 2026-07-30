@@ -193,9 +193,16 @@ func TestStartChatSkipsAPlatformItCannotBuildWithoutLosingTheOthers(t *testing.T
 	}
 }
 
-func TestRefreshKeyTellsKickOperatorsToPasteRatherThanRetry(t *testing.T) {
-	// 502 invites a retry that can never succeed. A platform that publishes no
-	// key endpoint is a 400: the fix is the paste field, not the button again.
+func TestRefreshKeyTellsKickOperatorsToReconnectRatherThanRetry(t *testing.T) {
+	// Kick's stream key IS fetchable -- `stream.key` on GET /public/v1/channels,
+	// behind the `streamkey:read` scope. What this test now pins is the case
+	// that remains: a token issued BEFORE that scope was requested. Granting a
+	// scope never upgrades a token already in hand, so Kick returns 401 and the
+	// only fix is to disconnect and reconnect the account.
+	//
+	// 502 is right here and 400 was right before. The distinction is real: this
+	// is an upstream rejection of our credential, not a malformed request, and
+	// the retry the operator needs is a reconnect rather than the same button.
 	s, h, store := testServer(t, config.Config{})
 	sign := login(t, h)
 
@@ -216,10 +223,10 @@ func TestRefreshKeyTellsKickOperatorsToPasteRatherThanRetry(t *testing.T) {
 	sign(r)
 	w := do(t, h, r)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 so the client stops retrying (body %s)", w.Code, w.Body.String())
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502: the platform rejected our token (body %s)", w.Code, w.Body.String())
 	}
-	if !strings.Contains(strings.ToLower(w.Body.String()), "paste") {
+	if !strings.Contains(strings.ToLower(w.Body.String()), "reconnect") {
 		t.Fatalf("the error does not tell the operator what to do instead: %s", w.Body.String())
 	}
 	// Never the client secret, never the stream key already on the row.

@@ -102,6 +102,76 @@ func NewFacebook(cfg FacebookConfig) (*FacebookAdapter, error) {
 func (f *FacebookAdapter) Platform() db.Platform { return db.PlatformFacebook }
 func (f *FacebookAdapter) Account() string       { return f.cfg.AccountRef }
 
+// Delete removes one comment from the live video's thread.
+//
+// Facebook's live chat IS the comment thread on the video, so moderating it is
+// comment moderation: DELETE /{comment_id}. There is no chat-specific endpoint
+// and no separate moderation surface to find.
+//
+// Facebook is the only one of the four platforms with a reversible option --
+// `is_hidden` takes a comment off the public thread without destroying it -- and
+// Hide below uses it. Delete is the irreversible one, kept separate rather than
+// hidden behind a flag, because a moderator choosing between "hide" and "destroy"
+// should have to say which.
+func (f *FacebookAdapter) Delete(ctx context.Context, commentID string) error {
+	commentID = strings.TrimSpace(commentID)
+	if commentID == "" {
+		return fmt.Errorf("no comment id to delete")
+	}
+	err := doJSON(ctx, f.cfg.HTTP, http.MethodDelete,
+		f.cfg.APIBase+"/"+url.PathEscape(commentID), f.cfg.Token, nil, nil)
+	if err != nil {
+		return f.moderationError(err, "delete")
+	}
+	return nil
+}
+
+// Hide takes a comment off the public thread, or puts it back.
+//
+// The only reversible moderation primitive across all four platforms. Worth
+// having explicitly: a comment hidden in error costs an apology, and a comment
+// deleted in error costs the thing itself. Facebook keeps it visible to its
+// author and their friends, which is the platform's decision and not something
+// polyemesis can change -- so this is "off the public thread", not "gone".
+func (f *FacebookAdapter) Hide(ctx context.Context, commentID string, hidden bool) error {
+	commentID = strings.TrimSpace(commentID)
+	if commentID == "" {
+		return fmt.Errorf("no comment id to hide")
+	}
+	err := doJSON(ctx, f.cfg.HTTP, http.MethodPost,
+		f.cfg.APIBase+"/"+url.PathEscape(commentID),
+		f.cfg.Token, map[string]any{"is_hidden": hidden}, nil)
+	if err != nil {
+		verb := "hide"
+		if !hidden {
+			verb = "unhide"
+		}
+		return f.moderationError(err, verb)
+	}
+	return nil
+}
+
+// moderationError turns a Graph API refusal into the sentence that fixes it.
+//
+// The permission story here is the one that costs people a day. Reading comment
+// ids on a Page post needs the MODERATE task permission under Page Public
+// Content Access, so an app that can happily READ the thread can still be unable
+// to act on it — and the error for that reads like a generic permissions
+// failure.
+func (f *FacebookAdapter) moderationError(err error, verb string) error {
+	switch statusOf(err) {
+	case http.StatusForbidden:
+		return fmt.Errorf("Facebook refused to %s that comment. Acting on a Page's comments needs the "+
+			"MODERATE task permission on that Page, which is separate from being able to read them: %w", verb, err)
+	case http.StatusNotFound:
+		return fmt.Errorf("Facebook no longer has that comment; it may already be gone: %w", err)
+	}
+	if statusOf(err) == http.StatusUnauthorized {
+		return Fatal(fmt.Errorf("facebook rejected the access token; reconnect the Facebook account in Settings → Platforms"))
+	}
+	return err
+}
+
 func (f *FacebookAdapter) Health() Health {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -72,6 +72,11 @@ type Server struct {
 	// above it: a build with no chat wired serves the pane read-only from the
 	// stored scrollback rather than hiding it.
 	chat *chat.Hub
+
+	// kickKeys caches Kick's webhook signing key. One per server rather than
+	// one per adapter: the key belongs to Kick, not to an account, so two
+	// connected Kick channels share the fetch.
+	kickKeys *chat.KickKeyFetcher
 }
 
 // Options configures the server.
@@ -121,6 +126,7 @@ func New(o Options) *Server {
 		version:   o.Version,
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
+		kickKeys:  &chat.KickKeyFetcher{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
@@ -129,6 +135,10 @@ func New(o Options) *Server {
 			// that is genuinely terminating TLS.
 			o.Config.ServesTLS(),
 			o.Config.TrustProxyHeaders,
+			// Session revocation. Reading it through the store rather than
+			// caching it means a password change takes effect on the very next
+			// request, with no window in which a revoked token still works.
+			o.DB.TokenEpoch,
 		),
 	}
 }
@@ -196,6 +206,9 @@ func (s *Server) Handler() http.Handler {
 
 			r.Get("/settings", s.handleGetSettings)
 			r.Put("/settings", s.handlePutSettings)
+			// Its own route because the password must never travel outward in
+			// the settings blob -- see handlePutMQTTPassword.
+			r.Put("/settings/mqtt-password", s.handlePutMQTTPassword)
 
 			r.Get("/tls", s.handleTLSStatus)
 
@@ -236,6 +249,9 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/renditions", s.handleCreateRendition)
 			// Static segment first, same as /destinations/order above.
 			r.Get("/renditions/presets", s.handleRenditionPresets)
+			// The font picker for text overlays. A listing rather than a
+			// compiled-in list, because operators add their own fonts.
+			r.Get("/fonts", s.handleListFonts)
 			r.Get("/renditions/{id}", s.handleGetRendition)
 			r.Put("/renditions/{id}", s.handleUpdateRendition)
 			r.Delete("/renditions/{id}", s.handleDeleteRendition)
@@ -371,6 +387,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/metadata", s.handleMetadataOverview)
 			r.Post("/metadata/push", s.handlePushMetadata)
 			r.Get("/metadata/push/{id}", s.handleMetadataJob)
+			// What is still editable on each account's current broadcast.
+			// Fetched when the composer opens, never polled -- every row is a
+			// live platform call.
+			r.Get("/metadata/broadcast-window", s.handleBroadcastWindow)
 
 			// Unified chat. Live messages arrive on the WebSocket, not here;
 			// these four are the scrollback a freshly opened pane needs plus
@@ -379,7 +399,21 @@ func (s *Server) Handler() http.Handler {
 			// survive a path segment. See chat.go.
 			r.Get("/chat", s.handleChatOverview)
 			r.Get("/chat/messages", s.handleChatMessages)
+			// The moderator's user card: what one person has said. Read from
+			// our own scrollback, because no platform publishes this.
+			r.Get("/chat/users", s.handleChatUser)
 			r.Delete("/chat/messages", s.handleChatDeleteMessage)
+			// Hiding is POST rather than DELETE because it is reversible, and
+			// separate from delete because the two are different decisions:
+			// one takes a message off the public feed, the other destroys it.
+			r.Post("/chat/messages/hide", s.handleChatHideMessage)
+			// Banning addresses a PERSON, not a message, so it is its own
+			// route rather than a mode on the message ones.
+			// Channel-wide rules act on the ROOM, not a message or a
+			// person, so they get their own route too.
+			r.Patch("/chat/settings", s.handleChatSettings)
+			r.Post("/chat/bans", s.handleChatBan)
+			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)
 		})
 

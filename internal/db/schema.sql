@@ -1,11 +1,18 @@
 -- polyemesis schema. Applied idempotently at startup.
 
+-- token_epoch is what makes a session revocable. Sessions are stateless JWTs,
+-- so clearing the cookie at logout does not stop anyone holding a copy of the
+-- token from continuing to use it until it expires. The epoch is embedded in
+-- every token issued and checked on every request; bumping it here invalidates
+-- every token already in the wild, which is what "change my password because I
+-- think someone else has my session" has to mean.
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
     created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL
+    updated_at    INTEGER NOT NULL,
+    token_epoch   INTEGER NOT NULL DEFAULT 0
 );
 
 -- Long-lived credentials for automation, so a script never needs the admin
@@ -95,6 +102,10 @@ CREATE TABLE IF NOT EXISTS renditions (
     FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
 
+-- Note: the transport tuning columns (tr_*) and the expert-args columns are
+-- added by MigrateDestinationExpertArgs (destinations.go) rather than here, so
+-- fresh and upgraded databases get them from exactly one place and cannot
+-- disagree about the default.
 CREATE TABLE IF NOT EXISTS destinations (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT    NOT NULL,
@@ -125,6 +136,15 @@ CREATE TABLE IF NOT EXISTS destinations (
     FOREIGN KEY (rendition_id) REFERENCES renditions(id) ON DELETE SET NULL
 );
 
+-- The MQTT broker password, sealed. Its own table rather than a field in the
+-- settings blob because that blob is served to the settings page: a password
+-- in it would be handed to every browser that opened Settings.
+CREATE TABLE IF NOT EXISTS mqtt_creds (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    password_enc BLOB NOT NULL,          -- secretbox sealed
+    updated_at   INTEGER NOT NULL
+);
+
 -- The operator's own OAuth developer app. polyemesis cannot ship these.
 CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick
@@ -144,6 +164,10 @@ CREATE TABLE IF NOT EXISTS platform_accounts (
     refresh_token_enc BLOB,
     expires_at        INTEGER NOT NULL DEFAULT 0,
     scopes            TEXT    NOT NULL DEFAULT '',
+    -- The provider's ScopeVersion when this account was connected. Compared
+    -- against the provider's current version to spot a token issued before a
+    -- scope was added; 0 means the row predates the column.
+    scope_ver         INTEGER NOT NULL DEFAULT 0,
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     UNIQUE (platform, account_ref)
@@ -442,6 +466,14 @@ CREATE INDEX IF NOT EXISTS idx_transcript_tracks_recording ON transcript_tracks(
 -- platform, and the purge walks the same order backwards.
 CREATE INDEX IF NOT EXISTS idx_chat_messages_recent ON chat_messages(at_ms DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_platform ON chat_messages(platform, at_ms DESC, id DESC);
+-- "Everything this person has said", which is what a moderator reads before
+-- deciding whether one bad message was a bad moment or a pattern. Without this
+-- the query is a full scan of the table on every card open, and the card opens
+-- from a hover.
+--
+-- author_id and not author_name: a display name is not an identity, and on every
+-- platform here a name can change while the id cannot.
+CREATE INDEX IF NOT EXISTS idx_chat_messages_author ON chat_messages(platform, author_id, at_ms DESC, id DESC);
 
 -- NOTE: nothing here may reference destinations.rendition_id. This file runs
 -- against databases created before renditions existed, where CREATE TABLE IF

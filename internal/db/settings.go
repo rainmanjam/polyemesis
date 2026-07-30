@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -608,6 +609,154 @@ type MeterSettings struct {
 	IntervalMS int `json:"intervalMs"`
 }
 
+// DestinationSettings is install-wide destination policy.
+type DestinationSettings struct {
+	// StaggerMS spaces out the FIRST connection of destinations brought up in
+	// the same reconcile. 0 is off, which is what every install did before it
+	// existed.
+	//
+	// Going live means every destination opening a connection, negotiating TLS
+	// and starting to encode audio in the same tick. On a small box that is
+	// the moment most likely to drop frames, and it is the exact moment an
+	// operator is watching -- because it is when they went live.
+	//
+	// It never delays a RECONNECT. A destination that drops at 3am has to come
+	// back immediately, not wait its turn behind processes that are already
+	// healthy.
+	StaggerMS int `json:"staggerMs"`
+}
+
+// MaxDestinationStaggerMS is five seconds. Beyond that, bringing up eight
+// destinations takes most of a minute and the operator is watching a progress
+// bar rather than a stream.
+const MaxDestinationStaggerMS = 5000
+
+func (d DestinationSettings) problems() []string {
+	if d.StaggerMS < 0 || d.StaggerMS > MaxDestinationStaggerMS {
+		return []string{fmt.Sprintf("destination stagger %dms out of range (0-%d, 0 for none)",
+			d.StaggerMS, MaxDestinationStaggerMS)}
+	}
+	return nil
+}
+
+// ------------------------------------------------------------------- mqtt
+
+// MQTT bounds. The interval floor is 1s because the underlying state is
+// republished only on change, so a fast tick costs a comparison rather than a
+// message; the ceiling is an hour because past that a retained topic is a
+// historical record rather than telemetry.
+const (
+	MinMQTTIntervalSeconds = 1
+	MaxMQTTIntervalSeconds = 3600
+	MaxMQTTPrefixLength    = 128
+	MaxMQTTInstanceLength  = 64
+	MaxMQTTClientIDLength  = 128
+)
+
+// MQTTSettings publishes retained telemetry to a broker.
+//
+// The password is deliberately NOT here. It lives sealed in its own table, the
+// same way an OAuth client secret does, because this struct is marshalled into
+// the settings blob and served to the settings page. See DB.PutMQTTPassword.
+type MQTTSettings struct {
+	Enabled bool `json:"enabled"`
+	// BrokerURL is mqtt://, mqtts://, ws:// or wss://. Credentials in the URL
+	// are refused rather than accepted: a password in a URL reaches logs, `ps`
+	// output and error strings, and there is no taking it back afterwards.
+	BrokerURL string `json:"brokerUrl"`
+	Username  string `json:"username"`
+	// HasPassword reports that a sealed password exists, so the settings page
+	// can show that one is set without ever receiving it.
+	HasPassword bool `json:"hasPassword"`
+	// Prefix roots the topic tree. Separators are preserved, not slugged: an
+	// operator who writes `home/av` means two levels.
+	Prefix string `json:"prefix"`
+	// Instance distinguishes two polyemesis installs sharing one broker, and is
+	// what a Home Assistant device is keyed on. Slugged before use.
+	Instance string `json:"instance"`
+	// ClientID must be unique on the broker. A collision is the number-one
+	// cause of an unexplained reconnect loop: the broker disconnects the older
+	// session on every connect and both clients reconnect forever. Empty means
+	// "derive one from Instance", which is unique for the same reason Instance
+	// is.
+	ClientID       string `json:"clientId"`
+	IntervalSecond int    `json:"intervalSeconds"`
+	KeepAliveSec   int    `json:"keepAliveSeconds"`
+	// TLSSkipVerify accepts a self-signed broker certificate. Named for what it
+	// does rather than for what an operator wishes it did.
+	TLSSkipVerify bool `json:"tlsSkipVerify"`
+	// Discovery publishes Home Assistant device-discovery payloads. Separate
+	// from Enabled because a Node-RED or Telegraf consumer wants the telemetry
+	// and not the discovery topics.
+	Discovery bool `json:"discovery"`
+}
+
+// problems reports everything wrong with the MQTT block.
+//
+// Nothing here is checked when MQTT is switched off. A half-configured block an
+// operator is still filling in must not block saving an unrelated setting, and
+// a disabled publisher cannot misbehave.
+func (m MQTTSettings) problems() []string {
+	if !m.Enabled {
+		return nil
+	}
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	switch u, err := url.Parse(strings.TrimSpace(m.BrokerURL)); {
+	case strings.TrimSpace(m.BrokerURL) == "":
+		add("mqtt is enabled but no broker URL is set")
+	case err != nil:
+		add("mqtt broker URL is unparseable: %v", err)
+	case u.Host == "":
+		add("mqtt broker URL %q has no host", m.BrokerURL)
+	case u.User != nil:
+		// Refused rather than quietly moved into the username and password
+		// fields, because the operator needs to know the URL they pasted would
+		// have been written to a log.
+		add("mqtt broker URL carries credentials; put the username and password in their own fields so the password is sealed and never logged")
+	default:
+		switch u.Scheme {
+		case "mqtt", "tcp", "mqtts", "ssl", "ws", "wss":
+		default:
+			add("mqtt broker scheme %q is not one of mqtt, mqtts, tcp, ssl, ws or wss", u.Scheme)
+		}
+	}
+
+	// A `$` prefix is refused rather than escaped. Brokers reserve those
+	// topics, and a subscriber using `#` -- which is what anyone debugging
+	// reaches for first -- is specified never to receive them, so the telemetry
+	// would publish successfully and be invisible in exactly the view the
+	// operator would use to look for it.
+	if strings.HasPrefix(strings.TrimSpace(m.Prefix), "$") {
+		add("mqtt topic prefix must not begin with $: brokers reserve those topics and a '#' subscription never receives them")
+	}
+	if strings.ContainsAny(m.Prefix, "+#\x00") {
+		add("mqtt topic prefix %q contains a wildcard or NUL, which are legal in a subscription filter but not in a published topic", m.Prefix)
+	}
+	if len(m.Prefix) > MaxMQTTPrefixLength {
+		add("mqtt topic prefix is %d characters (maximum %d)", len(m.Prefix), MaxMQTTPrefixLength)
+	}
+	if len(m.Instance) > MaxMQTTInstanceLength {
+		add("mqtt instance name is %d characters (maximum %d)", len(m.Instance), MaxMQTTInstanceLength)
+	}
+	if len(m.ClientID) > MaxMQTTClientIDLength {
+		add("mqtt client id is %d characters (maximum %d)", len(m.ClientID), MaxMQTTClientIDLength)
+	}
+	if m.IntervalSecond < MinMQTTIntervalSeconds || m.IntervalSecond > MaxMQTTIntervalSeconds {
+		add("mqtt publish interval %ds out of range (%d-%d)",
+			m.IntervalSecond, MinMQTTIntervalSeconds, MaxMQTTIntervalSeconds)
+	}
+	// The MQTT keep-alive is a 16-bit field. 0 is legal on the wire and means
+	// "no keep-alive", which would leave a half-open connection looking healthy
+	// forever and the will message -- the entire availability story -- never
+	// firing.
+	if m.KeepAliveSec < 1 || m.KeepAliveSec > 65535 {
+		add("mqtt keep-alive %ds out of range (1-65535); 0 disables the liveness check the will message depends on", m.KeepAliveSec)
+	}
+	return probs
+}
+
 // ---------------------------------------------------------- post-production
 
 // Post-production bounds. Wide on purpose: they catch a unit mix-up or a typo,
@@ -717,6 +866,25 @@ type PostProdSettings struct {
 
 	// Kinds are the per-kind overrides.
 	Kinds []PostProdKindSettings `json:"kinds,omitempty"`
+
+	// WhisperModel is the transcription model a job gets when it names none.
+	// Empty keeps the hardware-derived choice, which is the right default and
+	// stays the default.
+	//
+	// It is here because model choice IS the transcription decision -- it trades
+	// speed, accuracy and memory against each other, and the right answer
+	// depends on hardware polyemesis can measure and on how much the operator
+	// cares about the transcript, which it cannot. The per-job API already
+	// accepted a model; nothing could express a preference for every job, and
+	// the UI never sent one at all, so the hardware guess was the only reachable
+	// answer.
+	//
+	// NOT validated against a fixed list. transcribe.Models() is the catalogue
+	// and it can grow, an operator may have a model file this build has never
+	// heard of, and a name we reject here is a model they cannot use for a
+	// reason they cannot see. The worker reports an unknown model when it tries
+	// to load it, which is the layer that actually knows.
+	WhisperModel string `json:"whisperModel,omitempty"`
 }
 
 // Policy converts the stored settings into the governor's own policy, which is
@@ -907,6 +1075,77 @@ type Settings struct {
 	Meters    MeterSettings     `json:"meters"`
 	Logging   LoggingSettings   `json:"logging"`
 	PostProd  PostProdSettings  `json:"postProd"`
+	MQTT      MQTTSettings      `json:"mqtt"`
+	// Destinations is install-wide destination policy; per-destination
+	// settings live on the destination row.
+	Destinations DestinationSettings `json:"destinations"`
+	Chat         ChatSettings        `json:"chat"`
+}
+
+// ChatSettings bounds the stored chat scrollback.
+//
+// This became worth exposing when the moderator's user card shipped. That card
+// answers "what has this person said before", and it answers it out of THIS
+// table -- no platform publishes a chat-history API, so the depth of a
+// moderation decision is now a direct function of these two numbers. At the old
+// hard-coded two hours, a card opened on a returning troublemaker showed
+// nothing, which reads as "they have never said anything" rather than "we did
+// not keep it".
+//
+// Both are bounds, and the QUIETER one wins: a message is dropped when it is
+// older than RetentionHours AND not among the newest KeepMessages. A busy
+// channel therefore keeps less time than asked and a quiet one keeps more, which
+// is the right way round -- the floor is what stops a slow channel's card being
+// empty.
+type ChatSettings struct {
+	// RetentionHours drops messages older than this. 0 means keep forever,
+	// matching the recorder's MaxAgeHours convention.
+	//
+	// Forever is a real answer here and not a trap: chat rows are small. A
+	// channel averaging ten messages a second stores roughly 7 MB an hour, so a
+	// year of a busy channel is tens of gigabytes, and most channels are
+	// nowhere near that. An operator who wants a permanent moderation record
+	// should be able to have one.
+	RetentionHours int `json:"retentionHours"`
+	// KeepMessages is the floor: this many newest messages survive whatever
+	// their age. It is what stops a channel that was quiet overnight from
+	// opening every user card empty in the morning.
+	KeepMessages int `json:"keepMessages"`
+	// PurgeMinutes is how often the sweep runs. Cheap -- it is one indexed
+	// delete -- so this is about how promptly "deleted" becomes true on disk
+	// rather than about load.
+	PurgeMinutes int `json:"purgeMinutes"`
+}
+
+// ChatSettings bounds, chosen to be generous rather than tidy. The cost of the
+// upper end is disk, which the operator can see; the cost of a low ceiling is a
+// moderation decision made on missing evidence, which they cannot.
+const (
+	// MaxChatRetentionHours is five years. Not a guess at what anyone needs --
+	// a bound that exists so a typo of 999999 is caught rather than stored.
+	MaxChatRetentionHours = 24 * 365 * 5
+	MaxChatKeepMessages   = 5_000_000
+	MaxChatPurgeMinutes   = 24 * 60
+)
+
+func (c ChatSettings) problems() []string {
+	var probs []string
+	if c.RetentionHours < 0 || c.RetentionHours > MaxChatRetentionHours {
+		probs = append(probs, fmt.Sprintf(
+			"chat retention %d hours out of range (0-%d, 0 to keep forever)",
+			c.RetentionHours, MaxChatRetentionHours))
+	}
+	if c.KeepMessages < 0 || c.KeepMessages > MaxChatKeepMessages {
+		probs = append(probs, fmt.Sprintf(
+			"chat keep %d messages out of range (0-%d)", c.KeepMessages, MaxChatKeepMessages))
+	}
+	// Zero would be a sweep every tick. Bounded below rather than defaulted
+	// silently, because a 0 here is far more likely to be a mistake than a wish.
+	if c.PurgeMinutes < 1 || c.PurgeMinutes > MaxChatPurgeMinutes {
+		probs = append(probs, fmt.Sprintf(
+			"chat purge interval %d minutes out of range (1-%d)", c.PurgeMinutes, MaxChatPurgeMinutes))
+	}
+	return probs
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -933,8 +1172,17 @@ func DefaultSettings() Settings {
 			StemCodec:      ffmpeg.DefaultStemCodec,
 		},
 		Preview: PreviewSettings{
-			Enabled:            true,
-			SegmentSeconds:     2,
+			Enabled: true,
+			// One second, not two. The player holds back
+			// liveSyncDurationCount (2) x the target duration, so the segment
+			// length is multiplied on its way to the screen: halving it takes
+			// roughly 2.5s off the preview, measured, for +0.9% bytes and no
+			// measurable quality cost (PSNR at 360p/800k was marginally HIGHER
+			// with the shorter GOP).
+			//
+			// This is the DEFAULT only. An operator who has stored a value
+			// keeps it -- see docs/roadmap/LL-HLS.md.
+			SegmentSeconds:     1,
 			VideoHeight:        360,
 			VideoKbps:          800,
 			IdleTimeoutSeconds: 30,
@@ -1007,6 +1255,34 @@ func DefaultSettings() Settings {
 			RetainDays:            30,
 			RetainJobs:            200,
 		},
+		// Off, and pre-filled with values that work the moment it is switched
+		// on. An operator who enables MQTT should have to supply a broker URL
+		// and nothing else.
+		//
+		// The literals below duplicate mqtt.DefaultPrefix and
+		// mqtt.DefaultKeepAliveSec on purpose: importing internal/mqtt here
+		// would link paho into the database layer, which has no business
+		// speaking a network protocol. TestMQTTDefaultsMatchTheMQTTPackage is a
+		// test-only import that keeps the two in step.
+		MQTT: MQTTSettings{
+			Enabled:        false,
+			Prefix:         "polyemesis",
+			Instance:       "polyemesis",
+			IntervalSecond: 10,
+			KeepAliveSec:   30,
+			Discovery:      true,
+		},
+		// Deliberately the same numbers the Hub used when they were constants,
+		// so an existing install behaves identically after upgrading and only
+		// changes when somebody decides to change it. The constants in
+		// internal/chat are still the fallback for a Hub built without these,
+		// which is every test; TestChatDefaultsMatchTheChatPackage keeps the two
+		// in step the way the MQTT pair above are kept.
+		Chat: ChatSettings{
+			RetentionHours: 2,
+			KeepMessages:   2000,
+			PurgeMinutes:   5,
+		},
 	}
 }
 
@@ -1065,6 +1341,15 @@ func (s Settings) Validate() error {
 		add("%s", p)
 	}
 	for _, p := range s.Listeners.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.MQTT.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.Destinations.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.Chat.problems() {
 		add("%s", p)
 	}
 

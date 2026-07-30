@@ -4,5 +4,22 @@
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
+  },
+  // src/components/ui is vendored shadcn, kept byte-identical to upstream so it
+  // can be re-synced when shadcn changes. Those files export a `cva()` variants
+  // object next to the component -- badgeVariants, buttonVariants -- which is
+  // upstream's shape, not ours. allowConstantExport does not cover it because a
+  // cva() call is not a literal constant.
+  //
+  // Scoped off here rather than with a disable comment in each file: an inline
+  // comment is a local edit to vendored code, and the next `shadcn add` would
+  // silently drop it. This override survives that.
+  "overrides": [
+    {
+      "files": ["src/components/ui/**"],
+      "rules": {
+        "react/only-export-components": "off"
+      }
+    }
+  ]
 }

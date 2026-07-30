@@ -1,0 +1,70 @@
+# gitleaks configuration.
+#
+# Six findings in this repository are test fixtures: deliberately
+# realistic-looking stream keys and ingest URLs, which exist precisely so the
+# redaction and URL-splitting code can be tested against something that looks
+# like the real thing. They are not credentials and never were.
+#
+# They are allowlisted by path and by value rather than globally disabling the
+# rule, because "generic-api-key found nothing" has to keep meaning something.
+# Six permanent known-failures is how a scanner stops being read at all, and a
+# blanket `[allowlist] paths = ['''_test\.go$''']` would hide a real key
+# committed to a test file — which is exactly where one tends to get committed.
+
+[extend]
+useDefault = true
+
+# One historical commit is exempted, by SHA.
+#
+# 5cbe821 added the allowlist self-test below and wrote its planted, made-up
+# credential as a literal directly into .github/workflows/security.yml. That
+# made the workflow file itself a finding. 1076b61 removed the literal — the
+# value is now assembled from two parts at run time — but removing a secret in
+# a later commit does not unpublish it, which is exactly the property the
+# full-history scan exists to enforce and is not one worth weakening.
+#
+# So the commit is allowlisted rather than the value or the path:
+#
+#   - Allowlisting the VALUE would stop the self-test below from working, since
+#     that test depends on precisely this string being detected.
+#   - Allowlisting the PATH would exempt the workflow file forever, including
+#     from a real credential added to it later.
+#   - Allowlisting the COMMIT exempts one immutable, already-reviewed diff and
+#     nothing else. The same string is still caught anywhere it appears again.
+#
+# The string was invented for this test, matches no real service, and was never
+# valid anywhere. It was a fixture that briefly sat in the wrong file.
+[allowlist]
+description = "A made-up fixture value that briefly lived in security.yml"
+commits = [
+  "5cbe821ff686ddcc59aee9a8aa830269122e9c36",
+]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API key"
+regex = '''(?i)(?:key|api|token|secret|client|passwd|password|auth|access)(?:[0-9a-z\-_\t .]{0,20})(?:[\s|']|[\s|"]){0,3}(?:=|>|:{1,3}=|\|\|:|<=|=>|:|\?=)(?:'|\"|\s|=|\x60){0,5}([0-9a-z\-_.=]{10,150})(?:['|\"|\n|\r|\s|\x60|;]|$)'''
+entropy = 3.5
+keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "auth", "access"]
+
+  [rules.allowlist]
+  # AND, not the default OR. With OR, listing the paths below would allowlist
+  # ANY secret in those two files, including a real one committed by accident —
+  # and a test file is exactly where a real key tends to get committed by
+  # accident. Requiring both conditions means only these specific known
+  # fixture values are ignored, and only in the files they belong to.
+  condition = "AND"
+  regexTarget = "match"
+  regexes = [
+    # The fake YouTube stream key redact_test.go asserts is masked. If
+    # redaction ever breaks, that test fails — a better signal than gitleaks
+    # flagging the fixture forever.
+    '''live_284729384_pQ8fZmT3xR9wLkYvB2nHsA''',
+    # Facebook's fixture ingest URLs: a hostname and a digit run, in
+    # splitIngestURL's table of what a real ingest URL looks like.
+    '''rtmp-api\.facebook\.com:\d+''',
+  ]
+  paths = [
+    '''internal/alerts/redact_test\.go''',
+    '''internal/oauth/facebook_test\.go''',
+  ]

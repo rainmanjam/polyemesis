@@ -681,3 +681,125 @@ func TestMigrateRenditionsUpgradesAPreRenditionsDatabase(t *testing.T) {
 		t.Errorf("RenditionID = %d after deleting the rendition, want nil", *got.RenditionID)
 	}
 }
+
+func overlayRendition() *Rendition {
+	sid := int64(1)
+	return &Rendition{
+		Name: "1080p", Width: 1920, Height: 1080, FPS: 60, VideoBitrate: 6000,
+		Encoder: EncoderX264, Preset: "veryfast", GOPSeconds: 2, SourceID: &sid,
+		Overlay: RenditionOverlay{
+			Image: "overlays/logo.png", Anchor: "bottom-right",
+			WidthPct: 0.12, MarginXPct: 0.04, MarginYPct: 0.04, Opacity: 1,
+		},
+	}
+}
+
+func TestAValidOverlayIsAccepted(t *testing.T) {
+	// The positive case. Without it every check below would be satisfied by a
+	// validator that refused everything.
+	if err := overlayRendition().Validate(); err != nil {
+		t.Fatalf("a well-formed overlay was refused: %v", err)
+	}
+	// And a rendition with no overlay at all must still validate, or every
+	// pre-existing row becomes unsavable.
+	r := overlayRendition()
+	r.Overlay = RenditionOverlay{}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("a rendition with no overlay was refused: %v", err)
+	}
+}
+
+func TestOverlayValidationRefusesWhatWouldNotRender(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mut  func(*Rendition)
+		want string
+	}{
+		// The rule that would otherwise surface as a watermark that silently is
+		// not there: the image is sized as a percentage of the output, so the
+		// output has to have a size.
+		{"no explicit width", func(r *Rendition) { r.Width = 0 }, "explicit width AND height"},
+		{"no explicit height", func(r *Rendition) { r.Height = 0 }, "explicit width AND height"},
+
+		{"absolute path", func(r *Rendition) { r.Overlay.Image = "/etc/passwd" }, "relative path"},
+		{"traversal", func(r *Rendition) { r.Overlay.Image = "../../secret.key" }, "relative path"},
+		{"windows traversal", func(r *Rendition) { r.Overlay.Image = `..\..\secret.key` }, "relative path"},
+		{"drive letter", func(r *Rendition) { r.Overlay.Image = `C:\logo.png` }, "relative path"},
+		{"control characters", func(r *Rendition) { r.Overlay.Image = "logo\x00.png" }, "control characters"},
+		{"overlong path", func(r *Rendition) {
+			r.Overlay.Image = strings.Repeat("a", MaxOverlayImagePath+1)
+		}, "longer than"},
+
+		{"unknown anchor", func(r *Rendition) { r.Overlay.Anchor = "diagonal" }, "unknown overlay anchor"},
+		{"width of zero", func(r *Rendition) { r.Overlay.WidthPct = 0 }, "overlay width"},
+		{"width over 100%", func(r *Rendition) { r.Overlay.WidthPct = 1.5 }, "overlay width"},
+		{"negative margin", func(r *Rendition) { r.Overlay.MarginXPct = -0.1 }, "horizontal margin"},
+		{"margin past the middle", func(r *Rendition) { r.Overlay.MarginYPct = 0.6 }, "vertical margin"},
+		{"opacity over 1", func(r *Rendition) { r.Overlay.Opacity = 1.5 }, "opacity"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := overlayRendition()
+			tc.mut(r)
+			err := r.Validate()
+			if err == nil {
+				t.Fatalf("%s was accepted", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error was %q, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A rendition with no image must not have its geometry validated. Otherwise a
+// half-filled form -- or a row whose overlay was cleared -- becomes unsavable
+// for a feature it is not using.
+func TestGeometryIsNotValidatedWithoutAnImage(t *testing.T) {
+	r := overlayRendition()
+	r.Width, r.Height = 0, 720
+	r.Overlay = RenditionOverlay{Anchor: "diagonal", WidthPct: 99, MarginXPct: -5}
+	if err := r.Validate(); err != nil {
+		t.Errorf("a rendition with no overlay image was refused for its overlay geometry: %v", err)
+	}
+}
+
+// The columns must survive a round trip, or the feature is reachable in the UI
+// and lost on save -- which is the same class of bug as being unreachable.
+func TestOverlaySurvivesTheDatabaseRoundTrip(t *testing.T) {
+	d := testDB(t)
+	src, err := d.DefaultSourceID()
+	if err != nil {
+		t.Fatalf("default source: %v", err)
+	}
+	in := overlayRendition()
+	in.SourceID = &src
+
+	created, err := d.CreateRendition(in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Overlay != in.Overlay {
+		t.Fatalf("overlay came back as %+v, want %+v", created.Overlay, in.Overlay)
+	}
+
+	created.Overlay.Anchor = "top-left"
+	created.Overlay.Opacity = 0.5
+	updated, err := d.UpdateRendition(created)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Overlay.Anchor != "top-left" || updated.Overlay.Opacity != 0.5 {
+		t.Errorf("the updated overlay came back as %+v", updated.Overlay)
+	}
+
+	// Clearing it must actually clear it, or an operator cannot remove a
+	// watermark once they have added one.
+	updated.Overlay = RenditionOverlay{}
+	cleared, err := d.UpdateRendition(updated)
+	if err != nil {
+		t.Fatalf("clearing: %v", err)
+	}
+	if cleared.Overlay.Active() {
+		t.Errorf("the overlay survived being cleared: %+v", cleared.Overlay)
+	}
+}

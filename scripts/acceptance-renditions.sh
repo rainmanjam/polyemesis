@@ -46,6 +46,17 @@ trap cleanup EXIT
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 
+# A watermark for the image-overlay checks, written before the server starts so
+# the path exists the moment the rendition references it.
+#
+# Solid WHITE at 20% of the frame, because both properties under test are
+# measured as luma against a testsrc2 background that averages far below it:
+# a bright crop in the anchored corner proves position, and HOW bright proves
+# the opacity was applied rather than ignored.
+mkdir -p data/overlays
+ffmpeg -hide_banner -loglevel error -f lavfi -i "color=c=white:s=200x200:d=1" \
+  -frames:v 1 -y data/overlays/logo.png
+
 # ---------------------------------------------------------------- 1. server
 step "1. Start the binary"
 "$BIN" -addr ":$PORT" -data ./data -log warn > server.log 2>&1 &
@@ -113,6 +124,144 @@ OUT=data/recordings
 check_video "$OUT/passthrough.mkv"  "passthrough"  1920 1080 60
 check_video "$OUT/rendition-a.mkv"  "720p30 dest A" 1280 720 30
 check_video "$OUT/rendition-b.mkv"  "720p30 dest B" 1280 720 30
+
+step "3b. Verify burned-in text actually reached the pixels"
+
+# Measured, not asserted. drawtext that renders nothing EXITS 0 -- proven
+# earlier by removing expansion=none, where "100% LIVE" drew zero pixels and
+# FFmpeg reported success -- so nothing about the process's exit status or the
+# stored settings can tell you whether the caption is on screen.
+#
+# The rendition draws a WHITE box at full opacity across the top-left 12% of
+# the frame. testsrc2 puts a colour-bar field there, so a crop of that corner
+# is bright ONLY if the box rendered.
+mean_luma() { # mean_luma <file> <crop>  -> 0-255, or empty
+  # -v info, NOT -v error. `metadata=print` writes at INFO level, so -v error
+  # suppresses the one line this parses and the function returns nothing --
+  # which reads as "the caption did not render" and is wrong. The band()
+  # helper below uses -v info for exactly the same reason.
+  #
+  # Measured: on a white frame this prints 255 and on a black one 0; with
+  # -v error both print nothing at all.
+  ffmpeg -v info -i "$1" -vf "crop=$2,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG" \
+    -frames:v 1 -f null - 2>&1 | awk -F= '/YAVG/{print int($NF)}' | tail -1
+}
+
+if [ "${TEXT_SUPPORTED:-no}" != "yes" ]; then
+  # Reported rather than silently skipped, and NOT counted as a pass: an
+  # FFmpeg without libfreetype has no drawtext filter at all, and a green run
+  # that quietly checked nothing is the outcome this suite exists to prevent.
+  printf "  \033[33m--\033[0m text: this FFmpeg has no drawtext filter, so the pixel check cannot run\n"
+else
+  [ "${TEXT_CONTENT_STORED:-}" = "POLYEMESIS" ] \
+    && ok "text round-tripped through the store" \
+    || bad "text content came back as '${TEXT_CONTENT_STORED:-}'"
+  [ "${TEXT_BOX_STORED:-no}" = "yes" ] \
+    && ok "the text box flag survived the store" \
+    || bad "the box flag came back as '${TEXT_BOX_STORED:-}'"
+  [ "${FONT_COUNT:-0}" -ge 2 ] \
+    && ok "the fonts endpoint lists ${FONT_COUNT} fonts on disk" \
+    || bad "the fonts endpoint listed ${FONT_COUNT:-0} fonts; the embedded ones were not written out"
+
+  # Top-left 20% x 15%, comfortably inside a box drawn at 12% of height.
+  TEXT_LUMA=$(mean_luma "$OUT/rendition-a.mkv" "iw*0.2:ih*0.15:0:0")
+  BASE_LUMA=$(mean_luma "$OUT/passthrough.mkv" "iw*0.2:ih*0.15:0:0")
+  # A DIFFERENCE, not an absolute level, and that choice is the whole point.
+  #
+  # The first version of this check demanded luma >= 170 and CI measured 180 --
+  # a ten-point margin on a number that legitimately moves, because font
+  # rasterisation differs between FreeType versions and the crop covers more
+  # area than the box does. That is a flake waiting for an FFmpeg bump.
+  #
+  # The signal is that the corner got BRIGHTER, and the measured gap is large:
+  # 84 without the box, 180 with it. Requiring 40 sits comfortably inside that
+  # while still failing outright if nothing was drawn, and it survives a change
+  # to the test pattern that an absolute threshold would not.
+  if [ -z "$TEXT_LUMA" ] || [ -z "$BASE_LUMA" ]; then
+    # Named separately from a failed comparison. An empty reading means the
+    # measurement itself broke -- which is exactly how this check first failed,
+    # reporting "the caption did not render" when the truth was that ffmpeg had
+    # printed nothing for it to parse.
+    bad "the luma measurement produced no reading (text='${TEXT_LUMA:-}' passthrough='${BASE_LUMA:-}'); the check is broken, not the caption"
+  elif [ "$((TEXT_LUMA - BASE_LUMA))" -ge 40 ]; then
+    ok "the text box is on screen (top-left luma ${TEXT_LUMA} against ${BASE_LUMA} without it)"
+  else
+    bad "top-left luma ${TEXT_LUMA} is not meaningfully above the passthrough's ${BASE_LUMA}; the caption did not render"
+  fi
+
+  # The passthrough must be UNTOUCHED. Text lives on a rendition; a
+  # destination doing -c:v copy has no mechanism by which a copied bitstream
+  # acquires a caption, and if it ever did the product's central promise
+  # would be broken.
+  ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
+    -of default=nw=1:nk=1 "$OUT/passthrough.mkv" >/dev/null 2>&1 \
+    && ok "the passthrough destination still decodes as video" \
+    || bad "the passthrough output is unreadable"
+fi
+
+step "3c. Verify the image watermark landed where it was asked to"
+
+# Overlays v0.5 shipped an image watermark with NO end-to-end coverage, and the
+# text checks above did not close that gap: both compile through overlayGraph,
+# but only the image exercises the second input, eof_action=repeat and the
+# alpha stage.
+#
+# Two properties, each with a control that fails if the other explanation is
+# true. A bright bottom-right corner alone would also pass if the filter
+# painted the whole frame; a dark top-right alone would pass if nothing
+# rendered. Together they mean the anchor was honoured.
+[ "${OVERLAY_IMAGE_STORED:-}" = "overlays/logo.png" ] \
+  && ok "the overlay path round-tripped through the store" \
+  || bad "overlay image came back as '${OVERLAY_IMAGE_STORED:-}'"
+[ "${OVERLAY_ANCHOR_STORED:-}" = "bottom-right" ] \
+  && ok "the overlay anchor survived the store" \
+  || bad "overlay anchor came back as '${OVERLAY_ANCHOR_STORED:-}'"
+
+# Bottom-right 20%x25%, inside a logo drawn at 20% of the width in that corner.
+LOGO_LUMA=$(mean_luma "$OUT/rendition-a.mkv" "iw*0.2:ih*0.25:iw*0.8:ih*0.75")
+# The SAME crop of the passthrough, which carries no overlay at all.
+LOGO_BASE=$(mean_luma "$OUT/passthrough.mkv" "iw*0.2:ih*0.25:iw*0.8:ih*0.75")
+# The opposite corner of the SAME rendition. No logo there, and no text either.
+CLEAN_LUMA=$(mean_luma "$OUT/rendition-a.mkv" "iw*0.2:ih*0.25:iw*0.8:0")
+
+if [ -z "$LOGO_LUMA" ] || [ -z "$LOGO_BASE" ] || [ -z "$CLEAN_LUMA" ]; then
+  bad "the overlay luma measurement produced no reading (logo='${LOGO_LUMA:-}' base='${LOGO_BASE:-}' clean='${CLEAN_LUMA:-}'); the check is broken, not the overlay"
+else
+  if [ "$((LOGO_LUMA - LOGO_BASE))" -ge 30 ]; then
+    ok "the watermark is in the bottom-right (luma ${LOGO_LUMA} against ${LOGO_BASE} without it)"
+  else
+    bad "bottom-right luma ${LOGO_LUMA} is not above the passthrough's ${LOGO_BASE}; the watermark did not render"
+  fi
+
+  # The anchor, proven by absence. If this corner is as bright as the logo
+  # corner, the overlay is not anchored -- it is everywhere.
+  if [ "$((LOGO_LUMA - CLEAN_LUMA))" -ge 30 ]; then
+    ok "the opposite corner is clean, so the anchor was honoured (${CLEAN_LUMA} vs ${LOGO_LUMA})"
+  else
+    bad "top-right luma ${CLEAN_LUMA} is as bright as the anchored corner ${LOGO_LUMA}; the overlay ignored its anchor"
+  fi
+
+  # Opacity, asserted against the value the operator ASKED for rather than
+  # merely "not opaque".
+  #
+  # A white logo at alpha a over a background b composites to a*255+(1-a)*b, so
+  # 50% predicts the midpoint. Checking only "below 255" would pass at 90%
+  # opacity and at 10%; checking the midpoint proves the requested alpha
+  # actually reached colourchannelmixer.
+  #
+  # This is worth pinning because the alpha stage is a DIFFERENT filter graph:
+  # colourchannelmixer is omitted entirely at 100%, so no opaque overlay ever
+  # exercises it and a wrong alpha would ship unnoticed.
+  WANT=$(( (255 + LOGO_BASE) / 2 ))
+  DIFF=$(( LOGO_LUMA > WANT ? LOGO_LUMA - WANT : WANT - LOGO_LUMA ))
+  # 15 of tolerance: the composite is deterministic -- no font rasterisation is
+  # involved -- so the only spread is encoder rounding on a lossy tier.
+  if [ "$DIFF" -le 15 ]; then
+    ok "the watermark is composited at the requested 50% (luma ${LOGO_LUMA}, predicted ${WANT} over a ${LOGO_BASE} background)"
+  else
+    bad "bottom-right luma ${LOGO_LUMA} is ${DIFF} away from the ${WANT} a 50% white logo predicts over ${LOGO_BASE}; the opacity is not the one that was set"
+  fi
+fi
 
 step "4. Verify audio routing survived the shared video encode"
 

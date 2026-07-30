@@ -1,25 +1,13 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CornerUpLeft,
   Filter,
-  Gamepad2,
   Loader2,
   MessagesSquare,
-  MonitorPlay,
-  Radio,
   Send,
   Shield,
-  ThumbsUp,
   Trash2,
-  Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,12 +17,22 @@ import { api } from "@/lib/api";
 import { clockTime, timestamp } from "@/lib/format";
 import type { SignalTone } from "@/lib/signal";
 import { cn } from "@/lib/utils";
+// Presentation and text-splitting live in lib/chat.ts; the refcounted socket in
+// hooks/useChatFeed.ts. See either file for why they are not in here.
+import {
+  accentFor,
+  chatStateDetail,
+  chatStateTone,
+  platformsIn,
+  splitMessage,
+} from "@/lib/chat";
+import { messageKey, useChatFeed } from "@/hooks/useChatFeed";
+import { ChatUserCard } from "@/components/ChatUserCard";
 import type {
   ChatLimit,
   ChatMessage,
   ChatPlatform,
   ChatSendResult,
-  ChatStats,
   ChatStatus,
 } from "@/lib/types";
 
@@ -50,69 +48,6 @@ import type {
 // TypeScript guess about whether Twitch can delete a message is exactly the
 // kind of check that is wrong in the restrictive direction.
 
-/** How many messages the browser keeps. The server bounds its own ring and its
- *  table; this bounds the DOM so a twelve-hour stream does not end with fifty
- *  thousand nodes on the page. */
-const CLIENT_LIMIT = 600;
-
-/** Platforms get an accent from the theme's signal palette rather than from
- *  their own brand colours: the kit has five saturated colours and adding four
- *  more hex values for logos would break the one rule the design language has.
- *  The mapping is still mnemonic — YouTube red, Kick green, Facebook blue. */
-const ACCENT: Record<
-  ChatPlatform,
-  {
-    label: string;
-    icon: React.ComponentType<{ className?: string }>;
-    /** Left rule on a message row. */
-    rule: string;
-    text: string;
-    chipOn: string;
-  }
-> = {
-  youtube: {
-    label: "YouTube",
-    icon: MonitorPlay,
-    rule: "border-l-down",
-    text: "text-down",
-    chipOn: "border-down/40 bg-down-dim text-down",
-  },
-  twitch: {
-    label: "Twitch",
-    icon: Gamepad2,
-    rule: "border-l-primary",
-    text: "text-primary",
-    chipOn: "border-primary/50 bg-primary-dim text-foreground",
-  },
-  kick: {
-    label: "Kick",
-    icon: Zap,
-    rule: "border-l-live",
-    text: "text-live",
-    chipOn: "border-live/40 bg-live-dim text-live",
-  },
-  facebook: {
-    label: "Facebook",
-    icon: ThumbsUp,
-    rule: "border-l-armed",
-    text: "text-armed",
-    chipOn: "border-armed/40 bg-armed-dim text-armed",
-  },
-  custom: {
-    label: "Custom",
-    icon: Radio,
-    rule: "border-l-border-strong",
-    text: "text-muted-foreground",
-    chipOn: "border-border-strong bg-secondary text-secondary-foreground",
-  },
-};
-
-/** Unknown platforms fall back rather than crash: the server may know about a
- *  platform this build does not. */
-export function accentFor(p: ChatPlatform) {
-  return ACCENT[p] ?? ACCENT.custom;
-}
-
 /** Author colours when the platform sent none. Theme tokens, hashed off the
  *  name so one person keeps one colour for the whole broadcast. */
 const NAME_TONES = [
@@ -127,257 +62,6 @@ function nameTone(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return NAME_TONES[h % NAME_TONES.length];
-}
-
-export function chatStateTone(state: ChatStatus["state"]): SignalTone {
-  switch (state) {
-    case "live":
-      return "live";
-    case "connecting":
-    case "degraded":
-      return "warn";
-    case "failed":
-      return "down";
-    default:
-      return "idle";
-  }
-}
-
-/** The sentence under a platform's name.
- *
- *  A red dot is not an explanation. Every state that is not plainly live gets
- *  words, and when the adapter did not supply any this says so rather than
- *  inventing a cause it cannot know. */
-export function chatStateDetail(s: ChatStatus): string {
-  if (s.detail) return s.detail;
-  switch (s.state) {
-    case "live":
-      return "";
-    case "connecting":
-      return "Connecting.";
-    case "degraded":
-      return "Running with a limitation the platform did not name.";
-    case "failed":
-      return s.lastError || "Not connected, and the platform gave no reason.";
-    default:
-      return "Stopped.";
-  }
-}
-
-// ------------------------------------------------------------- the live feed
-//
-// One socket for the whole app, refcounted, so mounting the dashboard panel and
-// the chat page at once costs one connection rather than two. It is deliberately
-// separate from useLiveData: chat is the only consumer of these two event types,
-// and a page that never opens the pane should not pay to buffer its messages.
-
-interface FeedState {
-  connected: boolean;
-  loading: boolean;
-  /** False when the server has no chat hub wired at all. Distinct from an empty
-   *  `statuses`, which means a hub is running with nothing attached. */
-  configured: boolean;
-  /** The scrollback came out of the database rather than a live connection. */
-  stored: boolean;
-  statuses: ChatStatus[];
-  limits: ChatLimit[];
-  messages: ChatMessage[];
-  /** The hub's own counters. Only the overview carries them, so this is a
-   *  snapshot from the last load rather than a live figure — the diagnostics
-   *  block it feeds is refreshed by the reload button, not by every message. */
-  stats: ChatStats | null;
-  error: string;
-}
-
-const EMPTY: FeedState = {
-  connected: false,
-  loading: true,
-  configured: false,
-  stored: false,
-  statuses: [],
-  limits: [],
-  messages: [],
-  stats: null,
-  error: "",
-};
-
-let feed: FeedState = EMPTY;
-const listeners = new Set<() => void>();
-let refs = 0;
-let socket: WebSocket | null = null;
-let retries = 0;
-let reconnectTimer: number | undefined;
-/** Dedupe across the socket and the initial fetch: the two overlap by exactly
- *  the messages that arrived while the fetch was in flight. */
-let seen = new Set<string>();
-
-function emit(patch: Partial<FeedState>) {
-  feed = { ...feed, ...patch };
-  listeners.forEach((l) => l());
-}
-
-const messageKey = (m: ChatMessage) => `${m.platform}\u0000${m.account ?? ""}\u0000${m.id}`;
-
-function appendMessage(m: ChatMessage) {
-  const key = messageKey(m);
-  if (seen.has(key)) return;
-  seen.add(key);
-  const next = [...feed.messages, m];
-  emit({ messages: next.length > CLIENT_LIMIT ? next.slice(next.length - CLIENT_LIMIT) : next });
-}
-
-/** Drop one message locally after the platform accepted a delete. The platform
- *  is the authority; this only keeps our copy from outliving it on screen. */
-function forgetMessage(m: { platform: ChatPlatform; account?: string; id: string }) {
-  const key = `${m.platform}\u0000${m.account ?? ""}\u0000${m.id}`;
-  seen.delete(key);
-  emit({ messages: feed.messages.filter((x) => messageKey(x) !== key) });
-}
-
-async function loadHistory() {
-  try {
-    const view = await api.chatOverview(CLIENT_LIMIT);
-    seen = new Set(view.messages.map(messageKey));
-    // Anything the socket delivered while this was in flight is kept: the
-    // fetch is the floor of the scrollback, not the whole of it.
-    const live = feed.messages.filter((m) => !seen.has(messageKey(m)));
-    live.forEach((m) => seen.add(messageKey(m)));
-    emit({
-      loading: false,
-      error: "",
-      configured: view.configured,
-      stored: view.stored ?? false,
-      statuses: view.statuses ?? [],
-      limits: view.limits ?? [],
-      stats: view.stats ?? null,
-      messages: [...view.messages, ...live],
-    });
-  } catch (err) {
-    emit({
-      loading: false,
-      error: err instanceof Error ? err.message : "Could not load chat.",
-    });
-  }
-}
-
-function openSocket() {
-  if (socket || refs === 0) return;
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}/api/v1/ws`);
-  socket = ws;
-
-  ws.onopen = () => {
-    retries = 0;
-    emit({ connected: true });
-  };
-  ws.onmessage = (ev) => {
-    let msg: { type: string; data: unknown };
-    try {
-      msg = JSON.parse(ev.data as string) as { type: string; data: unknown };
-    } catch {
-      return;
-    }
-    if (msg.type === "chat") {
-      appendMessage(msg.data as ChatMessage);
-    } else if (msg.type === "chatState") {
-      // A state event is proof a hub exists, whatever the last overview said.
-      emit({ statuses: (msg.data as ChatStatus[]) ?? [], configured: true, stored: false });
-    }
-  };
-  ws.onclose = () => {
-    socket = null;
-    emit({ connected: false });
-    if (refs === 0) return;
-    // Same backoff shape the rest of the app uses, so a restarting server is
-    // not hammered by every open tab.
-    const delay = Math.min(1000 * 2 ** retries, 15000);
-    retries++;
-    reconnectTimer = window.setTimeout(openSocket, delay);
-  };
-  ws.onerror = () => ws.close();
-}
-
-function acquire() {
-  refs++;
-  if (refs === 1) {
-    feed = { ...EMPTY };
-    seen = new Set();
-    openSocket();
-    void loadHistory();
-  }
-}
-
-function release() {
-  refs--;
-  if (refs > 0) return;
-  window.clearTimeout(reconnectTimer);
-  const ws = socket;
-  socket = null;
-  ws?.close();
-}
-
-function subscribe(l: () => void) {
-  listeners.add(l);
-  return () => listeners.delete(l);
-}
-
-/** The shared chat feed. Refcounted: the first component to mount opens the
- *  socket, the last to unmount closes it. */
-export function useChatFeed() {
-  useEffect(() => {
-    acquire();
-    return release;
-  }, []);
-  const state = useSyncExternalStore(subscribe, () => feed);
-
-  const reload = useCallback(() => {
-    emit({ loading: true });
-    return loadHistory();
-  }, []);
-
-  const remove = useCallback(async (m: ChatMessage) => {
-    // The button is offered for every message on every platform. Whether a
-    // platform supports deletion is the platform's answer to give, and hiding
-    // the action on a guess would silently remove a moderator's only tool the
-    // day a platform gains the capability.
-    await api.deleteChatMessage({ platform: m.platform, account: m.account, id: m.id });
-    forgetMessage(m);
-  }, []);
-
-  return { ...state, reload, remove };
-}
-
-// -------------------------------------------------------------- text + emotes
-
-type Piece = { kind: "text"; text: string } | { kind: "emote"; name: string; url?: string };
-
-/** Split a message into text runs and emotes.
- *
- *  Offsets are RUNE offsets with an exclusive end — the convention every
- *  adapter normalises into — so the text is split on code points, not on UTF-16
- *  units. A message with an emoji before an emote misplaces every following
- *  range otherwise. Anything out of range is skipped rather than throwing: a
- *  line rendered without its emote beats a line not rendered at all. */
-export function splitMessage(m: ChatMessage): Piece[] {
-  const runes = Array.from(m.text);
-  const emotes = (m.emotes ?? [])
-    .filter((e) => e.start >= 0 && e.end > e.start && e.end <= runes.length)
-    .sort((a, b) => a.start - b.start);
-
-  const out: Piece[] = [];
-  let at = 0;
-  for (const e of emotes) {
-    if (e.start < at) continue; // overlapping ranges: keep the first
-    if (e.start > at) out.push({ kind: "text", text: runes.slice(at, e.start).join("") });
-    out.push({
-      kind: "emote",
-      name: e.name || runes.slice(e.start, e.end).join(""),
-      url: e.url,
-    });
-    at = e.end;
-  }
-  if (at < runes.length) out.push({ kind: "text", text: runes.slice(at).join("") });
-  return out;
 }
 
 function MessageBody({ m }: { m: ChatMessage }) {
@@ -412,10 +96,13 @@ function MessageBody({ m }: { m: ChatMessage }) {
 function MessageRow({
   m,
   onDelete,
+  onOpenUser,
   compact,
 }: {
   m: ChatMessage;
   onDelete?: (m: ChatMessage) => void;
+  /** Open the moderator's user card for whoever said this. */
+  onOpenUser?: (m: ChatMessage) => void;
   compact?: boolean;
 }) {
   const accent = accentFor(m.platform);
@@ -460,13 +147,34 @@ function MessageRow({
         <Shield className="mr-0.5 inline h-3 w-3 align-text-bottom text-armed" aria-label="Moderator" />
       )}
 
-      <span
-        className={cn("font-semibold", !m.author.color && nameTone(m.author.name))}
+      {/* The name is the way in to moderation, which is where every chat tool
+          puts it: you read a bad line, you click who said it. A separate
+          moderation button per row would compete with Delete for the same
+          corner and make the common case (read, judge, act) three clicks. */}
+      <button
+        type="button"
+        disabled={!onOpenUser || !m.author.id}
+        onClick={() => onOpenUser?.(m)}
+        aria-label={m.author.id ? `Moderate ${m.author.name}` : m.author.name}
+        title={
+          m.author.id
+            ? `What ${m.author.name} has said, and what to do about it`
+            : // A platform that sent no author id cannot be addressed by any
+              // moderation call, so the name is not a button. Saying why beats a
+              // control that silently does nothing.
+              `${m.author.name} — ${m.platform} sent no user id for this message, so it cannot be moderated`
+        }
+        className={cn(
+          "font-semibold",
+          !m.author.color && nameTone(m.author.name),
+          onOpenUser && m.author.id
+            ? "cursor-pointer hover:underline focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none"
+            : "cursor-default",
+        )}
         style={m.author.color ? { color: m.author.color } : undefined}
-        title={(m.author.badges ?? []).map((b) => b.label || b.id).join(", ") || undefined}
       >
         {m.author.name}
-      </span>
+      </button>
       <span className="text-subtle-foreground">{m.action ? " " : ": "}</span>
       <span
         className={cn(
@@ -501,11 +209,13 @@ function MessageRow({
 export function ChatTimeline({
   messages,
   onDelete,
+  onOpenUser,
   compact,
   empty,
 }: {
   messages: ChatMessage[];
   onDelete?: (m: ChatMessage) => void;
+  onOpenUser?: (m: ChatMessage) => void;
   compact?: boolean;
   empty?: React.ReactNode;
 }) {
@@ -549,6 +259,7 @@ export function ChatTimeline({
                 key={messageKey(m)}
                 m={m}
                 onDelete={onDelete}
+                onOpenUser={onOpenUser}
                 compact={compact}
               />
             ))}
@@ -872,6 +583,11 @@ export function ChatPanel({
       return next;
     });
 
+  // The message whose author's card is open. Holding the MESSAGE rather than
+  // just an id keeps the platform and account with it, which the card needs to
+  // address a moderation call and cannot re-derive.
+  const [card, setCard] = useState<ChatMessage | null>(null);
+
   const del = useCallback(
     async (m: ChatMessage) => {
       try {
@@ -887,6 +603,16 @@ export function ChatPanel({
 
   return (
     <div className={cn("flex min-h-0 flex-col rounded-md border border-border bg-card", className)}>
+      {card && (
+        <ChatUserCard
+          platform={card.platform}
+          account={card.account}
+          authorId={card.author.id ?? ""}
+          authorName={card.author.name}
+          open
+          onOpenChange={(o) => !o && setCard(null)}
+        />
+      )}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
         <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12px] font-semibold">Chat</span>
@@ -908,6 +634,7 @@ export function ChatPanel({
       <ChatTimeline
         messages={visible}
         onDelete={del}
+        onOpenUser={setCard}
         compact
         empty={
           <ChatEmpty loading={loading} configured={configured} error={error} statuses={statuses} />
@@ -919,20 +646,6 @@ export function ChatPanel({
       )}
     </div>
   );
-}
-
-/** Every platform that has either spoken or is attached, in a stable order so
- *  the filter chips do not reshuffle as messages arrive. */
-export function platformsIn(messages: ChatMessage[], statuses: ChatStatus[]): ChatPlatform[] {
-  const order = Object.keys(ACCENT) as ChatPlatform[];
-  const present = new Set<ChatPlatform>();
-  statuses.forEach((s) => present.add(s.platform));
-  messages.forEach((m) => present.add(m.platform));
-  const known = order.filter((p) => present.has(p));
-  const unknown = [...present]
-    .filter((p) => !order.includes(p))
-    .sort((a, b) => a.localeCompare(b));
-  return [...known, ...unknown];
 }
 
 /** What an empty timeline says. Four different situations, four different

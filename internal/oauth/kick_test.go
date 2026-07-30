@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -31,32 +32,95 @@ func kickStub(t *testing.T, h http.HandlerFunc) *httptest.Server {
 
 // --------------------------------------------------------- the missing key
 
-func TestKickIngestExplainsTheManualPasteAndNeverReturnsSomethingURLShaped(t *testing.T) {
-	// A future agent "fixing" this by guessing an endpoint is the specific
-	// regression this test exists to catch: Kick publishes no stream-key
-	// endpoint, and a fabricated one fails as a 404 nobody can diagnose.
-	ing, err := (&Kick{}).Ingest(context.Background(), "cid", "token")
-	if ing != nil {
-		t.Fatalf("Ingest returned an ingest %#v; Kick has no stream-key endpoint to return one from", ing)
-	}
+func TestKickIngestNeverFabricatesAnIngestURL(t *testing.T) {
+	// The original version of this test asserted Ingest could never succeed,
+	// because Kick was believed to publish no stream key at all. That premise
+	// was wrong -- the key is stream.key on the channels resource, behind
+	// streamkey:read -- so the assertion has been replaced.
+	//
+	// What is KEPT is the concern the original was really protecting, and it
+	// nearly bit during this very change: a first draft of Ingest defaulted the
+	// missing-URL case to a hardcoded RTMPS host copied from memory. Kick fronts
+	// its ingest with a CDN whose host has changed, so a stale constant would
+	// publish to nowhere and read as a polyemesis bug. Never invent the URL:
+	// return what the API returned, or fail saying so.
+	ing, err := (&Kick{}).Ingest(context.Background(), "cid", "not-a-real-token")
 	if err == nil {
-		t.Fatal("Ingest returned no error; the caller would store an empty stream key")
+		t.Fatal("Ingest succeeded with a bogus token; the caller would store an empty key")
 	}
-	if !errors.Is(err, ErrNoStreamKeyAPI) {
-		t.Fatalf("Ingest error does not wrap ErrNoStreamKeyAPI, so callers cannot tell "+
-			"'impossible' from 'failed': %v", err)
+	if ing != nil {
+		t.Fatalf("Ingest returned %#v alongside an error", ing)
 	}
 
-	msg := err.Error()
-	for _, forbidden := range []string{"://", "rtmp", "http", "kick.com", "/public/v1", "/oauth"} {
-		if strings.Contains(strings.ToLower(msg), forbidden) {
-			t.Errorf("Ingest error contains %q, which reads as a fabricated endpoint: %s", forbidden, msg)
+	msg := strings.ToLower(err.Error())
+	// The error may legitimately name the dashboard path in prose, but it must
+	// never contain something an operator could mistake for a real ingest URL.
+	for _, forbidden := range []string{"://", "rtmp"} {
+		if strings.Contains(msg, forbidden) {
+			t.Errorf("Ingest error contains %q, which reads as a fabricated ingest endpoint: %s",
+				forbidden, err)
 		}
 	}
-	for _, want := range []string{"Settings", "Stream", "paste"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("Ingest error does not tell the operator where the key is (missing %q): %s", want, msg)
-		}
+}
+
+// The positive case. Without it the suite above passes just as happily against
+// an Ingest that refuses everything, which is exactly what it used to do.
+func TestKickIngestReadsTheKeyOffTheChannelsResource(t *testing.T) {
+	var gotPath string
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		io.WriteString(w, `{"data":[{"broadcaster_user_id":7,"slug":"chan",
+			"stream":{"is_live":true,"url":"rtmps://ingest.example/app/","key":"sk_live_abc"}}]}`)
+	})
+
+	ing, err := (&Kick{}).Ingest(context.Background(), "cid", "token")
+	if err != nil {
+		t.Fatalf("Ingest failed against a channels response carrying a key: %v", err)
+	}
+	// The key must come from the resource we already fetch, not an invented
+	// /streamkey path -- that was the false premise this whole change corrected.
+	if gotPath != "/public/v1/channels" {
+		t.Errorf("Ingest called %q, want /public/v1/channels", gotPath)
+	}
+	if ing.Key != "sk_live_abc" {
+		t.Errorf("Key = %q, want the value from stream.key", ing.Key)
+	}
+	if ing.URL != "rtmps://ingest.example/app/" {
+		t.Errorf("URL = %q, want the value from stream.url verbatim", ing.URL)
+	}
+}
+
+// A key with no URL must fail rather than guess. See the comment on
+// TestKickIngestNeverFabricatesAnIngestURL: a hardcoded host was nearly shipped.
+func TestKickIngestRefusesToInventAURLWhenOnlyTheKeyArrives(t *testing.T) {
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"data":[{"broadcaster_user_id":7,"slug":"chan",
+			"stream":{"is_live":true,"key":"sk_live_abc"}}]}`)
+	})
+	ing, err := (&Kick{}).Ingest(context.Background(), "cid", "token")
+	if err == nil {
+		t.Fatalf("Ingest returned %#v for a response with no stream.url; it must not "+
+			"substitute a host of its own", ing)
+	}
+	if !strings.Contains(err.Error(), "no ingest URL") {
+		t.Errorf("the error does not say the URL was missing: %v", err)
+	}
+}
+
+// A token minted before streamkey:read gets neither field, and must be told to
+// reconnect -- retrying forever is the failure mode this guards.
+func TestKickIngestTellsAStaleTokenToReconnect(t *testing.T) {
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"data":[{"broadcaster_user_id":7,"slug":"chan",
+			"stream":{"is_live":true}}]}`)
+	})
+	_, err := (&Kick{}).Ingest(context.Background(), "cid", "token")
+	if !errors.Is(err, ErrNoStreamKeyAPI) {
+		t.Fatalf("a response with no key must wrap ErrNoStreamKeyAPI so callers can "+
+			"distinguish 'reconnect' from 'retry': %v", err)
+	}
+	if !strings.Contains(err.Error(), "connect it again") {
+		t.Errorf("the error does not tell the operator to reconnect: %v", err)
 	}
 }
 
@@ -89,12 +153,23 @@ func TestManualKeyForOnlyFlagsPlatformsThatAuthenticateButCannotFetchAKey(t *tes
 		})
 	}
 
-	t.Run("kick is flagged once it is registered", func(t *testing.T) {
+	// Kick still carries manual-key advice, but it no longer means "this
+	// platform can never fetch a key" -- Kick can, over streamkey:read. It now
+	// covers the one case left: a token minted before that scope was requested,
+	// which no amount of retrying fixes because granting a scope does not
+	// upgrade a token already issued.
+	t.Run("kick keeps reconnect advice for a token that predates the scope", func(t *testing.T) {
 		if _, err := Get(db.PlatformKick); err != nil {
-			t.Skip("Kick is not in Providers() yet; apply the one-line registration from the Kick provider report")
+			t.Skip("Kick is not in Providers() yet")
 		}
-		if _, ok := ManualKeyFor(db.PlatformKick); !ok {
-			t.Fatal("Kick is registered but ManualKeyFor says no, so the UI would offer a Fetch key button that cannot work")
+		mk, ok := ManualKeyFor(db.PlatformKick)
+		if !ok {
+			t.Fatal("Kick lost its manual-key advice; an operator whose token predates " +
+				"streamkey:read would get a bare failure with nothing to act on")
+		}
+		if !strings.Contains(mk.ManualKeyReason(), "connect it again") {
+			t.Errorf("the advice does not tell the operator to reconnect, which is the "+
+				"only thing that fixes it: %q", mk.ManualKeyReason())
 		}
 	})
 }
@@ -107,8 +182,20 @@ func TestGetKickResolvesToAProviderRatherThanAnUnsupportedPlatform(t *testing.T)
 	if p.Platform() != db.PlatformKick {
 		t.Fatalf("Get(kick) returned the %q provider", p.Platform())
 	}
-	if _, err := p.Ingest(context.Background(), "cid", "token"); !errors.Is(err, ErrNoStreamKeyAPI) {
-		t.Fatalf("the registered Kick provider does not report the manual key: %v", err)
+	// Ingest used to return ErrNoStreamKeyAPI unconditionally, on the belief
+	// that Kick published no stream key at all. It does: stream.key on the
+	// channels resource, behind streamkey:read. So the contract under test is
+	// now that Ingest actually TRIES -- a bogus token must produce a transport
+	// or auth failure, which proves a request was made, rather than the old
+	// short-circuit that never touched the network.
+	_, err = p.Ingest(context.Background(), "cid", "not-a-real-token")
+	if err == nil {
+		t.Fatal("Ingest succeeded with a bogus token")
+	}
+	if errors.Is(err, ErrNoStreamKeyAPI) {
+		t.Fatalf("Ingest still short-circuits with ErrNoStreamKeyAPI instead of "+
+			"calling the channels resource; the stream key IS fetchable over "+
+			"streamkey:read: %v", err)
 	}
 }
 
@@ -183,13 +270,29 @@ func TestKickAuthURLCarriesPKCEAndEveryRequestedScope(t *testing.T) {
 			t.Errorf("scope %q is declared but not requested at authorization time: %q", want, scope)
 		}
 	}
-	// Nothing in polyemesis bans a viewer, and asking for the power to do so
-	// makes the consent screen scarier than the feature warrants.
+	// This used to assert the OPPOSITE: that moderation:ban was absent, because
+	// nothing here banned a viewer and asking for the power to do so made the
+	// consent screen scarier than the feature warranted.
+	//
+	// The maintainer reversed that decision and banning is implemented, so the
+	// assertion is inverted rather than deleted. The property worth guarding is
+	// unchanged and is the reason this block exists at all: the scopes asked for
+	// on the consent screen must match what the code actually does. A scope
+	// requested and unused makes an operator grant power nobody exercises; a
+	// scope used and unrequested is a 401 they cannot fix without reconnecting.
+	var hasBan bool
 	for _, g := range granted {
 		if g == "moderation:ban" {
-			t.Error("moderation:ban is requested but nothing uses it")
+			hasBan = true
 		}
 	}
+	if !hasBan {
+		t.Error("moderation:ban is not requested, but KickAdapter.Ban exists and will 401 without it")
+	}
+	// The other half of the rule -- that the implementation is really there --
+	// is asserted in internal/chat, where the interface lives. Reaching for it
+	// from here would make the OAuth package depend on the chat package for a
+	// compile-time check.
 }
 
 func TestKickTokenRequestsSendTheGrantKickExpects(t *testing.T) {
@@ -730,4 +833,115 @@ func TestEveryRegisteredProviderHasASetupGuide(t *testing.T) {
 			t.Errorf("provider %q has no setup guide", platform)
 		}
 	}
+}
+
+// ------------------------------------------------------- broadcast settings
+
+// Kick's whole metadata surface is three fields, and tags is the one it shares
+// with YouTube. Everything else on BroadcastSettings has no Kick equivalent and
+// must be REPORTED rather than silently ignored: an operator who set a DVR
+// toggle and saw nothing happen deserves to know the platform has no such
+// thing.
+func TestKickTakesTagsAndSaysWhatItCannotDo(t *testing.T) {
+	var body map[string]any
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch && r.URL.Path == "/public/v1/channels" {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	tags := []string{"speedrun", "chill"}
+	dvr := false
+	when := "2026-08-01T20:00:00Z"
+	res, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+		BroadcastSettings{Tags: &tags, EnableDvr: &dvr, ScheduledStart: &when})
+	if err != nil {
+		t.Fatalf("PushBroadcastSettings: %v", err)
+	}
+
+	got, _ := body["custom_tags"].([]any)
+	if len(got) != 2 || got[0] != "speedrun" {
+		t.Errorf("custom_tags = %v, want the two requested", body["custom_tags"])
+	}
+	// The title and category must NOT be sent. This call is about tags, and a
+	// stream_title key here would blank the operator's title.
+	if _, ok := body["stream_title"]; ok {
+		t.Errorf("a tags-only write sent a stream_title: %v", body)
+	}
+	if _, ok := body["category_id"]; ok {
+		t.Errorf("a tags-only write sent a category_id: %v", body)
+	}
+
+	if !containsField(res.Applied, FieldTags) {
+		t.Errorf("tags were written but not reported as applied: %v", res.Applied)
+	}
+	for _, want := range []MetadataField{FieldScheduledStart, FieldContentDetails} {
+		if !containsField(res.Skipped, want) {
+			t.Errorf("%s has no Kick equivalent and was not reported as skipped: %v", want, res.Skipped)
+		}
+	}
+	if len(res.Warnings) < 2 {
+		t.Errorf("skipped fields carried no explanation: %v", res.Warnings)
+	}
+}
+
+// Clearing every tag is a real edit, and it is the case an empty-versus-nil
+// slip hides: a nil slice means "not mentioned" and must send nothing, while an
+// EMPTY one means "remove them all" and must send [].
+func TestKickCanClearEveryTag(t *testing.T) {
+	var body map[string]any
+	var patched bool
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch && r.URL.Path == "/public/v1/channels" {
+			patched = true
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	empty := []string{}
+	if _, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+		BroadcastSettings{Tags: &empty}); err != nil {
+		t.Fatalf("PushBroadcastSettings: %v", err)
+	}
+	if !patched {
+		t.Fatal("clearing the tags sent no request at all, so they can never be removed")
+	}
+	got, ok := body["custom_tags"].([]any)
+	if !ok || len(got) != 0 {
+		t.Errorf("custom_tags = %v, want an empty list", body["custom_tags"])
+	}
+}
+
+// A block with nothing Kick handles must not write at all.
+func TestKickWritesNothingWhenThereAreNoTags(t *testing.T) {
+	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			t.Errorf("a settings block with no tags still wrote to %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	dvr := true
+	res, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+		BroadcastSettings{EnableDvr: &dvr})
+	if err != nil {
+		t.Fatalf("PushBroadcastSettings: %v", err)
+	}
+	if len(res.Applied) != 0 {
+		t.Errorf("nothing was written but %v was reported as applied", res.Applied)
+	}
+}
+
+func containsField(list []MetadataField, want MetadataField) bool {
+	for _, f := range list {
+		if f == want {
+			return true
+		}
+	}
+	return false
 }

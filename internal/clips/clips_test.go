@@ -240,6 +240,17 @@ func TestResolveRefusesAnythingOutsideTheClipsDirectory(t *testing.T) {
 		{"a recording", "rec-20260727-203000.mkv", false},
 		{"an empty name", "", false},
 		{"the prefix and extension with nothing between", Prefix + Ext, false},
+		// Shaped to pass IsClip so the SEPARATOR is the only thing rejecting
+		// it -- otherwise the case would pass for the wrong reason and keep
+		// passing after the separator check was removed.
+		//
+		// A backslash rather than a forward slash because that is what makes
+		// the invariant testable here. This check tests '/' AND
+		// os.PathSeparator, which is correct; the identical copy in
+		// internal/recording had drifted to the separator alone, and on Linux
+		// every forward-slash case still passed while Windows let "a/b"
+		// through.
+		{"a windows separator in an otherwise valid clip name", Prefix + `a\b` + Ext, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

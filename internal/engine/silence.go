@@ -113,8 +113,27 @@ func (e *Engine) sourceHub() *relay.Hub {
 // today; once the tier is between them it must be compiled against the
 // SYNTHETIC layout, not the probe.
 func (e *Engine) effectiveSource() routing.Source {
+	src, _ := e.effectiveSourceKnown()
+	return src
+}
+
+// effectiveSourceKnown is effectiveSource plus whether the layout it returns is
+// a MEASUREMENT or a placeholder.
+//
+// Until the ingest is probed, e.source is routing.DefaultSource(): six tracks
+// that exist so the routing editor has something to render, not a claim about
+// what is arriving. Anything that compiles that layout into a command line --
+// the stem plan, the meters filtergraph -- asks FFmpeg to map streams that do
+// not exist, and FFmpeg refuses to start rather than skipping them. Callers
+// that build a process need the second return value; callers that render a UI
+// do not, which is why effectiveSource still exists.
+//
+// The synthetic tier counts as known: one silent track is exactly what the
+// destinations below it receive.
+func (e *Engine) effectiveSourceKnown() (routing.Source, bool) {
 	e.mu.RLock()
 	src, live := e.source, e.silence != nil && e.silence.hub != nil
+	probed := e.probed
 	e.mu.RUnlock()
 	if live {
 		src = synthTrack()
@@ -124,7 +143,7 @@ func (e *Engine) effectiveSource() routing.Source {
 	// layout gets them too: a single tier track can still be labelled, and
 	// dropping them would make a role exclusion silently stop applying the
 	// moment the ingest lost its video.
-	return e.annotate(src)
+	return e.annotate(src), probed || live
 }
 
 // reconcileSilence starts, stops or leaves the tier alone.

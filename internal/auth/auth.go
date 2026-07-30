@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,14 @@ const (
 // ErrUnauthorized is returned for any failed authentication.
 var ErrUnauthorized = errors.New("unauthorized")
 
+// EpochFunc reports the session epoch currently on record for a user.
+//
+// Every issued token carries the epoch that was current when it was signed, and
+// every verification compares the two. Bumping the stored epoch therefore
+// invalidates every token already in circulation — which is the only revocation
+// a stateless JWT can be given.
+type EpochFunc func(userID int64) (int64, error)
+
 // Manager issues and validates sessions.
 type Manager struct {
 	key []byte
@@ -42,21 +51,46 @@ type Manager struct {
 	// trusted proxy reports X-Forwarded-Proto: https.
 	secure     bool
 	trustProxy bool
+	// epoch is required, not optional. See New.
+	epoch EpochFunc
 }
 
 // New creates a session manager. key should come from secrets.Box.Derive.
-func New(key []byte, secure, trustProxy bool) *Manager {
-	return &Manager{key: key, secure: secure, trustProxy: trustProxy}
+//
+// epoch is a required dependency and a nil one is not quietly tolerated: Issue
+// and Verify both fail closed, so a build that forgets to wire it cannot log
+// anybody in and the omission surfaces on the first request instead of becoming
+// a permanently disabled check nobody notices.
+//
+// That specific shape is deliberate. The Kick webhook adapter carried an
+// optional `Verify` hook guarded by `if cfg.Verify != nil`, was never wired at
+// its one construction site, and so ran with signature checking silently
+// switched off. An optional security control is an absent one; this constructor
+// refuses to repeat the mistake.
+func New(key []byte, secure, trustProxy bool, epoch EpochFunc) *Manager {
+	return &Manager{key: key, secure: secure, trustProxy: trustProxy, epoch: epoch}
 }
 
 // Claims is the session payload.
 type Claims struct {
 	jwt.RegisteredClaims
 	Username string `json:"username"`
+	// Epoch is the users.token_epoch value current when this token was signed.
+	// A token whose epoch has fallen behind is refused. Absent in tokens issued
+	// by a build that predates revocation, which decode as 0 — the same value a
+	// migrated install starts at, so an upgrade does not sign anybody out.
+	Epoch int64 `json:"epoch"`
 }
 
 // Issue signs a session token for a user.
 func (m *Manager) Issue(userID int64, username string) (string, error) {
+	if m.epoch == nil {
+		return "", ErrUnauthorized
+	}
+	epoch, err := m.epoch(userID)
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -67,6 +101,7 @@ func (m *Manager) Issue(userID int64, username string) (string, error) {
 			Issuer:    "polyemesis",
 		},
 		Username: username,
+		Epoch:    epoch,
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.key)
 }
@@ -85,7 +120,38 @@ func (m *Manager) Verify(token string) (*Claims, error) {
 	if err != nil {
 		return nil, ErrUnauthorized
 	}
+	if err := m.checkEpoch(&claims); err != nil {
+		return nil, err
+	}
 	return &claims, nil
+}
+
+// checkEpoch refuses a token that was issued before the user's sessions were
+// last revoked.
+//
+// A signature-valid token that fails here is not a forgery; it is a real token
+// somebody was meant to stop being able to use. It still gets the same
+// undifferentiated ErrUnauthorized, because telling a holder "this token was
+// revoked" rather than "this token is invalid" tells them their stolen
+// credential was real.
+func (m *Manager) checkEpoch(claims *Claims) error {
+	if m.epoch == nil {
+		return ErrUnauthorized
+	}
+	userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+	if err != nil {
+		return ErrUnauthorized
+	}
+	current, err := m.epoch(userID)
+	if err != nil {
+		// The store could not answer. Fail closed: an unreachable database is
+		// not a reason to accept a token we cannot check.
+		return ErrUnauthorized
+	}
+	if claims.Epoch != current {
+		return ErrUnauthorized
+	}
+	return nil
 }
 
 func (m *Manager) isSecure(r *http.Request) bool {

@@ -123,6 +123,15 @@ func TestValidRecordingNameRejectsAnythingThatCouldEscapeTheDirectory(t *testing
 		{"a newline", "rec\n.mkv", false},
 		{"a null byte", "rec\x00.mkv", false},
 		{"absurdly long", strings.Repeat("a", 256), false},
+		// Backslash cases pin the invariant on the platform this suite runs on.
+		//
+		// This check is already correct -- it tests '/' AND os.PathSeparator --
+		// but so was the copy in internal/recording until it drifted to the
+		// separator alone, which meant nothing on Linux and let a forward slash
+		// through on Windows. Every forward-slash case above would still pass
+		// after that same narrowing; these would not.
+		{"a windows separator", `sub\rec.mkv`, false},
+		{"a windows climb out", `..\..\etc\passwd`, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

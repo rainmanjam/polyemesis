@@ -20,8 +20,11 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 	}{
 		{"kick signs in", "kick", CapSSO, SupportYes,
 			"Kick's OAuth 2.1 flow is implemented, and losing it would lose chat and metadata with it"},
-		{"kick stream key is pasted, not fetched", "kick", CapStreamKey, SupportManual,
-			"no Kick endpoint returns a stream key; manual is the working answer, not a failure"},
+		{"kick fetches its own stream key", "kick", CapStreamKey, SupportYes,
+			"stream.key on the channels resource, over the streamkey:read scope. This " +
+				"read SupportManual for a long time on the belief that no Kick endpoint " +
+				"returned a key -- there is no /streamkey endpoint, but the key rides on " +
+				"the channels response we already fetch"},
 		{"kick moderates", "kick", CapModeration, SupportYes,
 			"DELETE /public/v1/chat/{id} plus the moderation scopes"},
 		{"kick reports viewers", "kick", CapViewerStats, SupportYes,

@@ -10,10 +10,11 @@ import {
   ChatStatusList,
   ChatTimeline,
   PlatformFilter,
-  accentFor,
-  platformsIn,
-  useChatFeed,
 } from "@/components/ChatPanel";
+import { accentFor, platformsIn } from "@/lib/chat";
+import { ChatUserCard } from "@/components/ChatUserCard";
+import { ChatRules } from "@/components/ChatRules";
+import { useChatFeed } from "@/hooks/useChatFeed";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /** One pane for every platform at once.
@@ -61,6 +62,11 @@ export function ChatPage() {
       else next.add(p);
       return next;
     });
+
+  // The message whose author's card is open. The whole message, not an id: the
+  // card needs the platform and account to address a moderation call, and
+  // cannot re-derive either.
+  const [card, setCard] = useState<ChatMessage | null>(null);
 
   const del = useCallback(
     async (m: ChatMessage) => {
@@ -126,9 +132,21 @@ export function ChatPage() {
             </div>
           </div>
 
+          {card && (
+            <ChatUserCard
+              platform={card.platform}
+              account={card.account}
+              authorId={card.author.id ?? ""}
+              authorName={card.author.name}
+              open
+              onOpenChange={(o) => !o && setCard(null)}
+            />
+          )}
+
           <ChatTimeline
             messages={visible}
             onDelete={del}
+            onOpenUser={setCard}
             empty={
               hidden.size > 0 && messages.length > 0 ? (
                 <div className="flex h-full items-center justify-center px-6 text-center">
@@ -161,6 +179,7 @@ export function ChatPage() {
             </div>
           )}
 
+          <ChatRules statuses={statuses} />
           <ChatStatusList statuses={statuses} />
 
           {configured && statuses.length === 0 && (

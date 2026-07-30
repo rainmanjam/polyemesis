@@ -58,7 +58,16 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	// And once more for the rendition aspect-conversion columns.
+	if err := d.MigratePlatformAccountScopeVer(); err != nil {
+		return nil, err
+	}
 	if err := d.MigrateRenditionAspect(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// users.token_epoch, so a password change can revoke sessions that are
+	// already signed and in somebody's cookie jar.
+	if err := d.MigrateUserTokenEpoch(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

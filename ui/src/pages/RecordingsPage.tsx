@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   AudioLines,
   ChevronDown,
@@ -35,7 +36,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
-import { autoApi } from "@/pages/AutomationPage";
+import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
 import type { DiskUsage, Recording, Settings } from "@/lib/types";
 

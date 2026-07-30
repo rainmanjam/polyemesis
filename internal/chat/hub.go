@@ -82,6 +82,11 @@ type Hub struct {
 	stored   int64
 	deduped  int64
 	received int64
+	// retracted counts messages withdrawn after delivery, by a moderator here
+	// or on the platform's own dashboard. Worth a counter of its own: a number
+	// that climbs while nobody is using the pane's delete button is the sign
+	// that moderation is happening somewhere polyemesis cannot see.
+	retracted int64
 
 	store     Store
 	bus       Publisher
@@ -197,6 +202,29 @@ func WithSendTimeout(d time.Duration) Option {
 		if d > 0 {
 			h.sendTimeout = d
 		}
+	}
+}
+
+// SetRetention changes the stored-history bounds on a running Hub.
+//
+// Separate from WithRetention because retention is an operator setting now, and
+// a setting that only takes effect on restart is one an operator changes, sees
+// nothing happen, and changes again. The purge loop reads these under the lock
+// on every tick, so the next sweep uses the new values.
+//
+// A zero or negative age means keep forever, matching RecordingSettings.
+// MaxAgeHours. It is a real answer rather than a mistake to guard against: chat
+// rows are small, and an operator who wants a permanent moderation record should
+// be able to have one.
+func (h *Hub) SetRetention(age time.Duration, keep int, purgeEvery time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.retention = age
+	if keep >= 0 {
+		h.retainKeep = keep
+	}
+	if purgeEvery > 0 {
+		h.purgeEvery = purgeEvery
 	}
 }
 
@@ -372,6 +400,120 @@ func (h *Hub) deliver(r *runner, m Message) {
 	}
 }
 
+// retract removes one message the platform says is gone.
+//
+// Called on the adapter's goroutine like deliver, and cheap for the same reason.
+// Idempotent by construction: a platform may report a deletion more than once,
+// and a retraction for a message we never held is the normal case rather than an
+// error -- it happens for anything older than the history ring.
+//
+// The seen-key is deliberately NOT cleared. If the platform re-sends the message
+// after announcing its deletion, that is the platform contradicting itself and
+// the right answer is to keep ignoring it.
+func (h *Hub) retract(r *runner, messageID string) {
+	if messageID == "" {
+		return
+	}
+	h.mu.Lock()
+	n := h.forgetHistory(func(m Message) bool {
+		return m.ID == messageID && m.Platform == r.platform && m.Account == r.account
+	})
+	h.retracted += int64(n)
+	h.mu.Unlock()
+
+	h.removeStored(r.platform, r.account, messageID)
+	h.publishRetraction(Retraction{
+		Platform: r.platform, Account: r.account, MessageIDs: []string{messageID},
+	})
+}
+
+// retractUser removes every message from one author, or -- with an empty
+// authorID -- clears the whole room.
+//
+// The platform names a user, not a list of messages, so the message ids are
+// resolved HERE from what we are holding. That is the only honest translation
+// available: the pane can only remove what it has, and claiming to have removed
+// a message that scrolled out of the ring an hour ago would be a lie the UI then
+// has to render.
+func (h *Hub) retractUser(r *runner, authorID string) {
+	h.mu.Lock()
+	var ids []string
+	h.forgetHistory(func(m Message) bool {
+		if m.Platform != r.platform || m.Account != r.account {
+			return false
+		}
+		// An empty authorID is the platform clearing everything.
+		if authorID != "" && m.Author.ID != authorID {
+			return false
+		}
+		ids = append(ids, m.ID)
+		return true
+	})
+	h.retracted += int64(len(ids))
+	h.mu.Unlock()
+
+	for _, id := range ids {
+		h.removeStored(r.platform, r.account, id)
+	}
+	if len(ids) > 0 {
+		h.publishRetraction(Retraction{
+			Platform: r.platform, Account: r.account, MessageIDs: ids,
+		})
+	}
+}
+
+// forgetHistory drops every history entry matching drop, preserving order, and
+// returns how many went. Caller holds h.mu.
+//
+// The ring is rebuilt compactly rather than tombstoned, so History stays a
+// straight read with no filtering and every caller of it is unaffected.
+func (h *Hub) forgetHistory(drop func(Message) bool) int {
+	if h.histN == 0 {
+		return 0
+	}
+	kept := make([]Message, 0, h.histN)
+	start := (h.histAt - h.histN + len(h.history)*2) % len(h.history)
+	removed := 0
+	for i := 0; i < h.histN; i++ {
+		m := h.history[(start+i)%len(h.history)]
+		if drop(m) {
+			removed++
+			continue
+		}
+		kept = append(kept, m)
+	}
+	if removed == 0 {
+		return 0
+	}
+	for i := range h.history {
+		h.history[i] = Message{}
+	}
+	copy(h.history, kept)
+	h.histN = len(kept)
+	h.histAt = len(kept) % len(h.history)
+	return removed
+}
+
+// removeStored deletes one message from the durable scrollback, when the store
+// can do that. A store that cannot is not an error: retention will age the row
+// out, and the live pane has already dropped it.
+func (h *Hub) removeStored(p db.Platform, account, messageID string) {
+	rm, ok := h.store.(Remover)
+	if !ok || h.store == nil {
+		return
+	}
+	if err := rm.DeleteChatMessage(p, account, messageID); err != nil {
+		h.log.Debug("chat retraction not applied to the stored scrollback",
+			"platform", p, "id", messageID, "err", err)
+	}
+}
+
+func (h *Hub) publishRetraction(r Retraction) {
+	if h.bus != nil {
+		h.bus.Publish(events.TypeChatRetract, r)
+	}
+}
+
 // markSeen records a key and reports whether it was already known.
 func (h *Hub) markSeen(key string) bool {
 	if _, ok := h.seen[key]; ok {
@@ -496,7 +638,137 @@ func (h *Hub) Delete(ctx context.Context, p db.Platform, account, messageID stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
 	defer cancel()
-	return d.Delete(ctx, messageID)
+	if err := d.Delete(ctx, messageID); err != nil {
+		return err
+	}
+	// Same path an upstream deletion takes: drop it from the history ring and
+	// the stored scrollback, and tell every subscriber.
+	//
+	// Before this, only the browser that pressed the button removed the message
+	// — from its own copy. A second operator watching the same chat, and any
+	// overlay fed from the pane, kept showing it. One moderator action should
+	// not leave the room in two states.
+	h.retract(r, messageID)
+	return nil
+}
+
+// Hide takes a message off the platform's public feed without destroying it,
+// where the platform can do that.
+//
+// Only Facebook can today. The refusal for everything else names the platform
+// and says what it can do instead, the same way Delete's does — a sentence an
+// operator can act on beats "unsupported".
+func (h *Hub) Hide(ctx context.Context, p db.Platform, account, messageID string, hidden bool) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	hd, ok := r.adapter.(Hider)
+	if !ok {
+		return fmt.Errorf("chat: %s has no way to hide a message without deleting it. "+
+			"Delete it instead, or use the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	if err := hd.Hide(ctx, messageID, hidden); err != nil {
+		return err
+	}
+	// Hiding removes it from the pane; unhiding does NOT put it back. The
+	// scrollback is not a mirror of the platform and never was -- a message
+	// restored on Facebook will simply not reappear here, which is honest about
+	// what this server actually knows rather than pretending to a sync it does
+	// not have.
+	if hidden {
+		h.retract(r, messageID)
+	}
+	return nil
+}
+
+// HideLocally removes a message from THIS SERVER only, leaving the platform
+// untouched.
+//
+// The one moderation action that works on every platform, including the ones
+// with no moderation API at all, because it asks nobody's permission. It is for
+// the case the others cannot serve: something is on the operator's screen — or
+// on an overlay fed from it — that they do not want there, on a platform
+// polyemesis cannot moderate.
+//
+// It is NOT moderation and callers must not present it as such. Every viewer on
+// the platform still sees the message. The API says so in its response and the
+// UI has to repeat it; a control that looks like a delete and is not would be
+// worse than having no control at all.
+func (h *Hub) HideLocally(p db.Platform, account, messageID string) error {
+	if strings.TrimSpace(messageID) == "" {
+		return fmt.Errorf("no message id to hide")
+	}
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	// Deliberately works whether or not an adapter is attached. A disconnected
+	// platform's messages are still on screen, and being unable to clear them
+	// because the socket dropped would be the wrong answer.
+	if r == nil {
+		r = &runner{platform: p, account: account, hub: h}
+	}
+	h.retract(r, messageID)
+	return nil
+}
+
+// Ban removes a person from one platform's chat. A zero duration is permanent.
+//
+// Per-platform and never fan-out, for the same reason Delete is: a user id only
+// means something on the platform that issued it, and the same human on two
+// platforms is two accounts with no link between them that polyemesis can see.
+//
+// The messages that person already sent are retracted from the pane too. Every
+// platform here does that on its own side -- a ban or timeout clears their
+// backlog -- so leaving ours behind would show the operator a room the viewers
+// are no longer in.
+func (h *Hub) Ban(ctx context.Context, p db.Platform, account, userID string, d time.Duration, reason string) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	b, ok := r.adapter.(Banner)
+	if !ok {
+		return fmt.Errorf("chat: polyemesis cannot ban on %s; use the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	if err := b.Ban(ctx, userID, d, reason); err != nil {
+		return err
+	}
+	h.retractUser(r, userID)
+	return nil
+}
+
+// Unban lifts a ban or an unexpired timeout.
+//
+// It does NOT restore the messages that were retracted. They are gone from this
+// server's history and nothing re-fetches them; saying otherwise would promise a
+// sync that does not exist.
+func (h *Hub) Unban(ctx context.Context, p db.Platform, account, userID string) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	b, ok := r.adapter.(Banner)
+	if !ok {
+		return fmt.Errorf("chat: polyemesis cannot lift a ban on %s; use the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	return b.Unban(ctx, userID)
 }
 
 // ------------------------------------------------------------------- status
@@ -531,9 +803,14 @@ type Stats struct {
 	Stored   int64 `json:"stored"`
 	// Dropped counts messages shed because persistence fell behind. They were
 	// still delivered live; only the scrollback lost them.
-	Dropped  int64 `json:"dropped"`
-	Pending  int   `json:"pending"`
-	Adapters int   `json:"adapters"`
+	Dropped int64 `json:"dropped"`
+	// Retracted counts messages withdrawn AFTER delivery — deleted here, or
+	// deleted on the platform's own dashboard and reported back. Worth its own
+	// number: one that climbs while nobody is touching the pane's delete button
+	// says moderation is happening somewhere polyemesis cannot see.
+	Retracted int64 `json:"retracted"`
+	Pending   int   `json:"pending"`
+	Adapters  int   `json:"adapters"`
 }
 
 // Stats snapshots the counters.
@@ -541,12 +818,13 @@ func (h *Hub) Stats() Stats {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return Stats{
-		Received: h.received,
-		Deduped:  h.deduped,
-		Stored:   h.stored,
-		Dropped:  h.dropped,
-		Pending:  len(h.pending),
-		Adapters: len(h.runners),
+		Received:  h.received,
+		Deduped:   h.deduped,
+		Stored:    h.stored,
+		Dropped:   h.dropped,
+		Retracted: h.retracted,
+		Pending:   len(h.pending),
+		Adapters:  len(h.runners),
 	}
 }
 
@@ -563,7 +841,10 @@ func (h *Hub) background() {
 	defer h.wg.Done()
 	flush := time.NewTicker(h.flushEvery)
 	defer flush.Stop()
-	purge := time.NewTicker(h.purgeEvery)
+	h.mu.Lock()
+	purgeEvery := h.purgeEvery
+	h.mu.Unlock()
+	purge := time.NewTicker(purgeEvery)
 	defer purge.Stop()
 
 	for {
@@ -576,6 +857,17 @@ func (h *Hub) background() {
 			h.flush()
 		case <-purge.C:
 			h.purge()
+			// Pick up a changed sweep interval. Without this the ticker keeps
+			// the interval it was born with, so SetRetention's purgeEvery would
+			// be stored, reported back to the operator, and never used — the
+			// worst kind of setting, because it looks applied.
+			h.mu.Lock()
+			next := h.purgeEvery
+			h.mu.Unlock()
+			if next != purgeEvery && next > 0 {
+				purgeEvery = next
+				purge.Reset(next)
+			}
 		}
 	}
 }
@@ -609,11 +901,22 @@ func (h *Hub) flush() {
 }
 
 func (h *Hub) purge() {
-	p, ok := h.store.(Purger)
-	if !ok || h.retention <= 0 {
+	// Snapshot under the lock. These used to be written once at construction
+	// and read freely; SetRetention made them mutable, which turned this into a
+	// data race the moment an operator saved the settings page.
+	h.mu.Lock()
+	retention, keep := h.retention, h.retainKeep
+	store := h.store
+	h.mu.Unlock()
+
+	p, ok := store.(Purger)
+	// Zero or negative retention means keep forever. Not a guard against a bad
+	// value: it is the setting an operator picks when they want a permanent
+	// moderation record, and the user card reads this table.
+	if !ok || retention <= 0 {
 		return
 	}
-	if _, err := p.PurgeChatMessages(h.now().Add(-h.retention), h.retainKeep); err != nil {
+	if _, err := p.PurgeChatMessages(h.now().Add(-retention), keep); err != nil {
 		h.log.Warn("chat history not purged", "err", err)
 	}
 }
@@ -744,10 +1047,17 @@ func (r *runner) runOnce(ctx context.Context) (err error) {
 			err = fmt.Errorf("the %s chat adapter hit an internal error (%v); it has been restarted", r.platform, p)
 		}
 	}()
-	return r.adapter.Run(ctx, SinkFunc(func(m Message) {
-		r.hub.deliver(r, m)
-	}))
+	return r.adapter.Run(ctx, runnerSink{r: r})
 }
+
+// runnerSink is what every adapter is handed. It is a struct rather than a
+// SinkFunc because it carries three capabilities now, not one: deliver, retract
+// one message, and retract everything from one author.
+type runnerSink struct{ r *runner }
+
+func (s runnerSink) Deliver(m Message)           { s.r.hub.deliver(s.r, m) }
+func (s runnerSink) Retract(messageID string)    { s.r.hub.retract(s.r, messageID) }
+func (s runnerSink) RetractUser(authorID string) { s.r.hub.retractUser(s.r, authorID) }
 
 func (r *runner) send(ctx context.Context, text string) SendResult {
 	res := SendResult{Platform: r.platform, Account: r.account}
@@ -872,4 +1182,28 @@ func decodeJSON(raw json.RawMessage, out any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+// UpdateChatSettings applies channel-wide chat rules on one platform.
+//
+// Per-platform and not a fan-out, unlike Send. "Slow mode on" means a different
+// thing on each platform that has it, only Twitch publishes an API for it at
+// all, and quietly applying it to one of four platforms while reporting success
+// would be the kind of half-truth this package exists to avoid.
+func (h *Hub) UpdateChatSettings(ctx context.Context, p db.Platform, account string, s ChatSettings) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	w, ok := r.adapter.(ChatSettingsWriter)
+	if !ok {
+		return fmt.Errorf("chat: %s publishes no API for slow mode or follower-only chat; "+
+			"set it in the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	return w.UpdateChatSettings(ctx, s)
 }

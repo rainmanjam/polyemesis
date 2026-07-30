@@ -3,10 +3,16 @@ package chat
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -416,6 +422,246 @@ func TestTwitchHandshakeAndPingPong(t *testing.T) {
 	}
 }
 
+// recordingSink is a Sink that also hears retractions, which is the whole point
+// of the type: a plain SinkFunc silently ignores them, and a test written
+// against one would pass whether or not the adapter said anything.
+type recordingSink struct {
+	mu        sync.Mutex
+	messages  []Message
+	retracted []string
+	users     []string
+}
+
+func (s *recordingSink) Deliver(m Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messages = append(s.messages, m)
+}
+
+func (s *recordingSink) Retract(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retracted = append(s.retracted, id)
+}
+
+func (s *recordingSink) RetractUser(authorID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Appended even when empty: "" is Twitch clearing the whole room, which is
+	// a real event and not an absent one.
+	s.users = append(s.users, authorID)
+}
+
+func (s *recordingSink) snapshot() ([]string, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.retracted...), append([]string(nil), s.users...)
+}
+
+// Twitch tells us when a moderator deletes something on its own dashboard, and
+// polyemesis used to ignore it.
+//
+// The CAP REQ this adapter already sends asks for twitch.tv/commands, which is
+// exactly what makes CLEARMSG and CLEARCHAT arrive. Before this, the command
+// switch handled PRIVMSG only -- so following polyemesis's own advice ("use the
+// Twitch dashboard") left the deleted message on screen, and on any overlay fed
+// from the pane, until retention aged it out up to two hours later.
+//
+// Run over the real read loop rather than by calling handle directly: the tag
+// names are the entire feature, and a test that constructs an ircLine by hand
+// would keep passing if the parser stopped populating them.
+func TestTwitchReportsItsOwnDeletions(t *testing.T) {
+	a, srv := newTwitchOverPipe(t, TwitchConfig{Nick: "streamer", Channel: "streamer", AccountRef: "42"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sink := &recordingSink{}
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, sink) }()
+
+	for i := 0; i < 3; i++ {
+		srv.readLine(t) // CAP, PASS, NICK
+	}
+	srv.write(t, ":tmi.twitch.tv 001 streamer :Welcome, GLHF!")
+	srv.readLine(t) // JOIN
+
+	// A moderator deleted one message. target-msg-id is the tag Twitch uses;
+	// getting this name wrong makes the whole feature a silent no-op, which is
+	// why it is asserted rather than assumed.
+	srv.write(t, "@login=ronni;room-id=1;target-msg-id=abc-123-def;tmi-sent-ts=164 :tmi.twitch.tv CLEARMSG #streamer :HeyGuys")
+
+	// A user was timed out, which removes everything they said. Twitch names the
+	// USER here, never the messages -- ban-duration marks a timeout rather than
+	// a permanent ban, and both clear the same way.
+	srv.write(t, "@ban-duration=600;room-id=1;target-user-id=99;tmi-sent-ts=164 :tmi.twitch.tv CLEARCHAT #streamer :offender")
+
+	// No target-user-id at all is Twitch clearing the entire room.
+	srv.write(t, "@room-id=1;tmi-sent-ts=164 :tmi.twitch.tv CLEARCHAT #streamer")
+
+	deadline := time.After(2 * time.Second)
+	for {
+		ids, users := sink.snapshot()
+		if len(ids) >= 1 && len(users) >= 2 {
+			if ids[0] != "abc-123-def" {
+				t.Fatalf("CLEARMSG retracted %q, want the target-msg-id", ids[0])
+			}
+			if users[0] != "99" {
+				t.Fatalf("CLEARCHAT retracted user %q, want target-user-id 99", users[0])
+			}
+			if users[1] != "" {
+				t.Fatalf("a CLEARCHAT with no target-user-id retracted %q, want \"\" meaning the whole room", users[1])
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("CLEARMSG/CLEARCHAT never reached the sink: ids=%v users=%v", ids, users)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after the context was cancelled")
+	}
+}
+
+// helixStub is a fake Helix, recording the request Delete builds.
+func helixStub(t *testing.T, status int, body string) (*httptest.Server, *url.Values, *string) {
+	t.Helper()
+	var got url.Values
+	var clientID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		clientID = r.Header.Get("Client-Id")
+		w.WriteHeader(status)
+		if body != "" {
+			fmt.Fprint(w, body)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &got, &clientID
+}
+
+func twitchForDelete(t *testing.T, base string) *TwitchAdapter {
+	t.Helper()
+	a, err := NewTwitch(TwitchConfig{
+		Nick: "streamer", Channel: "streamer", AccountRef: "42", Token: "tok",
+		HelixToken:    func(context.Context) (string, error) { return "helix-tok", nil },
+		ClientID:      "client-abc",
+		BroadcasterID: "42",
+		ModeratorID:   "42",
+		APIBase:       base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func TestTwitchDeleteAddressesOneMessage(t *testing.T) {
+	srv, got, clientID := helixStub(t, http.StatusNoContent, "")
+	a := twitchForDelete(t, srv.URL)
+
+	if err := a.Delete(context.Background(), "msg-7"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("message_id") != "msg-7" {
+		t.Fatalf("message_id = %q", got.Get("message_id"))
+	}
+	// Both ids are required, and Twitch 403s when moderator_id is not a
+	// moderator of broadcaster_id.
+	if got.Get("broadcaster_id") != "42" || got.Get("moderator_id") != "42" {
+		t.Fatalf("ids = broadcaster %q moderator %q, want both 42",
+			got.Get("broadcaster_id"), got.Get("moderator_id"))
+	}
+	// Helix rejects a valid bearer token that arrives without a Client-Id.
+	if *clientID != "client-abc" {
+		t.Fatalf("Client-Id header = %q, want it set", *clientID)
+	}
+}
+
+// The one that matters most in this file.
+//
+// Twitch documents message_id as OPTIONAL on this endpoint, and omitting it does
+// not fail -- it deletes every message in the channel. So a blank id must never
+// reach the wire: the bug would turn "remove this message" into "wipe the chat",
+// and it would look like a successful moderation action while doing it.
+func TestTwitchDeleteRefusesABlankIDBecauseItWouldClearTheChat(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	a := twitchForDelete(t, srv.URL)
+
+	for _, id := range []string{"", "   ", "\t"} {
+		called = false
+		err := a.Delete(context.Background(), id)
+		if err == nil {
+			t.Fatalf("Delete(%q) was accepted; Twitch reads a missing id as \"delete everything\"", id)
+		}
+		if called {
+			t.Fatalf("Delete(%q) reached the API, which would have cleared the channel", id)
+		}
+		if !strings.Contains(err.Error(), "every message") {
+			t.Fatalf("error = %q, want it to explain the consequence", err)
+		}
+	}
+}
+
+// Four failures, four different things to do about them. Collapsing these into
+// one sentence is how an operator ends up reconnecting an account to fix a
+// message that was merely too old.
+func TestTwitchDeleteFailuresSayWhatToDo(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		wantSub string
+	}{
+		{"401 means the scope was never granted", http.StatusUnauthorized, "reconnect"},
+		{"403 means not a moderator there", http.StatusForbidden, "moderate"},
+		{"404 is usually the six-hour limit", http.StatusNotFound, "six hours"},
+		{"400 is a message Twitch protects", http.StatusBadRequest, "broadcaster's own"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := helixStub(t, tc.status, `{"message":"nope"}`)
+			a := twitchForDelete(t, srv.URL)
+
+			err := a.Delete(context.Background(), "msg-7")
+			if err == nil {
+				t.Fatalf("status %d reported as success", tc.status)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error = %q, want it to mention %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+
+// An adapter built without Helix details must say so rather than send a request
+// that cannot work — and must not be Fatal, because chat itself is fine.
+func TestTwitchDeleteWithoutCredentialsExplainsItself(t *testing.T) {
+	a, err := NewTwitch(TwitchConfig{Nick: "streamer", Channel: "streamer", AccountRef: "42", Token: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	derr := a.Delete(context.Background(), "msg-7")
+	if derr == nil {
+		t.Fatal("a Delete with no API credentials claimed success")
+	}
+	if !strings.Contains(derr.Error(), "credentials") {
+		t.Fatalf("error = %q, want it to name the missing credentials", derr)
+	}
+	if IsFatal(derr) {
+		t.Fatal("a missing-credentials Delete was Fatal, which would tear down a working chat connection")
+	}
+}
+
 func TestTwitchLoginFailureIsFatal(t *testing.T) {
 	a, srv := newTwitchOverPipe(t, TwitchConfig{Nick: "streamer", AccountRef: "42"})
 
@@ -530,5 +776,151 @@ func TestTwitchDialFailureIsRetryableNotFatal(t *testing.T) {
 	}
 	if IsFatal(runErr) {
 		t.Fatal("a dial failure was marked fatal; a network blip must be retried")
+	}
+}
+
+// Twitch counts SECONDS, and one endpoint does both ban and timeout: omit
+// duration for permanent, supply it for a timeout.
+func TestTwitchBanSendsSecondsAndOmitsThemForAPermanentBan(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want any
+	}{
+		{"ten minutes is 600 seconds", 10 * time.Minute, float64(600)},
+		{"one second stays one second", time.Second, float64(1)},
+		{"zero is permanent, so no duration is sent", 0, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewDecoder(r.Body).Decode(&body)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, `{"data":[]}`)
+			}))
+			defer srv.Close()
+
+			a := twitchForDelete(t, srv.URL)
+			if err := a.Ban(context.Background(), "99", tc.d, "spam"); err != nil {
+				t.Fatal(err)
+			}
+			data, _ := body["data"].(map[string]any)
+			if data == nil {
+				t.Fatalf("body = %+v, want a data object", body)
+			}
+			if data["user_id"] != "99" {
+				t.Fatalf("user_id = %v, want the platform's own id", data["user_id"])
+			}
+			got, present := data["duration"]
+			if tc.want == nil {
+				if present {
+					t.Fatalf("duration = %v sent for a permanent ban; Twitch reads that as a TIMEOUT", got)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("duration = %v for %s, want %v seconds", got, tc.d, tc.want)
+			}
+		})
+	}
+}
+
+// Twitch caps the reason at 1000 characters and rejects the WHOLE request when
+// it is longer. A long reason must not cost the ban itself.
+func TestTwitchBanTruncatesAnOverlongReasonRatherThanLosingTheBan(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	if err := a.Ban(context.Background(), "99", 0, strings.Repeat("x", 1500)); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := body["data"].(map[string]any)
+	reason, _ := data["reason"].(string)
+	if len([]rune(reason)) != 1000 {
+		t.Fatalf("reason is %d chars, want it truncated to Twitch's 1000 limit", len([]rune(reason)))
+	}
+}
+
+func TestTwitchUnbanAddressesTheUser(t *testing.T) {
+	var method string
+	var q url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, q = r.Method, r.URL.Query()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	if err := a.Unban(context.Background(), "99"); err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodDelete {
+		t.Fatalf("method = %s, want DELETE", method)
+	}
+	if q.Get("user_id") != "99" {
+		t.Fatalf("user_id = %q", q.Get("user_id"))
+	}
+}
+
+// PATCH semantics are the point: setting one field must not clear the others.
+//
+// Twitch's endpoint takes every setting in one body, so a request built from a
+// struct of plain values would send zeros for everything unset and switch off
+// follower-only mode as a side effect of adjusting slow mode. That is why every
+// field is a pointer.
+func TestTwitchChatSettingsSendsOnlyWhatWasAsked(t *testing.T) {
+	var body map[string]any
+	var method string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	on, secs := true, 30
+	if err := a.UpdateChatSettings(context.Background(), ChatSettings{
+		SlowMode: &on, SlowModeSeconds: &secs,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodPatch {
+		t.Fatalf("method = %s, want PATCH", method)
+	}
+	if body["slow_mode"] != true || body["slow_mode_wait_time"] != float64(30) {
+		t.Fatalf("body = %+v, want slow mode on at 30s", body)
+	}
+	// The important half: nothing else was sent.
+	for _, k := range []string{"follower_mode", "subscriber_mode", "emote_mode",
+		"unique_chat_mode", "non_moderator_chat_delay"} {
+		if _, present := body[k]; present {
+			t.Fatalf("%q was sent although it was never set; this request would have "+
+				"changed a setting the operator did not touch", k)
+		}
+	}
+}
+
+// An empty change is not an error, but it is not a request either: an empty
+// PATCH spends a rate-limit slot to change nothing.
+func TestTwitchChatSettingsSendsNothingWhenNothingChanged(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	if err := a.UpdateChatSettings(context.Background(), ChatSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("an empty settings change was sent to Twitch anyway")
 	}
 }

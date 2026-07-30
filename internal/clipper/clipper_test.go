@@ -2,6 +2,7 @@ package clipper
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -154,7 +155,7 @@ func TestTimelineSpanIsHalfOpen(t *testing.T) {
 }
 
 func TestRequestValidateRejectsWhatCanNeverWork(t *testing.T) {
-	ok := Request{In: time.Second, Out: 2 * time.Second, OutPath: "/clips/a.mkv"}
+	ok := Request{In: time.Second, Out: 2 * time.Second, OutPath: filepath.Join(testClipDir, "a.mkv")}
 
 	tests := []struct {
 		name    string
@@ -218,13 +219,13 @@ func TestContainerForFallsOpenOnAnUnknownExtension(t *testing.T) {
 		path string
 		want Container
 	}{
-		{"/clips/a.mkv", ContainerMatroska},
-		{"/clips/a.MKV", ContainerMatroska},
-		{"/clips/a.mp4", ContainerMP4},
-		{"/clips/a.mov", ContainerMP4},
-		{"/clips/a.ts", ContainerMPEGTS},
-		{"/clips/a.wat", DefaultContainer},
-		{"/clips/a", DefaultContainer},
+		{filepath.Join(testClipDir, "a.mkv"), ContainerMatroska},
+		{filepath.Join(testClipDir, "a.MKV"), ContainerMatroska},
+		{filepath.Join(testClipDir, "a.mp4"), ContainerMP4},
+		{filepath.Join(testClipDir, "a.mov"), ContainerMP4},
+		{filepath.Join(testClipDir, "a.ts"), ContainerMPEGTS},
+		{filepath.Join(testClipDir, "a.wat"), DefaultContainer},
+		{filepath.Join(testClipDir, "a"), DefaultContainer},
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {

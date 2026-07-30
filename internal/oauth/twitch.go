@@ -29,13 +29,27 @@ func (t *Twitch) Scopes() []string {
 	// a broadcast is the worst possible moment.
 	//
 	// user:read:email is still not requested: we do not need it, and asking
-	// would make the consent screen scarier than the feature warrants. Nor is
-	// any moderation scope — nothing in polyemesis bans or times out a viewer.
+	// would make the consent screen scarier than the feature warrants.
+	//
+	// The two moderation scopes are separate on purpose, and Twitch separates
+	// them for the same reason we describe them separately: removing one message
+	// a broadcaster could already remove by hand is not the same ask as the
+	// power to remove a person.
+	//
+	//   moderator:manage:chat_messages  delete a message
+	//   moderator:manage:banned_users   ban, timeout, and lift either
+	//
+	// The second was previously withheld as a product decision. The maintainer
+	// has reversed that; both are requested now, and both only work in a channel
+	// this account already moderates -- Twitch answers 403 otherwise.
 	return []string{
 		"channel:read:stream_key",
 		"channel:manage:broadcast",
 		"chat:read",
 		"chat:edit",
+		"moderator:manage:chat_messages",
+		"moderator:manage:banned_users",
+		"moderator:manage:chat_settings",
 	}
 }
 
@@ -48,6 +62,17 @@ func (t *Twitch) Scopes() []string {
 // this stays off until Twitch documents support. The flow is still a
 // confidential client: the secret never leaves the server, the code is bound to
 // a whitelisted redirect URI, and the state is single-use.
+// ScopeVersion 4 adds the three moderation scopes to the set: stream key,
+// channel write, the two chat scopes, message deletion, bans, and the
+// channel-wide chat settings (slow mode, follower-only, moderator delay).
+//
+// Bump it whenever Scopes changes -- an operator holding a token issued before
+// the change does not gain the new permission, and the failure arrives as a 401
+// mid-broadcast. This bump is the difference between the account list saying
+// "reconnect to enable moderation" and an operator finding out when the delete
+// button fails on the message they needed gone.
+func (t *Twitch) ScopeVersion() int { return 4 }
+
 func (t *Twitch) PKCE() bool { return false }
 
 func (t *Twitch) AuthURL(clientID, redirectURI, state, _ string) string {

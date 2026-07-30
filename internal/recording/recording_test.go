@@ -558,6 +558,21 @@ func TestResolveRejectsNamesThatEscapeTheRecordingsDir(t *testing.T) {
 		{name: "a leading slash on an otherwise valid name", in: "/rec-20240115-143000.mkv"},
 		{name: "a climb that rejoins the dir", in: "sub/../rec-20240115-143000.mkv"},
 		{name: "a trailing separator", in: "rec-20240115-143000.mkv/"},
+		// The BACKSLASH cases are what make this invariant testable here.
+		//
+		// Every case above uses a forward slash, so on Linux they were all
+		// caught by os.PathSeparator and the suite was green -- while on
+		// Windows, where that constant is '\', the same names sailed through
+		// and Join turned them into paths into subdirectories. A Linux run
+		// could not see it.
+		//
+		// A backslash is a legal character in a POSIX filename, so these
+		// exercise the same "a name is a bare filename, not a path" rule on
+		// the platform CI mostly runs on, and they fail on Linux if the check
+		// ever narrows back to the local separator.
+		{name: "a windows nested path", in: `a\b`},
+		{name: "a windows climb out", in: `..\..\etc\passwd`},
+		{name: "a windows trailing separator", in: `rec-20240115-143000.mkv\`},
 	}
 
 	for _, tc := range tests {

@@ -22,7 +22,25 @@ on:
 # streams and wait on them, so a superseded run can sit for its full 20-minute
 # ceiling consuming a runner nobody is waiting on.
 concurrency:
-  group: ci-${{ github.ref }}
+  # head_ref || ref_name, NOT github.ref, and the difference is a doubling of
+  # this workflow's cost.
+  #
+  # Every push to a PR branch fires this twice -- once for `push` and once for
+  # `pull_request`. github.ref differs between those two events
+  # (refs/heads/BRANCH versus refs/pull/N/merge), so a group keyed on it puts
+  # the twins in SEPARATE groups and neither dedupes the other: two full runs,
+  # 17 jobs each, eleven of them acceptance suites that publish real streams.
+  #
+  # github.head_ref is the source branch on a pull_request and empty on a push;
+  # github.ref_name is the bare branch name on a push. Together they resolve to
+  # the same string for both events, so the twins share one group and the second
+  # cancels the first.
+  #
+  # The alternative -- `push: branches: [main]` and let PRs cover the rest --
+  # gives exactly one run with no cancellation at all, but silently drops CI for
+  # a branch with no PR open. `branches: ["**"]` above looks deliberate, so this
+  # keeps it.
+  group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -34,8 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
@@ -57,6 +75,92 @@ jobs:
       # race here shows up in production as a stream that stops for one viewer.
       - run: go test -race ./...
 
+  # The same build and test, on the operating systems polyemesis actually ships
+  # for.
+  #
+  # `make release` cross-compiles darwin and windows binaries and every job
+  # above then runs on ubuntu, so until this existed the Windows and macOS
+  # builds were proven to COMPILE and never proven to WORK. That gap matters
+  # here more than in most projects: this codebase shells out to a child
+  # process, manages process groups and signals, binds sockets, and builds file
+  # paths that end up on an FFmpeg command line. Every one of those is a place
+  # where Linux and Windows genuinely differ.
+  #
+  # No -race: it needs cgo, and these builds are CGO_ENABLED=0 on purpose. The
+  # ubuntu job above runs the race detector, which is where a data race would
+  # show up anyway -- the goroutine scheduling is not what differs across these
+  # platforms.
+  crossplatform:
+    name: "test: ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      # Never cancel siblings: when Windows and macOS both break, both answers
+      # are wanted, and fail-fast would turn one fix into two round trips.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # FFmpeg on every runner, for the reason the ubuntu job gives: without it
+      # the measurement tests SKIP rather than fail, and the run goes green
+      # having checked nothing. A cross-platform job that skipped every test
+      # that touches FFmpeg would be the most misleading kind of green.
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - name: FFmpeg version
+        run: ffmpeg -hide_banner -version
+
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
+      # Build and RUN it. Compiling proves the code is valid for the platform;
+      # it does not prove the process comes up.
+      #
+      # The failures this catches are the ones a compiler cannot: a data
+      # directory created with a path separator the OS does not accept, a
+      # listener that binds differently, an embedded asset that resolves on one
+      # filesystem and not another. `make release` already cross-compiles these
+      # targets, so before this the Windows binary had never been executed by
+      # anything.
+      #
+      # bash on all three: windows-latest ships Git Bash, so one script serves
+      # every runner rather than a PowerShell fork nobody maintains.
+      - name: Start the server and check it serves
+        shell: bash
+        run: |
+          set -uo pipefail
+          go build -o polyemesis-smoke ./cmd/polyemesis
+          ./polyemesis-smoke -addr 127.0.0.1:8123 -data ./smoke-data -log warn &
+          pid=$!
+          ok=no
+          for _ in $(seq 1 40); do
+            sleep 0.5
+            if curl -fsS http://127.0.0.1:8123/api/v1/health >/dev/null 2>&1; then ok=yes; break; fi
+          done
+          # Killed before the assertion so a failure cannot leave a runner with
+          # an orphaned server holding a port for the rest of the job.
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          if [ "$ok" != yes ]; then
+            echo "the server never answered /health on ${{ matrix.os }}"
+            exit 1
+          fi
+          echo "server started and served /health on ${{ matrix.os }}"
+
   ui:
     name: ui typecheck, lint, build
     runs-on: ubuntu-latest
@@ -65,15 +169,15 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           # Keep in step with the Dockerfiles' node tag and @types/node major.
           node-version: 24
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - run: npm ci
-      - run: npx tsc -b --noEmit
+      - run: npm ci --ignore-scripts
+      - run: npx --no-install tsc -b --noEmit
       - run: npm run lint
       - run: npm run build
       # A vulnerable direct dependency should fail the build, not sit in a
@@ -86,12 +190,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm
@@ -120,12 +224,12 @@ jobs:
           - acceptance-multisource # 18 checks: two programmes, one port, by token
           - acceptance-browser     # 24 checks: Playwright against the image
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm
@@ -137,14 +241,14 @@ jobs:
         if: matrix.suite == 'acceptance-browser'
         working-directory: ui
         run: |
-          npm ci
-          npx playwright install --with-deps chromium
+          npm ci --ignore-scripts
+          npx --no-install playwright install --with-deps chromium
 
       - run: ./scripts/${{ matrix.suite }}.sh
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.suite }}-logs
           path: |
@@ -192,13 +296,17 @@ jobs:
           - acceptance-synth    # silence tier and the failover slate
           - acceptance-failover # switch without restarting a destination
           - acceptance-postprod
+          # Retained MQTT telemetry. Brings up eclipse-mosquitto as a container
+          # rather than installing a broker on the runner, so it needs no
+          # apt step of its own -- Docker is already present on ubuntu-latest.
+          - acceptance-mqtt
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm
@@ -229,7 +337,7 @@ jobs:
       # check into a guess.
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.suite }}-logs
           path: |

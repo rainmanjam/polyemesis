@@ -125,7 +125,15 @@ func ValidRecordingName(name string) bool {
 	if name == "" || name == "." || name == ".." || len(name) > 255 {
 		return false
 	}
-	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, os.PathSeparator) {
+	// ContainsAny over BOTH separators, spelled literally.
+	//
+	// The previous form -- '/' or os.PathSeparator -- reads as "both", and is
+	// both only on Windows: on Linux os.PathSeparator IS '/', so the condition
+	// collapsed to one check and a backslash was accepted. That is not an
+	// escape on Linux, where a backslash is a legal filename character, but
+	// this name is stored and the same data directory opened from a Windows
+	// build reads it as a path.
+	if strings.ContainsAny(name, `/\`) {
 		return false
 	}
 	return !strings.ContainsAny(name, "\x00\n\r")

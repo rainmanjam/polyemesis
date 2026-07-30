@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -358,5 +359,106 @@ func TestCommandStringQuoting(t *testing.T) {
 				t.Errorf("CommandString() = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+// A destination that retries forever looks exactly like one that works: the
+// card says "reconnecting", the supervisor is busy, and nothing ever says the
+// endpoint has refused us forty times and is not coming back.
+func TestGivingUpAfterTooManyConsecutiveRestarts(t *testing.T) {
+	rec := newRecorder()
+	p := testProcess(t, fakeExit(1), Spec{
+		AutoRestart: true,
+		MaxRestarts: 3,
+		MinBackoff:  5 * time.Millisecond,
+		MaxBackoff:  5 * time.Millisecond,
+		OnState:     rec.onState,
+	})
+	p.Start()
+
+	waitFor(t, "the supervisor to give up", func() bool {
+		return p.Status().State == StateFailed
+	})
+
+	st := p.Status()
+	// StateFailed, not StateStopped: stopped is what an operator asked for,
+	// failed is what happened to them, and only one of those is an incident.
+	if st.State != StateFailed {
+		t.Fatalf("state = %s, want %s", st.State, StateFailed)
+	}
+	if !strings.Contains(st.LastError, "gave up after") {
+		t.Errorf("LastError = %q, want it to say the supervisor gave up", st.LastError)
+	}
+	if st.Restarts > 3 {
+		t.Errorf("restarted %d times with MaxRestarts=3", st.Restarts)
+	}
+
+	// And it must STAY given up. A supervisor that quietly resumed would be
+	// worse than one that never stopped, because the operator has now been
+	// told it is dead.
+	before := p.Status().Restarts
+	time.Sleep(60 * time.Millisecond)
+	if after := p.Status().Restarts; after != before {
+		t.Errorf("restarts went from %d to %d after giving up", before, after)
+	}
+}
+
+// The default, and what every process here did before the limit existed. The
+// ingest in particular must never give up: a publisher that reconnects after
+// an hour is normal operation.
+func TestZeroMaxRestartsRetriesForever(t *testing.T) {
+	p := testProcess(t, fakeExit(1), Spec{
+		AutoRestart: true,
+		MinBackoff:  5 * time.Millisecond,
+		MaxBackoff:  5 * time.Millisecond,
+	})
+	p.Start()
+
+	waitFor(t, "several restarts", func() bool { return p.Status().Restarts >= 5 })
+	if st := p.Status().State; st == StateFailed {
+		t.Errorf("state = %s with MaxRestarts unset; it must retry forever", st)
+	}
+}
+
+// StartDelay holds the FIRST spawn back and nothing else. A destination that
+// drops at 3am has to come back immediately, not wait its turn behind
+// processes that are already healthy.
+func TestStartDelayAppliesToTheFirstSpawnOnly(t *testing.T) {
+	const delay = 120 * time.Millisecond
+	begin := time.Now()
+	p := testProcess(t, fakeExit(1), Spec{
+		AutoRestart: true,
+		StartDelay:  delay,
+		MinBackoff:  5 * time.Millisecond,
+		MaxBackoff:  5 * time.Millisecond,
+	})
+	p.Start()
+
+	waitFor(t, "the first spawn", func() bool { return p.Status().Restarts >= 1 })
+	if waited := time.Since(begin); waited < delay {
+		t.Errorf("first spawn happened after %s, want at least the %s start delay", waited, delay)
+	}
+
+	// The restarts that follow must NOT each pay the delay again.
+	afterFirst := time.Now()
+	waitFor(t, "three more restarts", func() bool { return p.Status().Restarts >= 4 })
+	if elapsed := time.Since(afterFirst); elapsed > delay {
+		t.Errorf("three restarts took %s, longer than a single %s start delay: "+
+			"the delay is being applied to reconnects", elapsed, delay)
+	}
+}
+
+// A stop that arrives during the stagger window must not wait it out.
+func TestStartDelayIsInterruptedByAStop(t *testing.T) {
+	p := testProcess(t, fakeSleep(30*time.Second), Spec{
+		AutoRestart: true,
+		StartDelay:  10 * time.Second,
+	})
+	p.Start()
+
+	begin := time.Now()
+	p.Stop(context.Background())
+	if waited := time.Since(begin); waited > 2*time.Second {
+		t.Errorf("Stop took %s; it waited out the start delay instead of cancelling it", waited)
 	}
 }

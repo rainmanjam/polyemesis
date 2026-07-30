@@ -207,12 +207,17 @@ type Engine struct {
 	// source is the probed ingest layout. Until the ingest carries a stream,
 	// this is DefaultSource() so the routing editor still has something to
 	// render.
-	source    routing.Source
-	probed    bool
-	videoInfo *ffmpeg.VideoStream
-	levels    ffmpeg.Levels
-	levelsAt  time.Time
-	settings  db.Settings
+	source routing.Source
+	// sourceName is the operator's label for this programme, refreshed on every
+	// reconcile. Cached rather than read on demand: Status() runs per WebSocket
+	// push and per telemetry tick, and a database read on that path buys
+	// nothing -- a rename cannot happen without a reconcile.
+	sourceName string
+	probed     bool
+	videoInfo  *ffmpeg.VideoStream
+	levels     ffmpeg.Levels
+	levelsAt   time.Time
+	settings   db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
@@ -738,11 +743,32 @@ func (e *Engine) effectiveSettings() (db.Settings, error) {
 		return settings, nil
 	}
 	settings.Ingest = src.Ingest
+
+	// Cached here rather than read on demand because Status() is assembled on
+	// every WebSocket push and on every telemetry tick, and the name changes
+	// only when the operator renames the source -- which goes through a
+	// reconcile.
+	e.mu.Lock()
+	e.sourceName = src.Name
+	e.mu.Unlock()
+
 	return settings, nil
 }
 
 // SourceID reports which programme this engine owns.
 func (e *Engine) SourceID() int64 { return e.sourceID }
+
+// SourceName is the operator's label for this programme, empty until the first
+// reconcile has read the row.
+//
+// It exists because every external consumer that groups by source needs a
+// stable human-readable handle: an id is meaningless in an MQTT topic or on a
+// Home Assistant entity, and the id is the only thing Status carried before.
+func (e *Engine) SourceName() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.sourceName
+}
 
 // Reconcile makes the running processes match the database. It is safe to call
 // repeatedly and from any handler.
@@ -903,12 +929,46 @@ func stemPlanSig(plan []recording.Stem) string {
 	return strings.Join(parts, ",")
 }
 
+// stemPlanFor decides which stems the recorder writes.
+//
+// The stem plan is derived from the probed track set and its roles, so all
+// three belong in the signature: renaming track 2 from "track2" to "mic"
+// has to move the file the next segment is written to.
+//
+// PROBED is the load-bearing word, and it was missing. Until the ingest has
+// been probed, e.source is routing.DefaultSource() -- six placeholder tracks
+// that exist so the routing editor has something to render, not a claim
+// about what is arriving. Planning stems from it asks FFmpeg to
+// `-map 0:a:3` on a three-track ingest, and FFmpeg treats a map that
+// matches no stream as fatal:
+//
+//	Stream map '0:a:3' matches no streams.
+//	Error parsing options for output file .../rec-%Y%m%d-%H%M%S-track4.flac
+//
+// The recorder then crash-loops until the probe lands and a later reconcile
+// replaces the plan. On a fast machine that is over in a second and leaves
+// nothing but a stray set of track-named stems; on a slow one it is a
+// restart storm whose outcome depends on what finishes first. That is the
+// acceptance-audio flake.
+//
+// The main recording is deliberately NOT gated on this. It maps `0:v` and
+// `0:a` wholesale, which is correct whatever arrives, and an operator who
+// switched recording on wants the programme captured from the first frame
+// -- waiting for a probe would lose the opening seconds for nothing.
+func stemPlanFor(rec db.RecordingSettings, src routing.Source, probed bool) []recording.Stem {
+	if !rec.Stems || !probed {
+		return nil
+	}
+	return recording.PlanStems(src, rec.StemCodec)
+}
+
 func (e *Engine) reconcileRecorder(s db.Settings) {
 	e.mu.RLock()
 	cur := e.recorder
 	// Read here rather than through e.Source(): that takes the same RLock, and
 	// this function holds it again further down.
 	src := e.source
+	probed := e.probed
 	e.mu.RUnlock()
 	src = e.annotate(src)
 
@@ -920,13 +980,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		}
 		return
 	}
-	// The stem plan is derived from the probed track set and its roles, so all
-	// three belong in the signature: renaming track 2 from "track2" to "mic"
-	// has to move the file the next segment is written to.
-	var plan []recording.Stem
-	if s.Recording.Stems {
-		plan = recording.PlanStems(src, s.Recording.StemCodec)
-	}
+	plan := stemPlanFor(s.Recording, src, probed)
 	sig := strconv.Itoa(s.Recording.SegmentSeconds) + "|" +
 		strconv.FormatBool(s.Recording.Stems) + "|" + string(s.Recording.StemCodec) + "|" +
 		stemPlanSig(plan)
@@ -1201,9 +1255,17 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	// The layout the meters will actually see, which is the synthetic one when
 	// the silence tier is running — a meter built from a zero-track probe would
 	// parse nothing while the destinations downstream carry a track.
-	src := e.effectiveSource()
+	//
+	// `known` is what stops a meter being built from the placeholder layout.
+	// The zero-track check below cannot catch that: DefaultSource() has SIX
+	// tracks, so an unprobed engine sails past it and compiles
+	// `[0:a:0]...[0:a:5]amerge=inputs=6` against a three-track ingest. FFmpeg
+	// reports "Stream specifier ':a:3' ... matches no streams" and exits, and
+	// the meters crash-loop until the probe lands -- burning CPU on the
+	// smallest machines, which are the ones least able to spare it.
+	src, known := e.effectiveSourceKnown()
 
-	if !s.Meters.Enabled || len(src.Tracks) == 0 {
+	if !s.Meters.Enabled || len(src.Tracks) == 0 || !known {
 		if cur != nil {
 			e.stopAux(&e.meters, "meters")
 		}
@@ -1338,7 +1400,7 @@ func (e *Engine) reconcileOutputs() error {
 	srcSig := upstreamSig(selSig, silenceSig)
 
 	wantRends := wantedRenditions(rendRows, counts, func(r *db.Rendition) string {
-		return renditionSig(r, fps, srcSig)
+		return renditionSig(r, fps, srcSig, e.cfg.DataDir)
 	})
 	e.mu.RLock()
 	haveRends := make(map[int64]string, len(e.rends))
@@ -1520,6 +1582,12 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 	}
 	slices.Sort(ids)
 
+	// Spacing for destinations started in THIS sweep. Counted per actually-
+	// started process, not per id, so a reconcile that leaves seven running and
+	// starts one does not make that one wait seven slots for nothing.
+	stagger := time.Duration(e.Settings().Destinations.StaggerMS) * time.Millisecond
+	started := 0
+
 	for _, id := range ids {
 		p := plans[id]
 
@@ -1557,12 +1625,14 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			continue
 		}
 
-		if err := e.startDest(p.row, p.compiled, p.spec, hub); err != nil {
+		if err := e.startDest(p.row, p.compiled, p.spec, hub, stagger*time.Duration(started)); err != nil {
 			e.log.Error("start destination", "dest", p.row.Name, "err", err)
 			e.mu.Lock()
 			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: err.Error()}
 			e.mu.Unlock()
+			continue
 		}
+		started++
 	}
 }
 
@@ -1624,7 +1694,46 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// which is the worst of both worlds: the operator is told it applied
 		// and the process is still running the old command line.
 		row.ExtraInputArgs, row.ExtraOutputArgs,
+		// Transport tuning, for exactly the same reason. Every one of these
+		// changes the command line, and a setting that is stored and never
+		// reaches the running process is the failure this repo keeps paying
+		// for -- most recently r.Deinterlace on renditions.
+		strconv.FormatBool(row.Transport.NoDurationFilesize),
+		strconv.Itoa(row.Transport.MuxQueuePackets),
+		strconv.Itoa(row.Transport.MuxQueueBytes),
+		strconv.Itoa(row.Transport.RWTimeoutSeconds),
+		// The reconnect policy is a property of the SUPERVISOR, not of the
+		// command line, so it does not show up in the argv -- which is exactly
+		// why it has to be named here. Without it, raising a give-up threshold
+		// would be stored and never reach the process it governs.
+		strconv.Itoa(row.Resilience.MinBackoffSeconds),
+		strconv.Itoa(row.Resilience.MaxBackoffSeconds),
+		strconv.Itoa(row.Resilience.GiveUpAfter),
+		// Audio encoding: both change the command line.
+		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
 	})
+}
+
+// audioCodecOf maps the stored codec name onto the FFmpeg encoder name. An
+// unrecognised value falls back to AAC rather than reaching the command line:
+// a destination row written by a newer build must still stream, and AAC is the
+// one codec every platform takes.
+func audioCodecOf(stored string) string {
+	if stored == db.DestAudioOpus {
+		return ffmpeg.AudioCodecOpus
+	}
+	return ffmpeg.AudioCodecAAC
+}
+
+// secondsOr converts a settings value in seconds to a Duration, returning the
+// fallback when the operator has not set one. Zero means "the supervisor's
+// default", never "no delay at all" -- a zero backoff would be a spin loop
+// against a platform that is refusing us.
+func secondsOr(v int, fallback time.Duration) time.Duration {
+	if v <= 0 {
+		return fallback
+	}
+	return time.Duration(v) * time.Second
 }
 
 // expertArgv parses a destination's hand-written arguments into an argv.
@@ -1668,7 +1777,7 @@ func destWritesAFile(row *db.Destination) bool {
 	}
 }
 
-func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub) error {
+func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
 	port, err := e.alloc.Allocate()
 	if err != nil {
 		return err
@@ -1709,6 +1818,20 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 			// was shown in the confirm dialog.
 			ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
 			ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
+			// Muxer and socket tuning. Its zero value emits nothing, so a
+			// destination that has not opted in produces exactly the command
+			// it always did.
+			// Output audio encoding. Zero value is AAC stereo.
+			Audio: ffmpeg.AudioSpec{
+				Codec: audioCodecOf(row.Audio.Codec),
+				Mono:  row.Audio.Mono,
+			},
+			Transport: ffmpeg.TransportSpec{
+				NoDurationFilesize: row.Transport.NoDurationFilesize,
+				MuxQueuePackets:    row.Transport.MuxQueuePackets,
+				MuxQueueBytes:      row.Transport.MuxQueueBytes,
+				RWTimeoutSeconds:   row.Transport.RWTimeoutSeconds,
+			},
 		})
 	}
 
@@ -1741,9 +1864,18 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		Args:        buildArgs(target),
 		NextArgs:    nextArgs,
 		AutoRestart: true,
-		OnLog:       e.onLog,
-		OnState:     e.onState,
-		LogSink:     logSink{e},
+		// Per-destination reconnect policy. Zero values leave the supervisor's
+		// own defaults in place, which is what every destination ran on before
+		// this was configurable.
+		MinBackoff:  secondsOr(row.Resilience.MinBackoffSeconds, 0),
+		MaxBackoff:  secondsOr(row.Resilience.MaxBackoffSeconds, 0),
+		MaxRestarts: row.Resilience.GiveUpAfter,
+		// Spaced out so going live does not spawn every destination in the
+		// same tick. First spawn only -- a reconnect is never delayed.
+		StartDelay: startDelay,
+		OnLog:      e.onLog,
+		OnState:    e.onState,
+		LogSink:    logSink{e},
 	})
 
 	e.mu.Lock()
@@ -1836,7 +1968,7 @@ func diffRenditions(want, running map[int64]string) (start, stop []int64) {
 // destinations riding it. The source frame rate is folded in only when the
 // rendition inherits it, since that is the only case where the keyframe
 // interval — counted in frames — depends on what the ingest is doing.
-func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string {
+func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig, dataDir string) string {
 	parts := []string{
 		strconv.Itoa(r.Width), strconv.Itoa(r.Height), strconv.Itoa(r.FPS),
 		strconv.Itoa(r.VideoBitrate), string(r.Encoder), r.Preset,
@@ -1845,6 +1977,16 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string 
 		// dimension, so it has to be named here or picking a mode would be
 		// saved and never encoded.
 		r.AspectMode, r.PadColor,
+		// Deinterlace, for exactly the same reason -- and it was missing until
+		// the overlay work went looking. Changing a rendition from progressive
+		// to `all` was stored, shown in the UI, and never reached the running
+		// encoder, because nothing in this list changed and the supervisor had
+		// no reason to restart it.
+		r.Deinterlace,
+		// The overlay's SHAPE. Every field, because each one changes the filter
+		// graph: a different anchor, width or opacity is a different encode.
+		overlaySig(r.Overlay, dataDir),
+		textSig(r.Text, dataDir),
 		// Which relay it reads. RenditionArgs copies audio with -map 0:a, so a
 		// tier started against the raw ingest of a video-only stream produces a
 		// video-only hub; it has to be restarted onto the silence tier when one
@@ -1857,14 +1999,159 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig string) string 
 	return hashStrings(parts)
 }
 
+// overlaySig hashes the overlay's shape, plus the image file's size and
+// modification time.
+//
+// The file stat is here on purpose. Everything else in the signature is a
+// database field, but an operator who replaces logo.png with a new one has
+// changed the encode without changing a single row -- and without the stat the
+// running encoder would keep compositing the old image until something
+// unrelated restarted it. The file's CONTENTS are not read: a stat per
+// reconcile is cheap, and hashing the bytes on every sweep is not.
+func overlaySig(o db.RenditionOverlay, dataDir string) string {
+	if !o.Active() {
+		return ""
+	}
+	parts := []string{
+		o.Image, o.Anchor,
+		strconv.FormatFloat(o.WidthPct, 'g', -1, 64),
+		strconv.FormatFloat(o.MarginXPct, 'g', -1, 64),
+		strconv.FormatFloat(o.MarginYPct, 'g', -1, 64),
+		strconv.FormatFloat(o.Opacity, 'g', -1, 64),
+	}
+	if fi, err := os.Stat(filepath.Join(dataDir, filepath.FromSlash(o.Image))); err == nil {
+		parts = append(parts,
+			strconv.FormatInt(fi.Size(), 10),
+			strconv.FormatInt(fi.ModTime().UnixNano(), 10))
+	} else {
+		// A missing file is itself a state worth restarting on: once the
+		// operator puts it there, the encode has to pick it up. Naming the
+		// absence -- rather than silently omitting the stat -- means the
+		// signature changes the moment the file appears.
+		parts = append(parts, "missing")
+	}
+	return strings.Join(parts, "\x00")
+}
+
+// textSig is overlaySig for burned-in text.
+//
+// The FONT FILE is stat'ed as well as named, for exactly the reason the overlay
+// image is: an operator who replaces MyStation.ttf in the fonts directory with
+// a corrected version has changed what the stream looks like, and a signature
+// built only from the stored name would not notice. Naming a missing font
+// rather than omitting it means the encode restarts the moment the file
+// appears.
+func textSig(t db.RenditionText, dataDir string) string {
+	if !t.Active() {
+		return ""
+	}
+	parts := []string{
+		t.Content, t.Font, t.Anchor, t.Color, t.BoxColor,
+		strconv.FormatFloat(t.SizePct, 'g', -1, 64),
+		strconv.FormatFloat(t.MarginXPct, 'g', -1, 64),
+		strconv.FormatFloat(t.MarginYPct, 'g', -1, 64),
+		strconv.FormatBool(t.Box),
+		strconv.FormatFloat(t.BoxOpacity, 'g', -1, 64),
+	}
+	if p, err := textFontPath(t.Font, dataDir); err == nil {
+		if fi, err := os.Stat(p); err == nil {
+			parts = append(parts,
+				strconv.FormatInt(fi.Size(), 10),
+				strconv.FormatInt(fi.ModTime().UnixNano(), 10))
+		} else {
+			parts = append(parts, "missing")
+		}
+	} else {
+		parts = append(parts, "unresolved")
+	}
+	return strings.Join(parts, "\x00")
+}
+
+// textFontPath resolves a stored font NAME to an absolute path.
+//
+// Empty means the built-in default, which is how a rendition that asks for text
+// and names no font still draws: the shipping image has no system fonts, so
+// leaving fontfile unset would fall through to fontconfig and find nothing.
+func textFontPath(name, dataDir string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		name = ffmpeg.DefaultFont
+	}
+	return ffmpeg.FontPath(filepath.Join(dataDir, ffmpeg.FontsDirName), name)
+}
+
+// textSpecOf maps the stored text onto the filter's spec.
+//
+// A font that will not resolve yields NO TEXT rather than an error or a
+// fallback. The alternatives are both worse: erroring takes the whole rendition
+// off air over a caption, and silently substituting a different font ships a
+// frame the operator did not design. Validation refuses a bad name at save
+// time, so reaching here means the file was removed from under a running
+// install -- and textSig has already made that a restart trigger, so the text
+// returns by itself when the font does.
+func textSpecOf(t db.RenditionText, dataDir string) *ffmpeg.TextSpec {
+	if !t.Active() {
+		return nil
+	}
+	font, err := textFontPath(t.Font, dataDir)
+	if err != nil {
+		// No logger here on purpose: this is called from renditionSpecOf, which
+		// is a pure mapping the tests drive directly. The one production caller
+		// notices the Active-but-nil case and logs it, so the silence is local
+		// rather than total.
+		return nil
+	}
+	return &ffmpeg.TextSpec{
+		Text:       t.Content,
+		FontFile:   font,
+		Anchor:     ffmpeg.OverlayAnchor(t.Anchor),
+		SizePct:    t.SizePct,
+		Color:      t.Color,
+		MarginXPct: t.MarginXPct,
+		MarginYPct: t.MarginYPct,
+		Box:        t.Box,
+		BoxColor:   t.BoxColor,
+		BoxOpacity: t.BoxOpacity,
+	}
+}
+
+// overlaySpecOf resolves the stored relative path against the data directory.
+//
+// Joined to an absolute path only here, at process-build time, exactly as the
+// slate image is. The stored value stays relative so it cannot be an absolute
+// read primitive for whoever reaches the renditions API; db validation refuses
+// traversal, and this is the one place the two halves meet.
+func overlaySpecOf(o db.RenditionOverlay, dataDir string) *ffmpeg.OverlaySpec {
+	if !o.Active() {
+		return nil
+	}
+	opacity := o.Opacity
+	if opacity <= 0 {
+		// A row stored before opacity existed, or one saved as 0. Treated as
+		// fully opaque rather than fully transparent: an invisible watermark is
+		// indistinguishable from a broken one, and the operator asked for a
+		// watermark.
+		opacity = 1
+	}
+	return &ffmpeg.OverlaySpec{
+		ImagePath:  filepath.Join(dataDir, filepath.FromSlash(o.Image)),
+		Anchor:     ffmpeg.OverlayAnchor(o.Anchor),
+		WidthPct:   o.WidthPct,
+		MarginXPct: o.MarginXPct,
+		MarginYPct: o.MarginYPct,
+		Opacity:    opacity,
+	}
+}
+
 // renditionSpecOf maps a stored rendition onto the encode's command line.
 //
 // There is no audio field to map, and there must never be one: RenditionArgs
 // copies every audio track through with -c:a copy, which is what leaves the
 // per-destination routing graphs downstream with the full multitrack ingest to
 // work from.
-func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDevice string) ffmpeg.RenditionSpec {
+func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDevice, dataDir string) ffmpeg.RenditionSpec {
 	return ffmpeg.RenditionSpec{
+		Overlay:     overlaySpecOf(r.Overlay, dataDir),
+		Text:        textSpecOf(r.Text, dataDir),
 		Deinterlace: ffmpeg.DeinterlaceMode(r.Deinterlace),
 		// Only meaningful for the VAAPI encoders, and empty everywhere else.
 		// Until this was threaded through, every VAAPI rendition fell back to
@@ -1992,7 +2279,35 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 
 	subName := fmt.Sprintf("rendition:%d", row.ID)
 	in := upstream.Subscribe(subName, port)
-	args := ffmpeg.RenditionArgs(renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row)))
+	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
+	// An FFmpeg with no drawtext filter must not be handed one.
+	//
+	// This is not a cosmetic guard. Found by running the renditions acceptance
+	// suite against a Homebrew FFmpeg built without libfreetype: the graph is
+	// rejected with "No such filter: 'drawtext'", the encode dies, the
+	// supervisor restarts it, and it dies again. The whole rendition is off
+	// air -- along with every destination feeding from it -- because somebody
+	// asked for a caption.
+	//
+	// Dropping the text keeps the picture up. The same choice the unresolvable
+	// font makes below, and for the same reason: a missing caption is a
+	// disappointment, a missing stream is an outage.
+	if rspec.Text != nil && !e.tools.HasFilter("drawtext") {
+		rspec.Text = nil
+		e.log.Warn("this FFmpeg has no drawtext filter, so no text is drawn; "+
+			"the rendition runs without it rather than failing to start",
+			"rendition", row.ID)
+	}
+	// Configured text that produced no spec means the font could not be
+	// resolved. Validation refuses a bad name at save time, so this is a font
+	// removed from under a running install. Said out loud, because the operator
+	// otherwise sees a stream that starts fine and simply has no caption --
+	// which is the failure mode this whole feature keeps trying to avoid.
+	if row.Text.Active() && rspec.Text == nil && e.tools.HasFilter("drawtext") {
+		e.log.Warn("rendition text has no usable font, so no text is drawn",
+			"rendition", row.ID, "font", row.Text.Font)
+	}
+	args := ffmpeg.RenditionArgs(rspec)
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: subName, Kind: "rendition", Bin: e.tools.FFmpeg, Args: args,
@@ -3381,6 +3696,12 @@ func (e *Engine) Source() routing.Source {
 
 // SourceInfo is the ingest layout as the API reports it.
 type SourceInfo struct {
+	// ID and Name identify the programme this snapshot belongs to. They are
+	// here because a Status handed to anything outside the WebSocket -- MQTT
+	// telemetry, Home Assistant discovery -- has to say which source it
+	// describes, and until now nothing in the payload did.
+	ID     int64               `json:"id"`
+	Name   string              `json:"name"`
 	Probed bool                `json:"probed"`
 	Tracks []routing.Track     `json:"tracks"`
 	Video  *ffmpeg.VideoStream `json:"video,omitempty"`
@@ -3400,6 +3721,7 @@ type SourceInfo struct {
 func (e *Engine) SourceInfo() SourceInfo {
 	e.mu.RLock()
 	probed, src, video := e.probed, e.source, e.videoInfo
+	name := e.sourceName
 	synthetic := e.silence != nil && e.silence.hub != nil
 	e.mu.RUnlock()
 
@@ -3407,6 +3729,7 @@ func (e *Engine) SourceInfo() SourceInfo {
 		src = synthTrack()
 	}
 	return SourceInfo{
+		ID: e.sourceID, Name: name,
 		Probed: probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
 		Annotations: e.Settings().Ingest.Annotations,
 	}

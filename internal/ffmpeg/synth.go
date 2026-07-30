@@ -384,6 +384,14 @@ func slateVideoFilter(s SlateSpec, prof encoderProfile) string {
 }
 
 // escapeLavfiValue protects an option value inside a filtergraph description.
+//
+// ONE level of escaping, which is enough for the colours this is used for and
+// is NOT enough in general. A filtergraph is unescaped twice -- see
+// escapeLavfiArg in text.go, and the measurements there. The values reaching
+// this function are colours validated elsewhere to be a name or 0xRRGGBB, so
+// none of them can contain a character that needs the second level; a colour
+// that could would break exactly as the Windows font path did. Anything else
+// passed through here should use escapeLavfiArg instead.
 // A colour like "0x101014" is harmless, but any user-supplied string with a
 // colon in it would otherwise be read as the start of the next option and
 // produce a parse error the operator cannot connect to what they typed.

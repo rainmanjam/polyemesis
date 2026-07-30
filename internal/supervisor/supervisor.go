@@ -79,6 +79,34 @@ type Spec struct {
 	// footage nor wedges the destination.
 	NextArgs func() []string
 
+	// MaxRestarts gives up after this many CONSECUTIVE restarts that did not
+	// reach stableAfter. 0 is unlimited, which is what every process here did
+	// before this existed and remains the right default for the ingest.
+	//
+	// It exists for destinations. A destination retrying forever looks exactly
+	// like one that works: the card says "reconnecting", the supervisor is
+	// busy, and nothing ever says "this endpoint has refused us forty times and
+	// is not coming back". Giving up moves it to StateFailed, which the alert
+	// watcher already treats as down -- so the operator is told once, loudly,
+	// instead of never.
+	//
+	// CONSECUTIVE is the load-bearing word. A destination that reconnects
+	// cleanly once an hour for a week must never accumulate its way to the
+	// limit, so a run longer than stableAfter resets the count, exactly as it
+	// already resets the backoff.
+	MaxRestarts int
+
+	// StartDelay holds the FIRST spawn back. Restarts are unaffected: a
+	// destination that drops at 3am must come back immediately, not wait its
+	// turn behind processes that are already healthy.
+	//
+	// It exists so that bringing several destinations up at once does not
+	// spawn eight FFmpegs in the same tick. Each one opens a connection,
+	// negotiates TLS and starts encoding audio simultaneously, which on a
+	// small box is the moment most likely to drop frames -- and it is the exact
+	// moment an operator is watching, because it is when they went live.
+	StartDelay time.Duration
+
 	// AutoRestart makes the supervisor respawn the child when it exits.
 	// The preview and destinations want this; a one-shot probe does not.
 	AutoRestart bool
@@ -239,6 +267,22 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 	defer close(done)
 
 	backoff := p.spec.MinBackoff
+	// Consecutive restarts that did not reach stableAfter. Reset by a healthy
+	// run, not by a successful spawn: a process that starts and dies in two
+	// seconds has not recovered from anything.
+	consecutive := 0
+
+	// Before the first spawn only, and interruptible: a stop that arrives
+	// during the stagger window must not wait it out.
+	if p.spec.StartDelay > 0 {
+		select {
+		case <-ctx.Done():
+			p.setState(StateStopped, "")
+			return
+		case <-time.After(p.spec.StartDelay):
+		}
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -275,6 +319,22 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		// promptly rather than inherit an old backoff.
 		if ranFor > stableAfter {
 			backoff = p.spec.MinBackoff
+			consecutive = 0
+		}
+		consecutive++
+
+		// Out of patience. StateFailed rather than StateStopped: stopped is
+		// what an operator asked for, failed is what happened to them, and the
+		// alert watcher only treats one of those as an incident.
+		if p.spec.MaxRestarts > 0 && consecutive > p.spec.MaxRestarts {
+			give := fmt.Sprintf("gave up after %d consecutive restarts", consecutive-1)
+			if msg != "" {
+				give += ": " + msg
+			}
+			p.log.Error("giving up on process", "restarts", consecutive-1, "err", msg)
+			p.appendLog(give, "error")
+			p.setState(StateFailed, give)
+			return
 		}
 
 		p.mu.Lock()

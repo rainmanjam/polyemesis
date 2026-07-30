@@ -82,6 +82,9 @@ func (f *Facebook) Scopes() []string {
 // off until Meta documents support. The flow remains a confidential client: the
 // secret never leaves the server, the code is bound to a whitelisted redirect
 // URI, and the state is single-use.
+// ScopeVersion 1 is the set above. Bump whenever Scopes changes.
+func (f *Facebook) ScopeVersion() int { return 1 }
+
 func (f *Facebook) PKCE() bool { return false }
 
 func (f *Facebook) AuthURL(clientID, redirectURI, state, _ string) string {

@@ -23,7 +23,9 @@ deliberately does not do, and how to get it running. These are the details.
 | [PLATFORMS.md](PLATFORMS.md) | What each platform's published API allows, and the OAuth app setup for the four that sign in |
 | [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md) | Going live from a file, on a schedule, with no encoder attached |
 | [MONITORING.md](MONITORING.md) | Prometheus metrics, alerts, and automation with API tokens |
+| [MQTT.md](MQTT.md) | Retained telemetry and Home Assistant discovery |
 | [API.md](API.md) | Every HTTP route, authentication, and a worked example |
+| [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md) | The palette, type scale and motion vocabulary the app and website share |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Organised by what you observe |
 | [FAQ.md](FAQ.md) | The questions that come up first |
 | [UPGRADING.md](UPGRADING.md) | Migrations, rollback, version-specific notes |

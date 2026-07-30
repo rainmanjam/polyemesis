@@ -204,9 +204,19 @@ func TestTokenEnforcedTracksTheListenerNotTheSetting(t *testing.T) {
 	h, store, sign := sourceServer(t)
 	srv := serverUnderTest(t, h)
 
-	// The fixture runs a manager, so the listener is up and the field says so.
+	// The fixture binds the shared SRT listener on a port it picked and owns --
+	// see freeUDPPort in renditions_test.go -- so the listener really is up here
+	// and a false reading is the product's fault, not the machine's.
+	//
+	// The message used to read "tokenEnforced is false while the listener is
+	// bound", which was the one thing that could not be true at that moment and
+	// sent me looking in the wrong half of the system for half an hour. It said
+	// "bound" because the fixture used the 6000 default, and on a developer
+	// machine 6000 is a popular number.
 	if !listSources(t, h, sign)[0].TokenEnforced {
-		t.Fatal("tokenEnforced is false while the listener is bound")
+		t.Fatalf("tokenEnforced is false, so the shared SRT listener is not bound "+
+			"on udp/%d -- a port this fixture chose because it was free. Nothing "+
+			"external explains this one", srtPortOf(t, store))
 	}
 
 	// Port 0 specifically. To the kernel :0 is not an error, it means "any free

@@ -209,3 +209,69 @@ test.describe("saving", () => {
     await page.waitForTimeout(800);
   });
 });
+
+test.describe("anchor grid", () => {
+  // The 3x3 anchor picker replaced a nine-item select, and the thing a select
+  // gave for free was keyboard operation. Nine buttons in a grid do not: they
+  // need a roving tabindex and two-dimensional arrow keys, both hand-written
+  // and neither visible in a screenshot.
+  //
+  // Asserted through aria-checked rather than a class, because that is what a
+  // screen reader and the form both read. A styling regression is cosmetic; an
+  // aria-checked regression means the control reports the wrong position to
+  // everything that is not a sighted mouse user.
+  //
+  // Self-sufficient on purpose: it opens the CREATE dialog and fills in what
+  // reveals the grid, rather than requiring a rendition to already exist. A
+  // test that skips when the fixture is missing is a test that silently stops
+  // running.
+  test("arrow keys move the selection in two dimensions", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/renditions");
+
+    await page.getByRole("button", { name: "New rendition" }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    // The overlay geometry only appears once the rendition has a fixed size AND
+    // an image, because the overlay is scaled as a percentage of the output.
+    // That gate is deliberate -- see RenditionOverlay.problems -- so the test
+    // satisfies it rather than working around it.
+    await page.locator("#rend-overlay-image").fill("overlays/logo.png");
+
+    const group = page.getByRole("radiogroup", { name: "Position" }).first();
+    await expect(group).toBeVisible();
+
+    // Nine, always. Showing every option at once is the whole reason this
+    // replaced a select.
+    await expect(group.getByRole("radio")).toHaveCount(9);
+    await expect(group.getByRole("radio", { checked: true })).toHaveCount(1);
+
+    // EXACT labels after each press, not merely "something changed".
+    //
+    // The first version of this asserted only that the selection differed after
+    // ArrowUp + ArrowLeft, and it passed against a build with vertical movement
+    // REMOVED: ArrowUp did nothing, ArrowLeft still moved bottom-right to
+    // bottom-centre, the label differed, and the test reported success while
+    // the capability it exists to prove was broken. Caught by mutation.
+    const selected = () => group.getByRole("radio", { checked: true });
+    await expect(selected()).toHaveAttribute("aria-label", "Bottom right");
+
+    // Vertical, asserted on its own so nothing else can satisfy it.
+    await selected().focus();
+    await page.keyboard.press("ArrowUp");
+    await expect(selected()).toHaveAttribute("aria-label", "Middle right");
+
+    // Then horizontal, from the row the previous press moved to.
+    await page.keyboard.press("ArrowLeft");
+    await expect(selected()).toHaveAttribute("aria-label", "Centre");
+
+    // Edges clamp rather than wrap. Wrapping would mean an operator holding a
+    // key sails past the corner they were aiming for.
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await expect(selected()).toHaveAttribute("aria-label", "Top centre");
+
+    // Exactly one throughout, or the form has two answers for one setting.
+    await expect(group.getByRole("radio", { checked: true })).toHaveCount(1);
+  });
+});

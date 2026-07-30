@@ -1,11 +1,32 @@
 package api
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 )
+
+// secretEqual compares two bearer secrets without leaking, through how long the
+// comparison took, how many leading bytes the caller guessed correctly.
+//
+// The timing channel this closes is not the reason it exists. Go's `==` on
+// strings bails at the first differing byte, but the signal that leaks is
+// nanoseconds wide and a webhook secret is reached across a network, so nothing
+// here was practically attackable.
+//
+// It exists because the other two bearer secrets in this codebase — the playout
+// token and the SRT stream token — are already compared with
+// subtle.ConstantTimeCompare. One of three compared a different way is a thing
+// the next reader has to stop and re-derive as safe. Uniformity is the feature.
+//
+// ConstantTimeCompare returns 0 for unequal lengths, so a length mismatch is
+// still a mismatch; it just is not a constant-time one, which is why the length
+// of a secret is not a secret.
+func secretEqual(got, want string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
 
 // cspDirectives is the Content-Security-Policy, one directive per entry so the
 // reason for each relaxation stays next to it. Every relaxation below is

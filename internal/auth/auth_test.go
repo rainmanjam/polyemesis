@@ -14,7 +14,13 @@ import (
 
 func testManager(t *testing.T, fill byte) *Manager {
 	t.Helper()
-	return New(bytes.Repeat([]byte{fill}, 32), false, false)
+	return New(bytes.Repeat([]byte{fill}, 32), false, false, staticEpoch(0))
+}
+
+// staticEpoch is an EpochFunc for a store whose epoch never moves, which is the
+// uninteresting case every test that is not about revocation wants.
+func staticEpoch(n int64) EpochFunc {
+	return func(int64) (int64, error) { return n, nil }
 }
 
 func TestIssueThenVerifyReturnsTheIssuedIdentity(t *testing.T) {

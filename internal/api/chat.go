@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -253,13 +254,267 @@ func (s *Server) handleChatDeleteMessage(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if s.store != nil {
-		if err := s.store.DeleteChatMessage(platform, account, id); err != nil {
-			// The platform already removed it, which is what the operator
-			// asked for. A stale row in our own scrollback is not worth
-			// reporting the deletion as failed.
-			s.log.Debug("chat message deleted on platform but not locally", "err", err)
-		}
-	}
+	// The local scrollback and the broadcast to every other browser are the
+	// Hub's job now, on the same path an upstream deletion takes. Doing it here
+	// as well was how one moderator action could leave two operators looking at
+	// two different rooms.
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handleChatHideMessage takes a message off a feed without destroying it.
+//
+// Two different scopes, and the difference is the whole point:
+//
+//	scope=platform  the platform hides it from viewers. Only Facebook can, and
+//	                only because its live chat is a comment thread with an
+//	                is_hidden field.
+//	scope=local     polyemesis stops showing it. Works everywhere, including
+//	                platforms with no moderation API at all, because it asks
+//	                nobody's permission — and every viewer still sees it.
+//
+// The response says which happened in words, not just a status. An operator who
+// believes a local hide removed a message from their audience's screens has been
+// misled by their own tool, and that is worse than the tool refusing.
+func (s *Server) handleChatHideMessage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	id := strings.TrimSpace(q.Get("id"))
+	if platform == "" || id == "" {
+		writeError(w, http.StatusBadRequest, "platform and id are required")
+		return
+	}
+
+	// Local is the default deliberately. It is the one that cannot fail and
+	// cannot overreach, so a caller that omits the parameter gets the harmless
+	// half rather than an unintended platform write.
+	switch scope := strings.TrimSpace(q.Get("scope")); scope {
+	case "", "local":
+		if err := s.chat.HideLocally(platform, account, id); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "hidden",
+			"scope":  "local",
+			"detail": "Hidden in polyemesis only. Everyone watching on " + string(platform) +
+				" can still see this message.",
+		})
+
+	case "platform":
+		// hidden=false is how a mistaken hide is undone. Only the platform
+		// scope can be reversed; a local hide is forgotten, not flagged.
+		hidden := strings.TrimSpace(q.Get("hidden")) != "false"
+		if err := s.chat.Hide(r.Context(), platform, account, id, hidden); err != nil {
+			// The sentence is the payload, as with delete.
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		detail := "Hidden from the public thread on " + string(platform) +
+			". Its author and their friends may still see it; that is the platform's rule, not ours."
+		if !hidden {
+			detail = "Restored to the public thread on " + string(platform) +
+				". It will not reappear in this pane — polyemesis does not re-fetch what it has dropped."
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "hidden", "scope": "platform", "detail": detail,
+		})
+
+	default:
+		writeError(w, http.StatusBadRequest,
+			`scope must be "local" (hide it here only) or "platform" (hide it from viewers)`)
+	}
+}
+
+// handleChatBan removes a person from one platform's chat.
+//
+// The duration is in SECONDS on the wire, and exactly one unit exists in this
+// API on purpose. The platforms disagree — YouTube and Twitch count seconds,
+// Kick counts minutes — and each adapter converts at the last moment. A caller
+// here never has to know, and cannot get it wrong.
+//
+// Omitting the duration, or sending 0, is a PERMANENT ban. That is the platforms'
+// own convention on all three, so it is kept rather than invented around.
+func (s *Server) handleChatBan(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	userID := strings.TrimSpace(q.Get("userId"))
+	if platform == "" || userID == "" {
+		writeError(w, http.StatusBadRequest, "platform and userId are required")
+		return
+	}
+
+	var d time.Duration
+	if raw := strings.TrimSpace(q.Get("seconds")); raw != "" {
+		secs, err := strconv.Atoi(raw)
+		if err != nil || secs < 0 {
+			writeError(w, http.StatusBadRequest,
+				"seconds must be a whole number of seconds, or omitted for a permanent ban")
+			return
+		}
+		d = time.Duration(secs) * time.Second
+	}
+
+	if err := s.chat.Ban(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason"))); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// The verb is reported back, because "banned" and "timed out for 10m" are
+	// different things to have just done and the caller should not have to infer
+	// which from the request it sent.
+	out := map[string]string{"status": "banned", "scope": "permanent"}
+	if d > 0 {
+		out["status"] = "timed out"
+		out["scope"] = d.String()
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleChatUnban lifts a ban or an unexpired timeout.
+//
+// It does not restore the messages that the ban retracted. Those are gone from
+// this server's history and nothing re-fetches them; the response says so rather
+// than leaving an operator to wonder why the chat did not come back.
+func (s *Server) handleChatUnban(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	userID := strings.TrimSpace(q.Get("userId"))
+	if platform == "" || userID == "" {
+		writeError(w, http.StatusBadRequest, "platform and userId are required")
+		return
+	}
+	if err := s.chat.Unban(r.Context(), platform, account, userID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "unbanned",
+		"detail": "They can post again. Their earlier messages do not come back — polyemesis " +
+			"does not re-fetch what it has dropped.",
+	})
+}
+
+// handleChatSettings applies channel-wide chat rules on one platform.
+//
+// PATCH, and pointer fields all the way down: an omitted field means "leave it
+// alone". A body of plain values could not express "turn slow mode on and touch
+// nothing else" — it would send zeros for everything unset and switch off
+// follower-only mode as a side effect.
+//
+// Per-platform rather than fan-out. Only Twitch publishes an API for any of
+// this, and "slow mode on" applied to one of four platforms while reporting
+// success would be a half-truth.
+func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	if platform == "" {
+		writeError(w, http.StatusBadRequest, "platform is required")
+		return
+	}
+	var body chat.ChatSettings
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if err := s.chat.UpdateChatSettings(r.Context(), platform,
+		strings.TrimSpace(q.Get("account")), body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// chatUserCard is what a moderator sees before deciding.
+type chatUserCard struct {
+	Platform db.Platform `json:"platform"`
+	AuthorID string      `json:"authorId"`
+	// Name and the role flags come from the most recent message rather than
+	// from a platform lookup: they are what this person looked like when they
+	// last spoke, which is the thing being judged.
+	Name        string `json:"name,omitempty"`
+	Color       string `json:"color,omitempty"`
+	Moderator   bool   `json:"moderator,omitempty"`
+	Subscriber  bool   `json:"subscriber,omitempty"`
+	Broadcaster bool   `json:"broadcaster,omitempty"`
+
+	Messages []chat.Message `json:"messages"`
+	// Truncated says the limit was reached, so "12 messages" is a floor and not
+	// a count. The distinction matters: a moderator reading a bounded window as
+	// a complete record judges a pattern from a sample.
+	Truncated bool `json:"truncated"`
+	// RetentionNote explains, in words, why this history is as deep as it is.
+	// Without it the card silently understates a talkative person as quiet.
+	RetentionNote string `json:"retentionNote"`
+}
+
+// handleChatUser answers with one person's recent messages and their roles.
+//
+// This is the equivalent of Twitch's moderator card, and it is built from
+// polyemesis's own store because NO platform publishes a user-chat-history API.
+// Twitch's card is a web-app feature over internal endpoints; Helix has Get
+// Chatters and Get Moderators, neither of which is a history. The others have
+// nothing.
+//
+// Being local makes it work identically on all four platforms — something
+// Twitch's own card cannot do — at the cost of depth, which is why the response
+// carries RetentionNote and Truncated rather than presenting a slice as a total.
+func (s *Server) handleChatUser(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	authorID := strings.TrimSpace(q.Get("authorId"))
+	if platform == "" || authorID == "" {
+		writeError(w, http.StatusBadRequest, "platform and authorId are required")
+		return
+	}
+	limit := chatLimitParam(r)
+
+	out := chatUserCard{
+		Platform: platform,
+		AuthorID: authorID,
+		Messages: []chat.Message{},
+		RetentionNote: "Read from this server's own scrollback, not from " + string(platform) +
+			". No platform offers an API for a viewer's chat history, so this is as far back as " +
+			"polyemesis kept — see the chat retention setting.",
+	}
+	if s.store == nil {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	rows, err := s.store.ChatMessagesByAuthor(platform, authorID, limit)
+	if err != nil {
+		// Same posture as the rest of this file: an unreadable scrollback
+		// answers empty rather than failing, so the card still opens and its
+		// moderation actions still work. Refusing to show the card because
+		// history is unavailable would take away the buttons too.
+		s.log.Debug("chat user history unavailable", "err", err)
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	for _, row := range rows {
+		out.Messages = append(out.Messages, chat.FromDB(row))
+	}
+	out.Truncated = len(rows) >= limit
+	if n := len(rows); n > 0 {
+		last := rows[n-1]
+		out.Name = last.AuthorName
+		out.Color = last.AuthorColor
+		out.Moderator = last.Moderator
+		out.Subscriber = last.Subscriber
+		out.Broadcaster = last.Broadcaster
+	}
+	writeJSON(w, http.StatusOK, out)
 }

@@ -515,6 +515,103 @@ func (y *YouTubeAdapter) Send(ctx context.Context, text string) (Message, error)
 	}, nil
 }
 
+// Delete removes one message from the live chat.
+//
+// This needs NO new OAuth scope. liveChatMessages.delete accepts
+// https://www.googleapis.com/auth/youtube, which internal/oauth/youtube.go has
+// always requested — so every YouTube account already connected can do this
+// today, with no reconnect and no consent screen. The capability matrix recorded
+// YouTube moderation as "unverified" for a long time, which is exactly the
+// fail-open default working as intended: nobody had read the docs, so nothing
+// claimed it was impossible.
+//
+// Unlike Send, this does NOT refuse when the budget looks spent. A message a
+// moderator has decided to remove stays on stream while we decline to spend 50
+// units, and the API's own 403 remains the authority on when the quota is
+// actually gone. Spending is still recorded, so the pacer keeps reading honestly.
+func (y *YouTubeAdapter) Delete(ctx context.Context, messageID string) error {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return fmt.Errorf("no message id to delete")
+	}
+	err := doJSON(ctx, y.cfg.HTTP, http.MethodDelete,
+		y.cfg.APIBase+"/liveChatMessages?id="+url.QueryEscape(messageID),
+		y.cfg.Token, nil, nil)
+	y.budget.spend(QuotaCostDeleteMessage)
+	if err != nil {
+		// 403 here is usually authority rather than quota: the connected
+		// account is not the broadcaster and not a moderator of that chat.
+		// Saying so beats "forbidden", which sends people to reconnect an
+		// account that was never the problem.
+		if statusOf(err) == http.StatusForbidden && reasonOf(err) != "quotaExceeded" {
+			return fmt.Errorf("YouTube refused the deletion. The connected account has to own the "+
+				"broadcast or be a moderator of its chat: %w", err)
+		}
+		if statusOf(err) == http.StatusNotFound {
+			return fmt.Errorf("YouTube does not have that message any more; it may already be deleted: %w", err)
+		}
+		return y.classify(err)
+	}
+	return nil
+}
+
+// Ban removes a user from the live chat, permanently or for a duration.
+//
+// Like Delete, this needs no new scope: liveChatBans.insert accepts
+// auth/youtube, which is already granted. Verified against Google's reference
+// rather than assumed, because "it is probably the same scope" is how a feature
+// ships and then 403s on every existing account.
+//
+// YouTube counts in SECONDS. Kick counts in minutes. That is why this takes a
+// Duration and converts here.
+func (y *YouTubeAdapter) Ban(ctx context.Context, userID string, d time.Duration, _ string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("no user id to ban")
+	}
+	y.mu.Lock()
+	chatID := y.chatID
+	y.mu.Unlock()
+	if chatID == "" {
+		return fmt.Errorf("YouTube has no live chat open right now")
+	}
+
+	snippet := map[string]any{
+		"liveChatId":        chatID,
+		"type":              "permanent",
+		"bannedUserDetails": map[string]any{"channelId": userID},
+	}
+	if d > 0 {
+		// Rounded UP, not truncated: a 500ms timeout rounding to zero seconds
+		// would be sent as a permanent ban, and the difference between those two
+		// is not something to leave to integer division.
+		secs := int64((d + time.Second - 1) / time.Second)
+		snippet["type"] = "temporary"
+		snippet["banDurationSeconds"] = secs
+	}
+
+	err := doJSON(ctx, y.cfg.HTTP, http.MethodPost,
+		y.cfg.APIBase+"/liveChatBans?part=snippet", y.cfg.Token,
+		map[string]any{"snippet": snippet}, nil)
+	y.budget.spend(QuotaCostBan)
+	if err != nil {
+		if statusOf(err) == http.StatusForbidden && reasonOf(err) != "quotaExceeded" {
+			return fmt.Errorf("YouTube refused the ban. The connected account has to own the broadcast "+
+				"or be a moderator of its chat: %w", err)
+		}
+		return y.classify(err)
+	}
+	return nil
+}
+
+// Unban lifts a ban. YouTube addresses this by the BAN's id rather than the
+// user's, which polyemesis does not keep, so this reports the limitation instead
+// of failing obscurely.
+func (y *YouTubeAdapter) Unban(ctx context.Context, userID string) error {
+	return fmt.Errorf("YouTube removes a ban by the ban's own id, which polyemesis does not store. " +
+		"Lift it from YouTube Studio → Live chat, where the ban is listed")
+}
+
 // classify turns an API error into the message an operator can act on, without
 // echoing anything that could carry a credential.
 func (y *YouTubeAdapter) classify(err error) error {

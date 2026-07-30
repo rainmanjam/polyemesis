@@ -159,6 +159,73 @@ rather than tidy: scaling interlaced content blends the two fields together, and
 once that has happened the combing is baked into the pixels and no later filter
 can remove it.
 
+## Watermarks
+
+A rendition can burn a still image into the picture — a logo, a sponsor card, a
+channel mark.
+
+It lives here, on the rendition, rather than on a destination, and that is not
+an arrangement of the settings page. A destination copies video with
+`-c:v copy`; there is no mechanism by which a copied bitstream acquires a logo.
+Burning one in *is* a re-encode, so it belongs where re-encoding is already the
+contract.
+
+The practical consequence is worth being clear about:
+
+- **Adding a watermark to a rendition costs no new process.** A few percent CPU
+  on an encode that was already running. This case is cheap.
+- **Giving two platforms *different* branding costs a second full encode.** They
+  are different pictures, so they are different encodes — roughly 1.5–3 cores on
+  x264 `veryfast`, or near-zero CPU on NVENC at the cost of one of its 3–8
+  concurrent sessions.
+- **A clean feed is a destination on no rendition, or on one with no watermark.**
+  Nothing to switch off.
+
+### Everything is a percentage
+
+| Setting | Means |
+|---|---|
+| **Width** | the image's width as a percentage of the frame's width |
+| **Margin X / Y** | the gap from the anchored edges, as percentages of the frame |
+| **Position** | one of nine anchors — corners, edge centres, or the middle |
+| **Opacity** | 1–100%; the image's own transparency is respected either way |
+
+Percentages rather than pixels, because the same watermark has to be correct on
+a 1920×1080 tier and a 1080×1920 one. A logo placed 40 px from the right edge of
+a landscape frame is in a sensible place; the same 40 px on a vertical frame is
+not the same place at all, and a size in pixels that reads well on one lands
+comically large or invisible on the other.
+
+Margins are ignored on a centred axis — a centred logo is centred.
+
+### Getting the image in
+
+Put the file in `<data-directory>/overlays/` and give the rendition the relative
+path, `overlays/logo.png`. PNG with transparency is the usual choice.
+
+The path is confined to the data directory, the same way a slate image and a
+`file://` pull source are. An absolute path or a `..` is refused rather than
+resolved: the field is operator input that becomes an FFmpeg argument, and
+anything else would be a file-read primitive for whoever reaches the API.
+
+### Two things that will catch you
+
+**A watermarked rendition needs an explicit width *and* height.** The image is
+sized as a percentage of the output, so the output has to have a size. A
+rendition with one axis free is refused when you save it rather than starting
+and quietly having no logo.
+
+**Editing a watermark restarts the encode**, and therefore every destination
+riding that rendition. Nudging a logo by 2% while live drops them for a second
+or two. Replacing the image file has the same effect, and deliberately so — the
+alternative is an encoder that keeps compositing the picture you just replaced.
+
+### What this is not, yet
+
+v0.5 is a still image. No text, no clock, no viewer counts, no animation, no
+browser sources. Those are designed and costed in
+[the roadmap](roadmap/OVERLAYS.md); they are not built.
+
 ## Hardware encoders
 
 At startup polyemesis **encodes one frame** with each encoder your FFmpeg

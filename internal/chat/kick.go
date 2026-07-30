@@ -65,13 +65,17 @@ type KickConfig struct {
 	// "https://stream.example.com". Empty is a supported state and produces a
 	// clear explanation rather than a failure.
 	PublicURL string
-	// CallbackSecret makes the callback path unguessable. Kick does not
-	// document a signature scheme this code can verify, so the secrecy of the
-	// path is what stops a stranger posting fake chat into the pane. A blank
-	// one is generated.
+	// CallbackSecret makes the callback path unguessable. It is defence in
+	// depth rather than the authentication — a secret in a URL leaks through
+	// proxy logs, Referer headers and any plain-HTTP hop, which is what Verify
+	// below is for. A blank one is generated.
 	CallbackSecret string
-	// Verify, when set, authenticates a delivery — the hook for Kick's
-	// signature header once its scheme is documented. Nothing here invents one.
+	// Verify authenticates a delivery. Required: the handler refuses every POST
+	// when it is nil rather than accepting unverified events.
+	//
+	// It stays a function rather than a concrete type so a test can sign with
+	// its own key, and so the signature scheme lives in kick_verify.go where it
+	// can be read against Kick's documentation side by side.
 	Verify func(r *http.Request, body []byte) error
 
 	// Probe replaces the reachability check, for tests.
@@ -340,11 +344,21 @@ func (k *KickAdapter) Handler() http.Handler {
 			http.Error(w, "could not read the request body", http.StatusBadRequest)
 			return
 		}
-		if k.cfg.Verify != nil {
-			if err := k.cfg.Verify(r, body); err != nil {
-				http.Error(w, "signature rejected", http.StatusUnauthorized)
-				return
-			}
+		// Fail closed. A nil Verify used to mean "skip the check", which is how
+		// this adapter shipped with signature verification silently switched
+		// off: the hook existed, the nil guard existed, and no construction
+		// site ever assigned it. An unconfigured verifier is now a refused
+		// delivery, so the same omission would surface as chat that does not
+		// arrive rather than as chat that arrives unauthenticated.
+		if k.cfg.Verify == nil {
+			http.Error(w, "webhook verification is not configured", http.StatusServiceUnavailable)
+			return
+		}
+		if err := k.cfg.Verify(r, body); err != nil {
+			// 401 and nothing else. Which part of a forgery failed is not
+			// information the sender is owed.
+			http.Error(w, "signature rejected", http.StatusUnauthorized)
+			return
 		}
 
 		k.ingest(r.Header.Get("Kick-Event-Type"), body)
@@ -569,6 +583,84 @@ func (k *KickAdapter) Delete(ctx context.Context, messageID string) error {
 		return fmt.Errorf("Kick refused the deletion. If this account was connected before unified chat existed "+
 			"it never granted moderation:chat_message:manage — disconnect and reconnect it in Settings → Platforms. "+
 			"Kick said: %s", err)
+	}
+	return err
+}
+
+// KickMaxTimeout is Kick's documented ceiling: 10080 minutes, which is seven
+// days. Beyond it the API rejects the request outright, so a longer timeout is
+// converted to a permanent ban only where the caller asked for one — never
+// silently.
+const KickMaxTimeout = 10080 * time.Minute
+
+// Ban removes a user from the chat, permanently or for a timeout.
+//
+// KICK COUNTS IN MINUTES. YouTube and Twitch count in seconds. This is the
+// conversion that makes a unified "600" mean ten minutes everywhere instead of
+// seven days here, and it is the entire reason the interface takes a Duration.
+func (k *KickAdapter) Ban(ctx context.Context, userID string, d time.Duration, reason string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("no user id to ban")
+	}
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		// Kick's ids are integers in JSON, not strings. Sending a quoted id
+		// fails as a validation error that names neither field.
+		return fmt.Errorf("kick user id %q is not numeric, so this ban cannot be addressed", userID)
+	}
+
+	body := map[string]any{
+		"broadcaster_user_id": k.cfg.BroadcasterUserID,
+		"user_id":             uid,
+	}
+	if d > 0 {
+		if d > KickMaxTimeout {
+			return fmt.Errorf("kick timeouts stop at 7 days and this one is %s; "+
+				"ask for a permanent ban explicitly if that is what you mean", d)
+		}
+		// Rounded UP: a 30-second timeout must not truncate to zero minutes,
+		// because zero here means PERMANENT.
+		mins := int64((d + time.Minute - 1) / time.Minute)
+		body["duration"] = mins
+	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		if len([]rune(reason)) > 100 {
+			// Kick's documented maximum. A long reason must not cost the ban.
+			reason = string([]rune(reason)[:100])
+		}
+		body["reason"] = reason
+	}
+
+	err = doJSON(ctx, k.cfg.HTTP, http.MethodPost,
+		k.cfg.APIBase+"/public/v1/moderation/bans", k.cfg.Token, body, nil)
+	if err != nil && (statusOf(err) == http.StatusUnauthorized || statusOf(err) == http.StatusForbidden) {
+		return fmt.Errorf("Kick refused the ban. If this account was connected before banning existed "+
+			"it never granted moderation:ban — disconnect and reconnect it in Settings → Platforms. "+
+			"Kick said: %w", err)
+	}
+	return err
+}
+
+// Unban lifts a ban or an unexpired timeout.
+func (k *KickAdapter) Unban(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("no user id to unban")
+	}
+	uid, cerr := strconv.Atoi(userID)
+	if cerr != nil {
+		return fmt.Errorf("kick user id %q is not numeric, so this cannot be addressed", userID)
+	}
+	err := doJSON(ctx, k.cfg.HTTP, http.MethodDelete,
+		k.cfg.APIBase+"/public/v1/moderation/bans", k.cfg.Token,
+		map[string]any{
+			"broadcaster_user_id": k.cfg.BroadcasterUserID,
+			"user_id":             uid,
+		}, nil)
+	if err != nil && (statusOf(err) == http.StatusUnauthorized || statusOf(err) == http.StatusForbidden) {
+		return fmt.Errorf("Kick refused the unban; the account may lack moderation:ban. "+
+			"Reconnect it in Settings → Platforms. Kick said: %w", err)
 	}
 	return err
 }

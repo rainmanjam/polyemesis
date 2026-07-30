@@ -100,6 +100,24 @@ func TestStemDownloadRefusesAnythingOutsideTheStemsDirectory(t *testing.T) {
 		// A subdirectory: the stems directory is flat, and a name with a
 		// separator in it is the first step of every traversal.
 		"sub/rec-20240115-143000-mic.flac",
+		// The same with a BACKSLASH, for the Windows reading of these names.
+		//
+		// Honest about what these do and do not prove: they do NOT pin
+		// resolveStem's separator check. Removing that check entirely leaves
+		// this test green, which was verified rather than assumed. The reason
+		// is the ordering — ParseStemFilename runs behind it with an ANCHORED
+		// regex, so a name containing any separator fails the shape check
+		// whatever the separator rule says. The separator check here is
+		// defence in depth that the shape check makes unreachable.
+		//
+		// They are kept because the PROPERTY is what this test is for: these
+		// names must not serve bytes, and that must stay true however the two
+		// checks are reordered or rewritten later. The place where the
+		// separator rule is genuinely load-bearing, and genuinely pinned by a
+		// mutation, is internal/recording and internal/media — neither has a
+		// shape check in front of it.
+		`sub\rec-20240115-143000-mic.flac`,
+		`..\secret.flac`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			mustNotLeak(t, h, sign, http.MethodGet,

@@ -98,15 +98,241 @@ type Destination struct {
 	// an argument here overrides something the product otherwise guarantees.
 	// Stored rather than treated as a one-shot confirmation, so a later edit
 	// that keeps the same override does not lose the record of who agreed.
-	ExpertAckReencode bool      `json:"expertAckReencode,omitempty"`
-	Position          int       `json:"position"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ExpertAckReencode bool `json:"expertAckReencode,omitempty"`
+	// Transport is the optional muxer and socket tuning. Its zero value emits
+	// no FFmpeg arguments at all, so a destination that has not opted in
+	// produces exactly the command it always did.
+	Transport DestTransport `json:"transport"`
+	// Resilience is how hard this destination is retried, and when to stop.
+	// Its zero value is the behaviour every destination had before it existed:
+	// retry forever, 1s to 30s.
+	Resilience DestResilience `json:"resilience"`
+	// Audio is the output encoding choice. Its zero value is AAC stereo, which
+	// is what every destination emitted before it existed.
+	Audio AudioEncoding `json:"audio"`
+	// Compliance is the obligation metadata: who the programme is for, who may
+	// see it, what a viewer is about to be shown. Its zero value touches
+	// nothing -- see oauth.Compliance.
+	Compliance Compliance `json:"compliance"`
+	Position   int        `json:"position"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
 // ExpertArgsSet reports whether this destination has any hand-written
 // arguments. Two empty strings and no row at all must both read as "expert
 // mode off".
+// Transport bounds. Wide on purpose: these catch a unit mix-up or a typo, not
+// an opinion about how somebody runs their box.
+const (
+	// MaxMuxQueuePackets is FFmpeg's own practical ceiling; beyond this the
+	// queue is a memory leak with a limit rather than a buffer.
+	MaxMuxQueuePackets = 1 << 20
+	// MaxMuxQueueBytes is 1 GiB. A threshold larger than the machine's RAM is
+	// a typo, not a policy.
+	MaxMuxQueueBytes = 1 << 30
+	// MaxRWTimeoutSeconds is an hour. Anything longer is indistinguishable
+	// from the hang the timeout exists to break.
+	MaxRWTimeoutSeconds = 3600
+	// MinRWTimeoutSeconds is 1. A sub-second timeout on a live socket fires on
+	// ordinary jitter and turns a healthy stream into a restart loop.
+	MinRWTimeoutSeconds = 1
+)
+
+// Resilience bounds.
+const (
+	MinDestBackoffSeconds = 1
+	MaxDestBackoffSeconds = 300
+	// MaxDestGiveUpAfter is generous: a platform that has refused a thousand
+	// times is not coming back, but the number exists to catch a typo rather
+	// than to express an opinion.
+	MaxDestGiveUpAfter = 1000
+)
+
+// DestResilience is the per-destination reconnect policy.
+//
+// The one global knob that existed before this was
+// settings.ingest.pull.reconnectDelayMaxSeconds, and that governs PULL INGEST
+// -- the dial-out source -- not destinations. Destinations had no policy at
+// all: every one retried forever on the same 1s-to-30s curve, whatever it was
+// and however hopeless.
+type DestResilience struct {
+	// MinBackoffSeconds and MaxBackoffSeconds bracket the retry curve. 0 takes
+	// the supervisor's defaults, which are 1 and 30.
+	MinBackoffSeconds int `json:"minBackoffSeconds,omitempty"`
+	MaxBackoffSeconds int `json:"maxBackoffSeconds,omitempty"`
+	// GiveUpAfter stops retrying after this many CONSECUTIVE failed restarts.
+	// 0 is forever, which is the historical behaviour and still the right
+	// answer for a platform that is merely slow to come back.
+	//
+	// Consecutive, not cumulative: a destination that reconnects cleanly once
+	// an hour for a week must never accumulate its way to the limit. A run
+	// that lasts past the supervisor's stability window resets the count.
+	//
+	// The point is not to save CPU. It is that a destination retrying forever
+	// is INDISTINGUISHABLE from one that works -- the card says
+	// "reconnecting", and nothing ever says this endpoint is not coming back.
+	// Giving up moves it to failed, which the alert rules already treat as an
+	// incident, so the operator is told once rather than never.
+	GiveUpAfter int `json:"giveUpAfter,omitempty"`
+}
+
+// Active reports whether any resilience policy is set.
+func (r DestResilience) Active() bool {
+	return r.MinBackoffSeconds > 0 || r.MaxBackoffSeconds > 0 || r.GiveUpAfter > 0
+}
+
+func (r DestResilience) problems() []string {
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	for _, b := range []struct {
+		name string
+		v    int
+	}{{"minimum", r.MinBackoffSeconds}, {"maximum", r.MaxBackoffSeconds}} {
+		if b.v != 0 && (b.v < MinDestBackoffSeconds || b.v > MaxDestBackoffSeconds) {
+			add("%s reconnect delay %ds out of range (%d-%d, 0 for the default)",
+				b.name, b.v, MinDestBackoffSeconds, MaxDestBackoffSeconds)
+		}
+	}
+	// Refused rather than silently swapped. An inverted pair is a typo, and
+	// quietly reordering it would hide the typo AND produce a retry curve the
+	// operator did not ask for.
+	if r.MinBackoffSeconds > 0 && r.MaxBackoffSeconds > 0 &&
+		r.MinBackoffSeconds > r.MaxBackoffSeconds {
+		add("minimum reconnect delay %ds is greater than the maximum %ds",
+			r.MinBackoffSeconds, r.MaxBackoffSeconds)
+	}
+	if r.GiveUpAfter < 0 || r.GiveUpAfter > MaxDestGiveUpAfter {
+		add("give up after %d retries out of range (0-%d, 0 to retry forever)",
+			r.GiveUpAfter, MaxDestGiveUpAfter)
+	}
+	return probs
+}
+
+// Audio codec choices for a destination.
+const (
+	// DestAudioAAC is the default and the only thing every platform takes.
+	DestAudioAAC = ""
+	// DestAudioOpus is meaningfully better below ~64 kbps. SRT and file
+	// destinations only -- see DestAudio.Codec.
+	DestAudioOpus = "opus"
+)
+
+// DestAudioCodecs is every codec a destination may name, in the order to offer
+// them: the universal one first.
+var DestAudioCodecs = []string{DestAudioAAC, DestAudioOpus}
+
+// AudioEncoding is the per-destination output encoding.
+//
+// Smaller than the roadmap asked for, because one of its three items does not
+// exist. "AAC profile (LC / HE-AAC v1 / v2)" is NOT BUILDABLE: FFmpeg's native
+// aac encoder exposes no -profile option, and `-profile:a aac_he` makes it
+// refuse to open outright ("Profile not supported!"). HE-AAC needs the nonfree
+// libfdk_aac, which cannot ship in a redistributable build.
+//
+// The goal behind that item -- good audio well below 64 kbps -- is met by Opus,
+// which is free, already in the pinned build, and better than HE-AAC at those
+// rates. Answered by a different means rather than abandoned.
+type AudioEncoding struct {
+	// Codec is empty for AAC. Opus is refused on RTMP: FFmpeg will write it
+	// into FLV, because Enhanced RTMP defines a mapping, and no mainstream
+	// ingest accepts it. A stream that muxes cleanly and is rejected by the
+	// platform looks correct everywhere the operator can see.
+	Codec string `json:"codec,omitempty"`
+	// Mono folds the routing graph's stereo output to one channel. A DOWNMIX
+	// of the operator's mix, not a re-route: the matrix still produces OutL and
+	// OutR and this sums them. Halves the bitrate on talk content for no
+	// perceptual loss.
+	Mono bool `json:"mono,omitempty"`
+}
+
+func (a AudioEncoding) problems(kind DestKind) []string {
+	var probs []string
+	add := func(f string, v ...any) { probs = append(probs, fmt.Sprintf(f, v...)) }
+
+	known := false
+	for _, c := range DestAudioCodecs {
+		if c == a.Codec {
+			known = true
+			break
+		}
+	}
+	if !known {
+		add("unknown audio codec %q (aac, opus)", a.Codec)
+	}
+	// Refused at save time rather than silently downgraded at start time. A
+	// downgrade would leave the operator looking at a destination whose
+	// settings say Opus and whose stream is AAC, with nothing anywhere saying
+	// which is running -- the exact failure the deinterlace validation exists
+	// to prevent.
+	if a.Codec == DestAudioOpus && kind == DestRTMP {
+		add("opus cannot be used on an RTMP destination: FFmpeg will mux it, " +
+			"but no mainstream RTMP ingest accepts it, so the stream would " +
+			"upload cleanly and be rejected")
+	}
+	return probs
+}
+
+// DestTransport is the per-destination muxer and socket tuning.
+//
+// Everything here was probed against the pinned FFmpeg before it was designed
+// around. See ffmpeg.TransportSpec for the probe results, including the one
+// that corrected the roadmap: max_muxing_queue_size and
+// muxing_queue_data_threshold are a PAIR, not alternatives.
+type DestTransport struct {
+	// NoDurationFilesize drops FLV's zero duration and filesize metadata.
+	// RTMP only; ignored elsewhere rather than refused, because a destination
+	// switched from RTMP to SRT should not become unsavable.
+	NoDurationFilesize bool `json:"noDurationFilesize,omitempty"`
+	// MuxQueuePackets and MuxQueueBytes bound the interleave buffer. The
+	// packet cap applies only once the queue passes the byte threshold, so
+	// setting the threshold alone does nothing -- which is why the UI offers
+	// them together.
+	MuxQueuePackets int `json:"muxQueuePackets,omitempty"`
+	MuxQueueBytes   int `json:"muxQueueBytes,omitempty"`
+	// RWTimeoutSeconds breaks a half-open socket. Without it a far end that
+	// vanished without a FIN blocks the muxer indefinitely: FFmpeg keeps
+	// running, the supervisor sees a live process, and the stream is off air
+	// with nothing reporting it.
+	RWTimeoutSeconds int `json:"rwTimeoutSeconds,omitempty"`
+}
+
+// Active reports whether any transport tuning is set.
+func (t DestTransport) Active() bool {
+	return t.NoDurationFilesize || t.MuxQueuePackets > 0 || t.MuxQueueBytes > 0 ||
+		t.RWTimeoutSeconds > 0
+}
+
+// problems reports everything wrong with the transport block.
+func (t DestTransport) problems() []string {
+	var probs []string
+	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
+
+	if t.MuxQueuePackets < 0 || t.MuxQueuePackets > MaxMuxQueuePackets {
+		add("muxing queue %d packets out of range (0-%d, 0 for the FFmpeg default)",
+			t.MuxQueuePackets, MaxMuxQueuePackets)
+	}
+	if t.MuxQueueBytes < 0 || t.MuxQueueBytes > MaxMuxQueueBytes {
+		add("muxing queue %d bytes out of range (0-%d, 0 for the FFmpeg default)",
+			t.MuxQueueBytes, MaxMuxQueueBytes)
+	}
+	// Refused rather than quietly accepted, because a byte threshold with no
+	// packet cap is a setting that appears to do something and does nothing:
+	// FFmpeg documents the threshold as "the threshold after which
+	// max_muxing_queue_size is taken into account".
+	if t.MuxQueueBytes > 0 && t.MuxQueuePackets == 0 {
+		add("a muxing queue byte threshold does nothing without a packet limit: " +
+			"FFmpeg only applies the packet cap once the queue passes the threshold")
+	}
+	if t.RWTimeoutSeconds != 0 &&
+		(t.RWTimeoutSeconds < MinRWTimeoutSeconds || t.RWTimeoutSeconds > MaxRWTimeoutSeconds) {
+		add("socket timeout %ds out of range (%d-%d, 0 to disable)",
+			t.RWTimeoutSeconds, MinRWTimeoutSeconds, MaxRWTimeoutSeconds)
+	}
+	return probs
+}
+
 func (d Destination) ExpertArgsSet() bool {
 	return strings.TrimSpace(d.ExtraInputArgs) != "" ||
 		strings.TrimSpace(d.ExtraOutputArgs) != ""
@@ -195,6 +421,22 @@ func (d Destination) Validate() error {
 		add("%v", err)
 	}
 
+	for _, p := range d.Transport.problems() {
+		add("%s", p)
+	}
+	for _, p := range d.Resilience.problems() {
+		add("%s", p)
+	}
+	for _, p := range d.Audio.problems(d.Kind) {
+		add("%s", p)
+	}
+	// Refused at save time rather than at go-live. A compliance field that
+	// fails when the operator presses "go live" fails at the one moment they
+	// cannot stop to fix it.
+	for _, p := range d.Compliance.Problems() {
+		add("%s", p)
+	}
+
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))
 	}
@@ -208,12 +450,20 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		rendition  sql.NullInt64
 		source     sql.NullInt64
 		profileRaw string
-		created    int64
-		updated    int64
+		// Defaulted to "{}" so a row written before the column existed decodes
+		// to a zero Compliance -- touch nothing -- rather than failing the scan.
+		complianceJSON = "{}"
+		created        int64
+		updated        int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
 		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
 		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
+		&d.Transport.NoDurationFilesize, &d.Transport.MuxQueuePackets,
+		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
+		&d.Resilience.MinBackoffSeconds, &d.Resilience.MaxBackoffSeconds,
+		&d.Resilience.GiveUpAfter,
+		&d.Audio.Codec, &d.Audio.Mono, &complianceJSON,
 		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -244,6 +494,11 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		return nil, fmt.Errorf("destination %d has no source: it belongs to no "+
 			"programme and would never be started", d.ID)
 	}
+	if complianceJSON != "" {
+		if err := json.Unmarshal([]byte(complianceJSON), &d.Compliance); err != nil {
+			return nil, fmt.Errorf("destination %d has unreadable compliance metadata: %w", d.ID, err)
+		}
+	}
 	if err := json.Unmarshal([]byte(profileRaw), &d.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", d.ID, err)
 	}
@@ -255,7 +510,24 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
+	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
+	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
+	au_codec, au_mono, compliance,
 	position, created_at, updated_at`
+
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	destBySourceQuery = `SELECT ` + destColumns + ` FROM destinations WHERE source_id = ? ORDER BY position, id`
+	destListQuery     = `SELECT ` + destColumns + ` FROM destinations ORDER BY position, id`
+	destByIDQuery     = `SELECT ` + destColumns + ` FROM destinations WHERE id = ?`
+)
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
 // key would catch it anyway, but only as "FOREIGN KEY constraint failed",
@@ -281,7 +553,7 @@ func (d *DB) checkRendition(id *int64) error {
 // worst failure this feature can have.
 func (d *DB) ListDestinationsBySource(sourceID int64) ([]*Destination, error) {
 	rows, err := d.sql.Query(
-		`SELECT `+destColumns+` FROM destinations WHERE source_id = ? ORDER BY position, id`, sourceID)
+		destBySourceQuery, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +571,7 @@ func (d *DB) ListDestinationsBySource(sourceID int64) ([]*Destination, error) {
 }
 
 func (d *DB) ListDestinations() ([]*Destination, error) {
-	rows, err := d.sql.Query(`SELECT ` + destColumns + ` FROM destinations ORDER BY position, id`)
+	rows, err := d.sql.Query(destListQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +590,7 @@ func (d *DB) ListDestinations() ([]*Destination, error) {
 
 // GetDestination loads one destination.
 func (d *DB) GetDestination(id int64) (*Destination, error) {
-	row := d.sql.QueryRow(`SELECT `+destColumns+` FROM destinations WHERE id = ?`, id)
+	row := d.sql.QueryRow(destByIDQuery, id)
 	dst, err := scanDestination(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -366,6 +638,10 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	compliance, err := json.Marshal(dst.Compliance)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().Unix()
 
 	var maxPos sql.NullInt64
@@ -376,11 +652,21 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
 		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id, source_id,
-		 extra_input_args, extra_output_args, expert_ack_reencode, position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 extra_input_args, extra_output_args, expert_ack_reencode,
+		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
+		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
+		 au_codec, au_mono, compliance,
+		 position, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
-		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode, dst.Position, now, now)
+		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
+		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
+		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
+		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
+		dst.Resilience.GiveUpAfter,
+		dst.Audio.Codec, dst.Audio.Mono, string(compliance),
+		dst.Position, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -407,14 +693,27 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	compliance, err := json.Marshal(dst.Compliance)
+	if err != nil {
+		return nil, err
+	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
 		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
 		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
+		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
+		tr_rw_timeout_seconds=?,
+		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
+		au_codec=?, au_mono=?, compliance=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
+		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
+		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
+		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
+		dst.Resilience.GiveUpAfter,
+		dst.Audio.Codec, dst.Audio.Mono, string(compliance),
 		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
@@ -543,6 +842,23 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		{"extra_input_args", `ALTER TABLE destinations ADD COLUMN extra_input_args TEXT NOT NULL DEFAULT ''`},
 		{"extra_output_args", `ALTER TABLE destinations ADD COLUMN extra_output_args TEXT NOT NULL DEFAULT ''`},
 		{"expert_ack_reencode", `ALTER TABLE destinations ADD COLUMN expert_ack_reencode INTEGER NOT NULL DEFAULT 0`},
+		// Transport tuning. Every default is the no-op value, so an upgraded
+		// install emits exactly the FFmpeg command it did yesterday.
+		{"tr_no_duration_filesize", `ALTER TABLE destinations ADD COLUMN tr_no_duration_filesize INTEGER NOT NULL DEFAULT 0`},
+		{"tr_mux_queue_packets", `ALTER TABLE destinations ADD COLUMN tr_mux_queue_packets INTEGER NOT NULL DEFAULT 0`},
+		{"tr_mux_queue_bytes", `ALTER TABLE destinations ADD COLUMN tr_mux_queue_bytes INTEGER NOT NULL DEFAULT 0`},
+		{"tr_rw_timeout_seconds", `ALTER TABLE destinations ADD COLUMN tr_rw_timeout_seconds INTEGER NOT NULL DEFAULT 0`},
+		// Reconnect policy. 0 everywhere is "the behaviour you already had".
+		{"rs_min_backoff_seconds", `ALTER TABLE destinations ADD COLUMN rs_min_backoff_seconds INTEGER NOT NULL DEFAULT 0`},
+		{"rs_max_backoff_seconds", `ALTER TABLE destinations ADD COLUMN rs_max_backoff_seconds INTEGER NOT NULL DEFAULT 0`},
+		{"rs_give_up_after", `ALTER TABLE destinations ADD COLUMN rs_give_up_after INTEGER NOT NULL DEFAULT 0`},
+		// Audio encoding. '' is AAC and 0 is stereo, which is what every
+		// destination emitted before these existed.
+		{"au_codec", `ALTER TABLE destinations ADD COLUMN au_codec TEXT NOT NULL DEFAULT ''`},
+		{"au_mono", `ALTER TABLE destinations ADD COLUMN au_mono INTEGER NOT NULL DEFAULT 0`},
+		// Compliance rides as one JSON blob rather than four columns: it is a
+		// map plus two scalars, edited as a unit, and '{}' is "touch nothing".
+		{"compliance", `ALTER TABLE destinations ADD COLUMN compliance TEXT NOT NULL DEFAULT '{}'`},
 	}
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)

@@ -197,11 +197,15 @@ var platformCapabilities = []PlatformCapability{
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportYes,
-			CapModeration:  SupportUnknown,
+			CapModeration:  SupportYes,
 			CapViewerStats: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapChatRead: "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
+			CapModeration: "Delete a message, over the same auth/youtube scope everything else here uses — so an account " +
+				"connected before this existed can already do it, with no reconnect. The connected account still has to " +
+				"own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. " +
+				"Banning and timing out work too, over the same scope — permanent, or a timeout in seconds.",
 		},
 	},
 	{
@@ -215,11 +219,17 @@ var platformCapabilities = []PlatformCapability{
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportYes,
-			CapModeration:  SupportUnknown,
+			CapModeration:  SupportYes,
 			CapViewerStats: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapMetadata: "Title and category, over the channel:manage:broadcast scope.",
+			CapModeration: "Delete a message, over moderator:manage:chat_messages. An account connected before this " +
+				"existed holds a token without that scope — the account list says so and asks you to reconnect, " +
+				"rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete " +
+				"anything older than six hours, and refuses the broadcaster's own messages and other moderators'. " +
+				"Banning and timing out work over moderator:manage:banned_users, which is a separate scope from " +
+				"deletion because removing a person is a bigger ask than removing a message.",
 		},
 	},
 	{
@@ -237,24 +247,27 @@ var platformCapabilities = []PlatformCapability{
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportUnknown,
-			CapModeration:  SupportUnknown,
+			CapModeration:  SupportYes,
 			CapViewerStats: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapStreamKey: "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
-			CapMetadata:  "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
-			CapChatRead:  "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was pasted by hand has no live-video id to attach to, and the chat pane says so.",
+			CapModeration: "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off " +
+				"the public thread without destroying it, because its live chat is a comment thread. Acting on a " +
+				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +
+				"so an app that shows you the thread can still be refused when you act on it.",
+			CapMetadata: "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
+			CapChatRead: "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was pasted by hand has no live-video id to attach to, and the chat pane says so.",
 		},
 	},
 	{
 		PresetID: "kick", Name: "Kick", Platform: db.PlatformKick,
-		Tier:      TierPartial,
-		Summary:   "Sign in with Kick for chat, moderation, metadata and viewer stats — then paste the stream key, because Kick's public API does not publish one.",
-		ReadFirst: "Both halves of this destination are real at once: click Connect account for everything Kick's API does offer, and paste the ingest URL and key from Kick → Settings → Stream. Neither replaces the other, and the paste is not a workaround for a broken connection.",
-		HelpURL:   "https://kick.com/dashboard/settings/stream",
+		Tier:    TierPartial,
+		Summary: "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
+		HelpURL: "https://kick.com/dashboard/settings/stream",
 		Caps: map[Capability]Support{
 			CapSSO:         SupportYes,
-			CapStreamKey:   SupportManual,
+			CapStreamKey:   SupportYes,
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportYes,
@@ -262,14 +275,19 @@ var platformCapabilities = []PlatformCapability{
 			CapViewerStats: SupportYes,
 		},
 		Reasons: map[Capability]string{
-			CapSSO:       "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
-			CapStreamKey: "Checked against Kick's published Channels, Livestreams and Users endpoints — none of them return a stream key. This is a documented absence, not a missing feature on our side, and it does not hold back anything else.",
-			CapMetadata:  "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
-			CapChatRead:  "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
-			CapModeration: "Delete a message, over moderation:chat_message:manage. Banning and timing out are not " +
-				"implemented and the moderation:ban scope is deliberately not requested: nothing in polyemesis bans a " +
-				"viewer, and asking a restreamer's audience for that power would be overreach. Use Kick's own " +
-				"dashboard.",
+			CapSSO: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
+			CapStreamKey: "Fetched from the channels resource, over the streamkey:read scope. " +
+				"This was recorded here as impossible for a long time, and the reasoning is worth keeping: " +
+				"Kick publishes no /streamkey endpoint, so reading the endpoint list finds nothing — " +
+				"the key rides as stream.key on the same channels response we already fetch, and is " +
+				"withheld unless streamkey:read was granted, which the Get Channels page does not list " +
+				"among its required scopes. An account connected before that scope was requested must be " +
+				"reconnected once.",
+			CapMetadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
+			CapChatRead: "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
+			CapModeration: "Delete a message, over moderation:chat_message:manage. Banning and timing out work over " +
+				"moderation:ban. Note that Kick counts timeouts in MINUTES where YouTube and Twitch count seconds, " +
+				"and caps them at 7 days; polyemesis converts, so you give it one unit everywhere.",
 			CapViewerStats: "Live state and viewer count from Kick's livestreams endpoints.",
 		},
 	},

@@ -36,6 +36,13 @@ const (
 	QuotaCostListMessages   = 5
 	QuotaCostListBroadcasts = 1
 	QuotaCostSendMessage    = 50
+	// Moderation writes. Charged like any other write, but NEVER refused for
+	// want of budget -- see the reserve note below and the check in Delete.
+	// Declining to remove a message because arithmetic said the quota was low
+	// would leave that message on stream, which is the one outcome worse than
+	// spending the units.
+	QuotaCostDeleteMessage = 50
+	QuotaCostBan           = 50
 
 	// DefaultQuotaUnits is a Google Cloud project's default daily allowance.
 	DefaultQuotaUnits = 10000

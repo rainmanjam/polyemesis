@@ -135,11 +135,33 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		if err != nil {
 			return nil, err
 		}
+		// Moderation is Helix, not IRC, and needs three things IRC never
+		// carries: a Client-Id, the channel's numeric id, and a token that is
+		// still fresh an hour after connect.
+		//
+		// Missing developer credentials are NOT an error here. Chat itself
+		// works without them -- IRC has the token it needs -- and refusing to
+		// open the pane because a moderation call might one day fail would
+		// trade a working feature for one that is not being used yet. Delete
+		// says so plainly if it is ever called.
+		var clientID string
+		if creds, cerr := s.store.GetPlatformCreds(s.box, db.PlatformTwitch); cerr == nil {
+			clientID = creds.ClientID
+		}
 		return chat.NewTwitch(chat.TwitchConfig{
 			Nick:       a.AccountName,
 			Channel:    a.AccountName,
 			AccountRef: a.AccountRef,
 			Token:      acct.AccessToken,
+			HelixToken: s.chatToken(a.ID),
+			ClientID:   clientID,
+			// Channel is set from AccountName just above, so the account IS the
+			// broadcaster and the two ids are the same. They are separate fields
+			// because that stops being true the moment someone reads a channel
+			// they merely moderate, and a moderation call addressed at the wrong
+			// channel is worse than one that refuses.
+			BroadcasterID: a.AccountRef,
+			ModeratorID:   a.AccountRef,
 		})
 
 	case db.PlatformKick:
@@ -154,6 +176,12 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:             s.chatToken(a.ID),
 			PublicURL:         publicBaseURL(s.cfg),
 			CallbackSecret:    s.kickCallbackSecret(),
+			// The signature check. Without this line the adapter refuses every
+			// delivery — which is the point: the previous version of this
+			// construction site simply omitted it, and the handler's nil guard
+			// turned that omission into unauthenticated chat injection rather
+			// than into a visible failure.
+			Verify: chat.KickVerifier(s.kickKeys),
 		})
 
 	case db.PlatformFacebook:
@@ -226,7 +254,7 @@ func (s *Server) setFacebookBroadcast(accountRef, liveVideoID string) {
 // "wrong secret" that they would not learn from "no such route".
 func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 	want := s.kickCallbackSecret()
-	if want == "" || chi.URLParam(r, "secret") != want {
+	if want == "" || !secretEqual(chi.URLParam(r, "secret"), want) {
 		http.NotFound(w, r)
 		return
 	}

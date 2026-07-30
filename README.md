@@ -196,6 +196,7 @@ most:
 | [Configuration](docs/CONFIGURATION.md) | `config.yaml` vs the UI, and which is which |
 | [API](docs/API.md) | Every route, with authentication and a worked example |
 | [Monitoring](docs/MONITORING.md) | Prometheus metrics and alerts |
+| [MQTT](docs/MQTT.md) | Retained telemetry and Home Assistant discovery |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Organised by what you observe |
 | [FAQ](docs/FAQ.md) | The questions that come up first |
 

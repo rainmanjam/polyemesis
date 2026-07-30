@@ -97,8 +97,16 @@ type PlatformAccount struct {
 	RefreshToken string    `json:"-"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	Scopes       string    `json:"scopes"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	// ScopeVer is the provider's ScopeVersion at the moment this account was
+	// connected. Compared against the provider's CURRENT version to spot a
+	// token that predates a scope change -- see oauth.Provider.ScopeVersion.
+	//
+	// Zero means "connected before this column existed", which is not the same
+	// as "out of date": the API layer falls back to comparing the granted
+	// scopes for those rows rather than accusing every existing account.
+	ScopeVer  int       `json:"scopeVer"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Expired reports whether the access token needs refreshing. The one-minute
@@ -128,16 +136,17 @@ func (d *DB) UpsertPlatformAccount(box *secrets.Box, a *PlatformAccount) (*Platf
 	}
 
 	_, err = d.sql.Exec(`INSERT INTO platform_accounts
-		(platform, account_name, account_ref, access_token_enc, refresh_token_enc, expires_at, scopes, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?)
+		(platform, account_name, account_ref, access_token_enc, refresh_token_enc, expires_at, scopes, scope_ver, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(platform, account_ref) DO UPDATE SET
 			account_name=excluded.account_name,
 			access_token_enc=excluded.access_token_enc,
 			refresh_token_enc=COALESCE(NULLIF(excluded.refresh_token_enc, X''), platform_accounts.refresh_token_enc),
 			expires_at=excluded.expires_at,
 			scopes=excluded.scopes,
+			scope_ver=excluded.scope_ver,
 			updated_at=excluded.updated_at`,
-		a.Platform, a.AccountName, a.AccountRef, accessEnc, refreshEnc, exp, a.Scopes, now, now)
+		a.Platform, a.AccountName, a.AccountRef, accessEnc, refreshEnc, exp, a.Scopes, a.ScopeVer, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -159,10 +168,10 @@ func (d *DB) GetPlatformAccount(box *secrets.Box, id int64) (*PlatformAccount, e
 		exp, created, upd int64
 	)
 	err := d.sql.QueryRow(`SELECT id, platform, account_name, account_ref, access_token_enc,
-		refresh_token_enc, expires_at, scopes, created_at, updated_at
+		refresh_token_enc, expires_at, scopes, scope_ver, created_at, updated_at
 		FROM platform_accounts WHERE id = ?`, id).
 		Scan(&a.ID, &a.Platform, &a.AccountName, &a.AccountRef, &accessEnc, &refreshEnc,
-			&exp, &a.Scopes, &created, &upd)
+			&exp, &a.Scopes, &a.ScopeVer, &created, &upd)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -186,7 +195,7 @@ func (d *DB) GetPlatformAccount(box *secrets.Box, id int64) (*PlatformAccount, e
 // ListPlatformAccounts returns all connected accounts, without token material.
 func (d *DB) ListPlatformAccounts() ([]PlatformAccount, error) {
 	rows, err := d.sql.Query(`SELECT id, platform, account_name, account_ref, expires_at,
-		scopes, created_at, updated_at FROM platform_accounts ORDER BY platform, account_name`)
+		scopes, scope_ver, created_at, updated_at FROM platform_accounts ORDER BY platform, account_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +208,7 @@ func (d *DB) ListPlatformAccounts() ([]PlatformAccount, error) {
 			exp, created, upd int64
 		)
 		if err := rows.Scan(&a.ID, &a.Platform, &a.AccountName, &a.AccountRef, &exp,
-			&a.Scopes, &created, &upd); err != nil {
+			&a.Scopes, &a.ScopeVer, &created, &upd); err != nil {
 			return nil, err
 		}
 		if exp > 0 {
@@ -708,4 +717,27 @@ func DestinationPresetsForPlatform(p Platform) []DestinationPreset {
 		}
 	}
 	return out
+}
+
+// MigratePlatformAccountScopeVer adds the scope-version column.
+//
+// Defaults to 0, which reads as "connected before this existed" rather than
+// "out of date". That distinction matters: bumping every stored account to a
+// stale version would show a reconnect prompt on every account an operator
+// has, including the ones connected yesterday with the full scope set, and a
+// prompt that is wrong the first time is a prompt nobody reads the second time.
+//
+// The API layer decides what a 0 means, by comparing the scopes actually
+// granted against the ones the provider now asks for. See
+// oauth.AccountNeedsReconnect.
+func (d *DB) MigratePlatformAccountScopeVer() error {
+	has, err := columnExists(d.sql, "platform_accounts", "scope_ver")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	_, err = d.sql.Exec(`ALTER TABLE platform_accounts ADD COLUMN scope_ver INTEGER NOT NULL DEFAULT 0`)
+	return err
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
-import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertTriangle,
   Check,
@@ -38,9 +39,8 @@ import {
 } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
-// The capability matrix lives beside the destination dialog that renders it
-// inline; this page shows the same rows as a full table. It should move to
-// ui/src/lib/ when someone owns that file — it is data, not a component.
+// The destination dialog renders this matrix inline; this page shows the same
+// rows as a full table. Both read it from lib, which is where it belongs.
 import {
   CAPABILITY_COLUMNS,
   PLATFORM_CAPABILITIES,
@@ -48,7 +48,7 @@ import {
   supportInfo,
   supportOf,
   tierInfo,
-} from "@/components/DestinationDialog";
+} from "@/lib/capabilities";
 import { api } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
@@ -61,6 +61,7 @@ import type {
   PlatformAccount,
   PlatformCreds,
   Settings,
+  FailoverReturn,
   SetupGuide,
   SystemInfo,
   TlsMode,
@@ -107,6 +108,40 @@ export function SettingsPage() {
     }
   };
 
+  // Two calls, in this order, because the password does not live in the
+  // settings blob. Settings first: if the broker URL and the password changed
+  // together, storing the password against the OLD broker for a moment is the
+  // harmless ordering, and storing new settings that briefly carry the old
+  // password is not.
+  const saveMqtt = async (next: Settings, password: string) => {
+    setSaving(true);
+    try {
+      const saved = await api.putSettings(next);
+      if (password !== "") {
+        await api.putMqttPassword(password);
+        saved.mqtt = { ...saved.mqtt, enabled: saved.mqtt?.enabled ?? false, hasPassword: true };
+      }
+      setSettings(saved);
+      toast.success("MQTT settings saved.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save the MQTT settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clearMqttPassword = async () => {
+    try {
+      await api.putMqttPassword("");
+      setSettings((prev) =>
+        prev ? { ...prev, mqtt: { ...prev.mqtt, enabled: prev.mqtt?.enabled ?? false, hasPassword: false } } : prev,
+      );
+      toast.success("Broker password cleared.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not clear the password.");
+    }
+  };
+
   if (!settings) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -131,7 +166,13 @@ export function SettingsPage() {
           <IngestSettings settings={settings} system={system} onSave={save} saving={saving} />
         </TabsContent>
         <TabsContent value="pipeline">
-          <PipelineSettings settings={settings} onSave={save} saving={saving} />
+          <PipelineSettings
+            settings={settings}
+            onSave={save}
+            onSaveMqtt={saveMqtt}
+            onClearMqttPassword={clearMqttPassword}
+            saving={saving}
+          />
         </TabsContent>
         <TabsContent value="platforms">
           <PlatformSettings />
@@ -387,6 +428,21 @@ function IngestSettings({
               <Badge variant={system.ffmpeg.hasLibx264 ? "outline" : "warn"}>
                 x264 {system.ffmpeg.hasLibx264 ? "yes" : "no"}
               </Badge>
+              {/* Only shown once the filter probe has run. An absent list means
+                  the probe did not happen, and reporting "no" for that would be
+                  a claim nobody measured. */}
+              {(system.ffmpeg.filters?.length ?? 0) > 0 && (
+                <Badge
+                  variant={system.ffmpeg.filters?.includes("drawtext") ? "outline" : "warn"}
+                  title={
+                    system.ffmpeg.filters?.includes("drawtext")
+                      ? "This build can draw text on video."
+                      : "This build has no drawtext filter, so text overlays are unavailable. It needs an FFmpeg built with libfreetype."
+                  }
+                >
+                  text overlays {system.ffmpeg.filters?.includes("drawtext") ? "yes" : "no"}
+                </Badge>
+              )}
             </div>
           )}
         </CardContent>
@@ -480,14 +536,24 @@ function PullIngestFields({
 function PipelineSettings({
   settings,
   onSave,
+  onSaveMqtt,
+  onClearMqttPassword,
   saving,
 }: {
   settings: Settings;
   onSave: (s: Settings) => void;
+  onSaveMqtt: (s: Settings, password: string) => void;
+  onClearMqttPassword: () => Promise<void>;
   saving: boolean;
 }) {
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
+  // Held here and never seeded from the server: the password is not in the
+  // settings payload at all, so there is nothing to seed it FROM. An empty box
+  // means "leave the stored one alone", which is why saving it is a separate
+  // call rather than part of the settings PUT.
+  const [mqttPassword, setMqttPassword] = useState("");
+  useEffect(() => setMqttPassword(""), [settings]);
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
@@ -514,6 +580,515 @@ function PipelineSettings({
             with zero tracks, so it can never displace audio you are actually sending.
           </span>
           <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Going live</CardTitle>
+          <CardDescription>
+            What happens when several destinations start at once.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="dest-stagger">Stagger connections (ms)</Label>
+            <Input
+              id="dest-stagger"
+              type="number"
+              min={0}
+              max={5000}
+              value={draft.destinations?.staggerMs ?? 0}
+              onChange={(e) =>
+                setDraft({ ...draft, destinations: { staggerMs: Number(e.target.value) } })
+              }
+              className="w-28"
+            />
+            <span className="text-[10px] text-muted-foreground">
+              0 is off. Going live otherwise means every destination opening a connection,
+              negotiating TLS and starting to encode audio in the same tick &mdash; on a small box
+              that is the moment most likely to drop frames, and it is the exact moment you are
+              watching, because it is when you went live. A few hundred milliseconds is plenty.
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              It never delays a <em>reconnect</em>. A destination that drops at 3am comes back
+              immediately rather than waiting its turn behind processes that are already healthy.
+            </span>
+          </div>
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Chat history</CardTitle>
+          <CardDescription>
+            How far back the chat scrollback goes &mdash; and with it, how much a moderator can
+            see when they open somebody&rsquo;s card.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-hours">Keep for (hours)</Label>
+              <Input
+                id="chat-hours"
+                type="number"
+                min={0}
+                max={43800}
+                value={draft.chat?.retentionHours ?? 2}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: {
+                      retentionHours: Number(e.target.value),
+                      keepMessages: draft.chat?.keepMessages ?? 2000,
+                      purgeMinutes: draft.chat?.purgeMinutes ?? 5,
+                    },
+                  })
+                }
+                className="w-28"
+              />
+              <span className="text-[10px] text-muted-foreground">0 keeps everything, forever.</span>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-keep">Always keep (messages)</Label>
+              <Input
+                id="chat-keep"
+                type="number"
+                min={0}
+                max={5000000}
+                value={draft.chat?.keepMessages ?? 2000}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: {
+                      retentionHours: draft.chat?.retentionHours ?? 2,
+                      keepMessages: Number(e.target.value),
+                      purgeMinutes: draft.chat?.purgeMinutes ?? 5,
+                    },
+                  })
+                }
+                className="w-32"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                A floor, whatever their age.
+              </span>
+            </div>
+          </div>
+
+          <span className="text-[10px] text-muted-foreground">
+            Both apply and the more generous one wins: a message goes when it is older than the
+            hours <em>and</em> outside the newest N. So a busy channel keeps less time than you
+            asked and a quiet one keeps more &mdash; which is the right way round, because the
+            floor is what stops a slow channel&rsquo;s user cards being empty.
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            This is not only a disk setting. Clicking a name in chat opens what that person has
+            said before, and that history comes from here &mdash; no platform publishes an API for
+            it, so polyemesis can only show what it kept. Set this too short and somebody who has
+            been trouble for a week reads as though they have never said anything.
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            Chat is small. A channel averaging ten messages a second stores roughly 7&nbsp;MB an
+            hour; most are nowhere near that.
+          </span>
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Failover</CardTitle>
+          <CardDescription>
+            A standby input and a holding card, for when the live source stops delivering. Off by
+            default: with it off the pipeline is byte-for-byte what it was before this existed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="fo-enabled">Enabled</Label>
+            <Switch
+              id="fo-enabled"
+              checked={draft.failover?.enabled ?? false}
+              onCheckedChange={(v) =>
+                setDraft({ ...draft, failover: { ...draft.failover, enabled: v } })
+              }
+            />
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            Turning this on adds one remux hop between the ingest and everything below it. Cheap,
+            but not free, which is why it is a decision rather than a default.
+          </span>
+
+          {draft.failover?.enabled && (
+            <>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="fo-grace">Grace period (seconds)</Label>
+                <Input
+                  id="fo-grace"
+                  type="number"
+                  min={1}
+                  value={draft.failover?.graceSeconds ?? 10}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      failover: { ...draft.failover, enabled: true, graceSeconds: Number(e.target.value) },
+                    })
+                  }
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  How long the live source may deliver nothing before the tier switches. Longer
+                  than a reconnect on purpose &mdash; an encoder re-establishing an RTMP connection
+                  is normal operation, not a failure.
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <Label>Coming back</Label>
+                <Select
+                  value={draft.failover?.return ?? "manual"}
+                  onValueChange={(v) =>
+                    setDraft({
+                      ...draft,
+                      failover: { ...draft.failover, enabled: true, return: v as FailoverReturn },
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">Manual &mdash; stay on the backup until I switch</SelectItem>
+                    <SelectItem value="auto">Automatic &mdash; return once the primary is steady</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-[10px] text-muted-foreground">
+                  Manual is the default because an automatic return can flap: a primary that is
+                  recovering in bursts would move the programme back and forth mid-broadcast.
+                </span>
+              </div>
+
+              {draft.failover?.return === "auto" && (
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="fo-stable">Return after (seconds steady)</Label>
+                  <Input
+                    id="fo-stable"
+                    type="number"
+                    min={0}
+                    value={draft.failover?.returnStableSeconds ?? 60}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        failover: {
+                          ...draft.failover,
+                          enabled: true,
+                          returnStableSeconds: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <Label htmlFor="fo-slate">Show a slate when nothing is live</Label>
+                <Switch
+                  id="fo-slate"
+                  checked={draft.failover?.slate?.enabled ?? false}
+                  onCheckedChange={(v) =>
+                    setDraft({
+                      ...draft,
+                      failover: {
+                        ...draft.failover,
+                        enabled: true,
+                        slate: { ...draft.failover?.slate, enabled: v },
+                      },
+                    })
+                  }
+                />
+              </div>
+
+              {draft.failover?.slate?.enabled && (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="fo-slate-img">Slate image</Label>
+                    <Input
+                      id="fo-slate-img"
+                      value={draft.failover?.slate?.imagePath ?? ""}
+                      placeholder="slate/holding.png"
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          failover: {
+                            ...draft.failover,
+                            enabled: true,
+                            slate: { ...draft.failover?.slate, enabled: true, imagePath: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                    <span className="text-[10px] text-muted-foreground">
+                      A path inside the data directory. Leave it empty to paint a flat colour
+                      instead &mdash; that is the fallback precisely because a colour has no file
+                      that can fail to open.
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="fo-slate-col">Slate colour</Label>
+                    <Input
+                      id="fo-slate-col"
+                      value={draft.failover?.slate?.color ?? ""}
+                      placeholder="black"
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          failover: {
+                            ...draft.failover,
+                            enabled: true,
+                            slate: { ...draft.failover?.slate, enabled: true, color: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                    <span className="text-[10px] text-muted-foreground">
+                      One word, because it lands on a filter graph where a comma would end the
+                      argument. Used only when no image is set.
+                    </span>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>MQTT telemetry</CardTitle>
+          <CardDescription>
+            Publishes state to a broker as retained messages, so a consumer that was not connected
+            when something changed still gets the current answer.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="mq-enabled">Enabled</Label>
+            <Switch
+              id="mq-enabled"
+              checked={draft.mqtt?.enabled ?? false}
+              onCheckedChange={(v) => setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: v } })}
+            />
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            <strong>MQTT 5.0 only.</strong> A broker pinned to 3.1.1 will not complete a connection
+            at all &mdash; it is not a degraded mode. Mosquitto 2.x, EMQX and the Home Assistant
+            add-on are all fine.
+          </span>
+
+          {draft.mqtt?.enabled && (
+            <>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="mq-url">Broker URL</Label>
+                {/* The placeholder suggests mqtts, not mqtt. A placeholder is a
+                    suggestion, and the encrypted scheme is the better thing to
+                    suggest — the help below already says all four schemes work,
+                    and the warning under it explains when plaintext is a
+                    reasonable choice on a trusted LAN. It also stops
+                    SonarCloud's S5332 reading illustrative text in an empty
+                    field as an insecure connection. */}
+                <Input
+                  id="mq-url"
+                  value={draft.mqtt?.brokerUrl ?? ""}
+                  placeholder="mqtts://broker.local:8883"
+                  onChange={(e) =>
+                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, brokerUrl: e.target.value } })
+                  }
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  mqtt://, mqtts://, ws:// or wss://. A password in the URL is <em>refused</em>:
+                  a URL reaches log lines and <code>ps</code> output, and there is no taking it
+                  back. Put it in the field below, where it is encrypted at rest.
+                </span>
+                {/* Said at the point of configuration rather than left to the
+                    docs, because the credential is encrypted at rest and then
+                    sent in the clear -- which is the sort of gap an operator
+                    reasonably assumes has been closed. Not a refusal: mqtt:// on
+                    a trusted LAN is the normal Home Assistant setup and what our
+                    own documentation recommends. */}
+                {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                    <code>mqtt://</code> is unencrypted. MQTT sends the username and password in
+                    its CONNECT packet, so both cross the network in the clear — fine on a
+                    trusted LAN, which is the usual Home Assistant case, and not fine over
+                    anything you do not control. Use <code>mqtts://</code> if the broker offers
+                    it.
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="mq-user">Username</Label>
+                  <Input
+                    id="mq-user"
+                    value={draft.mqtt?.username ?? ""}
+                    onChange={(e) =>
+                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, username: e.target.value } })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="mq-pw">Password</Label>
+                  <Input
+                    id="mq-pw"
+                    type="password"
+                    value={mqttPassword}
+                    placeholder={draft.mqtt?.hasPassword ? "(unchanged)" : ""}
+                    onChange={(e) => setMqttPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                The password is never returned by any API, so this box is blank even when one is
+                set. Leave it empty to keep the stored password; clear it with the button below.
+              </span>
+              {draft.mqtt?.hasPassword && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setMqttPassword("");
+                    void onClearMqttPassword();
+                  }}
+                >
+                  Clear stored password
+                </Button>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="mq-prefix">Topic prefix</Label>
+                  <Input
+                    id="mq-prefix"
+                    value={draft.mqtt?.prefix ?? "polyemesis"}
+                    onChange={(e) =>
+                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, prefix: e.target.value } })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="mq-inst">Instance</Label>
+                  <Input
+                    id="mq-inst"
+                    value={draft.mqtt?.instance ?? "polyemesis"}
+                    onChange={(e) =>
+                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, instance: e.target.value } })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                Separators in the prefix are preserved, so <code>home/av</code> means two levels.
+                A prefix starting with <code>$</code> is refused: brokers reserve those, and a
+                subscriber using <code>#</code> never receives them &mdash; the telemetry would
+                publish successfully and be invisible in exactly the view you would debug with.
+              </span>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="mq-int">Publish interval (s)</Label>
+                  <Input
+                    id="mq-int"
+                    type="number"
+                    min={1}
+                    max={3600}
+                    value={draft.mqtt?.intervalSeconds ?? 10}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        mqtt: { ...draft.mqtt, enabled: true, intervalSeconds: Number(e.target.value) },
+                      })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="mq-ka">Keep-alive (s)</Label>
+                  <Input
+                    id="mq-ka"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={draft.mqtt?.keepAliveSeconds ?? 30}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        mqtt: { ...draft.mqtt, enabled: true, keepAliveSeconds: Number(e.target.value) },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                Unchanged state is not republished, so a short interval costs a comparison rather
+                than a message. The keep-alive is what bounds how long a dead link goes unnoticed
+                &mdash; and therefore how quickly the broker tells subscribers this instance is
+                gone.
+              </span>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="mq-cid">Client ID</Label>
+                <Input
+                  id="mq-cid"
+                  value={draft.mqtt?.clientId ?? ""}
+                  placeholder="derived from the instance name"
+                  onChange={(e) =>
+                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, clientId: e.target.value } })
+                  }
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  Must be unique on the broker. A collision is the number-one cause of an
+                  unexplained reconnect loop: the broker disconnects the older session on every
+                  connect, and both clients reconnect forever.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Label htmlFor="mq-disc">Home Assistant discovery</Label>
+                <Switch
+                  id="mq-disc"
+                  checked={draft.mqtt?.discovery ?? true}
+                  onCheckedChange={(v) =>
+                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, discovery: v } })
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="mq-tls">Accept a self-signed certificate</Label>
+                <Switch
+                  id="mq-tls"
+                  checked={draft.mqtt?.tlsSkipVerify ?? false}
+                  onCheckedChange={(v) =>
+                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, tlsSkipVerify: v } })
+                  }
+                />
+              </div>
+            </>
+          )}
+
+          <Button size="sm" onClick={() => onSaveMqtt(draft, mqttPassword)} disabled={saving}>
             {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
           </Button>
         </CardContent>
@@ -1043,8 +1618,27 @@ function PlatformCredCard({
                     className="flex items-center justify-between rounded border border-border bg-background px-2 py-1.5"
                   >
                     <div className="min-w-0">
-                      <div className="truncate text-[12px]">{a.accountName}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-[12px]">{a.accountName}</span>
+                        {a.reconnect?.needed && (
+                          <Badge variant="outline" className="border-amber-500 text-[9px] text-amber-600 dark:text-amber-500">
+                            reconnect needed
+                          </Badge>
+                        )}
+                      </div>
                       <div className="font-mono text-[10px] text-muted-foreground">{a.accountRef}</div>
+                      {/* Said in full rather than as a bare badge. "Reconnect"
+                          with no reason reads as a fault the operator caused;
+                          the point is that a token cannot gain a permission it
+                          was not issued with, which is nobody's mistake. */}
+                      {a.reconnect?.needed && (
+                        <div className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-500">
+                          {a.reconnect.reason}
+                          {a.reconnect.missing && a.reconnect.missing.length > 0 && (
+                            <> Missing: <code>{a.reconnect.missing.join(", ")}</code></>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <Button
                       variant="ghost"

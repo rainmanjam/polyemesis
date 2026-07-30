@@ -99,6 +99,19 @@ func main() {
 	}
 
 	fmt.Println("creating the 720p30 rendition")
+	// Burned-in text rides along on this rendition.
+	//
+	// A WHITE BOX at full opacity, top-left, 12% of the frame height. That
+	// shape is chosen to be measurable rather than to be pretty: the shell
+	// crops exactly that corner and asserts its mean luma is near white.
+	// testsrc2 puts a mid-grey/colour-bar field there, so a crop that comes
+	// back bright can only be the box -- and a drawtext that silently rendered
+	// nothing (the failure mode that exits 0) leaves it dark.
+	//
+	// No font is named, so this also exercises the built-in default and the
+	// path that materialises it into <data>/fonts at startup. On a build with
+	// no drawtext filter the server refuses nothing and simply draws nothing,
+	// which is why the shell reports whether the filter exists before judging.
 	created := call("POST", "/renditions", map[string]any{
 		"name":         "720p30",
 		"width":        1280,
@@ -108,9 +121,53 @@ func main() {
 		"encoder":      "libx264",
 		"preset":       "veryfast",
 		"gopSeconds":   2,
+		// The image watermark, anchored BOTTOM-RIGHT at half opacity.
+		//
+		// Deliberately the opposite corner from the text above, because that is
+		// what makes the anchor testable: a shell that finds the logo in the
+		// bottom-right and background in the top-right has proved the anchor
+		// was honoured, where a full-frame check would pass even if the filter
+		// ignored the anchor entirely.
+		//
+		// 50% opacity, because the alpha path is a DIFFERENT filter graph:
+		// colourchannelmixer is omitted entirely at 100%, so an opaque overlay
+		// never exercises it and a broken alpha would ship unnoticed.
+		"overlay": map[string]any{
+			"image":      "overlays/logo.png",
+			"anchor":     "bottom-right",
+			"widthPct":   0.2,
+			"marginXPct": 0.0,
+			"marginYPct": 0.0,
+			"opacity":    0.5,
+		},
+		"text": map[string]any{
+			"content":    "POLYEMESIS",
+			"anchor":     "top-left",
+			"sizePct":    0.12,
+			"color":      "black",
+			"marginXPct": 0.0,
+			"marginYPct": 0.0,
+			"box":        true,
+			"boxColor":   "white",
+			"boxOpacity": 1.0,
+		},
 	})
 	rid := int64(created["rendition"].(map[string]any)["id"].(float64))
 	facts["RENDITION_ID"] = strconv.FormatInt(rid, 10)
+	// Read back rather than trusting the POST: a field that round-trips to ""
+	// is a column the store dropped, and the pixel check further down would
+	// then fail for a reason nobody could locate.
+	ovl := mapOf(created["rendition"].(map[string]any)["overlay"])
+	facts["OVERLAY_IMAGE_STORED"] = str(ovl["image"])
+	facts["OVERLAY_ANCHOR_STORED"] = str(ovl["anchor"])
+	txt := mapOf(created["rendition"].(map[string]any)["text"])
+	facts["TEXT_CONTENT_STORED"] = str(txt["content"])
+	facts["TEXT_BOX_STORED"] = boolStr(txt["box"] == true)
+	fonts := get("/fonts")
+	facts["TEXT_SUPPORTED"] = boolStr(fonts["textSupported"] == true)
+	facts["DEFAULT_FONT"] = str(fonts["defaultFont"])
+	nf, _ := fonts["fonts"].([]any)
+	facts["FONT_COUNT"] = strconv.Itoa(len(nf))
 	fmt.Printf("  rendition %d created\n", rid)
 
 	// A brand-new rendition nothing selects must not be burning CPU.

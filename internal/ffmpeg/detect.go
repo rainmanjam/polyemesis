@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,19 @@ type Tools struct {
 	// preference order. Before the probe has run it holds the listed hardware
 	// encoders instead, which is a hint and not a capability.
 	HWEncoders []string `json:"hwEncoders"`
+	// Filters is every filter the binary reports, as whole tokens.
+	//
+	// Detection existed only for ENCODERS, and that was a real gap: a filter
+	// is as optional as an encoder and fails just as hard. drawtext needs
+	// --enable-libfreetype and is genuinely absent from ordinary builds -- the
+	// machine this was written on has 489 filters and no drawtext among them.
+	// Without this list a text overlay would be saved, validated, compiled into
+	// a filtergraph, and fail at process start with "No such filter", which
+	// reaches the operator as a destination that will not come up.
+	//
+	// Empty means the probe never ran, which is treated as "assume the best"
+	// everywhere, exactly like the encoder list.
+	Filters []string `json:"filters"`
 	// EncoderCaps is what each candidate encoder actually did when this
 	// machine was asked to encode a frame with it, including why it failed.
 	// Empty means the probe never ran, which is treated as "assume the best"
@@ -143,6 +157,7 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 
 	t.checkSRT(ctx)
 	t.checkEncoders(ctx)
+	t.checkFilters(ctx)
 	return t, nil
 }
 
@@ -204,6 +219,69 @@ func (t *Tools) checkEncoders(ctx context.Context) {
 		t.mu.Unlock()
 	}
 	t.RefreshEncoderCapabilities(ctx)
+}
+
+// checkFilters records which filters this build contains.
+//
+// One step, not two, unlike checkEncoders: a filter that the build lists is a
+// filter that exists, because filters are pure software. There is no hardware
+// underneath to disagree with the list, so the list IS the evidence.
+func (t *Tools) checkFilters(ctx context.Context) {
+	out, err := exec.CommandContext(ctx, t.FFmpeg, "-hide_banner", "-filters").CombinedOutput()
+	if err != nil {
+		// Left empty, which every caller reads as "assume the best". Refusing
+		// to start over a failed capability probe would take a working install
+		// down for a question nothing had asked yet.
+		return
+	}
+	t.mu.Lock()
+	t.Filters = parseFilters(string(out))
+	t.mu.Unlock()
+}
+
+// HasFilter reports whether this build contains a filter.
+//
+// An empty filter list means the probe has not run, and that returns TRUE: the
+// alternative is refusing a feature because we failed to ask whether it works,
+// which is the restrictive-direction failure this repo has already paid for
+// three times. A build that genuinely lacks the filter then fails at start with
+// FFmpeg's own message, which is no worse than before this existed.
+func (t *Tools) HasFilter(name string) bool {
+	if t == nil {
+		return true
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if len(t.Filters) == 0 {
+		return true
+	}
+	return containsString(t.Filters, name)
+}
+
+// filterLineRe matches one row of `ffmpeg -filters`.
+//
+// The format is two or three flag characters, the name, the pin signature and
+// a description:
+//
+//	T. drawbox           V->V       Draw a colored box on the input video.
+//	TSC overlay          VV->V      Overlay a video source on top of the input.
+//
+// Anchored on the pin signature rather than on the flags, because the flag
+// column is two characters wide in some builds and three in others -- matching
+// the flags is how a parser silently returns nothing on the build you did not
+// test against.
+var filterLineRe = regexp.MustCompile(`^\s*[TSC.]{2,3}\s+(\S+)\s+[AVN|]+->[AVN|]+\s`)
+
+// parseFilters pulls the filter names out of `ffmpeg -filters`.
+func parseFilters(out string) []string {
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if m := filterLineRe.FindStringSubmatch(line); m != nil {
+			names = append(names, m[1])
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // RefreshEncoderCapabilities re-probes every candidate encoder and replaces the

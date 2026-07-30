@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 )
 
 // writeConfig drops a config.yaml in a fresh temp dir and returns its path.
@@ -507,16 +509,22 @@ func TestEnsureDirsCreatesKeyDirectoriesPrivateAndOnlyWhenNeeded(t *testing.T) {
 			if err := cfg.EnsureDirs(); err != nil {
 				t.Fatalf("EnsureDirs: %v", err)
 			}
-			assertDir(t, cfg.TLSDir(), tc.wantTLSDir, 0o700)
-			assertDir(t, cfg.ACMECacheDir(), tc.wantACMEDir, 0o700)
-			assertDir(t, cfg.RecordingsDir(), true, 0o755)
+			assertPrivateDir(t, cfg.TLSDir(), tc.wantTLSDir)
+			assertPrivateDir(t, cfg.ACMECacheDir(), tc.wantACMEDir)
+			assertDirExists(t, cfg.RecordingsDir(), true)
 		})
 	}
 }
 
-func assertDir(t *testing.T, path string, want bool, perm os.FileMode) {
+// assertDirExists checks presence only.
+//
+// The MODE is deliberately not asserted for the public directories. 0755 is a
+// Unix rendering of "an ordinary directory", Windows has no equivalent, and
+// nothing depends on the exact bits -- so asserting them would fail on Windows
+// while describing no requirement.
+func assertDirExists(t *testing.T, path string, want bool) {
 	t.Helper()
-	fi, err := os.Stat(path)
+	_, err := os.Stat(path)
 	if !want {
 		if err == nil {
 			t.Errorf("%s exists but should not have been created", path)
@@ -526,7 +534,23 @@ func assertDir(t *testing.T, path string, want bool, perm os.FileMode) {
 	if err != nil {
 		t.Fatalf("stat %s: %v", path, err)
 	}
-	if got := fi.Mode().Perm(); got != perm {
-		t.Errorf("%s mode = %04o, want %04o", path, got, perm)
+}
+
+// assertPrivateDir checks the PROPERTY -- that nothing but this account can
+// reach the directory -- rather than the mode bits that happen to express it on
+// one platform.
+//
+// That distinction is the whole lesson here. This assertion read `mode ==
+// 0700` until the cross-platform matrix ran it on Windows, where a FileMode is
+// discarded: the TLS key directory was open to every local account, and this
+// test reported it protected on every platform for as long as it existed.
+func assertPrivateDir(t *testing.T, path string, want bool) {
+	t.Helper()
+	assertDirExists(t, path, want)
+	if !want {
+		return
+	}
+	if err := fsperm.CheckPrivate(path); err != nil {
+		t.Errorf("TLS private key material is exposed: %v", err)
 	}
 }

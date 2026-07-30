@@ -12,6 +12,20 @@ import (
 const scheduleColumns = `id, name, enabled, action, kind, destination_ids, tz,
 	at_minutes, days, run_at, grace_seconds, last_run_at, created_at, updated_at`
 
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	scheduleListQuery    = `SELECT ` + scheduleColumns + ` FROM schedules ORDER BY id`
+	scheduleEnabledQuery = `SELECT ` + scheduleColumns + ` FROM schedules WHERE enabled = 1 ORDER BY id`
+	scheduleByIDQuery    = `SELECT ` + scheduleColumns + ` FROM schedules WHERE id = ?`
+)
+
 // scanSchedule reads one row. Instants come back as UTC because that is how
 // they went in — the zone a recurring schedule is READ in lives in tz, not in
 // the stored timestamps.
@@ -64,13 +78,13 @@ func scanSchedule(s interface{ Scan(...any) error }) (*scheduler.Schedule, error
 
 // ListSchedules returns every schedule, oldest first.
 func (d *DB) ListSchedules() ([]scheduler.Schedule, error) {
-	return d.querySchedules(`SELECT ` + scheduleColumns + ` FROM schedules ORDER BY id`)
+	return d.querySchedules(scheduleListQuery)
 }
 
 // Schedules returns the enabled schedules. It is what satisfies
 // scheduler.Store, so a switched-off schedule is never evaluated.
 func (d *DB) Schedules() ([]scheduler.Schedule, error) {
-	return d.querySchedules(`SELECT ` + scheduleColumns + ` FROM schedules WHERE enabled = 1 ORDER BY id`)
+	return d.querySchedules(scheduleEnabledQuery)
 }
 
 func (d *DB) querySchedules(query string) ([]scheduler.Schedule, error) {
@@ -93,7 +107,7 @@ func (d *DB) querySchedules(query string) ([]scheduler.Schedule, error) {
 
 // GetSchedule loads one schedule.
 func (d *DB) GetSchedule(id int64) (*scheduler.Schedule, error) {
-	sc, err := scanSchedule(d.sql.QueryRow(`SELECT `+scheduleColumns+` FROM schedules WHERE id = ?`, id))
+	sc, err := scanSchedule(d.sql.QueryRow(scheduleByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

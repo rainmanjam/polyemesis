@@ -85,6 +85,20 @@ type RecordingMeta struct {
 const sessionColumns = `id, title, description, tags, started_at, ended_at,
 	duration_ms, bytes, recordings, auto, created_at, updated_at`
 
+// The reads below, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. A query assembled at the
+// call site is indistinguishable, to a reader and to a static analyser, from
+// one that interpolates a variable; a constant is safe BY CONSTRUCTION,
+// because there is no expression left for a value to reach. Fuller argument in
+// chat.go.
+const (
+	sessionListQuery = `SELECT ` + sessionColumns + ` FROM sessions
+		ORDER BY started_at DESC, id DESC`
+	sessionByIDQuery = `SELECT ` + sessionColumns + ` FROM sessions WHERE id = ?`
+)
+
 func scanSession(s interface{ Scan(...any) error }) (*Session, error) {
 	var (
 		out                        Session
@@ -116,8 +130,7 @@ func scanSession(s interface{ Scan(...any) error }) (*Session, error) {
 
 // ListSessions returns sessions newest first, which is how the library reads.
 func (d *DB) ListSessions() ([]Session, error) {
-	rows, err := d.sql.Query(`SELECT ` + sessionColumns + ` FROM sessions
-		ORDER BY started_at DESC, id DESC`)
+	rows, err := d.sql.Query(sessionListQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +197,7 @@ func (d *DB) SessionTags() ([]string, error) {
 
 // GetSession loads one session.
 func (d *DB) GetSession(id int64) (*Session, error) {
-	s, err := scanSession(d.sql.QueryRow(`SELECT `+sessionColumns+` FROM sessions WHERE id = ?`, id))
+	s, err := scanSession(d.sql.QueryRow(sessionByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

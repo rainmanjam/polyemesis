@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"golang.org/x/crypto/acme/autocert"
+
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 )
 
 // newACMEManager builds the autocert manager. It performs no network I/O:
@@ -25,9 +26,16 @@ func newACMEManager(opts Options) (*autocert.Manager, error) {
 	}
 
 	cacheDir := ACMECacheDir(opts.DataDir)
-	// 0700: the cache holds the account key and every issued private key.
-	if err := os.MkdirAll(cacheDir, dirPerm); err != nil {
-		return nil, fmt.Errorf("tlsx: cannot create the acme cache %s: %w", cacheDir, err)
+	// The cache holds the ACME account key and every issued private key, so it
+	// is restricted to this account.
+	//
+	// fsperm.SecureDir rather than os.MkdirAll(.., 0o700): a FileMode is
+	// discarded on Windows, where that call created a world-readable directory
+	// and returned nil. Also note this does NOT rely on config.EnsureDirs
+	// having run -- tlsx is reachable without it, so it establishes the
+	// property itself rather than assuming somebody else did.
+	if err := fsperm.SecureDir(cacheDir); err != nil {
+		return nil, fmt.Errorf("tlsx: cannot create the acme cache: %w", err)
 	}
 
 	return &autocert.Manager{

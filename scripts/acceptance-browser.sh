@@ -60,7 +60,7 @@ echo "  container healthy on :$PORT"
 
 printf "\n\033[1m2. Browser suite\033[0m\n"
 cd "$ROOT/ui"
-BASE_URL="http://127.0.0.1:$PORT" npx playwright test --config e2e/playwright.config.ts
+BASE_URL="http://127.0.0.1:$PORT" npx --no-install playwright test --config e2e/playwright.config.ts
 status=$?
 
 if [ "$status" -eq 0 ]; then

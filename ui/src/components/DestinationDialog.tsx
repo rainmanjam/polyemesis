@@ -21,8 +21,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { Switch } from "@/components/ui/switch";
+// The capability matrix this dialog renders inline. Data, not a component, and
+// shared with the settings page — see lib/capabilities.ts.
+import {
+  CAPABILITY_COLUMNS,
+  capabilityFor,
+  supportInfo,
+  supportOf,
+  tierInfo,
+} from "@/lib/capabilities";
+import { TWITCH_LABELS } from "@/lib/types";
 import type {
   Destination,
+  DestTransport,
+  DestResilience,
+  AudioEncoding,
+  Compliance,
+  PrivacyStatus,
   DestKind,
   Platform,
   PlatformAccount,
@@ -482,338 +498,6 @@ const PRESETS: DestPreset[] = [
   },
 ];
 
-/* ------------------------------------------------- platform capability matrix
- *
- *  What a user actually gets from each platform, said out loud before they
- *  invest an hour in setup. Mirrors internal/oauth/capabilities.go, which is
- *  also served from GET /api/v1/platforms/capabilities for scripted clients —
- *  the same arrangement the preset catalogue above already uses.
- *
- *  This is a description, never a gate. Nothing below is consulted to decide
- *  whether a save is allowed: an operator whose account can do something ours
- *  could not verify must be able to try it and read the platform's own error.
- *  See "unknown" below.
- */
-
-export type Capability =
-  | "sso"
-  | "streamKey"
-  | "metadata"
-  | "chatRead"
-  | "chatSend"
-  | "moderation"
-  | "viewerStats";
-
-/** Four values rather than a boolean, because the interesting platforms are
- *  not binary. Kick's stream key is not "unsupported" — it works perfectly,
- *  the operator just types it. */
-export type Support =
-  /** polyemesis does this for you today. */
-  | "yes"
-  /** Works, with one step you do by hand. A pasted key is a supported
-   *  destination, not a degraded one. */
-  | "manual"
-  /** The platform publishes no API for this. Only ever set where somebody
-   *  actually read the platform's docs and found the thing absent. */
-  | "no"
-  /** Not built, and the platform's API not confirmed either way. The honest
-   *  default and the fail-open one: shown as unverified, never as a refusal. */
-  | "unknown";
-
-export type CapTier = "integrated" | "partial" | "manual" | "unsupported";
-
-export interface PlatformCapability {
-  /** Joins this row to an entry in PRESETS. */
-  presetId: string;
-  name: string;
-  /** The platform id for /oauth/{id}/start and for matching connected
-   *  accounts. Deliberately a plain string rather than `Platform`: Facebook
-   *  signs in and fetches keys today, but the destination row's platform
-   *  column only widens to "facebook" once ui/src/lib/types.ts does. Keying
-   *  the connect affordance off this means the button works either way. */
-  connect?: string;
-  tier: CapTier;
-  summary: string;
-  /** The thing that costs a day if it is met halfway through instead of at
-   *  the start. Facebook's App Review is why this field exists. */
-  readFirst?: string;
-  caps: Partial<Record<Capability, Support>>;
-  /** Only the cells where the value alone would raise a question. A wall of
-   *  tooltips is not honesty. */
-  reasons?: Partial<Record<Capability, string>>;
-}
-
-export const CAPABILITY_COLUMNS: { key: Capability; label: string; help: string }[] = [
-  { key: "sso", label: "Sign in", help: "Connect the account with OAuth instead of pasting secrets." },
-  { key: "streamKey", label: "Stream key", help: "polyemesis fetches the ingest URL and key for you." },
-  { key: "metadata", label: "Metadata", help: "Set the title, description or category when you go live." },
-  { key: "chatRead", label: "Chat read", help: "Messages appear in the unified chat pane." },
-  { key: "chatSend", label: "Chat send", help: "You can reply from the chat pane." },
-  { key: "moderation", label: "Moderation", help: "Delete a message or time a viewer out." },
-  { key: "viewerStats", label: "Viewers", help: "Live viewer count read back from the platform." },
-];
-
-export const SUPPORT_LEGEND: {
-  key: Support;
-  label: string;
-  help: string;
-  variant: "live" | "default" | "outline" | "warn";
-}[] = [
-  { key: "yes", label: "Works", help: "polyemesis does this for you today.", variant: "live" },
-  {
-    key: "manual",
-    label: "By hand",
-    help: "Supported, with one step you do yourself — usually pasting a key.",
-    variant: "default",
-  },
-  {
-    key: "unknown",
-    label: "Unverified",
-    help: "Not built yet, and the platform's API was not confirmed either way. Nothing stops you trying.",
-    variant: "outline",
-  },
-  {
-    key: "no",
-    label: "Not possible",
-    help: "The platform publishes no API for this, so no amount of setup will produce it.",
-    variant: "warn",
-  },
-];
-
-export const TIER_LEGEND: { key: CapTier; label: string; help: string }[] = [
-  {
-    key: "integrated",
-    label: "Fully integrated",
-    help: "Sign in once and polyemesis fetches the ingest URL and stream key.",
-  },
-  {
-    key: "partial",
-    label: "Sign in + paste key",
-    help: "Sign-in works and brings chat and metadata with it, but the key is typed by hand.",
-  },
-  {
-    key: "manual",
-    label: "Manual key",
-    help: "Paste the ingest URL and stream key from the platform's dashboard. Streaming works exactly as well; there is just nothing to connect.",
-  },
-  {
-    key: "unsupported",
-    label: "Not supported",
-    help: "polyemesis cannot stream here. Shown so you do not spend an evening finding that out.",
-  },
-];
-
-/** Display order: most integrated first, unsupported last — because the last
- *  row is the one nobody should have to scroll to find. */
-export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
-  {
-    presetId: "youtube",
-    name: "YouTube Live",
-    connect: "youtube",
-    tier: "integrated",
-    summary:
-      "Connect a Google account and polyemesis fetches the ingest URL and stream key, pushes your title and description at go-live, and reads and replies to live chat.",
-    caps: {
-      sso: "yes",
-      streamKey: "yes",
-      metadata: "yes",
-      chatRead: "yes",
-      chatSend: "yes",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-    reasons: {
-      chatRead:
-        "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
-    },
-  },
-  {
-    presetId: "twitch",
-    name: "Twitch",
-    connect: "twitch",
-    tier: "integrated",
-    summary:
-      "Connect a Twitch account and polyemesis fetches the stream key, sets your title and category at go-live, and joins chat over IRC.",
-    caps: {
-      sso: "yes",
-      streamKey: "yes",
-      metadata: "yes",
-      chatRead: "yes",
-      chatSend: "yes",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-    reasons: { metadata: "Title and category, over the channel:manage:broadcast scope." },
-  },
-  {
-    presetId: "facebook",
-    name: "Facebook Live",
-    connect: "facebook",
-    tier: "integrated",
-    summary:
-      "Connect a Facebook profile or Page and polyemesis creates the broadcast, splits out the RTMPS ingest and key, pushes the title and description, and reads the comment thread.",
-    readFirst:
-      "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it.",
-    caps: {
-      sso: "yes",
-      streamKey: "yes",
-      metadata: "yes",
-      chatRead: "yes",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-    reasons: {
-      streamKey:
-        "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
-      metadata:
-        "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
-      chatRead:
-        "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was pasted by hand has no live-video id to attach to, and the chat pane says so.",
-    },
-  },
-  {
-    presetId: "kick",
-    name: "Kick",
-    connect: "kick",
-    tier: "partial",
-    summary:
-      "Sign in with Kick for chat, moderation, metadata and viewer stats — then paste the stream key, because Kick's public API does not publish one.",
-    readFirst:
-      "Both halves of this destination are real at once: click Connect account for everything Kick's API does offer, and paste the ingest URL and key from Kick → Settings → Stream. Neither replaces the other, and the paste is not a workaround for a broken connection.",
-    caps: {
-      sso: "yes",
-      streamKey: "manual",
-      metadata: "yes",
-      chatRead: "yes",
-      chatSend: "yes",
-      moderation: "yes",
-      viewerStats: "yes",
-    },
-    reasons: {
-      sso: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
-      streamKey:
-        "Checked against Kick's published Channels, Livestreams and Users endpoints — none of them return a stream key. This is a documented absence, not a missing feature on our side, and it does not hold back anything else.",
-      metadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
-      chatRead:
-        "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
-      moderation:
-        "Delete a message, over moderation:chat_message:manage. Banning and timing out are not implemented and the moderation:ban scope is deliberately not requested: nothing in polyemesis bans a viewer, and asking a restreamer's audience for that power would be overreach. Use Kick's own dashboard.",
-      viewerStats: "Live state and viewer count from Kick's livestreams endpoints.",
-    },
-  },
-  {
-    presetId: "x",
-    name: "X (Twitter) Live",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key. There is no API to connect: X's developer platform covers posts, users, media and the post firehose, not live-video ingest.",
-    readFirst:
-      "“Streaming” in X's API documentation means streaming posts, not ingesting video. No documented third-party live-video ingest endpoint exists, and access to what is documented is credit-based and paid. Set the source up in X's own producer tooling and copy both fields across.",
-    caps: {
-      sso: "no",
-      streamKey: "manual",
-      metadata: "no",
-      chatRead: "no",
-      chatSend: "no",
-      moderation: "no",
-      viewerStats: "no",
-    },
-    reasons: {
-      sso: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
-    },
-  },
-  {
-    presetId: "rumble",
-    name: "Rumble",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from Rumble Studio. Rumble has an API page, but it sits behind a login and nothing about it is published.",
-    readFirst:
-      "rumble.com/account/api requires an account to view and documents nothing publicly, so polyemesis makes no claim about what it can or cannot do. If you have access and it turns out to offer more, that is a gap in our knowledge rather than a limit of the platform.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "dlive",
-    name: "DLive",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from DLive → Dashboard → Stream settings. Streaming works; there is no integration to connect.",
-    readFirst:
-      "DLive's developer portal at dev.dlive.tv no longer resolves in DNS, so its developer support appears to be inactive. Nothing about streaming to DLive depends on that — but do not go looking for an API key, because there is currently nowhere to get one.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "instagram",
-    name: "Instagram Live",
-    tier: "unsupported",
-    summary:
-      "polyemesis cannot stream to Instagram. Instagram's platform covers messaging, content publishing and comments — there is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts.",
-    readFirst:
-      "This entry exists to save you the evening. A destination that silently never connects is worse than no destination at all: it looks like a bug in polyemesis, and there is nothing to fix. If your account still has Live Producer RTMP access, add a Generic RTMPS destination and paste the server URL and key Meta gives you — but check that you have it before you build the show around it.",
-    caps: {
-      sso: "no",
-      // Not "manual": for most accounts there is no key to paste, so offering
-      // the paste field as the answer would be its own lie.
-      streamKey: "no",
-      metadata: "no",
-      chatRead: "no",
-      chatSend: "no",
-      moderation: "no",
-      viewerStats: "no",
-    },
-  },
-];
-
-/** The row for a preset id.
- *
- *  A preset with no row is the common case — thirty-odd entries, eight with
- *  anything to say beyond "paste the key" — so this returns a manual-tier row
- *  rather than nothing. Every unlisted capability then reads through
- *  `supportOf` as "unknown", which is the fail-open answer: claiming "no"
- *  about an API nobody here has read is how a capability check starts refusing
- *  things that work. */
-export function capabilityFor(presetId: string, name?: string): PlatformCapability {
-  const row = PLATFORM_CAPABILITIES.find((p) => p.presetId === presetId);
-  if (row) return row;
-  return {
-    presetId,
-    name: name || presetId,
-    tier: "manual",
-    summary:
-      "Paste the ingest URL and stream key from this platform's dashboard. Every polyemesis feature on this side of the wire — per-destination audio routing, renditions, reconnect, meters — works exactly the same.",
-    caps: { streamKey: "manual" },
-  };
-}
-
-/** An absent capability is unverified, never unsupported. */
-export function supportOf(row: PlatformCapability, c: Capability): Support {
-  return row.caps[c] ?? "unknown";
-}
-
-export function supportInfo(s: Support) {
-  return SUPPORT_LEGEND.find((l) => l.key === s) ?? SUPPORT_LEGEND[2];
-}
-
-export function tierInfo(t: CapTier) {
-  return TIER_LEGEND.find((l) => l.key === t) ?? TIER_LEGEND[2];
-}
 
 /** Best-effort match of a saved destination back onto a catalogue entry, so
  *  reopening one shows what it is instead of "choose a platform". An exact URL
@@ -867,6 +551,18 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [url, setUrl] = useState("");
   const [streamKey, setStreamKey] = useState("");
   const [bitrate, setBitrate] = useState(160);
+  // Muxer and socket tuning. An empty object is "no opt-in", which is what
+  // every destination that predates this carries, and what the server turns
+  // into no FFmpeg arguments at all.
+  const [transport, setTransport] = useState<DestTransport>({});
+  // Reconnect policy. Empty is "retry forever, 1s to 30s", which is what every
+  // destination did before this existed.
+  const [resilience, setResilience] = useState<DestResilience>({});
+  // Output audio encoding. Empty is AAC stereo.
+  const [audio, setAudio] = useState<AudioEncoding>({});
+  // Obligation metadata. Empty means "touch nothing", which is what every
+  // destination that has never set any carries.
+  const [compliance, setCompliance] = useState<Compliance>({});
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -892,11 +588,19 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setUrl(destination.url);
       setStreamKey(destination.streamKey);
       setBitrate(destination.audioBitrate);
+      setTransport(destination.transport ?? {});
+      setResilience(destination.resilience ?? {});
+      setAudio(destination.audio ?? {});
+      setCompliance(destination.compliance ?? {});
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
       setRenditionId(destination.renditionId ? String(destination.renditionId) : PASSTHROUGH);
     } else {
+      setTransport({});
+      setResilience({});
+      setAudio({});
+      setCompliance({});
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -993,6 +697,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         accountId: accountId === "none" ? null : Number(accountId),
         // null is passthrough: no encode, no process, straight off the ingest.
         renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
+        transport,
+        resilience,
+        audio,
+        compliance,
       };
       if (editing) {
         await api.updateDestination(destination.id, payload);
@@ -1366,6 +1074,304 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               on — a rendition never touches audio.
             </span>
           </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <Label>Audio codec</Label>
+              <Select
+                value={audio.codec || "aac"}
+                onValueChange={(v) =>
+                  setAudio({ ...audio, codec: v === "aac" ? "" : (v as "opus") })
+                }
+                disabled={kind === "rtmp"}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="aac">AAC — every platform takes it</SelectItem>
+                  <SelectItem value="opus">Opus — better below 64 kbps</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-[10px] text-muted-foreground">
+                {kind === "rtmp"
+                  ? "RTMP is AAC. FFmpeg will mux Opus into FLV, but no mainstream ingest accepts it — the stream would upload cleanly and be rejected."
+                  : "Opus is worth it for a low-bitrate feed. Check the receiver takes it."}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="dest-mono">Channels</Label>
+              <div className="flex h-9 items-center gap-2">
+                <Switch
+                  id="dest-mono"
+                  checked={audio.mono ?? false}
+                  onCheckedChange={(v) => setAudio({ ...audio, mono: v })}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {audio.mono ? "Mono" : "Stereo"}
+                </span>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                Mono folds your mix down rather than re-routing it, and halves the bitrate on talk
+                content for no perceptual loss.
+              </span>
+            </div>
+          </div>
+
+          {(platform === "youtube" || platform === "twitch") && (
+            <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
+              <p className="text-xs font-medium">Compliance</p>
+              <span className="text-[10px] text-muted-foreground">
+                Not cosmetic. COPPA is a law, Twitch requires labels for several content classes,
+                and going live publicly by accident cannot be undone once people have seen it.
+                Anything left unset is not sent at all &mdash; polyemesis never overwrites a
+                setting you did not choose.
+              </span>
+
+              {platform === "youtube" && (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <Label>Visibility</Label>
+                    <Select
+                      value={compliance.privacy || "unset"}
+                      onValueChange={(v) =>
+                        setCompliance({
+                          ...compliance,
+                          privacy: v === "unset" ? "" : (v as PrivacyStatus),
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
+                        <SelectItem value="private">Private</SelectItem>
+                        <SelectItem value="unlisted">Unlisted</SelectItem>
+                        <SelectItem value="public">Public</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-[10px] text-muted-foreground">
+                      "Leave as it is" is the safe default and means no visibility write happens at
+                      all. That matters: YouTube's update is destructive by section, so a write
+                      that omitted this would revert your broadcast to its default rather than
+                      leaving it alone.
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <Label>Made for kids (COPPA)</Label>
+                    <Select
+                      value={
+                        compliance.madeForKids === undefined
+                          ? "unset"
+                          : compliance.madeForKids
+                            ? "yes"
+                            : "no"
+                      }
+                      onValueChange={(v) =>
+                        setCompliance({
+                          ...compliance,
+                          madeForKids: v === "unset" ? undefined : v === "yes",
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
+                        <SelectItem value="no">No &mdash; not made for kids</SelectItem>
+                        <SelectItem value="yes">Yes &mdash; made for kids</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-[10px] text-muted-foreground">
+                      "No" is a declaration, not the absence of one, so it is sent. This is written
+                      through YouTube's video resource rather than the broadcast, because that is
+                      the only place it is settable once a broadcast exists.
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {platform === "twitch" && (
+                <div className="flex flex-col gap-1">
+                  <Label>Content labels</Label>
+                  <div className="flex flex-col gap-1">
+                    {TWITCH_LABELS.map((id) => (
+                      <div key={id} className="flex items-center justify-between gap-2">
+                        <span className="text-[11px]">{id.replace(/([A-Z])/g, " $1").trim()}</span>
+                        <Switch
+                          checked={compliance.labels?.[id] ?? false}
+                          onCheckedChange={(v) =>
+                            setCompliance({
+                              ...compliance,
+                              labels: { ...compliance.labels, [id]: v },
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    Twitch requires these for mature games, sexual themes, drugs, gambling and
+                    graphic violence. "Mature game" is not here because Twitch derives it from the
+                    category and refuses to let anything set it.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <details className="rounded-md border border-border p-2">
+            <summary className="cursor-pointer text-xs font-medium">
+              Transport &amp; muxer
+              {(transport.noDurationFilesize ||
+                (transport.muxQueuePackets ?? 0) > 0 ||
+                (transport.rwTimeoutSeconds ?? 0) > 0) && (
+                <span className="ml-2 text-[10px] text-muted-foreground">(customised)</span>
+              )}
+            </summary>
+            <div className="mt-2 flex flex-col gap-3">
+              <span className="text-[10px] text-muted-foreground">
+                Leave all of these alone unless a platform is misbehaving. Every one is off by
+                default, and off means polyemesis sends exactly the FFmpeg command it always has.
+              </span>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="dest-rwt">Socket timeout (seconds)</Label>
+                <Input
+                  id="dest-rwt"
+                  type="number"
+                  min={0}
+                  max={3600}
+                  value={transport.rwTimeoutSeconds ?? 0}
+                  onChange={(e) =>
+                    setTransport({ ...transport, rwTimeoutSeconds: Number(e.target.value) })
+                  }
+                  className="w-24"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  0 disables it. Worth setting on a platform behind a load balancer: a far end that
+                  disappears without closing the connection otherwise blocks the muxer forever.
+                  FFmpeg keeps running, polyemesis sees a healthy process, and the stream is off air
+                  with nothing saying so.
+                </span>
+              </div>
+
+              {kind === "rtmp" && (
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="dest-flv" className="font-normal">
+                    Drop FLV duration &amp; filesize metadata
+                  </Label>
+                  <Switch
+                    id="dest-flv"
+                    checked={transport.noDurationFilesize ?? false}
+                    onCheckedChange={(v) => setTransport({ ...transport, noDurationFilesize: v })}
+                  />
+                </div>
+              )}
+              {kind === "rtmp" && (
+                <span className="text-[10px] text-muted-foreground">
+                  Both are necessarily zero on a live stream, and some ingests read a zero duration
+                  as a broken file rather than as a live one. RTMP only.
+                </span>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-mqp">Muxing queue (packets)</Label>
+                  <Input
+                    id="dest-mqp"
+                    type="number"
+                    min={0}
+                    value={transport.muxQueuePackets ?? 0}
+                    onChange={(e) =>
+                      setTransport({ ...transport, muxQueuePackets: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-mqb">…above (bytes)</Label>
+                  <Input
+                    id="dest-mqb"
+                    type="number"
+                    min={0}
+                    value={transport.muxQueueBytes ?? 0}
+                    onChange={(e) =>
+                      setTransport({ ...transport, muxQueueBytes: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                These are a <strong>pair</strong>: FFmpeg applies the packet cap only once the queue
+                has grown past the byte threshold, so a threshold on its own does nothing and will
+                be refused. Raise them if a destination reports interleave errors &mdash; the audio
+                path here has variable latency, because loudness normalisation reads ahead.
+              </span>
+
+              <div className="border-t border-border pt-3">
+                <p className="text-xs font-medium">Reconnecting</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-minbo">Retry after (seconds)</Label>
+                  <Input
+                    id="dest-minbo"
+                    type="number"
+                    min={0}
+                    max={300}
+                    value={resilience.minBackoffSeconds ?? 0}
+                    onChange={(e) =>
+                      setResilience({ ...resilience, minBackoffSeconds: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="dest-maxbo">…backing off to</Label>
+                  <Input
+                    id="dest-maxbo"
+                    type="number"
+                    min={0}
+                    max={300}
+                    value={resilience.maxBackoffSeconds ?? 0}
+                    onChange={(e) =>
+                      setResilience({ ...resilience, maxBackoffSeconds: Number(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                0 on both takes the default, 1s doubling to 30s. A destination that stays up past a
+                minute is treated as healthy and starts again from the shorter delay.
+              </span>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="dest-giveup">Give up after (retries)</Label>
+                <Input
+                  id="dest-giveup"
+                  type="number"
+                  min={0}
+                  max={1000}
+                  value={resilience.giveUpAfter ?? 0}
+                  onChange={(e) =>
+                    setResilience({ ...resilience, giveUpAfter: Number(e.target.value) })
+                  }
+                  className="w-24"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  0 retries forever, which is the default and is right for a platform that is
+                  merely slow to come back. Set it when you would rather be TOLD: a destination
+                  retrying forever looks exactly like one that works &mdash; the card says
+                  "reconnecting" and nothing ever says this endpoint is not coming back. Giving up
+                  marks it failed, which your alert rules already treat as an incident.
+                  Consecutive failures only; a clean run resets the count.
+                </span>
+              </div>
+            </div>
+          </details>
 
           {selectedPreset && (
             <div className="flex flex-col gap-1 rounded-md border border-dashed p-2">

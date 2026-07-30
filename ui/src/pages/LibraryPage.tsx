@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   Captions,
   ChevronDown,

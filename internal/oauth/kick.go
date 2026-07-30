@@ -77,9 +77,12 @@ func (k *Kick) Platform() db.Platform { return db.PlatformKick }
 // operator to disconnect and reconnect, and discovering that mid-broadcast is
 // the worst possible moment.
 //
-// moderation:ban is the one omitted. Nothing in polyemesis bans or times out a
-// viewer, and a consent screen asking for the power to do so — for a
-// restreamer — reads as overreach and costs trust we need for the rest.
+// moderation:ban was previously omitted, on the grounds that nothing here banned
+// a viewer and that asking a restreamer's audience for the power to do so read
+// as overreach. That was a product decision and the maintainer has reversed it:
+// banning and timing out are implemented, so the scope is requested. The old
+// reasoning is kept rather than deleted because it is the argument to re-read if
+// the decision is ever revisited. See docs/roadmap/CHAT-MODERATION.md.
 func (k *Kick) Scopes() []string {
 	return []string{
 		"user:read",                      // who the token belongs to
@@ -87,13 +90,29 @@ func (k *Kick) Scopes() []string {
 		"channel:write",                  // title and category push
 		"chat:write",                     // send chat as the user or a bot
 		"moderation:chat_message:manage", // delete a message from the unified chat
+		"moderation:ban",                 // ban and timeout, and lift either
 		"events:subscribe",               // webhooks for chat and livestream state
+		// The stream key. NOT covered by channel:read, which is what made this
+		// look impossible for so long: the key rides as stream.key on the very
+		// same GET /public/v1/channels response that channel:read already
+		// fetches, but the field is omitted unless this scope was granted too.
+		// There is no /streamkey endpoint to find, so reading the endpoint list
+		// suggests the capability does not exist.
+		"streamkey:read",
 	}
 }
 
 // PKCE is on, and unlike the other providers it is not optional: Kick's
 // authorization server speaks OAuth 2.1, which folds RFC 7636 into the
 // authorization-code grant itself. An exchange without a verifier is refused.
+// ScopeVersion 2 adds moderation:ban. Version 1 added streamkey:read, which was
+// exactly the case this mechanism exists for: an account connected before it
+// landed holds a token without the scope, and the stream key silently never
+// arrives. The same applies here — an account on version 1 can delete a message
+// and cannot ban anybody, and the account list says so instead of letting the
+// button fail.
+func (k *Kick) ScopeVersion() int { return 2 }
+
 func (k *Kick) PKCE() bool { return true }
 
 func (k *Kick) AuthURL(clientID, redirectURI, state, challenge string) string {
@@ -165,6 +184,11 @@ type kickChannel struct {
 		ViewerCount int    `json:"viewer_count"`
 		StartTime   string `json:"start_time"`
 		Language    string `json:"language"`
+		// The ingest pair, present only when the token carries streamkey:read.
+		// Absent — not empty-and-present — for a token granted before that
+		// scope was requested, which is what Ingest distinguishes on.
+		URL string `json:"url"`
+		Key string `json:"key"`
 	} `json:"stream"`
 }
 
@@ -203,17 +227,53 @@ func (k *Kick) Account(ctx context.Context, clientID, accessToken string) (*Acco
 // follows it. It carries no URL on purpose: an ingest hostname invented to make
 // the message look complete is exactly the failure this provider exists to
 // avoid, and the Kick preset already links the dashboard.
+// ManualKeyReason is no longer the normal path. Kick DOES expose the key, on
+// the channels resource, behind the streamkey:read scope — see Ingest. This is
+// what an operator sees when their token predates that scope, which is the one
+// case left where the key really cannot be fetched.
 func (k *Kick) ManualKeyReason() string {
-	return "Kick's public API does not expose a stream key — it is absent from the channels, " +
-		"livestreams and users resources alike, so there is nothing for polyemesis to fetch. " +
-		"Open your Kick creator dashboard, go to Settings → Stream, and paste the stream URL and " +
-		"key into this destination. Connecting the account is still worth doing: it pushes your " +
-		"title and category, resolves categories by name, and reports viewer counts."
+	return "This Kick account was connected before polyemesis asked for the stream-key " +
+		"scope, and granting a scope never upgrades a token that has already been issued. " +
+		"Disconnect the account and connect it again — once, and the key is fetched " +
+		"automatically from then on. Until then, paste the stream URL and key from your " +
+		"Kick dashboard under Settings → Stream."
 }
 
-// Ingest always fails, and says why in a way the operator can act on.
+// Ingest reads the channel's stream URL and key.
+//
+// This used to return ErrNoStreamKeyAPI unconditionally, and the reasoning
+// recorded for that was wrong in an instructive way. Kick publishes no
+// /streamkey endpoint, so an endpoint-by-endpoint reading of the API finds
+// nothing and concludes the capability is absent. The key is actually a field
+// on the channels resource we were ALREADY fetching for identity and live
+// state -- withheld unless the token also carries streamkey:read, which the
+// Get Channels page does not list under its required scopes.
+//
+// So the field was invisible twice over: absent from the endpoint list, and
+// absent from the response we were looking at.
 func (k *Kick) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
-	return nil, fmt.Errorf("%w. %s", ErrNoStreamKeyAPI, k.ManualKeyReason())
+	c, err := k.channel(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	if c.Stream.Key == "" {
+		// Almost always a token minted before streamkey:read was requested.
+		// Granting a scope never upgrades a token already issued, so the only
+		// fix is a reconnect -- and saying that is the whole value of this
+		// branch, because the symptom otherwise looks like Kick being broken.
+		return nil, fmt.Errorf("%w. %s", ErrNoStreamKeyAPI, k.ManualKeyReason())
+	}
+	if c.Stream.URL == "" {
+		// Deliberately NOT defaulted to a hardcoded ingest host. Kick fronts
+		// its ingest with a CDN and the host has changed before; a stale
+		// constant here would publish to nowhere and look like a polyemesis
+		// bug. Returning the key we did read, and asking for the URL, is the
+		// honest failure.
+		return nil, fmt.Errorf("Kick returned a stream key but no ingest URL. "+
+			"Copy the Stream URL from your Kick dashboard (Settings %s Stream) "+
+			"into this destination; the key has been filled in for you", "→")
+	}
+	return &Ingest{URL: c.Stream.URL, Key: c.Stream.Key}, nil
 }
 
 // ---------------------------------------------------------------- categories
@@ -313,12 +373,52 @@ func (k *Kick) UpdateChannel(ctx context.Context, accessToken string, u KickChan
 	return requestJSON(ctx, http.MethodPatch, kickAPIBase+"/public/v1/channels", accessToken, body, nil, nil)
 }
 
+// PushBroadcastSettings writes the one field of BroadcastSettings that Kick
+// has: custom_tags.
+//
+// Kick has no broadcast RESOURCE at all -- no scheduled start, no DVR, no
+// editing window -- so most of this type does not apply and is reported as
+// skipped rather than silently ignored. An operator who set a DVR toggle and
+// saw nothing happen deserves to be told the platform has no such thing.
+//
+// Implementing the same optional interface as YouTube rather than inventing a
+// second path: the field the two share is tags, and one code path in the API
+// layer beats two that must be kept in step.
+func (k *Kick) PushBroadcastSettings(ctx context.Context, clientID, accessToken string, s BroadcastSettings) (*MetadataResult, error) {
+	res := &MetadataResult{}
+	if s.ScheduledStart != nil {
+		res.Skipped = append(res.Skipped, FieldScheduledStart)
+		res.Warnings = append(res.Warnings,
+			"Kick has no scheduled start; it has no broadcast resource to schedule")
+	}
+	if s.TouchesContentDetails() {
+		res.Skipped = append(res.Skipped, FieldContentDetails)
+		res.Warnings = append(res.Warnings,
+			"Kick has no DVR, auto-start or monitor-stream settings")
+	}
+	if s.Tags == nil {
+		return res, nil
+	}
+
+	// Tags REPLACE, exactly as they do on YouTube. Kick documents a limit of
+	// ten and this does not enforce it, for the reason KickChannelUpdate
+	// gives: Kick's own rejection names the limit and stays right if it moves.
+	if err := k.UpdateChannel(ctx, accessToken, KickChannelUpdate{CustomTags: *s.Tags}); err != nil {
+		return nil, scopeAdvice(err, db.PlatformKick, k.MetadataCaps().Scope)
+	}
+	res.Applied = append(res.Applied, FieldTags)
+	return res, nil
+}
+
 func (k *Kick) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
 		// No description: a Kick channel has a description, but the live
 		// broadcast does not, and the channel update accepts only a title, a
 		// category and tags. Saying so here keeps it out of the failure list.
-		Fields:        []MetadataField{FieldTitle, FieldCategory},
+		// Tags ARE supported: custom_tags is one of the three fields the
+		// channel PATCH takes. Advertised so the composer offers the control
+		// for Kick as well as YouTube rather than greying it out.
+		Fields:        []MetadataField{FieldTitle, FieldCategory, FieldTags},
 		CategoryLabel: "Category",
 		CategoryHint:  "A Kick category, e.g. Just Chatting, Grand Theft Auto V. A numeric category id also works.",
 		// TitleMax is left at zero: Kick publishes no title length, and a limit

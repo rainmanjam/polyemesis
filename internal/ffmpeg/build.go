@@ -473,6 +473,154 @@ type DestSpec struct {
 	// end they would attach to nothing and silently do nothing.
 	ExtraInputArgs  []string
 	ExtraOutputArgs []string
+
+	// Transport is the optional muxer and socket tuning. Its zero value emits
+	// nothing at all, so a destination that has not opted in produces exactly
+	// the argv it always did.
+	Transport TransportSpec
+
+	// Audio is the optional output-encoding choice. Its zero value is AAC
+	// stereo, which is what every destination emitted before this existed.
+	Audio AudioSpec
+}
+
+// Audio codec names, spelled the way FFmpeg spells them because these strings
+// are written straight onto the command line.
+const (
+	AudioCodecAAC  = "aac"
+	AudioCodecOpus = "libopus"
+)
+
+// AudioSpec is the per-destination audio encoding choice.
+//
+// Deliberately small. The roadmap asked for three things here and one of them
+// does not exist -- see AACProfileUnavailable below.
+type AudioSpec struct {
+	// Codec is empty for AAC, which is the only thing every platform takes.
+	// AudioCodecOpus is meaningfully better below ~64 kbps and is the reason
+	// this field exists at all.
+	Codec string
+	// Mono folds the routing graph's stereo output down to one channel.
+	//
+	// A DOWNMIX of the operator's mix, not a re-route. The routing matrix still
+	// produces OutL and OutR and this sums them; wiring individual tracks to a
+	// single channel would be a change to the matrix and a different feature.
+	// For talk content that is exactly what is wanted, and it halves the
+	// bitrate for no perceptual loss.
+	Mono bool
+}
+
+// AACProfileUnavailable records why there is no HE-AAC option here.
+//
+// The roadmap listed "AAC profile (LC / HE-AAC v1 / v2)" as a Part B item, on
+// the grounds that HE-AAC is meaningfully better below 64 kbps. It is, and it
+// is not reachable: FFmpeg's native `aac` encoder exposes NO -profile option at
+// all, and `-profile:a aac_he` makes it refuse to open with
+//
+//	[aac] Profile not supported!
+//
+// producing no output whatever rather than falling back. HE-AAC needs
+// libfdk_aac, which is nonfree and cannot ship in a redistributable build.
+//
+// The underlying GOAL -- good audio well below 64 kbps -- is met by Opus
+// instead, which is free, in the pinned build, and better than HE-AAC at those
+// rates. So the item is answered rather than abandoned, by a different means
+// than the one that was proposed.
+const AACProfileUnavailable = "FFmpeg's native AAC encoder supports only LC; HE-AAC needs the nonfree libfdk_aac"
+
+// audioCodecArgs renders the codec and channel count for a video destination.
+//
+// Opus is refused on RTMP, and that refusal is the interesting part. FFmpeg
+// will happily WRITE Opus into FLV -- it produced a valid 8.6 KB file when
+// probed -- because Enhanced RTMP defines a mapping for it. No mainstream
+// ingest accepts it. A stream that muxes cleanly, uploads cleanly and is
+// rejected by the platform is the worst failure mode available: it looks
+// correct everywhere the operator can see.
+func audioCodecArgs(s DestSpec) []string {
+	codec := AudioCodecAAC
+	if s.Audio.Codec == AudioCodecOpus && s.Kind != DestRTMP {
+		codec = AudioCodecOpus
+	}
+	channels := "2"
+	if s.Audio.Mono {
+		channels = "1"
+	}
+	return []string{
+		"-c:a", codec,
+		"-b:a", strconv.Itoa(s.AudioBitrate) + "k",
+		"-ac", channels,
+		"-ar", strconv.Itoa(s.SampleRate),
+	}
+}
+
+// TransportSpec is the per-destination muxer and socket tuning.
+//
+// Every field is off by default and every one was probed against the pinned
+// FFmpeg before it was designed around -- a third of the first draft of this
+// block did not survive `ffmpeg -h`, which is why the probe results are written
+// down here rather than remembered.
+type TransportSpec struct {
+	// NoDurationFilesize sets `-flvflags no_duration_filesize`.
+	//
+	// FLV carries duration and filesize in its metadata, and for a live stream
+	// both are necessarily zero. Some RTMP ingests treat a zero duration as a
+	// malformed file rather than as a live stream. Confirmed `E..........` on
+	// the flv muxer, and applied ONLY to RTMP -- handing it to the mpegts muxer
+	// would be an unknown option, which FFmpeg warns about on every start.
+	NoDurationFilesize bool
+
+	// MuxQueuePackets sets `-max_muxing_queue_size` and MuxQueueBytes sets
+	// `-muxing_queue_data_threshold`. They are a PAIR, and that is the
+	// correction the probe produced.
+	//
+	// The roadmap doc had these as alternatives -- max_muxing_queue_size for
+	// stream init, muxing_queue_data_threshold for the steady state. FFmpeg's
+	// own help says otherwise: the threshold is "the threshold after which
+	// max_muxing_queue_size is taken into account". So the packet cap applies
+	// only once the queue has grown past the byte threshold, and setting the
+	// threshold alone does nothing whatsoever.
+	//
+	// Both matter here because polyemesis's audio path has variable latency --
+	// loudnorm has lookahead -- so the interleave between a copied video stream
+	// and a filtered audio one genuinely can diverge.
+	MuxQueuePackets int
+	MuxQueueBytes   int
+
+	// RWTimeoutSeconds sets `-rw_timeout`, in microseconds on the wire.
+	//
+	// A half-open TCP connection -- the far end gone without a FIN, which is
+	// what a platform behind a load balancer does -- otherwise blocks the muxer
+	// indefinitely. FFmpeg keeps running, the supervisor sees a live process,
+	// and the stream is off air with nothing reporting it. Confirmed
+	// `ED.........`, so it is settable on an output and not only on an input,
+	// and confirmed to parse on an `rtmp://` target.
+	RWTimeoutSeconds int
+}
+
+// transportOutputArgs renders the muxer tuning that belongs immediately before
+// the target. Empty for a destination that has not opted in.
+func transportOutputArgs(s DestSpec) []string {
+	var args []string
+	t := s.Transport
+	// FLV only. The flag does not exist on any other muxer, and passing an
+	// option a muxer does not own makes FFmpeg warn on every single start --
+	// noise that trains an operator to ignore the log.
+	if t.NoDurationFilesize && s.Kind == DestRTMP {
+		args = append(args, "-flvflags", "no_duration_filesize")
+	}
+	if t.MuxQueuePackets > 0 {
+		args = append(args, "-max_muxing_queue_size", strconv.Itoa(t.MuxQueuePackets))
+	}
+	if t.MuxQueueBytes > 0 {
+		args = append(args, "-muxing_queue_data_threshold", strconv.Itoa(t.MuxQueueBytes))
+	}
+	if t.RWTimeoutSeconds > 0 {
+		// Microseconds on the wire; seconds in the settings, because nobody
+		// reasons about a socket timeout in microseconds and a stray factor of
+		// a thousand is a timeout that never fires.
+		args = append(args, "-rw_timeout", strconv.Itoa(t.RWTimeoutSeconds*1_000_000))
+	}
+	return args
 }
 
 // SpliceExtraArgs inserts hand-written arguments into a generated FFmpeg
@@ -604,12 +752,8 @@ func DestinationArgs(s DestSpec) []string {
 			s.ExtraInputArgs, s.ExtraOutputArgs)
 	}
 
-	args = append(args,
-		"-c:a", "aac",
-		"-b:a", strconv.Itoa(s.AudioBitrate)+"k",
-		"-ac", "2",
-		"-ar", strconv.Itoa(s.SampleRate),
-	)
+	args = append(args, audioCodecArgs(s)...)
+	args = append(args, transportOutputArgs(s)...)
 	switch s.Kind {
 	case DestRTMP:
 		args = append(args, "-f", "flv")
@@ -666,15 +810,23 @@ func audioOutputArgs(s DestSpec) []string {
 	if !f.lossless {
 		args = append(args, "-b:a", strconv.Itoa(s.AudioBitrate)+"k")
 	}
-	// Still stereo, still at the profile's rate: an audio-only destination is a
-	// destination, and the promise is one summed stereo mix per destination.
-	args = append(args, "-ac", "2", "-ar", strconv.Itoa(s.SampleRate))
+	// One summed mix per destination, at the profile's rate. Stereo unless the
+	// operator asked for mono -- the codec here is still chosen by the target's
+	// extension, because an Icecast mount's format is part of its URL.
+	channels := "2"
+	if s.Audio.Mono {
+		channels = "1"
+	}
+	args = append(args, "-ac", channels, "-ar", strconv.Itoa(s.SampleRate))
 
 	if isIcecast(s.Target) {
 		// FFmpeg only assumes audio/mpeg. Anything else has to be declared or
 		// listeners get a file download where they expected a stream.
 		args = append(args, "-content_type", f.contentType)
 	}
+	// Transport tuning applies to an audio-only destination too: an Icecast
+	// mount behind a dead proxy hangs exactly the way an RTMP one does.
+	args = append(args, transportOutputArgs(s)...)
 	return append(args, "-f", f.muxer, s.Target)
 }
 
@@ -764,7 +916,14 @@ func PreviewArgs(s PreviewSpec) []string {
 	if s.VideoKbps == 0 {
 		s.VideoKbps = 800
 	}
-	gop := s.SegmentSeconds * 30
+	// The live window has to stay wide enough that a player sitting at the far
+	// edge of its allowed latency can still fetch the segment it is asking for.
+	// hls.js will seek when it falls liveMaxLatencyDurationCount (6) target
+	// durations behind, so a window of listSize x SegmentSeconds against a
+	// threshold of 6 x SegmentSeconds is exactly equal at every segment length
+	// -- the ratio is scale-invariant, and a constant 6 gives no margin at all.
+	// Derived so shorter segments buy some.
+	listSize := max(6, (8+s.SegmentSeconds-1)/s.SegmentSeconds)
 
 	args := commonArgs()
 	args = append(args, progressArgs()...)
@@ -783,16 +942,38 @@ func PreviewArgs(s PreviewSpec) []string {
 		"-vf", fmt.Sprintf("scale=-2:%d", s.Height),
 		// Keyframe interval must divide the segment length exactly, or HLS
 		// segments drift off the GOP boundary and players stall on each one.
-		"-g", strconv.Itoa(gop),
-		"-keyint_min", strconv.Itoa(gop),
+		//
+		// Expressed in SECONDS rather than frames. `-g SegmentSeconds*30` was
+		// a 30 fps assumption baked into a field the operator never sets: on a
+		// 25 fps ingest every segment overshot by 20%, measured as EXTINF
+		// 1.200000 for a requested 1s. force_key_frames states the interval
+		// exactly and is right at every frame rate.
+		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", s.SegmentSeconds),
+		// Still needed: it is what stops x264 inserting its own keyframes
+		// between the forced ones on a scene change.
 		"-sc_threshold", "0",
 		"-c:a", "aac",
 		"-b:a", "96k",
 		"-ac", "2",
 		"-f", "hls",
 		"-hls_time", strconv.Itoa(s.SegmentSeconds),
-		"-hls_list_size", "6",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+		"-hls_list_size", strconv.Itoa(listSize),
+		// program_date_time is not decoration. It stamps the first segment with
+		// a wall-clock time, so live-edge latency becomes a NUMBER an operator
+		// and a test can both read -- EXT-X-PROGRAM-DATE-TIME plus the
+		// cumulative EXTINF, subtracted from now. Without it, latency can only
+		// be claimed. internal/playout already sets it, for the same reason.
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
+		// Default is 1, meaning a segment is unlinked the moment it leaves the
+		// playlist. Keeping one extra lets a player's already-issued request
+		// for the segment that just aged out still complete.
+		"-hls_delete_threshold", "2",
+		// MPEG-TS, deliberately. fMP4 measured ~8-9% smaller and buys ZERO
+		// latency, while costing an init.mp4 lifecycle that has to survive the
+		// on-demand stop/start cycle and an explicit content type for Safari's
+		// native path. Its only strategic argument was as the prerequisite for
+		// a Go-side LL-HLS packager, which docs/roadmap/LL-HLS.md declines to
+		// build.
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", filepath.Join(s.OutputDir, "seg_%05d.ts"),
 		filepath.Join(s.OutputDir, "index.m3u8"),

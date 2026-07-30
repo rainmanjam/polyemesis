@@ -31,7 +31,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **YouTube Live** | Works | Works | Works | Works | Works | Unverified | Unverified |
 | **Twitch** | Works | Works | Works | Works | Works | Unverified | Unverified |
 | **Facebook Live** | Works | Works | Works | Works | Unverified | Unverified | Unverified |
-| **Kick** | Works | **By hand** | Works | Works | Works | Works | Works |
+| **Kick** | Works | Works | Works | Works | Works | Works | Works |
 | **X (Twitter)** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
 | **Rumble** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
@@ -63,13 +63,29 @@ measured in days. Start it before you need it. Facebook also issues a fresh
 ingest and key per broadcast, so connecting the account is what creates the
 broadcast — there is no permanent key to reuse.
 
-**Kick — sign in *and* paste a key.** This is the mixed case, and both halves
-are real at once. Kick's OAuth 2.1 flow (PKCE, which Kick requires) gets you
-chat both ways, deleting a chat message, title and category push, and viewer
-counts. It does not get you a stream key: none of Kick's published Channels,
-Livestreams or Users endpoints return one. That is a documented absence rather
-than something missing on our side, and it holds nothing else back. Connect the
-account, then paste the ingest URL and key from **Kick → Settings → Stream**.
+**Kick — fully automated, and it took a correction to get there.** Kick's
+OAuth 2.1 flow (PKCE, which Kick requires) gets you chat both ways, deleting a
+chat message, title, category and tag push, viewer counts — **and the stream
+key**.
+
+Kick's entire metadata surface is three fields — `stream_title`, `category_id`
+and `custom_tags` — on one channel PATCH. There is no description, no
+thumbnail and no scheduling, so the composer skips those for Kick and says so
+rather than reporting them as failures. Tags **replace** rather than merge, as
+they do on YouTube; clearing the field removes every tag.
+
+This page said for a long time that the key was unfetchable, and the reasoning
+was understandable but wrong. Kick publishes no `/streamkey` endpoint, so
+reading the endpoint list finds nothing. The key is a field —
+`stream.key` — on the **channels resource polyemesis already fetches** for
+identity and live state, withheld unless the token carries the `streamkey:read`
+scope, which Kick's own Get Channels page does not list among its required
+scopes. Invisible twice over.
+
+**An account connected before this landed must be disconnected and reconnected
+once.** Granting a scope never upgrades a token that has already been issued —
+and Settings → Platforms flags exactly this, so it does not have to be
+remembered from a page of documentation.
 
 **X (Twitter) — paste your key, there is no API.** X's developer platform covers
 posts, users, media and the post firehose. "Streaming" in its documentation
@@ -126,6 +142,28 @@ Scope requested: `https://www.googleapis.com/auth/youtube`. Write access is
 needed because polyemesis creates a reusable ingest stream if your channel has
 none.
 
+**Broadcast settings have an editing window.** Alongside title, description and
+category, polyemesis can push tags, the scheduled start, and YouTube's DVR,
+auto-start and auto-stop toggles. The last three **stop being editable once a
+broadcast leaves `created` or `ready`** — YouTube refuses them with errors such
+as `enableDvrModificationNotAllowed` from that point on.
+
+The go-live composer reads each account's broadcast state when it opens and
+disables those controls once they have locked, naming the state that caused it.
+That is advice, not enforcement: a broadcast can go live between the read and
+the write, so the platform's refusal is still what decides, and it is reported
+against the account it came from.
+
+Set DVR and auto-start **before** going live. Everything else — title,
+description, category, tags, scheduled start — stays editable throughout.
+
+Each toggle also has a *Leave unchanged* option, which is the default and is
+not the same as *Off*. Leaving one alone omits it from the request entirely so
+YouTube keeps whatever it has; choosing *Off* actively turns the feature off.
+The distinction matters because the API is destructive by part: a field omitted
+from a part that IS being sent reverts to its default, so polyemesis reads the
+current broadcast and carries every untouched field through on every write.
+
 ### Twitch
 
 1. <https://dev.twitch.tv/console/apps> → **Register Your Application**.
@@ -139,6 +177,13 @@ pane).
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, disconnect and reconnect once.
+
+polyemesis now says so itself. Each platform carries a scope version that is
+stored with the account, and **Settings → Platforms marks an account
+"reconnect needed"** when the running build asks for more than that account was
+granted. Accounts connected before the version existed are judged on the scopes
+the platform actually returned, so an account that already holds everything is
+left alone rather than nagged.
 
 ### Facebook Live (Meta)
 
@@ -173,16 +218,15 @@ once, and neither is a workaround for the other.
 3. Paste the client ID and secret into polyemesis, then **Connect account**.
    Kick speaks OAuth 2.1, so polyemesis sends a PKCE challenge automatically —
    it is the first provider here that does.
-4. Open **Kick → Settings → Stream** and paste the Stream URL and Stream Key
-   into your Kick destination. polyemesis cannot fetch these: the key is absent
-   from Kick's published Channels, Livestreams and Users endpoints alike.
+4. Nothing to paste. The ingest URL and stream key are fetched for you over
+   the `streamkey:read` scope.
 
 Connecting is worth doing anyway — it pushes your title and category (resolving
 categories by name rather than by numeric id), carries chat both ways, and
 reports viewer counts.
 
 Scopes requested: `user:read`, `channel:read`, `channel:write`, `chat:write`,
-`moderation:chat_message:manage`, `events:subscribe`. `moderation:ban` is
+`moderation:chat_message:manage`, `events:subscribe`, `streamkey:read`. `moderation:ban` is
 deliberately not requested: nothing in polyemesis bans or times out a viewer.
 
 Kick delivers chat over a webhook rather than a socket, so the chat pane needs a

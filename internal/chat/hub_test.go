@@ -283,6 +283,146 @@ func TestDuplicateMessagesAreDeliveredOnce(t *testing.T) {
 	}
 }
 
+// A message the platform says is gone must leave the pane.
+//
+// The history ring is what the REST scrollback and every late-joining browser
+// read, so a retraction that only fired an event would leave the message to
+// reappear on the next reload -- which is the same bug in a slower costume.
+func TestARetractedMessageLeavesTheHistory(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "keep-1", Text: "fine", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "gone", Text: "deleted later", Author: Author{ID: "9"}})
+			sink.Deliver(Message{ID: "keep-2", Text: "also fine", Author: Author{ID: "7"}})
+			// Only reachable because the Hub hands adapters a sink that is a
+			// Retractor. A SinkFunc would drop this silently.
+			retract(sink, "gone")
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "the retraction to apply", func() bool { return len(h.History(0)) == 2 })
+
+	var ids []string
+	for _, m := range h.History(0) {
+		ids = append(ids, m.ID)
+	}
+	// Order matters: the ring is rebuilt compactly rather than tombstoned, and
+	// a rebuild that reorders the conversation would be worse than the leak.
+	if len(ids) != 2 || ids[0] != "keep-1" || ids[1] != "keep-2" {
+		t.Fatalf("history = %v, want [keep-1 keep-2] in order", ids)
+	}
+	if got := h.Stats().Retracted; got != 1 {
+		t.Fatalf("Retracted = %d, want 1", got)
+	}
+}
+
+// A timeout removes everything one author said, and the platform names the
+// AUTHOR rather than the messages.
+func TestRetractingAUserClearsOnlyThatAuthor(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "a1", Text: "hello", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "b1", Text: "spam", Author: Author{ID: "99"}})
+			sink.Deliver(Message{ID: "a2", Text: "how are you", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "b2", Text: "more spam", Author: Author{ID: "99"}})
+			retractUser(sink, "99")
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "the timeout to apply", func() bool { return len(h.History(0)) == 2 })
+	time.Sleep(20 * time.Millisecond)
+
+	for _, m := range h.History(0) {
+		if m.Author.ID == "99" {
+			t.Fatalf("history still holds %q from the timed-out author", m.ID)
+		}
+	}
+	if n := len(h.History(0)); n != 2 {
+		t.Fatalf("history holds %d messages, want the 2 from the untouched author", n)
+	}
+	if got := h.Stats().Retracted; got != 2 {
+		t.Fatalf("Retracted = %d, want 2 (both of that author's messages)", got)
+	}
+}
+
+// An empty author id is the platform clearing the whole room, not a no-op.
+func TestRetractingAnEmptyUserClearsTheRoom(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "a1", Text: "one", Author: Author{ID: "7"}})
+			sink.Deliver(Message{ID: "b1", Text: "two", Author: Author{ID: "99"}})
+			retractUser(sink, "")
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "the room to clear", func() bool { return len(h.History(0)) == 0 })
+}
+
+// A retraction naming a message from a DIFFERENT platform must not touch ours.
+//
+// Message ids are platform-scoped and nothing guarantees they are unique across
+// platforms, so an id-only match would let a Twitch deletion silently remove a
+// Kick message that happened to share a string.
+func TestARetractionIsScopedToItsOwnPlatform(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	kick := &fakeAdapter{platform: db.PlatformKick, account: "kk",
+		messages: []Message{{ID: "shared-id", Text: "kick message"}}}
+	if err := h.Attach(ctx, kick); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the kick message", func() bool { return len(h.History(0)) == 1 })
+
+	tw := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
+		runFn: func(ctx context.Context, sink Sink) error {
+			sink.Deliver(Message{ID: "tw-1", Text: "twitch message"})
+			retract(sink, "shared-id") // same id, different platform
+			<-ctx.Done()
+			return nil
+		}}
+	if err := h.Attach(ctx, tw); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the twitch message", func() bool { return len(h.History(0)) == 2 })
+	time.Sleep(20 * time.Millisecond)
+
+	var found bool
+	for _, m := range h.History(0) {
+		if m.Platform == db.PlatformKick && m.ID == "shared-id" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a Twitch retraction deleted a Kick message that merely shared an id")
+	}
+}
+
 func TestMessagesInheritTheAdaptersPlatformAndAccount(t *testing.T) {
 	h := testHub(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -651,4 +791,78 @@ func TestHubAdapterReachesCapabilitiesTheInterfaceDoesNotCarry(t *testing.T) {
 	if _, ok := hub.Adapter(db.PlatformKick, "42"); ok {
 		t.Fatal("a detached adapter is still reachable")
 	}
+}
+
+// The settings defaults must equal the constants this package falls back to.
+//
+// Two places name the same numbers: db.DefaultSettings().Chat, which a fresh
+// install stores, and the Default* constants here, which every Hub built
+// without settings uses -- that is every test, and any caller that forgets to
+// apply the stored values. If they drift, the two behave differently while both
+// claiming to be "the default", and it surfaces as "my chat history is shorter
+// than the settings page says".
+//
+// The test lives here rather than in internal/db because internal/chat imports
+// internal/db; the reverse import would be a cycle.
+func TestChatDefaultsMatchTheSettingsDefaults(t *testing.T) {
+	s := db.DefaultSettings().Chat
+	if want := int(DefaultRetention / time.Hour); s.RetentionHours != want {
+		t.Errorf("settings default retention = %dh, DefaultRetention = %dh", s.RetentionHours, want)
+	}
+	if s.KeepMessages != DefaultRetentionKeep {
+		t.Errorf("settings default keep = %d, DefaultRetentionKeep = %d", s.KeepMessages, DefaultRetentionKeep)
+	}
+	if want := int(DefaultPurgeEvery / time.Minute); s.PurgeMinutes != want {
+		t.Errorf("settings default purge = %dm, DefaultPurgeEvery = %dm", s.PurgeMinutes, want)
+	}
+}
+
+// Retention has to be changeable on a RUNNING Hub. A setting that only takes
+// effect after a restart is one an operator changes, sees nothing happen, and
+// changes again.
+func TestSetRetentionAppliesWithoutARestart(t *testing.T) {
+	h := testHub(t)
+
+	h.SetRetention(48*time.Hour, 100000, 30*time.Minute)
+	h.mu.Lock()
+	gotAge, gotKeep, gotEvery := h.retention, h.retainKeep, h.purgeEvery
+	h.mu.Unlock()
+
+	if gotAge != 48*time.Hour || gotKeep != 100000 || gotEvery != 30*time.Minute {
+		t.Fatalf("retention = %v/%d/%v, want 48h/100000/30m", gotAge, gotKeep, gotEvery)
+	}
+}
+
+// Keep-forever must not become purge-everything.
+//
+// The Hub spells "forever" as a non-positive duration, and the API converts 0
+// hours into that. Getting this backwards would turn the setting an operator
+// picks to KEEP all their chat into the one that deletes it on the next sweep,
+// which is the worst available failure for this feature.
+func TestKeepForeverPurgesNothing(t *testing.T) {
+	h := testHub(t)
+	purged := false
+	h.store = &purgeSpy{onPurge: func() { purged = true }}
+
+	h.SetRetention(-1, 2000, time.Minute)
+	h.purge()
+	if purged {
+		t.Fatal("a keep-forever retention still ran a purge; that setting DELETES the history it promises to keep")
+	}
+
+	// And the opposite, so the test is not passing because purging never works.
+	h.SetRetention(time.Hour, 2000, time.Minute)
+	h.purge()
+	if !purged {
+		t.Fatal("a finite retention never purged, so the check above proves nothing")
+	}
+}
+
+// purgeSpy is a Store that records whether the sweep ran.
+type purgeSpy struct{ onPurge func() }
+
+func (p *purgeSpy) AppendChatMessages([]db.ChatMessage) (int, error) { return 0, nil }
+func (p *purgeSpy) PurgeChatMessages(time.Time, int) (int, error) {
+	p.onPurge()
+	return 0, nil
 }

@@ -6,11 +6,21 @@
 // resulting tokens encrypted (see internal/secrets), and refreshes them
 // automatically.
 //
-// On Kick: Kick's public API exposes the channel, the category directory, chat
-// and livestream stats, but no stream key — confirmed absent from Channels,
-// Livestreams and Users. Kick is therefore a full Provider whose Ingest returns
-// ErrNoStreamKeyAPI; see ManualKey in kick.go. Signing in is still worth doing,
-// because everything except the key is available once you have.
+// On Kick: its stream key WAS recorded here as unavailable — "confirmed absent
+// from Channels, Livestreams and Users" — and that was wrong. There is no
+// /streamkey endpoint to find, so reading the endpoint list suggests the
+// capability does not exist; the key in fact rides as stream.key on the same
+// GET /public/v1/channels response the adapter already fetches, withheld unless
+// streamkey:read was granted. Kick.Ingest reads it like any other provider.
+//
+// ErrNoStreamKeyAPI survives for exactly one case: a token minted before that
+// scope was requested, which reads as an empty key and is fixed by reconnecting
+// once. Granting a scope never upgrades a token already issued.
+//
+// The stale claim outlived the fix in three other places — the capability
+// matrix, the setup guide, and this comment. guide_drift_test.go now pins the
+// guide against the matrix; this paragraph is pinned by nothing, so re-read it
+// against kick.go before trusting it.
 package oauth
 
 import (
@@ -52,6 +62,27 @@ type Provider interface {
 	// Scopes are requested at authorization time and shown in the UI so the
 	// user knows what they are granting.
 	Scopes() []string
+	// ScopeVersion is bumped BY HAND whenever Scopes changes, and is stored
+	// alongside the account it was granted under.
+	//
+	// This exists because an OAuth token carries exactly the scopes it was
+	// issued with, and adding a scope to the application does NOT upgrade a
+	// token somebody already holds. Without this, an operator who connected
+	// before a feature shipped silently lacks permission for it and finds out
+	// from a 401 during a broadcast. polyemesis previously handled that with a
+	// line in the documentation, twice.
+	//
+	// A developer-bumped integer rather than a diff of the granted scope
+	// strings, and that is deliberate. Diffing means comparing against what
+	// the PLATFORM returned, and platforms rename scopes, grant supersets and
+	// reorder them -- which produces spurious "reconnect" prompts, and a
+	// prompt that cries wolf is a prompt operators learn to dismiss. The
+	// version is cruder and always right about the only question that matters:
+	// did WE change what we ask for.
+	//
+	// Keep the constant next to Scopes in each provider. The pairing is the
+	// only thing that makes forgetting to bump it visible in review.
+	ScopeVersion() int
 	// PKCE reports whether this platform accepts RFC 7636 parameters. It is
 	// opt-in per provider rather than on by default: a platform whose
 	// /authorize endpoint validates its query string strictly rejects an
@@ -343,16 +374,18 @@ func guides() []SetupGuide {
 			RedirectPath: "/api/v1/oauth/kick/callback",
 			Supported:    true,
 			Scopes:       (&Kick{}).Scopes(),
-			Note: "Kick is the one platform where the stream key stays manual: its public API does not " +
-				"expose one anywhere. Connect the account anyway — it pushes your title and category, finds " +
-				"categories by name instead of by numeric id, and reports viewer counts. Paste the ingest URL " +
-				"and key once from Kick → Settings → Stream and they do not change.",
+			Note: "Kick uses OAuth 2.1, so the consent step sends a PKCE challenge automatically — " +
+				"there is nothing extra to configure for it. Grant every scope on the consent screen: " +
+				"the stream key is withheld unless streamkey:read is among them, and an account " +
+				"connected before that scope was requested has to be disconnected and reconnected once " +
+				"before the key appears.",
 			Steps: []string{
 				"Open Kick → Settings → Developer and create an OAuth application.",
 				"Set the Redirect URI to exactly the URI shown below.",
 				"Copy the Client ID and Client Secret into the fields on this page and save.",
 				"Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
-				"Open Kick → Settings → Stream, copy the Stream URL and Stream Key, and paste both into your Kick destination. polyemesis cannot fetch these.",
+				"Nothing to paste: polyemesis reads the ingest URL and stream key from the channels " +
+					"resource over the streamkey:read scope, the same way it does for the other platforms.",
 			},
 		},
 	}

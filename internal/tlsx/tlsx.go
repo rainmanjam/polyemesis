@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -363,6 +364,19 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("tlsx: cannot close %s: %w", tmp, err)
+	}
+	// A mode with no group or other bits means the caller said "only this
+	// account". On Unix the Chmod above IS that; on Windows a FileMode is
+	// discarded and it is not, so the same intent has to be restated through
+	// the platform's real access control. See internal/fsperm.
+	//
+	// Applied to the TEMPORARY file rather than after the rename: a rename
+	// carries the file's ACL with it, so the key never exists at its final
+	// path in an unprotected state, not even briefly.
+	if perm&0o077 == 0 {
+		if err := fsperm.SecureFile(tmp); err != nil {
+			return fmt.Errorf("tlsx: cannot restrict %s: %w", tmp, err)
+		}
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("tlsx: cannot install %s: %w", path, err)

@@ -18,14 +18,15 @@ claim is often more instructive than the right one.
 |---|---|---|---|---|
 | **0** | [Unreachable features](UNREACHABLE-FEATURES.md) | 1–2 d | ✅ **done** | Two features were already built and no user could reach them. Also closed a validation gap found on the way in |
 | **1** | [Playlist — Phase 0](PLAYLIST-AND-COMPOSITING.md#playlist-the-mostly-wiring-claim-is-half-right) | 1 d | ✅ **done** | Scheduled file broadcast already worked. Now documented, and pinned by a 15-check suite in CI |
-| **2** | [LL-HLS](LL-HLS.md) | **3 d** | ready | Preview latency 4.2–6.2 s → 2.2–3.2 s with zero new dependencies |
-| **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | ready | Exactly one net-new module. Retained telemetry has no existing path at all |
+| **2** | [LL-HLS](LL-HLS.md) | 3 d | ✅ **done** | Preview latency 4.2–6.2 s → 2.2–3.2 s, zero new dependencies. Also fixed a 30 fps assumption that made every segment 20% long on a 25 fps ingest |
+| **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | **shipped** | Exactly one net-new module. Retained telemetry has no existing path at all |
 | **4** | Selector generalisation | **~3–5 d** | ready | Shared prerequisite for 5 and 7. Doing it once is much safer than twice in the most safety-critical pure function in the tree |
 | **5** | [Playlist — full](PLAYLIST-AND-COMPOSITING.md#sequencing-take-the-concat-demuxer) | **17–22 d** | ready | Most-requested by volume; lower technical risk than compositing |
-| **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **deferred** | The most-repeated unmet request. Sits before 7 because it extracts the `overlay`/`evenExpr` helpers compositing then reuses |
+| **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **v0.5 shipped** | The most-repeated unmet request. Sits before 7 because it extracts the `overlay`/`evenExpr` helpers compositing then reuses |
 | **7** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | ready | Largest, riskiest, and the one that puts the audio differentiator in play |
 | **8** | [WebRTC — WHEP](WEBRTC.md) | **8–12 d** | **deferred** | The sub-second preview tier. Independent of everything else; slots in whenever latency becomes the priority |
 | **9** | [Teams and roles](TEAMS-AND-ROLES.md) | **20–30 d** | ready | A security boundary retrofitted across ~120 routes. Do it when it is the priority, not alongside other work |
+| **10** | [Destination settings & metadata](DESTINATION-SETTINGS.md) | **14–19 d** in 4 parts | ready | Three metadata fields against a documented ten-plus, two of which are compliance items. Starts with a **0.5-day** fix that removes a documented limitation |
 
 [WHIP](WEBRTC.md#whip-design) ingest is a separate decision, deliberately not
 given a number: it carries one audio track, so it has RTMP's exact limitation
@@ -87,11 +88,16 @@ is ≈2.5 s rather than 3.0 s. Two supporting claims — `TARGETDURATION` inflat
 and a segment-window hazard — were refuted by measurement and are recorded as
 refuted.
 
-**`Queue: nil` in autopaho is a no-op.** The MQTT design documented it as
-deliberately disabling offline buffering; `autopaho/auto.go:271` silently
-substitutes an in-memory queue. Shipping as written would have produced exactly
-the stale-replay behaviour the design argued against, with a comment claiming
-otherwise.
+**`Queue: nil` in autopaho is a no-op — and the no-op is harmless.**
+`autopaho/auto.go:271` really does substitute an in-memory queue for a nil one,
+and the field's own comment contradicts the code. But building the feature
+showed the substitution is **inert**: the queue is read only by
+`PublishViaQueue`, while `ConnectionManager.Publish` bypasses it and returns
+`ConnectionDownError` when the link is down — which is exactly the no-buffering
+behaviour the design wanted. The verification pass found a true code fact and
+drew a false conclusion from it; no no-op queue implementation was needed.
+Recorded here because "the reviewer was half right" is the more useful lesson
+than either "the reviewer caught it" or "the reviewer was wrong".
 
 **`chi.Walk` emits one row per (method, pattern), not per registration.** The
 teams/roles route-census test — the backstop meant to catch an unguarded route —

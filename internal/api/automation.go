@@ -570,7 +570,10 @@ func (s *Server) handleDownloadStem(w http.ResponseWriter, r *http.Request) {
 // idea applied one level down, plus a filename shape check — a name that is not
 // a stem this build wrote is not a file this route will serve.
 func (s *Server) resolveStem(name string) (string, error) {
-	if name == "" || strings.ContainsRune(name, '/') || strings.ContainsRune(name, os.PathSeparator) {
+	// ContainsAny over BOTH separators, spelled literally. The previous form --
+	// '/' or os.PathSeparator -- reads as "both" and is both only on Windows,
+	// because on Linux that constant IS '/'. See internal/media for the note.
+	if name == "" || strings.ContainsAny(name, `/\`) {
 		return "", fmt.Errorf("invalid stem name %q", name)
 	}
 	if _, _, ok := recording.ParseStemFilename(name); !ok {

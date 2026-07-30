@@ -1,0 +1,289 @@
+# Security scanning.
+#
+# Separate from ci.yml because it fails for different reasons and on a different
+# clock: a new CVE published against a dependency turns this red without a line
+# of this repository changing, and that is the signal, not a flake. Keeping it
+# out of ci.yml means a red badge here never blocks a merge on work that is
+# unrelated to it, and the weekly schedule catches advisories that land between
+# pushes.
+name: security
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    # Monday morning, offset from ci.yml's 06:17 so the two do not contend.
+    - cron: "43 6 * * 1"
+
+concurrency:
+  group: security-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Go dependency vulnerabilities, filtered by reachability. govulncheck is the
+  # right tool here rather than a generic SCA: it reports what your code
+  # actually CALLS, so an advisory against a package you import but never reach
+  # does not become a ticket nobody can action.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # JavaScript dependencies.
+  npm-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      # --ignore-scripts: this job never builds anything, it only needs the
+      # resolved dependency tree for `npm audit`. Running install lifecycle
+      # scripts would execute code from every package in that tree on a runner,
+      # which is a real supply-chain path and buys nothing here.
+      - run: npm ci --ignore-scripts
+      # Production dependencies only. A moderate advisory in a build-time dev
+      # dependency does not ship to anybody, and treating it as urgent is how a
+      # team learns to pass --force.
+      - run: npm audit --omit=dev --audit-level=high
+
+  # Committed credentials, across the full history.
+  #
+  # A pinned binary rather than gitleaks/gitleaks-action@v2, for two reasons
+  # found by running the action first:
+  #
+  #  1. It requires GITHUB_TOKEN on pull_request events and not on push, so the
+  #     same commit passed as a push and failed as a PR. A scanner whose result
+  #     depends on which event triggered it is a scanner nobody can reason about.
+  #  2. It installed gitleaks 8.24.3 while this repository's allowlist was
+  #     written and verified against 8.30.1. Both report "no leaks" here, so a
+  #     green run would NOT have proved the allowlist behaves the same on both —
+  #     and the difference that matters (`condition = "AND"`) is exactly the
+  #     kind of newer syntax an older binary can ignore rather than reject.
+  #
+  # Pinning means CI runs the version the config was tested against. The
+  # version assertion below is what makes the pin real rather than aspirational.
+  gitleaks:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history. A secret that was committed and then "removed"
+          # in a later commit is still a secret that was published, and a
+          # shallow clone cannot see it.
+          fetch-depth: 0
+
+      - name: install gitleaks (pinned)
+        run: |
+          # --proto '=https' matters because -L follows redirects: without it a
+          # redirect to http:// would silently downgrade the transport for a
+          # binary that is about to be run as a security gate.
+          curl -sSfL --proto '=https' --tlsv1.2 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          installed="$(gitleaks version)"
+          echo "gitleaks $installed"
+          if [ "$installed" != "$GITLEAKS_VERSION" ]; then
+            echo "::error::expected gitleaks $GITLEAKS_VERSION, got $installed"
+            exit 1
+          fi
+
+      # Prove the allowlist is narrow before trusting it to be silent.
+      #
+      # .gitleaks.toml allowlists six test fixtures. It uses condition = "AND"
+      # so that only those exact values, in those exact files, are ignored —
+      # because the default is OR, and an OR would have exempted the whole file,
+      # including a real key committed to it. A test file is precisely where a
+      # real key tends to get committed by accident.
+      #
+      # "No leaks found" cannot distinguish a correct allowlist from one that
+      # silences everything. So: plant a secret in an allowlisted file and
+      # require that it is still caught.
+      #
+      # The planted value is assembled at run time rather than written out as a
+      # literal. Spelling a credential-shaped string directly in this file
+      # makes THIS file a gitleaks finding — which is exactly what happened on
+      # the first attempt, and it was only caught because the scan runs against
+      # committed history rather than the working tree. The parts below carry
+      # no keyword before the `=`, so the rule does not fire on them.
+      - name: verify the allowlist is not over-broad
+        run: |
+          target=internal/alerts/redact_test.go
+
+          # A non-zero exit from gitleaks means "something was found", not
+          # "the plant was found". Asserting on the exit code alone would pass
+          # on any unrelated finding — the same mistake as reading "0 findings"
+          # from a scan that examined 0 files. So: establish a clean baseline,
+          # then assert on the specific file.
+          if ! gitleaks detect --no-banner --redact --no-git \
+                 --config .gitleaks.toml --report-path before.json; then
+            echo "::error::the working tree already has findings; this check cannot prove anything"
+            exit 1
+          fi
+
+          prefix="live_999888777"
+          body="zQ1wErTyUiOpAsDfGhJkL"
+          printf '\nconst plantedKey = "%s_%s"\n' "$prefix" "$body" >> "$target"
+
+          gitleaks detect --no-banner --redact --no-git \
+            --config .gitleaks.toml --report-path after.json || true
+          git checkout "$target"
+
+          python3 - "$target" <<'PY'
+          import json, sys
+          target = sys.argv[1]
+          found = json.load(open('after.json'))
+          hits = [f for f in found if f.get('File') == target]
+          if not hits:
+              print("::error::A secret planted in an allowlisted file was NOT detected.")
+              print("::error::.gitleaks.toml is too broad: it is exempting the file, not the fixtures.")
+              print(f"::error::findings seen: {[f.get('File') for f in found]}")
+              sys.exit(1)
+          print(f"planted secret detected in {target}; the allowlist is scoped to values, not files")
+          PY
+
+          # Scoped to the file this step touched. A whole-tree check would fail
+          # for anything else that happened to be modified, which is a
+          # confusing way to report "the plant was not cleaned up".
+          git diff --quiet -- "$target" || {
+            echo "::error::the planted secret was not removed from the working tree"
+            exit 1
+          }
+          rm -f before.json after.json
+
+      - name: scan
+        run: gitleaks detect --no-banner --redact --config .gitleaks.toml
+
+  # Static analysis.
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      # Pinned, for the same reason gitleaks is pinned a few jobs up: an
+      # untagged image is :latest, so the engine that decides whether this
+      # repository is clean could change between two runs of the same commit,
+      # and the rule exclusions below were reasoned about against one specific
+      # analyser. Leaving this floating while arguing for a pinned gitleaks in
+      # the same file was simply an inconsistency.
+      #
+      # Only the ENGINE is pinned. The rules still come from the registry via
+      # --config=r/..., so new checks continue to arrive; what is fixed is the
+      # thing that parses the tree and decides what a finding is. Bump this
+      # deliberately, and re-check the exclusions when you do.
+      image: semgrep/semgrep:1.172.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No --error here. The gate is the two steps below, in that order:
+      # prove the scan happened, THEN judge what it found. --error would exit
+      # before the proof step ever ran.
+      #
+      # Two rules are excluded, each because the finding was traced and is not
+      # a vulnerability in this codebase:
+      #
+      #   dangerous-exec-command — 18 hits, all exec.CommandContext(bin, argv...)
+      #     invocations of ffmpeg/ffprobe. Arguments travel as a []string, never
+      #     through a shell, so there is no injection path. Excluded rather than
+      #     suppressed per-line because the pattern is the correct one and will
+      #     recur every time a new probe is added.
+      #
+      #   filepath-clean-misuse — 1 hit, internal/web/web.go. path.Clean is
+      #     applied to a URL path before the prefix is trimmed, which is the
+      #     right order; the rule matches the shape, not the bug.
+      #
+      #   detect-insecure-websocket — 6 hits, every one inside a COMMENT
+      #     listing the URL schemes an MQTT broker may use ("mqtt://, mqtts://,
+      #     ws:// or wss://"), in .go and .md files the rule should not have
+      #     been applied to at all. Plain ws:// to a LAN broker is a supported,
+      #     operator-chosen deployment, surfaced in the UI as exactly that.
+      #
+      # Anything else at ERROR severity fails the job.
+      - name: semgrep
+        run: |
+          semgrep \
+            --config=r/go \
+            --config=r/javascript.react \
+            --config=r/javascript.lang \
+            --exclude-rule=go.lang.security.audit.dangerous-exec-command.dangerous-exec-command \
+            --exclude-rule=go.lang.security.filepath-clean-misuse.filepath-clean-misuse \
+            --exclude-rule=javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket \
+            --json --output=semgrep.json \
+            --exclude=node_modules --exclude=dist --exclude=ui/dist
+
+      # The assertion this job exists to make.
+      #
+      # A semgrep run that fails to load its rules exits reporting zero
+      # findings and zero scanned files, and "0 findings" is indistinguishable
+      # from a clean pass unless somebody looks at the second number. That is
+      # not hypothetical: the first scan of this repository reported TOTAL 0
+      # and had examined nothing at all, because one registry config failed to
+      # parse and rule loading aborted.
+      #
+      # A security job that can pass forever while testing nothing is worse
+      # than no job, because it is also a green badge. So: prove files were
+      # read before believing anything about what was in them.
+      - name: assert semgrep actually scanned the tree
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open('semgrep.json'))
+          scanned = len(d.get('paths', {}).get('scanned', []))
+          errs = d.get('errors', [])
+          fatal = [e for e in errs if e.get('level') == 'error']
+          warn = [e for e in errs if e.get('level') != 'error']
+
+          print(f"semgrep scanned {scanned} files "
+                f"({len(fatal)} fatal, {len(warn)} non-fatal diagnostics)")
+
+          # Non-fatal diagnostics are printed, not failed on. One is expected:
+          # semgrep's TypeScript grammar does not accept `const satisfies` in
+          # ui/src/lib/types.ts and reports a partial parse of that one file.
+          # Surfacing it keeps it from quietly growing into "half the tree did
+          # not parse".
+          for e in warn:
+              print(f"::warning::semgrep: {e.get('message', e)}")
+
+          if fatal:
+              for e in fatal:
+                  print(f"::error::semgrep: {e.get('message', e)}")
+              print("::error::semgrep failed to run cleanly; a partial scan is not a pass")
+              sys.exit(1)
+
+          # The floor. This repository has ~255 scannable files; 50 is well
+          # under that and still far above the zero a broken rule-load yields.
+          if scanned < 50:
+              print(f"::error::semgrep scanned {scanned} files, expected the whole tree.")
+              print("::error::A zero-finding result from a zero-file scan is not a clean bill of health.")
+              sys.exit(1)
+          PY
+
+      # Only now, having established that the scan was real, is it worth
+      # believing what it did or did not find.
+      - name: fail on high-severity findings
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          results = json.load(open('semgrep.json'))['results']
+          errs = [r for r in results if r['extra']['severity'] == 'ERROR']
+          for r in errs:
+              print(f"::error file={r['path']},line={r['start']['line']}::"
+                    f"{r['check_id']}: {r['extra']['message'].splitlines()[0]}")
+          print(f"{len(errs)} ERROR-severity findings, {len(results)} total")
+          sys.exit(1 if errs else 0)
+          PY

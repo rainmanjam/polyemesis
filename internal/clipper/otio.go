@@ -249,15 +249,32 @@ func (c EDLClip) otio(rate float64) otioClip {
 // or the timeline resolves to nothing on the machine it is opened on. What it
 // must NOT do is replace every backslash it sees — a backslash is a perfectly
 // legal character in a POSIX filename, and "my\clip.mkv" is one file, not two
-// directories. Only a drive-letter prefix is treated as Windows, which no POSIX
-// path can start with.
+// directories. Only a drive-letter or UNC prefix is treated as Windows, and no
+// POSIX absolute path can start with either.
+//
+// Deliberately NOT filepath.ToSlash: that function is defined by the platform
+// the code is RUNNING on, and it rewrites every backslash when that platform is
+// Windows. So a recording named `my\clip.mkv` produced a correct URL on Linux
+// and silently became file:///rec/my/clip.mkv — a path to a different, absent
+// file — on Windows. An OTIO file is routinely written on one machine and
+// opened on another, so this mapping has to depend only on the path itself.
 func fileURL(path string) string {
-	p := filepath.ToSlash(path)
+	if path == "" {
+		return ""
+	}
+	// UNC: \\server\share\file.mkv is file://server/share/file.mkv, with the
+	// server as the URL HOST rather than part of the path. Handled explicitly
+	// because the drive-letter branch below cannot see it and would otherwise
+	// percent-escape the separators into one long nonexistent filename.
+	if strings.HasPrefix(path, `\\`) {
+		rest := strings.ReplaceAll(path[2:], `\`, "/")
+		host, tail, _ := strings.Cut(rest, "/")
+		u := url.URL{Scheme: "file", Host: host, Path: "/" + tail}
+		return u.String()
+	}
+	p := path
 	if hasDriveLetter(p) {
 		p = strings.ReplaceAll(p, `\`, "/")
-	}
-	if p == "" {
-		return ""
 	}
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useConfirm } from "@/hooks/useConfirm";
 import { Download, Loader2, Scissors, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
-import { autoApi } from "@/pages/AutomationPage";
+import { autoApi } from "@/lib/autoApi";
 import { bytes, timestamp } from "@/lib/format";
 
 interface Clip {

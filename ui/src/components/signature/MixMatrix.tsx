@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { channelLabels } from "./AudioMeter";
+import { channelLabels } from "@/lib/channels";
 import type { MatrixCell, SourceTrack } from "@/lib/types";
 import { RotateCcw } from "lucide-react";
 

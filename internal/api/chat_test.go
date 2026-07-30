@@ -340,3 +340,84 @@ func TestChatSendLimitsMatchTheAdapters(t *testing.T) {
 		}
 	}
 }
+
+// The moderator's user card, which is polyemesis's answer to Twitch's — built
+// from our own scrollback because no platform publishes a chat-history API.
+func TestChatUserCardShowsOnePersonsMessages(t *testing.T) {
+	_, h, store := testServer(t, config.Config{})
+	base := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	// Built with explicit author IDs rather than through chatRow, because the
+	// card keys on author_id and chatRow only sets a name. That is the right
+	// shape for both: a display name is not an identity, and on every platform
+	// here a name can change while the id cannot.
+	withAuthor := func(m db.ChatMessage, id string) db.ChatMessage {
+		m.AuthorID = id
+		return m
+	}
+	storeChat(t, store,
+		withAuthor(chatRow(db.PlatformTwitch, "t1", "ana", "hello", base), "u-ana"),
+		withAuthor(chatRow(db.PlatformTwitch, "t2", "bo", "someone else", base.Add(time.Minute)), "u-bo"),
+		withAuthor(chatRow(db.PlatformTwitch, "t3", "ana", "again", base.Add(2*time.Minute)), "u-ana"),
+	)
+	sign := login(t, h)
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/chat/users?platform=twitch&authorId=u-ana", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", w.Code, w.Body.String())
+	}
+
+	var card chatUserCard
+	if err := json.Unmarshal(w.Body.Bytes(), &card); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(card.Messages) != 2 {
+		t.Fatalf("messages = %d, want ana's 2 and not bo's: %+v", len(card.Messages), card.Messages)
+	}
+	if card.Messages[0].Text != "hello" || card.Messages[1].Text != "again" {
+		t.Fatalf("order = %+v, want oldest first", card.Messages)
+	}
+	// The caveat is not decoration. A moderator reading "2 messages" as a
+	// complete record judges a pattern from a sample, so the response has to
+	// say where the number came from.
+	if card.RetentionNote == "" {
+		t.Error("no retention note; the card would present a bounded window as a total")
+	}
+}
+
+func TestChatUserCardNeedsBothIdentifiers(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	for _, q := range []string{"", "?platform=twitch", "?authorId=ana"} {
+		r := jsonRequest(t, http.MethodGet, "/api/v1/chat/users"+q, nil)
+		sign(r)
+		if w := do(t, h, r); w.Code != http.StatusBadRequest {
+			t.Errorf("GET /chat/users%s = %d, want 400: a card for nobody in particular "+
+				"would pool unrelated people into one person", q, w.Code)
+		}
+	}
+}
+
+// A card must open even with no history, because its BUTTONS are the point.
+// Refusing the card when the scrollback is empty would take the moderation
+// actions away at exactly the moment somebody is trying to use them.
+func TestChatUserCardOpensWithNoHistory(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/chat/users?platform=twitch&authorId=nobody", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 with an empty card", w.Code)
+	}
+	var card chatUserCard
+	if err := json.Unmarshal(w.Body.Bytes(), &card); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if card.Messages == nil {
+		t.Error("messages = null; the UI would have to guard where an empty list would do")
+	}
+}

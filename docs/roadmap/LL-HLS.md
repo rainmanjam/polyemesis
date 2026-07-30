@@ -1,7 +1,15 @@
 # Preview latency: tune HLS, do not build LL-HLS
 
-**Status:** proposed, not started. **Effort: 3 days. Zero new dependencies.**
+**Status: DONE**, 2026-07-28. **Zero new dependencies.**
 **Result:** preview latency **4.2–6.2 s → 2.2–3.2 s** (mean ≈2.7 s).
+
+Two things changed on the way in, both because they were measured rather than
+assumed. The frame-rate fix turned out to be a **bug fix**, not a tuning knob —
+`-g SegmentSeconds*30` produced `EXTINF:1.200000` for a requested 1 s on a 25 fps
+ingest, confirmed against FFmpeg 8.1.2. And `lowLatencyMode` was already set in
+the player but genuinely inert, for a subtler reason than either the design or
+its reviewer gave: `maxLiveSyncPlaybackRate` **defaults to 1**, so the guard
+`!lowLatencyMode || maxLiveSyncPlaybackRate === 1` short-circuited regardless.
 
 ---
 

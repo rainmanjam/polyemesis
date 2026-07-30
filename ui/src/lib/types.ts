@@ -192,6 +192,18 @@ export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
 export interface Destination {
   id: number;
   name: string;
+  /** Optional muxer and socket tuning. Always present in a server response and
+   *  empty for a destination that has not opted in. */
+  transport?: DestTransport;
+  /** Reconnect policy. Always present in a server response and empty for a
+   *  destination that has not opted in. */
+  resilience?: DestResilience;
+  /** Output audio encoding. Always present in a server response and empty for
+   *  a destination that has not opted in. */
+  audio?: AudioEncoding;
+  /** Compliance metadata. Always present in a server response and empty for a
+   *  destination that has not set any. */
+  compliance?: Compliance;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -247,6 +259,14 @@ export interface Rendition {
   /** Strips field combing before any scaling: "" off, "auto" only frames the
    *  source flagged interlaced, "all" unconditionally. */
   deinterlace?: RenditionDeinterlace;
+  /** An optional image watermark burned into this tier. An overlay is the one
+   *  thing that makes a rendition re-encode differently from before, so it is
+   *  always present in the payload and empty when there is none. */
+  overlay: RenditionOverlay;
+  /** An optional line of text burned into this tier, drawn ON TOP of the
+   *  overlay. Always present in the payload and empty when there is none, for
+   *  the same reason `overlay` is. */
+  text: RenditionText;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -256,6 +276,97 @@ export interface Rendition {
 export type RenditionAspectMode = "" | "crop" | "pad" | "blurpad";
 /** Mirrors ffmpeg.DeinterlaceModes. */
 export type RenditionDeinterlace = "" | "auto" | "all";
+
+/** Where an overlay is pinned. Nine positions, named the way an operator would
+ *  point at them rather than as coordinates. */
+export type OverlayAnchor =
+  | "top-left" | "top-center" | "top-right"
+  | "middle-left" | "center" | "middle-right"
+  | "bottom-left" | "bottom-center" | "bottom-right";
+
+/** An image watermark on a rendition.
+ *
+ *  Every measurement is a FRACTION of the output (0-1), never pixels. That is
+ *  the point rather than a detail: the same overlay has to be correct on a
+ *  1920x1080 tier and a 1080x1920 one, and pixel geometry that looks right on
+ *  the first lands off-canvas on the second. */
+export interface RenditionOverlay {
+  /** A path relative to the data directory. Empty means no overlay. */
+  image?: string;
+  anchor?: OverlayAnchor;
+  /** Width as a fraction of the output width. */
+  widthPct?: number;
+  /** Gap from the anchored edges, as fractions of output width and height.
+   *  Ignored on a centred axis. */
+  marginXPct?: number;
+  marginYPct?: number;
+  /** 0-1; 0 is treated as fully opaque. */
+  opacity?: number;
+}
+
+/** A line of text burned into a rendition.
+ *
+ *  Every measurement is a FRACTION of the output (0-1), never pixels, for the
+ *  reason RenditionOverlay gives. Size is a fraction of the output HEIGHT
+ *  rather than width, because legibility is set by how tall a glyph is and a
+ *  portrait tier would otherwise get unreadably small type. */
+export interface RenditionText {
+  /** The literal string drawn. Never interpreted: the filter is built with
+   *  expansion=none, so a percent sign is a glyph rather than a directive. */
+  content?: string;
+  /** A BARE FILENAME in the fonts directory, never a path. Empty means the
+   *  built-in default. Fetch the choices from GET /api/v1/fonts rather than
+   *  hardcoding them -- operators add their own fonts to that directory. */
+  font?: string;
+  anchor?: OverlayAnchor;
+  /** Type size as a fraction of the output HEIGHT. */
+  sizePct?: number;
+  /** An FFmpeg colour: a name, 0xRRGGBB, or either with @alpha. */
+  color?: string;
+  /** Gap from the anchored edges. Ignored on a centred axis. */
+  marginXPct?: number;
+  marginYPct?: number;
+  /** A filled rectangle behind the text. It is what keeps white text readable
+   *  over a white shirt. */
+  box?: boolean;
+  boxColor?: string;
+  /** 0-1. A box at full opacity hides the picture behind it. */
+  boxOpacity?: number;
+}
+
+/** One thing a platform may accept in a metadata push.
+ *
+ *  Mirrors oauth.AllMetadataFields. Kept HERE rather than in the page that
+ *  renders it, because a push result names these in `applied` and `skipped` and
+ *  the union is therefore an API contract, not a component detail.
+ *
+ *  TestUITypesCanNameEveryMetadataField in internal/oauth fails if the Go side
+ *  gains a field this union does not have, AND if this union gains one no Go
+ *  constant produces. A field the UI cannot name is one an operator sees as
+ *  nothing at all. */
+export type MetaField =
+  // What the operator types.
+  | "title"
+  | "description"
+  | "category"
+  // What a platform requires them to declare. Pushed through the compliance
+  // path rather than the composer, but a result still names them.
+  | "privacy"
+  | "madeForKids"
+  | "contentLabels"
+  // What lives on the broadcast rather than the channel. YouTube only, and
+  // most of it stops being writable once a broadcast goes live.
+  | "scheduledStart"
+  | "contentDetails"
+  | "tags";
+
+/** One font available to a text overlay, from GET /api/v1/fonts. */
+export interface FontInfo {
+  name: string;
+  /** polyemesis rewrites the built-ins on every startup, so replacing one is
+   *  undone by a restart. Warn rather than forbid. */
+  builtIn: boolean;
+}
 
 /** A rendition plus its usage. `enabledDestinations` is the ref count the
  *  engine acts on: at zero there is no process and no CPU burnt. */
@@ -593,6 +704,12 @@ export interface Settings {
     maxGb: number;
     maxAgeHours: number;
     minFreeGb: number;
+    /** One lossless file per ingest track, alongside the muxed recording.
+     *  Named from the track roles, so a stem is `mic.flac` rather than
+     *  `track3.flac`. Optional so a client that predates stems can still PUT. */
+    stems?: boolean;
+    /** flac or wav. Empty takes the server's default. */
+    stemCodec?: StemCodec;
   };
   preview: {
     enabled: boolean;
@@ -610,6 +727,115 @@ export interface Settings {
   /** Optional so a client that predates playout can still PUT settings: the
    *  server merges over the stored value, and an absent key leaves it alone. */
   playout?: PlayoutSettings;
+  /** The source-selector tier. Optional for the same reason. */
+  failover?: FailoverSettings;
+  /** Retained MQTT telemetry. Optional for the same reason. */
+  mqtt?: MQTTSettings;
+  /** Install-wide destination policy. Optional for the same reason. */
+  destinations?: { staggerMs: number };
+  /** How much chat scrollback is kept. Optional for the same reason.
+   *
+   *  This is the depth of the moderator's user card, not just a disk knob: that
+   *  card answers "what has this person said before" out of polyemesis's own
+   *  store, because no platform publishes a chat-history API. Set it too short
+   *  and a card opened on a returning troublemaker reads as "they have never
+   *  said anything" rather than "we did not keep it". */
+  chat?: ChatRetentionSettings;
+}
+
+/** Bounds on the stored chat scrollback.
+ *
+ *  Both apply and the more generous one wins: a message goes when it is older
+ *  than `retentionHours` AND outside the newest `keepMessages`. So a busy
+ *  channel keeps less time than asked and a quiet one keeps more — the floor is
+ *  what stops a slow channel's user cards being empty. */
+export interface ChatRetentionSettings {
+  /** 0 keeps forever, the same convention the recorder's maxAgeHours uses. */
+  retentionHours: number;
+  /** Newest-N floor, kept whatever their age. */
+  keepMessages: number;
+  /** How often the sweep runs. */
+  purgeMinutes: number;
+}
+
+// ---------------------------------------------------------------- failover
+
+export type StemCodec = "flac" | "wav";
+
+/** What happens when the current source goes quiet and comes back. */
+export type FailoverReturn = "manual" | "auto";
+
+/** The still shown while no source is live.
+ *
+ *  A slate is the difference between a platform seeing a dead stream and a
+ *  platform seeing a holding card, so it is the one part of failover that
+ *  matters even to an install with a single source. */
+export interface SlateSettings {
+  enabled: boolean;
+  /** A path INSIDE the data directory, e.g. `slate/holding.png`. Empty paints
+   *  `color` instead, which is the fallback precisely because a flat colour
+   *  has no file that can fail to open. */
+  imagePath?: string;
+  /** Any spelling FFmpeg's colour parser takes. Empty means black. */
+  color?: string;
+  videoKbps?: number;
+  encoder?: string;
+  preset?: string;
+}
+
+/** One standby input, used when the primary stops delivering. */
+export interface FailoverBackup {
+  mode?: IngestMode;
+  srt?: { passphrase: string; latencyMs: number };
+  rtmp?: { app: string; streamKey: string };
+  pull?: PullSettings;
+}
+
+export interface FailoverSettings {
+  enabled: boolean;
+  /** How long the live source may deliver nothing before the tier switches.
+   *  Longer than a reconnect on purpose: an encoder re-establishing an RTMP
+   *  connection is normal operation, not a failure. */
+  graceSeconds?: number;
+  /** `manual` keeps the backup on air until somebody switches back --
+   *  the default, because an automatic return can flap. */
+  return?: FailoverReturn;
+  /** With `auto`, how long the primary must stay healthy before it is trusted
+   *  again. */
+  returnStableSeconds?: number;
+  backup?: FailoverBackup;
+  slate?: SlateSettings;
+}
+
+// -------------------------------------------------------------------- mqtt
+
+/** Retained MQTT telemetry.
+ *
+ *  polyemesis speaks MQTT 5.0 only -- the client library implements the 5.0
+ *  specification and nothing earlier, so a broker pinned to 3.1.1 will not
+ *  complete a connection at all. */
+export interface MQTTSettings {
+  enabled: boolean;
+  /** mqtt://, mqtts://, ws:// or wss://. Credentials in the URL are REFUSED:
+   *  a URL reaches log lines and `ps` output, and there is no taking it back. */
+  brokerUrl?: string;
+  username?: string;
+  /** Read-only. The password itself is never returned by any API. */
+  hasPassword?: boolean;
+  /** Roots the topic tree. Separators are preserved, so `home/av` means two
+   *  levels rather than one. */
+  prefix?: string;
+  /** Distinguishes two installs sharing one broker, and keys the Home
+   *  Assistant device. */
+  instance?: string;
+  /** Must be unique on the broker. Empty derives one from `instance`. */
+  clientId?: string;
+  intervalSeconds?: number;
+  keepAliveSeconds?: number;
+  /** Accepts a self-signed broker certificate. Named for what it does. */
+  tlsSkipVerify?: boolean;
+  /** Publishes Home Assistant device-discovery payloads. */
+  discovery?: boolean;
 }
 
 // ---------------------------------------------------------------- playout
@@ -787,6 +1013,13 @@ export interface FFmpegTools {
   /** What each candidate did when this machine was asked to encode a frame.
    *  Empty means the test encode never ran. */
   encoderCaps?: EncoderCapability[] | null;
+  /** Every filter the binary registers.
+   *
+   *  A filter is as optional as an encoder and fails just as hard. drawtext
+   *  needs --enable-libfreetype and is genuinely missing from ordinary builds,
+   *  so a feature that needs it has to check rather than assume. Empty means
+   *  the probe never ran, which everything reads as "assume the best". */
+  filters?: string[] | null;
 }
 
 /** One encoder's measured answer: what happened when this machine, with these
@@ -885,8 +1118,30 @@ export interface PlatformAccount {
   accountRef: string;
   expiresAt: string;
   scopes: string;
+  /** The provider's scope version when this account was connected. Compared
+   *  against the running build's to spot a token issued before a permission
+   *  was added. 0 means the row predates the field. */
+  scopeVer: number;
   createdAt: string;
   updatedAt: string;
+  /** Whether this account still holds the permissions this build needs.
+   *
+   *  Computed per request rather than stored, because the answer changes when
+   *  the BINARY changes, not when the row does — upgrading polyemesis can turn
+   *  a fine account into one that needs reconnecting. */
+  reconnect?: ReconnectReason;
+}
+
+/** Why an account should be reconnected.
+ *
+ *  An OAuth token carries exactly the scopes it was issued with, and granting a
+ *  new scope never upgrades a token that already exists. */
+export interface ReconnectReason {
+  needed: boolean;
+  reason?: string;
+  /** Named scopes the stored grant lacks, when that is how the verdict was
+   *  reached. Absent when the verdict came from the version. */
+  missing?: string[];
 }
 
 export interface SetupGuide {
@@ -961,7 +1216,14 @@ export type EventType =
   /** One chat message, one event. See ChatMessage. */
   | "chat"
   /** The whole per-platform connection table, whenever any part of it moves. */
-  | "chatState";
+  | "chatState"
+  /** Messages that were delivered and are now gone — deleted here, or deleted
+   *  on the platform's own dashboard and reported back to us. See ChatRetraction.
+   *
+   *  The one event in this union that must not be dropped on the floor. Missing
+   *  a "chat" costs a line of conversation; missing this one leaves a message on
+   *  screen that a moderator deliberately removed. */
+  | "chatRetract";
 
 export interface WsEvent {
   type: EventType;
@@ -1093,8 +1355,89 @@ export interface ChatStats {
   /** Shed because persistence fell behind. They were still shown live; only
    *  the scrollback lost them. */
   dropped: number;
+  /** Withdrawn after delivery — deleted here, or deleted on the platform's own
+   *  dashboard and reported back. A number climbing while nobody is using the
+   *  pane's delete button means moderation is happening somewhere polyemesis
+   *  cannot see. */
+  retracted: number;
   pending: number;
   adapters: number;
+}
+
+/** What a moderation call did, in the server's own words.
+ *
+ *  `detail` is not decoration and must be shown. It carries the difference
+ *  between "hidden from viewers" and "hidden only here, everyone can still see
+ *  it" — a distinction the status field alone cannot make, and one a moderator
+ *  who gets it wrong acts on for the rest of the broadcast. */
+export interface ChatModerationResult {
+  status: string;
+  scope?: string;
+  detail?: string;
+}
+
+/** Channel-wide chat rules. Only Twitch publishes an API for these.
+ *
+ *  Every field is optional and an omitted one means LEAVE IT ALONE, not "off".
+ *  Twitch takes all of these in one body, so sending a full object would switch
+ *  off follower-only mode as a side effect of adjusting slow mode. */
+export interface ChatSettings {
+  slowMode?: boolean;
+  slowModeSeconds?: number;
+  followerMode?: boolean;
+  followerModeMinutes?: number;
+  subscriberMode?: boolean;
+  emoteMode?: boolean;
+  uniqueChatMode?: boolean;
+  nonModeratorChatDelay?: boolean;
+  nonModeratorChatDelaySeconds?: number;
+}
+
+/** One viewer's recent messages and roles — the moderator's user card.
+ *
+ *  Read from polyemesis's own scrollback, because NO platform publishes an API
+ *  for a viewer's chat history. Twitch's mod card is a Twitch web-app feature
+ *  over internal endpoints; Helix offers "who is here now" and "who are the
+ *  moderators", neither of which is a history. The others have nothing.
+ *
+ *  Being local makes it work identically on all four platforms, which Twitch's
+ *  own card cannot do. The cost is depth, which is why `truncated` and
+ *  `retentionNote` exist and must be rendered: a moderator who reads a bounded
+ *  window as a complete record judges a pattern from a sample. */
+export interface ChatUserCard {
+  platform: ChatPlatform;
+  authorId: string;
+  /** As they appeared when they last spoke, not a fresh platform lookup. */
+  name?: string;
+  color?: string;
+  moderator?: boolean;
+  subscriber?: boolean;
+  broadcaster?: boolean;
+  messages: ChatMessage[];
+  /** The limit was reached, so the count is a floor and not a total. */
+  truncated: boolean;
+  /** Why the history is only this deep. Show it. */
+  retentionNote: string;
+}
+
+/** Messages that are gone. Carried by the "chatRetract" event.
+ *
+ *  A list rather than one id because a timeout removes everything one author
+ *  said, and one event per message would let the pane render a half-applied
+ *  timeout — some of the offender's messages gone, some still there. */
+export interface ChatRetraction {
+  platform: ChatPlatform;
+  account?: string;
+  /** What the server was actually holding and has dropped. NOT necessarily
+   *  everything the platform removed: anything already out of the server's
+   *  history ring cannot be named. */
+  messageIds: string[];
+  /** Set when the platform named a user rather than a message, so a client
+   *  holding its own longer buffer can apply the same rule to messages the
+   *  server no longer has. */
+  authorId?: string;
+  /** The platform cleared the entire room. */
+  all?: boolean;
 }
 
 /** A platform's published maximum message length. Advisory: the composer warns
@@ -1115,6 +1458,90 @@ export interface ChatOverview {
   limits: ChatLimit[];
   /** The scrollback came from the database rather than a live connection. */
   stored?: boolean;
+}
+
+/** Per-destination muxer and socket tuning.
+ *
+ *  Everything here was probed against the pinned FFmpeg before it shipped, and
+ *  every field is off by default: a destination that has not opted in produces
+ *  exactly the command it always did. */
+export interface DestTransport {
+  /** Drops FLV's zero duration and filesize metadata. Some RTMP ingests treat
+   *  a zero duration as a malformed file rather than as a live stream. RTMP
+   *  only; ignored on every other kind. */
+  noDurationFilesize?: boolean;
+  /** The interleave buffer. These are a PAIR: FFmpeg applies the packet cap
+   *  only once the queue has passed the byte threshold, so a threshold with no
+   *  cap does nothing at all and the server refuses it. */
+  muxQueuePackets?: number;
+  muxQueueBytes?: number;
+  /** Breaks a half-open socket. Without it a far end that vanished without a
+   *  FIN blocks the muxer indefinitely: FFmpeg keeps running, the supervisor
+   *  sees a live process, and the stream is off air with nothing reporting
+   *  it. 0 disables. */
+  rwTimeoutSeconds?: number;
+}
+
+/** How hard a destination is retried, and when to stop.
+ *
+ *  The zero value is the behaviour every destination had before this existed:
+ *  retry forever, 1s to 30s. */
+export interface DestResilience {
+  minBackoffSeconds?: number;
+  maxBackoffSeconds?: number;
+  /** Stop after this many CONSECUTIVE failed restarts; 0 retries forever.
+   *
+   *  The point is not to save CPU. A destination retrying forever is
+   *  indistinguishable from one that works -- the card says "reconnecting",
+   *  and nothing ever says this endpoint is not coming back. Giving up moves
+   *  it to failed, which the alert rules already treat as an incident. */
+  giveUpAfter?: number;
+}
+
+/** Per-destination audio encoding.
+ *
+ *  Note what is NOT here: an AAC profile. FFmpeg's native AAC encoder supports
+ *  only LC, and refuses to open at all when asked for HE-AAC; HE-AAC needs the
+ *  nonfree libfdk_aac. Opus answers the same goal -- good audio well below
+ *  64 kbps -- and is already in the build. */
+export interface AudioEncoding {
+  /** Empty is AAC. "opus" is refused on RTMP: FFmpeg will mux it, but no
+   *  mainstream RTMP ingest accepts it, so the stream would upload cleanly and
+   *  be rejected. */
+  codec?: "" | "opus";
+  /** Folds the routing graph's stereo output to one channel. A downmix of your
+   *  mix, not a re-route. */
+  mono?: boolean;
+}
+
+/** YouTube broadcast visibility. Empty means LEAVE IT ALONE, and that
+ *  distinction matters: YouTube's update is destructive by PART, so a status
+ *  write that omits privacyStatus reverts the broadcast to its default rather
+ *  than leaving it. */
+export type PrivacyStatus = "" | "private" | "unlisted" | "public";
+
+/** Twitch content classification labels Twitch will WRITE.
+ *
+ *  MatureGame is deliberately absent: it is readable and not writable, so
+ *  offering it would be a control that silently never applies. */
+export const TWITCH_LABELS = [
+  "DebatedSocialIssuesAndPolitics",
+  "DrugsIntoxication",
+  "Gambling",
+  "ProfanityVulgarity",
+  "SexualThemes",
+  "ViolentGraphic",
+] as const;
+
+/** Obligation metadata: who the programme is for, who may see it, what a
+ *  viewer is about to be shown. Every zero value means "do not touch". */
+export interface Compliance {
+  privacy?: PrivacyStatus;
+  /** COPPA self-declaration. undefined is "not said"; false is the real
+   *  declaration "this is not for children", and the two are different. */
+  madeForKids?: boolean;
+  /** Twitch labels, id -> enabled. A key set to false actively CLEARS it. */
+  labels?: Record<string, boolean>;
 }
 
 // ------------------------------------------------------------------- expert
@@ -1360,6 +1787,15 @@ export interface PostProdSettings {
   retainDays: number;
   retainJobs: number;
   kinds?: PostProdKindSettings[];
+  /** Transcription model for jobs that name none. Empty keeps the
+   *  hardware-derived choice, which is the right default and stays it.
+   *
+   *  Model choice IS the transcription decision — speed against accuracy
+   *  against memory — and the right answer depends partly on hardware
+   *  polyemesis can measure and partly on how much you care about the
+   *  transcript, which it cannot. See WhisperInfo.models for what this machine
+   *  has. */
+  whisperModel?: string;
 }
 
 /** What this machine can do about speech to text. Reported even when

@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
@@ -112,7 +114,7 @@ func TestSilenceRestartsEveryConsumer(t *testing.T) {
 	}
 
 	r := testRendition(1, "1080p60")
-	if renditionSig(r, 60, "") == renditionSig(r, 60, "silence-sig") {
+	if renditionSig(r, 60, "", "") == renditionSig(r, 60, "silence-sig", "") {
 		t.Error("a rendition does not restart when the silence tier appears")
 	}
 }
@@ -124,5 +126,18 @@ func TestPlayoutDirMatchesThePlayoutPackage(t *testing.T) {
 	cfg := config.Config{DataDir: "/var/lib/polyemesis"}
 	if got, want := cfg.PlayoutDir(), playout.DirIn(cfg.DataDir); got != want {
 		t.Errorf("config.PlayoutDir() = %q, playout.DirIn() = %q", got, want)
+	}
+}
+
+// Same idea for fonts, and the same reason: config spells "fonts" out as a
+// string literal because it is a leaf package and cannot import ffmpeg. If the
+// two ever disagree, startup writes the embedded fonts into one directory while
+// the font picker lists another, and every overlay fails with a font the
+// operator can see sitting on disk.
+func TestFontsDirMatchesTheFfmpegPackage(t *testing.T) {
+	cfg := config.Config{DataDir: "/var/lib/polyemesis"}
+	want := filepath.Join(cfg.DataDir, ffmpeg.FontsDirName)
+	if got := cfg.FontsDir(); got != want {
+		t.Errorf("config.FontsDir() = %q, ffmpeg.FontsDirName gives %q", got, want)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,39 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
+
+// freeUDPPort asks the kernel for a UDP port nobody is using.
+//
+// Bind :0, read back what we got, release it. There is a window between the
+// release and the manager's own bind, and it is deliberately not defended
+// against: the alternative is a probe that tries to PREDICT whether the real
+// bind will succeed, and that cannot be done honestly here. gosrt sets
+// SO_REUSEADDR on its listener and a plain ListenPacket does not, so a probe and
+// the real thing do not even agree on what "in use" means.
+//
+// If the window is lost, the manager fails to bind and the test that cares says
+// so while naming the port. That is the right failure: loud, specific, and about
+// the thing that actually happened.
+func freeUDPPort(t *testing.T) int {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot find a free UDP port: %v", err)
+	}
+	defer pc.Close()
+	return pc.LocalAddr().(*net.UDPAddr).Port
+}
+
+// srtPortOf reports the port the fixture settled on, for failure messages that
+// name a real number instead of "the SRT port".
+func srtPortOf(t *testing.T, store *db.DB) int {
+	t.Helper()
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	return st.Listeners.SRTPort
+}
 
 // renditionServer is testServer plus a real engine, because every rendition
 // mutation reconciles.
@@ -47,6 +81,27 @@ func renditionServer(t *testing.T, tools *ffmpeg.Tools) (http.Handler, *db.DB, f
 	if err := cfg.EnsureDirs(); err != nil {
 		t.Fatalf("EnsureDirs: %v", err)
 	}
+	// Give the shared SRT listener a port this test owns.
+	//
+	// The manager binds a REAL UDP socket on Start, even here -- the bogus FFmpeg
+	// path stops encoders from spawning, but the listener is gosrt inside our own
+	// process and nothing about a fake FFmpeg prevents it. On the 6000 default
+	// that makes every test in this fixture depend on 6000 being free, and on a
+	// developer machine it very often is not: Docker Desktop publishes on it.
+	//
+	// The symptom was not a clear "port in use" either. The listener silently
+	// failed, tokenEnforced read false, and the test that asserts on it reported
+	// something that could not be true. An isolated port removes the shared
+	// resource rather than teaching each test to tolerate losing it.
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Listeners.SRTPort = freeUDPPort(t)
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+
 	bus := events.NewBroker()
 	// A manager rather than a bare engine: the API is source-aware now, and
 	// Start is what creates the engine for the source the migration made.

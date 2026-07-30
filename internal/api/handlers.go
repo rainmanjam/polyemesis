@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
@@ -166,7 +167,17 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Re-issue: a password change should refresh the session, not end it.
+	// SetPassword bumped the user's token epoch, so every session token issued
+	// before this moment — including the one that authenticated this very
+	// request — is now refused. That is the point: a password change is what an
+	// operator does when they think somebody else is holding their session, and
+	// it has to actually end that session.
+	//
+	// Re-issuing here means the operator changing their own password stays
+	// logged in on this device while every other copy of the old token stops
+	// working. If the re-issue fails, the response still reports success,
+	// because the password genuinely did change; the operator lands back at the
+	// login screen on their next request, which is the safe direction to fail.
 	token, err := s.sessions.Issue(user.ID, user.Username)
 	if err == nil {
 		_ = s.sessions.SetSession(w, r, token)
@@ -627,7 +638,44 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// HasPassword is derived, never stored in the settings blob.
+	//
+	// The blob is served straight to the settings page, so a password in it
+	// would be handed to every browser that opened Settings. The page gets a
+	// boolean instead: enough to render "a password is set" and to offer to
+	// clear it, and nothing more.
+	if has, err := s.store.HasMQTTPassword(); err == nil {
+		settings.MQTT.HasPassword = has
+	} else {
+		s.log.Warn("cannot tell whether an MQTT password is stored", "err", err)
+	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// handlePutMQTTPassword sets or clears the broker password.
+//
+// Its own endpoint rather than a field on the settings blob, for the reason
+// above: the blob travels outward on every settings read, and a write-only
+// field in a read-write payload is a trap -- a client that PUT back what it
+// GOT would blank the password every time.
+//
+// An empty password CLEARS the stored one. That is the only way to move to an
+// anonymous broker without leaving a stale credential behind to be sent to it.
+func (s *Server) handlePutMQTTPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.store.PutMQTTPassword(s.box, req.Password); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// No reconcile call: the MQTT runner polls the settings and notices the
+	// password changed by its hash, which is also what makes a rotation to a
+	// different password of the same length take effect.
+	writeJSON(w, http.StatusOK, map[string]bool{"hasPassword": req.Password != ""})
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
@@ -683,7 +731,31 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "settings saved but reconcile failed: "+err.Error())
 		return
 	}
+	// Chat retention is not the manager's to reconcile -- the Hub owns it -- and
+	// it has to be applied HERE rather than at the next restart. A retention
+	// setting that stores, returns 200 and keeps sweeping on the old numbers is
+	// the same silent no-op the ingest block above documents.
+	ApplyChatRetention(s.chat, settings.Chat)
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// ApplyChatRetention pushes the stored bounds into a running Hub.
+//
+// Shared by the settings handler and startup so the two cannot disagree about
+// what "0 hours" means, which is the sort of difference that only shows up as
+// "my chat history vanished after a restart".
+func ApplyChatRetention(hub *chat.Hub, c db.ChatSettings) {
+	if hub == nil {
+		return
+	}
+	// 0 hours is keep-forever, and a negative Duration is how the Hub spells
+	// that. Converting through time.Duration(0) would mean "purge everything
+	// older than now", which is the exact opposite.
+	age := time.Duration(c.RetentionHours) * time.Hour
+	if c.RetentionHours <= 0 {
+		age = -1
+	}
+	hub.SetRetention(age, c.KeepMessages, time.Duration(c.PurgeMinutes)*time.Minute)
 }
 
 // ------------------------------------------------------------- destinations

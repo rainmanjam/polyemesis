@@ -49,9 +49,23 @@ func scanAlertRule(s interface{ Scan(...any) error }) (*alerts.Rule, error) {
 const alertRuleColumns = `id, name, enabled, url, format, events, min_severity,
 	debounce_seconds, min_interval_seconds, created_at, updated_at`
 
+// The alert-rule reads, as whole compile-time constants.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. That is the point: a query
+// assembled at the call site is indistinguishable, to a reader and to a static
+// analyser, from one that interpolates a variable. Making the query a constant
+// makes it safe BY CONSTRUCTION — there is no expression left for a value to
+// reach. See the same treatment, and the fuller argument, in chat.go.
+const (
+	alertRulesQuery        = `SELECT ` + alertRuleColumns + ` FROM alert_rules ORDER BY id`
+	alertRulesEnabledQuery = `SELECT ` + alertRuleColumns + ` FROM alert_rules WHERE enabled = 1 ORDER BY id`
+	alertRuleByIDQuery     = `SELECT ` + alertRuleColumns + ` FROM alert_rules WHERE id = ?`
+)
+
 // ListAlertRules returns every rule, oldest first.
 func (d *DB) ListAlertRules() ([]alerts.Rule, error) {
-	rows, err := d.sql.Query(`SELECT ` + alertRuleColumns + ` FROM alert_rules ORDER BY id`)
+	rows, err := d.sql.Query(alertRulesQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +85,7 @@ func (d *DB) ListAlertRules() ([]alerts.Rule, error) {
 // AlertRules returns the enabled rules. It is what satisfies
 // alerts.RuleSource, so the notifier never sees a rule that is switched off.
 func (d *DB) AlertRules() ([]alerts.Rule, error) {
-	rows, err := d.sql.Query(`SELECT ` + alertRuleColumns + ` FROM alert_rules WHERE enabled = 1 ORDER BY id`)
+	rows, err := d.sql.Query(alertRulesEnabledQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +104,7 @@ func (d *DB) AlertRules() ([]alerts.Rule, error) {
 
 // GetAlertRule loads one rule.
 func (d *DB) GetAlertRule(id int64) (*alerts.Rule, error) {
-	r, err := scanAlertRule(d.sql.QueryRow(`SELECT `+alertRuleColumns+` FROM alert_rules WHERE id = ?`, id))
+	r, err := scanAlertRule(d.sql.QueryRow(alertRuleByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

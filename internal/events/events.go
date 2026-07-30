@@ -66,6 +66,17 @@ const (
 	// tell an idle channel from a dead adapter, and cross-platform chat where
 	// one platform silently stopped is worse than one where it visibly did.
 	TypeChatState Type = "chatState"
+	// TypeChatRetract says messages that were delivered are now gone —
+	// deleted, or removed by a timeout that cleared everything one author said.
+	//
+	// This one is NOT droppable in the way the others are, and that is the
+	// difference worth understanding. Shedding a TypeChat costs a line of
+	// conversation. Shedding a TypeChatRetract leaves a message on screen that
+	// a moderator deliberately removed, in front of whoever is reading the pane
+	// and whatever overlay is fed from it. A subscriber that misses one has to
+	// reload its scrollback to be correct again, which is what the REST history
+	// endpoint is for.
+	TypeChatRetract Type = "chatRetract"
 )
 
 // Event is one message.

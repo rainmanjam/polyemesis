@@ -16,6 +16,23 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
+// setSettings writes the engine's live settings the way production does: under
+// the lock.
+//
+// Assigning e.settings directly RACES the status publisher. Engine.Settings()
+// reads that field under e.mu.RLock(), and it is called from the supervisor's
+// own goroutine via setState -> onState -> publishStatus -> Status ->
+// SourceInfo. The engine is correct; a test that reaches past its mutex is not.
+//
+// This was reported by the race detector on a Dependabot PR that bumped an
+// unrelated dependency -- the bump shifted timing enough to make a latent race
+// fire, and the failure looked like the dependency's fault. It was ours.
+func setSettings(e *Engine, s db.Settings) {
+	e.mu.Lock()
+	e.settings = s
+	e.mu.Unlock()
+}
+
 // ---------------------------------------------------------------- the choice
 
 func failoverChoice(cur sourceKind, mut func(*sourceChoice)) sourceChoice {
@@ -306,7 +323,7 @@ func TestTheRestartHashDoesNotMoveWhenTheSourceDoes(t *testing.T) {
 	if destSpec(row, compiled, on) != destSpec(row, compiled, afterProbeCleared) {
 		t.Error("a destination's restart hash moved across a source switch")
 	}
-	if renditionSig(rend, 60, on) != renditionSig(rend, 60, afterProbeCleared) {
+	if renditionSig(rend, 60, on, "") != renditionSig(rend, 60, afterProbeCleared, "") {
 		t.Error("a rendition's restart hash moved across a source switch")
 	}
 }
@@ -511,7 +528,7 @@ func (e *Engine) deliver(k sourceKind, now time.Time) {
 func TestADestinationRidesAPrimaryDownSlateBackCycleWithoutRestarting(t *testing.T) {
 	e := failoverEngine(t)
 	s := failoverOnSettings()
-	e.settings = s
+	setSettings(e, s)
 
 	e.reconcileSelector(s, wantSelector(s), "")
 	hub := e.selectorHub()
@@ -630,7 +647,7 @@ func TestADestinationRidesAPrimaryDownSlateBackCycleWithoutRestarting(t *testing
 func TestARespawnedFeedDoesNotRewindTheTimeline(t *testing.T) {
 	e := failoverEngine(t)
 	s := failoverOnSettings()
-	e.settings = s
+	setSettings(e, s)
 
 	e.reconcileSelector(s, wantSelector(s), "")
 	if e.selectorHub() == nil {
@@ -679,7 +696,7 @@ func TestARespawnedFeedDoesNotRewindTheTimeline(t *testing.T) {
 func TestTurningFailoverOffLeavesNothingBehind(t *testing.T) {
 	e := failoverEngine(t)
 	on := failoverOnSettings()
-	e.settings = on
+	setSettings(e, on)
 
 	e.reconcileSelector(on, wantSelector(on), "")
 	if e.selectorHub() == nil {
@@ -687,7 +704,7 @@ func TestTurningFailoverOffLeavesNothingBehind(t *testing.T) {
 	}
 
 	off := db.DefaultSettings()
-	e.settings = off
+	setSettings(e, off)
 	e.reconcileSelector(off, wantSelector(off), "")
 
 	if h := e.selectorHub(); h != nil {
@@ -716,7 +733,7 @@ func TestTurningFailoverOffLeavesNothingBehind(t *testing.T) {
 func TestAnOperatorCanPutASourceOnAirByHand(t *testing.T) {
 	e := failoverEngine(t)
 	s := failoverOnSettings()
-	e.settings = s
+	setSettings(e, s)
 
 	e.reconcileSelector(s, wantSelector(s), "")
 	if e.selectorHub() == nil {

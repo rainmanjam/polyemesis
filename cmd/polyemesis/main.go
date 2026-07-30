@@ -142,6 +142,16 @@ func run(h *hooks) error {
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
+	// Text overlays need a font FILE, and the image polyemesis ships has no
+	// system fonts at all -- fontconfig is installed and finds nothing. The
+	// embedded copies are written out here so drawtext has a real path to open.
+	//
+	// Every startup, not just the first: it keeps the built-ins in step with
+	// the binary across an upgrade, and repairs one that was truncated. An
+	// operator's own fonts in the same directory are left alone.
+	if err := ffmpeg.EnsureFonts(cfg.FontsDir()); err != nil {
+		return err
+	}
 
 	// FFmpeg is checked before anything else is opened: a missing or too-old
 	// binary is a hard, immediately actionable failure and there is no point
@@ -195,6 +205,21 @@ func run(h *hooks) error {
 	h.progress("starting the background job queue")
 	pp := startPostProd(ctx, log, cfg, store, eng, tools)
 
+	// Retained MQTT telemetry. Started unconditionally and inert until an
+	// operator switches it on: the runner watches the stored settings, so
+	// enabling it does not need a restart. Nothing in the streaming path can
+	// block on or fail because of a broker.
+	stopMQTT := startMQTT(ctx, log, store, box, eng, version)
+	defer func() {
+		// Its own bounded context, because this runs after ctx is cancelled and
+		// a clean `offline` is exactly what must still get out. Without it the
+		// instance sits on the broker reading `online` until the keep-alive
+		// times out.
+		shutdown, done := context.WithTimeout(context.Background(), 5*time.Second)
+		defer done()
+		stopMQTT(shutdown)
+	}()
+
 	// The unified chat fan-in. Built unconditionally: a Hub with nothing
 	// attached is the difference between "no platform is connected" and "this
 	// build has no chat", and the operator needs to be told which.
@@ -204,6 +229,19 @@ func run(h *hooks) error {
 		chat.WithLogger(log),
 	)
 	defer hub.Close()
+	// Retention is an operator setting, and the stored value has to be applied
+	// at startup as well as on save. Without this a longer window would work
+	// until the first restart and then quietly revert to the built-in two
+	// hours, taking the moderator's user-card history with it.
+	//
+	// A failed read leaves the Hub on its own defaults rather than stopping the
+	// server: chat history is the most expendable data here, and refusing to
+	// boot over it would be a wildly disproportionate response.
+	if s, err := store.GetSettings(); err == nil {
+		api.ApplyChatRetention(hub, s.Chat)
+	} else {
+		log.Warn("chat retention settings unreadable; using the built-in defaults", "err", err)
+	}
 
 	srv := api.New(api.Options{
 		Log: log, Config: cfg,
@@ -359,22 +397,86 @@ func startHTTPHelper(log *slog.Logger, cfg config.Config, provider *tlsx.Provide
 
 // redirectToHTTPS sends everything that is not an ACME challenge to the TLS
 // listener.
+//
+// The destination is the configured hostname when there is one. When there is
+// not, it is the Host header the client sent — which is attacker-controlled,
+// and is why this function is more careful than a one-line http.Redirect.
+//
+// The exposure is narrow but real. An attacker cannot make a victim's browser
+// send a forged Host to this box, so they cannot steer a victim directly. What
+// they CAN do is send `Host: evil.example` themselves and have a shared cache
+// in front of this server store the resulting `301 Location: https://evil.
+// example/...` against that URL, then serve it to the next person who asks for
+// it. A permanent, cacheable redirect carrying a value a stranger chose is the
+// whole of that bug.
+//
+// So the two cases are treated differently, because they are different:
+//
+//   - Configured hostname: the destination is fixed and ours. Permanent and
+//     cacheable, which is what a redirect to a stable name should be.
+//   - Host from the request: validated for shape, then sent as a TEMPORARY
+//     redirect with `Cache-Control: no-store` and `Vary: Host`, so no
+//     intermediary may store it and hand it to a different client.
+//
+// Reflecting the request host at all is deliberate: an operator who has not set
+// tls.hostname still reaches this box by IP or by some name their own network
+// resolves, and refusing to redirect would break that for no gain — the client
+// only ever arrives at the authority it already asked for.
 func redirectToHTTPS(cfg config.Config) http.HandlerFunc {
+	configured := strings.TrimSpace(cfg.TLS.Hostname) != ""
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		host := redirectHost(cfg, r.Host)
 		if host == "" {
 			http.Error(w, "no host to redirect to", http.StatusBadRequest)
 			return
 		}
+
 		// 301 is what a browser caches for a page load, but it is also allowed
 		// to rewrite the request to GET; 308 keeps the method and body for the
 		// API clients that would otherwise silently lose their request.
-		code := http.StatusMovedPermanently
+		permanent, temporary := http.StatusMovedPermanently, http.StatusFound
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			code = http.StatusPermanentRedirect
+			permanent, temporary = http.StatusPermanentRedirect, http.StatusTemporaryRedirect
 		}
+
+		code := permanent
+		if !configured {
+			if !plausibleHost(host) {
+				http.Error(w, "unusable Host header", http.StatusBadRequest)
+				return
+			}
+			code = temporary
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Add("Vary", "Host")
+		}
+
 		http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), code)
 	}
+}
+
+// plausibleHost reports whether a host:port taken from a request header is
+// shaped like an authority and nothing else.
+//
+// This is not a security boundary on its own — the no-store temporary redirect
+// above is what contains the actual risk — but a Host header is raw client
+// input, and letting anything at all through into a Location value invites the
+// next reader to assume it was checked somewhere. Letters, digits, dots,
+// hyphens, and the colon and brackets an IPv6 authority needs. Nothing else,
+// and nothing empty.
+func plausibleHost(host string) bool {
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, c := range host {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.' || c == '-' || c == ':' || c == '[' || c == ']':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // redirectHost builds the authority to redirect to: the configured hostname

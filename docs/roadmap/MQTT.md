@@ -1,5 +1,40 @@
 # MQTT: retained telemetry, and alerts as a rider
 
+> **Status: telemetry SHIPPED.** See [../MQTT.md](../MQTT.md) for the operator
+> page. Alert delivery over MQTT remains unbuilt and is still judged redundant
+> for the reason given below.
+>
+> **Three things this design got wrong, found by building it.** They are left
+> inline below rather than edited out, because the pattern matters more than the
+> individual errors.
+>
+> 1. **The `Queue: nil` trap is real but INERT.** `autopaho/auto.go:271` does
+>    substitute `memory.New()` — still true in the pinned v0.23.0, and the
+>    field's own comment contradicts the code. But the queue is read *only* by
+>    `PublishViaQueue` (auto.go:488). `ConnectionManager.Publish` (auto.go:460)
+>    bypasses it entirely and returns `ConnectionDownError` when the link is
+>    down, which is exactly the no-buffering behaviour this design wanted. **No
+>    custom no-op queue is needed.** The claim that shipping `Queue: nil` "would
+>    have produced exactly the stale-replay behaviour it argued against" is
+>    wrong — it would have produced an idle allocated queue and correct
+>    behaviour. The verification pass found a true code fact and drew a false
+>    conclusion from it.
+> 2. **4 hex of sha256 is too few, and the arithmetic is not close.** 16 bits
+>    gives a birthday collision probability of about n²/2/65536: ~1.9% across 50
+>    altered names, ~68% across 300. Shipped with **8 hex** (32 bits, ~0.0001%
+>    across 100). The design was right that the hash is necessary and wrong
+>    about its width.
+> 3. **A structural aliasing hole the design did not see.** A source named
+>    literally `twitch-1a2b3c4d` slugs to itself unaltered, so it collides with
+>    any name whose hash happens to be `1a2b3c4d`. Closed by hashing anything
+>    already shaped like a suffix, which makes equality of the output imply
+>    equality of both halves.
+>
+> Everything else held: the dependency really is one net-new module (**+586 KB
+> on 25.4 MB, +2.4%**, measured against a paired build); `paho.golang` really is
+> MQTT 5.0 only; QoS 1 really is required for retained state; and
+> `engine.Status` really did carry no source name.
+
 **Status:** proposed, not started.
 **Effort: 7–10 days**, or **5–6 days** for telemetry alone, which delivers most
 of the value.
