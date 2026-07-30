@@ -155,7 +155,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatRead:
         "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
       moderation:
-        "Delete a message, over the same auth/youtube scope everything else here uses — so an account connected before this existed can already do it, with no reconnect. The connected account still has to own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. Banning and timing out are not implemented: the API supports them under the same scope, so this is a decision rather than a limit — see docs/roadmap/CHAT-MODERATION.md.",
+        "Delete a message, over the same auth/youtube scope everything else here uses — so an account connected before this existed can already do it, with no reconnect. The connected account still has to own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. Banning and timing out work too, over the same scope — permanent, or a timeout in seconds.",
     },
   },
   {
@@ -177,7 +177,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     reasons: {
       metadata: "Title and category, over the channel:manage:broadcast scope.",
       moderation:
-        "Delete a message, over moderator:manage:chat_messages. An account connected before this existed holds a token without that scope — the account list says so and asks you to reconnect, rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete anything older than six hours, and refuses the broadcaster's own messages and other moderators'. Banning and timing out are not implemented and moderator:manage:banned_users is deliberately not requested — see docs/roadmap/CHAT-MODERATION.md.",
+        "Delete a message, over moderator:manage:chat_messages. An account connected before this existed holds a token without that scope — the account list says so and asks you to reconnect, rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete anything older than six hours, and refuses the broadcaster's own messages and other moderators'. Banning and timing out work over moderator:manage:banned_users, which is a separate scope from deletion because removing a person is a bigger ask than removing a message.",
     },
   },
   {
@@ -233,7 +233,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatRead:
         "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
       moderation:
-        "Delete a message, over moderation:chat_message:manage. Banning and timing out are not implemented and the moderation:ban scope is deliberately not requested: nothing in polyemesis bans a viewer, and asking a restreamer's audience for that power would be overreach. Use Kick's own dashboard.",
+        "Delete a message, over moderation:chat_message:manage. Banning and timing out work over moderation:ban. Note that Kick counts timeouts in MINUTES where YouTube and Twitch count seconds, and caps them at 7 days; polyemesis converts, so you give it one unit everywhere.",
       viewerStats: "Live state and viewer count from Kick's livestreams endpoints.",
     },
   },

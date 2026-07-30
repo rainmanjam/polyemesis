@@ -270,13 +270,29 @@ func TestKickAuthURLCarriesPKCEAndEveryRequestedScope(t *testing.T) {
 			t.Errorf("scope %q is declared but not requested at authorization time: %q", want, scope)
 		}
 	}
-	// Nothing in polyemesis bans a viewer, and asking for the power to do so
-	// makes the consent screen scarier than the feature warrants.
+	// This used to assert the OPPOSITE: that moderation:ban was absent, because
+	// nothing here banned a viewer and asking for the power to do so made the
+	// consent screen scarier than the feature warranted.
+	//
+	// The maintainer reversed that decision and banning is implemented, so the
+	// assertion is inverted rather than deleted. The property worth guarding is
+	// unchanged and is the reason this block exists at all: the scopes asked for
+	// on the consent screen must match what the code actually does. A scope
+	// requested and unused makes an operator grant power nobody exercises; a
+	// scope used and unrequested is a 401 they cannot fix without reconnecting.
+	var hasBan bool
 	for _, g := range granted {
 		if g == "moderation:ban" {
-			t.Error("moderation:ban is requested but nothing uses it")
+			hasBan = true
 		}
 	}
+	if !hasBan {
+		t.Error("moderation:ban is not requested, but KickAdapter.Ban exists and will 401 without it")
+	}
+	// The other half of the rule -- that the implementation is really there --
+	// is asserted in internal/chat, where the interface lives. Reaching for it
+	// from here would make the OAuth package depend on the chat package for a
+	// compile-time check.
 }
 
 func TestKickTokenRequestsSendTheGrantKickExpects(t *testing.T) {

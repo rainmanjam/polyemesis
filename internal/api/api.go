@@ -394,6 +394,10 @@ func (s *Server) Handler() http.Handler {
 			// separate from delete because the two are different decisions:
 			// one takes a message off the public feed, the other destroys it.
 			r.Post("/chat/messages/hide", s.handleChatHideMessage)
+			// Banning addresses a PERSON, not a message, so it is its own
+			// route rather than a mode on the message ones.
+			r.Post("/chat/bans", s.handleChatBan)
+			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)
 		})
 

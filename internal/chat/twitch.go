@@ -309,6 +309,10 @@ func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Sink) (bool, error
 // TwitchHelixBase is Twitch's REST API. Overridden in tests.
 const TwitchHelixBase = "https://api.twitch.tv/helix"
 
+// twitchClientIDHeader is required on every Helix request alongside the bearer
+// token. A request carrying a valid token and no Client-Id is rejected.
+const twitchClientIDHeader = "Client-Id"
+
 // Delete removes one message from the channel's chat.
 //
 // Over Helix, not IRC: Twitch removed the /delete chat command, so the only way
@@ -327,6 +331,98 @@ func (t *TwitchAdapter) Delete(ctx context.Context, messageID string) error {
 		return fmt.Errorf("no message id to delete, and Twitch reads a missing id as " +
 			"\"delete every message in this chat\"")
 	}
+	if err := t.helixReady(); err != nil {
+		return err
+	}
+
+	q := url.Values{
+		"broadcaster_id": {t.cfg.BroadcasterID},
+		"moderator_id":   {t.cfg.ModeratorID},
+		"message_id":     {messageID},
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodDelete,
+		t.helixBase()+"/moderation/chat?"+q.Encode(),
+		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, nil, nil)
+	if err != nil {
+		return t.moderationError(err, "deletion")
+	}
+	return nil
+}
+
+// Ban removes a user from the channel's chat, permanently or for a duration.
+//
+// One endpoint does both: omit duration for a permanent ban, supply seconds for
+// a timeout. Twitch counts in SECONDS; Kick counts in minutes.
+func (t *TwitchAdapter) Ban(ctx context.Context, userID string, d time.Duration, reason string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("no user id to ban")
+	}
+	if err := t.helixReady(); err != nil {
+		return err
+	}
+
+	data := map[string]any{"user_id": userID}
+	if d > 0 {
+		// Round up for the same reason YouTube's does: truncating a sub-second
+		// timeout to zero would turn it into a permanent ban.
+		data["duration"] = int64((d + time.Second - 1) / time.Second)
+	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		// Twitch caps this at 1000 characters and rejects the whole request if
+		// it is longer, so a long reason must not cost the ban itself.
+		if len([]rune(reason)) > 1000 {
+			reason = string([]rune(reason)[:1000])
+		}
+		data["reason"] = reason
+	}
+
+	q := url.Values{
+		"broadcaster_id": {t.cfg.BroadcasterID},
+		"moderator_id":   {t.cfg.ModeratorID},
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodPost,
+		t.helixBase()+"/moderation/bans?"+q.Encode(),
+		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID},
+		map[string]any{"data": data}, nil)
+	if err != nil {
+		return t.moderationError(err, "ban")
+	}
+	return nil
+}
+
+// Unban lifts a ban or an unexpired timeout.
+func (t *TwitchAdapter) Unban(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("no user id to unban")
+	}
+	if err := t.helixReady(); err != nil {
+		return err
+	}
+	q := url.Values{
+		"broadcaster_id": {t.cfg.BroadcasterID},
+		"moderator_id":   {t.cfg.ModeratorID},
+		"user_id":        {userID},
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodDelete,
+		t.helixBase()+"/moderation/bans?"+q.Encode(),
+		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, nil, nil)
+	if err != nil {
+		return t.moderationError(err, "unban")
+	}
+	return nil
+}
+
+func (t *TwitchAdapter) helixBase() string {
+	if t.cfg.APIBase != "" {
+		return t.cfg.APIBase
+	}
+	return TwitchHelixBase
+}
+
+// helixReady reports whether this adapter can make a moderation call at all.
+func (t *TwitchAdapter) helixReady() error {
 	if t.cfg.ClientID == "" || t.cfg.HelixToken == nil {
 		return fmt.Errorf("this Twitch connection cannot moderate: it was built without API " +
 			"credentials. Reconnect the Twitch account in Settings → Platforms")
@@ -336,30 +432,16 @@ func (t *TwitchAdapter) Delete(ctx context.Context, messageID string) error {
 			"address a moderation call at it. This happens when reading a channel other than the "+
 			"connected account's own", firstNonEmpty(t.cfg.Channel, "this channel"))
 	}
+	return nil
+}
 
-	base := t.cfg.APIBase
-	if base == "" {
-		base = TwitchHelixBase
-	}
-	q := url.Values{
-		"broadcaster_id": {t.cfg.BroadcasterID},
-		"moderator_id":   {t.cfg.ModeratorID},
-		"message_id":     {messageID},
-	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodDelete,
-		base+"/moderation/chat?"+q.Encode(),
-		t.cfg.HelixToken, map[string]string{"Client-Id": t.cfg.ClientID}, nil, nil)
-	if err == nil {
-		return nil
-	}
-
-	// Each of these is a different thing to do about it, which is the whole
-	// reason they are not one sentence.
+// moderationError maps a Helix refusal onto the thing to do about it.
+func (t *TwitchAdapter) moderationError(err error, verb string) error {
 	switch statusOf(err) {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("Twitch refused the deletion. An account connected before moderation "+
-			"existed never granted moderator:manage:chat_messages — disconnect and reconnect it in "+
-			"Settings → Platforms. Twitch said: %w", err)
+		return fmt.Errorf("Twitch refused the %s. An account connected before moderation existed never "+
+			"granted the scope for it — disconnect and reconnect it in Settings → Platforms. "+
+			"Twitch said: %w", verb, err)
 	case http.StatusForbidden:
 		return fmt.Errorf("Twitch says this account does not moderate %s. The connected account has "+
 			"to be the broadcaster or a moderator of that channel: %w",
@@ -367,9 +449,12 @@ func (t *TwitchAdapter) Delete(ctx context.Context, messageID string) error {
 	case http.StatusNotFound:
 		return fmt.Errorf("Twitch no longer has that message. It refuses to delete anything older "+
 			"than six hours, and this one may simply have aged out: %w", err)
+	case http.StatusConflict:
+		// Only bans produce this, and it means another process is mid-change.
+		return fmt.Errorf("Twitch is already changing that user's ban state; try again in a moment: %w", err)
 	case http.StatusBadRequest:
-		return fmt.Errorf("Twitch will not delete that message. It refuses deletion of the "+
-			"broadcaster's own messages and those of other moderators: %w", err)
+		return fmt.Errorf("Twitch will not %s that. It protects the broadcaster's own messages and "+
+			"other moderators, and refuses to ban somebody already banned: %w", verb, err)
 	}
 	return err
 }

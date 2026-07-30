@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -326,4 +327,80 @@ func (s *Server) handleChatHideMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest,
 			`scope must be "local" (hide it here only) or "platform" (hide it from viewers)`)
 	}
+}
+
+// handleChatBan removes a person from one platform's chat.
+//
+// The duration is in SECONDS on the wire, and exactly one unit exists in this
+// API on purpose. The platforms disagree — YouTube and Twitch count seconds,
+// Kick counts minutes — and each adapter converts at the last moment. A caller
+// here never has to know, and cannot get it wrong.
+//
+// Omitting the duration, or sending 0, is a PERMANENT ban. That is the platforms'
+// own convention on all three, so it is kept rather than invented around.
+func (s *Server) handleChatBan(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	userID := strings.TrimSpace(q.Get("userId"))
+	if platform == "" || userID == "" {
+		writeError(w, http.StatusBadRequest, "platform and userId are required")
+		return
+	}
+
+	var d time.Duration
+	if raw := strings.TrimSpace(q.Get("seconds")); raw != "" {
+		secs, err := strconv.Atoi(raw)
+		if err != nil || secs < 0 {
+			writeError(w, http.StatusBadRequest,
+				"seconds must be a whole number of seconds, or omitted for a permanent ban")
+			return
+		}
+		d = time.Duration(secs) * time.Second
+	}
+
+	if err := s.chat.Ban(r.Context(), platform, account, userID, d, strings.TrimSpace(q.Get("reason"))); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// The verb is reported back, because "banned" and "timed out for 10m" are
+	// different things to have just done and the caller should not have to infer
+	// which from the request it sent.
+	out := map[string]string{"status": "banned", "scope": "permanent"}
+	if d > 0 {
+		out["status"] = "timed out"
+		out["scope"] = d.String()
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleChatUnban lifts a ban or an unexpired timeout.
+//
+// It does not restore the messages that the ban retracted. Those are gone from
+// this server's history and nothing re-fetches them; the response says so rather
+// than leaving an operator to wonder why the chat did not come back.
+func (s *Server) handleChatUnban(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	account := strings.TrimSpace(q.Get("account"))
+	userID := strings.TrimSpace(q.Get("userId"))
+	if platform == "" || userID == "" {
+		writeError(w, http.StatusBadRequest, "platform and userId are required")
+		return
+	}
+	if err := s.chat.Unban(r.Context(), platform, account, userID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "unbanned",
+		"detail": "They can post again. Their earlier messages do not come back — polyemesis " +
+			"does not re-fetch what it has dropped.",
+	})
 }

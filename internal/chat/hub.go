@@ -695,6 +695,59 @@ func (h *Hub) HideLocally(p db.Platform, account, messageID string) error {
 	return nil
 }
 
+// Ban removes a person from one platform's chat. A zero duration is permanent.
+//
+// Per-platform and never fan-out, for the same reason Delete is: a user id only
+// means something on the platform that issued it, and the same human on two
+// platforms is two accounts with no link between them that polyemesis can see.
+//
+// The messages that person already sent are retracted from the pane too. Every
+// platform here does that on its own side -- a ban or timeout clears their
+// backlog -- so leaving ours behind would show the operator a room the viewers
+// are no longer in.
+func (h *Hub) Ban(ctx context.Context, p db.Platform, account, userID string, d time.Duration, reason string) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	b, ok := r.adapter.(Banner)
+	if !ok {
+		return fmt.Errorf("chat: polyemesis cannot ban on %s; use the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	if err := b.Ban(ctx, userID, d, reason); err != nil {
+		return err
+	}
+	h.retractUser(r, userID)
+	return nil
+}
+
+// Unban lifts a ban or an unexpired timeout.
+//
+// It does NOT restore the messages that were retracted. They are gone from this
+// server's history and nothing re-fetches them; saying otherwise would promise a
+// sync that does not exist.
+func (h *Hub) Unban(ctx context.Context, p db.Platform, account, userID string) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	b, ok := r.adapter.(Banner)
+	if !ok {
+		return fmt.Errorf("chat: polyemesis cannot lift a ban on %s; use the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	return b.Unban(ctx, userID)
+}
+
 // ------------------------------------------------------------------- status
 
 // Statuses reports every attached adapter, ordered so the UI does not reshuffle

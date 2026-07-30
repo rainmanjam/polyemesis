@@ -94,6 +94,38 @@ type Deleter interface {
 	Delete(ctx context.Context, messageID string) error
 }
 
+// Banner is the optional capability for removing a PERSON rather than a message.
+//
+// A deliberate reversal, and worth recording as one. This codebase previously
+// declined to request any ban scope, on the grounds that "asking a restreamer's
+// audience for that power would be overreach". That was the maintainer's call
+// and it has been changed by the maintainer; the scopes below are requested now.
+// See docs/roadmap/CHAT-MODERATION.md.
+//
+// The duration is a time.Duration and NOT a number, because the platforms do not
+// agree on the unit and the disagreement is silent:
+//
+//	YouTube  banDurationSeconds   seconds
+//	Twitch   duration             seconds
+//	Kick     duration             MINUTES, max 10080
+//
+// A unified API taking "600" would mean ten minutes on two platforms and seven
+// days on the third, and nothing would report an error. Each adapter converts
+// from Duration at the last moment, so the unit only exists where the request is
+// built.
+type Banner interface {
+	Adapter
+	// Ban removes a user from the chat. A zero duration is PERMANENT; any
+	// positive duration is a timeout.
+	//
+	// The user id is the platform's own, which every adapter already carries as
+	// Author.ID -- a display name is not an identity and a renamed account would
+	// silently escape a ban keyed on one.
+	Ban(ctx context.Context, userID string, d time.Duration, reason string) error
+	// Unban lifts a ban or an unexpired timeout.
+	Unban(ctx context.Context, userID string) error
+}
+
 // Hider is the optional capability for taking a message off the public feed
 // WITHOUT destroying it.
 //
@@ -367,3 +399,31 @@ func FromDB(r db.ChatMessage) Message {
 	_ = decodeJSON(r.Emotes, &m.Emotes)
 	return m
 }
+
+// Compile-time proof that each adapter really implements the capability the
+// consent screen asks a scope for.
+//
+// These cost nothing at runtime and cannot be skipped. They exist because the
+// failure they catch is silent and expensive in a specific way: a scope stays on
+// the consent screen, an operator grants it, the account list says the feature is
+// available, and it turns out nothing implements the method. The reverse — an
+// implementation with no scope — is guarded in internal/oauth, where the scope
+// lists live.
+var (
+	_ Deleter = (*KickAdapter)(nil)
+	_ Deleter = (*YouTubeAdapter)(nil)
+	_ Deleter = (*TwitchAdapter)(nil)
+	_ Deleter = (*FacebookAdapter)(nil)
+
+	_ Banner = (*KickAdapter)(nil)
+	_ Banner = (*YouTubeAdapter)(nil)
+	_ Banner = (*TwitchAdapter)(nil)
+
+	// Facebook alone, because only its live chat is a comment thread.
+	_ Hider = (*FacebookAdapter)(nil)
+
+	// The sink the Hub hands every adapter must be able to hear both kinds of
+	// retraction, or the CLEARMSG/CLEARCHAT path silently does nothing.
+	_ Retractor    = runnerSink{}
+	_ RetractorAll = runnerSink{}
+)

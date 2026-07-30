@@ -573,6 +573,84 @@ func (k *KickAdapter) Delete(ctx context.Context, messageID string) error {
 	return err
 }
 
+// KickMaxTimeout is Kick's documented ceiling: 10080 minutes, which is seven
+// days. Beyond it the API rejects the request outright, so a longer timeout is
+// converted to a permanent ban only where the caller asked for one — never
+// silently.
+const KickMaxTimeout = 10080 * time.Minute
+
+// Ban removes a user from the chat, permanently or for a timeout.
+//
+// KICK COUNTS IN MINUTES. YouTube and Twitch count in seconds. This is the
+// conversion that makes a unified "600" mean ten minutes everywhere instead of
+// seven days here, and it is the entire reason the interface takes a Duration.
+func (k *KickAdapter) Ban(ctx context.Context, userID string, d time.Duration, reason string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("no user id to ban")
+	}
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		// Kick's ids are integers in JSON, not strings. Sending a quoted id
+		// fails as a validation error that names neither field.
+		return fmt.Errorf("kick user id %q is not numeric, so this ban cannot be addressed", userID)
+	}
+
+	body := map[string]any{
+		"broadcaster_user_id": k.cfg.BroadcasterUserID,
+		"user_id":             uid,
+	}
+	if d > 0 {
+		if d > KickMaxTimeout {
+			return fmt.Errorf("kick timeouts stop at 7 days and this one is %s; "+
+				"ask for a permanent ban explicitly if that is what you mean", d)
+		}
+		// Rounded UP: a 30-second timeout must not truncate to zero minutes,
+		// because zero here means PERMANENT.
+		mins := int64((d + time.Minute - 1) / time.Minute)
+		body["duration"] = mins
+	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		if len([]rune(reason)) > 100 {
+			// Kick's documented maximum. A long reason must not cost the ban.
+			reason = string([]rune(reason)[:100])
+		}
+		body["reason"] = reason
+	}
+
+	err = doJSON(ctx, k.cfg.HTTP, http.MethodPost,
+		k.cfg.APIBase+"/public/v1/moderation/bans", k.cfg.Token, body, nil)
+	if err != nil && (statusOf(err) == http.StatusUnauthorized || statusOf(err) == http.StatusForbidden) {
+		return fmt.Errorf("Kick refused the ban. If this account was connected before banning existed "+
+			"it never granted moderation:ban — disconnect and reconnect it in Settings → Platforms. "+
+			"Kick said: %w", err)
+	}
+	return err
+}
+
+// Unban lifts a ban or an unexpired timeout.
+func (k *KickAdapter) Unban(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("no user id to unban")
+	}
+	uid, cerr := strconv.Atoi(userID)
+	if cerr != nil {
+		return fmt.Errorf("kick user id %q is not numeric, so this cannot be addressed", userID)
+	}
+	err := doJSON(ctx, k.cfg.HTTP, http.MethodDelete,
+		k.cfg.APIBase+"/public/v1/moderation/bans", k.cfg.Token,
+		map[string]any{
+			"broadcaster_user_id": k.cfg.BroadcasterUserID,
+			"user_id":             uid,
+		}, nil)
+	if err != nil && (statusOf(err) == http.StatusUnauthorized || statusOf(err) == http.StatusForbidden) {
+		return fmt.Errorf("Kick refused the unban; the account may lack moderation:ban. "+
+			"Reconnect it in Settings → Platforms. Kick said: %w", err)
+	}
+	return err
+}
+
 // randomSecret is an unguessable path segment. crypto/rand only: a predictable
 // callback path is an open door for anyone who can guess it to inject chat.
 func randomSecret() string {

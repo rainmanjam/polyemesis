@@ -468,3 +468,87 @@ func TestNewKickWithoutATokenIsAConfigurationState(t *testing.T) {
 		t.Fatalf("error %q does not read as a configuration state", err)
 	}
 }
+
+// KICK COUNTS IN MINUTES. YouTube and Twitch count in seconds.
+//
+// This is the single most dangerous detail in the moderation work: a unified API
+// taking a bare "600" would mean ten minutes on two platforms and SEVEN DAYS
+// here, and nothing anywhere would report an error. The interface takes a
+// time.Duration so the unit only exists at the point the request is built, and
+// this test is what holds that point honest.
+func TestKickBanConvertsSecondsToMinutes(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want any // the "duration" field, or nil when it must be absent
+	}{
+		{"ten minutes is 10, not 600", 10 * time.Minute, float64(10)},
+		{"an hour is 60", time.Hour, float64(60)},
+		// Rounded UP. Truncating to zero would mean PERMANENT, which is not a
+		// rounding error anybody recovers from.
+		{"thirty seconds rounds up to one minute, never zero", 30 * time.Second, float64(1)},
+		{"one second rounds up to one minute", time.Second, float64(1)},
+		{"zero is permanent, so no duration is sent at all", 0, nil},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewDecoder(r.Body).Decode(&body)
+				fmt.Fprint(w, `{"data":{}}`)
+			}))
+			defer srv.Close()
+
+			a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL })
+			if err := a.Ban(context.Background(), "77", tc.d, ""); err != nil {
+				t.Fatal(err)
+			}
+			got, present := body["duration"]
+			if tc.want == nil {
+				if present {
+					t.Fatalf("duration = %v was sent for a permanent ban; Kick reads a duration as a TIMEOUT", got)
+				}
+				return
+			}
+			if !present {
+				t.Fatalf("no duration sent for %s; Kick would read that as a permanent ban", tc.d)
+			}
+			if got != tc.want {
+				t.Fatalf("duration = %v minutes for %s, want %v", got, tc.d, tc.want)
+			}
+		})
+	}
+}
+
+// Kick's documented ceiling is 10080 minutes. Past it the API rejects the
+// request, so silently converting to a permanent ban would be the worst possible
+// interpretation of "timeout for a very long time".
+func TestKickBanRefusesBeyondSevenDaysRatherThanBanningForever(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+
+	a := kickAdapter(t, func(c *KickConfig) { c.APIBase = srv.URL })
+	err := a.Ban(context.Background(), "77", 8*24*time.Hour, "")
+	if err == nil {
+		t.Fatal("a timeout longer than Kick's maximum was accepted")
+	}
+	if called {
+		t.Fatal("the request was sent anyway")
+	}
+	if !strings.Contains(err.Error(), "permanent") {
+		t.Fatalf("error = %q, want it to name the alternative the operator actually has", err)
+	}
+}
+
+// Kick's ids are integers in JSON. A quoted id fails as a validation error that
+// names neither field, so it is caught here where the message can be useful.
+func TestKickBanRejectsANonNumericUserID(t *testing.T) {
+	a := kickAdapter(t, nil)
+	if err := a.Ban(context.Background(), "someone", time.Minute, ""); err == nil {
+		t.Fatal("a non-numeric user id was accepted")
+	}
+}

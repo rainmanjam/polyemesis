@@ -77,9 +77,12 @@ func (k *Kick) Platform() db.Platform { return db.PlatformKick }
 // operator to disconnect and reconnect, and discovering that mid-broadcast is
 // the worst possible moment.
 //
-// moderation:ban is the one omitted. Nothing in polyemesis bans or times out a
-// viewer, and a consent screen asking for the power to do so — for a
-// restreamer — reads as overreach and costs trust we need for the rest.
+// moderation:ban was previously omitted, on the grounds that nothing here banned
+// a viewer and that asking a restreamer's audience for the power to do so read
+// as overreach. That was a product decision and the maintainer has reversed it:
+// banning and timing out are implemented, so the scope is requested. The old
+// reasoning is kept rather than deleted because it is the argument to re-read if
+// the decision is ever revisited. See docs/roadmap/CHAT-MODERATION.md.
 func (k *Kick) Scopes() []string {
 	return []string{
 		"user:read",                      // who the token belongs to
@@ -87,6 +90,7 @@ func (k *Kick) Scopes() []string {
 		"channel:write",                  // title and category push
 		"chat:write",                     // send chat as the user or a bot
 		"moderation:chat_message:manage", // delete a message from the unified chat
+		"moderation:ban",                 // ban and timeout, and lift either
 		"events:subscribe",               // webhooks for chat and livestream state
 		// The stream key. NOT covered by channel:read, which is what made this
 		// look impossible for so long: the key rides as stream.key on the very
@@ -101,11 +105,13 @@ func (k *Kick) Scopes() []string {
 // PKCE is on, and unlike the other providers it is not optional: Kick's
 // authorization server speaks OAuth 2.1, which folds RFC 7636 into the
 // authorization-code grant itself. An exchange without a verifier is refused.
-// ScopeVersion 1 includes streamkey:read, which was added after the first
-// release and is exactly the case this mechanism exists for: an account
-// connected before it landed holds a token without the scope, and the stream
-// key silently never arrives.
-func (k *Kick) ScopeVersion() int { return 1 }
+// ScopeVersion 2 adds moderation:ban. Version 1 added streamkey:read, which was
+// exactly the case this mechanism exists for: an account connected before it
+// landed holds a token without the scope, and the stream key silently never
+// arrives. The same applies here — an account on version 1 can delete a message
+// and cannot ban anybody, and the account list says so instead of letting the
+// button fail.
+func (k *Kick) ScopeVersion() int { return 2 }
 
 func (k *Kick) PKCE() bool { return true }
 

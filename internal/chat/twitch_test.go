@@ -3,6 +3,7 @@ package chat
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -775,5 +776,94 @@ func TestTwitchDialFailureIsRetryableNotFatal(t *testing.T) {
 	}
 	if IsFatal(runErr) {
 		t.Fatal("a dial failure was marked fatal; a network blip must be retried")
+	}
+}
+
+// Twitch counts SECONDS, and one endpoint does both ban and timeout: omit
+// duration for permanent, supply it for a timeout.
+func TestTwitchBanSendsSecondsAndOmitsThemForAPermanentBan(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want any
+	}{
+		{"ten minutes is 600 seconds", 10 * time.Minute, float64(600)},
+		{"one second stays one second", time.Second, float64(1)},
+		{"zero is permanent, so no duration is sent", 0, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewDecoder(r.Body).Decode(&body)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, `{"data":[]}`)
+			}))
+			defer srv.Close()
+
+			a := twitchForDelete(t, srv.URL)
+			if err := a.Ban(context.Background(), "99", tc.d, "spam"); err != nil {
+				t.Fatal(err)
+			}
+			data, _ := body["data"].(map[string]any)
+			if data == nil {
+				t.Fatalf("body = %+v, want a data object", body)
+			}
+			if data["user_id"] != "99" {
+				t.Fatalf("user_id = %v, want the platform's own id", data["user_id"])
+			}
+			got, present := data["duration"]
+			if tc.want == nil {
+				if present {
+					t.Fatalf("duration = %v sent for a permanent ban; Twitch reads that as a TIMEOUT", got)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("duration = %v for %s, want %v seconds", got, tc.d, tc.want)
+			}
+		})
+	}
+}
+
+// Twitch caps the reason at 1000 characters and rejects the WHOLE request when
+// it is longer. A long reason must not cost the ban itself.
+func TestTwitchBanTruncatesAnOverlongReasonRatherThanLosingTheBan(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	if err := a.Ban(context.Background(), "99", 0, strings.Repeat("x", 1500)); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := body["data"].(map[string]any)
+	reason, _ := data["reason"].(string)
+	if len([]rune(reason)) != 1000 {
+		t.Fatalf("reason is %d chars, want it truncated to Twitch's 1000 limit", len([]rune(reason)))
+	}
+}
+
+func TestTwitchUnbanAddressesTheUser(t *testing.T) {
+	var method string
+	var q url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, q = r.Method, r.URL.Query()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	if err := a.Unban(context.Background(), "99"); err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodDelete {
+		t.Fatalf("method = %s, want DELETE", method)
+	}
+	if q.Get("user_id") != "99" {
+		t.Fatalf("user_id = %q", q.Get("user_id"))
 	}
 }
