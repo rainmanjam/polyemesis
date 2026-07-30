@@ -115,3 +115,29 @@ func TestCheckCredentialsForYouTube(t *testing.T) {
 		})
 	}
 }
+
+// Every registered provider must be either checkable or explicitly declared
+// unverifiable -- never both, never neither.
+//
+// This is the guard that stops a provider added later from defaulting into
+// "we could not check this" by omission. The same shape of omission produced
+// the Medium finding in the 2026-07-30 security review: KickConfig carried an
+// optional Verify hook that no construction site ever set, so signature
+// checking silently never ran. An optional security control is an absent one.
+func TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable(t *testing.T) {
+	for platform, provider := range Providers() {
+		_, checkable := provider.(CredentialChecker)
+		_, declared := unverifiableProviders[platform]
+
+		switch {
+		case checkable && declared:
+			t.Errorf("%s implements CredentialChecker AND is listed as unverifiable; "+
+				"pick one", platform)
+		case !checkable && !declared:
+			t.Errorf("%s neither implements CredentialChecker nor appears in "+
+				"unverifiableProviders. Add the method, or add an entry saying why "+
+				"the platform offers no way to verify a credential without user "+
+				"consent.", platform)
+		}
+	}
+}

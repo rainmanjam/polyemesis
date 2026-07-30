@@ -148,3 +148,28 @@ func formatComplaint(p db.Platform, clientID, clientSecret string) string {
 func errorsIsUnreachable(err error) bool {
 	return errors.Is(err, ErrCheckUnreachable)
 }
+
+// classifyCheckError turns a token-endpoint failure into the distinction the
+// UI needs: did the platform refuse the credentials, or could we not ask?
+//
+// A 5xx or a transport failure is OUR problem to report, not the operator's
+// credential to doubt. Telling somebody their secret is wrong when the platform
+// merely had a bad minute is the specific wrong message this exists to avoid.
+func classifyCheckError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	// postForm formats non-2xx as "token endpoint returned %d: %s".
+	for _, code := range []string{" 500", " 502", " 503", " 504", " 429"} {
+		if strings.Contains(msg, "returned"+code) {
+			return fmt.Errorf("%w: %s", ErrCheckUnreachable, msg)
+		}
+	}
+	if strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "connection refused") {
+		return fmt.Errorf("%w: %s", ErrCheckUnreachable, msg)
+	}
+	return err
+}
