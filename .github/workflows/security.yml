@@ -175,7 +175,18 @@ jobs:
   semgrep:
     runs-on: ubuntu-latest
     container:
-      image: semgrep/semgrep
+      # Pinned, for the same reason gitleaks is pinned a few jobs up: an
+      # untagged image is :latest, so the engine that decides whether this
+      # repository is clean could change between two runs of the same commit,
+      # and the rule exclusions below were reasoned about against one specific
+      # analyser. Leaving this floating while arguing for a pinned gitleaks in
+      # the same file was simply an inconsistency.
+      #
+      # Only the ENGINE is pinned. The rules still come from the registry via
+      # --config=r/..., so new checks continue to arrive; what is fixed is the
+      # thing that parses the tree and decides what a finding is. Bump this
+      # deliberately, and re-check the exclusions when you do.
+      image: semgrep/semgrep:1.172.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
