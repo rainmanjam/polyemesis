@@ -138,6 +138,15 @@ For the destination that needs one setting nothing else does:
   changing the password bumps a token epoch and every token issued before it
   stops working — which is what "somebody else has my session" has to mean.
 - Fourteen UI languages.
+- **An interactive Linux installer** (`scripts/install.sh`), in Docker or binary
+  mode, with rollback on failure. It exists for the traps that a hand-written
+  `docker run` reliably falls into: `/udp` on the SRT port, a 30-second stop
+  grace period so a recording is finalised rather than truncated, a UDP firewall
+  rule, and `CAP_NET_BIND_SERVICE` when ACME is chosen. Binary mode refuses to
+  proceed below the FFmpeg 6.0 floor — naming the caller's distribution version
+  where it recognises it — and verifies the download against the release's
+  published `SHA256SUMS`. It never handles a password, because there is no
+  account until the first-run screen creates one.
 
 ### Security
 
@@ -193,5 +202,37 @@ Bugs worth naming, because each was found by measurement rather than by review:
 - Browser end-to-end suite against the shipped container.
 - Fixed-value guards on suite check counts, after one suite reported
   *"7 passed, 0 failed — PASSED"* having silently skipped five checks.
+- **A real broadcast now runs on Linux, macOS and Windows on every push**, not
+  just a health check. The cross-platform job pushes a three-track stream in,
+  compiles two destinations with different track selections, and measures
+  per-band energy in each output — so a destination silently carrying the wrong
+  mix fails, where a check that only asked whether FFmpeg exited 0 would pass.
+  This is the part built on process groups, signals and path construction, which
+  is exactly where Windows differs.
+
+### Documentation
+
+An accuracy pass over every page, checking each claim against the code rather
+than reading for tone. What it found is why it was worth doing:
+
+- The quickstart's **first command pulled from a registry the project has never
+  published to**, and its OBS instructions contradicted `OBS.md` in a way that
+  produced a working stream carrying a single audio track — configuring away the
+  only reason to run polyemesis.
+- `SECURITY.md` and `TLS.md` both promised that **every** response carries
+  `X-Frame-Options: DENY`. The embeddable player deliberately drops it. A
+  security policy that overstates its own coverage is worse than one that states
+  the exception.
+- `TLS.md` documented the `:80` redirect as `301`/`308`, which holds only when
+  `tls.hostname` is set; without it the target comes from the client's own `Host`
+  header and the redirect is deliberately temporary and uncacheable.
+- `HARDWARE.md` contradicted itself on render-node selection. Detection does
+  choose a node and the encode honours it — but the *probe* still names
+  `renderD128` unconditionally, so on a multi-GPU host it tests the wrong device
+  and the editor declines to offer VA-API on the strength of it.
+- `INSTALL.md` claimed `make release` emits no Windows target. It emits two.
+- The stale "nobody has run this on Windows" claim appeared on four separate
+  pages. Platform status now uses one vocabulary — **Primary**, **Verified**,
+  **Unproven** — defined once and used identically everywhere.
 
 [Unreleased]: https://github.com/rainmanjam/polyemesis/commits/main
