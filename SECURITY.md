@@ -35,6 +35,12 @@ the software actually promises.
 
 - **The admin session.** bcrypt password hashing, a JWT in an `HttpOnly`,
   `SameSite=Lax` cookie, CSRF double-submit on every state-changing request.
+- **Revocation that actually revokes.** Each user row carries a token epoch that
+  every session token is signed against and every request re-checks. Changing
+  the password bumps it in the same statement, so every session issued before
+  the change stops working immediately — a stolen cookie does not outlive the
+  password it was obtained under. The check fails closed: a token whose epoch
+  cannot be established is refused rather than admitted.
 - **Login brute force.** Five free attempts per client address, then a delay
   doubling from 2s, capped at 5 minutes, with `Retry-After` on the 429. The cap
   and the one-hour idle reset are deliberate: an uncapped lockout is a
@@ -62,9 +68,19 @@ the software actually promises.
 - **Path confinement.** File destinations, `file://` pull sources, slate images,
   recording and clip downloads are all confined to the data directory. Paths
   that come from the database are never trusted as filesystem paths.
-- **Browser-side hardening.** Every response carries a CSP,
-  `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`, and a
-  `Permissions-Policy` disabling camera, microphone and geolocation.
+- **Inbound webhooks.** Kick's chat webhook is verified against Kick's published
+  RSA public key before its body is read, and the handler refuses the request
+  outright when no verifier is configured. An unverifiable webhook endpoint is
+  an unauthenticated write path, so it fails closed rather than open.
+- **Browser-side hardening.** Responses carry a CSP, `X-Frame-Options: DENY`,
+  `nosniff`, `Referrer-Policy: no-referrer`, and a `Permissions-Policy`
+  disabling camera, microphone and geolocation.
+
+  The one exception is `/watch`, and only when you have turned on
+  `allowCrossOrigin` for playout: a page whose purpose is to sit in an iframe on
+  somebody else's site cannot also refuse to be framed. That page alone drops
+  `X-Frame-Options` and opens `frame-ancestors`; the admin console keeps the
+  strict policy. Leaving `allowCrossOrigin` off keeps the exception closed.
 
 ### What it does NOT defend
 
