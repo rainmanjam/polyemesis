@@ -72,13 +72,19 @@ With one-port ingest the refusal is typed and says which:
 
 | Reason | What it means |
 |---|---|
-| `REJ_BADSECRET` | Wrong passphrase, or a token that does not match any source |
-| `REJ_RESOURCE` | Something is already publishing to that source |
-| `REJ_UNSECURE` | A passphrase is required and none was offered |
+| `REJ_BADSECRET` | Wrong passphrase, or a token matching no source |
+| `REJ_CLOSE` | The source exists but is disabled |
+| `REJ_RESOURCE` | Something is already publishing to that source, or no pipeline is running for it |
+| `REJ_ROGUE` | The `streamid` is empty or over the length limit |
+| `REJ_UNSECURE` | The source requires a passphrase and none was offered — or the publisher encrypted and the source has no passphrase set |
 
-A source that is **disabled** also refuses. That used to fail with nothing on
-screen explaining it; if you are on an older build and a publisher is rejected
-for no visible reason, check the source is enabled.
+A token that does not exist and a token for a source that does not exist give
+the same answer deliberately, so a caller cannot use the refusal to enumerate
+sources. Neither is ever logged.
+
+The two `REJ_RESOURCE` cases are worth telling apart, and the server log does:
+*already publishing* names the incumbent peer, *no pipeline for source* means
+the source is enabled but nothing is running to receive it.
 
 ### It connects and then drops every few seconds
 
@@ -155,6 +161,8 @@ Check the destination's target matches the platform you are sending to.
 
 ---
 
+## Recordings and jobs
+
 ### A clip is up to a second longer than I asked for
 
 Check your FFmpeg major version. This changed between the versions polyemesis
@@ -175,9 +183,6 @@ It only shows up when the out point falls mid-GOP. An out point that lands on a
 keyframe is exact on both.
 
 If you need exact out-points, use FFmpeg 8.x.
-
-
-## Recordings and jobs
 
 ### Recording stopped on its own
 
