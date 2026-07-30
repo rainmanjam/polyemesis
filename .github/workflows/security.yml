@@ -52,7 +52,11 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - run: npm ci
+      # --ignore-scripts: this job never builds anything, it only needs the
+      # resolved dependency tree for `npm audit`. Running install lifecycle
+      # scripts would execute code from every package in that tree on a runner,
+      # which is a real supply-chain path and buys nothing here.
+      - run: npm ci --ignore-scripts
       # Production dependencies only. A moderate advisory in a build-time dev
       # dependency does not ship to anybody, and treating it as urgent is how a
       # team learns to pass --force.
@@ -88,7 +92,10 @@ jobs:
 
       - name: install gitleaks (pinned)
         run: |
-          curl -sSfL \
+          # --proto '=https' matters because -L follows redirects: without it a
+          # redirect to http:// would silently downgrade the transport for a
+          # binary that is about to be run as a security gate.
+          curl -sSfL --proto '=https' --tlsv1.2 \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin gitleaks
           installed="$(gitleaks version)"
