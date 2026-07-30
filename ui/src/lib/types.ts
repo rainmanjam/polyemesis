@@ -2102,3 +2102,16 @@ export interface AutomodModelStats {
   lastError?: string;
   lastCallAt?: string;
 }
+
+/** The server-rendered matrix. Rows, columns and availability all come from the
+ *  server so the UI never keeps a second copy of the vocabulary that could
+ *  drift out of step with what the engine actually understands. */
+export interface AutomodMatrixView {
+  enabled: boolean;
+  platformEnabled?: Record<string, boolean>;
+  cells: AutomodCell[];
+  summary: Record<string, number>;
+  actions: AutomodAction[];
+  checkers: AutomodChecker[];
+  platforms: string[];
+}

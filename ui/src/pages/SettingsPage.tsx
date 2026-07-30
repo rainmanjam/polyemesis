@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
+import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -703,6 +704,17 @@ function PipelineSettings({
           </Button>
         </CardContent>
       </Card>
+
+      {/* Automod sits directly after chat retention, because the two are the
+          same subject: retention is the DEPTH the history checker can see, and
+          a rate detector with a two-hour scrollback behind it is a different
+          instrument from one with a week. */}
+      <AutomodMatrix settings={draft} onChange={setDraft} />
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+          {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+        </Button>
+      </div>
 
       <Card>
         <CardHeader>

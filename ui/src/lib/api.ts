@@ -59,6 +59,8 @@ import type {
   BitrateSample,
   LogLine,
   MediaFile,
+  AutomodMatrixView,
+  AutomodModelStats,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -203,6 +205,14 @@ export function uploadMedia(
 }
 
 export const api = {
+  // --- automod ---
+  automodMatrix: () => get<AutomodMatrixView>("/automod/matrix"),
+  automodStats: () => get<AutomodModelStats>("/automod/stats"),
+  /** Sets or clears the model API key. Empty clears it. The key is never
+   *  returned by any endpoint, so the UI can only ever report that one is set. */
+  setAutomodKey: (key: string) =>
+    put<{ hasApiKey: boolean }>("/settings/automod-key", { key }),
+
   // --- media uploads ---
   media: () => get<MediaFile[]>("/media"),
   deleteMedia: (name: string) => del<void>(`/media/${encodeURIComponent(name)}`),
