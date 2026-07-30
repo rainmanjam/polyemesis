@@ -197,11 +197,16 @@ var platformCapabilities = []PlatformCapability{
 			CapMetadata:    SupportYes,
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportYes,
-			CapModeration:  SupportUnknown,
+			CapModeration:  SupportYes,
 			CapViewerStats: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapChatRead: "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
+			CapModeration: "Delete a message, over the same auth/youtube scope everything else here uses — so an account " +
+				"connected before this existed can already do it, with no reconnect. The connected account still has to " +
+				"own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. " +
+				"Banning and timing out are not implemented: the API supports them under the same scope, so this is a " +
+				"decision rather than a limit — see docs/roadmap/CHAT-MODERATION.md.",
 		},
 	},
 	{

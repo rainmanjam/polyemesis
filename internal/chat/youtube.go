@@ -515,6 +515,46 @@ func (y *YouTubeAdapter) Send(ctx context.Context, text string) (Message, error)
 	}, nil
 }
 
+// Delete removes one message from the live chat.
+//
+// This needs NO new OAuth scope. liveChatMessages.delete accepts
+// https://www.googleapis.com/auth/youtube, which internal/oauth/youtube.go has
+// always requested — so every YouTube account already connected can do this
+// today, with no reconnect and no consent screen. The capability matrix recorded
+// YouTube moderation as "unverified" for a long time, which is exactly the
+// fail-open default working as intended: nobody had read the docs, so nothing
+// claimed it was impossible.
+//
+// Unlike Send, this does NOT refuse when the budget looks spent. A message a
+// moderator has decided to remove stays on stream while we decline to spend 50
+// units, and the API's own 403 remains the authority on when the quota is
+// actually gone. Spending is still recorded, so the pacer keeps reading honestly.
+func (y *YouTubeAdapter) Delete(ctx context.Context, messageID string) error {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return fmt.Errorf("no message id to delete")
+	}
+	err := doJSON(ctx, y.cfg.HTTP, http.MethodDelete,
+		y.cfg.APIBase+"/liveChatMessages?id="+url.QueryEscape(messageID),
+		y.cfg.Token, nil, nil)
+	y.budget.spend(QuotaCostDeleteMessage)
+	if err != nil {
+		// 403 here is usually authority rather than quota: the connected
+		// account is not the broadcaster and not a moderator of that chat.
+		// Saying so beats "forbidden", which sends people to reconnect an
+		// account that was never the problem.
+		if statusOf(err) == http.StatusForbidden && reasonOf(err) != "quotaExceeded" {
+			return fmt.Errorf("YouTube refused the deletion. The connected account has to own the "+
+				"broadcast or be a moderator of its chat: %w", err)
+		}
+		if statusOf(err) == http.StatusNotFound {
+			return fmt.Errorf("YouTube does not have that message any more; it may already be deleted: %w", err)
+		}
+		return y.classify(err)
+	}
+	return nil
+}
+
 // classify turns an API error into the message an operator can act on, without
 // echoing anything that could carry a credential.
 func (y *YouTubeAdapter) classify(err error) error {

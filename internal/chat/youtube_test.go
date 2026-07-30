@@ -314,6 +314,77 @@ func TestYouTubeSendReturnsThePlatformsIDSoTheEchoDeduplicates(t *testing.T) {
 	}
 }
 
+// YouTube deletion needs no new OAuth scope, which is the whole reason it is
+// worth building: liveChatMessages.delete accepts auth/youtube, and that is what
+// this app has always requested. Every connected account can already do it.
+func TestYouTubeDeleteAddressesTheRightMessage(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) { c.LiveChatID = "chat-1" })
+	if err := a.Delete(context.Background(), "msg-42"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %s, want DELETE", gotMethod)
+	}
+	if !strings.HasSuffix(gotPath, "/liveChatMessages") {
+		t.Fatalf("path = %q, want the liveChatMessages resource", gotPath)
+	}
+	// The id travels as a query parameter. Sending it as a path segment would
+	// 404 against a resource that does not exist.
+	if gotQuery != "id=msg-42" {
+		t.Fatalf("query = %q, want id=msg-42", gotQuery)
+	}
+}
+
+// An empty id must never reach the API.
+//
+// This matters more than it looks. Twitch's equivalent endpoint treats a missing
+// message id as "delete EVERY message in the room", and while YouTube's does not
+// document that behaviour, a moderation call built from an empty string is a bug
+// wherever it lands. Refusing locally costs nothing and removes the question.
+func TestYouTubeDeleteRefusesAnEmptyID(t *testing.T) {
+	var called bool
+	stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) { c.LiveChatID = "chat-1" })
+	if err := a.Delete(context.Background(), "   "); err == nil {
+		t.Fatal("a blank message id was accepted")
+	}
+	if called {
+		t.Fatal("a blank message id reached the API")
+	}
+}
+
+// A 403 from this endpoint is almost always authority, not quota: the connected
+// account is not the broadcaster and not a moderator. Saying "reconnect the
+// account" there would send an operator to fix something that was never wrong.
+func TestYouTubeDeleteSeparatesAuthorityFromQuota(t *testing.T) {
+	stub := newYTStub(t, func(w http.ResponseWriter, r *http.Request, call int64) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"errors":[{"reason":"forbidden"}],"message":"forbidden"}}`)
+	})
+
+	a := ytAdapter(t, stub.URL, func(c *YouTubeConfig) { c.LiveChatID = "chat-1" })
+	err := a.Delete(context.Background(), "msg-42")
+	if err == nil {
+		t.Fatal("a 403 was reported as success")
+	}
+	if !strings.Contains(err.Error(), "moderator") {
+		t.Fatalf("error = %q, want it to name the moderator requirement", err)
+	}
+	if IsFatal(err) {
+		t.Fatal("a permissions 403 was marked Fatal, which would stop the adapter reconnecting")
+	}
+}
+
 func TestYouTubeSendRefusalsAreActionable(t *testing.T) {
 	tests := []struct {
 		name    string

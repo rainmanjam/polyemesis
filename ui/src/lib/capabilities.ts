@@ -148,12 +148,14 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       metadata: "yes",
       chatRead: "yes",
       chatSend: "yes",
-      moderation: "unknown",
+      moderation: "yes",
       viewerStats: "unknown",
     },
     reasons: {
       chatRead:
         "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
+      moderation:
+        "Delete a message, over the same auth/youtube scope everything else here uses — so an account connected before this existed can already do it, with no reconnect. The connected account still has to own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. Banning and timing out are not implemented: the API supports them under the same scope, so this is a decision rather than a limit — see docs/roadmap/CHAT-MODERATION.md.",
     },
   },
   {
@@ -207,12 +209,10 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     connect: "kick",
     tier: "partial",
     summary:
-      "Sign in with Kick for chat, moderation, metadata and viewer stats — then paste the stream key, because Kick's public API does not publish one.",
-    readFirst:
-      "Both halves of this destination are real at once: click Connect account for everything Kick's API does offer, and paste the ingest URL and key from Kick → Settings → Stream. Neither replaces the other, and the paste is not a workaround for a broken connection.",
+      "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
     caps: {
       sso: "yes",
-      streamKey: "manual",
+      streamKey: "yes",
       metadata: "yes",
       chatRead: "yes",
       chatSend: "yes",
@@ -222,7 +222,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     reasons: {
       sso: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
       streamKey:
-        "Checked against Kick's published Channels, Livestreams and Users endpoints — none of them return a stream key. This is a documented absence, not a missing feature on our side, and it does not hold back anything else.",
+        "Fetched from the channels resource, over the streamkey:read scope. This was recorded here as impossible for a long time and the reasoning is worth keeping: the key rides as stream.key on the very same GET /public/v1/channels response that channel:read already fetches, but the field is omitted unless streamkey:read was granted too. There is no /streamkey endpoint, so reading the endpoint list suggests the capability does not exist. An account connected before that scope was requested holds a token without it and sees no key — reconnect it in Settings → Platforms.",
       metadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
       chatRead:
         "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
