@@ -64,17 +64,24 @@ srt://your-host:6000?streamid=<token>
 Every source shares that one port. The token is the address, so adding a second
 programme later needs no new port and no container restart.
 
-In OBS: **Settings → Stream → Service: Custom**, and paste. For SRT the URL
-already carries everything it needs.
+In OBS, multitrack SRT does **not** go through the Stream tab. Use
+**Settings → Output → Output Mode: Advanced → Recording**, set
+**Type: Custom Output (FFmpeg)** and **FFmpeg Output Type: Output to URL**, then
+paste the URL as the path with **Container Format: `mpegts`**.
 
-Then **Settings → Output → Output Mode: Advanced → Recording tab is irrelevant;
-you want the Streaming tab.** Set the encoder you normally use. Do *not* set a
-low keyframe interval on account of polyemesis — video is passed through
-untouched, so your encoder settings are what every destination receives.
+That sounds wrong and is not: with *Output to URL*, OBS's "recording" **is** the
+SRT push. The Stream tab can speak SRT, but it sends one audio track, which
+loses the only thing polyemesis is for.
 
-For multitrack audio, OBS's **Audio → Advanced** panel is where you assign
-sources to tracks 1–6, and the **Output → Streaming** tab is where you tick which
-tracks to send.
+Tick the tracks you want under **Audio Track** in that same panel — the sources
+are assigned to tracks 1–6 in the Audio Mixer's **Advanced Audio Properties**.
+
+Set the encoder you normally use. Do *not* set a low keyframe interval on
+account of polyemesis — video is passed through untouched, so your encoder
+settings are what every destination receives.
+
+Press **Start Recording**, not Start Streaming. [OBS.md](OBS.md) has the full
+field-by-field table, including the `latency` unit that catches everybody.
 
 Press **Start Streaming**. The polyemesis dashboard should show the ingest live
 within a couple of seconds, with a meter per incoming track.
