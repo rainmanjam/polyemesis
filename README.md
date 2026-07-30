@@ -51,11 +51,18 @@ hot. One upload, one video encode, different audio per platform.
   startable with auto-reconnect and exponential backoff.
 - **Platform sign-in** for YouTube, Twitch, Facebook and Kick, with chat and
   metadata push where the API allows it. [→ PLATFORMS.md](docs/PLATFORMS.md)
+- **Chat moderation on all four** — delete, ban, timeout, and a moderator user
+  card showing what one person has said across every platform at once, which no
+  single platform's own tooling does.
+- **Overlays on renditions** — an image watermark and a line of burnt-in text,
+  sized and placed as percentages of the frame so one setting is right on a
+  landscape tier and a vertical one alike. [→ RENDITIONS.md](docs/RENDITIONS.md)
 - **Failover** with a standby ingest, a generated slate, and a source selector
   that switches without restarting a single destination.
 - **Post-production**: segmented multitrack recording with retention, a job
   queue, Whisper transcription with full-text search, and a clipper.
-- **Prometheus metrics** and in-process alert rules with webhook delivery.
+- **Prometheus metrics** and in-process alert rules with webhook delivery, plus
+  retained MQTT telemetry with Home Assistant discovery.
   [→ MONITORING.md](docs/MONITORING.md)
 - **TLS that configures itself** — Let's Encrypt when the box has a public name,
   a local CA when it does not, and out of the way when a proxy already

@@ -67,14 +67,97 @@ than by which package changed.
 - Unified chat across platforms.
 - Platform capability presets, so a destination is configured with limits the
   platform will actually accept.
+- **Metadata push** — title, description, category and tags, shaped per platform
+  and reporting what each one refused rather than claiming success.
+- **Kick's stream key is fetched, not pasted.** It was recorded here as
+  unavailable for a long time: Kick publishes no `/streamkey` endpoint, so
+  reading the endpoint list finds nothing. The key rides as `stream.key` on the
+  channels response polyemesis already fetches, withheld unless the token
+  carries `streamkey:read`.
+
+### Chat moderation
+
+Delete, ban, timeout and lift, across all four connected platforms. Before this
+only one of the four could delete.
+
+- A **cross-platform moderator user card**: what one person has said, newest
+  last. No platform here publishes an API for a user's message history —
+  Twitch's own mod card is a web-app feature backed by internal endpoints — so
+  this reads polyemesis's retained scrollback. Shallower than Twitch's card, and
+  it works across four platforms at once.
+- Facebook's reversible **hide**, and a local-only hide everywhere else.
+- Twitch **channel rules**: slow mode, followers-only, subscribers-only,
+  no repeated messages.
+- **Chat retention is configurable** — hours and message count — where it was
+  previously hard-coded at two hours and 2000 messages.
+
+Two platform traps are handled rather than inherited:
+
+- `DELETE /helix/moderation/chat` with **no** `message_id` deletes every message
+  in the channel and returns success. An empty id is refused before the URL is
+  built.
+- Kick counts timeouts in **minutes** where YouTube and Twitch count seconds, so
+  a unified `600` would mean ten minutes on two platforms and seven days on the
+  third. Each adapter converts at the last moment and rounds **up** — truncating
+  30s to zero minutes would reach Kick as a permanent ban.
+
+### Overlays
+
+- **Image watermarks** on renditions: nine anchors, size and margins as
+  percentages of the frame so the same logo is correct on landscape and vertical
+  tiers alike.
+- **Text overlays**: content, font, anchor, size, colour, margins and an optional
+  background box. Two weights of Inter ship embedded, because FFmpeg's
+  `drawtext` takes a font *path* and a container image has neither fontconfig nor
+  a font file. A build without `drawtext` drops the text and keeps the picture up
+  rather than failing the rendition.
+
+### Per-destination tuning
+
+For the destination that needs one setting nothing else does:
+
+- **Transport and muxer**: mux queue limits in packets or bytes, read/write
+  timeout, and the flags that stop FFmpeg guessing a duration it cannot know.
+- **Resilience**: minimum and maximum reconnect backoff, and a give-up
+  threshold counted on **consecutive** failures — so a destination that
+  reconnects once an hour for a week never accumulates its way to the limit.
+- **Audio**: bitrate, codec and mono output per destination.
+- **Expert arguments**, spliced into the FFmpeg command line, with a dry run
+  that tells you whether the result would start without starting it. Treat
+  access to it as equivalent to shell access.
 
 ### Operations
 
 - Prometheus metrics, alert rules with webhook delivery, and schedules.
+- **MQTT telemetry**, retained, with Home Assistant discovery — so the stream
+  appears as entities in a dashboard the operator already runs.
 - TLS with automatic certificate selection; HSTS deliberately opt-in and never
   sent over a self-signed certificate.
 - API tokens, hashed at rest and individually revocable.
+- **Sessions are revocable.** A stateless JWT cannot be deleted server-side, so
+  changing the password bumps a token epoch and every token issued before it
+  stops working — which is what "somebody else has my session" has to mean.
 - Fourteen UI languages.
+
+### Security
+
+Findings from a pre-release review, each fixed with a test that fails when the
+fix is removed:
+
+- **The Kick webhook now verifies its signature.** The hook existed, was
+  nil-checked, and was never assigned at its one construction site — so
+  verification silently never ran and the unguessable callback path was the only
+  control. A missing verifier now refuses the delivery instead of skipping the
+  check.
+- First-run setup is atomic, so two concurrent requests to an uninitialised
+  install cannot both create an administrator.
+- The webhook path secret is compared in constant time, like the playout and SRT
+  tokens already were.
+- Every database read is a compile-time constant, so no value can reach the SQL
+  text by construction.
+- CI gained dependency, secret and static-analysis scanning — gated on proof
+  that the scan actually examined the tree, after a run reported zero findings
+  having read zero files.
 
 ### Fixed
 
