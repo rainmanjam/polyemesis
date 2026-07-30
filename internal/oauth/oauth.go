@@ -364,16 +364,18 @@ func guides() []SetupGuide {
 			RedirectPath: "/api/v1/oauth/kick/callback",
 			Supported:    true,
 			Scopes:       (&Kick{}).Scopes(),
-			Note: "Kick is the one platform where the stream key stays manual: its public API does not " +
-				"expose one anywhere. Connect the account anyway — it pushes your title and category, finds " +
-				"categories by name instead of by numeric id, and reports viewer counts. Paste the ingest URL " +
-				"and key once from Kick → Settings → Stream and they do not change.",
+			Note: "Kick uses OAuth 2.1, so the consent step sends a PKCE challenge automatically — " +
+				"there is nothing extra to configure for it. Grant every scope on the consent screen: " +
+				"the stream key is withheld unless streamkey:read is among them, and an account " +
+				"connected before that scope was requested has to be disconnected and reconnected once " +
+				"before the key appears.",
 			Steps: []string{
 				"Open Kick → Settings → Developer and create an OAuth application.",
 				"Set the Redirect URI to exactly the URI shown below.",
 				"Copy the Client ID and Client Secret into the fields on this page and save.",
 				"Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
-				"Open Kick → Settings → Stream, copy the Stream URL and Stream Key, and paste both into your Kick destination. polyemesis cannot fetch these.",
+				"Nothing to paste: polyemesis reads the ingest URL and stream key from the channels " +
+					"resource over the streamkey:read scope, the same way it does for the other platforms.",
 			},
 		},
 	}
