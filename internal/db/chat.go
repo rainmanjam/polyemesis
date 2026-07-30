@@ -116,6 +116,33 @@ func (d *DB) AppendChatMessages(msgs []ChatMessage) (int, error) {
 const chatColumns = `id, platform, account, message_id, channel, author_id, author_name, author_color,
 	moderator, subscriber, broadcaster, text, badges, emotes, reply_to_id, reply_to, echo, at_ms`
 
+// The chat reads, as whole compile-time constants rather than strings assembled
+// at the call site.
+//
+// Go folds `"a" + constB + "c"` at compile time when every operand is a const,
+// so these cost nothing at runtime and cannot vary. That is the point: a query
+// built by concatenation at the call site is indistinguishable, to a reader and
+// to a static analyser, from one that interpolates a variable — and SonarCloud
+// raised exactly that on ChatMessagesByAuthor (go:S2077, Major).
+//
+// It was a false positive: every value in these queries travels as a `?`
+// placeholder and the only concatenated part was chatColumns, a const. But
+// "it is safe, trust me" is a claim the next reader has to re-derive, and a
+// suppression comment is worse — it silences the rule for whatever the line
+// becomes later. Making the query a constant makes it safe BY CONSTRUCTION: no
+// value can reach the SQL text, because there is no expression left to reach it.
+const (
+	chatRecentQuery = `SELECT ` + chatColumns + ` FROM chat_messages
+		ORDER BY at_ms DESC, id DESC LIMIT ?`
+
+	chatRecentForPlatformQuery = `SELECT ` + chatColumns + ` FROM chat_messages
+		WHERE platform = ? ORDER BY at_ms DESC, id DESC LIMIT ?`
+
+	chatByAuthorQuery = `SELECT ` + chatColumns + ` FROM chat_messages
+		WHERE platform = ? AND author_id = ?
+		ORDER BY at_ms DESC, id DESC LIMIT ?`
+)
+
 // RecentChatMessages returns the newest limit messages in reading order —
 // oldest first — because that is how a chat pane renders them and reversing a
 // slice in the browser is one more thing to get wrong.
@@ -151,9 +178,7 @@ func (d *DB) ChatMessagesByAuthor(p Platform, authorID string, limit int) ([]Cha
 	if limit <= 0 || strings.TrimSpace(authorID) == "" {
 		return []ChatMessage{}, nil
 	}
-	rows, err := d.sql.Query(`SELECT `+chatColumns+` FROM chat_messages
-		WHERE platform = ? AND author_id = ?
-		ORDER BY at_ms DESC, id DESC LIMIT ?`, p, authorID, limit)
+	rows, err := d.sql.Query(chatByAuthorQuery, p, authorID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -187,11 +212,9 @@ func (d *DB) recentChat(p Platform, limit int) ([]ChatMessage, error) {
 		err  error
 	)
 	if p == "" {
-		rows, err = d.sql.Query(`SELECT `+chatColumns+` FROM chat_messages
-			ORDER BY at_ms DESC, id DESC LIMIT ?`, limit)
+		rows, err = d.sql.Query(chatRecentQuery, limit)
 	} else {
-		rows, err = d.sql.Query(`SELECT `+chatColumns+` FROM chat_messages
-			WHERE platform = ? ORDER BY at_ms DESC, id DESC LIMIT ?`, p, limit)
+		rows, err = d.sql.Query(chatRecentForPlatformQuery, p, limit)
 	}
 	if err != nil {
 		return nil, err
