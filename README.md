@@ -61,9 +61,10 @@ hot. One upload, one video encode, different audio per platform.
   that switches without restarting a single destination.
 - **Post-production**: segmented multitrack recording with retention, a job
   queue, Whisper transcription with full-text search, and a clipper.
-- **Prometheus metrics** and in-process alert rules with webhook delivery, plus
-  retained MQTT telemetry with Home Assistant discovery.
+- **Prometheus metrics** and in-process alert rules with webhook delivery.
   [→ MONITORING.md](docs/MONITORING.md)
+- **Retained MQTT telemetry** with Home Assistant discovery, so the stream shows
+  up as entities in a dashboard you already run. [→ MQTT.md](docs/MQTT.md)
 - **TLS that configures itself** — Let's Encrypt when the box has a public name,
   a local CA when it does not, and out of the way when a proxy already
   terminates it. [→ TLS.md](docs/TLS.md)
