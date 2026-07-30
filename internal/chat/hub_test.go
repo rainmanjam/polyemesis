@@ -792,3 +792,77 @@ func TestHubAdapterReachesCapabilitiesTheInterfaceDoesNotCarry(t *testing.T) {
 		t.Fatal("a detached adapter is still reachable")
 	}
 }
+
+// The settings defaults must equal the constants this package falls back to.
+//
+// Two places name the same numbers: db.DefaultSettings().Chat, which a fresh
+// install stores, and the Default* constants here, which every Hub built
+// without settings uses -- that is every test, and any caller that forgets to
+// apply the stored values. If they drift, the two behave differently while both
+// claiming to be "the default", and it surfaces as "my chat history is shorter
+// than the settings page says".
+//
+// The test lives here rather than in internal/db because internal/chat imports
+// internal/db; the reverse import would be a cycle.
+func TestChatDefaultsMatchTheSettingsDefaults(t *testing.T) {
+	s := db.DefaultSettings().Chat
+	if want := int(DefaultRetention / time.Hour); s.RetentionHours != want {
+		t.Errorf("settings default retention = %dh, DefaultRetention = %dh", s.RetentionHours, want)
+	}
+	if s.KeepMessages != DefaultRetentionKeep {
+		t.Errorf("settings default keep = %d, DefaultRetentionKeep = %d", s.KeepMessages, DefaultRetentionKeep)
+	}
+	if want := int(DefaultPurgeEvery / time.Minute); s.PurgeMinutes != want {
+		t.Errorf("settings default purge = %dm, DefaultPurgeEvery = %dm", s.PurgeMinutes, want)
+	}
+}
+
+// Retention has to be changeable on a RUNNING Hub. A setting that only takes
+// effect after a restart is one an operator changes, sees nothing happen, and
+// changes again.
+func TestSetRetentionAppliesWithoutARestart(t *testing.T) {
+	h := testHub(t)
+
+	h.SetRetention(48*time.Hour, 100000, 30*time.Minute)
+	h.mu.Lock()
+	gotAge, gotKeep, gotEvery := h.retention, h.retainKeep, h.purgeEvery
+	h.mu.Unlock()
+
+	if gotAge != 48*time.Hour || gotKeep != 100000 || gotEvery != 30*time.Minute {
+		t.Fatalf("retention = %v/%d/%v, want 48h/100000/30m", gotAge, gotKeep, gotEvery)
+	}
+}
+
+// Keep-forever must not become purge-everything.
+//
+// The Hub spells "forever" as a non-positive duration, and the API converts 0
+// hours into that. Getting this backwards would turn the setting an operator
+// picks to KEEP all their chat into the one that deletes it on the next sweep,
+// which is the worst available failure for this feature.
+func TestKeepForeverPurgesNothing(t *testing.T) {
+	h := testHub(t)
+	purged := false
+	h.store = &purgeSpy{onPurge: func() { purged = true }}
+
+	h.SetRetention(-1, 2000, time.Minute)
+	h.purge()
+	if purged {
+		t.Fatal("a keep-forever retention still ran a purge; that setting DELETES the history it promises to keep")
+	}
+
+	// And the opposite, so the test is not passing because purging never works.
+	h.SetRetention(time.Hour, 2000, time.Minute)
+	h.purge()
+	if !purged {
+		t.Fatal("a finite retention never purged, so the check above proves nothing")
+	}
+}
+
+// purgeSpy is a Store that records whether the sweep ran.
+type purgeSpy struct{ onPurge func() }
+
+func (p *purgeSpy) AppendChatMessages([]db.ChatMessage) (int, error) { return 0, nil }
+func (p *purgeSpy) PurgeChatMessages(time.Time, int) (int, error) {
+	p.onPurge()
+	return 0, nil
+}

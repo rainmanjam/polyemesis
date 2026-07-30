@@ -625,6 +625,87 @@ function PipelineSettings({
 
       <Card>
         <CardHeader>
+          <CardTitle>Chat history</CardTitle>
+          <CardDescription>
+            How far back the chat scrollback goes &mdash; and with it, how much a moderator can
+            see when they open somebody&rsquo;s card.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-hours">Keep for (hours)</Label>
+              <Input
+                id="chat-hours"
+                type="number"
+                min={0}
+                max={43800}
+                value={draft.chat?.retentionHours ?? 2}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: {
+                      retentionHours: Number(e.target.value),
+                      keepMessages: draft.chat?.keepMessages ?? 2000,
+                      purgeMinutes: draft.chat?.purgeMinutes ?? 5,
+                    },
+                  })
+                }
+                className="w-28"
+              />
+              <span className="text-[10px] text-muted-foreground">0 keeps everything, forever.</span>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-keep">Always keep (messages)</Label>
+              <Input
+                id="chat-keep"
+                type="number"
+                min={0}
+                max={5000000}
+                value={draft.chat?.keepMessages ?? 2000}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: {
+                      retentionHours: draft.chat?.retentionHours ?? 2,
+                      keepMessages: Number(e.target.value),
+                      purgeMinutes: draft.chat?.purgeMinutes ?? 5,
+                    },
+                  })
+                }
+                className="w-32"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                A floor, whatever their age.
+              </span>
+            </div>
+          </div>
+
+          <span className="text-[10px] text-muted-foreground">
+            Both apply and the more generous one wins: a message goes when it is older than the
+            hours <em>and</em> outside the newest N. So a busy channel keeps less time than you
+            asked and a quiet one keeps more &mdash; which is the right way round, because the
+            floor is what stops a slow channel&rsquo;s user cards being empty.
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            This is not only a disk setting. Clicking a name in chat opens what that person has
+            said before, and that history comes from here &mdash; no platform publishes an API for
+            it, so polyemesis can only show what it kept. Set this too short and somebody who has
+            been trouble for a week reads as though they have never said anything.
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            Chat is small. A channel averaging ten messages a second stores roughly 7&nbsp;MB an
+            hour; most are nowhere near that.
+          </span>
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Failover</CardTitle>
           <CardDescription>
             A standby input and a holding card, for when the live source stops delivering. Off by

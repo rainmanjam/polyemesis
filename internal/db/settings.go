@@ -1060,6 +1060,73 @@ type Settings struct {
 	// Destinations is install-wide destination policy; per-destination
 	// settings live on the destination row.
 	Destinations DestinationSettings `json:"destinations"`
+	Chat         ChatSettings        `json:"chat"`
+}
+
+// ChatSettings bounds the stored chat scrollback.
+//
+// This became worth exposing when the moderator's user card shipped. That card
+// answers "what has this person said before", and it answers it out of THIS
+// table -- no platform publishes a chat-history API, so the depth of a
+// moderation decision is now a direct function of these two numbers. At the old
+// hard-coded two hours, a card opened on a returning troublemaker showed
+// nothing, which reads as "they have never said anything" rather than "we did
+// not keep it".
+//
+// Both are bounds, and the QUIETER one wins: a message is dropped when it is
+// older than RetentionHours AND not among the newest KeepMessages. A busy
+// channel therefore keeps less time than asked and a quiet one keeps more, which
+// is the right way round -- the floor is what stops a slow channel's card being
+// empty.
+type ChatSettings struct {
+	// RetentionHours drops messages older than this. 0 means keep forever,
+	// matching the recorder's MaxAgeHours convention.
+	//
+	// Forever is a real answer here and not a trap: chat rows are small. A
+	// channel averaging ten messages a second stores roughly 7 MB an hour, so a
+	// year of a busy channel is tens of gigabytes, and most channels are
+	// nowhere near that. An operator who wants a permanent moderation record
+	// should be able to have one.
+	RetentionHours int `json:"retentionHours"`
+	// KeepMessages is the floor: this many newest messages survive whatever
+	// their age. It is what stops a channel that was quiet overnight from
+	// opening every user card empty in the morning.
+	KeepMessages int `json:"keepMessages"`
+	// PurgeMinutes is how often the sweep runs. Cheap -- it is one indexed
+	// delete -- so this is about how promptly "deleted" becomes true on disk
+	// rather than about load.
+	PurgeMinutes int `json:"purgeMinutes"`
+}
+
+// ChatSettings bounds, chosen to be generous rather than tidy. The cost of the
+// upper end is disk, which the operator can see; the cost of a low ceiling is a
+// moderation decision made on missing evidence, which they cannot.
+const (
+	// MaxChatRetentionHours is five years. Not a guess at what anyone needs --
+	// a bound that exists so a typo of 999999 is caught rather than stored.
+	MaxChatRetentionHours = 24 * 365 * 5
+	MaxChatKeepMessages   = 5_000_000
+	MaxChatPurgeMinutes   = 24 * 60
+)
+
+func (c ChatSettings) problems() []string {
+	var probs []string
+	if c.RetentionHours < 0 || c.RetentionHours > MaxChatRetentionHours {
+		probs = append(probs, fmt.Sprintf(
+			"chat retention %d hours out of range (0-%d, 0 to keep forever)",
+			c.RetentionHours, MaxChatRetentionHours))
+	}
+	if c.KeepMessages < 0 || c.KeepMessages > MaxChatKeepMessages {
+		probs = append(probs, fmt.Sprintf(
+			"chat keep %d messages out of range (0-%d)", c.KeepMessages, MaxChatKeepMessages))
+	}
+	// Zero would be a sweep every tick. Bounded below rather than defaulted
+	// silently, because a 0 here is far more likely to be a mistake than a wish.
+	if c.PurgeMinutes < 1 || c.PurgeMinutes > MaxChatPurgeMinutes {
+		probs = append(probs, fmt.Sprintf(
+			"chat purge interval %d minutes out of range (1-%d)", c.PurgeMinutes, MaxChatPurgeMinutes))
+	}
+	return probs
 }
 
 // DefaultSettings is what a fresh install runs with.
@@ -1186,6 +1253,17 @@ func DefaultSettings() Settings {
 			KeepAliveSec:   30,
 			Discovery:      true,
 		},
+		// Deliberately the same numbers the Hub used when they were constants,
+		// so an existing install behaves identically after upgrading and only
+		// changes when somebody decides to change it. The constants in
+		// internal/chat are still the fallback for a Hub built without these,
+		// which is every test; TestChatDefaultsMatchTheChatPackage keeps the two
+		// in step the way the MQTT pair above are kept.
+		Chat: ChatSettings{
+			RetentionHours: 2,
+			KeepMessages:   2000,
+			PurgeMinutes:   5,
+		},
 	}
 }
 
@@ -1250,6 +1328,9 @@ func (s Settings) Validate() error {
 		add("%s", p)
 	}
 	for _, p := range s.Destinations.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.Chat.problems() {
 		add("%s", p)
 	}
 

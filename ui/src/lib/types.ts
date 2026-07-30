@@ -733,6 +733,29 @@ export interface Settings {
   mqtt?: MQTTSettings;
   /** Install-wide destination policy. Optional for the same reason. */
   destinations?: { staggerMs: number };
+  /** How much chat scrollback is kept. Optional for the same reason.
+   *
+   *  This is the depth of the moderator's user card, not just a disk knob: that
+   *  card answers "what has this person said before" out of polyemesis's own
+   *  store, because no platform publishes a chat-history API. Set it too short
+   *  and a card opened on a returning troublemaker reads as "they have never
+   *  said anything" rather than "we did not keep it". */
+  chat?: ChatRetentionSettings;
+}
+
+/** Bounds on the stored chat scrollback.
+ *
+ *  Both apply and the more generous one wins: a message goes when it is older
+ *  than `retentionHours` AND outside the newest `keepMessages`. So a busy
+ *  channel keeps less time than asked and a quiet one keeps more — the floor is
+ *  what stops a slow channel's user cards being empty. */
+export interface ChatRetentionSettings {
+  /** 0 keeps forever, the same convention the recorder's maxAgeHours uses. */
+  retentionHours: number;
+  /** Newest-N floor, kept whatever their age. */
+  keepMessages: number;
+  /** How often the sweep runs. */
+  purgeMinutes: number;
 }
 
 // ---------------------------------------------------------------- failover

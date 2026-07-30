@@ -229,6 +229,19 @@ func run(h *hooks) error {
 		chat.WithLogger(log),
 	)
 	defer hub.Close()
+	// Retention is an operator setting, and the stored value has to be applied
+	// at startup as well as on save. Without this a longer window would work
+	// until the first restart and then quietly revert to the built-in two
+	// hours, taking the moderator's user-card history with it.
+	//
+	// A failed read leaves the Hub on its own defaults rather than stopping the
+	// server: chat history is the most expendable data here, and refusing to
+	// boot over it would be a wildly disproportionate response.
+	if s, err := store.GetSettings(); err == nil {
+		api.ApplyChatRetention(hub, s.Chat)
+	} else {
+		log.Warn("chat retention settings unreadable; using the built-in defaults", "err", err)
+	}
 
 	srv := api.New(api.Options{
 		Log: log, Config: cfg,

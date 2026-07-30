@@ -205,6 +205,29 @@ func WithSendTimeout(d time.Duration) Option {
 	}
 }
 
+// SetRetention changes the stored-history bounds on a running Hub.
+//
+// Separate from WithRetention because retention is an operator setting now, and
+// a setting that only takes effect on restart is one an operator changes, sees
+// nothing happen, and changes again. The purge loop reads these under the lock
+// on every tick, so the next sweep uses the new values.
+//
+// A zero or negative age means keep forever, matching RecordingSettings.
+// MaxAgeHours. It is a real answer rather than a mistake to guard against: chat
+// rows are small, and an operator who wants a permanent moderation record should
+// be able to have one.
+func (h *Hub) SetRetention(age time.Duration, keep int, purgeEvery time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.retention = age
+	if keep >= 0 {
+		h.retainKeep = keep
+	}
+	if purgeEvery > 0 {
+		h.purgeEvery = purgeEvery
+	}
+}
+
 // New creates a Hub and starts its background flusher. Close stops it.
 func New(opts ...Option) *Hub {
 	h := &Hub{
@@ -818,7 +841,10 @@ func (h *Hub) background() {
 	defer h.wg.Done()
 	flush := time.NewTicker(h.flushEvery)
 	defer flush.Stop()
-	purge := time.NewTicker(h.purgeEvery)
+	h.mu.Lock()
+	purgeEvery := h.purgeEvery
+	h.mu.Unlock()
+	purge := time.NewTicker(purgeEvery)
 	defer purge.Stop()
 
 	for {
@@ -831,6 +857,17 @@ func (h *Hub) background() {
 			h.flush()
 		case <-purge.C:
 			h.purge()
+			// Pick up a changed sweep interval. Without this the ticker keeps
+			// the interval it was born with, so SetRetention's purgeEvery would
+			// be stored, reported back to the operator, and never used — the
+			// worst kind of setting, because it looks applied.
+			h.mu.Lock()
+			next := h.purgeEvery
+			h.mu.Unlock()
+			if next != purgeEvery && next > 0 {
+				purgeEvery = next
+				purge.Reset(next)
+			}
 		}
 	}
 }
@@ -864,11 +901,22 @@ func (h *Hub) flush() {
 }
 
 func (h *Hub) purge() {
-	p, ok := h.store.(Purger)
-	if !ok || h.retention <= 0 {
+	// Snapshot under the lock. These used to be written once at construction
+	// and read freely; SetRetention made them mutable, which turned this into a
+	// data race the moment an operator saved the settings page.
+	h.mu.Lock()
+	retention, keep := h.retention, h.retainKeep
+	store := h.store
+	h.mu.Unlock()
+
+	p, ok := store.(Purger)
+	// Zero or negative retention means keep forever. Not a guard against a bad
+	// value: it is the setting an operator picks when they want a permanent
+	// moderation record, and the user card reads this table.
+	if !ok || retention <= 0 {
 		return
 	}
-	if _, err := p.PurgeChatMessages(h.now().Add(-h.retention), h.retainKeep); err != nil {
+	if _, err := p.PurgeChatMessages(h.now().Add(-retention), keep); err != nil {
 		h.log.Warn("chat history not purged", "err", err)
 	}
 }

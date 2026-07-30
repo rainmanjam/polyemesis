@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
@@ -720,7 +721,31 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "settings saved but reconcile failed: "+err.Error())
 		return
 	}
+	// Chat retention is not the manager's to reconcile -- the Hub owns it -- and
+	// it has to be applied HERE rather than at the next restart. A retention
+	// setting that stores, returns 200 and keeps sweeping on the old numbers is
+	// the same silent no-op the ingest block above documents.
+	ApplyChatRetention(s.chat, settings.Chat)
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// ApplyChatRetention pushes the stored bounds into a running Hub.
+//
+// Shared by the settings handler and startup so the two cannot disagree about
+// what "0 hours" means, which is the sort of difference that only shows up as
+// "my chat history vanished after a restart".
+func ApplyChatRetention(hub *chat.Hub, c db.ChatSettings) {
+	if hub == nil {
+		return
+	}
+	// 0 hours is keep-forever, and a negative Duration is how the Hub spells
+	// that. Converting through time.Duration(0) would mean "purge everything
+	// older than now", which is the exact opposite.
+	age := time.Duration(c.RetentionHours) * time.Hour
+	if c.RetentionHours <= 0 {
+		age = -1
+	}
+	hub.SetRetention(age, c.KeepMessages, time.Duration(c.PurgeMinutes)*time.Minute)
 }
 
 // ------------------------------------------------------------- destinations
