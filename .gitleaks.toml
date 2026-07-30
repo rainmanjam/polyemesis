@@ -14,6 +14,32 @@
 [extend]
 useDefault = true
 
+# One historical commit is exempted, by SHA.
+#
+# 5cbe821 added the allowlist self-test below and wrote its planted, made-up
+# credential as a literal directly into .github/workflows/security.yml. That
+# made the workflow file itself a finding. 1076b61 removed the literal — the
+# value is now assembled from two parts at run time — but removing a secret in
+# a later commit does not unpublish it, which is exactly the property the
+# full-history scan exists to enforce and is not one worth weakening.
+#
+# So the commit is allowlisted rather than the value or the path:
+#
+#   - Allowlisting the VALUE would stop the self-test below from working, since
+#     that test depends on precisely this string being detected.
+#   - Allowlisting the PATH would exempt the workflow file forever, including
+#     from a real credential added to it later.
+#   - Allowlisting the COMMIT exempts one immutable, already-reviewed diff and
+#     nothing else. The same string is still caught anywhere it appears again.
+#
+# The string was invented for this test, matches no real service, and was never
+# valid anywhere. It was a fixture that briefly sat in the wrong file.
+[allowlist]
+description = "A made-up fixture value that briefly lived in security.yml"
+commits = [
+  "5cbe821ff686ddcc59aee9a8aa830269122e9c36",
+]
+
 [[rules]]
 id = "generic-api-key"
 description = "Generic API key"
