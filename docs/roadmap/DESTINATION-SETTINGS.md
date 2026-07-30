@@ -1,8 +1,15 @@
 # Per-destination settings and platform metadata
 
-**Status:** researched, not started.
-**Effort:** ~14–19 days total, in four independently shippable parts.
-**Dependencies: none.** The SDK audit says hand-roll everything.
+**Status: Parts A–D SHIPPED**, 2026-07-29, except the two items named under
+[What remains](#what-remains). The original estimate was ~14–19 days.
+**Dependencies: none.** The SDK audit says hand-roll everything, and nothing
+since has changed that.
+
+Verified against the tree rather than against the PR titles: `ExpertArgs`,
+`MuxQueuePackets`/`MuxQueueBytes` and `RWTimeoutSeconds` for Part A, mono and
+codec choice for Part B, `DestResilience.GiveUpAfter`/`MinBackoffSeconds` reaching
+`engine.go` for Part C, and `MetadataCaps` on all four providers plus
+`PushCompliance` for Part D.
 
 Grounded in the platforms' own API references and in probe builds, then handed
 to an adversarial reviewer. **Two of the ideas that motivated this document did
@@ -125,7 +132,21 @@ checking on its own merits, separately from this work.
 
 ---
 
-## Part A — Transport and muxer (~2 days)
+## What remains
+
+Two items from the parts below are not built. Both are named here rather than
+left for somebody to discover by grepping for a field that does not exist.
+
+| Item | Part | Why it is still open |
+|---|---|---|
+| **Staggered go-live** | C | Destinations still all connect at once. The other two Part C items shipped; this one is scheduling rather than policy, and it wants a decision about whether the spacing is per-destination or one global ramp |
+| **Facebook's full metadata surface** | D | Facebook advertises `title` and `description` only. It has the largest write surface of any platform here — deliberately deferred as its own feature, not half-built |
+
+Also deferred as a separate feature: **per-destination stored broadcast
+defaults**, so a destination remembers its own title and category rather than the
+composer starting empty each time.
+
+## Part A — Transport and muxer (SHIPPED)
 
 **Probe the flag before designing around it.** A third of the first draft of this
 section did not survive `ffmpeg -h`:
@@ -184,13 +205,13 @@ mix**, not a re-route: the routing matrix still produces `OutL`/`OutR` and
 `-ac 1` sums them. Wiring individual tracks to a single channel would be a
 change to the matrix, and that is a different feature.
 
-## Part C — Resilience (~2 days)
+## Part C — Resilience (SHIPPED, except staggered go-live)
 
-| Setting | Today |
-|---|---|
-| Per-destination reconnect policy | One global `reconnectDelayMaxSeconds`, and it is for **pull ingest**, not destinations |
-| Give-up threshold plus alert | Retries indefinitely; a destination retrying forever looks identical to one that works |
-| Staggered go-live | All destinations connect at once, spiking CPU and upstream |
+| Setting | Was | Now |
+|---|---|---|
+| Per-destination reconnect policy | One global `reconnectDelayMaxSeconds`, and it was for **pull ingest**, not destinations | `DestResilience.MinBackoffSeconds`/`MaxBackoffSeconds`, per destination |
+| Give-up threshold plus alert | Retried indefinitely; a destination retrying forever looked identical to one that works | `GiveUpAfter`, counted on **consecutive** failures so a destination that reconnects hourly for a week never accumulates its way to the limit |
+| Staggered go-live | All destinations connect at once, spiking CPU and upstream | **Still open** — see [What remains](#what-remains) |
 
 ## Part D — Metadata (~7–12 days, and the real gap)
 

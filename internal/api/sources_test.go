@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -206,7 +208,37 @@ func TestTokenEnforcedTracksTheListenerNotTheSetting(t *testing.T) {
 
 	// The fixture runs a manager, so the listener is up and the field says so.
 	if !listSources(t, h, sign)[0].TokenEnforced {
-		t.Fatal("tokenEnforced is false while the listener is bound")
+		// Distinguish "the product is wrong" from "this machine's port is busy",
+		// because the two need completely different responses and the old message
+		// asserted the first while the second was far more likely.
+		//
+		// The default SRT port is 6000, and on a developer machine that is a
+		// popular number -- Docker Desktop publishes on it, among others. When
+		// something else holds it the fixture's listener cannot bind, so
+		// tokenEnforced is correctly false and this test has nothing to measure.
+		// The previous message read "tokenEnforced is false while the listener is
+		// bound" at the exact moment the listener was NOT bound, which sends the
+		// reader looking for a bug in the wrong half of the system.
+		//
+		// Skip rather than fail, and only on a real port conflict: CI runs in a
+		// clean container where nothing else wants 6000, so this never fires there
+		// and the assertion stays strict where it counts.
+		st, err := store.GetSettings()
+		if err != nil {
+			t.Fatalf("GetSettings: %v", err)
+		}
+		port := st.Listeners.SRTPort
+		if pc, lerr := net.ListenPacket("udp", fmt.Sprintf(":%d", port)); lerr != nil {
+			t.Skipf("udp/%d is already in use on this machine (%v), so the fixture's "+
+				"SRT listener could not bind and tokenEnforced is correctly false. "+
+				"Free the port -- on a developer machine it is usually Docker -- or "+
+				"run this in a container", port, lerr)
+		} else {
+			pc.Close()
+			t.Fatalf("the SRT listener is not bound even though udp/%d is free, so "+
+				"tokenEnforced is false for a reason inside the product rather than "+
+				"outside it", port)
+		}
 	}
 
 	// Port 0 specifically. To the kernel :0 is not an error, it means "any free
