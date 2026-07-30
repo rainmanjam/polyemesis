@@ -867,3 +867,60 @@ func TestTwitchUnbanAddressesTheUser(t *testing.T) {
 		t.Fatalf("user_id = %q", q.Get("user_id"))
 	}
 }
+
+// PATCH semantics are the point: setting one field must not clear the others.
+//
+// Twitch's endpoint takes every setting in one body, so a request built from a
+// struct of plain values would send zeros for everything unset and switch off
+// follower-only mode as a side effect of adjusting slow mode. That is why every
+// field is a pointer.
+func TestTwitchChatSettingsSendsOnlyWhatWasAsked(t *testing.T) {
+	var body map[string]any
+	var method string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	on, secs := true, 30
+	if err := a.UpdateChatSettings(context.Background(), ChatSettings{
+		SlowMode: &on, SlowModeSeconds: &secs,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodPatch {
+		t.Fatalf("method = %s, want PATCH", method)
+	}
+	if body["slow_mode"] != true || body["slow_mode_wait_time"] != float64(30) {
+		t.Fatalf("body = %+v, want slow mode on at 30s", body)
+	}
+	// The important half: nothing else was sent.
+	for _, k := range []string{"follower_mode", "subscriber_mode", "emote_mode",
+		"unique_chat_mode", "non_moderator_chat_delay"} {
+		if _, present := body[k]; present {
+			t.Fatalf("%q was sent although it was never set; this request would have "+
+				"changed a setting the operator did not touch", k)
+		}
+	}
+}
+
+// An empty change is not an error, but it is not a request either: an empty
+// PATCH spends a rate-limit slot to change nothing.
+func TestTwitchChatSettingsSendsNothingWhenNothingChanged(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+
+	a := twitchForDelete(t, srv.URL)
+	if err := a.UpdateChatSettings(context.Background(), ChatSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("an empty settings change was sent to Twitch anyway")
+	}
+}

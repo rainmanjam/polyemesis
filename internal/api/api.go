@@ -396,6 +396,9 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/chat/messages/hide", s.handleChatHideMessage)
 			// Banning addresses a PERSON, not a message, so it is its own
 			// route rather than a mode on the message ones.
+			// Channel-wide rules act on the ROOM, not a message or a
+			// person, so they get their own route too.
+			r.Patch("/chat/settings", s.handleChatSettings)
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)

@@ -1135,3 +1135,27 @@ func decodeJSON(raw json.RawMessage, out any) error {
 	}
 	return json.Unmarshal(raw, out)
 }
+
+// UpdateChatSettings applies channel-wide chat rules on one platform.
+//
+// Per-platform and not a fan-out, unlike Send. "Slow mode on" means a different
+// thing on each platform that has it, only Twitch publishes an API for it at
+// all, and quietly applying it to one of four platforms while reporting success
+// would be the kind of half-truth this package exists to avoid.
+func (h *Hub) UpdateChatSettings(ctx context.Context, p db.Platform, account string, s ChatSettings) error {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return fmt.Errorf("chat: %s is not connected", p)
+	}
+	w, ok := r.adapter.(ChatSettingsWriter)
+	if !ok {
+		return fmt.Errorf("chat: %s publishes no API for slow mode or follower-only chat; "+
+			"set it in the %s dashboard", p, p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	return w.UpdateChatSettings(ctx, s)
+}

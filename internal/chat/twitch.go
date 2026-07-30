@@ -414,6 +414,101 @@ func (t *TwitchAdapter) Unban(ctx context.Context, userID string) error {
 	return nil
 }
 
+// ChatSettings is the channel-wide state a moderator can set.
+//
+// Every field is a pointer because this is a PATCH and nil means "leave it
+// alone". A struct of plain values could not express "turn slow mode on and
+// touch nothing else" -- it would send zeros for everything unset and silently
+// switch off follower-only mode as a side effect of adjusting slow mode.
+type ChatSettings struct {
+	// SlowMode and SlowModeSeconds: the wait between one viewer's messages.
+	SlowMode        *bool `json:"slowMode,omitempty"`
+	SlowModeSeconds *int  `json:"slowModeSeconds,omitempty"`
+	// FollowerMode and FollowerModeMinutes: how long someone must have followed
+	// before they may post. Zero minutes means "any follower".
+	FollowerMode        *bool `json:"followerMode,omitempty"`
+	FollowerModeMinutes *int  `json:"followerModeMinutes,omitempty"`
+	// SubscriberMode restricts chat to subscribers.
+	SubscriberMode *bool `json:"subscriberMode,omitempty"`
+	// EmoteMode restricts chat to emotes only.
+	EmoteMode *bool `json:"emoteMode,omitempty"`
+	// UniqueChatMode is Twitch's name for what everyone else calls r9k: no
+	// repeated messages.
+	UniqueChatMode *bool `json:"uniqueChatMode,omitempty"`
+	// NonModeratorChatDelay holds messages briefly so moderators see them first.
+	NonModeratorChatDelay        *bool `json:"nonModeratorChatDelay,omitempty"`
+	NonModeratorChatDelaySeconds *int  `json:"nonModeratorChatDelaySeconds,omitempty"`
+}
+
+// ChatSettingsWriter is the optional capability for channel-wide chat rules.
+//
+// Only Twitch publishes an API for these. It is a separate interface from
+// Deleter and Banner because it acts on the ROOM rather than on a message or a
+// person, and conflating the three would let a UI offer "slow mode" next to
+// "delete" as though they were the same kind of decision.
+type ChatSettingsWriter interface {
+	Adapter
+	UpdateChatSettings(ctx context.Context, s ChatSettings) error
+}
+
+// UpdateChatSettings applies channel-wide chat rules.
+//
+// PATCH semantics throughout: only the fields set are sent, so adjusting slow
+// mode cannot switch off follower-only mode as a side effect. Twitch requires
+// the paired duration whenever a mode is enabled, so those are sent together or
+// the request is rejected in a way that names neither field.
+func (t *TwitchAdapter) UpdateChatSettings(ctx context.Context, s ChatSettings) error {
+	if err := t.helixReady(); err != nil {
+		return err
+	}
+	body := map[string]any{}
+	if s.SlowMode != nil {
+		body["slow_mode"] = *s.SlowMode
+	}
+	if s.SlowModeSeconds != nil {
+		body["slow_mode_wait_time"] = *s.SlowModeSeconds
+	}
+	if s.FollowerMode != nil {
+		body["follower_mode"] = *s.FollowerMode
+	}
+	if s.FollowerModeMinutes != nil {
+		body["follower_mode_duration"] = *s.FollowerModeMinutes
+	}
+	if s.SubscriberMode != nil {
+		body["subscriber_mode"] = *s.SubscriberMode
+	}
+	if s.EmoteMode != nil {
+		body["emote_mode"] = *s.EmoteMode
+	}
+	if s.UniqueChatMode != nil {
+		body["unique_chat_mode"] = *s.UniqueChatMode
+	}
+	if s.NonModeratorChatDelay != nil {
+		body["non_moderator_chat_delay"] = *s.NonModeratorChatDelay
+	}
+	if s.NonModeratorChatDelaySeconds != nil {
+		body["non_moderator_chat_delay_duration"] = *s.NonModeratorChatDelaySeconds
+	}
+	if len(body) == 0 {
+		// Not an error worth raising to the operator, but not a request worth
+		// sending either: an empty PATCH would spend a rate-limit slot to
+		// change nothing.
+		return nil
+	}
+
+	q := url.Values{
+		"broadcaster_id": {t.cfg.BroadcasterID},
+		"moderator_id":   {t.cfg.ModeratorID},
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodPatch,
+		t.helixBase()+"/chat/settings?"+q.Encode(),
+		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, body, nil)
+	if err != nil {
+		return t.moderationError(err, "chat settings change")
+	}
+	return nil
+}
+
 func (t *TwitchAdapter) helixBase() string {
 	if t.cfg.APIBase != "" {
 		return t.cfg.APIBase

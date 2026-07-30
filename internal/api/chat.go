@@ -404,3 +404,35 @@ func (s *Server) handleChatUnban(w http.ResponseWriter, r *http.Request) {
 			"does not re-fetch what it has dropped.",
 	})
 }
+
+// handleChatSettings applies channel-wide chat rules on one platform.
+//
+// PATCH, and pointer fields all the way down: an omitted field means "leave it
+// alone". A body of plain values could not express "turn slow mode on and touch
+// nothing else" — it would send zeros for everything unset and switch off
+// follower-only mode as a side effect.
+//
+// Per-platform rather than fan-out. Only Twitch publishes an API for any of
+// this, and "slow mode on" applied to one of four platforms while reporting
+// success would be a half-truth.
+func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireChat(w) {
+		return
+	}
+	q := r.URL.Query()
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	if platform == "" {
+		writeError(w, http.StatusBadRequest, "platform is required")
+		return
+	}
+	var body chat.ChatSettings
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if err := s.chat.UpdateChatSettings(r.Context(), platform,
+		strings.TrimSpace(q.Get("account")), body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}

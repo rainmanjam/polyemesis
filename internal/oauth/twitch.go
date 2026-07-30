@@ -49,6 +49,7 @@ func (t *Twitch) Scopes() []string {
 		"chat:edit",
 		"moderator:manage:chat_messages",
 		"moderator:manage:banned_users",
+		"moderator:manage:chat_settings",
 	}
 }
 
@@ -61,15 +62,16 @@ func (t *Twitch) Scopes() []string {
 // this stays off until Twitch documents support. The flow is still a
 // confidential client: the secret never leaves the server, the code is bound to
 // a whitelisted redirect URI, and the state is single-use.
-// ScopeVersion 3 adds the two moderation scopes to the set: stream key, channel
-// write, the two chat scopes, message deletion, and bans.
+// ScopeVersion 4 adds the three moderation scopes to the set: stream key,
+// channel write, the two chat scopes, message deletion, bans, and the
+// channel-wide chat settings (slow mode, follower-only, moderator delay).
 //
 // Bump it whenever Scopes changes -- an operator holding a token issued before
 // the change does not gain the new permission, and the failure arrives as a 401
 // mid-broadcast. This bump is the difference between the account list saying
 // "reconnect to enable moderation" and an operator finding out when the delete
 // button fails on the message they needed gone.
-func (t *Twitch) ScopeVersion() int { return 3 }
+func (t *Twitch) ScopeVersion() int { return 4 }
 
 func (t *Twitch) PKCE() bool { return false }
 
