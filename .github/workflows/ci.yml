@@ -190,6 +190,55 @@ jobs:
           fi
           echo "server started and served /health on ${{ matrix.os }}"
 
+      # Push an actual broadcast through it, on every platform.
+      #
+      # /health proves the process comes up. It does not prove the product
+      # works: that needs a stream arriving, a layout being probed, two
+      # destinations compiling different routing graphs, FFmpeg children being
+      # spawned and supervised, and audio landing in a container. Those are the
+      # parts built on process groups, signals and file paths -- precisely
+      # where Windows differs -- so "it serves /health on Windows" was never
+      # the claim worth making.
+      #
+      # The stream is injected into the relay hub rather than pushed over SRT,
+      # because libsrt is not guaranteed in a runner's FFmpeg (Homebrew's has
+      # none). That substitutes only the ingest hop; everything downstream is
+      # the real path. SRT ingest itself is covered by the acceptance suites on
+      # ubuntu.
+      #
+      # Verification is a measurement, not an exit status: each destination
+      # gets a different pair of the three input tones, and the check reads
+      # per-band energy back out of the file. A destination that silently
+      # carried the wrong mix would pass any check that only asked whether
+      # FFmpeg exited 0.
+      - name: Push a broadcast through it and measure the output
+        shell: bash
+        run: |
+          set -uo pipefail
+          rm -rf ./data
+          ./polyemesis-smoke -addr 127.0.0.1:8099 -data ./data -log warn > bcast-server.log 2>&1 &
+          pid=$!
+          go run scripts/smoketest.go
+          rc=$?
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          if [ "$rc" -ne 0 ]; then
+            echo "--- server log ---"
+            cat bcast-server.log || true
+            exit 1
+          fi
+
+      - name: Upload broadcast artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: broadcast-${{ matrix.os }}
+          path: |
+            bcast-server.log
+            data/recordings/
+          retention-days: 7
+          if-no-files-found: ignore
+
   ui:
     name: ui typecheck, lint, build
     runs-on: ubuntu-latest
