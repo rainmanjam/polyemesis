@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
-import { ConfirmDestructive, useConfirm } from "@/components/ConfirmDestructive";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertTriangle,
   Check,
@@ -38,9 +39,8 @@ import {
 } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
-// The capability matrix lives beside the destination dialog that renders it
-// inline; this page shows the same rows as a full table. It should move to
-// ui/src/lib/ when someone owns that file — it is data, not a component.
+// The destination dialog renders this matrix inline; this page shows the same
+// rows as a full table. Both read it from lib, which is where it belongs.
 import {
   CAPABILITY_COLUMNS,
   PLATFORM_CAPABILITIES,
@@ -48,7 +48,7 @@ import {
   supportInfo,
   supportOf,
   tierInfo,
-} from "@/components/DestinationDialog";
+} from "@/lib/capabilities";
 import { api } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";

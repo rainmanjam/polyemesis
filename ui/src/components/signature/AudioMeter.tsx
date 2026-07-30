@@ -259,28 +259,3 @@ export function MeterScale({ className }: { className?: string }) {
     </div>
   );
 }
-
-/** Standard channel names by count, so a 5.1 track labels its channels
- *  correctly instead of showing 1..6. */
-export function channelLabels(count: number): string[] {
-  switch (count) {
-    case 1:
-      return ["M"];
-    case 2:
-      return ["L", "R"];
-    case 3:
-      return ["L", "R", "C"];
-    case 4:
-      return ["L", "R", "Ls", "Rs"];
-    case 5:
-      return ["L", "R", "C", "Ls", "Rs"];
-    case 6:
-      return ["L", "R", "C", "LFE", "Ls", "Rs"];
-    case 7:
-      return ["L", "R", "C", "LFE", "Cs", "Ls", "Rs"];
-    case 8:
-      return ["L", "R", "C", "LFE", "Lb", "Rb", "Ls", "Rs"];
-    default:
-      return Array.from({ length: count }, (_, i) => String(i + 1));
-  }
-}

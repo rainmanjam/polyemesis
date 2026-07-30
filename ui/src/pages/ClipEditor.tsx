@@ -28,16 +28,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
+import { Timeline, type TimelineSegmentMark } from "@/components/signature/Timeline";
 import {
-  Timeline,
   driftText,
   parseSpriteVTT,
   parseTimecode,
   timecode,
   type SpriteCue,
-  type TimelineSegmentMark,
-} from "@/components/signature/Timeline";
-import { autoApi } from "@/pages/AutomationPage";
+} from "@/lib/timeline";
+import { autoApi } from "@/lib/autoApi";
 import { bytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 

@@ -143,22 +143,3 @@ export function ConfirmDestructive({
     </Dialog>
   );
 }
-
-/** State for one pending confirmation.
- *
- *  A hook rather than a pattern to copy, because the copies drift: three pages
- *  each rolling their own `deleting` state is how one of them ends up without a
- *  guard at all, which is exactly what happened with the jobs list.
- */
-export function useConfirm<T>() {
-  const [target, setTarget] = useState<T | null>(null);
-  return {
-    target,
-    ask: setTarget,
-    close: () => setTarget(null),
-    open: target !== null,
-    onOpenChange: (o: boolean) => {
-      if (!o) setTarget(null);
-    },
-  };
-}

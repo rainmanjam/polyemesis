@@ -10,10 +10,9 @@ import {
   ChatStatusList,
   ChatTimeline,
   PlatformFilter,
-  accentFor,
-  platformsIn,
-  useChatFeed,
 } from "@/components/ChatPanel";
+import { accentFor, platformsIn } from "@/lib/chat";
+import { useChatFeed } from "@/hooks/useChatFeed";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /** One pane for every platform at once.

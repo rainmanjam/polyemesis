@@ -11,7 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AudioMeter, channelLabels } from "./AudioMeter";
+import { AudioMeter } from "./AudioMeter";
+import { channelLabels } from "@/lib/channels";
 import { gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
