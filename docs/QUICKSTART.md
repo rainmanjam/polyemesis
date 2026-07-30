@@ -32,7 +32,7 @@ the whole question.
 docker run -d --name polyemesis \
   -p 8080:8080 -p 6000:6000/udp \
   -v polyemesis-data:/data \
-  ghcr.io/rainmanjam/polyemesis:latest
+  rainmanjam/polyemesis:latest
 ```
 
 **Binary:**
