@@ -135,6 +135,70 @@ For the destination that needs one setting nothing else does:
   that tells you whether the result would start without starting it. Treat
   access to it as equivalent to shell access.
 
+### Media uploads
+
+- **Put a file on the server from the browser** — Library → Media. Before this,
+  broadcasting from a file meant copying it onto the box yourself: fine on a
+  Linux host you already have a session on, a wall for everyone running the
+  container.
+- **The filename you send is discarded.** This is the only endpoint where a
+  caller supplies both the bytes and something path-shaped, so the server names
+  the file itself, with a random suffix that also stops an upload overwriting
+  an existing one by guessing its name.
+- **Nothing is left behind by a failure.** The body streams to a temporary file
+  and is renamed on success, so an oversized, empty or cancelled upload leaves
+  no partial file — which matters because a half-written video is not visibly
+  broken in a listing, and the operator would find out when the broadcast they
+  scheduled went to air.
+- **Free space is checked before the write**, not discovered during it. A
+  filled volume takes the database and the HLS preview with it.
+- **Every file carries an origin** — *uploaded*, *recorded* or *clip* — derived
+  from which store it came out of rather than stored beside it. Uploads live in
+  their own directory, so a retention policy written about footage the server
+  captured cannot delete a file an operator deliberately put there.
+
+### Automatic chat moderation
+
+Three checkers, cheapest first, and a switch matrix over all of them.
+
+- **Rules** — regular expressions over one message. Go's `regexp` is RE2, so an
+  operator-supplied pattern cannot become a denial of service. Normalisation
+  defeats the evasions people actually use: case, padded and doubled letters,
+  zero-width characters, leetspeak and Cyrillic homoglyphs.
+- **History** — a *sequence* from one author, and the layer neither of the
+  others can replace. Rate and repetition are properties of a sequence, so no
+  per-message classifier can see them: ten identical messages are individually
+  innocuous and collectively the commonest abuse there is. Detects flooding,
+  repeated phrases through case and spacing, link and mention spam, and
+  sustained upper case.
+- **Model** — an optional external API, asked only about what the first two
+  could not settle, and **off by default**. Any OpenAI-compatible endpoint,
+  including a locally hosted one.
+
+**The switch is three-dimensional: action × platform × checker.** The same
+action deserves different trust depending on the evidence — a regex hit is
+reproducible and a model verdict is not — and an operator's exposure differs per
+channel. Cells are gated by what each platform can actually do, and an
+unavailable one renders inert *with its reason* rather than as an unticked box:
+a switch that silently does nothing leaves the operator believing that channel
+is protected.
+
+**Nothing is automatic on a fresh install except flagging for review.**
+Auto-ban is offered wherever the platform supports it and defaults off for every
+checker, the model included — refusing to expose a capability is not a safety
+feature, it is a decision taken away from the person who knows their channel.
+There are per-platform and global kill switches, because mid-incident nobody
+should be unticking fifteen boxes.
+
+**It fails open, everywhere.** A model timeout, 500, rate-limit or unreadable
+key lets the message through and flags it; a rule that will not compile is
+logged loudly and the other checkers keep running; the action queue drops rather
+than blocking, because blocking would stall chat for every viewer during exactly
+the raid it exists for. A moderation outage must not silence a chat.
+
+Messages display *before* automod sees them and are retracted after, so nothing
+here can make chat feel slow.
+
 ### Operations
 
 - Prometheus metrics, alert rules with webhook delivery, and schedules.
@@ -303,10 +367,21 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 #### Playout
 
 - **Scheduled file broadcast joins mid-file, not at frame 0**, and there is no
-  playlist sequencing. See
-  [SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md).
+  playlist sequencing. Files can now be uploaded from the browser, but they play
+  one at a time. See [SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md).
 - **LL-HLS is not implemented and was declined deliberately** — FFmpeg cannot
   emit partial segments at all. Preview latency was tuned to 2.2–3.2 s instead.
+
+#### Automatic moderation
+
+- **The model checker sends chat messages to whatever endpoint you configure.**
+  Off by default, and a locally hosted OpenAI-compatible model keeps everything
+  on your hardware. The rules and history checkers send nothing anywhere.
+- **No moderation is perfect and this one is not tuned on your community.**
+  Every irreversible action starts off for that reason.
+- **Automod has not been run against a real raid.** The bounds are tested —
+  5,000 distinct authors are tracked and evicted — but a live incident on a busy
+  channel has not happened.
 
 #### Streaming platforms
 

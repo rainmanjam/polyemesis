@@ -68,6 +68,15 @@ the software actually promises.
 - **Path confinement.** File destinations, `file://` pull sources, slate images,
   recording and clip downloads are all confined to the data directory. Paths
   that come from the database are never trusted as filesystem paths.
+- **Uploads name themselves.** `POST /api/v1/media` is the one endpoint where a
+  caller supplies both the bytes and something filename-shaped, so the supplied
+  name is treated as a hint and thrown away: the server generates the stored
+  name with a random suffix, which also means an upload cannot overwrite an
+  existing one by guessing it. The separator check tests both `/` and `\` on
+  every platform rather than `os.PathSeparator`, whose meaning changes with the
+  build target — that exact bug once let a forward slash through on Windows.
+  Uploads are behind the session, so an API token cannot write bytes to the
+  disk, and an oversized, empty or cancelled upload leaves nothing behind.
 - **Inbound webhooks.** Kick's chat webhook is verified against Kick's published
   RSA public key before its body is read, and the handler refuses the request
   outright when no verifier is configured. An unverifiable webhook endpoint is
@@ -108,6 +117,20 @@ These are design decisions, not oversights. Read them as operating instructions.
   to loopback does not move the ingest listener, which must stay reachable for
   your encoder. A valid token is the only thing standing in front of it, plus
   the SRT passphrase if you set one.
+
+### One thing automod sends outward
+
+If you enable the model checker, **chat messages leave your server** for
+whichever endpoint you configure. That is the whole point of it, and it is worth
+saying plainly rather than leaving in a settings tooltip.
+
+It is off by default. The endpoint is yours to choose, so a locally hosted
+OpenAI-compatible model keeps everything on your own hardware. The API key is
+sealed with the same NaCl secretbox as your platform tokens and is never
+returned by any endpoint — the settings blob carries only `hasApiKey`.
+
+The rules and history checkers send nothing anywhere. They are local, and they
+are what catches most abuse.
 
 ### Deploying it safely
 

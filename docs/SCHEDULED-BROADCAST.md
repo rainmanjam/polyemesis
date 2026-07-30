@@ -20,21 +20,36 @@ which runs in CI.
 
 ## Setting it up
 
-**1. Put the file in the data directory.** Pull sources are confined to it,
+**1. Get the file onto the server.** Either upload it from the browser —
+**Library → Media → drop a file** — or place it in the data directory yourself
+if you have a shell on the box. Pull sources are confined to that directory,
 exactly as file destinations are:
 
 ```
-<dataDir>/recordings/show.ts
+<dataDir>/uploads/show-a1b2c3d4.ts     uploaded from the browser
+<dataDir>/recordings/show.ts           placed by hand
 ```
+
+An upload is stored under a name the **server** chooses, not the one you
+supplied: the client's filename is a hint and is discarded, because it is the
+one place a caller controls both the bytes and a path. The Library shows the
+stored name and the exact pull URL to paste, so you never have to guess it.
+
+Uploads live in their own directory rather than `recordings/` so that a
+retention policy written about footage the server captured cannot delete a file
+you deliberately put there. Every file in the Library carries an **origin** tag
+— *uploaded*, *recorded* or *clip* — which is how you tell the two apart at a
+glance.
 
 MPEG-TS is the least surprising container here. An MP4 works, but its `moov`
 atom means FFmpeg wants the whole file before it starts, which shows up as a
 slow first frame.
 
-**2. Point the ingest at it.** *Settings → Ingest → Mode: **Pull***, with:
+**2. Point the ingest at it.** *Settings → Ingest → Mode: **Pull***, with the
+pull URL from the Library:
 
 ```
-file://recordings/show.ts
+file://uploads/show-a1b2c3d4.ts
 ```
 
 The path is relative to the data directory. An absolute path, a `..`, or a
@@ -92,9 +107,10 @@ A schedule cannot touch a source, restart an ingest, or seek. Starting at frame
 0 needs the full playlist work — see
 [the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md).
 
-**One file, not a playlist.** There is no sequencing, no gapless transition
-between items, and no upload path — you place the file yourself. Several files
-in order needs the concat demuxer and a normalise-on-import step.
+**One file, not a playlist.** There is no sequencing and no gapless transition
+between items. Several files in order needs the concat demuxer and a
+normalise-on-import step — the upload path is now in place, so that work no
+longer has to build one first.
 
 **It occupies the primary ingest.** While a file is playing, the primary hub has
 bytes flowing, so failover sees the programme as live and will not switch to a

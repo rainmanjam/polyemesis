@@ -28,7 +28,7 @@ claim is often more instructive than the right one.
 | **9** | [Teams and roles](TEAMS-AND-ROLES.md) | **20–30 d** | ready | A security boundary retrofitted across ~120 routes. Do it when it is the priority, not alongside other work |
 | **10** | [Destination settings & metadata](DESTINATION-SETTINGS.md) | **14–19 d** in 4 parts | ✅ **A–D shipped** | Three metadata fields against a documented ten-plus, two of which are compliance items. Shipped 2026-07-29 bar the two items under [what remains](DESTINATION-SETTINGS.md#what-remains) |
 | **11** | [Chat moderation](CHAT-MODERATION.md) | — | ✅ **shipped** | Ban, timeout and delete across four platforms, plus upstream retraction. Shipped 2026-07-30 with every item in the plan and two more the research turned up |
-| **12** | [Chat automod](CHAT-AUTOMOD.md) | — | designed | Rules, then per-author history, then an optional model. The acting half already exists — four adapters expose ban/timeout/delete — so this is only the deciding half |
+| **12** | [Chat automod](CHAT-AUTOMOD.md) | — | ✅ **shipped** | Rules, then per-author history, then an optional model. The acting half already exists — four adapters expose ban/timeout/delete — so this is only the deciding half |
 | — | [Unreachable knobs](UNREACHABLE-KNOBS.md) | — | survey | The sibling of item 0, for *settings* rather than features: knobs the server honours that no operator can reach. Surveyed 2026-07-30; one shipped, the rest open |
 
 [WHIP](WEBRTC.md#whip-design) ingest is a separate decision, deliberately not

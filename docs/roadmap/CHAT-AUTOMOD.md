@@ -1,6 +1,9 @@
 # Automatic chat moderation
 
-**Status: designed, not built.** This is the design agreed before implementation.
+**Status: SHIPPED**, 2026-07-30. This document is the design that was agreed
+before implementation, kept as written — the two corrections it took during
+review are recorded in place rather than tidied away, because the wrong version
+of a call is often more instructive than the right one.
 
 Moderation today is entirely manual: you watch chat, you act. The four adapters
 already expose `Delete`, `Hide`, `HideLocally`, `Ban` and `Unban`, and upstream
