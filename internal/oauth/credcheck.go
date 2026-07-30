@@ -18,6 +18,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -155,21 +159,69 @@ func errorsIsUnreachable(err error) bool {
 // A 5xx or a transport failure is OUR problem to report, not the operator's
 // credential to doubt. Telling somebody their secret is wrong when the platform
 // merely had a bad minute is the specific wrong message this exists to avoid.
+//
+// Classification is numeric, not textual: errors.As recovers the status code
+// tokenStatusError carries, rather than string-matching it back out of an
+// error message. The earlier version matched only " 500", " 502", " 503",
+// " 504" and " 429" as substrings, which silently let a 501, a 505, or any of
+// Cloudflare's 520-526 fall through and be reported as a bad credential --
+// exactly the wrong message this function exists to prevent, for outages that
+// substring list simply never named.
 func classifyCheckError(err error) error {
 	if err == nil {
 		return nil
 	}
-	msg := err.Error()
-	// postForm formats non-2xx as "token endpoint returned %d: %s".
-	for _, code := range []string{" 500", " 502", " 503", " 504", " 429"} {
-		if strings.Contains(msg, "returned"+code) {
-			return fmt.Errorf("%w: %s", ErrCheckUnreachable, msg)
+
+	var se *tokenStatusError
+	if errors.As(err, &se) {
+		// >=500 is the platform's own server breaking; 429 is it rate-limiting
+		// us. Neither says anything about whether the credential pair is
+		// correct. Every other status (400, 401, 403, 404...) is the
+		// platform's considered answer about the pair itself, and stands.
+		if se.code >= 500 || se.code == http.StatusTooManyRequests {
+			return fmt.Errorf("%w: %s", ErrCheckUnreachable, err.Error())
 		}
+		return err
 	}
-	if strings.Contains(msg, "context deadline exceeded") ||
-		strings.Contains(msg, "no such host") ||
-		strings.Contains(msg, "connection refused") {
-		return fmt.Errorf("%w: %s", ErrCheckUnreachable, msg)
+
+	if isTransportFailure(err) {
+		return fmt.Errorf("%w: %s", ErrCheckUnreachable, err.Error())
 	}
 	return err
+}
+
+// isTransportFailure reports whether err means the platform was never reached
+// at all, as distinct from a tokenStatusError -- which means it was reached
+// and answered.
+//
+// Structural checks come first because they survive wrapping (an
+// http.Client.Do failure arrives as *url.Error wrapping the real cause, a
+// dial or DNS failure as *net.OpError, a context cancellation satisfies
+// errors.Is against context.DeadlineExceeded) and so hold up regardless of
+// which Go version or platform happens to phrase the underlying message.
+// The substring fallback at the end exists only for "i/o timeout": Go spells
+// a timed-out read or write that way in the message text without giving any
+// caller a typed or interface handle on it that isn't already covered by the
+// net.Error branch above for the common case -- this is the residual case
+// where that check does not apply but the wording still does.
+func isTransportFailure(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), "i/o timeout")
 }

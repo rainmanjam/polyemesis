@@ -893,8 +893,12 @@ func (f *Facebook) CheckCredentials(ctx context.Context, clientID, clientSecret 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return classifyCheckError(fmt.Errorf("token endpoint returned %d: %s",
-			resp.StatusCode, snippet(body)))
+		// tokenStatusError, not a formatted error: classifyCheckError needs the
+		// numeric code to tell a 5xx outage from a 4xx refusal, and Facebook
+		// takes this GET path instead of postForm precisely because it cannot
+		// share that function's body -- it must still share its error type so
+		// all three providers classify identically.
+		return classifyCheckError(&tokenStatusError{code: resp.StatusCode, body: snippet(body)})
 	}
 	return nil
 }

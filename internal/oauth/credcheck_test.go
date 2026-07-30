@@ -2,6 +2,8 @@ package oauth
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -139,5 +141,46 @@ func TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable(t *testing.T) {
 				"the platform offers no way to verify a credential without user "+
 				"consent.", platform)
 		}
+	}
+}
+
+// classifyCheckError used to string-match a handful of status codes out of an
+// error message, and the list was incomplete: a 501, a 505, or any of
+// Cloudflare's 520-526 fell through and were reported as a bad credential
+// instead of an unreachable platform. This pins the numeric classification
+// that replaced it against the specific codes the finding named.
+func TestClassifyCheckErrorByStatusCode(t *testing.T) {
+	unreachable := []int{429, 500, 501, 502, 503, 504, 520, 525}
+	rejected := []int{400, 401, 403, 404}
+
+	for _, code := range unreachable {
+		t.Run(fmt.Sprintf("%d is unreachable", code), func(t *testing.T) {
+			err := classifyCheckError(&tokenStatusError{code: code, body: "platform said something"})
+			if !errors.Is(err, ErrCheckUnreachable) {
+				t.Errorf("status %d: errors.Is(err, ErrCheckUnreachable) = false, want true (err = %v)",
+					code, err)
+			}
+		})
+	}
+	for _, code := range rejected {
+		t.Run(fmt.Sprintf("%d is rejected", code), func(t *testing.T) {
+			err := classifyCheckError(&tokenStatusError{code: code, body: "invalid client"})
+			if errors.Is(err, ErrCheckUnreachable) {
+				t.Errorf("status %d: errors.Is(err, ErrCheckUnreachable) = true, want false (err = %v)",
+					code, err)
+			}
+		})
+	}
+}
+
+// TestTokenStatusErrorTextIsUnchanged pins tokenStatusError.Error() against
+// the fmt.Errorf string it replaced in postForm. Nothing that reads the
+// message -- classifyCheckError's own %w wrapping included -- should be able
+// to tell the difference.
+func TestTokenStatusErrorTextIsUnchanged(t *testing.T) {
+	err := &tokenStatusError{code: 503, body: "platform is down"}
+	want := "token endpoint returned 503: platform is down"
+	if got := err.Error(); got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
