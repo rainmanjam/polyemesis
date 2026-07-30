@@ -9,7 +9,7 @@ that decides.
 
 - [The three-layer design](#the-three-layer-design)
 - [Why history is the hard part](#why-history-is-the-hard-part)
-- [Per-action switches](#per-action-switches)
+- [The switch matrix](#the-switch-matrix)
 - [The model connector](#the-model-connector)
 - [What it must never do](#what-it-must-never-do)
 - [Testing](#testing)
@@ -69,31 +69,85 @@ Two properties this layer must have:
   is fixed-size with an idle eviction, so the defence cannot become the
   denial of service.
 
-## Per-action switches
+## The switch matrix
 
-Every action carries **two independent switches**, one per evidence type:
+Three dimensions, not one: **action × platform × checker**.
 
-| Action | Reversible? | Rules may auto-act | Model may auto-act |
-|---|---|---|---|
-| Flag for review | n/a | default **on** | default **on** |
-| Hide (local) | yes | default **on** | default **on** |
-| Hide (Facebook, upstream) | yes | default **on** | default off |
-| Delete | **no** | default off | default off |
-| Timeout | yes, expires | default off | default off |
-| Ban | yes, manually | default off | **not offered** |
+```
+                    ┌─ rules ─┬─ history ─┬─ model ─┐
+  YouTube   delete  │    ☐    │     ☐     │    ☐    │
+            timeout │    ☐    │     ☐     │    ☐    │
+            ban     │    ☐    │     ☐     │    ☐    │
+  Twitch    delete  │    ☐    │     ☐     │    ☐    │
+            ...
+```
 
-Two switches rather than one because **the same action deserves different trust
-depending on the evidence behind it**. A regex hit on a slur list is
-deterministic and reproducible; a model verdict is probabilistic and cannot be
-replayed. Auto-deleting on the first is defensible, on the second it is not.
+Each dimension earns its place for a different reason:
 
-Defaults follow REVIEW-POKA-YOKE.md's rule that friction should be proportional
-to consequence: everything reversible may be automatic, everything irreversible
-starts off.
+**Checker**, because the same action deserves different trust depending on the
+evidence. A regex hit is deterministic, reproducible and explainable after the
+fact; a model verdict is none of those. Auto-deleting on the first is
+defensible, on the second it is a judgement the operator should make knowingly.
 
-**A model may never auto-ban.** Not a default — not offered. Banning on a
-probabilistic verdict with no human in the loop is the failure everybody in this
-space eventually has a bad week over.
+**Platform**, because they are not equivalent and an operator's exposure differs
+per channel. Facebook's hide is reversible upstream; everywhere else it is
+local-only. Kick counts timeouts in minutes where the others count seconds. Most
+of all, somebody may happily automate their small second-language stream and
+want nothing automatic on the channel their income depends on.
+
+**Action**, because consequence varies from "flagged for review" to
+"permanently removed with no undo".
+
+### Cells are gated by what the platform can actually do
+
+A switch offering an action a platform does not support is a promise the product
+cannot keep, and it fails silently — the operator ticks it and nothing ever
+happens.
+
+`ui/src/lib/capabilities.ts` already holds the per-platform capability matrix,
+including a `moderation` key, and `internal/oauth`'s drift guards already pin
+that TypeScript against the Go source of truth. The automod matrix must derive
+its cells from the same data, so each is one of three states rather than two:
+
+| State | Meaning |
+|---|---|
+| **unavailable** | This platform has no such action. Rendered inert with the reason, never as an unticked box |
+| **off** | Available and not automatic. The checker still flags for review |
+| **on** | Available and automatic |
+
+A guard test belongs here in the same shape as the existing ones: **the automod
+matrix may not offer a cell the capability matrix says is impossible.** Without
+it the two drift, and the failure is an operator believing a channel is
+protected when nothing is wired to it.
+
+### Defaults
+
+Everything **off** except *flag for review*, which is on everywhere it is
+possible. Automod that does something on first install is automod that surprises
+somebody during a broadcast.
+
+Auto-ban is **offered on every platform that supports it, and defaults off for
+every checker including the model.** An earlier draft of this document said a
+model may never auto-ban at all; that was the wrong call. Refusing to offer a
+capability is not a safety feature, it is a decision taken away from the person
+who knows their channel — and an operator running a raid-prone stream at 3 a.m.
+may want exactly that. What the product owes them is that it is off until they
+turn it on, that the consequence is stated plainly at the moment they do, and
+that turning it on is per platform rather than everywhere at once.
+
+### Making sixty switches usable
+
+Five actions × four platforms × three checkers is sixty cells. That is a table
+nobody reads, so:
+
+- **Row and column bulk toggles** — "nothing automatic on Twitch", "no model
+  actions anywhere" — because the common operations are whole rows and columns.
+- **A per-platform master switch**, so automod can be killed on one channel
+  instantly. Mid-incident, unticking fifteen boxes is not a thing anyone should
+  have to do.
+- **A global kill switch**, for the same reason at larger scale.
+- **The matrix collapses by default** to a summary line per platform — "Twitch:
+  3 automatic actions" — and expands on demand.
 
 ## The model connector
 
@@ -118,8 +172,8 @@ An HTTP call. No SDK, no new module — consistent with driving FFmpeg through
 ## What it must never do
 
 - **Never act on a message it has not stored.** The audit trail is the point.
-- **Never escalate on its own.** Three flags do not become a ban without a human
-  configuring exactly that.
+- **Never escalate on its own.** Three flags do not become a ban unless a human
+  configured exactly that, on that platform, for that checker.
 - **Never apply a duration without conversion.** Kick counts timeouts in
   minutes where YouTube and Twitch count seconds. That trap already bit once and
   is handled in the adapters; automod must route through the same path rather
@@ -134,9 +188,15 @@ The suite that would make this trustworthy:
 - Rate detector fires at N in the window and **not** at N−1.
 - Repeat detector fires on the same phrase ×3 and **not** on three different
   messages — the negative case is what proves it is not simply always firing.
-- **With auto-act off, the engine produces a suggestion and takes no action.**
+- **With a cell off, the engine produces a suggestion and takes no action.**
   This is the test that stops an accidental auto-ban, and it is the most
-  important one here.
+  important one here. It needs running per action, per platform, per checker --
+  a single case passing proves only that one cell is wired.
+- **A cell the platform cannot support is never automatic**, whatever the stored
+  setting says. A config written before a capability changed must not become an
+  action nobody can explain.
+- **The matrix offers no cell the capability matrix calls impossible**, in the
+  shape of the existing drift guards.
 - Model timeout, 500 and rate-limit each let the message through and flag it.
 - A raid of 5,000 distinct authors does not grow memory without bound.
 - Kick durations convert to minutes and round **up**: truncating 30s to zero
