@@ -1,9 +1,8 @@
 # Chat moderation
 
-**Status: SHIPPED**, 2026-07-30 — every item in the plan, plus one the research
-did not anticipate. The server side is complete and tested. The chat pane still
-exposes only Delete, so everything else is reachable over the API and not yet by
-clicking: see [What is not wired to a button](#what-is-not-wired-to-a-button).
+**Status: SHIPPED**, 2026-07-30 — every item in the plan, plus two the research
+did not anticipate: upstream retraction, and a cross-platform moderator's user
+card. Server and UI both.
 
 **Dependencies:** none in Go. Three platforms needed new OAuth scopes, so
 existing connections have to be reconnected — `ScopeVer` reports that in the
@@ -18,7 +17,7 @@ code depending on it was written.
 - [The endpoint that clears a channel](#the-endpoint-that-clears-a-channel)
 - [Scopes and re-consent](#scopes-and-re-consent)
 - [Per-platform detail](#per-platform-detail)
-- [What is not wired to a button](#what-is-not-wired-to-a-button)
+- [The user card](#the-user-card)
 - [What is still absent](#what-is-still-absent)
 
 ---
@@ -183,12 +182,25 @@ separate from being able to read them — an app that happily shows you the thre
 can still be refused when you act on it. That is the failure that costs a day, so
 the 403 names it.
 
-## What is not wired to a button
+## The user card
 
-The chat pane offers Delete on every message on every platform, and that is
-still the only moderation control in the UI. Hide, local hide, ban, timeout,
-unban and the Twitch chat rules are complete and tested on the server and
-reachable over the API:
+Twitch has a moderator card — click a name, see what that person said before —
+and it is the control moderators actually use. **No platform publishes an API for
+it.** Twitch's is a web-app feature over internal endpoints; Helix offers Get
+Chatters and Get Moderators, neither of which is a history. The others have
+nothing.
+
+polyemesis does not need one: every stored message carries `author_id` on all
+four platforms, so the card is a local query and works identically everywhere —
+which Twitch's own cannot do. The cost is depth, so `truncated` and
+`retentionNote` come back with it and are rendered. A moderator reading
+"3 messages" as a complete record judges a pattern from a sample.
+
+Clicking an author name in the pane opens it: history, roles, timeout presets,
+hide-here, lift ban, and a permanent ban that asks twice. Channel-wide Twitch
+rules are a separate panel, because they act on the room rather than on a person.
+
+The routes behind it:
 
 ```http
 DELETE /api/v1/chat/messages?platform=&account=&id=
@@ -202,11 +214,17 @@ PATCH  /api/v1/chat/settings?platform=&account=
 it gets the half that cannot overreach, rather than an unintended write to
 somebody's public thread.
 
-The UI work is the remaining piece. It is not a thin wrapper — a timeout needs a
-duration control, a ban needs a confirmation proportional to the consequence, and
-local hide needs to say plainly that viewers still see the message. Doing it
-badly would be worse than the API-only state, because a control that misleads a
-moderator about what it did is the failure this whole document is written around.
+Three rules the UI follows, each of which was the reason not to rush it:
+
+- **Only the permanent ban confirms.** Friction proportional to consequence; a
+  confirmation on every action trains people to click through the one that
+  matters.
+- **The server's sentence is shown verbatim.** It carries "hidden from viewers"
+  versus "hidden only here, everyone still sees it", and paraphrasing is how that
+  distinction gets lost.
+- **An action the platform cannot do is disabled with the reason, not hidden.** A
+  moderator who cannot find the timeout button does not conclude "Facebook has no
+  timeouts", they conclude the tool is broken.
 
 ## What is still absent
 
