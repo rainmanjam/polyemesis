@@ -54,7 +54,14 @@ duration was written inline at the point of use, which is how a scale drifts.
 
 ### Colour — unchanged
 
-81 tokens, already correct. The rule that matters:
+37 tokens carrying a literal colour, each mapped to a Tailwind name in the
+`@theme inline` block below. Count them with:
+
+```sh
+grep -cE '^\s*--[a-z-]+:\s*#' ui/src/index.css
+```
+
+They were already correct and are unchanged. The rule that matters:
 
 > Saturated colour is **signal only**. Green is live, amber is reconnecting, red
 > is down or clipping, cyan is armed but idle. If everything is grey except the
@@ -105,12 +112,19 @@ collapses all three to zero.
 Four levels, expressed as surface colour first and shadow second, because a dark
 UI reads depth from lightness more than from shadow.
 
-| Token | Surface | Shadow |
+**There is no `--elev-*` token.** Elevation is a convention over tokens that
+already exist rather than a layer of its own — writing `var(--elev-card)` gets
+you nothing. Each level is the pairing below, applied directly:
+
+| Level | Surface | Shadow |
 |---|---|---|
-| `--elev-flat` | `--surface` | none |
-| `--elev-card` | `--card` | none — the border carries it |
-| `--elev-raised` | `--card-raised` | `--shadow-raised` |
-| `--elev-overlay` | `--popover` | `--shadow-overlay` |
+| flat | `--surface` | none |
+| card | `--card` | none — the border carries it |
+| raised | `--card-raised` | `--shadow-raised` |
+| overlay | `--popover` | `--shadow-overlay` |
+
+All six of those are real tokens in `index.css`. If elevation ever earns its own
+tokens, this table is the definition they should collapse to.
 
 ## Sharing tokens with the website
 
