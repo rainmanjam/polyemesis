@@ -2,11 +2,13 @@
 #
 # polyemesis interactive installer for Linux.
 #
-#   curl -fsSL https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh | sudo bash
+#   curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
+#     https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh | sudo bash
 #
 # or, having read it first, which is the better habit:
 #
-#   curl -fsSLO https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
+#   curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLO \
+#     https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
 #   less install.sh && sudo bash install.sh
 #
 # Two install modes:
@@ -59,6 +61,16 @@ UNIT_CREATED=false
 CONTAINER_STARTED=false
 BINARY_INSTALLED=false
 INSTALL_COMPLETE=false
+
+# Every network fetch below goes through these flags.
+#
+# --proto '=https' pins the initial request and --proto-redir '=https' pins
+# every redirect, so a hijacked or misconfigured redirect cannot walk this down
+# to plaintext HTTP. That matters more here than in most scripts: this runs as
+# root and installs a binary that will be started as a service, so a downgrade
+# is a code-execution path rather than a privacy problem. `curl -L` alone will
+# happily follow https -> http.
+CURL_SAFE=(--proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL)
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; NC=$'\033[0m'
@@ -229,7 +241,7 @@ install_docker() {
     ok "docker present: $(docker --version)"
   else
     info "installing Docker from get.docker.com"
-    curl -fsSL https://get.docker.com | sh || die "Docker install failed"
+    curl "${CURL_SAFE[@]}" https://get.docker.com | sh || die "Docker install failed"
     systemctl enable --now docker || die "could not start the Docker daemon"
     ok "docker installed"
   fi
@@ -433,7 +445,7 @@ install_docker_mode() {
 # --------------------------------------------------------------- binary mode
 
 latest_release_tag() {
-  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+  curl "${CURL_SAFE[@]}" "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
 }
 
@@ -450,11 +462,11 @@ install_binary_mode() {
   tmp="$(mktemp -d)"
 
   info "downloading $asset"
-  curl -fsSL -o "$tmp/$asset" "$url" || die "download failed: $url"
+  curl "${CURL_SAFE[@]}" -o "$tmp/$asset" "$url" || die "download failed: $url"
 
   # Verify against the release's own SHA256SUMS. A binary that is about to run
   # as a service, installed over the network, is worth one extra request.
-  if curl -fsSL -o "$tmp/SHA256SUMS" \
+  if curl "${CURL_SAFE[@]}" -o "$tmp/SHA256SUMS" \
        "https://github.com/${REPO}/releases/download/${tag}/SHA256SUMS" 2>/dev/null; then
     if (cd "$tmp" && grep " ${asset}\$" SHA256SUMS | sha256sum -c --status -); then
       ok "checksum verified"

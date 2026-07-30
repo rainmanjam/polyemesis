@@ -25,7 +25,8 @@ asks how you want it installed, checks the things that actually go wrong, and
 rolls back cleanly if a step fails:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLO \
+  https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
 less install.sh          # it runs as root; read it first
 sudo bash install.sh
 ```
