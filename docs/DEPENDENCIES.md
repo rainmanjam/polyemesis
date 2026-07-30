@@ -32,10 +32,11 @@ Go toolchain: **1.26.5**.
 
 ## Direct Go dependencies
 
-Eight, deliberately. Each one earns its place below.
+Nine, deliberately. Each one earns its place below.
 
 | Module | Version | Used by |
 | --- | --- | --- |
+| `github.com/datarhei/gosrt` | v0.6.0 | `internal/srtserver` |
 | `github.com/go-chi/chi/v5` | v5.3.1 | `internal/api` |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | `internal/auth` |
 | `github.com/gorilla/websocket` | v1.5.3 | `internal/api` |
@@ -44,6 +45,33 @@ Eight, deliberately. Each one earns its place below.
 | `golang.org/x/sys` | v0.47.0 | `internal/recording`, `internal/supervisor`, service wrapper |
 | `gopkg.in/yaml.v3` | v3.0.1 | `internal/config` |
 | `modernc.org/sqlite` | v1.54.0 | `internal/db` |
+
+### `github.com/datarhei/gosrt` — and the test a protocol dependency must pass
+
+Added for one-port token-addressed ingest. It is the only dependency here that
+implements a *wire protocol*, and it is the precedent every future one gets
+measured against.
+
+The rule it establishes: **a protocol dependency is justified only when FFmpeg
+cannot do the job.**
+
+That is what separates it from `yutopp/go-rtmp`, which was measured and
+rejected — see
+[DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md#rtmp). go-rtmp would have
+pulled seven further modules including `logrus` (a second logging framework in a
+binary that uses `log/slog`) plus `pkg/errors` and `mapstructure`, both dead
+upstream — and `ffmpeg -listen 1` was already a complete answer for RTMP. gosrt
+had no such alternative: FFmpeg's SRT support is a client and a
+single-connection listener, and neither can demultiplex many publishers by
+`streamid` on one port.
+
+Pure Go, MIT, and `CGO_ENABLED=0` clean.
+
+> One licence detail worth knowing, recorded in
+> [MODULES.md](MODULES.md#one-licence-note-worth-knowing):
+> gosrt reaches `github.com/benburkert/openpgp` for AES key wrapping, and that
+> module ships no LICENSE file despite every source file carrying the Go
+> Authors' BSD header.
 
 ### `modernc.org/sqlite` — and why not `mattn/go-sqlite3`
 

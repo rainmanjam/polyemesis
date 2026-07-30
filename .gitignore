@@ -17,3 +17,9 @@ internal/web/dist/*
 *.db-shm
 .DS_Store
 .playwright-mcp/
+
+# Agent working notes: progress state, session hand-off, scratch analysis.
+# Deliberately untracked -- these are notes-to-self about how the work is
+# going, not artefacts of the project, and they go stale the moment the work
+# they describe lands.
+.work/

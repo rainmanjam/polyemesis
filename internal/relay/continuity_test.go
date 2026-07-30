@@ -238,7 +238,9 @@ func TestStatsReportsContinuityLossFromTheWire(t *testing.T) {
 	publish(t, h, clean, 1)
 	waitForRx(t, h, 1)
 	publish(t, h, afterALoss, 1)
-	waitForRx(t, h, 2)
+	// Four TS packets across two datagrams -- waiting on the datagram count
+	// would race the second one's measurement.
+	waitForTS(t, h, 4)
 
 	s := h.Stats()
 	if s.TSPackets != 4 {
@@ -264,7 +266,8 @@ func TestStatsReportsNoLossForACleanStream(t *testing.T) {
 	for cc := byte(0); cc < 16; cc++ {
 		publish(t, h, datagram(tsPkt{pid: videoPID, cc: cc}, tsPkt{pid: audioPID, cc: cc}), 1)
 	}
-	waitForRx(t, h, 16)
+	// 16 datagrams x 2 TS packets.
+	waitForTS(t, h, 32)
 
 	s := h.Stats()
 	if s.TSPackets != 32 || s.TSLost != 0 || s.Discontinuities != 0 || s.LossPercent != 0 {

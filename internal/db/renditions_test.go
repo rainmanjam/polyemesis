@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 func validRendition() *Rendition {
@@ -82,6 +84,16 @@ func TestRenditionValidateRejects(t *testing.T) {
 			name:    "a negative frame rate",
 			mutate:  func(r *Rendition) { r.FPS = -1 },
 			wantAll: []string{"fps -1 out of range"},
+		},
+		{
+			// Refused here rather than at start time for the same reason an
+			// unknown aspect mode is: deinterlaceFilter degrades an
+			// unrecognised mode to OFF, so the stored setting would say
+			// "deinterlacing" while the picture stayed combed, and nothing
+			// anywhere would say which one was running.
+			name:    "an unknown deinterlace mode, which the filter builder would silently ignore",
+			mutate:  func(r *Rendition) { r.Deinterlace = "yadif" },
+			wantAll: []string{`unknown deinterlace mode "yadif"`},
 		},
 		{
 			name:    "an absurd frame rate",
@@ -204,6 +216,14 @@ func TestRenditionValidateAccepts(t *testing.T) {
 		{
 			name:   "a ten-second GOP",
 			mutate: func(r *Rendition) { r.GOPSeconds = 10 },
+		},
+		{
+			name:   "deinterlacing only the frames the source flagged",
+			mutate: func(r *Rendition) { r.Deinterlace = string(ffmpeg.DeinterlaceAuto) },
+		},
+		{
+			name:   "deinterlacing unconditionally, for kit that flags nothing",
+			mutate: func(r *Rendition) { r.Deinterlace = string(ffmpeg.DeinterlaceAll) },
 		},
 	}
 

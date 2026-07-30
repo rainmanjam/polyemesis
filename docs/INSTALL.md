@@ -59,6 +59,28 @@ ffmpeg -protocols | tr ' ' '\n' | grep -x srt      # must print: srt
 > every build lists `srtp` (Secure RTP), a different protocol that happens to
 > contain the substring.
 
+### Which builds have libsrt
+
+Checked 2026-07-26. **"Ran the check"** means the `-protocols` command above was
+executed against that build. Everything else is read off a package index or a
+published feature list — so run the check yourself rather than trusting the row.
+
+| Source | libsrt |
+|---|---|
+| Docker image in this repo | yes — the build asserts it, and it was run |
+| [BtbN](https://github.com/BtbN/FFmpeg-Builds/releases) static builds, **Linux** | yes — ran the check |
+| Ubuntu 24.04 / Debian 13 `apt install ffmpeg` | advertised in the package build flags; not run |
+| [BtbN](https://github.com/BtbN/FFmpeg-Builds/releases) static builds, **Windows** | same recipe as their Linux asset, but no Windows asset was downloaded or run |
+| [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) Windows builds | listed among the *essentials* build's externals; not downloaded or run |
+| **Homebrew `ffmpeg` on macOS** | **no** — `srt` is not among the formula's dependencies, and the check was run |
+| [johnvansickle.com](https://johnvansickle.com/ffmpeg/) static builds | not advertised; run the check before relying on it |
+
+If your build has no SRT, polyemesis starts anyway and warns, so you can reach
+Settings and switch the ingest to RTMP. But RTMP carries a single stereo pair,
+so per-destination audio routing has nothing to route from. The ways out are a
+build configured with `--enable-libsrt`, one of the static builds above, or the
+Docker image — which bundles one and asserts it at build time.
+
 **Hardware encoders — nothing to install, nothing to configure.** Do *not* go
 looking for a build with NVENC or VA-API compiled in on the strength of
 `ffmpeg -encoders`: that list is what the binary was compiled with, not what

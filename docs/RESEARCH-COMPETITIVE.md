@@ -39,7 +39,7 @@ Restreamer, polyemesis already ships ten.
 | Analytics / statistics | 2 (closed) | have | Playout analytics, stats |
 | Low latency mode | 2 (closed) | partial | SRT latency is configurable; no LL-HLS |
 | Video grid / multiple inputs | 1 (closed) | **GAP** | |
-| Deinterlacing | 1 (closed) | **GAP** | |
+| Deinterlacing | 1 (closed) | **have** | Was built-but-unreachable; the control landed 2026-07-28. See the correction below |
 | MQTT (core tracker) | — | **GAP** | Alert webhooks exist; no MQTT |
 | Single token per RTMP endpoint (core) | — | **GAP** | Falls out of multi-source |
 
@@ -47,6 +47,33 @@ Verified against the code, not assumed. Two initial readings were wrong and are
 corrected here: the only `overlay=` in the tree is inside the blurred-pad
 compositor, not a branding feature, and the only WHIP mention is prose
 describing *a platform's* ingest, not ours.
+
+### Correction, 2026-07-28: deinterlacing is built but unreachable
+
+This table said **GAP**. It was wrong, and the way it was wrong is worth
+recording.
+
+Deinterlacing is implemented in Go and has been for some time:
+`DeinterlaceMode` with `off`/`auto`/`all`, a `deinterlaceFilter` that emits
+`bwdif` and places it first in the chain, a `Deinterlace` field on
+`RenditionSpec`, and a `deinterlace` column on the renditions table with its
+migration — [internal/ffmpeg/rendition.go:302-360](../internal/ffmpeg/rendition.go),
+[internal/db/renditions.go:116](../internal/db/renditions.go).
+
+**There is no control for it in the UI.** `grep -rn deinterlace ui/src` returns
+nothing. So an operator cannot switch it on, and the feature is complete in
+every layer except the one a user can reach.
+
+That is the same failure this project already documented once, in
+[DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md): the shared ingest port was
+built, tested and documented, defaulted to off, and was published on a port
+nothing could reach. *"A feature that is off by default and broken when turned
+on is not really a feature."* Deinterlacing is the same shape — built, correct,
+and invisible.
+
+The remediation is a select in the rendition editor, next to aspect mode. It is
+the cheapest item on the whole roadmap, and it should be measured as done only
+when a user can reach it.
 
 ## The strategic signal
 
@@ -89,9 +116,11 @@ own feed without HLS's 10-30s delay — not public playback. Sizeable subsystem.
 broadcast crowd. It needs an FFmpeg built with `decklink`, which Alpine's
 package is not, so it implies a third image variant. Real work, narrow audience.
 
-**4. Deinterlacing.** 1 reaction, trivial to add (`yadif`/`bwdif` on a
-rendition), and a prerequisite for anyone feeding polyemesis from SDI or legacy
-broadcast kit. Cheapest item on this list.
+**4. Deinterlacing.** ~~1 reaction, and a prerequisite for anyone feeding
+polyemesis from SDI or legacy broadcast kit.~~ **Done, 2026-07-28.** It was
+already built in Go; the gap was the UI control, and closing it also closed a
+validation hole where an unknown mode was silently ignored. See the correction
+above.
 
 **5. Playlist / scheduled pre-recorded broadcast.** Asked as "playlist files"
 (4), "on demand streaming" (4), "stream from MP4" (2), "virtual input: looping

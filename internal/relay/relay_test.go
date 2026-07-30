@@ -92,7 +92,33 @@ func receiveWithin(t *testing.T, c *net.UDPConn, want int, d time.Duration) [][]
 	return got
 }
 
+// waitForTS polls until the hub has MEASURED want TS packets.
+//
+// Not interchangeable with waitForRx, and using the wrong one is a flake rather
+// than a failure. Deliver increments rxPackets first, then fans out, then
+// measures -- deliberately, because measurement must never sit in front of
+// delivery. So rxPackets reaching N only means the Nth datagram has STARTED
+// being handled; its TS packets may not be counted yet.
+//
+// A test that waits on rxPackets and then asserts TSPackets is therefore racing
+// the last datagram. It passes locally, passes on most CI runs, and reports
+// "30 checked, want 32" on the one run that matters.
+func waitForTS(t *testing.T, h *Hub, want uint64) {
+	t.Helper()
+	deadline := time.Now().Add(readWait)
+	for time.Now().Before(deadline) {
+		if h.Stats().TSPackets >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("hub measured %d TS packets, want %d", h.Stats().TSPackets, want)
+}
+
 // waitForRx polls until the hub has accounted for want datagrams.
+//
+// Correct for asserting delivery. For anything reading TSPackets, TSLost,
+// Discontinuities or LossPercent, use waitForTS.
 func waitForRx(t *testing.T, h *Hub, want uint64) {
 	t.Helper()
 	deadline := time.Now().Add(readWait)
