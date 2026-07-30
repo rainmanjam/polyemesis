@@ -27,7 +27,7 @@ weekend.
 | **Linux (server)** | Primary target. Where it is developed against, deployed and exercised. |
 | **Docker** | Primary target. The image is built from this repo and bundles a pinned FFmpeg. |
 | **macOS** | Developed on daily. Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below. |
-| **Windows** | **Implemented but not executed on Windows.** It compiles, the service wrapper and process-group teardown are written, and the installer scripts exist — but no one has run the resulting binary on a Windows host. Treat it as untested. |
+| **Windows** | **Builds and runs; not broadcast-tested.** Every push runs the full Go suite on `windows-latest` with FFmpeg installed, then starts the binary and checks it serves — so the process demonstrably comes up. What nobody has done is put a real broadcast through it, and recording truncation on service stop is a known open question. |
 
 If you are choosing where to run this, run it on Linux.
 
@@ -384,12 +384,17 @@ ingest ports. Approve it, or nothing external reaches the encoder.
 
 ## Windows
 
-**Read this first.** Windows support is *implemented but has not been executed
-on Windows*. The binary cross-compiles, the Service Control Manager wrapper is
-written, process-group teardown and the disk-full guard have Windows
-implementations, and the installer scripts exist — but nobody has run the result
-on a Windows host. Nothing here is verified end to end. If you need this to work
-today, use Linux or Docker.
+**Read this first.** Windows builds and runs, and is not broadcast-tested. CI
+runs the full Go suite on `windows-latest` with FFmpeg installed on every push,
+then starts the binary and checks it answers `/health` — and that job has caught
+real Windows-only bugs, including a `file://` URL corrupted by path separators
+and TLS keys left world-readable because `os.FileMode` does nothing there.
+
+What remains unverified is *operation*: nobody has run a real broadcast through
+it on Windows, and the service-stop recording truncation below is a known
+unresolved problem. The Service Control Manager wrapper, process-group teardown
+and installer scripts have never been exercised on a live host. If this needs to
+work today, use Linux or Docker.
 
 **Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.5+ and
 Node 20.19+/22.12+ if you are building the binary yourself.
@@ -419,9 +424,17 @@ likely reason multitrack ingest fails on a fresh Windows box.
 
 ### Build the binary
 
-`make release` does not currently emit a Windows target, so build it directly.
-From a checkout, with the UI built first so `go:embed` picks up the real assets
-rather than the placeholder:
+`make release` cross-compiles `windows/amd64` and `windows/arm64` along with
+Linux and macOS, and writes them to `dist/` with the `.exe` suffix. It builds
+the UI first, so `go:embed` picks up the real assets rather than the
+placeholder:
+
+```bash
+make release
+ls dist/polyemesis-*-windows-*.exe
+```
+
+To build just the one target:
 
 ```bash
 make ui
@@ -429,7 +442,9 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
   go build -trimpath -ldflags "-s -w" -o polyemesis.exe ./cmd/polyemesis
 ```
 
-That works from Linux or macOS just as well as from Windows — there is no cgo.
+Either works from Linux or macOS just as well as from Windows — there is no
+cgo. Building the UI first is the step that matters: skip it and you get a
+binary that serves the placeholder page.
 
 ### Register it with the Service Control Manager
 
@@ -508,8 +523,8 @@ network in the clear.
 
 ---
 
-Configuration reference: `config.example.yaml`.
-TLS modes and what `auto` resolves to: the *TLS and certificates* section of
-[`README.md`](../README.md).
+Configuration reference: [`CONFIGURATION.md`](CONFIGURATION.md), and
+`config.example.yaml` for the annotated file itself.
+TLS modes and what `auto` resolves to: [`TLS.md`](TLS.md).
 Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 Testing without OBS: [`TESTING.md`](TESTING.md).
