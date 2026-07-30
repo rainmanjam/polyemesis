@@ -51,11 +51,11 @@ session, by hand, each of which a browser test would have caught and pinned:
 None of those are visible to `tsc`, and all four are trivially assertable in a
 browser. Until this exists, every UI change is verified once and never again.
 
-### What to build
+### What was built
 
-`ui/tests/` with Playwright, run against the shipped container so it exercises
-the same artefact users get. The first suite is the four bugs above plus the
-guards added for them:
+`ui/e2e/` with Playwright, run against the shipped container so it exercises the
+same artefact users get. It runs in CI as the `acceptance-browser` suite, 24
+checks, and covers the four bugs above plus the guards added for them:
 
 1. First-run setup, login, and that setup cannot be replayed.
 2. Every nav route renders without a console error.
@@ -65,6 +65,11 @@ guards added for them:
 5. Editing a port does **not** commit on blur; Apply/Discard appears.
 6. The delete dialog starts locked, and typing the WRONG name keeps it locked.
 7. A save that fails surfaces an error rather than silently reverting.
+
+The one thing it still cannot reach is the chat pane: the timeline is empty
+without a connected platform account, and the suite has no way to supply one.
+The moderation controls are unit- and mutation-tested underneath, but their
+click-through has never run.
 
 ## Integration gaps
 

@@ -210,8 +210,10 @@ than re-reading an existing one.
 
 ### Kick
 
-Kick signs in, and the stream key still gets pasted. Both halves are real at
-once, and neither is a workaround for the other.
+Kick signs in and the stream key is fetched, like every other platform here.
+This section used to open by saying the key still had to be pasted; that was
+true once and stopped being true when `streamkey:read` was added. See the
+Kick note further up this page for why the key looked unfetchable for so long.
 
 1. <https://kick.com/settings/developer> → create an OAuth application.
 2. Redirect URI: `https://YOUR_HOST/api/v1/oauth/kick/callback`
