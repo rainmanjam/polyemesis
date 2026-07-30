@@ -245,6 +245,14 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/sources/{id}", s.handleDeleteSource)
 			r.Post("/sources/{id}/token", s.handleRotateSourceToken)
 
+			// Media uploads. Inside the session+CSRF group like every other
+			// mutation, which also means an API token cannot reach them: a
+			// token is for automation, and writing arbitrary bytes to the
+			// server's disk is not something a leaked one should be able to do.
+			r.Post("/media", s.handleUploadMedia)
+			r.Get("/media", s.handleListMedia)
+			r.Delete("/media/{name}", s.handleDeleteMedia)
+
 			r.Get("/renditions", s.handleListRenditions)
 			r.Post("/renditions", s.handleCreateRendition)
 			// Static segment first, same as /destinations/order above.
