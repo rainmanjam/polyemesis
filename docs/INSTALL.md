@@ -7,6 +7,7 @@ installation problem comes from. Read the FFmpeg part of your platform's
 section even if you skip the rest.
 
 - [The scripted install](#the-scripted-install)
+- ["I do not have a certificate"](#i-do-not-have-a-certificate--two-different-certificates)
 - [Platform maturity](#platform-maturity)
 - [The FFmpeg requirement](#the-ffmpeg-requirement)
 - [Docker](#docker)
@@ -48,8 +49,66 @@ one on the first-run screen, so there is no credential for an installer to
 handle. In binary mode it verifies the download against the release's published
 `SHA256SUMS` and refuses to install on a mismatch.
 
+**Linux only.** It is bash, systemd, apt and ufw/firewalld, and it exits
+immediately anywhere else with `no /etc/os-release — this installer targets
+Linux`. macOS installs from the [macOS](#macos) section below; Windows has its
+own scripts in [`deploy/windows/`](../deploy/windows/).
+
 The rest of this page is the manual version, and is worth reading if the script
 fails or if you want to know what it did.
+
+---
+
+## "I do not have a certificate" — two different certificates
+
+They come up together and neither is a blocker, so it is worth separating them.
+
+### The TLS certificate: polyemesis makes its own
+
+You do not need to obtain one. `tls.mode: selfsigned` generates a local CA and a
+leaf at startup, so the connection is encrypted immediately and the only cost is
+a browser warning until you install that CA — one command on each platform, in
+[TLS.md](TLS.md#trusting-the-self-signed-ca). `acme` is the only mode that needs
+a real certificate, and `auto` will not choose it without a public DNS name.
+
+### The code-signing certificate: not needed to run
+
+The released binaries are **not signed with a paid certificate** and macOS
+binaries are **not notarized**. Neither stops them running.
+
+**macOS.** This is the one that could have been a genuine problem: Apple Silicon
+requires an arm64 binary to carry *a* signature to execute at all, and the
+release cross-compiles darwin binaries on a Linux runner. Go's linker ad-hoc
+signs `darwin/arm64` even when cross-compiling, which satisfies that
+requirement. Verified by building in a Linux container with the release's own
+flags and running the result on Apple Silicon:
+
+```console
+$ codesign -dv polyemesis-darwin-arm64
+CodeDirectory v=20400 ... flags=0x20002(adhoc,linker-signed)
+$ ./polyemesis-darwin-arm64 -version
+polyemesis v0.1.0
+```
+
+What is *not* signed is a Developer ID, so the binary is not notarized.
+`spctl -a -t execute` reports `rejected` — that answers "would Gatekeeper
+approve this for distribution", not "will this run". Gatekeeper enforces on
+files carrying `com.apple.quarantine`, which a browser download sets and `curl`
+does not. If you hit it:
+
+```bash
+xattr -d com.apple.quarantine ./polyemesis
+```
+
+A freshly quarantined binary can also sit for a minute or two on its first run
+while macOS scans it; the result is cached, and subsequent runs are immediate.
+
+**Windows.** The `.exe` is unsigned, so SmartScreen shows a warning on first
+run — *More info → Run anyway*, once. It does not prevent the service from
+being registered or started.
+
+**Docker avoids both**, on both platforms, and on macOS you probably want it
+anyway: Homebrew's FFmpeg has no libsrt, and multitrack ingest needs it.
 
 ---
 
