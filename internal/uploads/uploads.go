@@ -270,7 +270,11 @@ func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint
 	if err := os.Rename(tmpName, final); err != nil {
 		return File{}, fmt.Errorf("finalise upload: %w", err)
 	}
-	if err := os.Chmod(final, 0o644); err != nil {
+	// 0600, not 0644. Nothing outside this process reads an upload: the server
+	// serves it over the API and the FFmpeg children it spawns run as the same
+	// user. os.CreateTemp already makes the file 0600, so the earlier 0644 was
+	// actively WIDENING permissions on operator media for no reader that exists.
+	if err := os.Chmod(final, 0o600); err != nil {
 		return File{}, fmt.Errorf("chmod upload: %w", err)
 	}
 

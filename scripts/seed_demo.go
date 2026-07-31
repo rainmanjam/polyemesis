@@ -32,16 +32,25 @@ import (
 )
 
 // Must match what Playwright's auth.setup.ts will sign in with. Both read
-// E2E_PASSWORD, and scripts/capture-media.sh sets it once for the pair --
+// E2E_PASSWORD, and the calling script generates one per run for the pair --
 // because when the two disagreed, the seeder created the account and the
 // browser then failed on a missing <nav>, which points nowhere near the cause.
-var password = envOr("E2E_PASSWORD", "BrowserE2E!9xz")
+//
+// REQUIRED rather than defaulted. A literal here was a password committed to a
+// public repository: harmless in that it protects an account that lives for one
+// test run, and still the kind of thing that gets copied into somewhere it is
+// not harmless. Failing loudly costs one line in each calling script.
+var password = mustEnv("E2E_PASSWORD")
 
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func mustEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		fmt.Fprintf(os.Stderr,
+			"%s is not set. The calling script generates one per run; "+
+				"set it yourself to run this directly.\n", key)
+		os.Exit(2)
 	}
-	return fallback
+	return v
 }
 
 var (

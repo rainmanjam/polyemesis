@@ -70,7 +70,12 @@ INSTALL_COMPLETE=false
 # root and installs a binary that will be started as a service, so a downgrade
 # is a code-execution path rather than a privacy problem. `curl -L` alone will
 # happily follow https -> http.
-CURL_SAFE=(--proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL)
+#
+# Written out at each call site rather than held in an array. It is repetitive,
+# and it means the reader of a script they are about to pipe into a shell can
+# see the scheme being pinned on the line doing the download -- and so can
+# static analysis, which cannot resolve "${ARRAY[@]}" and reported four
+# downloads as unpinned when every one of them was pinned.
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; NC=$'\033[0m'
@@ -241,7 +246,7 @@ install_docker() {
     ok "docker present: $(docker --version)"
   else
     info "installing Docker from get.docker.com"
-    curl "${CURL_SAFE[@]}" https://get.docker.com | sh || die "Docker install failed"
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL https://get.docker.com | sh || die "Docker install failed"
     systemctl enable --now docker || die "could not start the Docker daemon"
     ok "docker installed"
   fi
@@ -445,7 +450,7 @@ install_docker_mode() {
 # --------------------------------------------------------------- binary mode
 
 latest_release_tag() {
-  curl "${CURL_SAFE[@]}" "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
 }
 
@@ -462,11 +467,11 @@ install_binary_mode() {
   tmp="$(mktemp -d)"
 
   info "downloading $asset"
-  curl "${CURL_SAFE[@]}" -o "$tmp/$asset" "$url" || die "download failed: $url"
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$tmp/$asset" "$url" || die "download failed: $url"
 
   # Verify against the release's own SHA256SUMS. A binary that is about to run
   # as a service, installed over the network, is worth one extra request.
-  if curl "${CURL_SAFE[@]}" -o "$tmp/SHA256SUMS" \
+  if curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$tmp/SHA256SUMS" \
        "https://github.com/${REPO}/releases/download/${tag}/SHA256SUMS" 2>/dev/null; then
     if (cd "$tmp" && grep " ${asset}\$" SHA256SUMS | sha256sum -c --status -); then
       ok "checksum verified"

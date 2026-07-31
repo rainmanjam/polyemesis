@@ -21,9 +21,17 @@ const STATE = "e2e/.auth/state.json";
  * value hard-coded here, this file found no "Create account" button, tried to
  * sign in with a password nobody had set, and failed on a missing <nav> — a
  * symptom several steps removed from the cause. One variable now drives both
- * sides; the default keeps the browser suite working with no environment at
- * all. */
-const PASSWORD = process.env.E2E_PASSWORD ?? "BrowserE2E!9xz";
+ * sides, and the calling script generates it per run rather than committing a
+ * literal -- which is a password in a public repository however short-lived the
+ * account it protects. Absent, this fails immediately and says so. */
+const PASSWORD = process.env.E2E_PASSWORD;
+if (!PASSWORD) {
+  throw new Error(
+    "E2E_PASSWORD is not set. scripts/capture-media.sh and " +
+      "scripts/acceptance-browser.sh each generate one per run; export one " +
+      "yourself to drive Playwright directly.",
+  );
+}
 
 setup("authenticate", async ({ page }) => {
   await page.goto("/");

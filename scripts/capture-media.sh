@@ -22,11 +22,6 @@ PORT=8099
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${TMPDIR:-/tmp}/polyemesis-capture"
 OUT="$ROOT/docs/media"
-BIN="$ROOT/polyemesis"
-
-SRC_PID=""
-SRV_PID=""
-USING_SRT=no
 # Server AND publisher both run in Docker, on one network.
 #
 # The host-to-container route was tried first and does not work here: the
@@ -47,13 +42,17 @@ SRC_NAME="polyemesis-capture-source"
 # to carry their own literal, so the seeder created the admin account and the
 # browser then tried a password nobody had set -- surfacing as a missing <nav>,
 # which points nowhere near the cause. Exported so both read the same value.
-export E2E_PASSWORD="${E2E_PASSWORD:-BrowserE2E!9xz}"
+#
+# Generated per run rather than written down. The account it protects exists for
+# the length of one capture, but a literal in a public repository is a literal
+# in a public repository, and both consumers now REFUSE to start without it.
+export E2E_PASSWORD="${E2E_PASSWORD:-E2E-$(openssl rand -hex 16)}"
 
+# Everything this script starts is a container, so cleanup is docker's job. The
+# host-process kills that used to be here were left over from the binary-launch
+# version and had been killing nothing for some time.
 cleanup() {
-  [ -n "$SRC_PID" ] && kill "$SRC_PID" 2>/dev/null || true
-  [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null || true
-  wait 2>/dev/null || true
-  # The FFmpeg children are in their own process groups, so killing the server
+  # FFmpeg children sit in their own process groups, so killing the server
   # does not take them with it -- the same trap the troubleshooting page warns
   # operators about, and it strands the ingest port for the next run.
   pkill -f "capture-source" 2>/dev/null || true
@@ -138,12 +137,10 @@ if [ -n "$TOKEN" ] && docker info >/dev/null 2>&1; then
   docker run -d --rm --name "$SRC_NAME" --network "$NET" --entrypoint ffmpeg \
     "$IMAGE" "${ENC_ARGS[@]}" \
     "srt://${SRV_NAME}:${SRT_PORT}?streamid=${TOKEN}&mode=caller&transtype=live&latency=200000" >/dev/null
-  USING_SRT=yes
 else
   echo "==> no token; falling back to relay injection (the ingest will read offline)"
   docker run -d --rm --name "$SRC_NAME" --network "$NET" --entrypoint ffmpeg \
     "$IMAGE" "${ENC_ARGS[@]}" "udp://${SRV_NAME}:${RELAY}?pkt_size=1316" >/dev/null
-  USING_SRT=no
 fi
 
 echo "==> waiting for the engine to probe and the destinations to start"
@@ -176,7 +173,7 @@ echo "    ingest is live"
 
 echo "==> capturing"
 ( cd "$ROOT/ui" && BASE_URL="http://127.0.0.1:$PORT" \
-    npx playwright test --config=e2e/capture.config.ts )
+    npx --no-install playwright test --config=e2e/capture.config.ts )
 
 # Playwright names video files by a hash, which is useless in a README.
 echo "==> collecting video"

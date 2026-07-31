@@ -59,7 +59,11 @@ fi
 echo "  container healthy on :$PORT"
 
 printf "\n\033[1m2. Browser suite\033[0m\n"
-cd "$ROOT/ui"
+cd "$ROOT/ui" || exit 1
+# Generated per run. auth.setup.ts creates the admin account with it and then
+# signs in, so nothing outside this process ever needs to know the value -- and
+# a literal in the repository would be a committed password regardless.
+export E2E_PASSWORD="${E2E_PASSWORD:-E2E-$(openssl rand -hex 16)}"
 BASE_URL="http://127.0.0.1:$PORT" npx --no-install playwright test --config e2e/playwright.config.ts
 status=$?
 
