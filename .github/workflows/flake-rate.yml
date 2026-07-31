@@ -29,13 +29,15 @@ on:
         type: string
         default: "5"
 
-permissions:
-  contents: read
+# Declared per job rather than once at the top. The two jobs genuinely differ:
+# plan never checks anything out, so it needs nothing at all, and saying so is
+# more accurate than granting it read access it does not use.
 
 jobs:
   plan:
     name: plan
     runs-on: ubuntu-latest
+    permissions: {}
     outputs:
       suites: ${{ steps.split.outputs.suites }}
     steps:
@@ -59,6 +61,9 @@ jobs:
     name: "${{ matrix.suite }} x${{ inputs.runs }}"
     needs: plan
     runs-on: ubuntu-latest
+    # Checks the repository out; nothing more.
+    permissions:
+      contents: read
     # Each repetition takes minutes and there are several. The default six-hour
     # ceiling would sit burning a runner if a suite hangs rather than fails.
     timeout-minutes: 120
