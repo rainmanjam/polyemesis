@@ -1155,7 +1155,27 @@ export interface SetupGuide {
   steps: string[];
   scopes: string[] | null;
   supported: boolean;
+  /** Present when the account connects but the stream key is pasted by hand.
+   *  The Go struct has carried this since the Kick stream-key work; this type
+   *  never gained it. */
+  manualStreamKey?: boolean;
   note?: string;
+  /** Computed per request by the API, from the configuration and the Host it
+   *  was reached on: reasons the displayed redirect URI may not work. */
+  redirectWarnings?: string[];
+}
+
+/** The verdict on a pasted client ID and secret.
+ *
+ *  Four states rather than a boolean, because "we could not reach the platform"
+ *  and "the platform said no" are different facts with different fixes -- and
+ *  because YouTube cannot be checked at all. Rendering its format check as the
+ *  same tick Twitch earns would be a lie told by a progress indicator. */
+export interface CredentialCheck {
+  platform: Platform;
+  state: "verified" | "unverified" | "rejected" | "unreachable";
+  method: "client_credentials" | "format";
+  detail: string;
 }
 
 export interface LogLine {
