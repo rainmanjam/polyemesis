@@ -43,10 +43,23 @@ SRC_NAME="polyemesis-capture-source"
 # browser then tried a password nobody had set -- surfacing as a missing <nav>,
 # which points nowhere near the cause. Exported so both read the same value.
 #
-# Generated per run rather than written down. The account it protects exists for
-# the length of one capture, but a literal in a public repository is a literal
-# in a public repository, and both consumers now REFUSE to start without it.
-export E2E_PASSWORD="${E2E_PASSWORD:-E2E-$(openssl rand -hex 16)}"
+# Generated per run rather than written down. The account it guards lives for
+# one capture, but a literal in a public repository is a committed password
+# whatever it guards, so the seeder and auth.setup.ts both now REFUSE to start
+# without this variable.
+#
+# openssl is checked rather than assumed. An empty command substitution would
+# leave a four-character password, fail the eight-character floor, and fail at
+# sign-in -- the same shape of several-steps-removed symptom described above.
+if [ -z "${E2E_PASSWORD:-}" ]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is needed to generate E2E_PASSWORD;" >&2
+    echo "export one yourself instead" >&2
+    exit 1
+  }
+  E2E_PASSWORD="E2E-$(openssl rand -hex 16)"
+fi
+export E2E_PASSWORD
 
 # Everything this script starts is a container, so cleanup is docker's job. The
 # host-process kills that used to be here were left over from the binary-launch
