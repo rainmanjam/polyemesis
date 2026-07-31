@@ -148,15 +148,22 @@ jobs:
 
       - name: --check creates nothing
         run: |
+          # Listings compared directly rather than hashed. A hash answers "did
+          # anything change"; the diff answers "what appeared", which is the
+          # question you actually have at 2am. It also keeps a weak-hash
+          # warning out of a step that is not doing cryptography.
           snap() {
             find /usr/local/bin /etc/systemd/system /var/lib /etc/polyemesis \
-              -maxdepth 1 2>/dev/null | sort | md5sum
+              -maxdepth 1 2>/dev/null | sort
           }
-          before="$(snap)"
+          snap > /tmp/before.txt
           bash scripts/install.sh --check --mode binary >/dev/null 2>&1 || true
           bash scripts/install.sh --check --mode docker >/dev/null 2>&1 || true
-          after="$(snap)"
-          [ "$before" = "$after" ] || { echo "--check modified the filesystem"; exit 1; }
+          snap > /tmp/after.txt
+          if ! diff -u /tmp/before.txt /tmp/after.txt; then
+            echo "--check modified the filesystem — see the diff above"
+            exit 1
+          fi
           # `if ! id ...` rather than `id ... && exit 1`. The second form
           # returns non-zero in the PASSING case -- no such user -- and under
           # set -e that fails the step for succeeding.
