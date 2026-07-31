@@ -27,6 +27,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -164,7 +166,55 @@ func (s *Server) Start() error {
 		}
 	}()
 	s.log.Info("one-port srt ingest listening", "addr", s.addr)
+	s.warnIfWildcardOnDarwin()
 	return nil
+}
+
+// warnIfWildcardOnDarwin names a macOS-only failure that is otherwise silent
+// on both sides.
+//
+// A bare ":port" makes gosrt listen with network "udp", which Go binds as a
+// dual-stack socket. On Linux that works: an IPv4 caller completes the SRT
+// handshake normally. On macOS it does not -- the datagrams arrive (a plain
+// net.ListenPacket on the same address receives them) but the handshake never
+// completes, so the publisher sees only an I/O error and this server logs
+// nothing at all, because handleConnect is never reached and its typed
+// refusals never run.
+//
+// Measured, on the same machine, with gosrt v0.11.0:
+//
+//	listen        caller   linux   darwin
+//	:PORT         IPv4     ok      TIMES OUT
+//	:PORT         IPv6     ok      ok
+//	0.0.0.0:PORT  IPv4     ok      ok
+//	127.0.0.1:PORT IPv4    ok      ok
+//
+// The address is NOT changed to 0.0.0.0 to route around it: that would bind
+// IPv4 only and silently drop IPv6 publishers everywhere, trading a warning on
+// one development platform for a regression on the deployment target. A
+// warning costs nothing where the bug does not exist.
+func (s *Server) warnIfWildcardOnDarwin() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	host, _, err := net.SplitHostPort(s.addr)
+	if err != nil || host != "" {
+		return
+	}
+	s.log.Warn("on macOS this address accepts IPv6 publishers only",
+		"addr", s.addr,
+		"symptom", "an IPv4 publisher fails with an I/O error and this server logs no refusal",
+		"fix", "bind 0.0.0.0:"+portOf(s.addr)+" instead, or publish over IPv6",
+		"unaffected", "linux, which is what the container images run")
+}
+
+// portOf returns the port from a host:port, or the address unchanged if it
+// cannot be split. Only used to build a suggestion string.
+func portOf(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return addr
 }
 
 // Stop closes the listener and every established publisher.

@@ -1,0 +1,67 @@
+# Measure the SRT wildcard/IPv4 behaviour on hosted runners.
+#
+# Issue #28 claims a wildcard SRT listener refuses IPv4 callers on macOS. That
+# was measured on one developer machine, where "macOS", "Apple Silicon" and
+# "that laptop's firewall" are indistinguishable. This runs the same probe on
+# neutral hardware, on both macOS architectures, so the three can be told apart.
+#
+# Manual, plus any pull request that touches the SRT server. It binds real UDP
+# ports and waits on real handshakes, so it is deliberately not in the main CI
+# path -- but a change to srtserver is exactly when this measurement is worth
+# taking, and workflow_dispatch alone cannot run from a branch: GitHub only
+# dispatches workflows that already exist on the default branch, so a probe
+# added by a PR could not be run by that PR. Which is precisely when it matters.
+name: srt address-family probe
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "internal/srtserver/**"
+      - ".github/workflows/srt-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: "${{ matrix.runner }} (${{ matrix.note }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The deployment target. The probe ASSERTS the wildcard works here.
+          - { runner: ubuntu-latest, note: "linux — the deployment target" }
+          # Apple Silicon, which is what the original report was measured on.
+          - { runner: macos-latest, note: "macOS 26 arm64" }
+          # The SAME macOS version on x64. Paired with the row above this
+          # isolates the architecture: macos-15-intel would have changed the OS
+          # version at the same time and told us less.
+          - { runner: macos-26-intel, note: "macOS 26 x64" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Probe
+        env:
+          POLYEMESIS_SRT_PROBE: "1"
+        run: go test ./internal/srtserver/ -run TestWildcardIPv4Matrix -count=1 -v
+
+      # The probe reports rather than asserts on darwin, so the summary is where
+      # the answer actually lands. Read the four lines under "runtime:".
+      - name: What this run showed
+        if: always()
+        env:
+          POLYEMESIS_SRT_PROBE: "1"
+        run: |
+          {
+            echo "### ${{ matrix.runner }} — ${{ matrix.note }}"
+            echo '```'
+            go test ./internal/srtserver/ -run TestWildcardIPv4Matrix -count=1 -v 2>&1 \
+              | grep -E "runtime:|<- IPv|CONFIRMED|NOTE:" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
