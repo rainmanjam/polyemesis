@@ -65,6 +65,38 @@ pgrep -af ffmpeg
 4. **Does your FFmpeg have SRT?** `ffmpeg -protocols | grep -x srt`. Homebrew's
    does not. Without it, the ingest cannot listen and the log says
    `Protocol not found`.
+5. **Are you on macOS with a bare `:port`?** See directly below — this one looks
+   exactly like a firewall and is not one.
+
+### macOS: an IPv4 publisher times out and nothing is logged
+
+The distinguishing symptom is the **silence**. Every refusal polyemesis makes is
+typed and logged, so a publisher that fails with an `I/O error` while the server
+log says nothing at all did not reach the handshake — no refusal was made,
+because no connection was ever offered.
+
+On macOS a bare `:6000` accepts **IPv6 publishers only**. The datagrams from an
+IPv4 caller do arrive — a plain listener on the same address receives them — but
+the SRT handshake never completes. Measured against gosrt v0.11.0 on GitHub's
+hosted runners, so this is not one machine's firewall:
+
+| Listen address | Caller | Linux | macOS |
+|---|---|---|---|
+| `:6000` | IPv4 | ok | **times out** |
+| `:6000` | IPv6 | ok | ok |
+| `0.0.0.0:6000` | IPv4 | ok | ok |
+| `127.0.0.1:6000` | IPv4 | ok | ok |
+
+**The fix is to bind `0.0.0.0:6000`**, or to publish over IPv6. The server prints
+this warning at startup on macOS when the address is a bare `:port`, so it is
+worth scrolling back to the first few lines of the log.
+
+**Linux is unaffected in every case**, which is what the container images and
+every documented deployment run. The default is deliberately not changed to
+`0.0.0.0`: that binds IPv4 only, which would silently drop IPv6 publishers on the
+platform that actually ships, to fix one where the problem is a development
+inconvenience. Tracked in [issue #28](https://github.com/rainmanjam/polyemesis/issues/28);
+the underlying behaviour is upstream in `datarhei/gosrt`, not in polyemesis.
 
 ### The publisher is refused
 
