@@ -1,0 +1,56 @@
+# Keep the Docker Hub listing in step with README.md.
+#
+# Split out of release.yml, for two reasons.
+#
+# The description used to sync ONLY on a version tag, so every README change
+# between releases sat unpublished until the next one. The listing page is the
+# first thing a stranger reads, and it was the last thing to be updated.
+#
+# And there was no way to repair it out of band. Re-running the release
+# workflow from a branch is not an option: VERSION comes from the ref name, so
+# dispatching it from main would publish `polyemesis:main`, `main-cuda` and
+# `main-vaapi` to Docker Hub -- three junk tags to fix one blank paragraph.
+#
+# Failure is deliberately LOUD here. In release.yml this step carries
+# continue-on-error, which is right: a description must never fail a release
+# whose images have already published. The cost of that is exactly what
+# happened on v0.1.0 -- seven tags went out, the PATCH returned "Forbidden"
+# because the token lacked the delete scope, and the listing stayed blank with
+# nothing red anywhere. This workflow does nothing else, so it is free to fail
+# and be seen.
+name: docker hub description
+
+on:
+  # Manual, for repairing the listing without waiting for a release.
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - .github/workflows/dockerhub-description.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-description
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: sync README to Docker Hub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The token needs read/write/DELETE. A read/write token -- enough to push
+      # every image -- logs in successfully and then fails this PATCH with a
+      # bare "Error: Forbidden" that names neither the scope nor the fix.
+      - name: Push the README to Docker Hub
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: rainmanjam/polyemesis
+          short-description: "Self-hosted restreaming with per-destination audio routing"
+          readme-filepath: ./README.md

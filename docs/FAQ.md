@@ -120,12 +120,26 @@ usually the least painful route.
 
 ## Is Windows supported?
 
-It compiles, the service wrapper and process-group teardown are written, and the
-installer scripts exist — but **nobody has run the binary on a Windows host**.
-Treat it as untested. There is a known unresolved question about recording
-truncation on service stop.
+**Tested, not operated.** Those are different claims and the difference is the
+whole answer — see the [platform table](../README.md#platform-maturity).
 
-Linux and Docker are the primary targets.
+Tested: Windows clears exactly the same CI floor as Linux and macOS on every
+push — build, vet, the full Go suite with FFmpeg installed, the binary started
+and serving, and a three-track broadcast pushed through it with per-band energy
+measured in each destination's output. On that axis the three are identical.
+That job has already caught real Windows-only bugs: a `file://` URL corrupted by
+path separators, TLS keys written world-readable because `os.FileMode` is a
+no-op there, and path traversal reaching four resolvers through `/`.
+
+Not operated: nobody runs it in earnest. No live broadcast has gone to a real
+platform from a Windows host, the Service Control Manager wrapper and installer
+scripts have never run outside a developer's head, and recording truncation on
+service stop is a known unresolved defect — the graceful stop is a
+`CTRL_BREAK_EVENT`, which Windows delivers only through a console, and a service
+has none.
+
+Linux also runs 11 acceptance suites and 3 container suites that never run
+anywhere else, which is the other half of why it is the primary target.
 
 ## Why is HSTS off by default?
 

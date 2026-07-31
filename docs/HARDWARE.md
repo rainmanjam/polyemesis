@@ -111,7 +111,7 @@ host at `docker run` time or it does not arrive.
 |---|---|---|
 | `Dockerfile` | Alpine | The default. CPU / `libx264`. Nothing to configure. |
 | `Dockerfile.cuda` | `nvidia/cuda:*-base-ubuntu24.04` | NVIDIA / NVENC |
-| `Dockerfile.vaapi` | `ubuntu:24.04` | Intel and AMD / VA-API and QSV |
+| `Dockerfile.vaapi` | `ubuntu:26.04` | Intel and AMD / VA-API and QSV |
 
 `docker-compose.yml` carries all three as one file: the default service is
 active, the two GPU variants are commented out just below it. Uncomment one,
@@ -328,9 +328,16 @@ The path does not exist or is not a usable render node.
   entirely, that is your answer.
 - On bare metal, `ls -l /dev/dri` on the host. No `renderD*` at all means no
   kernel driver is bound to the GPU.
-- On a multi-GPU host the first card may be display-only. polyemesis picks the
-  node itself rather than hardcoding `renderD128`; if you are running FFmpeg by
-  hand, try `renderD129`.
+- On a multi-GPU host the first card may be display-only, and the two halves of
+  polyemesis disagree about that today. Detection enumerates `/dev/dri` and
+  picks a render node, preferring Intel and AMD over NVIDIA; a rendition encode
+  then uses whatever it picked. **The probe does not** — it names
+  `/dev/dri/renderD128` unconditionally, so on a machine whose usable node is
+  `renderD129` it tests the wrong device and VA-API is greyed out on evidence
+  gathered from the wrong GPU. See
+  [what has not been run](#what-has-actually-been-run-and-what-has-not).
+  Running FFmpeg by hand against `renderD129` is the way to find out what the
+  hardware can really do.
 
 ### `Permission denied` opening `/dev/dri/renderD128`
 
@@ -451,11 +458,15 @@ gives the exact wording but not the conditions that trigger it.
   untested. In particular the `Permission denied` entry — the single most common
   real-world failure — could not be staged, because staging it needs a render
   node with real permissions.
-- **Multi-GPU render node selection.** The probe uses `/dev/dri/renderD128`
-  unconditionally. On a machine whose usable node is `renderD129` the VA-API
-  probe will test the wrong device and the editor will, correctly given that
-  evidence, decline to offer VA-API. Wiring the detected node into the probe is
-  a known follow-up.
+- **Multi-GPU render node selection.** Detection already does the right thing:
+  it enumerates `/dev/dri`, keeps only usable render nodes, ranks Intel and AMD
+  above an NVIDIA node (which opens fine but has no VA-API encode entrypoint
+  without the shim driver), and a rendition encode uses what it chose. **The
+  probe was never wired to that result** and still names `/dev/dri/renderD128`
+  unconditionally. On a machine whose usable node is `renderD129` the probe
+  therefore tests the wrong device, and the editor declines to offer VA-API —
+  correctly, given the evidence it was handed. Passing the detected node into
+  the probe is the known follow-up, and it is a small one.
 - **Windows**, and therefore AMF's primary platform, entirely.
 - **A full `docker build`** of either GPU image. Only the runtime stage was
   built; stages 1 and 2 are byte-identical to the default `Dockerfile`. Only

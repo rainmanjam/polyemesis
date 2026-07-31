@@ -1,27 +1,42 @@
 import type {
-  Source,
-  SourceView,
   ApiToken,
+  AutomodMatrixView,
+  AutomodModelStats,
+  BitrateSample,
   ChatMessage,
   ChatModerationResult,
-  ChatSettings,
-  ChatUserCard,
   ChatOverview,
   ChatPlatform,
   ChatSendResponse,
-  DryRunResult,
-  ExpertArgs,
-  ExpertResponse,
+  ChatSettings,
+  ChatUserCard,
+  CredentialCheck,
   Destination,
   DiskUsage,
+  DryRunResult,
   EncoderList,
+  ExpertArgs,
+  ExpertResponse,
+  FontInfo,
+  JobKindInfo,
+  JobsOverview,
+  JobState,
+  JobStats,
+  JobView,
   Levels,
+  LibraryRecording,
+  LibrarySession,
+  LibraryView,
+  LogLine,
+  MediaFile,
+  Metadata,
   PlatformAccount,
   PlatformCreds,
   PlayoutAdminView,
   PlayoutProtection,
   PlayoutPublicView,
   PlayoutUrls,
+  PostProdSettings,
   Preset,
   PresetOpts,
   ProcessInfo,
@@ -30,34 +45,23 @@ import type {
   RenditionBounds,
   RenditionDeleted,
   RenditionPreset,
-  FontInfo,
   RenditionView,
   RoutingProfile,
   RoutingResult,
-  JobKindInfo,
-  JobState,
-  JobStats,
-  JobView,
-  JobsOverview,
-  LibraryRecording,
-  LibrarySession,
-  LibraryView,
-  Metadata,
-  PostProdSettings,
-  SearchResults,
   SearchParams,
-  TranscriptTrack,
-  TranscriptView,
+  SearchResults,
   Settings,
   SetupGuide,
+  Source,
   SourceInfo,
+  SourceView,
   Status,
   SystemInfo,
   SystemStats,
   TlsStatus,
   TrackAnnotation,
-  BitrateSample,
-  LogLine,
+  TranscriptTrack,
+  TranscriptView,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -147,7 +151,74 @@ export interface DestinationWithRouting {
   routingError?: string;
 }
 
+/** Upload one file, reporting progress.
+ *
+ *  XMLHttpRequest rather than fetch, and not for nostalgia: fetch cannot report
+ *  UPLOAD progress at all. Streams-based request bodies would allow it but are
+ *  not available in Safari, and a multi-gigabyte upload with no progress bar is
+ *  indistinguishable from a hung one.
+ *
+ *  Content-Type is deliberately NOT set. The browser must generate it, because
+ *  only it knows the multipart boundary it just chose; setting it by hand
+ *  produces a body the server cannot parse. */
+export function uploadMedia(
+  file: File,
+  onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<MediaFile> {
+  return new Promise<MediaFile>((resolve, reject) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", BASE + "/media");
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("X-CSRF-Token", csrfToken());
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        body = xhr.responseText;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as MediaFile);
+        return;
+      }
+      const msg =
+        body && typeof body === "object" && "error" in body
+          ? String((body as { error: unknown }).error)
+          : `upload failed (${xhr.status})`;
+      reject(new ApiError(xhr.status, msg));
+    };
+    // A network failure and an abort are different things to a user: one is
+    // "try again", the other is "you did that on purpose".
+    xhr.onerror = () => reject(new ApiError(0, "the upload could not reach the server"));
+    xhr.onabort = () => reject(new ApiError(0, "upload cancelled"));
+
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(form);
+  });
+}
+
 export const api = {
+  // --- automod ---
+  automodMatrix: () => get<AutomodMatrixView>("/automod/matrix"),
+  automodStats: () => get<AutomodModelStats>("/automod/stats"),
+  /** Sets or clears the model API key. Empty clears it. The key is never
+   *  returned by any endpoint, so the UI can only ever report that one is set. */
+  setAutomodKey: (key: string) =>
+    put<{ hasApiKey: boolean }>("/settings/automod-key", { key }),
+
+  // --- media uploads ---
+  media: () => get<MediaFile[]>("/media"),
+  deleteMedia: (name: string) => del<void>(`/media/${encodeURIComponent(name)}`),
+  uploadMedia,
+
   // --- setup & auth ---
   setupStatus: () =>
     get<{ needsSetup: boolean; minPasswordChars: number }>("/setup"),
@@ -607,10 +678,15 @@ export const api = {
   platformGuides: () => get<SetupGuide[]>("/platforms/guides"),
   listCreds: () => get<PlatformCreds[]>("/platforms/credentials"),
   putCreds: (platform: string, clientId: string, clientSecret: string) =>
-    put<{ platform: string }>(`/platforms/credentials/${platform}`, {
-      clientId,
-      clientSecret,
-    }),
+    put<{ platform: string; hasSecret: boolean; check: CredentialCheck }>(
+      `/platforms/credentials/${platform}`,
+      { clientId, clientSecret },
+    ),
+  /** Re-runs the check against what is stored, so an operator who has just
+   *  fixed something in the platform console can retest without pasting the
+   *  secret again -- which most consoles show exactly once. */
+  checkCreds: (platform: string) =>
+    post<CredentialCheck>(`/platforms/credentials/${platform}/check`),
   deleteCreds: (platform: string) =>
     del<{ status: string }>(`/platforms/credentials/${platform}`),
   listAccounts: () => get<PlatformAccount[]>("/platforms/accounts"),

@@ -95,8 +95,22 @@ vet: ## Run go vet
 fmt: ## Format Go sources
 	gofmt -w ./cmd ./internal
 
+.PHONY: fmtcheck
+fmtcheck: ## Fail if any Go source needs formatting (what CI actually gates on)
+	@out="$$(gofmt -l ./cmd ./internal)"; \
+	if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+
+.PHONY: lint
+lint: $(UI_DIR)/node_modules ## Lint the frontend
+	cd $(UI_DIR) && npm run lint
+
+# CONTRIBUTING.md and the PR template both told contributors to run `make lint`,
+# which did not exist -- and `check` claimed to be "everything CI would run"
+# while omitting both the lint and the gofmt gate that CI fails on. Adding the
+# two targets was the honest fix: the instruction was reasonable, the Makefile
+# was the thing that was wrong.
 .PHONY: check
-check: vet test typecheck ## Everything CI would run
+check: fmtcheck vet test typecheck lint ## Everything CI would run
 
 # ----------------------------------------------------------------- release
 

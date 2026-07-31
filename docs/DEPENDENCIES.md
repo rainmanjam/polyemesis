@@ -36,7 +36,7 @@ Ten, deliberately. Each one earns its place below.
 
 | Module | Version | Used by |
 | --- | --- | --- |
-| `github.com/datarhei/gosrt` | v0.6.0 | `internal/srtserver` |
+| `github.com/datarhei/gosrt` | v0.11.0 | `internal/srtserver` |
 | `github.com/eclipse/paho.golang` | v0.23.0 | `internal/mqtt` |
 | `github.com/go-chi/chi/v5` | v5.3.1 | `internal/api` |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | `internal/auth` |
@@ -255,61 +255,69 @@ checking the things a rewrite is most likely to break:
   `verbatimModuleSyntax` — the two settings most exposed to a compiler
   rewrite — behave identically.
 - TypeScript 7 ships a **per-platform native binary** as an optional
-  dependency. Since the Docker UI stage builds on `node:22-alpine` (musl), the
-  real risk was a glibc-linked binary failing to exec. Verified by running
-  `npm ci && npm run build` inside `node:22-alpine` on **both** `linux/amd64`
-  and `linux/arm64`: the build completes and emits the expected bundle. The
-  binaries are statically linked and musl-safe.
+  dependency. Since the Docker UI stage builds on Alpine (musl), the real risk
+  was a glibc-linked binary failing to exec. Verified by running
+  `npm ci && npm run build` inside the image on **both** `linux/amd64` and
+  `linux/arm64`: the build completes and emits the expected bundle. The binaries
+  are statically linked and musl-safe.
 
-If a future TypeScript bump is being considered, repeat that Alpine check. A
-clean typecheck on macOS proves nothing about the container build.
+  That verification was performed against `node:22-alpine`, which the UI stage
+  used at the time; it is now `node:24-alpine`. The musl question is a property
+  of Alpine rather than of the Node major, so the conclusion carries — but the
+  check has not been repeated since the bump.
 
-### `@types/node` is pinned to the 22 line, on purpose
+If a future TypeScript bump is being considered, repeat that Alpine check
+against whatever the Dockerfile currently uses. A clean typecheck on macOS
+proves nothing about the container build.
 
-`^24.13.3` → `^22.20.1`. This is deliberately a *downgrade*, and `npm outdated`
-will complain about it forever.
+### `@types/node` tracks the Node the UI is actually built on
 
-The reason: the UI is built on **Node 22** (`FROM node:22-alpine` in the
-Dockerfile). Type definitions should describe the runtime you actually have.
-Declaring Node 24 or 26 types while building on Node 22 means the compiler will
-happily accept APIs that do not exist at runtime — false confidence, in
-exchange for nothing, since the only Node surface in the project is
-`node:path` and `__dirname` in `vite.config.ts`.
+Currently `^24.13.3`, matching `FROM node:24-alpine` in the Dockerfile's UI
+stage.
 
-`^22.20.1` satisfies Vite 8's peer range (`^20.19.0 || >=22.12.0`).
+The rule, which is what matters rather than the number: type definitions should
+describe the runtime you actually have. Declaring Node 26 types while building
+on Node 24 means the compiler accepts APIs that do not exist at runtime — false
+confidence in exchange for nothing, since the only Node surface in the project
+is `node:path` and `__dirname` in `vite.config.ts`. Declaring older types than
+the runtime is the harmless direction, and was the state here while the image
+was on Node 22.
 
-**If the Dockerfile moves to a newer Node, move this pin with it.** Those two
-values are supposed to agree.
+`^24.13.3` satisfies Vite 8's peer range (`^20.19.0 || >=22.12.0`).
 
-### react-router — the `npm audit` advisory you should NOT "fix"
+**These two values are supposed to agree.** If you move the Dockerfile's Node,
+move this pin with it — and if you find them disagreeing, the Dockerfile is the
+source of truth, because it is what actually runs the build.
 
-`npm audit` reports **2 high severity** advisories against `react-router` /
-`react-router-dom` and will keep doing so. This has been assessed twice and the
-conclusion is **take no action**. Do not run `npm audit fix --force`.
+### react-router — resolved by the v8 migration
+
+`react-router-dom` is gone. The UI is on **`react-router@^8.3.0`**, and the
+advisory that used to sit against this dependency is fixed rather than accepted.
 
 - **Advisory:** [GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)
   — "React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400
-  Response". Affected range `>=7.12.0 <8.3.0`. We are on 7.18.1.
-- **The vulnerable surface is RSC mode with server actions.** polyemesis is a
-  static SPA embedded in a Go binary. There is no React Server Components
-  runtime, no server actions, and no Node server rendering it — the Go binary
-  serves prebuilt files.
-- **We do not use the affected APIs.** The complete set of react-router imports
-  across `ui/src` is: `BrowserRouter`, `Routes`, `Route`, `Outlet`, `Navigate`,
-  `NavLink`, `Link`, `useParams`, `useLocation`, `useNavigate`,
-  `useSearchParams` — eleven component/hook APIs across five files. There is no
-  `createBrowserRouter`, no `RouterProvider`, no `loader:`, no `action:`, no
-  fetchers, and no RSC entry points anywhere in the source.
-- **There is no fixed version to move to on this line.** The advisory is fixed
-  in 8.3.0, but `react-router-dom`'s latest published release is 7.18.1 — v8
-  moved to the `react-router` package. Reaching a non-vulnerable version would
-  mean a v7→v8 framework migration, which is not a security action.
-- **npm's suggested fix is a downgrade to `react-router-dom@7.11.0`**, flagged
-  `isSemVerMajor`. Taking it would discard seven minor versions of real bug
-  fixes in order to mitigate a code path we cannot reach.
+  Response". Affected range `>=7.12.0 <8.3.0`, fixed in 8.3.0.
+- For most of this project's life there was **no fixed version to move to**: the
+  fix landed in 8.3.0, `react-router-dom` never published a v8, and v8 exists
+  only under the `react-router` package name. So the position was documented
+  non-exploitability — the vulnerable surface is RSC mode with server actions,
+  and polyemesis is a static SPA embedded in a Go binary with no RSC runtime, no
+  server actions and no Node server rendering it.
+- The v7→v8 migration has since happened, which moves the answer from *not
+  exploitable here* to *not present*. That is the better place to be, and it is
+  why the migration was worth doing even though it was never a security
+  emergency.
 
-Re-verify rather than trust this note if the app ever gains a data router,
-server-side rendering, or an RSC build. Until then, the audit output is noise.
+The imports remain the same eleven component and hook APIs — `BrowserRouter`,
+`Routes`, `Route`, `Outlet`, `Navigate`, `NavLink`, `Link`, `useParams`,
+`useLocation`, `useNavigate`, `useSearchParams`. There is still no
+`createBrowserRouter`, no `RouterProvider`, no `loader:`, no `action:`, no
+fetchers and no RSC entry point, so the surface that advisory covers is one this
+app would have to grow before it could be reached.
+
+Worth keeping in mind for the next advisory: "we do not use the affected code
+path" is a defensible position, but it expires the moment somebody adds a data
+router. Preferring the fixed version is less to remember.
 
 ## Verifying a dependency change
 
@@ -343,7 +351,7 @@ For a frontend toolchain change specifically, also reproduce the container
 build, because the host toolchain is not the one that ships:
 
 ```sh
-docker run --rm --platform linux/amd64 -v "$PWD/ui:/src:ro" node:22-alpine \
+docker run --rm --platform linux/amd64 -v "$PWD/ui:/src:ro" node:24-alpine \
   sh -c 'mkdir -p /work/ui /work/internal/web && cp -r /src/. /work/ui/ \
          && cd /work/ui && npm ci && npm run build'
 ```

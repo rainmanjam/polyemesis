@@ -88,6 +88,13 @@ type Hub struct {
 	// that moderation is happening somewhere polyemesis cannot see.
 	retracted int64
 
+	// automod holds the current moderator generation, or nil when none is
+	// wired. Replaced wholesale on SetModerator so a reconfiguration cannot
+	// half-apply and so a superseded generation's queued actions are abandoned
+	// rather than performed. The Hub acts; it never decides -- see automod.go.
+	automod    *automodState
+	automodGen uint64
+
 	store     Store
 	bus       Publisher
 	log       *slog.Logger
@@ -360,6 +367,10 @@ func (h *Hub) Close() {
 	}
 	h.stopOnce.Do(func() { close(h.stop) })
 	h.wg.Wait()
+	// The automod worker is not in h.wg -- it belongs to a generation that
+	// outlives individual adapters -- so it is stopped explicitly. Without this
+	// every closed Hub leaves one goroutine blocked on a channel forever.
+	h.closeAutomod()
 	// One last flush after the adapters are done: the messages from the final
 	// seconds of a broadcast are the ones somebody scrolls back to.
 	h.flush()
@@ -398,6 +409,12 @@ func (h *Hub) deliver(r *runner, m Message) {
 	if h.bus != nil {
 		h.bus.Publish(events.TypeChat, m)
 	}
+
+	// AFTER publishing, never before. The message is on screen by the time
+	// automod looks at it; a verdict may retract it a moment later. Blocking
+	// display on a check -- even a fast one -- is how chat starts feeling
+	// broken, and the retraction path exists for exactly this.
+	h.checkAutomod(m)
 }
 
 // retract removes one message the platform says is gone.

@@ -6,6 +6,8 @@ The dependency is **FFmpeg 6.0 or newer**, and it is where essentially every
 installation problem comes from. Read the FFmpeg part of your platform's
 section even if you skip the rest.
 
+- [The scripted install](#the-scripted-install)
+- ["I do not have a certificate"](#i-do-not-have-a-certificate--two-different-certificates)
 - [Platform maturity](#platform-maturity)
 - [The FFmpeg requirement](#the-ffmpeg-requirement)
 - [Docker](#docker)
@@ -17,17 +19,127 @@ section even if you skip the rest.
 
 ---
 
+## The scripted install
+
+On Linux, `scripts/install.sh` does everything on this page interactively —
+asks how you want it installed, checks the things that actually go wrong, and
+rolls back cleanly if a step fails:
+
+```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLO \
+  https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
+less install.sh          # it runs as root; read it first
+sudo bash install.sh
+```
+
+It offers two modes. **Docker** bundles a known-good FFmpeg with libsrt, so
+nothing on the host matters. **Binary** installs the static binary plus a
+systemd unit, and refuses to proceed if your FFmpeg is below 6.0 — naming your
+distribution's actual version when it recognises it — rather than installing a
+service that cannot start.
+
+What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
+the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
+truncated, a firewall rule for **udp**/6000, and `CAP_NET_BIND_SERVICE` on the
+unit when you choose ACME, without which the `:80` bind fails and issuance
+never completes.
+
+It never asks for an admin password. polyemesis has no account until you create
+one on the first-run screen, so there is no credential for an installer to
+handle. In binary mode it verifies the download against the release's published
+`SHA256SUMS` and refuses to install on a mismatch.
+
+**Linux only.** It is bash, systemd, apt and ufw/firewalld, and it exits
+immediately anywhere else with `no /etc/os-release — this installer targets
+Linux`. macOS installs from the [macOS](#macos) section below; Windows has its
+own scripts in [`deploy/windows/`](../deploy/windows/).
+
+The rest of this page is the manual version, and is worth reading if the script
+fails or if you want to know what it did.
+
+---
+
+## "I do not have a certificate" — two different certificates
+
+They come up together and neither is a blocker, so it is worth separating them.
+
+### The TLS certificate: polyemesis makes its own
+
+You do not need to obtain one. `tls.mode: selfsigned` generates a local CA and a
+leaf at startup, so the connection is encrypted immediately and the only cost is
+a browser warning until you install that CA — one command on each platform, in
+[TLS.md](TLS.md#trusting-the-self-signed-ca). `acme` is the only mode that needs
+a real certificate, and `auto` will not choose it without a public DNS name.
+
+### The code-signing certificate: not needed to run
+
+The released binaries are **not signed with a paid certificate** and macOS
+binaries are **not notarized**. Neither stops them running.
+
+**macOS.** This is the one that could have been a genuine problem: Apple Silicon
+requires an arm64 binary to carry *a* signature to execute at all, and the
+release cross-compiles darwin binaries on a Linux runner. Go's linker ad-hoc
+signs `darwin/arm64` even when cross-compiling, which satisfies that
+requirement. Verified by building in a Linux container with the release's own
+flags and running the result on Apple Silicon:
+
+```console
+$ codesign -dv polyemesis-darwin-arm64
+CodeDirectory v=20400 ... flags=0x20002(adhoc,linker-signed)
+$ ./polyemesis-darwin-arm64 -version
+polyemesis v0.1.0
+```
+
+What is *not* signed is a Developer ID, so the binary is not notarized.
+`spctl -a -t execute` reports `rejected` — that answers "would Gatekeeper
+approve this for distribution", not "will this run". Gatekeeper enforces on
+files carrying `com.apple.quarantine`, which a browser download sets and `curl`
+does not. If you hit it:
+
+```bash
+xattr -d com.apple.quarantine ./polyemesis
+```
+
+A freshly quarantined binary can also sit for a minute or two on its first run
+while macOS scans it; the result is cached, and subsequent runs are immediate.
+
+**Windows.** The `.exe` is unsigned, so SmartScreen shows a warning on first
+run — *More info → Run anyway*, once. It does not prevent the service from
+being registered or started.
+
+**Docker avoids both**, on both platforms, and on macOS you probably want it
+anyway: Homebrew's FFmpeg has no libsrt, and multitrack ingest needs it.
+
+---
+
 ## Platform maturity
 
 These are not four equal targets, and pretending otherwise would cost you a
-weekend.
+weekend. But they are equal on one axis, and separating that from the rest is
+the honest way to say it. Same framing as the
+[README](../README.md#platform-maturity).
 
-| Platform | Status |
-|---|---|
-| **Linux (server)** | Primary target. Where it is developed against, deployed and exercised. |
-| **Docker** | Primary target. The image is built from this repo and bundles a pinned FFmpeg. |
-| **macOS** | Developed on daily. Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below. |
-| **Windows** | **Implemented but not executed on Windows.** It compiles, the service wrapper and process-group teardown are written, and the installer scripts exist — but no one has run the resulting binary on a Windows host. Treat it as untested. |
+**The shared CI floor, identical on every push for all three operating
+systems:** build, vet, the full Go test suite with FFmpeg installed, the binary
+started and confirmed serving, and a three-track broadcast pushed through it
+with per-band energy measured in each destination's output. Two destinations
+take different track selections and the unselected tone must measure 25–40 dB
+down, so a wrong mix fails rather than passing quietly.
+
+Everything past that floor is where they diverge:
+
+| Platform | Beyond the shared floor | Operationally |
+|---|---|---|
+| **Linux (server)** | The race detector, 11 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
+| **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
+| **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
+| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect |
+
+The distinction that matters for choosing: Windows is **tested, not operated**.
+The broadcast path demonstrably works there and that job has already caught
+Windows-only bugs — a `file://` URL corrupted by path separators, TLS keys left
+world-readable because `os.FileMode` does nothing on Windows. What has never
+happened is somebody running a real show on it.
 
 If you are choosing where to run this, run it on Linux.
 
@@ -384,12 +496,17 @@ ingest ports. Approve it, or nothing external reaches the encoder.
 
 ## Windows
 
-**Read this first.** Windows support is *implemented but has not been executed
-on Windows*. The binary cross-compiles, the Service Control Manager wrapper is
-written, process-group teardown and the disk-full guard have Windows
-implementations, and the installer scripts exist — but nobody has run the result
-on a Windows host. Nothing here is verified end to end. If you need this to work
-today, use Linux or Docker.
+**Read this first.** Windows builds and runs, and is not broadcast-tested. CI
+runs the full Go suite on `windows-latest` with FFmpeg installed on every push,
+then starts the binary and checks it answers `/health` — and that job has caught
+real Windows-only bugs, including a `file://` URL corrupted by path separators
+and TLS keys left world-readable because `os.FileMode` does nothing there.
+
+What remains unverified is *operation*: nobody has run a real broadcast through
+it on Windows, and the service-stop recording truncation below is a known
+unresolved problem. The Service Control Manager wrapper, process-group teardown
+and installer scripts have never been exercised on a live host. If this needs to
+work today, use Linux or Docker.
 
 **Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.5+ and
 Node 20.19+/22.12+ if you are building the binary yourself.
@@ -419,9 +536,17 @@ likely reason multitrack ingest fails on a fresh Windows box.
 
 ### Build the binary
 
-`make release` does not currently emit a Windows target, so build it directly.
-From a checkout, with the UI built first so `go:embed` picks up the real assets
-rather than the placeholder:
+`make release` cross-compiles `windows/amd64` and `windows/arm64` along with
+Linux and macOS, and writes them to `dist/` with the `.exe` suffix. It builds
+the UI first, so `go:embed` picks up the real assets rather than the
+placeholder:
+
+```bash
+make release
+ls dist/polyemesis-*-windows-*.exe
+```
+
+To build just the one target:
 
 ```bash
 make ui
@@ -429,7 +554,9 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
   go build -trimpath -ldflags "-s -w" -o polyemesis.exe ./cmd/polyemesis
 ```
 
-That works from Linux or macOS just as well as from Windows — there is no cgo.
+Either works from Linux or macOS just as well as from Windows — there is no
+cgo. Building the UI first is the step that matters: skip it and you get a
+binary that serves the placeholder page.
 
 ### Register it with the Service Control Manager
 
@@ -508,8 +635,8 @@ network in the clear.
 
 ---
 
-Configuration reference: `config.example.yaml`.
-TLS modes and what `auto` resolves to: the *TLS and certificates* section of
-[`README.md`](../README.md).
+Configuration reference: [`CONFIGURATION.md`](CONFIGURATION.md), and
+`config.example.yaml` for the annotated file itself.
+TLS modes and what `auto` resolves to: [`TLS.md`](TLS.md).
 Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 Testing without OBS: [`TESTING.md`](TESTING.md).

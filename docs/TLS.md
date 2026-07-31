@@ -382,16 +382,31 @@ send it with `mode: off` however `tls.hsts` is set, and says so at startup.
 
 Whenever polyemesis is terminating TLS itself, it also tries to bind `:80` for a
 small helper that does two jobs: answers ACME HTTP-01 challenges (acme mode
-only) and permanently redirects everything else to HTTPS. Redirects are `301`
-for `GET`/`HEAD` and `308` for everything else, so an API client's method and
-body survive the hop.
+only) and redirects everything else to HTTPS.
+
+Which status code it sends depends on whether it knows its own name:
+
+| `tls.hostname` | `GET`/`HEAD` | other methods |
+|---|---|---|
+| set | `301` | `308` |
+| empty | `302`, `Cache-Control: no-store` | `307` |
+
+The method split keeps an API client's verb and body across the hop; a `301` is
+allowed to be rewritten to `GET`, a `308` is not.
+
+The permanent/temporary split is the more important half. With no `hostname`
+configured, the only available redirect target is the client's own `Host`
+header — so caching that permanently would let one request poison the redirect
+for everyone after it. The temporary form is uncacheable and varies on `Host`,
+and the header is checked for authority shape before it reaches `Location`.
+Setting `hostname` removes the guesswork and earns the permanent codes.
 
 It is skipped when `addr` is already port 80, and a failure to bind is a warning
 rather than a fatal error — you keep your HTTPS listener and your UI either way.
 
 ## Security headers
 
-Every response carries:
+Every response carries these, with one deliberate exception noted below:
 
 | header | value |
 |---|---|
@@ -413,6 +428,21 @@ runtime.
 Notably **absent** is `'unsafe-inline'` for scripts — the UI is a Vite bundle of
 hashed module files with no inline `<script>`, and that is the one relaxation
 that would turn an injected string into executable code.
+
+### The `/watch` exception
+
+The public player is the one page that does not get the table above verbatim.
+When you turn on `allowCrossOrigin` for playout, `/watch` drops
+`X-Frame-Options` and its CSP relaxes `frame-ancestors` to `*` — a page whose
+whole purpose is to sit in an iframe on someone else's site cannot also refuse
+to be framed.
+
+Two things keep that narrow. It applies to `/watch` alone, never to the admin
+console. And it is inert until you set `allowCrossOrigin`, which is the same
+switch that already publishes the media cross-origin — so the frame policy is
+not loosened beyond what you had already chosen to make public. The rest of the
+policy is derived from the admin one rather than written out separately, so a
+directive added there cannot go missing here.
 
 ## Transport security beyond the UI
 

@@ -27,9 +27,35 @@ on:
 
 permissions:
   contents: write # needed to create the GitHub Release and upload assets
+  packages: write # needed to push to ghcr.io
 
 env:
   IMAGE: rainmanjam/polyemesis
+  # The same images, published twice. GHCR needs no secret -- GITHUB_TOKEN is
+  # already scoped to it -- so a fork gets working publishing with nothing
+  # configured, and anyone who would rather not depend on Docker Hub's
+  # anonymous pull limits has a second source of the identical manifest.
+  #
+  # Lowercase because ghcr.io rejects anything else in a path; the repository
+  # name already is.
+  #
+  # ONE MANUAL STEP, ONCE: a package is PRIVATE the first time it is published.
+  # The workflow cannot change that for you, so until somebody sets it to public
+  # at Packages -> polyemesis -> Package settings -> Change visibility, a
+  # `docker pull ghcr.io/rainmanjam/polyemesis` from a stranger gets denied and
+  # looks exactly like a failed publish. Publishing from a workflow with
+  # GITHUB_TOKEN is what links the package to this repository automatically;
+  # the org.opencontainers.image.source label in each Dockerfile is what makes
+  # the package page point back here.
+  GHCR_IMAGE: ghcr.io/rainmanjam/polyemesis
+  # Whether this run publishes anything.
+  #
+  # It used to be `github.event_name == 'push'` at six separate call sites,
+  # while the dry_run input below was declared and READ BY NOTHING. Setting
+  # dry_run=false and expecting a publish got a silent no-op: the run went
+  # green, pushed nothing, and said nothing about it. One expression, consulted
+  # everywhere, and the input now means what it says.
+  PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
 
 jobs:
   images:
@@ -38,17 +64,41 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # A tag name goes into a Docker tag and a filename, and neither accepts a
+      # slash. `v0.1.0` is fine, so a real release never notices -- but a
+      # workflow_dispatch rehearsal runs from a BRANCH, and a conventional
+      # branch name like `docs/accuracy-pass` produces
+      # `polyemesis:docs/accuracy-pass-cuda`, which buildx refuses as an invalid
+      # reference. The rehearsal was therefore impossible from any branch named
+      # the way this project names branches, which is the one situation it
+      # exists to serve.
+      #
+      # Read from the environment rather than interpolated into the script, so
+      # a ref name can never be treated as shell.
+      - name: Derive a ref-safe version
+        run: echo "VERSION=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       # QEMU lets one amd64 runner produce an arm64 image. It is slower than a
       # native arm64 runner but needs no extra infrastructure.
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Log in to Docker Hub
-        if: github.event_name == 'push'
+        if: env.PUBLISH == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # No secret to configure: GITHUB_TOKEN is already scoped to the packages
+      # of the repository that owns the workflow.
+      - name: Log in to GitHub Container Registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # metadata-action derives the tag set from the git ref, so v1.2.3 becomes
       # :1.2.3, :1.2 and :latest. Writing those by hand is how :latest ends up
@@ -57,7 +107,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
-          images: ${{ env.IMAGE }}
+          images: |
+            ${{ env.IMAGE }}
+            ${{ env.GHCR_IMAGE }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -72,10 +124,10 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ env.VERSION }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -90,11 +142,18 @@ jobs:
           context: .
           file: Dockerfile.cuda
           platforms: linux/amd64
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ env.VERSION }}
+          # Labels on the GPU images too. They were built without any, so both
+          # published with no description, source or licence in the registry --
+          # the Dockerfiles now carry their own as well, which is what a manual
+          # `docker build` gets.
+          labels: ${{ steps.meta.outputs.labels }}
           tags: |
             ${{ env.IMAGE }}:cuda
-            ${{ env.IMAGE }}:${{ github.ref_name }}-cuda
-          push: ${{ github.event_name == 'push' }}
+            ${{ env.IMAGE }}:${{ env.VERSION }}-cuda
+            ${{ env.GHCR_IMAGE }}:cuda
+            ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}-cuda
+          push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -104,13 +163,40 @@ jobs:
           context: .
           file: Dockerfile.vaapi
           platforms: linux/amd64
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ env.VERSION }}
+          labels: ${{ steps.meta.outputs.labels }}
           tags: |
             ${{ env.IMAGE }}:vaapi
-            ${{ env.IMAGE }}:${{ github.ref_name }}-vaapi
-          push: ${{ github.event_name == 'push' }}
+            ${{ env.IMAGE }}:${{ env.VERSION }}-vaapi
+            ${{ env.GHCR_IMAGE }}:vaapi
+            ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}-vaapi
+          push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Docker Hub does not read the repository's README on its own: without
+      # this the listing shows an empty overview, which is what a page nobody
+      # scrolls past looks like. Only on a real tag, and only if it can log in.
+      #
+      # SCOPE: this needs a Docker Hub token with read/write/DELETE, which is a
+      # wider scope than pushing an image needs. With a read/write token the
+      # login succeeds, the images publish, and only this step fails -- with a
+      # bare "Error: Forbidden" on the PATCH. That is what happened on v0.1.0:
+      # seven tags published and the listing page stayed blank, because
+      # continue-on-error below quite correctly refused to fail the release
+      # over a description. If this step is red, check the token scope first.
+      - name: Push the README to Docker Hub
+        if: env.PUBLISH == 'true'
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.IMAGE }}
+          short-description: "Self-hosted restreaming with per-destination audio routing"
+          readme-filepath: ./README.md
+        # Metadata is not the release. A Docker Hub API hiccup must not fail a
+        # run whose images and binaries already published.
+        continue-on-error: true
 
   binaries:
     name: native binaries
@@ -130,10 +216,13 @@ jobs:
       # Docker is never required to run polyemesis: `make release` produces a
       # self-contained binary per platform with the web UI embedded, and the
       # only external requirement is FFmpeg on the host.
+      # Same slash problem as the images job: VERSION lands in the output
+      # filename, so a branch named `docs/accuracy-pass` makes `make release`
+      # write `dist/polyemesis-docs/accuracy-pass-linux-amd64` -- a directory,
+      # which the checksum step below then chokes on with
+      # "sha256sum: polyemesis-docs: Is a directory".
       - name: Cross-compile
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: make release VERSION="$VERSION"
+        run: make release VERSION="${GITHUB_REF_NAME//\//-}"
 
       # Checksums so someone can verify a download they did not build.
       - name: Checksums
@@ -143,7 +232,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Publish GitHub Release
-        if: github.event_name == 'push'
+        if: env.PUBLISH == 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: dist/*

@@ -15,9 +15,17 @@ Measured 2026-07-28 against a running Docker instance on FFmpeg 8.1.2.
 | | `acceptance-postprod.sh` | 12 | green |
 | E2E (shipped container) | `acceptance-docker.sh` | 28 | green |
 | | `acceptance-multisource.sh` | 18 | green |
+| Cross-platform broadcast | `scripts/smoketest.go` | 8 | Linux, macOS, Windows |
 | **E2E (browser)** | — | **0** | **absent** |
 
-Total: **4,451 Go tests + 202 acceptance checks.**
+Total: **4,451 Go tests + 202 acceptance checks**, plus the broadcast smoke test
+on all three platforms.
+
+`smoketest.go` is the only suite that runs anywhere but Linux. It injects into
+the relay hub rather than publishing over SRT, so it needs nothing of a runner's
+FFmpeg beyond `libx264` and AAC — which is what lets it run on Windows and on a
+Homebrew build with no libsrt. It proves the broadcast path, not SRT ingest;
+that stays with the Linux acceptance suites.
 
 ## Unit coverage, by package
 
@@ -51,11 +59,11 @@ session, by hand, each of which a browser test would have caught and pinned:
 None of those are visible to `tsc`, and all four are trivially assertable in a
 browser. Until this exists, every UI change is verified once and never again.
 
-### What to build
+### What was built
 
-`ui/tests/` with Playwright, run against the shipped container so it exercises
-the same artefact users get. The first suite is the four bugs above plus the
-guards added for them:
+`ui/e2e/` with Playwright, run against the shipped container so it exercises the
+same artefact users get. It runs in CI as the `acceptance-browser` suite, 24
+checks, and covers the four bugs above plus the guards added for them:
 
 1. First-run setup, login, and that setup cannot be replayed.
 2. Every nav route renders without a console error.
@@ -65,6 +73,11 @@ guards added for them:
 5. Editing a port does **not** commit on blur; Apply/Discard appears.
 6. The delete dialog starts locked, and typing the WRONG name keeps it locked.
 7. A save that fails surfaces an error rather than silently reverting.
+
+The one thing it still cannot reach is the chat pane: the timeline is empty
+without a connected platform account, and the suite has no way to supply one.
+The moderation controls are unit- and mutation-tested underneath, but their
+click-through has never run.
 
 ## Integration gaps
 
@@ -88,7 +101,7 @@ Worth stating so nobody reads absence as oversight:
 | Area | Blocker |
 |---|---|
 | GPU encode (NVENC/VAAPI/QSV) | No GPU on this machine. The probe path is tested; a *successful* hardware encode has never run |
-| Windows service | Recording truncation on service stop is known-broken by construction, and there is no Windows host here |
+| Windows **service** | Recording truncation on service stop is known-broken by construction: the graceful stop is a `CTRL_BREAK_EVENT`, which Windows delivers only through a console, and a service has none. CI covers the *console* path — full suite plus a measured broadcast on `windows-latest` every push — but a service-hosted run needs a real host and is unproven. |
 | ACME / Let's Encrypt | Needs a public DNS name and inbound 80 |
 | RTL languages | Blocked on converting 102 physical Tailwind utilities; shipping them untested would be worse than not shipping |
 | linux/arm64 runtime | The image *builds* for both arches and is verified at the ELF level, but only amd64 has been *run* |
