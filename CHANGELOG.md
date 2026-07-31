@@ -376,12 +376,16 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 
 - **The model checker sends chat messages to whatever endpoint you configure.**
   Off by default, and a locally hosted OpenAI-compatible model keeps everything
-  on your hardware. The rules and history checkers send nothing anywhere.
+  on your hardware. The rules and history checkers send nothing anywhere. The
+  endpoint is **not** filtered against private addresses, deliberately: a
+  private address is the recommended deployment, and only an admin — who can
+  already read your tokens — can set it. See [SECURITY.md](SECURITY.md).
 - **No moderation is perfect and this one is not tuned on your community.**
   Every irreversible action starts off for that reason.
-- **Automod has not been run against a real raid.** The bounds are tested —
-  5,000 distinct authors are tracked and evicted — but a live incident on a busy
-  channel has not happened.
+- **Automod has not been run against a real raid.** The bounds are tested — the
+  author ring holds 5,000 distinct authors, evicts the idle ones, and is capped
+  at 20,000 regardless of idleness — but a live incident on a busy channel has
+  not happened.
 
 #### Streaming platforms
 
