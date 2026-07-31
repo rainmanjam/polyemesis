@@ -38,6 +38,15 @@ env:
   #
   # Lowercase because ghcr.io rejects anything else in a path; the repository
   # name already is.
+  #
+  # ONE MANUAL STEP, ONCE: a package is PRIVATE the first time it is published.
+  # The workflow cannot change that for you, so until somebody sets it to public
+  # at Packages -> polyemesis -> Package settings -> Change visibility, a
+  # `docker pull ghcr.io/rainmanjam/polyemesis` from a stranger gets denied and
+  # looks exactly like a failed publish. Publishing from a workflow with
+  # GITHUB_TOKEN is what links the package to this repository automatically;
+  # the org.opencontainers.image.source label in each Dockerfile is what makes
+  # the package page point back here.
   GHCR_IMAGE: ghcr.io/rainmanjam/polyemesis
   # Whether this run publishes anything.
   #
