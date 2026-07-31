@@ -51,12 +51,20 @@ hot. One upload, one video encode, different audio per platform.
   startable with auto-reconnect and exponential backoff.
 - **Platform sign-in** for YouTube, Twitch, Facebook and Kick, with chat and
   metadata push where the API allows it. [→ PLATFORMS.md](docs/PLATFORMS.md)
+- **Chat moderation on all four** — delete, ban, timeout, and a moderator user
+  card showing what one person has said across every platform at once, which no
+  single platform's own tooling does.
+- **Overlays on renditions** — an image watermark and a line of burnt-in text,
+  sized and placed as percentages of the frame so one setting is right on a
+  landscape tier and a vertical one alike. [→ RENDITIONS.md](docs/RENDITIONS.md)
 - **Failover** with a standby ingest, a generated slate, and a source selector
   that switches without restarting a single destination.
 - **Post-production**: segmented multitrack recording with retention, a job
   queue, Whisper transcription with full-text search, and a clipper.
 - **Prometheus metrics** and in-process alert rules with webhook delivery.
   [→ MONITORING.md](docs/MONITORING.md)
+- **Retained MQTT telemetry** with Home Assistant discovery, so the stream shows
+  up as entities in a dashboard you already run. [→ MQTT.md](docs/MQTT.md)
 - **TLS that configures itself** — Let's Encrypt when the box has a public name,
   a local CA when it does not, and out of the way when a proxy already
   terminates it. [→ TLS.md](docs/TLS.md)
@@ -79,14 +87,27 @@ roadmap.
 
 ### Platform maturity
 
-Four targets, not four equal targets:
+Four targets, not four equal targets — but they are equal in one specific way
+that is worth separating out, because "tested" and "trusted" are different
+claims.
 
-| Platform | Status |
-|---|---|
-| **Linux (server)** | Primary target. Developed against, deployed, exercised. |
-| **Docker** | Primary target. Image built from this repo, FFmpeg pinned and bundled. |
-| **macOS** | Developed on daily. Good workstation and test rig. Homebrew's FFmpeg has no SRT — [see INSTALL.md](docs/INSTALL.md#ffmpeg-on-macos-the-version-is-fine-srt-is-not). |
-| **Windows** | **Implemented but never executed on Windows.** It compiles, the service wrapper and process-group teardown are written, the installer scripts exist — but nobody has run the binary on a Windows host. Treat it as untested. |
+**Every platform below clears the same CI floor on every push:** build, vet, the
+full Go test suite with FFmpeg present, the binary started and serving, and a
+three-track broadcast pushed through it with per-band energy measured in each
+destination's output. On that axis Linux, macOS and Windows are identical.
+
+What differs is everything after that:
+
+| Platform | Beyond the shared CI floor | Operationally |
+|---|---|---|
+| **Linux (server)** | The race detector, 11 acceptance suites, and 3 container suites — none of which run anywhere else | **Primary.** Developed against, deployed, exercised |
+| **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, FFmpeg pinned and bundled |
+| **macOS** | Nothing further | **Daily driver.** A good workstation and test rig, not a deployment target. Homebrew's FFmpeg has no SRT — [see INSTALL.md](docs/INSTALL.md#ffmpeg-on-macos-the-version-is-fine-srt-is-not) |
+| **Windows** | Nothing further | **Unproven.** Nobody runs it in earnest. The service wrapper and installer scripts have never been exercised on a live host, and recording truncation on service stop is a known unresolved defect |
+
+So: Windows is no longer *untested* — the broadcast path demonstrably works
+there, and that job has caught real Windows-only bugs. It is *unoperated*, which
+is a different and smaller claim than it used to be.
 
 ### Project status
 

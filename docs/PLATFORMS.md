@@ -28,11 +28,11 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 
 | Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers |
 |---|---|---|---|---|---|---|---|
-| **YouTube Live** | Works | Works | Works | Works | Works | Unverified | Unverified |
-| **Twitch** | Works | Works | Works | Works | Works | Unverified | Unverified |
-| **Facebook Live** | Works | Works | Works | Works | Unverified | Unverified | Unverified |
+| **YouTube Live** | Works | Works | Works | Works | Works | Works | Unverified |
+| **Twitch** | Works | Works | Works | Works | Works | Works | Unverified |
+| **Facebook Live** | Works | Works | Works | Works | Unverified | Works | Unverified |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works |
-| **X (Twitter)** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
+| **X (Twitter) Live** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
 | **Rumble** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Instagram Live** | Not possible | **Not possible** | Not possible | Not possible | Not possible | Not possible | Not possible |
@@ -210,8 +210,10 @@ than re-reading an existing one.
 
 ### Kick
 
-Kick signs in, and the stream key still gets pasted. Both halves are real at
-once, and neither is a workaround for the other.
+Kick signs in and the stream key is fetched, like every other platform here.
+This section used to open by saying the key still had to be pasted; that was
+true once and stopped being true when `streamkey:read` was added. See the
+Kick note further up this page for why the key looked unfetchable for so long.
 
 1. <https://kick.com/settings/developer> → create an OAuth application.
 2. Redirect URI: `https://YOUR_HOST/api/v1/oauth/kick/callback`

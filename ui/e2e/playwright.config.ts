@@ -36,6 +36,15 @@ export default defineConfig({
       dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/state.json" },
       testMatch: /.*\.spec\.ts/,
+      // capture.spec.ts is a media-generation tool, not a test, and it is the
+      // ONE spec this config must not sweep up: it writes into docs/media/, and
+      // this suite deliberately never streams. Running it here overwrote the
+      // committed screenshots with pictures of an offline system -- no failure,
+      // no warning, just a working tree full of degraded PNGs and a README that
+      // would quietly stop showing the product working. capture.config.ts runs
+      // it against a live ingest, which is the only context where it means
+      // anything.
+      testIgnore: /capture\.spec\.ts/,
     },
   ],
 });

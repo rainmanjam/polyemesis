@@ -33,11 +33,13 @@ func main() {
 	do("POST", "/setup", map[string]any{"username": "admin", "password": "hunter2hunter2"})
 	grabCSRF()
 
-	step("configure SRT ingest on 6010")
+	step("quiet the recorder and the preview")
 	settings := doGet("/settings")
 	ing := settings["ingest"].(map[string]any)
 	srt := ing["srt"].(map[string]any)
-	srt["port"] = 6010
+	// No srt.port here on purpose: with one-port ingest the SRT listener's
+	// port is process-wide and a source is addressed by its publish token, so
+	// SRTSettings carries no port at all. Writing one is now a 400.
 	srt["latencyMs"] = 120
 	rec := settings["recording"].(map[string]any)
 	rec["enabled"] = false
@@ -45,11 +47,15 @@ func main() {
 	prev["enabled"] = false
 	do("PUT", "/settings", settings)
 
-	// This Homebrew FFmpeg has no SRT protocol, so instead of driving the SRT
-	// listener we publish the exact MPEG-TS the ingest process would publish,
-	// straight to the relay hub. Everything downstream -- relay fan-out,
-	// probing, routing compilation, destination muxing -- is exercised
-	// identically; only the `-c copy` SRT hop is substituted.
+	// The stream is injected straight into the relay hub rather than through
+	// the SRT listener, which is what makes this runnable on any FFmpeg
+	// whatever its protocol list -- Homebrew's has no libsrt, and neither
+	// build is guaranteed on a CI runner. Everything downstream of the ingest
+	// -- relay fan-out, layout probing, routing compilation, destination
+	// muxing and the audio measurement -- is exercised identically; only the
+	// `-c copy` SRT hop is substituted.
+	//
+	// So this proves the broadcast path. It does NOT prove SRT ingest.
 	relayPort := int(doGet("/stats")["relay"].(map[string]any)["port"].(float64))
 	fmt.Printf("     relay hub listening on udp://127.0.0.1:%d\n", relayPort)
 

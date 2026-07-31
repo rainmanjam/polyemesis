@@ -22,7 +22,7 @@
 
 ---
 
-### Task 1: The CredentialChecker interface and its categorisation guard
+### Task 1: The CredentialChecker interface and the unverifiable set
 
 **Files:**
 - Create: `internal/oauth/credcheck.go`
@@ -40,36 +40,27 @@ Create `internal/oauth/credcheck_test.go`:
 package oauth
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
-// Every registered provider must be either checkable or explicitly declared
-// unverifiable -- never both, never neither.
-//
-// This is the guard that stops a provider added later from defaulting into
-// "we could not check this" by omission. The same shape of omission is what
-// produced the Medium finding in the 2026-07-30 security review: KickConfig
-// carried an optional Verify hook that no construction site ever set, so the
-// check silently never ran. An optional security control is an absent one.
-func TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable(t *testing.T) {
-	for platform, provider := range Providers() {
-		_, checkable := provider.(CredentialChecker)
-		reason, declared := unverifiableProviders[platform]
+// NOTE: the whole-registry categorisation guard
+// (TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable) lives in Task 2,
+// not here. It cannot pass until Twitch, Kick and Facebook have their methods,
+// and committing a knowingly-red test would leave one commit on this branch
+// that does not build green -- breaking git bisect for no benefit, since Task 2
+// follows immediately. The guard still lands before any code depends on it.
 
-		switch {
-		case checkable && declared:
-			t.Errorf("%s implements CredentialChecker AND is listed as unverifiable; "+
-				"pick one", platform)
-		case !checkable && !declared:
-			t.Errorf("%s neither implements CredentialChecker nor appears in "+
-				"unverifiableProviders. Add the method, or add an entry saying why "+
-				"the platform offers no way to verify a credential without user "+
-				"consent.", platform)
-		case declared && reason == "":
+// A provider declared unverifiable must say WHY. The reason is rendered to the
+// operator as the explanation for an "unverified" badge, so an empty one is a
+// blank space in the UI.
+func TestUnverifiableProvidersAllCarryAReason(t *testing.T) {
+	for platform, reason := range unverifiableProviders {
+		if strings.TrimSpace(reason) == "" {
 			t.Errorf("%s is declared unverifiable with an empty reason; the reason "+
-				"is the point", platform)
+				"is the point -- it is what the UI shows instead of a verdict", platform)
 		}
 	}
 }
@@ -94,8 +85,8 @@ func TestYouTubeIsTheDeclaredUnverifiableOne(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./internal/oauth/ -run TestEveryProviderIsEither -v`
-Expected: FAIL to build with `undefined: CredentialChecker` and `undefined: unverifiableProviders`.
+Run: `go test ./internal/oauth/ -run 'TestUnverifiable|TestYouTubeIsThe' -v`
+Expected: FAIL to build with `undefined: unverifiableProviders`.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -263,28 +254,28 @@ Add `"errors"` to the import block.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `go test ./internal/oauth/ -run 'TestEveryProvider|TestUnverifiable|TestYouTubeIsThe' -v`
-Expected: `TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable` FAILS, naming twitch, kick and facebook as "neither implements CredentialChecker nor appears in unverifiableProviders". That is correct — Task 2 adds the methods. `TestYouTubeIsTheDeclaredUnverifiableOne` and `TestUnverifiableProvidersOnlyNamesRegisteredPlatforms` PASS.
+Run: `go test ./internal/oauth/ -count=1`
+Expected: PASS — the whole package, not just the new tests. All three tests in this task are green on arrival. The whole-registry categorisation guard is deliberately **not** here; it lands in Task 2, where it can also be green. Committing a knowingly-red test would leave one commit on this branch that does not build, breaking `git bisect` for no benefit.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 gofmt -w internal/oauth/credcheck.go internal/oauth/credcheck_test.go
 git add internal/oauth/credcheck.go internal/oauth/credcheck_test.go
-git commit -m "feat(oauth): CredentialChecker interface and its categorisation guard
+git commit -m "feat(oauth): CredentialChecker interface and the unverifiable set
 
 Providers that can prove a credential pair without user consent implement
 CredentialChecker; those that cannot are named in unverifiableProviders WITH
-the reason. A test asserts every registered provider is in exactly one
-category, so a provider added later cannot default into 'unverified' by
-omission.
+the reason, because that reason is what the UI shows an operator instead of a
+verdict.
 
 Deliberately an interface rather than an optional nil-able hook. That shape is
 what left Kick webhook signature verification switched off for two releases:
 the field existed, the nil guard existed, and no construction site assigned it.
 
-Twitch, Kick and Facebook fail the guard until the next commit adds their
-methods, which is the guard doing its job."
+The whole-registry categorisation guard lands with the provider methods in the
+next commit rather than here. It cannot pass until all four are categorised,
+and committing it red would leave a commit on this branch that does not build."
 ```
 
 ---
@@ -296,6 +287,7 @@ methods, which is the guard doing its job."
 - Modify: `internal/oauth/kick.go`
 - Modify: `internal/oauth/facebook.go`
 - Create: `internal/oauth/credcheck_providers_test.go`
+- Modify: `internal/oauth/credcheck_test.go` (adds the categorisation guard, Step 9)
 
 **Interfaces:**
 - Consumes: `CredentialChecker`, `ErrCheckUnreachable` from Task 1.
@@ -622,10 +614,43 @@ func TestFacebookCheckCredentialsUsesGET(t *testing.T) {
 }
 ```
 
-- [ ] **Step 9: Run the whole package**
+- [ ] **Step 9: Add the whole-registry categorisation guard**
+
+Now that all four providers are categorised, this guard can be written green.
+Append to `internal/oauth/credcheck_test.go`:
+
+```go
+// Every registered provider must be either checkable or explicitly declared
+// unverifiable -- never both, never neither.
+//
+// This is the guard that stops a provider added later from defaulting into
+// "we could not check this" by omission. The same shape of omission produced
+// the Medium finding in the 2026-07-30 security review: KickConfig carried an
+// optional Verify hook that no construction site ever set, so signature
+// checking silently never ran. An optional security control is an absent one.
+func TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable(t *testing.T) {
+	for platform, provider := range Providers() {
+		_, checkable := provider.(CredentialChecker)
+		_, declared := unverifiableProviders[platform]
+
+		switch {
+		case checkable && declared:
+			t.Errorf("%s implements CredentialChecker AND is listed as unverifiable; "+
+				"pick one", platform)
+		case !checkable && !declared:
+			t.Errorf("%s neither implements CredentialChecker nor appears in "+
+				"unverifiableProviders. Add the method, or add an entry saying why "+
+				"the platform offers no way to verify a credential without user "+
+				"consent.", platform)
+		}
+	}
+}
+```
+
+- [ ] **Step 9b: Run the whole package**
 
 Run: `go test ./internal/oauth/ -count=1`
-Expected: PASS, including `TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable`, which now passes because all four providers are categorised.
+Expected: PASS, including the new guard — all four providers are now categorised.
 
 - [ ] **Step 10: Mutation-test the categorisation guard**
 
@@ -1195,7 +1220,24 @@ message. `ui/src/components/DestinationCard.tsx:203` is the pattern to match:
 Use those classes rather than the approximation above if the two disagree — the
 goal is that this warning looks like every other warning in the product.
 
-- [ ] **Step 5: Render the check verdict**
+- [ ] **Step 5: Widen putCreds' return type FIRST**
+
+This comes before the render step because Step 6 reads `saved.check`, and that
+does not typecheck until the return type admits it.
+
+`api.putCreds` currently returns `{ platform: string }`. Widen it:
+
+```ts
+  putCreds: (platform: string, clientId: string, clientSecret: string) =>
+    put<{ platform: string; hasSecret: boolean; check: CredentialCheck }>(
+      `/platforms/credentials/${platform}`,
+      { clientId, clientSecret },
+    ),
+```
+
+Keep the existing argument order and names; only the response type changes.
+
+- [ ] **Step 6: Render the check verdict**
 
 Add state near the other `useState` calls in the credentials card component:
 
@@ -1234,20 +1276,6 @@ And render it under the credential fields:
 
 The four labels are deliberately distinct words. "not verifiable" must never
 read as "verified", and "could not check" must never read as "rejected".
-
-- [ ] **Step 6: Update putCreds' return type**
-
-`api.putCreds` currently returns `{ platform: string }`. Widen it:
-
-```ts
-  putCreds: (platform: string, clientId: string, clientSecret: string) =>
-    put<{ platform: string; hasSecret: boolean; check: CredentialCheck }>(
-      `/platforms/credentials/${platform}`,
-      { clientId, clientSecret },
-    ),
-```
-
-Keep the existing argument order and names; only the response type changes.
 
 - [ ] **Step 7: Run the UI gates**
 

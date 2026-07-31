@@ -51,7 +51,11 @@ make build
 ```
 
 Open <http://localhost:8080>, complete first-run setup, and note the SRT port
-from Settings → Ingest (default 6000).
+from **Settings → Listeners** (default 6000).
+
+It is on *Listeners* rather than *Ingest* because there is one SRT port for the
+whole install — every source shares it and is told apart by its publish token,
+so the port is not a property of any one source's ingest.
 
 ---
 
@@ -250,18 +254,27 @@ completes first-run setup, creates two file destinations with tracks 1+2 and
 1+3, streams synthetic audio, then measures per-frequency energy in each output
 and fails if any tone is on the wrong side of the threshold.
 
+It expects the server on `127.0.0.1:8099` and reads the output files from
+`data/recordings/` relative to the working directory, so run both from the same
+place:
+
 ```bash
 # terminal 1
-./polyemesis -addr :8099 -data ./smoke-data -log warn
+./polyemesis -addr 127.0.0.1:8099 -data ./data -log warn
 
 # terminal 2
-mkdir -p /tmp/pm-smoke && cp scripts/smoketest.go /tmp/pm-smoke/
-cd /tmp/pm-smoke && go mod init smoke >/dev/null 2>&1
-go run smoketest.go
+go run scripts/smoketest.go
 ```
 
 It ends with `SMOKE TEST PASSED` or a table showing which band was wrong.
-It uses the direct-to-relay method from §6 so it runs without SRT.
+It uses the direct-to-relay method from §6, so it needs nothing of your FFmpeg
+beyond `libx264` and AAC — which is what lets it run on a Homebrew build with no
+libsrt, and on Windows.
+
+That portability is why it is the one suite CI runs on all three platforms: the
+cross-platform job pushes this exact broadcast through the binary on Linux,
+macOS and Windows on every push. See
+[TEST-STRATEGY.md](TEST-STRATEGY.md#what-runs-today).
 
 ---
 
@@ -307,16 +320,34 @@ go test -v ./internal/ffmpeg/     # ingest/destination/recorder command builders
 
 ## 10. Acceptance suites
 
-Four scripts drive the built binary through a real ingest and assert on what
-came out the other end. They need `make build` first, and they are the only
-tests that can fail on something the unit tests cannot see.
+Fourteen scripts drive the built binary — or the shipped image — through a real
+ingest and assert on what came out the other end. They need `make build` first,
+and they are the only tests that can fail on something the unit tests cannot
+see.
+
+Against the host binary:
 
 ```bash
 ./scripts/acceptance.sh              # per-destination audio routing, by measurement
+./scripts/acceptance-audio.sh        # per-track RMS through a bandpass
 ./scripts/acceptance-renditions.sh   # one shared encode serving two destinations
 ./scripts/acceptance-tls.sh          # every TLS mode, including the old configs
 ./scripts/acceptance-encoders.sh     # hardware-encoder detection
+./scripts/acceptance-failover.sh     # a source switch without restarting a destination
+./scripts/acceptance-synth.sh        # the silence tier and the standby slate
+./scripts/acceptance-pull.sh         # dial-out ingest
 ./scripts/acceptance-playlist-phase0.sh  # scheduled file broadcast, no encoder
+./scripts/acceptance-postprod.sh     # recording, jobs, retention
+./scripts/acceptance-mqtt.sh         # retained telemetry, against a real broker
+```
+
+Against the shipped container — these build the image and are the ones CI runs
+only on `main` and on a schedule:
+
+```bash
+./scripts/acceptance-docker.sh       # routing, passthrough, persistence
+./scripts/acceptance-multisource.sh  # two programmes, one port, told apart by token
+./scripts/acceptance-browser.sh      # Playwright against the real artefact
 ```
 
 `acceptance-encoders.sh` is the odd one out, because the thing it tests is a

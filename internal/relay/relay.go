@@ -64,6 +64,15 @@ type Hub struct {
 
 	closeOnce sync.Once
 	done      chan struct{}
+	// wg tracks the reader goroutine so Close can join it.
+	//
+	// Closing the connection wakes run() out of Read, but waking it is not the
+	// same as it having finished: it may be part-way through fanout or measure,
+	// still writing to subscriber sockets and still moving counters. Close
+	// returning at that moment tells the caller the hub has stopped while it
+	// demonstrably has not, which is how a Windows CI run caught a TxPackets
+	// increment landing after Close had already returned.
+	wg sync.WaitGroup
 }
 
 // Option customises the hub at construction. The zero set of options is the
@@ -129,6 +138,7 @@ func New(log *slog.Logger, port int, opts ...Option) (*Hub, error) {
 		subs:      map[string]*subscriber{},
 		done:      make(chan struct{}),
 	}
+	h.wg.Add(1)
 	go h.run()
 	return h, nil
 }
@@ -252,6 +262,8 @@ func (h *Hub) Stats() Stats {
 func (h *Hub) RxBytes() uint64 { return h.rxBytes.Load() }
 
 func (h *Hub) run() {
+	defer h.wg.Done()
+
 	buf := make([]byte, datagramSize)
 	for {
 		select {
@@ -362,6 +374,14 @@ func (h *Hub) Close() error {
 		close(h.done)
 		err = h.conn.Close()
 	})
+	// Outside the Once, so a second caller waits too rather than being told the
+	// hub is closed while the first caller's join is still in progress.
+	//
+	// This cannot deadlock: closing the connection is what unblocks run() out
+	// of Read, and run() checks h.done before every iteration, so it is already
+	// on its way out by the time anything waits for it. Nothing on the read
+	// path calls Close.
+	h.wg.Wait()
 	return err
 }
 

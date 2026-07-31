@@ -145,6 +145,14 @@ CREATE TABLE IF NOT EXISTS mqtt_creds (
     updated_at   INTEGER NOT NULL
 );
 
+-- The automod model's API key, sealed. Same reasoning as mqtt_creds above: a
+-- key in the settings blob is a key returned by GET /settings.
+CREATE TABLE IF NOT EXISTS automod_creds (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    key_enc    BLOB NOT NULL,           -- secretbox sealed
+    updated_at INTEGER NOT NULL
+);
+
 -- The operator's own OAuth developer app. polyemesis cannot ship these.
 CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick

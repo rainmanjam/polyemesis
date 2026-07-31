@@ -59,7 +59,25 @@ fi
 echo "  container healthy on :$PORT"
 
 printf "\n\033[1m2. Browser suite\033[0m\n"
-cd "$ROOT/ui"
+cd "$ROOT/ui" || exit 1
+# auth.setup.ts creates the admin account with this and then signs in with it,
+# so the value never leaves this process and is generated fresh per run. A
+# literal in the repository would be a committed password regardless of how
+# short-lived the account it guards is, so auth.setup.ts refuses to start
+# without the variable rather than carrying a default.
+#
+# openssl is checked rather than assumed: an empty command substitution would
+# leave a four-character password that fails the eight-character floor, and the
+# suite would fail at sign-in rather than at the missing tool.
+if [ -z "${E2E_PASSWORD:-}" ]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is needed to generate E2E_PASSWORD;" >&2
+    echo "export one yourself instead" >&2
+    exit 1
+  }
+  E2E_PASSWORD="E2E-$(openssl rand -hex 16)"
+fi
+export E2E_PASSWORD
 BASE_URL="http://127.0.0.1:$PORT" npx --no-install playwright test --config e2e/playwright.config.ts
 status=$?
 

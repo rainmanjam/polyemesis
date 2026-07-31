@@ -7,6 +7,12 @@ Restreamer's issue trackers (263 open, 548 closed) and restream.io's published
 plan comparison, done 2026-07-27 — with the polyemesis column verified against
 the code rather than assumed.
 
+> **The polyemesis column was re-verified 2026-07-30**, and three rows had gone
+> stale in the product's favour: overlays and MQTT had shipped while still
+> listed as missing, and LL-HLS had been deliberately declined rather than
+> merely absent. A comparison page drifts in whichever direction the project
+> moves, so the column is worth re-checking whenever this page is cited.
+
 ---
 
 ## The short version
@@ -40,15 +46,15 @@ Ranked by how often it was asked for, which is the honest ordering.
 
 | Gap | Evidence | Status here |
 |---|---|---|
-| **Overlays** — text, logo, watermark, channel name | Asked 5 separate times (6+5+4+2+1 reactions), every one closed unimplemented | **Missing.** Planned on renditions, where re-encoding is already the contract |
+| **Overlays** — text, logo, watermark, channel name | Asked 5 separate times (6+5+4+2+1 reactions), every one closed unimplemented | ✅ **Have.** Image watermarks and text overlays on renditions, where re-encoding is already the contract. Nine anchors, sizes as a percentage of the frame so one logo is correct on landscape and vertical tiers alike; two weights of Inter ship embedded because `drawtext` needs a font path |
 | **WebRTC / WHIP output** | 6 reactions, closed unimplemented | **Missing.** Sizeable subsystem; the real use case is sub-second self-monitoring |
 | **Decklink / SDI capture**, in and out | 4 + 2 reactions | **Missing.** Needs an FFmpeg built with `decklink`, so a third image variant |
 | **Deinterlacing** | 1 reaction | ✅ **Have.** `bwdif` with off / only-interlaced / every-frame, placed first in the filter chain because scaling interlaced content bakes the combing in |
 | **Playlist / scheduled file broadcast** | Five issues circling one capability | **Partial.** Pull ingest reads `file://` and schedules exist; no playlist sequencing |
 | **Multi-input compositing / video grid** | 1 reaction | **Missing.** Natural once multi-source is settled |
-| **MQTT** | Core tracker | **Missing.** Alert webhooks exist instead |
+| **MQTT** | Core tracker | ✅ **Have.** Retained telemetry with Home Assistant discovery, so the stream appears as entities in a dashboard the operator already runs. Alert webhooks exist alongside it — see [MQTT.md](MQTT.md) |
 | **HDR 10-bit HEVC** | 3 reactions, closed | **Partial.** `libx265` and `hevc_nvenc` exist; no HDR tone-map path |
-| **LL-HLS** | 2 reactions, closed | **Partial.** SRT latency is configurable; the HLS preview is not low-latency |
+| **LL-HLS** | 2 reactions, closed | **Addressed by tuning, not by building LL-HLS.** FFmpeg cannot emit LL-HLS partial segments at all — verified against the pinned binary — so the protocol would need a Go-side packager, which [roadmap/LL-HLS.md](roadmap/LL-HLS.md) declines. Tuning instead took preview latency from **4.2–6.2 s to 2.2–3.2 s**, measured. Two of the wins were bug fixes rather than knobs: a wrong GOP calculation, and a player flag that was inert because of an unrelated default |
 | Maturity | — | Restreamer is established; polyemesis is pre-release with one maintainer |
 
 **One caveat on Restreamer's side.** Two of its four most-reacted open issues are

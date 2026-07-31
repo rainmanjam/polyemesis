@@ -10,7 +10,21 @@ import (
 )
 
 // Twitch implements Twitch OAuth plus the Helix stream-key lookup.
-type Twitch struct{}
+type Twitch struct {
+	// tokenURL overrides Twitch's token endpoint. Empty in production; set by
+	// tests so a credential check can be exercised without reaching id.twitch.tv.
+	tokenURL string
+}
+
+// twitchTokenURL is the real endpoint, and the default when tokenURL is unset.
+const twitchTokenURL = "https://id.twitch.tv/oauth2/token"
+
+func (t *Twitch) tokenEndpoint() string {
+	if t.tokenURL != "" {
+		return t.tokenURL
+	}
+	return twitchTokenURL
+}
 
 func (t *Twitch) Platform() db.Platform { return db.PlatformTwitch }
 
@@ -90,7 +104,7 @@ func (t *Twitch) AuthURL(clientID, redirectURI, state, _ string) string {
 }
 
 func (t *Twitch) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, _ string) (*Token, error) {
-	return postForm(ctx, "https://id.twitch.tv/oauth2/token", url.Values{
+	return postForm(ctx, t.tokenEndpoint(), url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"code":          {code},
@@ -100,7 +114,7 @@ func (t *Twitch) Exchange(ctx context.Context, clientID, clientSecret, redirectU
 }
 
 func (t *Twitch) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
-	tok, err := postForm(ctx, "https://id.twitch.tv/oauth2/token", url.Values{
+	tok, err := postForm(ctx, t.tokenEndpoint(), url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"refresh_token": {refreshToken},
@@ -169,4 +183,16 @@ func (t *Twitch) Ingest(ctx context.Context, clientID, accessToken string) (*Ing
 			strings.Join(t.Scopes(), " "))
 	}
 	return &Ingest{URL: twitchIngestURL, Key: out.Data[0].StreamKey}, nil
+}
+
+// CheckCredentials proves both halves of the pair via a client-credentials
+// grant, which Twitch supports and which needs no user consent. The app token
+// it returns is discarded: obtaining one at all is the whole proof.
+func (t *Twitch) CheckCredentials(ctx context.Context, clientID, clientSecret string) error {
+	_, err := postForm(ctx, t.tokenEndpoint(), url.Values{
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"grant_type":    {"client_credentials"},
+	}, nil)
+	return classifyCheckError(err)
 }

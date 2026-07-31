@@ -1,12 +1,24 @@
 # One-port ingest: design
 
+> **Partly superseded by
+> [DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md).** This document argued for
+> a shared token-addressed port *alongside* per-source ports, with the shared
+> path off by default. That position was reversed: token-addressed SRT is now
+> the only SRT path, per-source ports are gone entirely, and the failover backup
+> is reached at `<token>.backup` on the same port. The comparison with Core
+> below still holds and is why this page is kept — read the successor first for
+> what actually shipped.
+
 Inspired by datarhei Core, not copied from it. Core proves the shape works —
 one SRT port, many programmes, demultiplexed at accept time. This document is
 about the five places their design leaves something on the table, and what
 polyemesis does instead.
 
 Verified against `datarhei/gosrt` v0.6.0 (MIT, pure Go, no cgo) and
-`datarhei/core`'s `srt/srt.go` and `rtmp/rtmp.go`, read 2026-07-27.
+`datarhei/core`'s `srt/srt.go` and `rtmp/rtmp.go`, read 2026-07-27. The
+dependency has since moved to v0.11.0; the `HandleConnect` shape this design
+rests on is unchanged, but nothing else here has been re-read against the newer
+release.
 
 ## What Core does
 

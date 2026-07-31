@@ -13,7 +13,7 @@ so they reflect what is actually vendored.
 
 ## Go — direct dependencies
 
-Nine, and the count is deliberate. Every one is either doing something genuinely
+Ten, and the count is deliberate. Every one is either doing something genuinely
 hard or is the Go project's own code.
 
 | Module | Version | Licence | What it does |
@@ -25,7 +25,8 @@ hard or is the Go project's own code.
 | `golang.org/x/crypto` | v0.54.0 | BSD-3-Clause | bcrypt, NaCl secretbox, ACME |
 | `golang.org/x/sys` | v0.47.0 | BSD-3-Clause | Process groups, disk stats, Windows job objects |
 | `github.com/shirou/gopsutil/v4` | v4.26.6 | BSD-3-Clause | Host CPU, memory and disk for the monitoring page |
-| `github.com/datarhei/gosrt` | v0.6.0 | MIT | Pure-Go SRT. Powers one-port token-addressed ingest |
+| `github.com/datarhei/gosrt` | v0.11.0 | MIT | Pure-Go SRT. Powers one-port token-addressed ingest |
+| `github.com/eclipse/paho.golang` | v0.23.0 | EPL-2.0 (dual EDL-1.0) | MQTT 5 client for retained telemetry |
 | `gopkg.in/yaml.v3` | v3.0.1 | Apache-2.0 (dual MIT) | Reads `config.yaml` |
 
 ## Go — indirect dependencies

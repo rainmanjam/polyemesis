@@ -473,13 +473,42 @@ internal/
   tlsx/        certificate layer: tls.Config, local CA + leaf, autocert, expiry
                introspection. Takes an already-resolved mode; knows no yaml.
   secrets/     NaCl secretbox token encryption at rest
-  oauth/       youtube.go · twitch.go · kick.go + PKCE + token refresh
+  fsperm/      restricts access to the files and directories holding secrets
+  oauth/       youtube.go · twitch.go · kick.go · facebook.go + PKCE + refresh,
+               plus the capability matrix the UI and the docs both render
   recording/   segment index, retention sweeper (max GB / max age), free-space guard
   events/      in-process pub/sub the WebSocket fans out
   engine/      the orchestrator: owns ingest+relay+recorder+preview+meters,
                plus the rendition tier and the destinations that consume it
   api/         chi router, REST handlers, WebSocket hub
   web/         go:embed ui/dist + SPA fallback
+
+  -- ingest and viewer-facing edges
+  srtserver/   the one-port SRT ingest: one listener serving every source,
+               demultiplexed by the publish token
+  playout/     the viewer-facing origin: packages the relay into public HLS
+               (optionally DASH) and counts who is watching
+  meters/      the measurement tier: what a destination is ACTUALLY sending,
+               in the unit the platform on the other end cares about
+
+  -- chat
+  chat/        unified cross-platform chat: one pane, one send box, four
+               platforms, plus moderation (delete, ban, timeout, hide) and the
+               YouTube quota pacer, which is the whole design problem there
+
+  -- capture and post-production
+  clips/       keeps the last N seconds of live in memory, cuts a file on demand
+  clipper/     cuts a clip out of a recording already on disk
+  jobs/        the durable background queue every heavy task runs on
+  transcribe/  recorded multitrack MKV to per-track transcripts and subtitles,
+               via whisper.cpp
+  media/       a finished recording to the derived files a library needs: a
+               low-bitrate proxy, keyframe index, thumbnails
+
+  -- operations
+  scheduler/   starts and stops destinations at a time the operator chose
+  alerts/      "something an operator would want to know" to webhook deliveries
+  mqtt/        retained telemetry, with Home Assistant discovery
 
 ui/            Vite + React + TS + Tailwind + shadcn/ui + Recharts + hls.js
 ```
