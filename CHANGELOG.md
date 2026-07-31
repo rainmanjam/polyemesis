@@ -10,7 +10,7 @@ its first tagged release.
 
 Nothing yet.
 
-## [0.1.0] — 2026-07-30
+## [0.1.0] — 2026-07-31
 
 The first tagged release. Entries are grouped by what they do for an operator
 rather than by which package changed.
