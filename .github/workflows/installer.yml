@@ -58,14 +58,18 @@ jobs:
           done
           echo "all five rejected"
 
-      - name: root is required
+      - name: root is required, and says so
         run: |
           useradd -m tester
-          if su tester -c "bash scripts/install.sh --check --mode docker" >/dev/null 2>&1; then
-            echo "ran as a non-root user"
-            exit 1
-          fi
-          echo "refused to run unprivileged"
+          set +e
+          out="$(su tester -c "bash scripts/install.sh --check --mode docker" 2>&1)"
+          rc=$?
+          set -e
+          # Non-zero alone proves nothing: a parser or detection regression
+          # exits non-zero too. Require the diagnostic that names the cause.
+          [ "$rc" -ne 0 ] || { echo "ran as a non-root user"; exit 1; }
+          echo "$out" | grep -q "run this with sudo" \
+            || { echo "failed for some reason other than privilege: $out"; exit 1; }
 
   # The preflight against each distribution's real package set. The floor and
   # the package names are what drift.
@@ -93,7 +97,10 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: The distro still ships the FFmpeg this matrix assumes
+      # Informational on purpose: it reports drift without failing, because the
+      # verdict assertions below are what actually gate. Named so nobody reads
+      # a green tick here as "the version is still X".
+      - name: Report FFmpeg drift (does not fail)
         run: |
           got="$(ffmpeg -version | head -1 | awk '{print $3}')"
           echo "expected ${{ matrix.ffmpeg }}, got $got"
@@ -126,11 +133,38 @@ jobs:
               || { echo "expected this FFmpeg to be rejected"; exit 1; }
           fi
 
-      - name: The init gate names the real reason
+      - name: The init gate fires, and names the real reason
         run: |
-          out="$(bash scripts/install.sh --check --mode docker 2>&1 || true)"
+          set +e
+          out="$(bash scripts/install.sh --check --mode docker 2>&1)"
+          rc=$?
+          set -e
+          # Docker mode needs no host FFmpeg, so the ONLY thing that can fail
+          # here is the init gate. Asserting the status as well as the text is
+          # what stops this passing vacuously if the gate were removed.
+          [ "$rc" -ne 0 ] || { echo "docker preflight passed with no systemd"; exit 1; }
           echo "$out" | grep -q "systemd is not running as PID 1" \
             || { echo "the init gate did not fire, or changed its wording"; exit 1; }
+
+      - name: --check creates nothing
+        run: |
+          snap() {
+            find /usr/local/bin /etc/systemd/system /var/lib /etc/polyemesis \
+              -maxdepth 1 2>/dev/null | sort | md5sum
+          }
+          before="$(snap)"
+          bash scripts/install.sh --check --mode binary >/dev/null 2>&1 || true
+          bash scripts/install.sh --check --mode docker >/dev/null 2>&1 || true
+          after="$(snap)"
+          [ "$before" = "$after" ] || { echo "--check modified the filesystem"; exit 1; }
+          # `if ! id ...` rather than `id ... && exit 1`. The second form
+          # returns non-zero in the PASSING case -- no such user -- and under
+          # set -e that fails the step for succeeding.
+          if id polyemesis >/dev/null 2>&1; then
+            echo "--check created the service account"
+            exit 1
+          fi
+          echo "nothing created"
 
   # Package names differ across the RPM family, and getting them wrong sends a
   # user to a package that does not exist. Separate job: dnf, not apt.

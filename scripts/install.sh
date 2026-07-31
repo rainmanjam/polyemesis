@@ -60,6 +60,7 @@ USER_CREATED=false
 UNIT_CREATED=false
 CONTAINER_STARTED=false
 BINARY_INSTALLED=false
+CONFIG_DIR_CREATED=false
 INSTALL_COMPLETE=false
 
 # Every network fetch below goes through these flags.
@@ -125,8 +126,13 @@ cleanup_on_failure() {
     # Config is not data: it is regenerated from the answers given, and leaving
     # a stale one behind makes a re-run behave differently from a first run for
     # reasons the operator cannot see.
-    rm -rf "$CONFIG_DIR"
-    info "removed $CONFIG_DIR"
+    # Only if THIS run created it. See the note beside the mkdir.
+    if [ "$CONFIG_DIR_CREATED" = true ]; then
+      rm -rf "$CONFIG_DIR"
+      info "removed $CONFIG_DIR"
+    elif [ -d "$CONFIG_DIR" ]; then
+      info "left $CONFIG_DIR alone — it predates this run"
+    fi
     [ -d "$DATA_DIR" ] && warn "left $DATA_DIR alone — it may hold data. Remove it yourself if this was a first install."
   fi
   if [ "$USER_CREATED" = true ]; then
@@ -171,9 +177,20 @@ ask() {
 }
 
 ask_yn() {
-  local prompt="$1" default="$2" varname="$3" reply=""
-  ask "$prompt (y/n)" "$default" reply
-  case "${reply,,}" in
+  # NOT named `reply`.
+  #
+  # ask() declares `local ... reply=""` of its own, and bash is dynamically
+  # scoped: passing "reply" as the output name made ask's printf -v write into
+  # ask's OWN local, which vanished on return. This function therefore read an
+  # empty string every time and answered "no" to everything -- including
+  # confirm_plan's "Proceed?", so the installer printed the plan and exited
+  # with "nothing done." no matter what was typed. It could not install.
+  #
+  # The double underscore is the point: it must not collide with any local in
+  # any function this one calls.
+  local prompt="$1" default="$2" varname="$3" __answer=""
+  ask "$prompt (y/n)" "$default" __answer
+  case "${__answer,,}" in
     y|yes) printf -v "$varname" '%s' "yes" ;;
     *)     printf -v "$varname" '%s' "no" ;;
   esac
@@ -210,10 +227,14 @@ detect_os() {
 # Testing for the systemctl BINARY is not enough and was the first thing tried.
 # Installing FFmpeg on Ubuntu pulls systemctl in as a dependency, so
 # `command -v systemctl` succeeds inside a container that has no init at all.
-# /run/systemd/system exists only when systemd is actually PID 1, which is the
-# thing that has to be true.
+# /run/systemd/system is the documented "booted with systemd" test -- what
+# sd_booted(3) itself uses. It is a strong signal rather than a proof: a bind
+# mount or a chroot can carry the path in with no init behind it. PID 1 is
+# checked as well, and the two together are as close as a shell script gets.
 require_systemd() {
-  if [ -d /run/systemd/system ]; then
+  local pid1=""
+  if [ -r /proc/1/comm ]; then read -r pid1 < /proc/1/comm || true; fi
+  if [ -d /run/systemd/system ] && [ "${pid1:-systemd}" = systemd ]; then
     ok "systemd is running"
     return 0
   fi
@@ -340,18 +361,22 @@ gather_configuration() {
   echo "  1) docker  — bundles a known-good FFmpeg with SRT. Recommended."
   echo "  2) binary  — static binary + systemd. Needs FFmpeg ${FFMPEG_MIN_MAJOR}.0+ with libsrt on this host."
   echo
-  local choice
-  ask "Choose 1 or 2" "1" choice
-  case "$choice" in
-    2|binary) MODE="binary" ;;
-    *)        MODE="docker" ;;
-  esac
+  if [ "$MODE_SET" = true ]; then
+    info "mode given on the command line; not asking"
+  else
+    local choice
+    ask "Choose 1 or 2" "1" choice
+    case "$choice" in
+      2|binary) MODE="binary" ;;
+      *)        MODE="docker" ;;
+    esac
+  fi
   ok "mode: $MODE"
 
   header "=== Ports ==="
-  ask "Web UI port (tcp)" "$HTTP_PORT" HTTP_PORT
-  ask "SRT ingest port (UDP — this is the one people forget)" "$SRT_PORT" SRT_PORT
-  ask_yn "Also expose RTMP on ${RTMP_PORT}/tcp? Only needed for encoders that cannot do SRT" "n" ENABLE_RTMP
+  [ "$HTTP_PORT_SET" = true ] || ask "Web UI port (tcp)" "$HTTP_PORT" HTTP_PORT
+  [ "$SRT_PORT_SET" = true ]  || ask "SRT ingest port (UDP — this is the one people forget)" "$SRT_PORT" SRT_PORT
+  [ "$RTMP_SET" = true ]      || ask_yn "Also expose RTMP on ${RTMP_PORT}/tcp? Only needed for encoders that cannot do SRT" "n" ENABLE_RTMP
 
   warn_if_taken "$HTTP_PORT" tcp "web UI"
   warn_if_taken "$SRT_PORT"  udp "SRT ingest"
@@ -365,13 +390,17 @@ gather_configuration() {
   echo "  2) selfsigned — encrypted now, browser warning until you install the CA."
   echo "  3) acme       — Let's Encrypt. Needs a public DNS name and inbound port 80."
   echo
-  local tls_choice
-  ask "Choose 1, 2 or 3" "2" tls_choice
-  case "$tls_choice" in
-    1|off)  TLS_MODE="off" ;;
-    3|acme) TLS_MODE="acme" ;;
-    *)      TLS_MODE="selfsigned" ;;
-  esac
+  if [ "$TLS_SET" = true ]; then
+    info "TLS mode given on the command line; not asking"
+  else
+    local tls_choice
+    ask "Choose 1, 2 or 3" "2" tls_choice
+    case "$tls_choice" in
+      1|off)  TLS_MODE="off" ;;
+      3|acme) TLS_MODE="acme" ;;
+      *)      TLS_MODE="selfsigned" ;;
+    esac
+  fi
 
   if [ "$TLS_MODE" = "acme" ]; then
     while [ -z "$DOMAIN_NAME" ]; do
@@ -547,6 +576,11 @@ install_binary_mode() {
     ok "created the $RUN_USER service account"
   fi
 
+  # Record what was actually created. `mkdir -p` succeeds on a directory that
+  # already exists, so a blanket DIRS_CREATED=true made rollback delete an
+  # EXISTING operator config on a failed re-run -- destroying more than the
+  # failure it was recovering from.
+  [ -d "$CONFIG_DIR" ] || CONFIG_DIR_CREATED=true
   mkdir -p "$DATA_DIR" "$CONFIG_DIR"
   DIRS_CREATED=true
   chown -R "$RUN_USER:$RUN_USER" "$DATA_DIR"
@@ -774,7 +808,9 @@ Options:
   --srt-port N           SRT ingest port, UDP (default 6000)
   --rtmp                 also expose RTMP (default off)
   --tls off|selfsigned|acme
-                         TLS mode (default off)
+                         TLS mode. Not passing it takes the interactive
+                         default, which is SELFSIGNED -- including under --yes.
+                         Pass --tls off explicitly if that is what you want.
   --hostname NAME        hostname for acme (sets DOMAIN_NAME)
   --email ADDR           contact address for acme
   --yes, -y              accept defaults; never prompt
@@ -792,21 +828,35 @@ USAGE
 ASSUME_YES=false
 CHECK_ONLY=false
 
+# Which answers came from the command line.
+#
+# Without these, parse_args set MODE and gather_configuration immediately asked
+# the same question and overwrote it -- so `--mode binary --yes` took the
+# prompt default and installed DOCKER. A root installer that silently does
+# something other than what it was told is the worst bug in this file, and it
+# survived local testing because --check exits before gather_configuration
+# ever runs.
+MODE_SET=false
+TLS_SET=false
+RTMP_SET=false
+HTTP_PORT_SET=false
+SRT_PORT_SET=false
+
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
-      --mode)       MODE="${2:-}"; shift 2 ;;
-      --mode=*)     MODE="${1#*=}"; shift ;;
-      --http-port)  HTTP_PORT="${2:-}"; shift 2 ;;
-      --http-port=*) HTTP_PORT="${1#*=}"; shift ;;
-      --srt-port)   SRT_PORT="${2:-}"; shift 2 ;;
-      --srt-port=*) SRT_PORT="${1#*=}"; shift ;;
-      --rtmp)       ENABLE_RTMP="yes"; shift ;;
-      --tls)        TLS_MODE="${2:-}"; shift 2 ;;
-      --tls=*)      TLS_MODE="${1#*=}"; shift ;;
-      --hostname)   DOMAIN_NAME="${2:-}"; shift 2 ;;
+      --mode)       [ $# -ge 2 ] || die "missing value for --mode"; MODE="$2"; MODE_SET=true; shift 2 ;;
+      --mode=*)     MODE="${1#*=}"; MODE_SET=true; shift ;;
+      --http-port)  [ $# -ge 2 ] || die "missing value for --http-port"; HTTP_PORT="$2"; HTTP_PORT_SET=true; shift 2 ;;
+      --http-port=*) HTTP_PORT="${1#*=}"; HTTP_PORT_SET=true; shift ;;
+      --srt-port)   [ $# -ge 2 ] || die "missing value for --srt-port"; SRT_PORT="$2"; SRT_PORT_SET=true; shift 2 ;;
+      --srt-port=*) SRT_PORT="${1#*=}"; SRT_PORT_SET=true; shift ;;
+      --rtmp)       ENABLE_RTMP="yes"; RTMP_SET=true; shift ;;
+      --tls)        [ $# -ge 2 ] || die "missing value for --tls"; TLS_MODE="$2"; TLS_SET=true; shift 2 ;;
+      --tls=*)      TLS_MODE="${1#*=}"; TLS_SET=true; shift ;;
+      --hostname)   [ $# -ge 2 ] || die "missing value for --hostname"; DOMAIN_NAME="$2"; shift 2 ;;
       --hostname=*) DOMAIN_NAME="${1#*=}"; shift ;;
-      --email)      ACME_EMAIL="${2:-}"; shift 2 ;;
+      --email)      [ $# -ge 2 ] || die "missing value for --email"; ACME_EMAIL="$2"; shift 2 ;;
       --email=*)    ACME_EMAIL="${1#*=}"; shift ;;
       -y|--yes)     ASSUME_YES=true; shift ;;
       --check)      CHECK_ONLY=true; ASSUME_YES=true; shift ;;
@@ -827,6 +877,11 @@ parse_args() {
     case "${!pv}" in
       ''|*[!0-9]*) die "$pv must be a number, not ${!pv}" ;;
     esac
+    # Range too. Port 0 is a number and is not a port: Docker reads it as
+    # "allocate me anything", and the summary would then advertise :0.
+    if [ "${!pv}" -lt 1 ] || [ "${!pv}" -gt 65535 ]; then
+      die "$pv must be between 1 and 65535, not ${!pv}"
+    fi
   done
 }
 
