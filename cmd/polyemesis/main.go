@@ -271,7 +271,8 @@ func run(h *hooks) error {
 	srv := api.New(api.Options{
 		Log: log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
-		Chat: hub,
+		Chat:  hub,
+		Hooks: hookd,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.

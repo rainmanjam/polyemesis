@@ -21,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
@@ -73,6 +74,12 @@ type Server struct {
 	// stored scrollback rather than hiding it.
 	chat *chat.Hub
 
+	// hooks is the shared lifecycle-webhook dispatcher. Optional like
+	// everything else in this block: a build with none wired still serves the
+	// hooks page, listing stored hooks and reporting that nothing is delivering
+	// -- which is the difference an operator needs to see.
+	hooks *hooks.Dispatcher
+
 	// kickKeys caches Kick's webhook signing key. One per server rather than
 	// one per adapter: the key belongs to Kick, not to an account, so two
 	// connected Kick channels share the fetch.
@@ -107,6 +114,9 @@ type Options struct {
 	// Chat is the chat Hub. Optional: without it the chat page reports that no
 	// platform is connected and still shows the stored history.
 	Chat *chat.Hub
+
+	// Hooks is the lifecycle-webhook dispatcher. Optional.
+	Hooks *hooks.Dispatcher
 }
 
 // New creates the server.
@@ -123,6 +133,7 @@ func New(o Options) *Server {
 		gov:       o.Governor,
 		whisper:   o.Whisper,
 		chat:      o.Chat,
+		hooks:     o.Hooks,
 		version:   o.Version,
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
@@ -361,6 +372,20 @@ func (s *Server) Handler() http.Handler {
 			r.Put("/alerts/rules/{id}", s.handleUpdateAlertRule)
 			r.Delete("/alerts/rules/{id}", s.handleDeleteAlertRule)
 			r.Post("/alerts/rules/{id}/test", s.handleTestAlertRule)
+
+			// Lifecycle webhooks. Same authenticated group as the alert rules,
+			// and /meta before /{id} so chi cannot read "meta" as an id.
+			r.Get("/hooks/meta", s.handleHooksMeta)
+			r.Get("/hooks", s.handleListHooks)
+			r.Post("/hooks", s.handleCreateHook)
+			r.Get("/hooks/{id}", s.handleGetHook)
+			r.Put("/hooks/{id}", s.handleUpdateHook)
+			r.Delete("/hooks/{id}", s.handleDeleteHook)
+			// POST despite reading nothing: it makes an outbound call to a
+			// third party, so it is neither safe nor idempotent, and POST puts
+			// it behind requireCSRF with the rest of the state-changing group.
+			r.Post("/hooks/{id}/test", s.handleTestHook)
+			r.Get("/hooks/{id}/deliveries", s.handleHookDeliveries)
 
 			// Scheduling. /runs is what the last sweep did, which is where a
 			// skipped occurrence gets explained.
