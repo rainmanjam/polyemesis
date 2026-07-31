@@ -122,6 +122,11 @@ cleanup_on_failure() {
     # directory on the way out is a worse problem than the one it is recovering
     # from, so it is left in place and named.
     info "removed $INSTALL_DIR"
+    # Config is not data: it is regenerated from the answers given, and leaving
+    # a stale one behind makes a re-run behave differently from a first run for
+    # reasons the operator cannot see.
+    rm -rf "$CONFIG_DIR"
+    info "removed $CONFIG_DIR"
     [ -d "$DATA_DIR" ] && warn "left $DATA_DIR alone — it may hold data. Remove it yourself if this was a first install."
   fi
   if [ "$USER_CREATED" = true ]; then
@@ -146,7 +151,10 @@ ask() {
   local shown="$prompt"
   [ -n "$default" ] && shown="$prompt [$default]"
 
-  if [ -r /dev/tty ]; then
+  if [ "${ASSUME_YES:-false}" = true ]; then
+    # Unattended. Take the default without printing a prompt nobody will read.
+    reply=""
+  elif [ -r /dev/tty ]; then
     printf '%s: ' "$shown" > /dev/tty
     IFS= read -r reply < /dev/tty || reply=""
   elif [ -t 0 ]; then
@@ -191,6 +199,37 @@ detect_os() {
   ok "detected ${DISTRO} ${DISTRO_VERSION} (${ARCH})"
 }
 
+# require_systemd fails EARLY, because the alternative is failing late.
+#
+# Both modes end at `systemctl enable --now`. Without this the binary mode
+# downloads ~20 MB, verifies it, installs it, creates a service account and
+# writes a unit file before systemd says no -- and what it says is
+# "System has not been booted with systemd as init system (PID 1)", which
+# names neither polyemesis nor the way out.
+#
+# Testing for the systemctl BINARY is not enough and was the first thing tried.
+# Installing FFmpeg on Ubuntu pulls systemctl in as a dependency, so
+# `command -v systemctl` succeeds inside a container that has no init at all.
+# /run/systemd/system exists only when systemd is actually PID 1, which is the
+# thing that has to be true.
+require_systemd() {
+  if [ -d /run/systemd/system ]; then
+    ok "systemd is running"
+    return 0
+  fi
+  err "systemd is not running as PID 1 on this host."
+  if command -v systemctl >/dev/null 2>&1; then
+    echo "     (systemctl is installed, which is not the same thing -- it arrives"
+    echo "      as a dependency of other packages. The init is what matters.)"
+  fi
+  echo "     polyemesis is installed here as a systemd service, in both modes."
+  echo "     On a container, WSL without systemd, or an OpenRC/runit distribution,"
+  echo "     run the image directly instead:"
+  echo "       docker run -d --name polyemesis -p ${HTTP_PORT}:8080 \\"
+  echo "         -p ${SRT_PORT}:${SRT_PORT}/udp -v polyemesis-data:/data ${IMAGE}"
+  return 1
+}
+
 # check_ffmpeg enforces the two separate things that go wrong, because they
 # fail differently and only one of them is fatal.
 check_ffmpeg() {
@@ -198,6 +237,15 @@ check_ffmpeg() {
     err "no ffmpeg on PATH."
     echo "     polyemesis shells out to FFmpeg for everything. Install ${FFMPEG_MIN_MAJOR}.0 or newer,"
     echo "     or re-run and choose the docker mode, which bundles one."
+    case "${DISTRO}" in
+      # Fedora has no `ffmpeg` package. ffmpeg-free is 7.1.5 and DOES carry
+      # libsrt -- checked, because recommending a build without it would be
+      # worse than saying nothing.
+      fedora)  echo "     On Fedora the package is \`ffmpeg-free\`: dnf install -y ffmpeg-free" ;;
+      rocky|almalinux|rhel|centos)
+               echo "     On this family the default repos have neither. EPEL's ffmpeg-free is"
+               echo "     5.1.x, below the floor. Use RPM Fusion, a static build, or docker." ;;
+    esac
     return 1
   }
 
@@ -215,6 +263,11 @@ check_ffmpeg() {
       case "${DISTRO}:${DISTRO_VERSION}" in
         ubuntu:22.04) echo "     Ubuntu 22.04 ships 4.4. \`apt install ffmpeg\` will not fix this." ;;
         debian:12)    echo "     Debian 12 ships 5.1. \`apt install ffmpeg\` will not fix this." ;;
+        # Measured, not assumed: EPEL on Rocky 9 carries ffmpeg-free 5.1.9, and
+        # there is no `ffmpeg` package at all. Both miss the floor.
+        rocky:*|almalinux:*|rhel:*|centos:*)
+          echo "     EPEL ships ffmpeg-free 5.1.x here, which is below the floor, and there"
+          echo "     is no \`ffmpeg\` package. RPM Fusion or a static build, or use docker." ;;
       esac
       echo "     Options: a newer distribution, a static build with libsrt"
       echo "     (https://github.com/BtbN/FFmpeg-Builds/releases), or the docker mode."
@@ -705,12 +758,111 @@ print_summary() {
 
 # ------------------------------------------------------------------- main
 
+usage() {
+  cat <<'USAGE'
+polyemesis installer
+
+  sudo bash install.sh [options]
+
+With no options it asks. Every question has a flag, so the same script can run
+unattended from cloud-init, Ansible, or a CI job -- which is also the only way
+it gets tested.
+
+Options:
+  --mode docker|binary   install mode (default: ask, then docker)
+  --http-port N          web UI port (default 8080)
+  --srt-port N           SRT ingest port, UDP (default 6000)
+  --rtmp                 also expose RTMP (default off)
+  --tls off|selfsigned|acme
+                         TLS mode (default off)
+  --hostname NAME        hostname for acme (sets DOMAIN_NAME)
+  --email ADDR           contact address for acme
+  --yes, -y              accept defaults; never prompt
+  --check                run the preflight checks and exit, changing nothing
+  --help, -h             this text
+
+Exit status is 0 only if the install finished. --check exits non-zero when the
+host cannot support the chosen mode.
+USAGE
+}
+
+# ASSUME_YES suppresses every prompt. CHECK_ONLY runs the preflight and stops,
+# which is what CI runs: it exercises detection and the gates on a real distro
+# without installing anything or needing a daemon.
+ASSUME_YES=false
+CHECK_ONLY=false
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --mode)       MODE="${2:-}"; shift 2 ;;
+      --mode=*)     MODE="${1#*=}"; shift ;;
+      --http-port)  HTTP_PORT="${2:-}"; shift 2 ;;
+      --http-port=*) HTTP_PORT="${1#*=}"; shift ;;
+      --srt-port)   SRT_PORT="${2:-}"; shift 2 ;;
+      --srt-port=*) SRT_PORT="${1#*=}"; shift ;;
+      --rtmp)       ENABLE_RTMP="yes"; shift ;;
+      --tls)        TLS_MODE="${2:-}"; shift 2 ;;
+      --tls=*)      TLS_MODE="${1#*=}"; shift ;;
+      --hostname)   DOMAIN_NAME="${2:-}"; shift 2 ;;
+      --hostname=*) DOMAIN_NAME="${1#*=}"; shift ;;
+      --email)      ACME_EMAIL="${2:-}"; shift 2 ;;
+      --email=*)    ACME_EMAIL="${1#*=}"; shift ;;
+      -y|--yes)     ASSUME_YES=true; shift ;;
+      --check)      CHECK_ONLY=true; ASSUME_YES=true; shift ;;
+      -h|--help)    usage; trap - EXIT INT TERM; exit 0 ;;
+      *)            usage; echo; die "unknown option: $1" ;;
+    esac
+  done
+
+  case "$MODE" in
+    ""|docker|binary) ;;
+    *) die "--mode must be docker or binary, not $MODE" ;;
+  esac
+  case "$TLS_MODE" in
+    off|selfsigned|acme) ;;
+    *) die "--tls must be off, selfsigned or acme, not $TLS_MODE" ;;
+  esac
+  for pv in HTTP_PORT SRT_PORT; do
+    case "${!pv}" in
+      ''|*[!0-9]*) die "$pv must be a number, not ${!pv}" ;;
+    esac
+  done
+}
+
 main() {
+  parse_args "$@"
   header "polyemesis installer"
   require_root
   detect_os
+
+  # --check stops here, having proved only what a host can be asked without
+  # changing it. This is what CI runs on every distro in the matrix: it
+  # exercises detection, the architecture gate, the init gate and the FFmpeg
+  # floor, and installs nothing.
+  if [ "$CHECK_ONLY" = true ]; then
+    local rc=0
+    if [ "${MODE:-docker}" = "binary" ]; then
+      check_ffmpeg || rc=1
+      require_systemd || rc=1
+    else
+      info "docker mode: the image carries FFmpeg, so no host FFmpeg is required"
+      require_systemd || rc=1
+    fi
+    [ "$rc" -eq 0 ] && ok "preflight passed" || err "preflight failed"
+    # Detach the trap rather than setting INSTALL_COMPLETE. That flag makes
+    # cleanup_on_failure `exit 0`, which is right for a finished install and
+    # WRONG here: it swallowed the non-zero status and every --check reported
+    # success while printing its own failures. Nothing has been created at this
+    # point, so there is nothing to undo and no reason to run the trap at all.
+    trap - EXIT INT TERM
+    exit "$rc"
+  fi
+
   gather_configuration
   confirm_plan
+
+  require_systemd || die "cannot install a service without systemd — see above"
 
   if [ "$MODE" = "docker" ]; then
     install_docker
