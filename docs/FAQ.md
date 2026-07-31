@@ -50,9 +50,10 @@ Homebrew's FFmpeg on macOS has no SRT. Use Docker.
 
 ## What about Enhanced RTMP / multitrack FLV from OBS 30.2+?
 
-Not implemented. The `enhancedRtmp` config key exists so old config files keep
-parsing, but **nothing branches on it** and RTMP ingest is single-track either
-way. Use SRT.
+Not implemented, and RTMP ingest is single-track either way. An `enhancedRtmp`
+config key used to be declared for it and has been removed, because a key that
+accepts a value and changes nothing is worse than no key. A config file that
+still carries it keeps loading; the key is simply ignored. Use SRT.
 
 ## Can I run horizontal and vertical at once?
 

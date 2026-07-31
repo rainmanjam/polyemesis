@@ -40,7 +40,6 @@ The keys, in brief:
 | `tls.hsts` | `false` | Opt-in on purpose — see below |
 | `trustProxyHeaders` | `false` | Set **only** behind a reverse proxy you control |
 | `ffmpeg.binary` / `ffmpeg.probe` | `""` | Pin specific binaries instead of searching `$PATH` |
-| `enhancedRtmp` | `false` | **Placeholder, has no effect.** See below. |
 
 ### Flags
 
@@ -100,11 +99,17 @@ and intend to keep one. It is ignored in `selfsigned` mode and when TLS is off �
 both log a warning rather than failing, because pinning a certificate the browser
 cannot validate is an excellent way to lock yourself out of your own tool.
 
-### `enhancedRtmp` does nothing
+### `enhancedRtmp` was removed
 
-It is accepted so existing config files keep parsing. Enhanced RTMP / multitrack
-FLV ingest (OBS 30.2+) is not implemented, no code branches on this key, and
-RTMP ingest is single-track either way. **For multitrack ingest today, use SRT.**
+It is no longer a key. Enhanced RTMP / multitrack FLV ingest (OBS 30.2+) is not
+implemented and RTMP ingest is single-track either way, so the key never did
+anything — it was declared as a placeholder and kept on the belief that config
+files already carrying it would otherwise fail to parse.
+
+That belief was wrong: config loading ignores unrecognised keys, so the
+declaration was buying nothing while presenting a knob an operator could set and
+watch have no effect. **A config file that still names `enhancedRtmp` loads
+exactly as before.** For multitrack ingest today, use SRT.
 
 ## The data directory
 

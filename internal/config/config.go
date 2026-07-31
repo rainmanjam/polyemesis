@@ -35,12 +35,21 @@ type Config struct {
 	// enable it when polyemesis really is behind a reverse proxy, otherwise a
 	// client can forge the header.
 	TrustProxyHeaders bool `yaml:"trustProxyHeaders"`
-	// EnhancedRTMP is a placeholder for OBS 30.2+ multitrack FLV ingest, which
-	// is not implemented. No code branches on it and no endpoint reports it, so
-	// setting it has no effect; it survives only so config files that already
-	// carry the key keep parsing.
-	EnhancedRTMP bool `yaml:"enhancedRtmp"`
 }
+
+// An `enhancedRtmp` key used to live here as a declared-but-inert placeholder
+// for OBS 30.2+ multitrack FLV ingest, on the stated grounds that it had to
+// survive "so config files that already carry the key keep parsing".
+//
+// That reason was not true. Load uses yaml.Unmarshal, not a decoder with
+// KnownFields(true), so an unrecognised key is ignored rather than rejected --
+// pinned by TestOldConfigWithEnhancedRtmpStillParses. The field was therefore
+// buying nothing, while presenting a settable knob that did nothing, which is
+// the failure mode the settings drift guards exist to prevent.
+//
+// Enhanced RTMP is still not implemented and RTMP ingest is single-track either
+// way; SRT is the multitrack path. An old config carrying the key keeps
+// loading, and now it is ignored for the same reason any unknown key is.
 
 // Mode selects how the built-in HTTPS listener obtains its certificate.
 type Mode string
