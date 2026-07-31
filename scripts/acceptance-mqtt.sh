@@ -38,6 +38,10 @@ SECRET='acceptance-stream-key-do-not-publish'
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-cleanup.sh"
+# Shared observation. See lib-observe.sh: the broker check used to assert a
+# cause it had never measured, having discarded docker's own account of it.
+# Issue #38.
+. "$SCRIPTS/lib-observe.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 DRIVER="$ROOT/scripts/acceptance_mqtt_driver.go"
@@ -81,22 +85,58 @@ start_broker() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1
   # allow_anonymous because the suite is testing telemetry, not authentication;
   # the password path is covered by the sealed-storage unit test.
+  #
+  # stdout is the container ID; stderr is the reason it did not start. BOTH used
+  # to go to /dev/null and the exit status was swallowed by a trailing `|| true`,
+  # which is why issue #38's "the broker container did not start" could never
+  # say why -- an image pull timeout, a port already held and a daemon that was
+  # not running all produced that one sentence. Kept in a file so the
+  # post-mortem can quote it and CI's artifact upload carries it.
   docker run -d --name "$CONTAINER" -p "$BROKER_PORT:1883" \
     eclipse-mosquitto:2 \
     sh -c 'printf "listener 1883\nallow_anonymous true\npersistence false\n" > /m.conf && exec mosquitto -c /m.conf' \
-    >/dev/null 2>&1
+    > docker-run.log 2>&1
+}
+
+# broker_state is the sampler the wait polls. It reports the CONTAINER's status
+# and whether mosquitto has announced itself, as one token, so the recorded
+# trajectory separates the three failures the old check collapsed into one:
+#
+#   absent x80              -- docker run never created it
+#   created/starting, exited/starting -- it started and died (see the log)
+#   running/starting x80    -- it is up but mosquitto never said "running"
+broker_state() {
+  local st
+  st=$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null) || st=""
+  [ -z "$st" ] && st=absent
+  if [ "$st" = running ] && docker logs "$CONTAINER" 2>&1 | grep -q "running"; then
+    printf 'running/ready'
+  else
+    printf '%s/starting' "$st"
+  fi
 }
 
 step "1. A broker, and a subscriber that can reach it"
-start_broker || true
-for _ in $(seq 1 40); do
-  sleep 0.5
-  docker logs "$CONTAINER" 2>&1 | grep -q "running" && break
-done
-if docker ps --format '{{.Names}}' | grep -q "^$CONTAINER$"; then
+if ! start_broker; then
+  bad "docker run failed outright"
+  note "docker-run.log:"
+  sed 's/^/          /' docker-run.log 2>/dev/null
+  poly_docker_postmortem "$CONTAINER"
+  exit 1
+fi
+# 40s rather than the previous 40 iterations of "sleep 0.5 + however long
+# `docker logs` took": that loop had no wall-clock ceiling at all and was
+# measured giving up at 36s. This preserves the effective wait rather than
+# tightening it -- the ceiling is a separate question that wants the flake rate
+# measured first (issue #38, direction 3).
+if poly_poll_until "mosquitto to announce itself" running/ready 40 broker_state; then
   ok "mosquitto is listening on $BROKER_PORT"
 else
-  bad "the broker container did not start"; exit 1
+  bad "the broker never became ready"
+  note "docker-run.log:"
+  sed 's/^/          /' docker-run.log 2>/dev/null
+  poly_docker_postmortem "$CONTAINER"
+  exit 1
 fi
 
 step "2. Server up, MQTT off"
