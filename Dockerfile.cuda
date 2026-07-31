@@ -81,6 +81,25 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # not for CUDA features.
 FROM nvidia/cuda:12.6.3-base-ubuntu24.04
 
+ARG VERSION=dev
+
+# OCI labels, on the image itself rather than only in the workflow.
+#
+# The workflow's metadata-action injects these for the default image, but a
+# label baked into the Dockerfile survives a `docker build` run by hand -- which
+# is how the GPU images are built by anyone with the hardware to test them, and
+# how this image is built by anyone auditing it. A registry listing with no
+# description, source or licence is one people scroll past.
+LABEL org.opencontainers.image.title="polyemesis" \
+      org.opencontainers.image.description="polyemesis with NVIDIA NVENC. Self-hosted restreaming with per-destination audio routing." \
+      org.opencontainers.image.url="https://github.com/rainmanjam/polyemesis" \
+      org.opencontainers.image.source="https://github.com/rainmanjam/polyemesis" \
+      org.opencontainers.image.documentation="https://github.com/rainmanjam/polyemesis/tree/main/docs" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="polyemesis" \
+      org.opencontainers.image.version="${VERSION}"
+
+
 # THE SECOND TRAP, and it is invisible: the nvidia/cuda base images ship
 # NVIDIA_DRIVER_CAPABILITIES=compute,utility — verified by reading `env` in
 # 12.6.3-base-ubuntu24.04. That set does NOT include `video`, so the container
