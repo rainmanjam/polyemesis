@@ -1604,6 +1604,11 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			next.row = p.row
 			e.dests[id] = &next
 			e.mu.Unlock()
+			// AFTER the unlock. SetPolicy itself is a memory write, but the
+			// revival path calls Restart, which blocks for up to stopTimeout.
+			// Holding e.mu across that would stall every Status() the dashboard
+			// asks for and every other tier's reconcile behind it.
+			e.applyDestPolicy(&next, p.row)
 			continue
 		}
 		e.mu.Unlock()
@@ -1702,13 +1707,13 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		strconv.Itoa(row.Transport.MuxQueuePackets),
 		strconv.Itoa(row.Transport.MuxQueueBytes),
 		strconv.Itoa(row.Transport.RWTimeoutSeconds),
-		// The reconnect policy is a property of the SUPERVISOR, not of the
-		// command line, so it does not show up in the argv -- which is exactly
-		// why it has to be named here. Without it, raising a give-up threshold
-		// would be stored and never reach the process it governs.
-		strconv.Itoa(row.Resilience.MinBackoffSeconds),
-		strconv.Itoa(row.Resilience.MaxBackoffSeconds),
-		strconv.Itoa(row.Resilience.GiveUpAfter),
+		// Resilience is deliberately ABSENT. It is a property of the
+		// supervisor, not of the command line, and supervisor.SetPolicy now
+		// carries it into a process that is already running -- see
+		// applyDestPolicy. The reasoning that first put it here was right about
+		// the danger (a setting stored and never reaching the process it
+		// governs) and wrong about the remedy: the remedy was to deliver it,
+		// not to drop the operator's connection in order to deliver it.
 		// Audio encoding: both change the command line.
 		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
 	})
@@ -1734,6 +1739,72 @@ func secondsOr(v int, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return time.Duration(v) * time.Second
+}
+
+// destPolicy is the reconnect policy for one destination row.
+//
+// The zero value must map to the zero Policy, not to an explicit 1s/30s: that
+// is what leaves supervisor.New's own defaults in place, which is what every
+// destination ran on before the policy was configurable.
+func destPolicy(row *db.Destination) supervisor.Policy {
+	return supervisor.Policy{
+		MinBackoff:  secondsOr(row.Resilience.MinBackoffSeconds, 0),
+		MaxBackoff:  secondsOr(row.Resilience.MaxBackoffSeconds, 0),
+		MaxRestarts: row.Resilience.GiveUpAfter,
+	}
+}
+
+// applyDestPolicy carries a changed reconnect policy into a destination that is
+// already running, and revives one that had given up under a stricter rule.
+//
+// The revival is the one place this work chooses a restart over a live apply,
+// and it is chosen deliberately. Raising GiveUpAfter on a destination that has
+// already exhausted the old limit and would otherwise sit in StateFailed for
+// ever is exactly the "stored, reported as applied, and does nothing" failure
+// this file is littered with warnings about. Lowering it is NOT retroactive: a
+// destination is not executed for exits it made under the old rules.
+//
+// Start() cannot do the revival -- supervise returns down the give-up path
+// without clearing p.running, so Start takes its idempotence early return.
+// Restart() is the only door, and its Stop returns immediately because the
+// supervise goroutine has already closed done.
+func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
+	if d == nil || d.proc == nil {
+		return
+	}
+	before := d.proc.Policy()
+	want := destPolicy(row)
+	if before == want {
+		return
+	}
+	d.proc.SetPolicy(want)
+	e.log.Info("destination reconnect policy retuned without a restart",
+		"dest", row.Name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
+		"giveUpAfter", want.MaxRestarts)
+
+	if d.proc.Status().State != supervisor.StateFailed || !moreForgiving(before, want) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	d.proc.Restart(ctx)
+	e.log.Info("destination revived: it had given up under the previous limit",
+		"dest", row.Name, "giveUpAfter", want.MaxRestarts)
+}
+
+// moreForgiving reports whether want allows more attempts than before.
+//
+// 0 means unlimited, so it is the MOST forgiving value rather than the least.
+// Compared as a plain number it sorts exactly the wrong way round, which would
+// revive a destination the operator had just told to give up sooner.
+func moreForgiving(before, want supervisor.Policy) bool {
+	if want.MaxRestarts == 0 {
+		return before.MaxRestarts != 0
+	}
+	if before.MaxRestarts == 0 {
+		return false
+	}
+	return want.MaxRestarts > before.MaxRestarts
 }
 
 // expertArgv parses a destination's hand-written arguments into an argv.
@@ -1866,10 +1937,11 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
 		// own defaults in place, which is what every destination ran on before
-		// this was configurable.
-		MinBackoff:  secondsOr(row.Resilience.MinBackoffSeconds, 0),
-		MaxBackoff:  secondsOr(row.Resilience.MaxBackoffSeconds, 0),
-		MaxRestarts: row.Resilience.GiveUpAfter,
+		// this was configurable. The same three values are re-applied without a
+		// restart by applyDestPolicy when they change.
+		MinBackoff:  destPolicy(row).MinBackoff,
+		MaxBackoff:  destPolicy(row).MaxBackoff,
+		MaxRestarts: destPolicy(row).MaxRestarts,
 		// Spaced out so going live does not spawn every destination in the
 		// same tick. First spawn only -- a reconnect is never delayed.
 		StartDelay: startDelay,
