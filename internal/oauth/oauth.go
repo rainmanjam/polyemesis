@@ -306,6 +306,10 @@ type SetupGuide struct {
 	// they had to be. Read it from ManualKeyFor rather than hard-coding it.
 	ManualStreamKey bool   `json:"manualStreamKey,omitempty"`
 	Note            string `json:"note,omitempty"`
+	// RedirectWarnings are computed per request by the API layer, which is
+	// where the configuration and the inbound Host live. Empty here; filled in
+	// by handlePlatformGuides.
+	RedirectWarnings []string `json:"redirectWarnings,omitempty"`
 }
 
 // Guides returns the setup instructions rendered on the credentials page.
