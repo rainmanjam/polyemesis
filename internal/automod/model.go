@@ -39,6 +39,18 @@ type ModelConfig struct {
 	// Endpoint is the chat-completions URL. Any OpenAI-compatible API works,
 	// including a locally hosted one -- which is the deployment an operator who
 	// does not want chat leaving the building will choose.
+	//
+	// NOT validated against private address ranges, and that is deliberate: the
+	// commonest configuration this feature is built for is exactly a private
+	// address -- Ollama or vLLM on 127.0.0.1 or a LAN host -- so the usual SSRF
+	// blocklist would reject the recommended deployment.
+	//
+	// The threat model that makes this acceptable: only an authenticated admin
+	// can set it, and an admin already holds strictly greater power than an
+	// outbound POST (they can edit destinations, read tokens, and restart the
+	// process). It is therefore not a privilege boundary, and treating it as one
+	// would cost the local-model deployment for no gain. An operator exposing
+	// the admin UI to untrusted users has a much larger problem than this field.
 	Endpoint string `json:"endpoint"`
 	// Model is the model name passed through to the API.
 	Model string `json:"model"`

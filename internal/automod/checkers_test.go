@@ -337,3 +337,92 @@ func TestDespacingDoesNotFireOnOrdinaryShortWords(t *testing.T) {
 		t.Fatal("the letter-spaced evasion got through")
 	}
 }
+
+// Idle eviction is not a bound during an ACTIVE raid: every author is recent,
+// so nothing is idle and nothing is evicted. MaxAuthors is the hard ceiling
+// that makes the memory bounded rather than merely self-tidying.
+func TestAuthorsAreCappedDuringAnActiveRaid(t *testing.T) {
+	limits := DefaultHistoryLimits()
+	limits.MaxAuthors = 500
+	limits.IdleEviction = time.Hour // nothing will go idle during this test
+	h, _ := newTestHistory(limits)
+
+	for i := 0; i < 5000; i++ {
+		h.Observe(db.PlatformTwitch, fmt.Sprintf("raider-%d", i), "hello")
+	}
+	if got := h.Tracked(); got > limits.MaxAuthors {
+		t.Fatalf("tracking %d authors with a cap of %d; idle eviction cannot help mid-raid",
+			got, limits.MaxAuthors)
+	}
+}
+
+// The cap must keep the ACTIVE authors and drop the stale ones: the people
+// flooding right now are the ones whose history the detectors need.
+func TestTheCapDropsTheLeastRecentlySeen(t *testing.T) {
+	limits := DefaultHistoryLimits()
+	limits.MaxAuthors = 10
+	limits.IdleEviction = time.Hour
+	limits.MaxMessages = 10000
+	h, clk := newTestHistory(limits)
+
+	for i := 0; i < 10; i++ {
+		h.Observe(db.PlatformTwitch, fmt.Sprintf("early-%d", i), "hi")
+	}
+	clk.advance(time.Minute)
+	h.Observe(db.PlatformTwitch, "recent", "still here")
+	// Exactly enough new authors to evict the early ones and no more. Adding
+	// more than the cap would legitimately evict "recent" too -- it would by
+	// then genuinely BE the least recently seen, which is the policy working
+	// rather than failing.
+	for i := 0; i < 9; i++ {
+		clk.advance(time.Second)
+		h.Observe(db.PlatformTwitch, fmt.Sprintf("later-%d", i), "hi")
+	}
+
+	h.mu.Lock()
+	_, keptRecent := h.authors[authorKey(db.PlatformTwitch, "recent")]
+	_, keptEarly := h.authors[authorKey(db.PlatformTwitch, "early-0")]
+	h.mu.Unlock()
+
+	if keptEarly {
+		t.Error("kept the least recently seen author over newer ones")
+	}
+	if !keptRecent {
+		t.Error("dropped a recent author while the cap had older ones to take")
+	}
+}
+
+// Eviction used to walk the whole author map on EVERY message, under the mutex.
+// With N authors that is O(N) per message, so a raid made each message more
+// expensive than the last. This asserts the sweep is amortised rather than
+// per-message.
+func TestEvictionDoesNotScanEveryAuthorPerMessage(t *testing.T) {
+	limits := DefaultHistoryLimits()
+	limits.MaxAuthors = 100000
+	// Idle eviction SHORTER than the sweep interval, which is what makes the
+	// amortisation observable: authors go idle inside a window during which no
+	// scan is due.
+	limits.IdleEviction = 5 * time.Second
+	h, clk := newTestHistory(limits)
+
+	// The first observation performs the initial sweep and schedules the next.
+	h.Observe(db.PlatformTwitch, "seed", "hi")
+	for i := 0; i < 3000; i++ {
+		h.Observe(db.PlatformTwitch, fmt.Sprintf("u-%d", i), "hi")
+	}
+
+	// Every one of them is now idle, but no sweep is due yet.
+	clk.advance(6 * time.Second)
+	h.Observe(db.PlatformTwitch, "trigger", "hi")
+	afterIdle := h.Tracked()
+	if afterIdle < 3000 {
+		t.Fatalf("a full scan ran on a message inside the sweep interval: %d authors left", afterIdle)
+	}
+
+	// Past the interval, one message pays for the scan and they go.
+	clk.advance(sweepInterval)
+	h.Observe(db.PlatformTwitch, "trigger", "hi")
+	if after := h.Tracked(); after > 2 {
+		t.Fatalf("the sweep did not run: %d authors remain", after)
+	}
+}

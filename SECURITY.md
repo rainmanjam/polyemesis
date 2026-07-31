@@ -132,6 +132,14 @@ returned by any endpoint — the settings blob carries only `hasApiKey`.
 The rules and history checkers send nothing anywhere. They are local, and they
 are what catches most abuse.
 
+**The endpoint is not filtered against private addresses.** A private address is
+the *recommended* configuration — Ollama or vLLM on `127.0.0.1` or a LAN host —
+so blocking those would reject the deployment we suggest. Only an authenticated
+admin can set the field, and an admin can already read your tokens and edit your
+destinations, so it grants no privilege they did not already have. Treat it the
+way you treat every other admin-only setting: if untrusted people can reach your
+admin UI, this field is not your biggest problem.
+
 ### Deploying it safely
 
 - **Do not expose it to the internet, or to a LAN you do not control, without

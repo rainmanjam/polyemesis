@@ -88,10 +88,12 @@ type Hub struct {
 	// that moderation is happening somewhere polyemesis cannot see.
 	retracted int64
 
-	// moderator is the deciding half of automod, and nil when none is wired.
-	// The Hub acts; it never decides -- see automod.go.
-	moderator   Moderator
-	automodJobs chan automodJob
+	// automod holds the current moderator generation, or nil when none is
+	// wired. Replaced wholesale on SetModerator so a reconfiguration cannot
+	// half-apply and so a superseded generation's queued actions are abandoned
+	// rather than performed. The Hub acts; it never decides -- see automod.go.
+	automod    *automodState
+	automodGen uint64
 
 	store     Store
 	bus       Publisher
@@ -365,6 +367,10 @@ func (h *Hub) Close() {
 	}
 	h.stopOnce.Do(func() { close(h.stop) })
 	h.wg.Wait()
+	// The automod worker is not in h.wg -- it belongs to a generation that
+	// outlives individual adapters -- so it is stopped explicitly. Without this
+	// every closed Hub leaves one goroutine blocked on a channel forever.
+	h.closeAutomod()
 	// One last flush after the adapters are done: the messages from the final
 	// seconds of a broadcast are the ones somebody scrolls back to.
 	h.flush()

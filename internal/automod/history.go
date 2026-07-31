@@ -2,6 +2,7 @@ package automod
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,13 @@ type HistoryLimits struct {
 	// raid is thousands of new authors in a minute, so the ring has to forget
 	// or the defence becomes the denial of service.
 	IdleEviction time.Duration `json:"idleEviction"`
+	// MaxAuthors caps how many are tracked at once, regardless of idleness.
+	//
+	// Idle eviction alone is NOT a bound: during an active raid every author is
+	// recent, so nothing is idle and nothing is evicted -- the map grows for as
+	// long as the raid lasts. This is the hard ceiling that makes the memory
+	// bounded rather than merely self-tidying.
+	MaxAuthors int `json:"maxAuthors"`
 }
 
 // DefaultHistoryLimits are deliberately forgiving.
@@ -69,6 +77,7 @@ func DefaultHistoryLimits() HistoryLimits {
 		TimeoutSeconds:        60,
 		Retain:                24,
 		IdleEviction:          10 * time.Minute,
+		MaxAuthors:            20000,
 	}
 }
 
@@ -86,6 +95,12 @@ type authorLog struct {
 type History struct {
 	mu     sync.Mutex
 	limits HistoryLimits
+	// sweepAt is when the next full eviction scan is due. Eviction used to run
+	// on EVERY message, walking the whole author map under the mutex: with N
+	// authors that is O(N) per message, so a raid made each message more
+	// expensive than the last and serialised every adapter behind one lock.
+	// Amortised to one scan per interval instead.
+	sweepAt time.Time
 	// Keyed on platform+author_id, never on display name: the same name on two
 	// platforms is not the same person, and author_id is the stable identifier
 	// on all four.
@@ -120,7 +135,7 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	h.evictLocked(now)
+	h.sweepIdleLocked(now)
 
 	key := authorKey(p, authorID)
 	log := h.authors[key]
@@ -133,6 +148,9 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 	if len(log.entries) > h.limits.Retain {
 		log.entries = log.entries[len(log.entries)-h.limits.Retain:]
 	}
+	// AFTER the insert, or the map settles one over the cap forever: checking
+	// before adding leaves room for the author about to arrive.
+	h.capAuthorsLocked()
 
 	cutoff := now.Add(-h.limits.Window)
 	var inWindow []entry
@@ -192,18 +210,52 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 	return sortByConsequence(out)
 }
 
-// evictLocked drops authors who have gone quiet. Called on every observation
-// rather than on a timer: a raid is exactly when a timer goroutine is least
-// likely to get scheduled, and it is exactly when this matters.
-func (h *History) evictLocked(now time.Time) {
-	if h.limits.IdleEviction <= 0 {
+// sweepInterval is how often the full scan runs. Short enough that an idle
+// author is forgotten promptly, long enough that the scan is not on the hot
+// path for every message.
+const sweepInterval = 30 * time.Second
+
+// sweepIdleLocked drops authors who have gone quiet, at most once per interval.
+//
+// Still driven by message arrival rather than a timer -- a raid is exactly when
+// a timer goroutine is least likely to be scheduled, and exactly when this
+// matters -- but amortised, so one message is not charged for every author
+// currently tracked.
+func (h *History) sweepIdleLocked(now time.Time) {
+	if h.limits.IdleEviction <= 0 || now.Before(h.sweepAt) {
 		return
 	}
+	h.sweepAt = now.Add(sweepInterval)
 	cutoff := now.Add(-h.limits.IdleEviction)
 	for k, log := range h.authors {
 		if log.last.Before(cutoff) {
 			delete(h.authors, k)
 		}
+	}
+}
+
+// capAuthorsLocked enforces MaxAuthors by dropping the least recently seen.
+//
+// Reached only during a raid, which is the one time it matters: idle eviction
+// cannot help when every author is recent. Dropping the oldest is the right
+// sacrifice -- their window has nearly expired anyway, while the authors
+// actively flooding are the ones whose history the detectors need.
+func (h *History) capAuthorsLocked() {
+	max := h.limits.MaxAuthors
+	if max <= 0 || len(h.authors) <= max {
+		return
+	}
+	type aged struct {
+		key  string
+		last time.Time
+	}
+	all := make([]aged, 0, len(h.authors))
+	for k, log := range h.authors {
+		all = append(all, aged{k, log.last})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
+	for i := 0; i < len(all)-max; i++ {
+		delete(h.authors, all[i].key)
 	}
 }
 

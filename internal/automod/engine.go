@@ -93,3 +93,12 @@ func (e *Engine) ModelStats() ModelStats {
 	}
 	return e.model.Stats()
 }
+
+// ModelEnabled reports whether the paid checker is configured and on.
+//
+// Exposed so the Hub can decide whether a message is worth queueing for the
+// model at all, rather than queueing every message and discovering inside the
+// connector that there is nothing to ask.
+func (e *Engine) ModelEnabled() bool {
+	return e != nil && e.model != nil && e.model.cfg.Enabled
+}

@@ -285,3 +285,35 @@ func TestOriginConstantsAreDistinct(t *testing.T) {
 		seen[o] = true
 	}
 }
+
+// The floor must survive the upload, not merely precede it. Checking only
+// "is there 2 GiB free" accepts an 8 GiB upload onto a volume with exactly the
+// reserve free, then writes until ENOSPC and eats the reserve the database and
+// recorder depend on -- the exact thing the floor exists to protect.
+func TestSaveRequiresHeadroomForTheUploadItself(t *testing.T) {
+	s := newStore(t)
+	const twoGiB = uint64(2) << 30
+	// Exactly the floor free, and an upload that would consume it.
+	s.freeBytes = func(string) (uint64, error) { return twoGiB, nil }
+	if _, err := s.Save(strings.NewReader("x"), "big.mp4", 8<<30, twoGiB); !errors.Is(err, ErrNoSpace) {
+		t.Fatalf("err = %v, want ErrNoSpace: the floor was not reserved for the upload", err)
+	}
+	assertDirEmpty(t, s)
+
+	// Room for both floor and upload: accepted.
+	s.freeBytes = func(string) (uint64, error) { return twoGiB + (16 << 30), nil }
+	if _, err := s.Save(strings.NewReader("x"), "ok.mp4", 8<<30, twoGiB); err != nil {
+		t.Fatalf("refused an upload that fits: %v", err)
+	}
+}
+
+// A disk check that cannot run must FAIL CLOSED. The one case where you cannot
+// tell how much room is left is not the case to start writing gigabytes.
+func TestSaveFailsClosedWhenTheDiskCheckErrors(t *testing.T) {
+	s := newStore(t)
+	s.freeBytes = func(string) (uint64, error) { return 0, errors.New("statfs exploded") }
+	if _, err := s.Save(strings.NewReader("data"), "x.mp4", 0, 1<<30); !errors.Is(err, ErrNoSpace) {
+		t.Fatalf("err = %v, want ErrNoSpace; an unreadable disk check must not skip the guard", err)
+	}
+	assertDirEmpty(t, s)
+}

@@ -205,7 +205,23 @@ type File struct {
 func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint64) (File, error) {
 	if minFreeBytes > 0 && s.freeBytes != nil {
 		free, err := s.freeBytes(s.dir)
-		if err == nil && free < minFreeBytes {
+		if err != nil {
+			// FAIL CLOSED. An earlier version skipped the guard when the check
+			// itself errored, which is the wrong direction for a disk check:
+			// the one case where you cannot tell how much room is left is not
+			// the case to start writing gigabytes.
+			return File{}, fmt.Errorf("%w: could not read free space: %v", ErrNoSpace, err)
+		}
+		// The floor has to survive the upload, not merely precede it. Checking
+		// `free < minFreeBytes` alone accepts an 8 GiB upload onto a volume
+		// with exactly the 2 GiB reserve free, writes until ENOSPC, and eats
+		// the reserve the database and the recorder depend on -- which is the
+		// entire thing the floor exists to protect.
+		needed := minFreeBytes
+		if maxBytes > 0 {
+			needed += uint64(maxBytes)
+		}
+		if free < needed {
 			return File{}, ErrNoSpace
 		}
 	}
