@@ -229,6 +229,28 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     updated_at           INTEGER NOT NULL
 );
 
+-- Lifecycle webhooks. Distinct from alert_rules, which are for a human reading
+-- Slack: an alert coalesces ("12 times") and debounces, and a hook must not,
+-- because a script cannot act on eleven events it was never given.
+--
+-- secret is SEALED, not plaintext, unlike alert_rules.url. It is an HMAC key
+-- rather than a capability URL: it is used to prove a payload came from here,
+-- so anybody who reads the database file can forge deliveries with it, and
+-- unlike a webhook URL it is never displayed and so never needs to be
+-- recovered in plaintext by a human.
+CREATE TABLE IF NOT EXISTS hooks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    url             TEXT    NOT NULL,
+    secret          BLOB    NOT NULL,
+    triggers        TEXT    NOT NULL DEFAULT '[]',   -- JSON array; empty = every trigger
+    timeout_seconds INTEGER NOT NULL DEFAULT 10,
+    max_attempts    INTEGER NOT NULL DEFAULT 3,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+
 -- When destinations should be live. Instants are UTC; a recurring schedule
 -- stores a wall-clock minute plus the IANA zone to read it in, so a show at
 -- 19:00 local stays at 19:00 across a daylight-saving boundary.
@@ -452,6 +474,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 
 CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled, id);
+CREATE INDEX IF NOT EXISTS idx_hooks_enabled ON hooks(enabled, id);
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled, id);
 CREATE INDEX IF NOT EXISTS idx_destinations_position ON destinations(position, id);
 
