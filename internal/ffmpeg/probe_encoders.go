@@ -100,6 +100,12 @@ func probeEncodersWith(ctx context.Context, ffmpegBin string, names []string, pe
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
+	// Resolved once for the whole run, BEFORE the probes fan out: every VAAPI
+	// candidate wants the same node, and detection reads the same /dev/dri for
+	// each of them. Inside the goroutine it would be one detection per encoder,
+	// racing, against a budget the probes themselves need.
+	vaapiDevice := probeVAAPIDevice(ctx, names)
+
 	// Sequentially, five probes at a few hundred milliseconds each is a second
 	// added to every startup; concurrently it is one probe's latency. They are
 	// independent processes touching different devices, so there is nothing to
@@ -110,7 +116,7 @@ func probeEncodersWith(ctx context.Context, ffmpegBin string, names []string, pe
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out[i] = probeEncoder(ctx, ffmpegBin, name, perProbe)
+			out[i] = probeEncoder(ctx, ffmpegBin, name, vaapiDevice, perProbe)
 		}()
 	}
 	wg.Wait()
@@ -178,14 +184,14 @@ func capabilityIn(caps []EncoderCapability, name string) (EncoderCapability, boo
 }
 
 // probeEncoder encodes one frame and reads the outcome off the exit status.
-func probeEncoder(ctx context.Context, ffmpegBin, name string, perProbe time.Duration) EncoderCapability {
+func probeEncoder(ctx context.Context, ffmpegBin, name, vaapiDevice string, perProbe time.Duration) EncoderCapability {
 	c := EncoderCapability{Name: name, Vendor: EncoderVendorOf(name)}
 
 	probeCtx, cancel := context.WithTimeout(ctx, perProbe)
 	defer cancel()
 
 	start := time.Now()
-	cmd := exec.CommandContext(probeCtx, ffmpegBin, probeArgs(name)...)
+	cmd := exec.CommandContext(probeCtx, ffmpegBin, probeArgs(name, vaapiDevice)...)
 	// Killing the process is not the same as getting the output pipe back: a
 	// child it spawned inherits that pipe and CombinedOutput blocks reading it
 	// until every holder is gone. Without a WaitDelay the deadline above is a
@@ -217,19 +223,65 @@ func probeEncoder(ctx context.Context, ffmpegBin, name string, perProbe time.Dur
 	return c
 }
 
+// anyVAAPI reports whether any candidate needs a render node named, so a host
+// with no VAAPI encoder in the list does not pay for GPU detection to answer a
+// question nobody asked.
+func anyVAAPI(names []string) bool {
+	for _, n := range names {
+		if encoderProfiles[n].vaapi {
+			return true
+		}
+	}
+	return false
+}
+
+// probeVAAPIDevice resolves the render node the VAAPI probe should name.
+//
+// Detection already chooses this node correctly for the real encode
+// (chooseVAAPIDevice ranks render nodes by vendor and usability), and the probe
+// ignored it, naming renderD128 unconditionally. On a multi-GPU host whose
+// first render node is display-only, or on a container passed renderD129, that
+// probed a device the encode would never use, failed, and VAAPI was withheld on
+// the strength of a test of the wrong hardware.
+//
+// NOT cached, deliberately. RefreshEncoderCapabilities exists because this
+// answer changes under a running server -- a driver package upgrades, a GPU is
+// passed through -- so a sync.Once here would pin the pre-GPU answer forever,
+// which is this same bug wearing a different hat.
+//
+// Falls back to the constant rather than returning empty when detection finds
+// nothing, because probeArgs must still name SOMETHING; see the note there.
+func probeVAAPIDevice(ctx context.Context, names []string) string {
+	if !anyVAAPI(names) {
+		return ""
+	}
+	if dev := DetectGPUs(ctx).VAAPIDevice; dev != "" {
+		return dev
+	}
+	return defaultVAAPIDevice
+}
+
 // probeArgs builds the one-frame encode for name.
 //
 // The per-encoder flags mirror rendition.go's profiles, because the flags are
 // part of what is being tested: VAAPI without -vaapi_device and the hwupload
 // tail fails on every machine including the ones where it works fine, and a
 // probe that always says no is worse than no probe at all.
-func probeArgs(name string) []string {
+//
+// That is also why an empty vaapiDevice falls back to the constant instead of
+// dropping the flag: "detection found no render node" would otherwise be
+// reported as "VAAPI is broken on this machine", which is a different and
+// wrong answer.
+func probeArgs(name, vaapiDevice string) []string {
 	prof := encoderProfiles[name]
 
 	args := []string{"-hide_banner", "-nostdin", "-loglevel", "warning"}
 	if prof.vaapi {
+		if vaapiDevice == "" {
+			vaapiDevice = defaultVAAPIDevice
+		}
 		// Must precede -i, same as the real encode.
-		args = append(args, "-vaapi_device", defaultVAAPIDevice)
+		args = append(args, "-vaapi_device", vaapiDevice)
 	}
 	args = append(args,
 		"-f", "lavfi",

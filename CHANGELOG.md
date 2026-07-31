@@ -8,7 +8,34 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The VA-API probe tested the wrong GPU on a multi-GPU host.** Detection
+  already ranked the render nodes under `/dev/dri` and handed the encode the
+  right one; the probe ignored that and named `/dev/dri/renderD128` regardless.
+  On a machine whose first render node is display-only — or a container passed
+  `renderD129` — VA-API was tested on hardware it would never run on, failed,
+  and was withheld from the editor on the strength of it. The probe now names
+  the node detection chose. Where detection finds no usable node it still names
+  `renderD128`, because a VA-API probe with no device fails on every machine
+  including the ones where VA-API works, and "no node found" must not be
+  reported as "this encoder is broken".
+
+### Changed
+
+- **A timed-out wait in the acceptance suites now reports what it observed.**
+  `acceptance-failover` and `acceptance-mqtt` both asserted causes they had
+  never measured, and `acceptance-mqtt` discarded `docker run`'s stdout, stderr
+  and exit status at the call site. Failures now carry the trajectory of every
+  sample taken, whether the value arrived just after the ceiling, and — for the
+  broker — the container's exit code, status and last log lines. No timeout was
+  changed and no retry was added; the flake rate is still the thing being
+  measured. See issue #38.
+- **The macOS SRT wildcard failure is documented where it is met.** The startup
+  warning fires at boot; operators meet the failure when they point an encoder
+  at the box. `docs/TROUBLESHOOTING.md` now carries the measured matrix under
+  the symptom, because the existing checklist sent readers to the firewall,
+  which the hosted-runner results rule out. See issue #28.
 
 ## [0.1.0] — 2026-07-31
 
