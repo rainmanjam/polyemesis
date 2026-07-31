@@ -99,9 +99,19 @@ type Engine struct {
 	// every child on purpose: the file reads as a single interleaved timeline.
 	// It is read on the stderr goroutine of every child and swapped whenever
 	// the logging settings change, so it is atomic rather than under e.mu.
-	sink    atomic.Pointer[supervisor.FileSink]
-	sinkMu  sync.Mutex
-	sinkCfg db.LoggingSettings
+	sink atomic.Pointer[supervisor.FileSink]
+
+	// meterInterval is the metering throttle, in nanoseconds.
+	//
+	// Atomic rather than under e.mu because it is read on the metering child's
+	// stdout goroutine for every astats frame -- up to fifty a second -- and
+	// taking the engine lock at that rate to answer a question that changes
+	// once a month would be absurd. It exists at all because the value used to
+	// be captured into the StdoutHandler closure at spawn time, which made
+	// editing it a silent no-op.
+	meterInterval atomic.Int64
+	sinkMu        sync.Mutex
+	sinkCfg       db.LoggingSettings
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -1248,7 +1258,40 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 // reconcileMeters restarts the metering sidecar whenever the ingest's track
 // layout changes, because the merged channel numbering it parses depends on
 // the exact per-track channel counts.
+// applyMeterInterval publishes a changed metering throttle to the sidecar that
+// is already running.
+//
+// Called before every early return in reconcileMeters, deliberately: a change
+// made while the meters are down (no probe yet, or metering switched off) has
+// to survive until they come back, or the operator has to make it twice.
+func (e *Engine) applyMeterInterval(m db.MeterSettings) {
+	e.meterInterval.Store(int64(time.Duration(m.IntervalMS) * time.Millisecond))
+}
+
+// meterThrottle rate-limits metering frames on their way to the WebSocket.
+//
+// It holds the ENGINE rather than a Duration. That is the whole point: astats
+// prints far faster than any UI can draw, so the frames have to be shed, but
+// the rate at which they are shed is an operator setting that must not require
+// respawning the sidecar to change. A captured Duration is what made
+// meters.intervalMs a setting that stored and did nothing.
+type meterThrottle struct {
+	e    *Engine
+	last time.Time
+}
+
+func (t *meterThrottle) allow(now time.Time) bool {
+	if now.Sub(t.last) < time.Duration(t.e.meterInterval.Load()) {
+		return false
+	}
+	t.last = now
+	return true
+}
+
 func (e *Engine) reconcileMeters(s db.Settings) {
+	// Before every early return below. See applyMeterInterval.
+	e.applyMeterInterval(s.Meters)
+
 	e.mu.RLock()
 	cur := e.meters
 	e.mu.RUnlock()
@@ -1297,23 +1340,24 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	url := meterHub.Subscribe("meters", port)
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
-	interval := time.Duration(s.Meters.IntervalMS) * time.Millisecond
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "meters", Kind: "meters", Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true,
 		// astats prints far faster than any UI can draw; throttle here rather
-		// than flooding every WebSocket client with 50 frames a second.
+		// than flooding every WebSocket client with 50 frames a second. The
+		// rate is read per frame from the engine, so lowering it applies to
+		// this sidecar without respawning it.
 		StdoutHandler: func(r io.Reader) error {
-			var last time.Time
+			th := &meterThrottle{e: e}
 			return ffmpeg.ParseLevels(r, channels, func(l ffmpeg.Levels) {
-				if time.Since(last) < interval {
+				now := time.Now()
+				if !th.allow(now) {
 					return
 				}
-				last = time.Now()
 				e.mu.Lock()
 				e.levels = l
-				e.levelsAt = last
+				e.levelsAt = now
 				e.mu.Unlock()
 				e.bus.Publish(events.TypeLevels, l)
 			})

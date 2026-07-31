@@ -157,3 +157,43 @@ func TestMoreForgivingTreatsZeroAsUnlimited(t *testing.T) {
 		})
 	}
 }
+
+// meters.intervalMs was captured by value into the StdoutHandler closure when
+// the metering sidecar spawned, and it is not in metersSig -- so changing it
+// stored cleanly, returned 200, and did absolutely nothing until some unrelated
+// change happened to restart the meters. It is a throttle in a Go parser and
+// never reaches an argv, so it must apply to the running process.
+func TestTheMeterThrottleReadsTheCurrentIntervalRatherThanTheOneItSpawnedWith(t *testing.T) {
+	e := &Engine{}
+	e.applyMeterInterval(db.MeterSettings{Enabled: true, IntervalMS: 1000})
+	th := &meterThrottle{e: e}
+
+	base := time.Now()
+	if !th.allow(base) {
+		t.Fatal("the first frame must always be published")
+	}
+	if th.allow(base.Add(50 * time.Millisecond)) {
+		t.Fatal("a frame 50ms into a 1000ms window was published; the throttle is not throttling")
+	}
+
+	e.applyMeterInterval(db.MeterSettings{Enabled: true, IntervalMS: 10})
+
+	if !th.allow(base.Add(50 * time.Millisecond)) {
+		t.Fatal("the same frame was still suppressed after the interval was lowered to 10ms; " +
+			"the throttle is reading a value captured when the sidecar spawned")
+	}
+}
+
+// The interval has to be stored before every early return in reconcileMeters,
+// or lowering it on a box whose ingest has not probed yet would be lost -- and
+// the operator would have to change it twice.
+func TestTheMeterIntervalIsAppliedEvenWhenTheMetersCannotRun(t *testing.T) {
+	e := &Engine{log: testLogger(), source: routing.DefaultSource()}
+	e.reconcileMeters(db.Settings{Meters: db.MeterSettings{Enabled: false, IntervalMS: 250}})
+
+	if got := e.meterInterval.Load(); got != int64(250*time.Millisecond) {
+		t.Fatalf("meterInterval = %d, want %d: the interval must be stored before the "+
+			"early returns, or a change made while the meters are down is lost",
+			got, int64(250*time.Millisecond))
+	}
+}
