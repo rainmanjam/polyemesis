@@ -15,6 +15,21 @@ internal/web/dist/*
 *.db
 *.db-wal
 *.db-shm
+
+# Key material, by NAME rather than by location.
+#
+# /data/ above already covers the default layout, but it is anchored to the
+# repository root and dataDir is configurable. Point it at ./test-data to run a
+# second instance and secret.key — the NaCl secretbox key that decrypts every
+# stored OAuth token and stream key — lands somewhere nothing ignores.
+#
+# *.db is already unanchored, so the database is safe wherever it is written.
+# The key that decrypts its contents was not. These names are fixed in the
+# code: config.SecretPath and internal/tlsx's self-signed set.
+secret.key
+ca.key
+server.key
+*.pem
 .DS_Store
 .playwright-mcp/
 

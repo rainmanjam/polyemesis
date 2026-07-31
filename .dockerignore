@@ -12,6 +12,19 @@ internal/web/dist/
 *.db
 *.db-wal
 *.db-shm
+
+# Key material, by name rather than by location — same reasoning as .gitignore,
+# and the same anchoring gap: /data/ above is rooted at the context root while
+# dataDir is configurable.
+#
+# The final image is not at risk: it copies only the binary. The BUILD STAGE is,
+# because the Dockerfile does `COPY . .`, and release.yml exports layers with
+# `cache-to: type=gha,mode=max` — which includes intermediate layers, not just
+# the final one. A stray secret.key would ride along into that cache.
+secret.key
+ca.key
+server.key
+*.pem
 scripts/
 docs/
 .DS_Store
