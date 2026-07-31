@@ -1,7 +1,9 @@
 # The second sweep: knobs no guard can see
 
-**Status:** surveyed 2026-07-30. One item shipped (chat retention); the rest
-recorded with a verdict each.
+**Status:** surveyed 2026-07-30. Every item rated worth doing has since
+shipped — chat retention, then the Whisper default model, then the chat history
+ring and the alert retry budget. The Low rows are recorded with a verdict each
+and remain deliberately unexposed.
 
 [UNREACHABLE-FEATURES](UNREACHABLE-FEATURES.md) found three `db.Rendition` fields
 that were built, validated, compiled into FFmpeg arguments — and absent from
@@ -47,8 +49,8 @@ What remains is below.
 | `relay.WithListenIP` | IPv4 loopback | Nothing, today — see [Why the relay pair must stay unwired](#why-the-relay-pair-must-stay-unwired) | **Do not wire.** I ranked this highest and was wrong |
 | `relay.WithAdvertiseIP` | derived from the bind | Only meaningful alongside a non-loopback bind | **Do not wire.** Same |
 | `transcribe.WithDefaultModel` | hardware-derived | An install-wide Whisper model choice. The API accepts a per-job `Model` ([library.go:908](../../internal/api/library.go)) and **the UI never sends it**, so model choice — the main speed/accuracy/RAM tradeoff in transcription — is unreachable by clicking and undefaultable | **High.** Small change, direct operator value |
-| `chat.WithHistory` | 500 messages | The in-memory ring a late-joining browser reads before falling back to the database. Pairs directly with the retention work just shipped: retention sets how deep a user card goes, this sets how much arrives without a query | **Medium.** Natural companion to `settings.chat` |
-| `alerts.WithRetry` | package default | The retry budget for a webhook that is down. Currently one fixed answer for "how hard do we chase a dead endpoint" | **Medium.** The one alerts knob with a real failure story behind it |
+| `chat.WithHistory` | ~~500 messages~~ `settings.chat.historyMessages` | The in-memory ring a late-joining browser reads before falling back to the database. Pairs directly with retention: that sets how deep a user card goes, this sets how much arrives without a query | ✅ **SHIPPED.** Live via `Hub.SetHistory`, bounded 1–50,000 |
+| `alerts.WithRetry` | ~~package default~~ `settings.alerts.retryAttempts` | The retry budget for a webhook that is down. Was one fixed answer for "how hard do we chase a dead endpoint" | ✅ **SHIPPED.** Attempts only; the backoff curve stays unexposed |
 | `chat.WithSendTimeout` | 15s | How long one slow platform may hold up the fan-out reply that tells the operator the other three worked | **Low-medium.** 15s is defensible; only a badly-behaved platform makes it wrong |
 | `alerts.WithFlushInterval` | 500ms | How often the pending alert set is examined | **Low.** Tuning without a failure story |
 | `alerts.WithRulesTTL` | 5s | Rule-list cache lifetime between database reads | **Low.** Same |
@@ -104,12 +106,27 @@ the bind option, then the setting. Not the reverse.
 
 ## Recommendation
 
-One is worth doing:
+**All three worth doing are now done.** `transcribe.WithDefaultModel` shipped
+first; `chat.WithHistory` and `alerts.WithRetry` followed as
+`settings.chat.historyMessages` and `settings.alerts.retryAttempts`.
 
-1. **`transcribe.WithDefaultModel`.** Model choice is the transcription decision,
-   the API already accepts it per job, and there is no way to express a default
-   or to pick one from the UI at all. No security dimension: it selects which
-   local model file a local process loads.
+1. ✅ **`transcribe.WithDefaultModel`.** Model choice is the transcription
+   decision, the API already accepted it per job, and there was no way to
+   express a default or pick one from the UI at all.
+2. ✅ **`chat.WithHistory`.** Applied live by resizing the ring rather than at
+   the next restart, for the reason retention was: a setting that needs a
+   restart is one an operator changes, sees nothing happen, and changes again.
+3. ✅ **`alerts.WithRetry`.** The attempt count only. The backoff curve
+   underneath was chosen against measured behaviour and no failure story argues
+   for moving it, which is the same test the Low rows below fail.
+
+Building the last two turned up something this document had not looked for: the
+comment on `db.ChatSettings` cited a guard, `TestChatDefaultsMatchTheChatPackage`,
+that kept the package default and the settings default in step. **No such test
+existed, in any package, under any name.** Exposing a knob is the moment that
+stops being free — until then there is one number, and afterwards there are two
+that can disagree. Both pairs are now genuinely pinned, in `internal/api`
+because `internal/db` cannot import either package without a cycle.
 
 The `Low` rows should be left alone. Each is one fixed number chosen against a
 measured shape, and exposing a knob nobody has a reason to turn adds a setting to

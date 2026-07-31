@@ -19,7 +19,6 @@ const (
 	defaultSendDepth    = 64
 	defaultFlushEvery   = 500 * time.Millisecond
 	defaultRulesTTL     = 5 * time.Second
-	defaultAttempts     = 4
 	defaultBackoff      = time.Second
 	defaultMaxBackoff   = 30 * time.Second
 	defaultHTTPTimeout  = 10 * time.Second
@@ -29,6 +28,18 @@ const (
 	// gets killed.
 	shutdownDrain = 3 * time.Second
 )
+
+// DefaultAttempts is the retry budget a Notifier built with no options uses.
+//
+// Exported, unlike its neighbours, because db.DefaultSettings has to seed
+// AlertSettings.RetryAttempts with the same number and the two would otherwise
+// drift silently: an install would run one budget until an operator opened the
+// form, then jump to another the moment they saved anything at all.
+//
+// internal/db cannot import this package to check -- chat and alerts both
+// depend on db, so the arrow only points one way -- which is why the guard
+// lives in internal/api, where both are already visible.
+const DefaultAttempts = 4
 
 // Doer is the HTTP client, narrowed so a test can count attempts without a
 // listening socket. *http.Client satisfies it.
@@ -149,7 +160,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 		doer:       &http.Client{Timeout: defaultHTTPTimeout},
 		now:        time.Now,
 		timeout:    defaultHTTPTimeout,
-		attempts:   defaultAttempts,
+		attempts:   DefaultAttempts,
 		backoff:    defaultBackoff,
 		maxBackoff: defaultMaxBackoff,
 		flushEvery: defaultFlushEvery,
@@ -360,6 +371,34 @@ func (n *Notifier) deliver(ctx context.Context, d Delivery) {
 	n.bump(func(s *Stats) { s.Sent++; s.LastSent = sent; s.LastError = "" })
 }
 
+// SetRetry changes the retry budget on a running Notifier.
+//
+// Separate from WithRetry because the budget is an operator setting now, and a
+// setting that only takes effect on restart is one an operator changes, sees
+// nothing happen, and changes again.
+//
+// Only the attempt count moves. The backoff curve was chosen against measured
+// behaviour and no failure story argues for exposing it -- see AlertSettings in
+// internal/db for why that is a decision rather than an omission.
+//
+// A delivery already in flight keeps the budget it started with; see post.
+func (n *Notifier) SetRetry(attempts int) {
+	if n == nil || attempts <= 0 {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.attempts = attempts
+}
+
+// retryBudget reads the attempt count under the lock, so one delivery can take
+// a stable snapshot of a value a settings save may be changing.
+func (n *Notifier) retryBudget() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.attempts
+}
+
 // post encodes and delivers with bounded retries.
 //
 // The retry classification is the whole point: a 404 from a deleted Slack
@@ -371,8 +410,16 @@ func (n *Notifier) post(ctx context.Context, d Delivery) error {
 		return err
 	}
 
+	// Read ONCE, before the loop. SetRetry can change this from a settings save
+	// while a delivery is in flight, and the budget has to be a fixed number for
+	// the duration of one delivery or the loop is comparing its counter against
+	// a moving target -- lowering it mid-retry would strand an attempt already
+	// slept for. Taking a snapshot also keeps the -race detector honest about a
+	// field the delivery goroutine would otherwise read unsynchronised.
+	budget := n.retryBudget()
+
 	var last error
-	for attempt := 1; attempt <= n.attempts; attempt++ {
+	for attempt := 1; attempt <= budget; attempt++ {
 		if attempt > 1 {
 			n.bump(func(s *Stats) { s.Retries++ })
 		}
@@ -381,7 +428,7 @@ func (n *Notifier) post(ctx context.Context, d Delivery) error {
 			return nil
 		}
 		last = err
-		if wait < 0 || attempt == n.attempts {
+		if wait < 0 || attempt == budget {
 			return last
 		}
 		if wait == 0 {

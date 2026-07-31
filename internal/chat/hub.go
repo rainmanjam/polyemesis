@@ -235,6 +235,53 @@ func (h *Hub) SetRetention(age time.Duration, keep int, purgeEvery time.Duration
 	}
 }
 
+// SetHistory resizes the in-memory ring on a running Hub, keeping the newest
+// messages that still fit.
+//
+// Separate from WithHistory for the same reason SetRetention is separate from
+// WithRetention: this is an operator setting now, and one that only takes
+// effect on restart is one an operator changes, sees nothing happen, and
+// changes again.
+//
+// The ring is REALLOCATED rather than resliced. Growing by reslicing a
+// wrapped ring would silently reinterpret the tail as live entries, and
+// shrinking it would leave histAt pointing past the end -- both produce a
+// scrollback that is subtly wrong rather than an error anybody notices. Copying
+// out in order and starting a fresh ring is O(n) on a bounded n, and it runs
+// when an operator saves a form.
+//
+// Shrinking discards the OLDEST surplus, which is the direction that matches
+// what the ring is for: a connecting browser wants the most recent traffic.
+func (h *Hub) SetHistory(n int) {
+	if n <= 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if n == len(h.history) {
+		return
+	}
+
+	keep := h.histN
+	if keep > n {
+		keep = n
+	}
+	next := make([]Message, n)
+	if keep > 0 {
+		// The newest `keep` entries, oldest-first, so the copy lands in the
+		// same order History reads.
+		first := (h.histAt - keep + len(h.history)*2) % len(h.history)
+		for i := 0; i < keep; i++ {
+			next[i] = h.history[(first+i)%len(h.history)]
+		}
+	}
+	h.history = next
+	h.histCap = n
+	h.histN = keep
+	// A full ring must wrap to 0, not point one past the end.
+	h.histAt = keep % n
+}
+
 // New creates a Hub and starts its background flusher. Close stops it.
 func New(opts ...Option) *Hub {
 	h := &Hub{

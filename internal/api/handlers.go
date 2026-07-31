@@ -22,6 +22,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -748,6 +749,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// about twice. Rebuilding the engine here is also what recompiles a changed
 	// rule -- without it a new pattern would not apply until the next restart.
 	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod)
+	// And the same for alert delivery: a retry budget that stores, returns 200
+	// and keeps chasing on the old count is the third instance of the silent
+	// no-op this handler now guards against three times.
+	ApplyAlertSettings(s.mgr, settings.Alerts)
 	writeJSON(w, http.StatusOK, settings)
 }
 
@@ -768,6 +773,27 @@ func ApplyChatRetention(hub *chat.Hub, c db.ChatSettings) {
 		age = -1
 	}
 	hub.SetRetention(age, c.KeepMessages, time.Duration(c.PurgeMinutes)*time.Minute)
+	// The in-memory ring is a separate bound from the stored one and is applied
+	// here for the same reason: it decides what a browser connecting one second
+	// after the save receives.
+	hub.SetHistory(c.HistoryMessages)
+}
+
+// ApplyAlertSettings pushes the stored delivery policy into the running engines.
+//
+// Takes the Manager rather than a Notifier because there is one Notifier PER
+// ENGINE and engines come and go with sources. Handing this a single Notifier
+// would apply the setting to one programme and leave every other one — and
+// every source added afterwards — on the old budget, which is a disagreement an
+// operator has no way to see.
+//
+// Shared with startup, like ApplyChatRetention, so a fresh boot and a settings
+// save cannot end up chasing a dead endpoint for different lengths of time.
+func ApplyAlertSettings(mgr *engine.Manager, a db.AlertSettings) {
+	if mgr == nil {
+		return
+	}
+	mgr.SetAlertRetry(a.RetryAttempts)
 }
 
 // ------------------------------------------------------------- destinations

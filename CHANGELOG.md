@@ -8,6 +8,31 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **Chat scrollback sent on connect is now an operator setting**
+  (`chat.historyMessages`). This is the in-memory ring a browser reads the
+  instant it opens the page, before any stored history is queried — a different
+  number from the retention bounds beside it, which govern what is kept on disk.
+  Applied live by resizing the ring, so it takes effect on the next connection
+  rather than the next restart. Bounded 1–50,000 rather than at the millions
+  `keepMessages` allows, because the ring is allocated in full up front: the
+  ceiling is memory reserved whether or not anyone is talking.
+- **Alert delivery attempts are now an operator setting**
+  (`alerts.retryAttempts`). How hard a webhook that is not answering gets chased
+  before the alert is dropped, 1–10, first try included. Applied to every
+  running engine and remembered for engines created later, so a source added
+  after the save does not quietly run a different budget from the rest. Only
+  retryable failures are affected — a 404 from a deleted webhook is still
+  permanent. The backoff curve underneath stays unexposed: it was chosen against
+  measured behaviour and nothing argues for moving it.
+
+  These were the last two knobs `docs/roadmap/UNREACHABLE-KNOBS.md` rated worth
+  exposing. Building them surfaced a separate defect: `db.ChatSettings` cited a
+  test, `TestChatDefaultsMatchTheChatPackage`, that kept the package default and
+  the settings default in step. **That test did not exist in any package under
+  any name.** Both pairs are now genuinely pinned.
+
 ### Fixed
 
 - **The VA-API probe tested the wrong GPU on a multi-GPU host.** Detection

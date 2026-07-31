@@ -744,6 +744,9 @@ export interface Settings {
   /** Automatic chat moderation. Optional so a client that predates it can still
    *  PUT settings. See AutomodSettings below. */
   automod?: AutomodSettings;
+  /** Alert delivery policy. Optional so a client that predates it can still
+   *  PUT settings. See AlertSettings below. */
+  alerts?: AlertSettings;
 }
 
 /** Bounds on the stored chat scrollback.
@@ -759,6 +762,28 @@ export interface ChatRetentionSettings {
   keepMessages: number;
   /** How often the sweep runs. */
   purgeMinutes: number;
+  /** Size of the in-memory ring a connecting browser reads before it falls
+   *  back to querying the database.
+   *
+   *  Bounded far lower than `keepMessages` because the two live in different
+   *  places: that one is rows on disk, paid for as they arrive, while this ring
+   *  is allocated in full up front — the number is memory held on a silent
+   *  channel exactly as on a busy one.
+   *
+   *  Optional so a client that predates it can still PUT settings. */
+  historyMessages?: number;
+}
+
+/** Install-wide alert delivery policy. Per-rule matching lives on the rule. */
+export interface AlertSettings {
+  /** How many times one delivery is tried before it is given up on, the first
+   *  try included.
+   *
+   *  The backoff curve underneath is deliberately not exposed: it was chosen
+   *  against measured behaviour and nothing argues for changing it. What an
+   *  operator gets to decide is how long a dead endpoint is chased before the
+   *  alert is dropped, which depends on their endpoint rather than on us. */
+  retryAttempts: number;
 }
 
 // ---------------------------------------------------------------- failover

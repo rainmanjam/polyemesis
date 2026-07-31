@@ -59,6 +59,7 @@ import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
   ApiToken,
   CertInfo,
+  ChatRetentionSettings,
   CredentialCheck,
   FailoverReturn,
   IngestMode,
@@ -536,6 +537,29 @@ function PullIngestFields({
 
 /* ---------------------------------------------------------------- pipeline */
 
+/** Every chat field, filled from the draft or from the server's defaults.
+ *
+ *  The controls below used to rebuild the chat object field by field, naming
+ *  each sibling explicitly. That works right up until a field is ADDED: the
+ *  handlers that predate it keep constructing an object without it, so editing
+ *  the retention hours silently drops the new value and the save comes back
+ *  rejected for a field the operator never touched. `historyMessages` was the
+ *  field that would have done it.
+ *
+ *  Spreading this instead means a handler names only what it changes, and a
+ *  future fifth field is carried by every existing control for free.
+ *
+ *  The fallbacks mirror db.DefaultSettings. They are reached only before the
+ *  first GET lands or against a server too old to send the key. */
+function chatFrom(draft: Settings): Required<ChatRetentionSettings> {
+  return {
+    retentionHours: draft.chat?.retentionHours ?? 2,
+    keepMessages: draft.chat?.keepMessages ?? 2000,
+    purgeMinutes: draft.chat?.purgeMinutes ?? 5,
+    historyMessages: draft.chat?.historyMessages ?? 500,
+  };
+}
+
 function PipelineSettings({
   settings,
   onSave,
@@ -647,11 +671,7 @@ function PipelineSettings({
                 onChange={(e) =>
                   setDraft({
                     ...draft,
-                    chat: {
-                      retentionHours: Number(e.target.value),
-                      keepMessages: draft.chat?.keepMessages ?? 2000,
-                      purgeMinutes: draft.chat?.purgeMinutes ?? 5,
-                    },
+                    chat: { ...chatFrom(draft), retentionHours: Number(e.target.value) },
                   })
                 }
                 className="w-28"
@@ -670,17 +690,34 @@ function PipelineSettings({
                 onChange={(e) =>
                   setDraft({
                     ...draft,
-                    chat: {
-                      retentionHours: draft.chat?.retentionHours ?? 2,
-                      keepMessages: Number(e.target.value),
-                      purgeMinutes: draft.chat?.purgeMinutes ?? 5,
-                    },
+                    chat: { ...chatFrom(draft), keepMessages: Number(e.target.value) },
                   })
                 }
                 className="w-32"
               />
               <span className="text-[10px] text-muted-foreground">
                 A floor, whatever their age.
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-history">Send on connect (messages)</Label>
+              <Input
+                id="chat-history"
+                type="number"
+                min={LIMITS.chatHistoryMessages.min}
+                max={LIMITS.chatHistoryMessages.max}
+                value={draft.chat?.historyMessages ?? 500}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: { ...chatFrom(draft), historyMessages: Number(e.target.value) },
+                  })
+                }
+                className="w-32"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                Scrollback without a query.
               </span>
             </div>
           </div>
@@ -701,6 +738,13 @@ function PipelineSettings({
             Chat is small. A channel averaging ten messages a second stores roughly 7&nbsp;MB an
             hour; most are nowhere near that.
           </span>
+          <span className="text-[10px] text-muted-foreground">
+            <strong>Send on connect</strong> is a different kind of number from the other two. Those
+            bound what is kept on disk; this one is a buffer held in memory, allocated in full
+            whether or not anyone is talking. It is what a browser receives the instant it opens the
+            page, before any of the stored history is queried &mdash; so raising it costs memory all
+            the time to make the first screen fuller.
+          </span>
           <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
             {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
           </Button>
@@ -712,6 +756,53 @@ function PipelineSettings({
           a rate detector with a two-hour scrollback behind it is a different
           instrument from one with a week. */}
       <AutomodMatrix settings={draft} onChange={setDraft} />
+
+      {/* Alert DELIVERY, not alert matching. Which conditions fire is per-rule
+          and lives on the Automation page; this is the one install-wide answer
+          behind all of them, and it is stored in the same settings tree as
+          everything else on this page — so it is saved by the same button. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Alert delivery</CardTitle>
+          <CardDescription>
+            How hard a webhook that is not answering gets chased, before the alert is given up on.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="alert-attempts">Delivery attempts</Label>
+            <Input
+              id="alert-attempts"
+              type="number"
+              min={LIMITS.alertRetryAttempts.min}
+              max={LIMITS.alertRetryAttempts.max}
+              value={draft.alerts?.retryAttempts ?? 4}
+              onChange={(e) =>
+                setDraft({ ...draft, alerts: { retryAttempts: Number(e.target.value) } })
+              }
+              className="w-28"
+            />
+            <span className="text-[10px] text-muted-foreground">
+              Including the first try. 1 means never retry.
+            </span>
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            Only failures worth retrying are retried. A 404 from a webhook somebody deleted is
+            permanent, and trying it again four times only delays every alert queued behind it; a
+            502 from a reverse proxy is exactly what these attempts are for.
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            The wait between attempts backs off automatically to a 30&nbsp;second ceiling, so the
+            top of this range is already several minutes of chasing one dead endpoint. Bounded is
+            the point &mdash; retrying forever turns a single dead webhook into a queue that never
+            drains.
+          </span>
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </CardContent>
+      </Card>
+
       <div className="flex justify-end">
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
           {saving ? <Loader2 className="animate-spin" /> : <Save />} Save

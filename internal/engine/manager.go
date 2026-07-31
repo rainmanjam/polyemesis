@@ -56,6 +56,13 @@ type Manager struct {
 	tw        *transcribe.Tools
 	modelsDir string
 	nice      func(name string, args []string) (string, []string)
+
+	// alertAttempts is remembered for the same reason and against the same
+	// failure: a source added after the setting was saved would otherwise chase
+	// a dead webhook for a different number of tries than every other source,
+	// with nothing to show an operator that the two disagree. Zero means
+	// "never set", and leaves the alerts package default in place.
+	alertAttempts int
 }
 
 // NewManager builds the manager. No engines exist until Start.
@@ -145,9 +152,16 @@ func (m *Manager) Sync() error {
 		}
 		m.mu.RLock()
 		tw, dir, nice := m.tw, m.modelsDir, m.nice
+		attempts := m.alertAttempts
 		m.mu.RUnlock()
 		if tw != nil {
 			eng.SetTranscriber(tw, dir, nice)
+		}
+		// Zero means the operator never set one, which leaves the alerts
+		// package default rather than clamping this engine to something no
+		// other engine is using. SetRetry tolerates a nil Notifier.
+		if attempts > 0 {
+			eng.Alerts().SetRetry(attempts)
 		}
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
@@ -410,6 +424,27 @@ func (m *Manager) SetTranscriber(w *transcribe.Tools, modelsDir string, nice fun
 	m.mu.Unlock()
 	for _, eng := range m.Engines() {
 		eng.SetTranscriber(w, modelsDir, nice)
+	}
+}
+
+// SetAlertRetry applies the alert delivery budget to every engine, now and to
+// any engine created later.
+//
+// Remembered rather than applied once, for the same reason SetTranscriber is:
+// engines are created and destroyed as sources come and go, so a value pushed
+// only into the engines running at save time is silently lost the moment an
+// operator adds a source. That failure is invisible -- the new source's alerts
+// simply chase a dead endpoint for a different length of time than every other
+// source's -- which makes it exactly the kind worth designing out.
+func (m *Manager) SetAlertRetry(attempts int) {
+	if attempts <= 0 {
+		return
+	}
+	m.mu.Lock()
+	m.alertAttempts = attempts
+	m.mu.Unlock()
+	for _, eng := range m.Engines() {
+		eng.Alerts().SetRetry(attempts)
 	}
 }
 
