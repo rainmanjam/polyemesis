@@ -39,7 +39,17 @@ Summing tracks can exceed full scale. The options:
 | `auto` (default) | A limiter is inserted whenever two or more tracks are combined, and omitted for a single track |
 | `off` | No limiter. You are responsible for the gain staging |
 | `limiter` | Always inserted |
-| `loudnorm` | EBU R128 loudness normalization to −16 LUFS instead of a limiter |
+| `loudnorm` | EBU R128 loudness normalization instead of a limiter |
+
+**A loudness target changes what `auto` does.** Naming a target on the
+destination is itself a request for loudness normalization, so `auto` arms
+`loudnorm` at that target rather than the limiter — including for a single
+track, where it would otherwise insert nothing. `off` and `limiter` are explicit
+choices and are never overridden; a target set alongside either is ignored for
+this stage.
+
+Without a target, `loudnorm` runs at −16 LUFS, the figure the streaming
+platforms expect.
 
 > polyemesis sets `amix=normalize=0` deliberately. FFmpeg's default divides the
 > sum by the number of inputs, which quietly drops a three-track mix by about
@@ -60,7 +70,11 @@ you can see the coefficients it chose and change them.
 Per destination, independent of the mix:
 
 - **Loudness target** — EBU R128, measured *after* routing, which is what the
-  platform on the other end actually receives.
+  platform on the other end actually receives. It is single-pass, because a live
+  programme is not available to measure in advance: it adapts as it goes and
+  converges over roughly the first minute, so an early reading is not yet the
+  number you will deliver. Setting one also arms `loudnorm` as the clip stage —
+  see above.
 - **Ducking** — attenuate one track group while another is active.
 - **Audio delay** — positive or negative, in milliseconds.
 

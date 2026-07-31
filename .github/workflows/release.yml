@@ -38,6 +38,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # A tag name goes into a Docker tag and a filename, and neither accepts a
+      # slash. `v0.1.0` is fine, so a real release never notices -- but a
+      # workflow_dispatch rehearsal runs from a BRANCH, and a conventional
+      # branch name like `docs/accuracy-pass` produces
+      # `polyemesis:docs/accuracy-pass-cuda`, which buildx refuses as an invalid
+      # reference. The rehearsal was therefore impossible from any branch named
+      # the way this project names branches, which is the one situation it
+      # exists to serve.
+      #
+      # Read from the environment rather than interpolated into the script, so
+      # a ref name can never be treated as shell.
+      - name: Derive a ref-safe version
+        run: echo "VERSION=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       # QEMU lets one amd64 runner produce an arm64 image. It is slower than a
       # native arm64 runner but needs no extra infrastructure.
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
@@ -72,7 +86,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ env.VERSION }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ github.event_name == 'push' }}
@@ -90,10 +104,15 @@ jobs:
           context: .
           file: Dockerfile.cuda
           platforms: linux/amd64
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ env.VERSION }}
+          # Labels on the GPU images too. They were built without any, so both
+          # published with no description, source or licence in the registry --
+          # the Dockerfiles now carry their own as well, which is what a manual
+          # `docker build` gets.
+          labels: ${{ steps.meta.outputs.labels }}
           tags: |
             ${{ env.IMAGE }}:cuda
-            ${{ env.IMAGE }}:${{ github.ref_name }}-cuda
+            ${{ env.IMAGE }}:${{ env.VERSION }}-cuda
           push: ${{ github.event_name == 'push' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -104,13 +123,30 @@ jobs:
           context: .
           file: Dockerfile.vaapi
           platforms: linux/amd64
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ env.VERSION }}
+          labels: ${{ steps.meta.outputs.labels }}
           tags: |
             ${{ env.IMAGE }}:vaapi
-            ${{ env.IMAGE }}:${{ github.ref_name }}-vaapi
+            ${{ env.IMAGE }}:${{ env.VERSION }}-vaapi
           push: ${{ github.event_name == 'push' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Docker Hub does not read the repository's README on its own: without
+      # this the listing shows an empty overview, which is what a page nobody
+      # scrolls past looks like. Only on a real tag, and only if it can log in.
+      - name: Push the README to Docker Hub
+        if: github.event_name == 'push'
+        uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77 # v4.0.2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.IMAGE }}
+          short-description: "Self-hosted restreaming with per-destination audio routing"
+          readme-filepath: ./README.md
+        # Metadata is not the release. A Docker Hub API hiccup must not fail a
+        # run whose images and binaries already published.
+        continue-on-error: true
 
   binaries:
     name: native binaries
@@ -130,10 +166,13 @@ jobs:
       # Docker is never required to run polyemesis: `make release` produces a
       # self-contained binary per platform with the web UI embedded, and the
       # only external requirement is FFmpeg on the host.
+      # Same slash problem as the images job: VERSION lands in the output
+      # filename, so a branch named `docs/accuracy-pass` makes `make release`
+      # write `dist/polyemesis-docs/accuracy-pass-linux-amd64` -- a directory,
+      # which the checksum step below then chokes on with
+      # "sha256sum: polyemesis-docs: Is a directory".
       - name: Cross-compile
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: make release VERSION="$VERSION"
+        run: make release VERSION="${GITHUB_REF_NAME//\//-}"
 
       # Checksums so someone can verify a download they did not build.
       - name: Checksums

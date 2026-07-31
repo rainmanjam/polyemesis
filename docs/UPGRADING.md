@@ -75,6 +75,25 @@ When you turn it on, publish URLs change: the token becomes the SRT streamid.
 The Sources page shows the new URL for each source. Update your encoders before
 switching, not after.
 
+### Session tokens gained an epoch
+
+A `users.token_epoch` column is added, defaulting to 0, and existing sessions
+carry that same value — so nobody is signed out by the upgrade itself. What
+changes afterwards is that **changing the password now ends every existing
+session**, immediately and everywhere, rather than leaving old cookies valid
+until they expire. That is the point of it; it is only surprising once.
+
+### Kick chat webhooks now require signature verification
+
+Kick webhook deliveries are verified against Kick's published RSA key, which the
+server fetches from `api.kick.com`. A request that cannot be verified is
+refused — including when the key itself could not be retrieved.
+
+If you run Kick chat on a host with restricted outbound access, allow
+`https://api.kick.com/public/v1/public-key` before upgrading. Previously an
+unverified delivery was accepted; an unauthenticated write path is not something
+to fail open on, so it now fails closed instead.
+
 ### `tls.enabled` → `tls.mode`
 
 The old boolean still works, so an existing config keeps its behaviour:

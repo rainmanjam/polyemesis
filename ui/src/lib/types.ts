@@ -741,6 +741,9 @@ export interface Settings {
    *  and a card opened on a returning troublemaker reads as "they have never
    *  said anything" rather than "we did not keep it". */
   chat?: ChatRetentionSettings;
+  /** Automatic chat moderation. Optional so a client that predates it can still
+   *  PUT settings. See AutomodSettings below. */
+  automod?: AutomodSettings;
 }
 
 /** Bounds on the stored chat scrollback.
@@ -1989,4 +1992,126 @@ export interface SearchResults {
   limit: number;
   offset: number;
   markers: [string, string];
+}
+
+/** A media file the server holds.
+ *
+ *  `origin` says where it came from and is DERIVED server-side from which store
+ *  the item was read out of, never stored beside it — a row in the recordings
+ *  table is something the server captured, by construction. */
+export type MediaOrigin = "recorded" | "uploaded" | "clip";
+
+export interface MediaFile {
+  name: string;
+  origin: MediaOrigin;
+  bytes: number;
+  modified: string;
+  /** Paste into a pull source. Relative to the data directory, which is what
+   *  ffmpeg's file:// handling resolves against. */
+  pullUrl: string;
+}
+
+/* --------------------------------------------------------------- automod --
+ *
+ * Automatic chat moderation. See docs/roadmap/CHAT-AUTOMOD.md.
+ *
+ * The switch is three-dimensional — action x platform x checker — because the
+ * same action deserves different trust depending on the evidence behind it, and
+ * because an operator's exposure differs per channel. */
+
+export type AutomodAction =
+  | "flag"
+  | "hide_local"
+  | "hide"
+  | "delete"
+  | "timeout"
+  | "ban";
+
+export type AutomodChecker = "rules" | "history" | "model";
+
+/** One switch, plus whether the platform can do it at all.
+ *
+ *  `available` is derived server-side from the platform capability matrix and
+ *  is not a stored setting. An unavailable cell renders inert with its reason
+ *  rather than as an unticked box: a switch that silently does nothing is worse
+ *  than no switch, because the operator believes the channel is protected. */
+export interface AutomodCell {
+  platform: string;
+  action: AutomodAction;
+  checker: AutomodChecker;
+  auto: boolean;
+  available: boolean;
+  reason?: string;
+}
+
+export interface AutomodRule {
+  id: number;
+  name: string;
+  enabled: boolean;
+  pattern: string;
+  action: AutomodAction;
+  timeoutSeconds?: number;
+}
+
+/** Bounds for the per-author sequence detectors — the only checker that can see
+ *  rate and repetition, which are properties of a sequence rather than a
+ *  message. */
+export interface AutomodHistory {
+  windowSeconds: number;
+  maxMessages: number;
+  maxRepeats: number;
+  maxLinks: number;
+  maxMentionsPerMessage: number;
+  minLengthForCaps: number;
+  maxCapsRatio: number;
+  action: AutomodAction;
+  timeoutSeconds: number;
+  retainPerAuthor: number;
+  idleEvictionSeconds: number;
+}
+
+export interface AutomodModel {
+  enabled: boolean;
+  endpoint: string;
+  model: string;
+  /** The key itself is never returned. Set it through its own endpoint. */
+  hasApiKey: boolean;
+  timeoutSeconds: number;
+  maxCallsPerHour: number;
+  action: AutomodAction;
+  timeoutForBan?: number;
+  minConfidence: number;
+  instruction: string;
+}
+
+export interface AutomodSettings {
+  enabled: boolean;
+  platformEnabled?: Record<string, boolean>;
+  /** Cells switched on, keyed "platform/action/checker". Absent means off. */
+  on?: Record<string, boolean>;
+  rules?: AutomodRule[];
+  history: AutomodHistory;
+  model: AutomodModel;
+}
+
+/** What the operator sees about model spend and health. */
+export interface AutomodModelStats {
+  callsThisHour: number;
+  ceiling: number;
+  failures: number;
+  lastError?: string;
+  lastCallAt?: string;
+}
+
+/** The server-rendered matrix. Rows, columns and availability all come from the
+ *  server so the UI never keeps a second copy of the vocabulary that could
+ *  drift out of step with what the engine actually understands. */
+export interface AutomodMatrixView {
+  enabled: boolean;
+  platformEnabled?: Record<string, boolean>;
+  cells: AutomodCell[];
+  summary: Record<string, number>;
+  actions: AutomodAction[];
+  checkers: AutomodChecker[];
+  platforms: string[];
 }

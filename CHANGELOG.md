@@ -8,9 +8,18 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing has been tagged yet. Everything below is on `main` and is what a first
-release will contain. Entries are grouped by what they do for an operator rather
-than by which package changed.
+Nothing yet.
+
+## [0.1.0] — 2026-07-30
+
+The first tagged release. Entries are grouped by what they do for an operator
+rather than by which package changed.
+
+**What it is for:** one encoder in, many platforms out, and **a different audio
+mix for each destination**. Video is never re-encoded on a destination path, so
+a dozen destinations cost roughly what one does.
+
+**Read [Known limitations](#known-limitations-at-010) before deploying it.**
 
 ### Multi-source ingest
 
@@ -126,6 +135,70 @@ For the destination that needs one setting nothing else does:
   that tells you whether the result would start without starting it. Treat
   access to it as equivalent to shell access.
 
+### Media uploads
+
+- **Put a file on the server from the browser** — Library → Media. Before this,
+  broadcasting from a file meant copying it onto the box yourself: fine on a
+  Linux host you already have a session on, a wall for everyone running the
+  container.
+- **The filename you send is discarded.** This is the only endpoint where a
+  caller supplies both the bytes and something path-shaped, so the server names
+  the file itself, with a random suffix that also stops an upload overwriting
+  an existing one by guessing its name.
+- **Nothing is left behind by a failure.** The body streams to a temporary file
+  and is renamed on success, so an oversized, empty or cancelled upload leaves
+  no partial file — which matters because a half-written video is not visibly
+  broken in a listing, and the operator would find out when the broadcast they
+  scheduled went to air.
+- **Free space is checked before the write**, not discovered during it. A
+  filled volume takes the database and the HLS preview with it.
+- **Every file carries an origin** — *uploaded*, *recorded* or *clip* — derived
+  from which store it came out of rather than stored beside it. Uploads live in
+  their own directory, so a retention policy written about footage the server
+  captured cannot delete a file an operator deliberately put there.
+
+### Automatic chat moderation
+
+Three checkers, cheapest first, and a switch matrix over all of them.
+
+- **Rules** — regular expressions over one message. Go's `regexp` is RE2, so an
+  operator-supplied pattern cannot become a denial of service. Normalisation
+  defeats the evasions people actually use: case, padded and doubled letters,
+  zero-width characters, leetspeak and Cyrillic homoglyphs.
+- **History** — a *sequence* from one author, and the layer neither of the
+  others can replace. Rate and repetition are properties of a sequence, so no
+  per-message classifier can see them: ten identical messages are individually
+  innocuous and collectively the commonest abuse there is. Detects flooding,
+  repeated phrases through case and spacing, link and mention spam, and
+  sustained upper case.
+- **Model** — an optional external API, asked only about what the first two
+  could not settle, and **off by default**. Any OpenAI-compatible endpoint,
+  including a locally hosted one.
+
+**The switch is three-dimensional: action × platform × checker.** The same
+action deserves different trust depending on the evidence — a regex hit is
+reproducible and a model verdict is not — and an operator's exposure differs per
+channel. Cells are gated by what each platform can actually do, and an
+unavailable one renders inert *with its reason* rather than as an unticked box:
+a switch that silently does nothing leaves the operator believing that channel
+is protected.
+
+**Nothing is automatic on a fresh install except flagging for review.**
+Auto-ban is offered wherever the platform supports it and defaults off for every
+checker, the model included — refusing to expose a capability is not a safety
+feature, it is a decision taken away from the person who knows their channel.
+There are per-platform and global kill switches, because mid-incident nobody
+should be unticking fifteen boxes.
+
+**It fails open, everywhere.** A model timeout, 500, rate-limit or unreadable
+key lets the message through and flags it; a rule that will not compile is
+logged loudly and the other checkers keep running; the action queue drops rather
+than blocking, because blocking would stall chat for every viewer during exactly
+the raid it exists for. A moderation outage must not silence a chat.
+
+Messages display *before* automod sees them and are retracted after, so nothing
+here can make chat feel slow.
+
 ### Operations
 
 - Prometheus metrics, alert rules with webhook delivery, and schedules.
@@ -138,6 +211,15 @@ For the destination that needs one setting nothing else does:
   changing the password bumps a token epoch and every token issued before it
   stops working — which is what "somebody else has my session" has to mean.
 - Fourteen UI languages.
+- **An interactive Linux installer** (`scripts/install.sh`), in Docker or binary
+  mode, with rollback on failure. It exists for the traps that a hand-written
+  `docker run` reliably falls into: `/udp` on the SRT port, a 30-second stop
+  grace period so a recording is finalised rather than truncated, a UDP firewall
+  rule, and `CAP_NET_BIND_SERVICE` when ACME is chosen. Binary mode refuses to
+  proceed below the FFmpeg 6.0 floor — naming the caller's distribution version
+  where it recognises it — and verifies the download against the release's
+  published `SHA256SUMS`. It never handles a password, because there is no
+  account until the first-run screen creates one.
 
 ### Security
 
@@ -183,6 +265,13 @@ Bugs worth naming, because each was found by measurement rather than by review:
   loss, so tabbing out of a field was an outage. Changes are now explicit.
 - **The relay forwarded zero-length datagrams**, which FFmpeg reports as EOF —
   one empty datagram would have ended every consumer on a hub at once.
+- **The VA-API image could not be built at all.** An automated
+  `bump ubuntu from 24.04 to 26.04` changed `Dockerfile.vaapi`'s `FROM` line and
+  left the FFmpeg pin at a 24.04 archive revision that does not exist on 26.04.
+  Nothing caught it: the release workflow runs only on a tag, and the container
+  suites run only on `main`. Found by rehearsing the release. The image now
+  pins Ubuntu 26.04's FFmpeg **8.0.1**, up from 6.1.1, which also brings AV1
+  VA-API and QSV encoders.
 
 ### Testing
 
@@ -193,5 +282,115 @@ Bugs worth naming, because each was found by measurement rather than by review:
 - Browser end-to-end suite against the shipped container.
 - Fixed-value guards on suite check counts, after one suite reported
   *"7 passed, 0 failed — PASSED"* having silently skipped five checks.
+- **A real broadcast now runs on Linux, macOS and Windows on every push**, not
+  just a health check. The cross-platform job pushes a three-track stream in,
+  compiles two destinations with different track selections, and measures
+  per-band energy in each output — so a destination silently carrying the wrong
+  mix fails, where a check that only asked whether FFmpeg exited 0 would pass.
+  This is the part built on process groups, signals and path construction, which
+  is exactly where Windows differs.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/commits/main
+### Documentation
+
+An accuracy pass over every page, checking each claim against the code rather
+than reading for tone. What it found is why it was worth doing:
+
+- The quickstart's **first command pulled from a registry the project has never
+  published to**, and its OBS instructions contradicted `OBS.md` in a way that
+  produced a working stream carrying a single audio track — configuring away the
+  only reason to run polyemesis.
+- `SECURITY.md` and `TLS.md` both promised that **every** response carries
+  `X-Frame-Options: DENY`. The embeddable player deliberately drops it. A
+  security policy that overstates its own coverage is worse than one that states
+  the exception.
+- `TLS.md` documented the `:80` redirect as `301`/`308`, which holds only when
+  `tls.hostname` is set; without it the target comes from the client's own `Host`
+  header and the redirect is deliberately temporary and uncacheable.
+- `HARDWARE.md` contradicted itself on render-node selection. Detection does
+  choose a node and the encode honours it — but the *probe* still names
+  `renderD128` unconditionally, so on a multi-GPU host it tests the wrong device
+  and the editor declines to offer VA-API on the strength of it.
+- `INSTALL.md` claimed `make release` emits no Windows target. It emits two.
+- The stale "nobody has run this on Windows" claim appeared on four separate
+  pages. Platform status is now stated on two axes instead of one adjective —
+  what CI proves, which is identical for Linux, macOS and Windows, and what
+  operating it proves, which is not — so a reader can see where the platforms
+  are equal rather than inferring it from a word.
+- Every file link and all 110 anchor links across 51 markdown files were
+  machine-checked and resolve.
+
+### Known limitations at 0.1.0
+
+Stated here rather than discovered later. None is a bug; each is a boundary.
+
+#### Access and identity
+
+- **One user, no roles.** Access to the UI is full control of the server's
+  streaming and — through expert mode and file destinations — meaningful control
+  of the machine. Put a reverse proxy in front if you need access control.
+- **No audit log.** Nothing records which change was made when, or from where.
+- **OAuth needs your own developer app.** Signing in to YouTube, Twitch, Kick or
+  Facebook works, but each operator registers their own application per platform;
+  there is no shared one. Stream URL and key need none of this. See
+  [PLATFORMS.md](docs/PLATFORMS.md).
+
+#### Ingest
+
+- **RTMP serves at most one source**, carries a single stereo pair, and is
+  unencrypted. SRT is the path that makes this product worth running.
+- **Enhanced RTMP / multitrack FLV is not implemented.** The `enhancedRtmp`
+  config key parses and nothing branches on it.
+
+#### Operating systems
+
+- **Windows is tested, not operated.** It clears the same CI floor as Linux and
+  macOS including a measured broadcast, but nobody has run a real show on it,
+  and **stopping the service truncates an in-progress recording** — the graceful
+  stop is a `CTRL_BREAK_EVENT`, which Windows delivers only through a console.
+- **linux/arm64 is built and verified at the ELF level, not run.**
+- **Homebrew's FFmpeg on macOS has no libsrt.** Use Docker or a build with
+  `--enable-libsrt`.
+
+#### Video
+
+- **No hardware encode has ever been run on real GPU hardware.** Detection,
+  refusal and fallback are all tested with shims; a successful NVENC, QSV or
+  VA-API encode has not been observed. See [HARDWARE.md](docs/HARDWARE.md).
+- **The VA-API probe names `/dev/dri/renderD128` unconditionally**, so on a
+  multi-GPU host it can test the wrong device and decline to offer VA-API on
+  the strength of it. Detection picks the right node; the probe was never wired
+  to it.
+- **FFmpeg 6.x cuts a copied clip up to one GOP long.** Use 8.x for exact
+  out-points.
+- No HDR tone-map path, no compositing or video grid, no Decklink/SDI.
+
+#### Playout
+
+- **Scheduled file broadcast joins mid-file, not at frame 0**, and there is no
+  playlist sequencing. Files can now be uploaded from the browser, but they play
+  one at a time. See [SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md).
+- **LL-HLS is not implemented and was declined deliberately** — FFmpeg cannot
+  emit partial segments at all. Preview latency was tuned to 2.2–3.2 s instead.
+
+#### Automatic moderation
+
+- **The model checker sends chat messages to whatever endpoint you configure.**
+  Off by default, and a locally hosted OpenAI-compatible model keeps everything
+  on your hardware. The rules and history checkers send nothing anywhere. The
+  endpoint is **not** filtered against private addresses, deliberately: a
+  private address is the recommended deployment, and only an admin — who can
+  already read your tokens — can set it. See [SECURITY.md](SECURITY.md).
+- **No moderation is perfect and this one is not tuned on your community.**
+  Every irreversible action starts off for that reason.
+- **Automod has not been run against a real raid.** The bounds are tested — the
+  author ring holds 5,000 distinct authors, evicts the idle ones, and is capped
+  at 20,000 regardless of idleness — but a live incident on a busy channel has
+  not happened.
+
+#### Streaming platforms
+
+- **Instagram Live cannot work** and is marked unsupported rather than shipped
+  as a preset that never connects.
+
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/rainmanjam/polyemesis/releases/tag/v0.1.0

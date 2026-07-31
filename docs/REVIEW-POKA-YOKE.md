@@ -2,6 +2,19 @@
 
 A mistake-proofing walkthrough of polyemesis, code and UI, done 2026-07-28.
 
+> **Status, re-checked 2026-07-30.** All three of the "what I would do first"
+> findings have since been built. The review is left as written, because the
+> reasoning is the reusable part — but read findings 1–3 as history rather than
+> as a to-do list.
+>
+> | Finding | Now |
+> |---|---|
+> | 1 — Settings can drop a live broadcast silently | **Done.** `SettingsPage.tsx` imports `useIngestLive` from `useLiveData`, and the port fields commit on an explicit save rather than on blur |
+> | 2 — `window.confirm` and inconsistent guards | **Done.** `components/ConfirmDestructive.tsx` exists and is used across nine call sites. The only remaining `window.confirm` in the tree is inside that file's own comment, describing what it replaced |
+> | 3 — Numeric inputs do not constrain at the widget | **Done, by a better mechanism than recommended.** Bounds live in `ui/src/lib/limits.ts`; 50 of 55 `type="number"` inputs carry `min` and 41 carry `max`. Rather than serving them from the settings-meta endpoint at runtime, `internal/db/limits_drift_test.go` fails the build when the TypeScript and the Go validator disagree — the drift is caught at test time instead of being avoided by a network round trip |
+>
+> Findings 4–8 have not been re-verified.
+
 Shingo's distinction is the whole of this document: a **control** makes the
 error impossible, a **warning** tells you about it. Warnings are what you build
 when a control is genuinely unavailable — they are not a cheaper substitute for

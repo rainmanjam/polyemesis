@@ -54,14 +54,23 @@ migration to write for somebody else's running system.
 This is the only moment when the simplification is free. After a release it
 would be a breaking change with an upgrade note and a deprecation window.
 
+> **Outcome, 2026-07-30.** The window was used: this landed before the first
+> tag, so the breaking change never broke anything. That is the whole argument
+> of this section, and it is worth keeping visible now that it has been
+> spent — the same reasoning does not apply to the next simplification, because
+> from the first release onward there are installs to carry.
+
 ## What it buys beyond simplicity
 
 **Ingest becomes authenticated by default.** With the token as the only address,
 there is no unauthenticated ingest path left: a publisher that does not present
-a valid token is refused, with a typed reason. Today an SRT port with no
-passphrase accepts whoever reaches it, and
-[SECURITY.md](../SECURITY.md) lists that under what polyemesis does *not*
-defend. That line can go.
+a valid token is refused, with a typed reason. Before this, an SRT port with no
+passphrase accepted whoever reached it, and [SECURITY.md](../SECURITY.md) listed
+that under what polyemesis does *not* defend.
+
+That line is now gone. SECURITY.md instead says SRT is authenticated by
+construction, and the caveat that remains is RTMP's — which has no token routing
+and is protected by its stream key alone.
 
 **One published port, forever.** `docker-compose.yml` stops being something you
 edit when you add a programme.
