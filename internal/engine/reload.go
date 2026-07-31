@@ -1,5 +1,11 @@
 package engine
 
+import (
+	"sync"
+
+	"github.com/rainmanjam/polyemesis/internal/events"
+)
+
 // What happens when an operator changes a setting while the stream is up.
 //
 // This file is the answer, written down as data rather than as prose, because
@@ -257,4 +263,86 @@ var settingsReload = map[string]ReloadRule{
 	"automod.model.timeoutSeconds":  {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
 	"automod.model.action":          {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
 	"automod.model.timeoutForBan":   {ClassLive, "ApplyAutomod", "rebuilds the model checker"},
+}
+
+// ------------------------------------------------------------ what a reconcile did
+
+const (
+	// reloadRestart means a child process was replaced to apply the change.
+	reloadRestart = "restart"
+	// reloadLive means the change reached a process that kept running.
+	reloadLive = "live"
+
+	// eventReload announces what a reconcile moved. Declared here rather than
+	// in internal/events because it is only meaningful to a system that has a
+	// reconciler; the broker takes any type. Same precedent as eventFailover.
+	eventReload events.Type = "reload"
+)
+
+// ReloadNote is one thing a reconcile did.
+type ReloadNote struct {
+	Tier   string `json:"tier"`
+	Name   string `json:"name"`
+	Action string `json:"action"`
+	Reason string `json:"reason"`
+}
+
+// ReloadReport is everything one engine's reconcile did.
+type ReloadReport struct {
+	SourceID   int64        `json:"sourceId"`
+	SourceName string       `json:"sourceName"`
+	Notes      []ReloadNote `json:"notes"`
+}
+
+// reloadRecorder collects notes for one reconcile.
+//
+// It carries its own mutex rather than riding on e.mu because notes are raised
+// from teardown paths that already hold, or are about to take, e.mu -- and
+// because a note must never be the thing that deadlocks a reconcile.
+type reloadRecorder struct {
+	mu    sync.Mutex
+	notes []ReloadNote
+}
+
+func newReloadRecorder() *reloadRecorder { return &reloadRecorder{} }
+
+func (r *reloadRecorder) note(tier, name, action, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.notes = append(r.notes, ReloadNote{Tier: tier, Name: name, Action: action, Reason: reason})
+}
+
+func (r *reloadRecorder) snapshot() []ReloadNote {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ReloadNote(nil), r.notes...)
+}
+
+// noteReload records something this reconcile did, if a reconcile is what is
+// doing it.
+//
+// A nil recorder is the normal case outside Reconcile and the note is dropped
+// on purpose: the preview idling out and the storage guard halting the recorder
+// are real events, but they are not consequences of anything the operator just
+// saved, and folding them into a settings response would tell somebody their
+// edit stopped a recording it had nothing to do with. They already reach the
+// operator as TypeStatus and as alerts.
+func (e *Engine) noteReload(tier, name, action, reason string) {
+	if r := e.reloadRec.Load(); r != nil {
+		r.note(tier, name, action, reason)
+	}
+}
+
+// LastReload is what the most recent reconcile did.
+//
+// Honest limitation: concurrent reconciles interleave into one recorder, so two
+// handlers saving at the same moment each see the union. That is the truth
+// about what moved, which is more useful than a per-caller fiction, but it is
+// not a per-request audit log and must not be read as one.
+func (e *Engine) LastReload() ReloadReport {
+	rep := e.lastReload.Load()
+	if rep == nil {
+		return ReloadReport{SourceID: e.sourceID, SourceName: e.SourceName()}
+	}
+	return *rep
 }

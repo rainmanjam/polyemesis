@@ -753,7 +753,34 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// and keeps chasing on the old count is the third instance of the silent
 	// no-op this handler now guards against three times.
 	ApplyAlertSettings(s.mgr, settings.Alerts)
-	writeJSON(w, http.StatusOK, settings)
+
+	// The EFFECT, not just the intent. "Saved" is a statement about the
+	// database; an operator whose destination card just went grey needs to know
+	// their edit did that, and one whose card did NOT move needs to know the
+	// edit landed somewhere rather than being stored and ignored.
+	//
+	// The settings stay at the TOP LEVEL rather than nested under a key. The UI
+	// types this response as Settings and assigns it straight into state
+	// (`setSettings(await api.putSettings(next))` in three pages), so nesting
+	// would silently blank every form on the page. Embedding inlines the
+	// settings fields and puts reload alongside them, which is additive.
+	writeJSON(w, http.StatusOK, settingsResponse{
+		Settings: settings,
+		Reload:   s.mgr.LastReload(),
+	})
+}
+
+// settingsResponse is the stored settings plus what saving them just did.
+//
+// db.Settings is EMBEDDED rather than named, so its fields marshal at the top
+// level exactly as they did before this existed. That is not a style choice:
+// three UI pages do `setSettings(await api.putSettings(next))` and type the
+// response as Settings, so moving the settings under a key would blank every
+// form on the page the moment somebody saved. Adding a sibling field is
+// additive and older clients ignore it.
+type settingsResponse struct {
+	db.Settings
+	Reload []engine.ReloadReport `json:"reload"`
 }
 
 // ApplyChatRetention pushes the stored bounds into a running Hub.

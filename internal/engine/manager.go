@@ -427,6 +427,20 @@ func (m *Manager) SetTranscriber(w *transcribe.Tools, modelsDir string, nice fun
 	}
 }
 
+// LastReload is what each engine's most recent reconcile did, in display order.
+//
+// One report per engine rather than a merged list: a settings save is
+// install-wide, and an operator with three programmes needs to know which one
+// lost a destination.
+func (m *Manager) LastReload() []ReloadReport {
+	engines := m.Engines()
+	out := make([]ReloadReport, 0, len(engines))
+	for _, eng := range engines {
+		out = append(out, eng.LastReload())
+	}
+	return out
+}
+
 // SetAlertRetry applies the alert delivery budget to every engine, now and to
 // any engine created later.
 //

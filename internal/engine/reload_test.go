@@ -169,3 +169,61 @@ func readGoSources(t *testing.T, dirs []string) string {
 	}
 	return b.String()
 }
+
+// A reconcile that restarts a live output must say so. "Saved" is a statement
+// about the database; an operator watching a card go grey needs to know it was
+// their edit that did it, and an operator whose card did NOT go grey needs to
+// know the edit still landed.
+func TestAReconcileRecordsWhatItRestartedAndWhatItAppliedLive(t *testing.T) {
+	rec := newReloadRecorder()
+	rec.note("destination", "twitch", reloadRestart, "the routing graph changed")
+	rec.note("destination", "youtube", reloadLive, "reconnect policy retuned")
+
+	got := rec.snapshot()
+	if len(got) != 2 {
+		t.Fatalf("notes = %d, want 2", len(got))
+	}
+	if got[0].Action != reloadRestart || got[0].Name != "twitch" {
+		t.Errorf("first note = %+v, want the restart of twitch", got[0])
+	}
+	if got[1].Action != reloadLive {
+		t.Errorf("second note = %+v, want a live apply", got[1])
+	}
+}
+
+// Notes raised outside a reconcile -- the preview idling out, a storage guard
+// halting the recorder -- must not accumulate into the next settings save's
+// report. They are not consequences of anything the operator just did.
+// Asserting on LastReload alone would be vacuous, and was: noteReload writes to
+// reloadRec while LastReload reads lastReload, so with no reconcile ever run the
+// second is nil no matter what the first did. A version of this test that only
+// checked LastReload passed against a noteReload that recorded everything.
+//
+// So it checks the mechanism: no recorder may exist outside a reconcile, and a
+// reconcile's report may contain only what was raised during it.
+func TestNotesRaisedOutsideAReconcileAreDropped(t *testing.T) {
+	e := &Engine{log: testLogger()}
+
+	e.noteReload("preview", "preview", reloadRestart, "idle timeout")
+	if r := e.reloadRec.Load(); r != nil {
+		t.Fatalf("noteReload installed a recorder with no reconcile in flight: %+v",
+			r.snapshot())
+	}
+	if got := e.LastReload().Notes; len(got) != 0 {
+		t.Fatalf("notes = %+v, want none: nothing was reconciling, so nothing an "+
+			"operator did caused this", got)
+	}
+
+	// And the next reconcile must not inherit it. This is the half that matters
+	// -- an operator saving a log level must not be told their edit stopped a
+	// recording the storage guard halted an hour earlier.
+	rec := newReloadRecorder()
+	e.reloadRec.Store(rec)
+	e.noteReload("destination", "twitch", reloadLive, "policy retuned")
+	e.reloadRec.Store(nil)
+
+	notes := rec.snapshot()
+	if len(notes) != 1 || notes[0].Name != "twitch" {
+		t.Fatalf("the reconcile's report = %+v, want only the note raised during it", notes)
+	}
+}

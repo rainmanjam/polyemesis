@@ -110,8 +110,14 @@ type Engine struct {
 	// be captured into the StdoutHandler closure at spawn time, which made
 	// editing it a silent no-op.
 	meterInterval atomic.Int64
-	sinkMu        sync.Mutex
-	sinkCfg       db.LoggingSettings
+
+	// reloadRec is the note collector for the reconcile currently in flight,
+	// nil the rest of the time. Atomic because it is read from teardown paths
+	// that hold e.mu.
+	reloadRec  atomic.Pointer[reloadRecorder]
+	lastReload atomic.Pointer[ReloadReport]
+	sinkMu     sync.Mutex
+	sinkCfg    db.LoggingSettings
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -787,6 +793,25 @@ func (e *Engine) Reconcile() error {
 	if err != nil {
 		return err
 	}
+	// Installed before the first sub-reconcile and cleared after the last, so a
+	// note raised by previewLoop or by the storage guard -- neither of which is
+	// a consequence of anything an operator just saved -- is dropped rather
+	// than reported as one.
+	rec := newReloadRecorder()
+	e.reloadRec.Store(rec)
+	defer func() {
+		e.reloadRec.Store(nil)
+		rep := ReloadReport{SourceID: e.sourceID, SourceName: e.SourceName(), Notes: rec.snapshot()}
+		e.lastReload.Store(&rep)
+		// Nil-checked unlike the publishers around it. Those all run on paths
+		// that only exist after New; this one runs on every Reconcile, and a
+		// partially-built Engine in a test is a pattern this package already
+		// uses -- it panicked exactly that way once during this work.
+		if len(rep.Notes) > 0 && e.bus != nil {
+			e.bus.Publish(eventReload, rep)
+		}
+	}()
+
 	e.mu.Lock()
 	prev := e.settings
 	e.settings = settings
@@ -1266,6 +1291,7 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 // to survive until they come back, or the operator has to make it twice.
 func (e *Engine) applyMeterInterval(m db.MeterSettings) {
 	e.meterInterval.Store(int64(time.Duration(m.IntervalMS) * time.Millisecond))
+	e.noteReload("meters", "meters", reloadLive, "metering interval applied without a respawn")
 }
 
 // meterThrottle rate-limits metering frames on their way to the WebSocket.
@@ -1825,6 +1851,9 @@ func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
 	e.log.Info("destination reconnect policy retuned without a restart",
 		"dest", row.Name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
 		"giveUpAfter", want.MaxRestarts)
+	e.noteReload("destination", row.Name, reloadLive,
+		fmt.Sprintf("reconnect policy retuned to %s..%s, giving up after %d",
+			want.MinBackoff, want.MaxBackoff, want.MaxRestarts))
 
 	if d.proc.Status().State != supervisor.StateFailed || !moreForgiving(before, want) {
 		return
@@ -1834,6 +1863,8 @@ func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
 	d.proc.Restart(ctx)
 	e.log.Info("destination revived: it had given up under the previous limit",
 		"dest", row.Name, "giveUpAfter", want.MaxRestarts)
+	e.noteReload("destination", row.Name, reloadRestart,
+		"it had given up under the previous limit and the new one is more forgiving")
 }
 
 // moreForgiving reports whether want allows more attempts than before.
@@ -2004,6 +2035,7 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	proc.Start()
 	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
+	e.noteReload("destination", row.Name, reloadRestart, "started")
 	return nil
 }
 
@@ -2011,6 +2043,8 @@ func (e *Engine) teardownDest(d *destination) {
 	if d == nil {
 		return
 	}
+	e.noteReload("destination", d.row.Name, reloadRestart,
+		"its command line changed, or it was disabled or removed")
 	if d.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 		d.proc.Stop(ctx)
@@ -2450,12 +2484,15 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	proc.Start()
 	e.log.Info("rendition started", "rendition", row.Name, "encoder", row.Encoder,
 		"bitrate", row.VideoBitrate, "consumers", consumers, "relayPort", hub.Port())
+	e.noteReload("rendition", row.Name, reloadRestart, "started")
 }
 
 func (e *Engine) teardownRendition(r *rendition) {
 	if r == nil {
 		return
 	}
+	e.noteReload("rendition", r.row.Name, reloadRestart,
+		"its encode signature changed, or nothing selects it any more")
 	if r.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 		r.proc.Stop(ctx)
