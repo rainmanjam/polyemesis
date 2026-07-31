@@ -1,0 +1,238 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  /* Tokens copied verbatim from ui/src/index.css. The card is the product's
+     own palette, not an approximation of it — DESIGN-SYSTEM.md's whole point is
+     that :root is the system and every consumer reads the same block. */
+  :root {
+    --surface: #0f1115;
+    --card: #141821;
+    --card-raised: #1a1f2b;
+    --muted: #1c222e;
+    --muted-foreground: #8b94a7;
+    --border: #232a38;
+    --border-strong: #303a4d;
+    --live: #3ecf6d;
+    --warn: #e8a33d;
+    --down: #e5484d;
+    --armed: #45b5d0;
+    --meter-low: #3ecf6d;
+    --meter-mid: #cfd23e;
+    --meter-high: #e8a33d;
+    --meter-peak: #e5484d;
+    --fg: #e6e9ef;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1280px; height: 640px;
+    background: var(--surface);
+    color: var(--fg);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* GitHub's template asks for a 40pt safe border; this uses 56px, because the
+     card also gets cropped to a square in some clients and the extra room keeps
+     the headline out of the crop. */
+  .card {
+    width: 100%; height: 100%;
+    padding: 56px 64px;
+    display: grid;
+    grid-template-columns: 1.02fr 1fr;
+    gap: 52px;
+    align-items: center;
+    position: relative;
+  }
+
+  /* A single wash of signal colour, bottom-left, at very low opacity. Neon's
+     hero is a decorative spectrum; ours is the actual meter palette, which is
+     the one thing a competitor's card cannot show honestly. */
+  .card::before {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(900px 400px at 8% 100%, rgba(62,207,109,.10), transparent 65%),
+      radial-gradient(700px 340px at 60% 0%, rgba(69,181,208,.07), transparent 60%);
+    pointer-events: none;
+  }
+
+  .left { position: relative; z-index: 1; }
+
+  .wordmark {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 26px;
+  }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 30px; }
+  .bars i { width: 4px; border-radius: 1px; display: block; }
+
+  .name {
+    font-size: 30px; font-weight: 600; letter-spacing: -0.01em;
+  }
+
+  h1 {
+    font-size: 60px; line-height: 1.06; font-weight: 640;
+    letter-spacing: -0.028em;
+    margin-bottom: 22px;
+  }
+  h1 em { font-style: normal; color: var(--live); }
+
+  .sub {
+    font-size: 21px; line-height: 1.45; color: var(--muted-foreground);
+    max-width: 30ch;
+  }
+
+  .foot {
+    margin-top: 30px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono); font-size: 14px;
+    color: var(--muted-foreground);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--live); }
+
+  /* The right side is the argument: one source, three destinations, each
+     taking a different set of the same tracks. */
+  .panel {
+    position: relative; z-index: 1;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px 24px 22px;
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--muted-foreground);
+    padding-bottom: 14px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--live);
+  }
+
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+  .row + .row { margin-top: 16px; }
+
+  /* Post-routing level, per destination. Different selections produce
+     different levels, which is the claim made visible rather than asserted. */
+  .meter {
+    grid-column: 1 / -1;
+    height: 6px; border-radius: 3px;
+    background: var(--muted);
+    overflow: hidden; margin-top: 8px;
+  }
+  .meter i {
+    display: block; height: 100%;
+    background: linear-gradient(90deg,
+      var(--meter-low) 0%, var(--meter-low) 62%,
+      var(--meter-mid) 82%, var(--meter-high) 94%, var(--meter-peak) 100%);
+  }
+  .dest { font-size: 15px; font-weight: 550; }
+  .tracks { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground); margin-top: 3px; }
+
+  /* Track chips: filled means this destination carries it. Three rows, three
+     different selections — no two alike, which is the whole product in one
+     glance. */
+  .chips { display: flex; gap: 5px; }
+  .chip {
+    width: 26px; height: 8px; border-radius: 2px;
+    background: var(--muted);
+  }
+  .chip.on-mic   { background: var(--live); }
+  .chip.on-music { background: var(--armed); }
+  .chip.on-com   { background: var(--meter-mid); }
+
+  .legend {
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+    display: flex; gap: 16px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 6px; border-radius: 2px; display: inline-block; }
+</style>
+
+<div class="card">
+  <div class="left">
+    <div class="wordmark">
+      <div class="bars" id="bars"></div>
+      <div class="name">polyemesis</div>
+    </div>
+
+    <h1>One stream in.<br>A <em>different mix</em><br>out of each.</h1>
+
+    <p class="sub">
+      Self-hosted restreaming with per-destination audio routing.
+      Video is copied, never re-encoded.
+    </p>
+
+    <div class="foot">
+      <span class="dot"></span> SRT &amp; RTMP · multitrack · MIT
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span>ROUTING &middot; LOUDNESS AFTER MIX</span>
+      <span class="live-pill"><span class="dot"></span> 3 LIVE</span>
+    </div>
+
+    <div class="row">
+      <div>
+        <div class="dest">YouTube</div>
+        <div class="tracks">mic + music + co-host</div>
+      </div>
+      <div class="chips">
+        <i class="chip on-mic"></i><i class="chip on-music"></i><i class="chip on-com"></i>
+      </div>
+      <div class="meter"><i style="width:88%"></i></div>
+    </div>
+
+    <div class="row">
+      <div>
+        <div class="dest">Twitch</div>
+        <div class="tracks">mic + co-host · no music</div>
+      </div>
+      <div class="chips">
+        <i class="chip on-mic"></i><i class="chip"></i><i class="chip on-com"></i>
+      </div>
+      <div class="meter"><i style="width:69%"></i></div>
+    </div>
+
+    <div class="row">
+      <div>
+        <div class="dest">Podcast</div>
+        <div class="tracks">mic only</div>
+      </div>
+      <div class="chips">
+        <i class="chip on-mic"></i><i class="chip"></i><i class="chip"></i>
+      </div>
+      <div class="meter"><i style="width:44%"></i></div>
+    </div>
+
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--live)"></i> mic</span>
+      <span><i class="swatch" style="background:var(--armed)"></i> music</span>
+      <span><i class="swatch" style="background:var(--meter-mid)"></i> co-host</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* The wordmark's meter bars. Deterministic heights rather than random, so
+     re-rendering the card produces the same image — a social preview that
+     changes on every build is one nobody can diff. */
+  const heights = [10, 18, 26, 30, 22, 14, 20, 28];
+  const colours = ["--meter-low","--meter-low","--meter-mid","--meter-high",
+                   "--meter-mid","--meter-low","--meter-low","--meter-mid"];
+  const el = document.getElementById("bars");
+  heights.forEach((h, i) => {
+    const b = document.createElement("i");
+    b.style.height = h + "px";
+    b.style.background = `var(${colours[i]})`;
+    el.appendChild(b);
+  });
+</script>
