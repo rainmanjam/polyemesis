@@ -33,3 +33,8 @@ internal/web/dist/*
 # tracked would commit an entire second checkout into the tree.
 .claude/
 .superpowers/
+
+# Presentation material: slides for a video or a talk, built from the docs but
+# not part of them. Regenerated freely and often half-finished, and a deck is
+# not something a reader of this repository needs in order to run polyemesis.
+presentation/
