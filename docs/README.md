@@ -10,6 +10,7 @@ deliberately does not do, and how to get it running. These are the details.
 | [QUICKSTART.md](QUICKSTART.md) | First stream in about five minutes |
 | [INSTALL.md](INSTALL.md) | Per-platform installation, including what to do when your distro's FFmpeg is too old |
 | [CONFIGURATION.md](CONFIGURATION.md) | `config.yaml`, flags, and — more usefully — *which* settings live in a file and which live in the UI |
+| [HOT-RELOAD.md](HOT-RELOAD.md) | Which settings drop a connection when you change them mid-stream, and which do not |
 | [TLS.md](TLS.md) | Certificates, ACME, reverse proxies, HSTS, and the SSH tunnel |
 | [HARDWARE.md](HARDWARE.md) | GPU encoding, what helps and what does not |
 

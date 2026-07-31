@@ -33,8 +33,35 @@ its first tagged release.
   the settings default in step. **That test did not exist in any package under
   any name.** Both pairs are now genuinely pinned.
 
+- **Changing a destination's reconnect policy no longer drops it.**
+  `minBackoffSeconds`, `maxBackoffSeconds` and `giveUpAfter` govern what the
+  supervisor does *after* FFmpeg exits and never reach the command line, yet
+  editing one used to tear the destination down and rebuild it — so the only way
+  to say "be more patient with this platform" was to drop the connection to it.
+  They are now delivered to the running process. A retune shortens a backoff
+  already in flight and never lengthens it, and never resets the restart
+  counters. Raising the give-up threshold on a destination that has already
+  given up does restart it, deliberately: leaving it failed for ever would be
+  the silent no-op this work exists to remove.
+- **Saving settings now reports what it did.** `PUT /api/v1/settings` returns a
+  `reload` array alongside the settings, naming what restarted, what applied
+  live, and why. "Saved" is a statement about the database; this is a statement
+  about the stream. See [docs/HOT-RELOAD.md](docs/HOT-RELOAD.md).
+- **Every settings field now has a recorded reload class.** 141 rules — one per
+  leaf of the settings tree — each naming a class, the function that carries the
+  change, and a reason. A reflection walk fails the build when a field is added
+  without one, when a rule names a field that no longer exists, or when it names
+  a function nobody wrote. The distribution: 87 live, 49 respawn, 1 rebind, 2
+  on-demand, 2 next-start.
+
 ### Fixed
 
+- **`meters.intervalMs` was stored, reported as saved, and ignored.** The value
+  was captured into the metering sidecar's stdout handler when it spawned, and
+  it is not part of that process's restart signature — so changing it did
+  nothing at all until some unrelated edit happened to restart the meters.
+  Lowering the interval to watch a quiet channel appeared to work and did not.
+  The throttle now reads the current value per frame.
 - **The VA-API probe tested the wrong GPU on a multi-GPU host.** Detection
   already ranked the render nodes under `/dev/dri` and handed the encode the
   right one; the probe ignored that and named `/dev/dri/renderD128` regardless.
