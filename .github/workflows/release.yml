@@ -25,9 +25,12 @@ on:
         type: boolean
         default: true
 
-permissions:
-  contents: write # needed to create the GitHub Release and upload assets
-  packages: write # needed to push to ghcr.io
+# Declared per job rather than once here. The two jobs need DIFFERENT things,
+# and granting the union to both hands each of them a capability it never uses:
+# the images job could have rewritten the repository, and the binaries job
+# could have pushed a container image. Neither is a bug today; both are a
+# larger blast radius than the work requires, and this workflow is the one that
+# runs with a registry token and publishes what people install.
 
 env:
   IMAGE: rainmanjam/polyemesis
@@ -61,6 +64,9 @@ jobs:
   images:
     name: container images
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout only; this job never writes to the repository
+      packages: write # ghcr.io, via GITHUB_TOKEN
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -201,6 +207,10 @@ jobs:
   binaries:
     name: native binaries
     runs-on: ubuntu-latest
+    permissions:
+      # Creates the GitHub Release and uploads the assets. No packages: write —
+      # this job pushes no images.
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
