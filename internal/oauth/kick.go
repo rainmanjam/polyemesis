@@ -60,7 +60,17 @@ func ManualKeyFor(p db.Platform) (ManualKey, bool) {
 // Kick implements Kick's OAuth 2.1 flow plus the parts of its public API that
 // polyemesis can use: channel identity, title/category push, category search
 // and livestream stats.
-type Kick struct{}
+type Kick struct {
+	// idBase overrides https://id.kick.com. Empty in production; set by tests.
+	idBase string
+}
+
+func (k *Kick) idEndpoint() string {
+	if k.idBase != "" {
+		return k.idBase
+	}
+	return kickIDBase
+}
 
 // Endpoints are vars so tests can point the provider at a stub. Nothing at
 // runtime rewrites them.
@@ -130,7 +140,7 @@ func (k *Kick) AuthURL(clientID, redirectURI, state, challenge string) string {
 		q.Set("code_challenge", challenge)
 		q.Set("code_challenge_method", "S256")
 	}
-	return kickIDBase + "/oauth/authorize?" + q.Encode()
+	return k.idEndpoint() + "/oauth/authorize?" + q.Encode()
 }
 
 func (k *Kick) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, verifier string) (*Token, error) {
@@ -147,11 +157,11 @@ func (k *Kick) Exchange(ctx context.Context, clientID, clientSecret, redirectURI
 	if verifier != "" {
 		form.Set("code_verifier", verifier)
 	}
-	return postForm(ctx, kickIDBase+"/oauth/token", form, nil)
+	return postForm(ctx, k.idEndpoint()+"/oauth/token", form, nil)
 }
 
 func (k *Kick) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
-	tok, err := postForm(ctx, kickIDBase+"/oauth/token", url.Values{
+	tok, err := postForm(ctx, k.idEndpoint()+"/oauth/token", url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"refresh_token": {refreshToken},
@@ -619,4 +629,16 @@ func parseKickTime(s string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// CheckCredentials proves the pair through Kick's app-access-token flow, which
+// its OAuth 2.1 documentation exposes at POST /oauth/token with
+// grant_type=client_credentials and needs no user consent.
+func (k *Kick) CheckCredentials(ctx context.Context, clientID, clientSecret string) error {
+	_, err := postForm(ctx, k.idEndpoint()+"/oauth/token", url.Values{
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"grant_type":    {"client_credentials"},
+	}, nil)
+	return classifyCheckError(err)
 }

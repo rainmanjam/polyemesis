@@ -1080,6 +1080,77 @@ type Settings struct {
 	// settings live on the destination row.
 	Destinations DestinationSettings `json:"destinations"`
 	Chat         ChatSettings        `json:"chat"`
+	Automod      AutomodSettings     `json:"automod"`
+}
+
+// AutomodSettings is everything about automatic chat moderation except the
+// model's API key, which is sealed separately -- same shape as the MQTT broker
+// password, and for the same reason: a secret in the settings blob is a secret
+// returned by GET /settings.
+//
+// The matrix is stored as the set of cells that are ON rather than a dense
+// grid. A dense grid needs migrating whenever an action, checker or platform is
+// added, and the migration has to invent a default for cells nobody has seen. A
+// sparse set answers that by construction: absent means off, which IS the
+// default.
+type AutomodSettings struct {
+	// Enabled is the global kill switch.
+	Enabled bool `json:"enabled"`
+	// PlatformEnabled is the per-platform kill switch. An absent platform means
+	// enabled, so adding a platform does not silently disable it -- the global
+	// switch above is the one that fails closed.
+	PlatformEnabled map[Platform]bool `json:"platformEnabled,omitempty"`
+	// On holds the cells switched on, keyed "platform/action/checker".
+	On map[string]bool `json:"on,omitempty"`
+	// Rules are the operator's patterns.
+	Rules []AutomodRule `json:"rules,omitempty"`
+	// History bounds the sequence detectors.
+	History AutomodHistory `json:"history"`
+	// Model configures the optional external checker.
+	Model AutomodModel `json:"model"`
+}
+
+// AutomodRule is one stored pattern. Mirrors automod.Rule, which is where it is
+// compiled and matched; this is only the persisted shape.
+type AutomodRule struct {
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	Pattern        string `json:"pattern"`
+	Action         string `json:"action"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// AutomodHistory bounds the per-author sequence detectors.
+type AutomodHistory struct {
+	WindowSeconds         int     `json:"windowSeconds"`
+	MaxMessages           int     `json:"maxMessages"`
+	MaxRepeats            int     `json:"maxRepeats"`
+	MaxLinks              int     `json:"maxLinks"`
+	MaxMentionsPerMessage int     `json:"maxMentionsPerMessage"`
+	MinLengthForCaps      int     `json:"minLengthForCaps"`
+	MaxCapsRatio          float64 `json:"maxCapsRatio"`
+	Action                string  `json:"action"`
+	TimeoutSeconds        int     `json:"timeoutSeconds"`
+	RetainPerAuthor       int     `json:"retainPerAuthor"`
+	IdleEvictionSeconds   int     `json:"idleEvictionSeconds"`
+}
+
+// AutomodModel configures the external checker.
+type AutomodModel struct {
+	Enabled  bool   `json:"enabled"`
+	Endpoint string `json:"endpoint"`
+	Model    string `json:"model"`
+	// HasAPIKey reports that a sealed key exists, so the settings page can show
+	// "configured" without the key ever being returned. The key itself is set
+	// through its own endpoint and never appears in this blob.
+	HasAPIKey       bool    `json:"hasApiKey"`
+	TimeoutSeconds  int     `json:"timeoutSeconds"`
+	MaxCallsPerHour int     `json:"maxCallsPerHour"`
+	Action          string  `json:"action"`
+	TimeoutForBan   int     `json:"timeoutForBan,omitempty"`
+	MinConfidence   float64 `json:"minConfidence"`
+	Instruction     string  `json:"instruction"`
 }
 
 // ChatSettings bounds the stored chat scrollback.
@@ -1282,6 +1353,42 @@ func DefaultSettings() Settings {
 			RetentionHours: 2,
 			KeepMessages:   2000,
 			PurgeMinutes:   5,
+		},
+		// Automod is ON, and does NOTHING except flag for review.
+		//
+		// Those two facts together are the point. Shipping it off means an
+		// operator has to discover it exists; shipping it acting means it
+		// surprises somebody mid-broadcast. Flagging changes nothing an
+		// audience can see, so it is the one thing safe to start armed --
+		// every other cell is absent, and absent means off.
+		//
+		// The On map is populated by automod.DefaultMatrix(), which is the
+		// single source of that default; duplicating the keys here would be
+		// two truths about the same thing.
+		Automod: AutomodSettings{
+			Enabled: true,
+			History: AutomodHistory{
+				WindowSeconds:         30,
+				MaxMessages:           8,
+				MaxRepeats:            3,
+				MaxLinks:              3,
+				MaxMentionsPerMessage: 5,
+				MinLengthForCaps:      12,
+				MaxCapsRatio:          0.8,
+				Action:                "timeout",
+				TimeoutSeconds:        60,
+				RetainPerAuthor:       24,
+				IdleEvictionSeconds:   600,
+			},
+			Model: AutomodModel{
+				Enabled:         false,
+				Model:           "gpt-4o-mini",
+				TimeoutSeconds:  4,
+				MaxCallsPerHour: 500,
+				Action:          "flag",
+				MinConfidence:   0.8,
+				Instruction:     "Flag harassment, threats, slurs and targeted abuse. Ordinary criticism, banter and strong language are not abuse.",
+			},
 		},
 	}
 }

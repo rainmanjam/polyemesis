@@ -1,0 +1,204 @@
+# Run the installer's preflight on real distributions.
+#
+# shellcheck already runs on this script, and shellcheck cannot tell you that
+# Fedora has no `ffmpeg` package, that EPEL's ffmpeg-free is below the version
+# floor, or that installing FFmpeg on Ubuntu drags in `systemctl` and makes a
+# `command -v systemctl` test pass inside a container with no init. All three
+# were found by running the thing in a container, and all three are the kind of
+# fact that rots quietly as distributions move.
+#
+# --check does the preflight and exits, creating nothing: no downloads, no
+# users, no unit files. Safe to run anywhere, which is what makes it a test.
+name: installer
+
+on:
+  push:
+    branches: [main]
+    paths: ["scripts/install.sh", ".github/workflows/installer.yml"]
+  pull_request:
+    paths: ["scripts/install.sh", ".github/workflows/installer.yml"]
+  # Distributions change under us; a monthly run catches a moved floor before a
+  # user does.
+  schedule:
+    - cron: "23 5 1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  # Flag handling and the argument validator, on one distro. These are
+  # properties of the script rather than of the host, so once is enough.
+  flags:
+    name: flags and validation
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: --help exits 0 and prints usage
+        run: |
+          out="$(bash scripts/install.sh --help)"
+          echo "$out" | head -3
+          echo "$out" | grep -q -- "--check" || { echo "usage does not document --check"; exit 1; }
+
+      - name: bad arguments are rejected
+        run: |
+          # Each of these must FAIL. A validator that accepts nonsense is worse
+          # than none, because the nonsense surfaces later as a broken install.
+          for bad in "--mode nonsense" "--tls bogus" "--http-port abc" "--srt-port x" "--wat"; do
+            # shellcheck disable=SC2086
+            if bash scripts/install.sh $bad >/dev/null 2>&1; then
+              echo "accepted bad arguments: $bad"
+              exit 1
+            fi
+          done
+          echo "all five rejected"
+
+      - name: root is required, and says so
+        run: |
+          useradd -m tester
+          set +e
+          out="$(su tester -c "bash scripts/install.sh --check --mode docker" 2>&1)"
+          rc=$?
+          set -e
+          # Non-zero alone proves nothing: a parser or detection regression
+          # exits non-zero too. Require the diagnostic that names the cause.
+          [ "$rc" -ne 0 ] || { echo "ran as a non-root user"; exit 1; }
+          echo "$out" | grep -q "run this with sudo" \
+            || { echo "failed for some reason other than privilege: $out"; exit 1; }
+
+  # The preflight against each distribution's real package set. The floor and
+  # the package names are what drift.
+  preflight:
+    name: "preflight: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Clears the FFmpeg floor from default repositories.
+          - { image: "ubuntu:24.04", ffmpeg: "6.1.1", expect: pass }
+          - { image: "debian:13",    ffmpeg: "7.1.5", expect: pass }
+          # Below the floor, and no amount of `apt install` fixes it. These
+          # assert the REFUSAL, which is the useful half.
+          - { image: "ubuntu:22.04", ffmpeg: "4.4.2", expect: fail }
+          - { image: "debian:12",    ffmpeg: "5.1.9", expect: fail }
+    steps:
+      - name: Install git and FFmpeg
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq git ffmpeg >/dev/null
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Informational on purpose: it reports drift without failing, because the
+      # verdict assertions below are what actually gate. Named so nobody reads
+      # a green tick here as "the version is still X".
+      - name: Report FFmpeg drift (does not fail)
+        run: |
+          got="$(ffmpeg -version | head -1 | awk '{print $3}')"
+          echo "expected ${{ matrix.ffmpeg }}, got $got"
+          case "$got" in
+            "${{ matrix.ffmpeg }}"*) : ;;
+            *) echo "::warning::FFmpeg moved on ${{ matrix.image }}: expected ${{ matrix.ffmpeg }}, got $got" ;;
+          esac
+
+      - name: Preflight, binary mode
+        run: |
+          set +e
+          bash scripts/install.sh --check --mode binary
+          rc=$?
+          set -e
+          echo "exit=$rc, expected ${{ matrix.expect }}"
+          # A GitHub Actions container has no systemd, so the init gate always
+          # fails here and the whole preflight is non-zero on every row. What
+          # differs is the FFmpeg verdict, which is asserted below.
+          [ "$rc" -ne 0 ] || { echo "preflight passed without systemd — the init gate is not firing"; exit 1; }
+
+      - name: The FFmpeg verdict matches the distro
+        run: |
+          out="$(bash scripts/install.sh --check --mode binary 2>&1 || true)"
+          echo "$out" | grep -E '^\[' || true
+          if [ "${{ matrix.expect }}" = "pass" ]; then
+            echo "$out" | grep -q "clears the 6.0 floor" \
+              || { echo "expected this FFmpeg to clear the floor"; exit 1; }
+          else
+            echo "$out" | grep -q "below the 6.0 floor" \
+              || { echo "expected this FFmpeg to be rejected"; exit 1; }
+          fi
+
+      - name: The init gate fires, and names the real reason
+        run: |
+          set +e
+          out="$(bash scripts/install.sh --check --mode docker 2>&1)"
+          rc=$?
+          set -e
+          # Docker mode needs no host FFmpeg, so the ONLY thing that can fail
+          # here is the init gate. Asserting the status as well as the text is
+          # what stops this passing vacuously if the gate were removed.
+          [ "$rc" -ne 0 ] || { echo "docker preflight passed with no systemd"; exit 1; }
+          echo "$out" | grep -q "systemd is not running as PID 1" \
+            || { echo "the init gate did not fire, or changed its wording"; exit 1; }
+
+      - name: --check creates nothing
+        run: |
+          # Listings compared directly rather than hashed. A hash answers "did
+          # anything change"; the diff answers "what appeared", which is the
+          # question you actually have at 2am. It also keeps a weak-hash
+          # warning out of a step that is not doing cryptography.
+          snap() {
+            find /usr/local/bin /etc/systemd/system /var/lib /etc/polyemesis \
+              -maxdepth 1 2>/dev/null | sort
+          }
+          snap > /tmp/before.txt
+          bash scripts/install.sh --check --mode binary >/dev/null 2>&1 || true
+          bash scripts/install.sh --check --mode docker >/dev/null 2>&1 || true
+          snap > /tmp/after.txt
+          if ! diff -u /tmp/before.txt /tmp/after.txt; then
+            echo "--check modified the filesystem — see the diff above"
+            exit 1
+          fi
+          # `if ! id ...` rather than `id ... && exit 1`. The second form
+          # returns non-zero in the PASSING case -- no such user -- and under
+          # set -e that fails the step for succeeding.
+          if id polyemesis >/dev/null 2>&1; then
+            echo "--check created the service account"
+            exit 1
+          fi
+          echo "nothing created"
+
+  # Package names differ across the RPM family, and getting them wrong sends a
+  # user to a package that does not exist. Separate job: dnf, not apt.
+  preflight-rpm:
+    name: "preflight: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["fedora:43", "rockylinux:9"]
+    steps:
+      - name: Install git
+        run: dnf install -y -q git >/dev/null
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Preflight names the right package for this family
+        run: |
+          out="$(bash scripts/install.sh --check --mode binary 2>&1 || true)"
+          echo "$out" | grep -E '^\[|^     ' || true
+          case "${{ matrix.image }}" in
+            fedora*)
+              # There is no `ffmpeg` package on Fedora at all.
+              echo "$out" | grep -q "ffmpeg-free" \
+                || { echo "Fedora hint missing: the package is ffmpeg-free"; exit 1; } ;;
+            rocky*)
+              echo "$out" | grep -qi "RPM Fusion" \
+                || { echo "RHEL-family hint missing"; exit 1; } ;;
+          esac

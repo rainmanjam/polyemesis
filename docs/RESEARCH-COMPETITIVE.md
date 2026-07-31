@@ -10,19 +10,36 @@ absolute terms — a 46-reaction issue on a project this size is a lot, a
 2-reaction issue is nearly noise — but the *ordering* is informative, and the
 repeats are more informative still.
 
+> **The polyemesis column was re-checked 2026-07-30** and five rows had moved,
+> all in the product's favour. Text overlays, embedding a logo, and overlaying a
+> channel logo and name — three separate asks, one shipped feature — are now
+> **have**, as is MQTT. Low-latency mode stays *partial* but for a different
+> reason than it says: LL-HLS was declined deliberately rather than left undone.
+>
+> The research itself is unchanged, because what Restreamer's users asked for in
+> July 2026 does not change. Only our column does.
+
 ## The headline: most of the top asks, polyemesis already has
 
-This is the surprising result. Of the fifteen most-reacted feature requests on
-Restreamer, polyemesis already ships ten.
+This is the surprising result. Of the twenty-five asks below, polyemesis ships
+**seventeen** outright and another three in part, against five genuine gaps —
+and the five are concentrated in capture hardware and compositing, not in
+streaming.
+
+Counted from the table rather than asserted: five rows moved into the *have*
+column between 2026-07-27 and 2026-07-30, so any figure quoted here is worth
+re-deriving rather than trusting. Ties at four and five reactions also make
+"the top fifteen" an ambiguous cut, which is why the whole table is counted
+instead.
 
 | Ask on Restreamer | Reactions | polyemesis | Notes |
 |---|---|---|---|
 | Fallback stream/image when ingest disconnects | **46** (top open issue) | **have** | Slate + failover; `SwitchSource` takes `primary\|backup\|slate\|auto` |
 | Multiple external providers simultaneously | 13 (closed) | **have** | The whole product |
 | **Multiple audio tracks for Twitch** | **8** | **have** | Literally the thesis. They are asking Restreamer for what polyemesis is |
-| Text overlays | 6 (closed) | **GAP** | |
+| Text overlays | 6 (closed) | **have** | Shipped 2026-07-29: content, font, anchor, size, colour, margins, optional background box |
 | WebRTC / WebTransport | 6 (closed) | **GAP** | |
-| Embed logo in stream | 5 (closed) | **GAP** | |
+| Embed logo in stream | 5 (closed) | **have** | Image watermarks on renditions, nine anchors |
 | Login page for player site | 5 | have | Playout token protection |
 | Start/stop by API (Home Assistant) | 9 (closed) | have | REST + API tokens |
 | On-demand streaming | 4 (closed) | have | |
@@ -30,17 +47,17 @@ Restreamer, polyemesis already ships ten.
 | Combined chat | 4 (closed) | have | Four platforms, one hub |
 | Playlist files | 4 (closed) | partial | Pull ingest takes `file://`, no playlist sequencing |
 | Add stream recording | 4 | have | Plus catalogue, clips, transcripts |
-| Overlay channel logo and name | 4 | **GAP** | |
+| Overlay channel logo and name | 4 | **have** | Both halves: image watermark plus text overlay |
 | Scheduling | 3 (closed) | have | Schedules API |
 | Audio-only MP3/HTTP publication | 3 | have | Icecast + audio-only destinations |
 | HDR 10-bit HEVC | 3 (closed) | partial | `libx265`, `hevc_nvenc`; no HDR tone-map path |
 | Cropping source stream | 2 | have | Rendition `aspectMode: crop` |
 | Decklink video input | 2 | **GAP** | |
 | Analytics / statistics | 2 (closed) | have | Playout analytics, stats |
-| Low latency mode | 2 (closed) | partial | SRT latency is configurable; no LL-HLS |
+| Low latency mode | 2 (closed) | partial | SRT latency is configurable. LL-HLS was declined on purpose — see roadmap/LL-HLS.md — and one-second preview segments took ~2.5s off instead |
 | Video grid / multiple inputs | 1 (closed) | **GAP** | |
 | Deinterlacing | 1 (closed) | **have** | Was built-but-unreachable; the control landed 2026-07-28. See the correction below |
-| MQTT (core tracker) | — | **GAP** | Alert webhooks exist; no MQTT |
+| MQTT (core tracker) | — | **have** | Retained telemetry with Home Assistant discovery, alongside alert webhooks |
 | Single token per RTMP endpoint (core) | — | **GAP** | Falls out of multi-source |
 
 Verified against the code, not assumed. Two initial readings were wrong and are
@@ -60,9 +77,9 @@ Deinterlacing is implemented in Go and has been for some time:
 migration — [internal/ffmpeg/rendition.go:302-360](../internal/ffmpeg/rendition.go),
 [internal/db/renditions.go:116](../internal/db/renditions.go).
 
-**There is no control for it in the UI.** `grep -rn deinterlace ui/src` returns
-nothing. So an operator cannot switch it on, and the feature is complete in
-every layer except the one a user can reach.
+**There was no control for it in the UI.** At the time, `grep -rn deinterlace
+ui/src` returned nothing. So an operator could not switch it on, and the feature
+was complete in every layer except the one a user can reach.
 
 That is the same failure this project already documented once, in
 [DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md): the shared ingest port was
@@ -74,6 +91,11 @@ and invisible.
 The remediation is a select in the rendition editor, next to aspect mode. It is
 the cheapest item on the whole roadmap, and it should be measured as done only
 when a user can reach it.
+
+**Closed 2026-07-29.** The control is in `ui/src/pages/RenditionsPage.tsx` and
+the grep that used to return nothing now returns seven lines. Recorded because
+the standard set here — *done means a user can reach it* — is the reusable
+part, not the fix.
 
 ## The strategic signal
 

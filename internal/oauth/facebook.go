@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -49,7 +50,17 @@ var (
 )
 
 // Facebook implements Facebook Login plus the Live Video API.
-type Facebook struct{}
+type Facebook struct {
+	// graphBase overrides https://graph.facebook.com/v24.0. Empty in production.
+	graphBase string
+}
+
+func (f *Facebook) graphEndpoint() string {
+	if f.graphBase != "" {
+		return f.graphBase
+	}
+	return fbGraphBase
+}
 
 func (f *Facebook) Platform() db.Platform { return db.PlatformFacebook }
 
@@ -853,4 +864,41 @@ func fbAdvice(err error, what string, scopes []string) error {
 // is the half of the envelope written for a human.
 func metaMessage(ge graphError) string {
 	return firstNonEmpty(strings.TrimSpace(ge.UserMsg), strings.TrimSpace(ge.Message))
+}
+
+// CheckCredentials proves the pair through Facebook's app-access-token
+// endpoint. Note the shape: this one is a GET with query parameters, where
+// Twitch and Kick both POST a form. Reusing postForm here would send a request
+// Facebook answers with 400 regardless of whether the credentials are good,
+// which would report every correct pair as rejected.
+func (f *Facebook) CheckCredentials(ctx context.Context, clientID, clientSecret string) error {
+	q := url.Values{
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"grant_type":    {"client_credentials"},
+	}
+	endpoint := f.graphEndpoint() + "/oauth/access_token?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return classifyCheckError(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// tokenStatusError, not a formatted error: classifyCheckError needs the
+		// numeric code to tell a 5xx outage from a 4xx refusal, and Facebook
+		// takes this GET path instead of postForm precisely because it cannot
+		// share that function's body -- it must still share its error type so
+		// all three providers classify identically.
+		return classifyCheckError(&tokenStatusError{code: resp.StatusCode, body: snippet(body)})
+	}
+	return nil
 }

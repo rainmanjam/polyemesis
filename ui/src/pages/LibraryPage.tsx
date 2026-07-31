@@ -40,6 +40,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { api, ApiError } from "@/lib/api";
+import { MediaUploads } from "@/components/MediaUploads";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
@@ -246,6 +247,13 @@ export function LibraryPage() {
           </Button>
         }
       />
+
+      {/* Uploads sit above search because they are the one thing on this page
+          an operator ADDS rather than searches. Everything below is a view of
+          what the server already recorded. */}
+      <div className="mb-3">
+        <MediaUploads />
+      </div>
 
       {/* ---------------- search: the top of the page, not a filter drawer ---- */}
       <Card className="mb-3">

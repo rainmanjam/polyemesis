@@ -35,6 +35,12 @@ the software actually promises.
 
 - **The admin session.** bcrypt password hashing, a JWT in an `HttpOnly`,
   `SameSite=Lax` cookie, CSRF double-submit on every state-changing request.
+- **Revocation that actually revokes.** Each user row carries a token epoch that
+  every session token is signed against and every request re-checks. Changing
+  the password bumps it in the same statement, so every session issued before
+  the change stops working immediately — a stolen cookie does not outlive the
+  password it was obtained under. The check fails closed: a token whose epoch
+  cannot be established is refused rather than admitted.
 - **Login brute force.** Five free attempts per client address, then a delay
   doubling from 2s, capped at 5 minutes, with `Retry-After` on the 429. The cap
   and the one-hour idle reset are deliberate: an uncapped lockout is a
@@ -62,9 +68,28 @@ the software actually promises.
 - **Path confinement.** File destinations, `file://` pull sources, slate images,
   recording and clip downloads are all confined to the data directory. Paths
   that come from the database are never trusted as filesystem paths.
-- **Browser-side hardening.** Every response carries a CSP,
-  `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`, and a
-  `Permissions-Policy` disabling camera, microphone and geolocation.
+- **Uploads name themselves.** `POST /api/v1/media` is the one endpoint where a
+  caller supplies both the bytes and something filename-shaped, so the supplied
+  name is treated as a hint and thrown away: the server generates the stored
+  name with a random suffix, which also means an upload cannot overwrite an
+  existing one by guessing it. The separator check tests both `/` and `\` on
+  every platform rather than `os.PathSeparator`, whose meaning changes with the
+  build target — that exact bug once let a forward slash through on Windows.
+  Uploads are behind the session, so an API token cannot write bytes to the
+  disk, and an oversized, empty or cancelled upload leaves nothing behind.
+- **Inbound webhooks.** Kick's chat webhook is verified against Kick's published
+  RSA public key before its body is read, and the handler refuses the request
+  outright when no verifier is configured. An unverifiable webhook endpoint is
+  an unauthenticated write path, so it fails closed rather than open.
+- **Browser-side hardening.** Responses carry a CSP, `X-Frame-Options: DENY`,
+  `nosniff`, `Referrer-Policy: no-referrer`, and a `Permissions-Policy`
+  disabling camera, microphone and geolocation.
+
+  The one exception is `/watch`, and only when you have turned on
+  `allowCrossOrigin` for playout: a page whose purpose is to sit in an iframe on
+  somebody else's site cannot also refuse to be framed. That page alone drops
+  `X-Frame-Options` and opens `frame-ancestors`; the admin console keeps the
+  strict policy. Leaving `allowCrossOrigin` off keeps the exception closed.
 
 ### What it does NOT defend
 
@@ -92,6 +117,28 @@ These are design decisions, not oversights. Read them as operating instructions.
   to loopback does not move the ingest listener, which must stay reachable for
   your encoder. A valid token is the only thing standing in front of it, plus
   the SRT passphrase if you set one.
+
+### One thing automod sends outward
+
+If you enable the model checker, **chat messages leave your server** for
+whichever endpoint you configure. That is the whole point of it, and it is worth
+saying plainly rather than leaving in a settings tooltip.
+
+It is off by default. The endpoint is yours to choose, so a locally hosted
+OpenAI-compatible model keeps everything on your own hardware. The API key is
+sealed with the same NaCl secretbox as your platform tokens and is never
+returned by any endpoint — the settings blob carries only `hasApiKey`.
+
+The rules and history checkers send nothing anywhere. They are local, and they
+are what catches most abuse.
+
+**The endpoint is not filtered against private addresses.** A private address is
+the *recommended* configuration — Ollama or vLLM on `127.0.0.1` or a LAN host —
+so blocking those would reject the deployment we suggest. Only an authenticated
+admin can set the field, and an admin can already read your tokens and edit your
+destinations, so it grants no privilege they did not already have. Treat it the
+way you treat every other admin-only setting: if untrusted people can reach your
+admin UI, this field is not your biggest problem.
 
 ### Deploying it safely
 

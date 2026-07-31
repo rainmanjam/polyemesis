@@ -1,13 +1,18 @@
 # Overlays: text, logo, watermark, channel name
 
-> **Status: v0.5 SHIPPED — image watermarks only.** One still per rendition,
-> percentage geometry, nine anchors, opacity. Operator page:
-> [../RENDITIONS.md](../RENDITIONS.md#watermarks).
+> **Status: image watermarks and text SHIPPED.** A still per rendition and a
+> line of burnt-in text, both with percentage geometry, nine anchors and
+> opacity. Operator page: [../RENDITIONS.md](../RENDITIONS.md#watermarks).
 >
-> **Not built, and still designed below:** text, clock, externally-fed data,
-> multiple overlays per rendition, the one-frame preview endpoint, the embedded
-> font, and the `drawtext` filter probe. The v1 estimate for the remainder is
-> the ~16 days below minus the ~6 spent.
+> Text arrived after this note first said it had not, along with the two things
+> the design correctly identified as its prerequisites: **the embedded font**
+> (two weights of Inter, because `drawtext` takes a font *path* and a container
+> image has neither fontconfig nor a font file) and **the `drawtext` filter
+> probe** (the filter is optional in FFmpeg; a build without it drops the text
+> and keeps the picture up rather than failing the rendition).
+>
+> **Not built, and still designed below:** the clock, externally-fed data,
+> multiple overlays per rendition, and the one-frame preview endpoint.
 >
 > **Three things building it changed.**
 >
@@ -32,7 +37,11 @@
 > ordinary software stage appended before VAAPI's one-way `format=nv12,hwupload`
 > tail, and nothing changed for the other four encoder families.
 
-**Status: DEFERRED (2026-07-28).** Superseded by the note above.
+**Status of the original design below: superseded by the note above.** It was
+written on 2026-07-28 and deferred; watermarks shipped that week and text
+followed. The body is kept because its reasoning about the filter chain, the
+geometry model and the hardware-encoder interaction is what the implementation
+was built from, and two of its three predictions held exactly.
 
 **Evidence:** the most-repeated unmet request on the competitor's tracker —
 asked **five separate times** (6+5+4+2+1 reactions across distinct issues), every

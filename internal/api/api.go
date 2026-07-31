@@ -245,6 +245,21 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/sources/{id}", s.handleDeleteSource)
 			r.Post("/sources/{id}/token", s.handleRotateSourceToken)
 
+			// Media uploads. Inside the session+CSRF group like every other
+			// mutation, which also means an API token cannot reach them: a
+			// token is for automation, and writing arbitrary bytes to the
+			// server's disk is not something a leaked one should be able to do.
+			// Automod. Its CONFIG rides inside Settings, so GET/PUT /settings
+			// already carries the matrix, rules and model options; only the
+			// derived matrix, model spend and the sealed key need endpoints.
+			r.Get("/automod/matrix", s.handleAutomodMatrix)
+			r.Get("/automod/stats", s.handleAutomodStats)
+			r.Put("/settings/automod-key", s.handlePutAutomodKey)
+
+			r.Post("/media", s.handleUploadMedia)
+			r.Get("/media", s.handleListMedia)
+			r.Delete("/media/{name}", s.handleDeleteMedia)
+
 			r.Get("/renditions", s.handleListRenditions)
 			r.Post("/renditions", s.handleCreateRendition)
 			// Static segment first, same as /destinations/order above.
@@ -374,6 +389,11 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/platforms/guides", s.handlePlatformGuides)
 			r.Get("/platforms/credentials", s.handleListCreds)
 			r.Put("/platforms/credentials/{platform}", s.handlePutCreds)
+			// POST rather than GET despite reading nothing: it makes an
+			// outbound call to a third party, so it is neither safe nor
+			// idempotent, and POST puts it behind requireCSRF with the rest of
+			// the state-changing group.
+			r.Post("/platforms/credentials/{platform}/check", s.handleCheckCreds)
 			r.Delete("/platforms/credentials/{platform}", s.handleDeleteCreds)
 			r.Get("/platforms/accounts", s.handleListAccounts)
 			r.Delete("/platforms/accounts/{id}", s.handleDeleteAccount)

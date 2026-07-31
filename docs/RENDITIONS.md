@@ -220,11 +220,39 @@ riding that rendition. Nudging a logo by 2% while live drops them for a second
 or two. Replacing the image file has the same effect, and deliberately so — the
 alternative is an encoder that keeps compositing the picture you just replaced.
 
+## Text overlays
+
+A rendition can also burn in a line of text. The settings mirror the watermark's
+reasoning — percentages, not pixels:
+
+| Setting | Means |
+|---|---|
+| **Content** | the line to draw |
+| **Font** | Inter Regular or Inter Bold, shipped embedded — or your own, dropped in `<data-directory>/fonts/` |
+| **Position** | the same nine anchors a watermark uses |
+| **Size** | as a percentage of frame height |
+| **Colour** | the text colour |
+| **Margin X / Y** | as percentages of the frame |
+| **Box** | an optional background box, with its own colour and opacity |
+
+Fonts are embedded rather than assumed because FFmpeg's `drawtext` takes a font
+*path*, not bytes, and a container image routinely has neither fontconfig nor a
+single font file on it. Asking the operator to supply one would make the feature
+work on a developer's laptop and fail in Docker.
+
+**`drawtext` is optional in FFmpeg, not guaranteed.** A build without libfreetype
+has no way to render text at all — the FFmpeg in Homebrew is sometimes one of
+them. polyemesis probes for the filter and, when it is missing, runs the
+rendition without the text rather than refusing to start. Dropping the text
+keeps the picture up, which is the right way round: nobody watching would prefer
+a black screen with correct typography.
+
+Editing text restarts the encode, exactly as editing a watermark does.
+
 ### What this is not, yet
 
-v0.5 is a still image. No text, no clock, no viewer counts, no animation, no
-browser sources. Those are designed and costed in
-[the roadmap](roadmap/OVERLAYS.md); they are not built.
+No clock, no viewer counts, no animation, no browser sources. Those are designed
+and costed in [the roadmap](roadmap/OVERLAYS.md); they are not built.
 
 ## Hardware encoders
 

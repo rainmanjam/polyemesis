@@ -649,6 +649,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.log.Warn("cannot tell whether an MQTT password is stored", "err", err)
 	}
+	// Same for the automod model key, and for the same reason: the page needs
+	// to know one is set without ever being handed it.
+	if has, err := s.store.HasAutomodKey(); err == nil {
+		settings.Automod.Model.HasAPIKey = has
+	} else {
+		s.log.Warn("cannot tell whether an automod model key is stored", "err", err)
+	}
 	writeJSON(w, http.StatusOK, settings)
 }
 
@@ -736,6 +743,11 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// setting that stores, returns 200 and keeps sweeping on the old numbers is
 	// the same silent no-op the ingest block above documents.
 	ApplyChatRetention(s.chat, settings.Chat)
+	// Same argument for automod: a matrix that stores, returns 200 and keeps
+	// deciding on the old cells is the silent no-op this file already warns
+	// about twice. Rebuilding the engine here is also what recompiles a changed
+	// rule -- without it a new pattern would not apply until the next restart.
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod)
 	writeJSON(w, http.StatusOK, settings)
 }
 

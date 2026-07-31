@@ -239,6 +239,10 @@ func run(h *hooks) error {
 	// boot over it would be a wildly disproportionate response.
 	if s, err := store.GetSettings(); err == nil {
 		api.ApplyChatRetention(hub, s.Chat)
+		// Automod, for the same reason: a matrix armed in the UI that quietly
+		// reverts on restart is worse than one that never worked, because the
+		// operator has already stopped checking it.
+		api.ApplyAutomod(hub, store, box, log, s.Automod)
 	} else {
 		log.Warn("chat retention settings unreadable; using the built-in defaults", "err", err)
 	}

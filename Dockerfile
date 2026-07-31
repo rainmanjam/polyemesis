@@ -87,6 +87,25 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
 #   FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 FROM alpine:3.24
 
+ARG VERSION=dev
+
+# OCI labels, on the image itself rather than only in the workflow.
+#
+# The workflow's metadata-action injects these for the default image, but a
+# label baked into the Dockerfile survives a `docker build` run by hand -- which
+# is how the GPU images are built by anyone with the hardware to test them, and
+# how this image is built by anyone auditing it. A registry listing with no
+# description, source or licence is one people scroll past.
+LABEL org.opencontainers.image.title="polyemesis" \
+      org.opencontainers.image.description="Self-hosted restreaming with per-destination audio routing. One ingest, many platforms, a different audio mix for each." \
+      org.opencontainers.image.url="https://github.com/rainmanjam/polyemesis" \
+      org.opencontainers.image.source="https://github.com/rainmanjam/polyemesis" \
+      org.opencontainers.image.documentation="https://github.com/rainmanjam/polyemesis/tree/main/docs" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="polyemesis" \
+      org.opencontainers.image.version="${VERSION}"
+
+
 # FFMPEG_VERSION is pinned, not floating, because `apk add ffmpeg` resolves to
 # whatever the branch happens to hold on the day you build. That makes an image
 # rebuilt six months from now a different product with the same tag — and the

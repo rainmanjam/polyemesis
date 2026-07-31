@@ -24,6 +24,9 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 	for i := range guides {
 		if guides[i].RedirectPath != "" {
 			guides[i].RedirectPath = origin + guides[i].RedirectPath
+			// Preflight the URI we are about to tell them to register, rather
+			// than letting the platform reject it after the fact.
+			guides[i].RedirectWarnings = redirectWarnings(s.cfg, r, guides[i].RedirectPath)
 		}
 	}
 	writeJSON(w, http.StatusOK, guides)
@@ -83,7 +86,35 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"platform": platform, "hasSecret": true})
+	// The check runs AFTER the store succeeds, and its verdict never changes
+	// the status code. An operator is usually part-way through a platform
+	// console when they paste these; refusing to save a credential they are
+	// three clicks from making valid is obstructive rather than protective.
+	check := oauth.CheckCredentialsFor(r.Context(), platform, req.ClientID, req.ClientSecret)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"platform":  platform,
+		"hasSecret": true,
+		"check":     check,
+	})
+}
+
+// handleCheckCreds re-runs the check against what is stored, so an operator who
+// has just fixed something in the platform console can retest without pasting
+// the secret again -- which they frequently cannot, because most consoles show
+// a client secret exactly once.
+func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
+	platform := db.Platform(chi.URLParam(r, "platform"))
+	if _, err := oauth.Get(platform); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	creds, err := s.store.GetPlatformCreds(s.box, platform)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK,
+		oauth.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret))
 }
 
 func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {

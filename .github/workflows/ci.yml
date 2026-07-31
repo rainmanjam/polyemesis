@@ -50,7 +50,9 @@ jobs:
   go:
     name: go build, vet, test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Above the 15m per-package go test timeout below, so Go's diagnostic
+    # panic wins the race against this.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -73,7 +75,16 @@ jobs:
       - run: go vet ./...
       # -race because the engine reconciles from several goroutines and a data
       # race here shows up in production as a stream that stops for one viewer.
-      - run: go test -race ./...
+      #
+      # -timeout because Go's default is 10 minutes PER PACKAGE and internal/db
+      # runs close to it on a slow runner -- see the cross-platform job below
+      # for the measurements. -race makes every one of them slower still.
+      #
+      # Kept BELOW timeout-minutes on purpose. Go's timeout panics with a
+      # goroutine dump naming the test that was running; the job timeout just
+      # kills the runner and tells you nothing. Whichever fires first decides
+      # how much you learn, so Go's has to.
+      - run: go test -race -timeout 15m ./...
 
   # The same build and test, on the operating systems polyemesis actually ships
   # for.
@@ -93,7 +104,9 @@ jobs:
   crossplatform:
     name: "test: ${{ matrix.os }}"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Above the 15m per-package go test timeout below. Windows needs the room:
+    # internal/db alone has been measured at 265-300s and once past 600s.
+    timeout-minutes: 30
     strategy:
       # Never cancel siblings: when Windows and macOS both break, both answers
       # are wanted, and fail-fast would turn one fix into two round trips.
@@ -125,7 +138,23 @@ jobs:
 
       - run: go build ./...
       - run: go vet ./...
-      - run: go test ./...
+      # Go's default timeout is 10 minutes PER PACKAGE, and internal/db lands
+      # close enough to it on Windows that ordinary runner variance decides the
+      # build. Measured on ONE unchanged tree: 264s, 297s, and once past 600s,
+      # where it failed -- a commit whose identical code had passed an hour
+      # earlier.
+      #
+      # The cause is not a slow test but a slow platform. internal/db runs
+      # against modernc.org/sqlite, a pure-Go SQLite that is roughly 40x slower
+      # on a Windows runner than on a developer machine: ~6s locally against
+      # ~265-300s there.
+      #
+      # 15m is ~3x the typical Windows run for the slowest package, and it is
+      # deliberately BELOW this job's timeout-minutes. Go's timeout panics with
+      # a goroutine dump naming the running test; the job timeout just kills the
+      # runner and tells you nothing. Whichever fires first decides how much you
+      # learn, so Go's has to.
+      - run: go test -timeout 15m ./...
 
       # Build and RUN it. Compiling proves the code is valid for the platform;
       # it does not prove the process comes up.
@@ -160,6 +189,55 @@ jobs:
             exit 1
           fi
           echo "server started and served /health on ${{ matrix.os }}"
+
+      # Push an actual broadcast through it, on every platform.
+      #
+      # /health proves the process comes up. It does not prove the product
+      # works: that needs a stream arriving, a layout being probed, two
+      # destinations compiling different routing graphs, FFmpeg children being
+      # spawned and supervised, and audio landing in a container. Those are the
+      # parts built on process groups, signals and file paths -- precisely
+      # where Windows differs -- so "it serves /health on Windows" was never
+      # the claim worth making.
+      #
+      # The stream is injected into the relay hub rather than pushed over SRT,
+      # because libsrt is not guaranteed in a runner's FFmpeg (Homebrew's has
+      # none). That substitutes only the ingest hop; everything downstream is
+      # the real path. SRT ingest itself is covered by the acceptance suites on
+      # ubuntu.
+      #
+      # Verification is a measurement, not an exit status: each destination
+      # gets a different pair of the three input tones, and the check reads
+      # per-band energy back out of the file. A destination that silently
+      # carried the wrong mix would pass any check that only asked whether
+      # FFmpeg exited 0.
+      - name: Push a broadcast through it and measure the output
+        shell: bash
+        run: |
+          set -uo pipefail
+          rm -rf ./data
+          ./polyemesis-smoke -addr 127.0.0.1:8099 -data ./data -log warn > bcast-server.log 2>&1 &
+          pid=$!
+          go run scripts/smoketest.go
+          rc=$?
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          if [ "$rc" -ne 0 ]; then
+            echo "--- server log ---"
+            cat bcast-server.log || true
+            exit 1
+          fi
+
+      - name: Upload broadcast artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: broadcast-${{ matrix.os }}
+          path: |
+            bcast-server.log
+            data/recordings/
+          retention-days: 7
+          if-no-files-found: ignore
 
   ui:
     name: ui typecheck, lint, build

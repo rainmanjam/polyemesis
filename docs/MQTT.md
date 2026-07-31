@@ -111,6 +111,14 @@ two streams' numbers) that looks nothing like its cause.
 
 A name that needs no changing is left alone, so `twitch` stays `twitch`.
 
+Two edge cases fall out of that rule and are handled rather than left to chance.
+A name that reduces to nothing at all — `!!!` — becomes `x` plus its hash rather
+than an empty topic segment. And a name that *already* ends in something shaped
+like a generated suffix, such as `stream-a1b2c3d4`, is hashed too even though
+the reduction changed nothing: otherwise an operator could pick a literal name
+that collides with another entity's generated one, which is the same overwrite
+the hash exists to prevent.
+
 ### Orphans are cleaned up
 
 Delete or rename a source or destination and its retained topic is cleared with

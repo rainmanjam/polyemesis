@@ -33,7 +33,7 @@ The keys, in brief:
 |---|---|---|
 | `addr` | `":8080"` | HTTP listen address for the UI and API |
 | `dataDir` | `"./data"` | Holds `polyemesis.db`, `secret.key`, `recordings/`, `hls/`, `tls/` |
-| `tls.mode` | `"auto"` | `auto`, `acme`, `selfsigned`, `manual`, `off` |
+| `tls.mode` | `"off"` — but `config.example.yaml` ships `"auto"` | `auto`, `acme`, `selfsigned`, `manual`, `off` |
 | `tls.hostname` | `""` | The DNS name this server is reached by |
 | `tls.acmeEmail` | `""` | Required for `acme`; where expiry warnings go |
 | `tls.certFile` / `tls.keyFile` | `""` | `manual` mode only |
@@ -62,6 +62,20 @@ child's full command line as it spawns, which is usually the fastest route to
 understanding a process that will not start.
 
 ## Three things that surprise people
+
+### The built-in default is `off`; `auto` comes from the example file
+
+Those are two different things, and the difference is plain HTTP.
+
+Start polyemesis with **no `tls:` block at all** — no config file, or a minimal
+one — and it serves plaintext, because the compiled-in default is `off`. The
+`auto` in the table above is what you get by starting from
+`config.example.yaml`, which ships `mode: "auto"` uncommented. A new install
+that follows the documented path is therefore encrypted; one assembled by hand
+from the key list is not.
+
+The server warns loudly at startup when it is binding publicly without TLS. That
+warning is the thing to read.
 
 ### `tls.mode: auto` does not mean "always encrypt"
 
@@ -123,5 +137,5 @@ For containers, pass flags in `command:`, or mount a `config.yaml`. The
 - [INSTALL.md](INSTALL.md) — getting it running on each platform
 - [QUICKSTART.md](QUICKSTART.md) — first stream in about five minutes
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — when it is running but wrong
-- The **TLS and certificates** section of the [README](../README.md) — the long
-  version, including certificate trust and reverse-proxy detail
+- [TLS.md](TLS.md) — the long version: how `auto` resolves, worked configurations
+  for all five deployments, trusting the self-signed CA, and reverse proxies

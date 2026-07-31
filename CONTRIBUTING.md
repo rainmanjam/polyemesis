@@ -39,20 +39,25 @@ make build          # builds the UI, embeds it, produces ./polyemesis
 ./polyemesis
 ```
 
-You need Go 1.26+, Node 24+, and FFmpeg 6.0+ (8.x recommended). See
-[docs/INSTALL.md](docs/INSTALL.md) for platform detail and
-[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for what is pinned and why.
+You need Go 1.26.5+, Node 20.19+ or 22.12+ (Vite 8's floor; CI builds on 24),
+and FFmpeg 6.0+ — 8.x recommended. See [docs/INSTALL.md](docs/INSTALL.md) for
+platform detail and [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for what is
+pinned and why.
 
-For UI work, `make dev` runs Vite against a running server so you get hot reload
-instead of a rebuild per change.
+For UI work you want two terminals: `make dev` runs the **backend** only, and
+`make ui-dev` runs Vite against it on `:8080` for hot reload. Running `make
+build` per change works and is much slower.
 
 ## Tests
 
 ```sh
-make test                       # Go unit tests
-go test ./... -race             # what CI runs; the race detector finds real bugs here
+make check                      # everything CI gates on: fmtcheck, vet, test, typecheck, lint
+go test ./... -race             # the race detector finds real bugs here
 ./scripts/acceptance.sh         # end-to-end against a real binary and real FFmpeg
 ```
+
+`make check` is the one to run before pushing — it is the local equivalent of
+the jobs that will gate your pull request.
 
 [docs/TESTING.md](docs/TESTING.md) lists every suite and what it covers.
 [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md) explains what is deliberately
@@ -80,7 +85,9 @@ by checking that a function returned `nil` — and some of it is hard-won.
 
 ## Code style
 
-Run `make fmt` and `make lint` before pushing. Beyond that:
+Run `make fmt` and `make check` before pushing — CI gates on `gofmt -l` being
+empty, so an unformatted file fails the build rather than being tidied for you.
+Beyond that:
 
 **Comments explain *why*, and especially *why not*.** The codebase is full of
 comments recording the approach that was tried and rejected, with the
@@ -108,9 +115,19 @@ A pull request should say:
 - how you know it works (which suite, what you measured),
 - anything you deliberately did not do.
 
-CI runs build, vet, unit tests with `-race`, and the container acceptance suite.
-Please make sure it is green — and if a test is flaky, say so rather than
-re-running until it passes. A flaky test is a bug report.
+**On your pull request** CI runs: `gofmt` gating, build, vet and the unit tests
+with `-race`; the same build and tests plus a measured broadcast on macOS and
+Windows; the UI typecheck, lint and build; and eleven host acceptance suites.
+
+**Not on your pull request:** the three container suites and the browser E2E.
+Each builds the image and publishes real streams into it, so they run on `main`
+and on a schedule instead. That means a change can pass everything visible on
+your PR and still break a suite after merge — if you have touched ingest,
+one-port token routing, or anything the UI drives end to end, say so in the
+description so it gets watched.
+
+If a test is flaky, say so rather than re-running until it passes. A flaky test
+is a bug report.
 
 ## Reporting bugs
 

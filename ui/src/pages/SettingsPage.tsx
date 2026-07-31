@@ -5,6 +5,7 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertTriangle,
+  RefreshCw,
   Check,
   Copy,
   Download,
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
+import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -57,11 +59,12 @@ import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
   ApiToken,
   CertInfo,
+  CredentialCheck,
+  FailoverReturn,
   IngestMode,
   PlatformAccount,
   PlatformCreds,
   Settings,
-  FailoverReturn,
   SetupGuide,
   SystemInfo,
   TlsMode,
@@ -703,6 +706,17 @@ function PipelineSettings({
           </Button>
         </CardContent>
       </Card>
+
+      {/* Automod sits directly after chat retention, because the two are the
+          same subject: retention is the DEPTH the history checker can see, and
+          a rate detector with a two-hour scrollback behind it is a different
+          instrument from one with a week. */}
+      <AutomodMatrix settings={draft} onChange={setDraft} />
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+          {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+        </Button>
+      </div>
 
       <Card>
         <CardHeader>
@@ -1468,13 +1482,18 @@ function PlatformCredCard({
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [check, setCheck] = useState<CredentialCheck | null>(null);
+  const [rechecking, setRechecking] = useState(false);
 
   useEffect(() => setClientId(creds?.clientId ?? ""), [creds]);
 
   const save = async () => {
     setBusy(true);
     try {
-      await api.putCreds(guide.platform, clientId.trim(), clientSecret.trim());
+      const saved = await api.putCreds(guide.platform, clientId.trim(), clientSecret.trim());
+      setCheck(saved.check ?? null);
+      // Saved is saved, whatever the checker thought. The verdict renders
+      // below; it does not turn a successful save into a failure toast.
       toast.success(`${guide.name} credentials saved.`);
       setClientSecret("");
       onChanged();
@@ -1482,6 +1501,17 @@ function PlatformCredCard({
       toast.error(err instanceof Error ? err.message : "Could not save the credentials.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const recheck = async () => {
+    setRechecking(true);
+    try {
+      setCheck(await api.checkCreds(guide.platform));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not re-check the credentials.");
+    } finally {
+      setRechecking(false);
     }
   };
 
@@ -1551,6 +1581,17 @@ function PlatformCredCard({
                     Must match exactly, including scheme and port. If you reach polyemesis through a
                     reverse proxy, use that public URL.
                   </span>
+                  {/* Above the credential fields on purpose: registering the
+                      right URI has to happen before the credentials matter. */}
+                  {guide.redirectWarnings?.map((warning) => (
+                    <div
+                      key={warning}
+                      className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn"
+                    >
+                      <AlertTriangle className="mt-px size-3 shrink-0" />
+                      <span>{warning}</span>
+                    </div>
+                  ))}
                 </div>
               )}
               {guide.scopes && guide.scopes.length > 0 && (
@@ -1591,10 +1632,43 @@ function PlatformCredCard({
               </div>
             </div>
 
+            {/* The verdict.
+                Four distinct words, and four distinct colours. "not verifiable"
+                must never read as "verified", and "could not check" must never
+                read as "rejected": a check that CANNOT run must not look like
+                one that ran and failed, and a platform outage must not be
+                reported as the operator's mistake. */}
+            {check && (
+              <div className="flex items-start gap-2 text-[10px]">
+                <Badge
+                  variant={
+                    check.state === "verified"
+                      ? "live"
+                      : check.state === "rejected"
+                        ? "down"
+                        : check.state === "unreachable"
+                          ? "warn"
+                          : "outline"
+                  }
+                >
+                  {check.state === "verified" && "verified"}
+                  {check.state === "rejected" && "rejected"}
+                  {check.state === "unverified" && "not verifiable"}
+                  {check.state === "unreachable" && "could not check"}
+                </Badge>
+                <span className="text-muted-foreground">{check.detail}</span>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-1.5">
               <Button size="sm" onClick={save} disabled={busy || !clientId.trim() || !clientSecret.trim()}>
                 {busy ? <Loader2 className="animate-spin" /> : <Save />} Save credentials
               </Button>
+              {creds?.hasSecret && (
+                <Button size="sm" variant="outline" onClick={recheck} disabled={rechecking}>
+                  {rechecking ? <Loader2 className="animate-spin" /> : <RefreshCw />} Re-check
+                </Button>
+              )}
               {creds && (
                 <>
                   <Button size="sm" variant="outline" asChild>

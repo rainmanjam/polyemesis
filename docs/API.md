@@ -101,10 +101,25 @@ tokens are for.
 | Method | Path |
 |---|---|
 | `GET` `PUT` | `/settings` |
-| `GET` | `/tls` |
+| `PUT` | `/settings/mqtt-password` |
+| `PUT` | `/settings/automod-key` |
+| `GET` | `/tls`, `/fonts` |
 
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
+
+The MQTT password has its own route because it is the one setting `GET
+/settings` will not give back. Writing it through the blob would mean reading
+the blob first, which would mean handing the password out to anything that can
+read settings. **`/settings/automod-key` exists for the same reason** — the
+model API key is sealed and never returned; `automod.model.hasApiKey` is all
+the settings blob carries. Sending an empty key clears it.
+
+`GET /fonts` lists the fonts available to a text overlay: the two weights of
+Inter that ship embedded, plus anything you drop in `<data-directory>/fonts/`,
+with the built-in ones marked. The route exists so the UI offers what this
+install actually has rather than a hard-coded list a build or a data directory
+could contradict.
 
 ### Sources
 
@@ -168,6 +183,60 @@ failover is off — there is no tier to switch.
 | `GET` | `/playout` |
 | `PUT` | `/playout/publish` |
 | `POST` | `/playout/token`, `/playout/analytics/reset` |
+
+### Media uploads
+
+| Method | Path |
+|---|---|
+| `POST` | `/media` |
+| `GET` | `/media` |
+| `DELETE` | `/media/{name}` |
+
+`POST /media` takes `multipart/form-data` with the file in a part named `file`.
+It streams to disk rather than buffering, so a multi-gigabyte upload is not an
+allocation.
+
+**The filename you send is a hint and is discarded.** The server chooses the
+stored name, with a random suffix, because this is the only endpoint where a
+caller supplies both the bytes and something path-shaped. The response carries
+the name it chose and a `pullUrl` ready to paste into a pull source.
+
+Uploads are stored under `<data-directory>/uploads/`, which retention never
+sweeps — a policy written about footage the server captured must not delete a
+file an operator deliberately put there. Every file carries an `origin` of
+`uploaded`, `recorded` or `clip`, derived from which store it came out of rather
+than stored beside it.
+
+These sit behind the session, like every other mutation, which means **an API
+token cannot upload**. Tokens are for automation, and writing arbitrary bytes to
+the server's disk is not something a leaked one should reach.
+
+Refusals worth knowing: `413` over the size limit, `507` when the volume lacks
+room — checked *before* the write, because a filled disk takes the database and
+the HLS preview with it — and `400` for an empty file. None of them leaves a
+partial file behind.
+
+### Automod
+
+| Method | Path |
+|---|---|
+| `GET` | `/automod/matrix` |
+| `GET` | `/automod/stats` |
+
+Automod's *configuration* lives inside `/settings` — the matrix, the rules and
+the model options all round-trip through that blob. Only two things need routes
+of their own.
+
+`GET /automod/matrix` renders every cell with an `available` flag and, where it
+is false, a `reason`. **Availability is derived from what each platform can
+actually do and is never stored**: a switch offering an action a platform cannot
+perform fails silently, and the operator believes that channel is protected. The
+response also carries the `actions`, `checkers` and `platforms` vocabularies, so
+a client builds its table from the server's list rather than a second copy free
+to drift.
+
+`GET /automod/stats` reports model spend and health — calls this hour against
+the ceiling, failures, and the last error.
 
 ### Recordings, library, clipper
 
@@ -236,12 +305,48 @@ the current value.
 | `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
-| `GET` | `/metadata` |
+| `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
-| `GET` | `/chat`, `/chat/messages` |
+| `GET` | `/chat`, `/chat/messages`, `/chat/users` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
+| `POST` | `/chat/messages/hide` |
+| `POST` `DELETE` | `/chat/bans` |
+| `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
+
+`/metadata/broadcast-window` reports the period each platform will accept a
+scheduled broadcast in, because they disagree and the composer has to say so
+before you fill the form in rather than after.
+
+#### Moderation
+
+`/chat/users` is the moderator's user card: what one person has said, newest
+last. It reads polyemesis's own retained scrollback, not the platform — **no**
+platform here publishes an API for a user's message history, Twitch included.
+Its mod card is a web-app feature backed by internal endpoints. The trade is
+depth for breadth: shallower than Twitch's card, and it works across all four
+platforms at once.
+
+`DELETE /chat/messages` removes one message on the platform. `POST
+/chat/messages/hide` is Facebook's reversible hide where the platform offers it,
+and a local-only hide everywhere else — the pane stops showing it, the platform
+never hears about it.
+
+`POST` and `DELETE /chat/bans` ban, time out, and lift either. **The duration is
+a Go duration, and the adapters convert.** YouTube and Twitch count seconds;
+Kick counts *minutes*, so a unified `600` would mean ten minutes on two
+platforms and seven days on the third. Each adapter converts at the last moment
+and rounds **up**, because truncating 30s to zero minutes would reach Kick as a
+permanent ban.
+
+`PATCH /chat/settings` is Twitch's channel rules — slow mode, followers-only,
+subscribers-only, no repeated messages.
+
+One deletion trap is worth stating because the platform's own API hides it:
+`DELETE /helix/moderation/chat` with **no** `message_id` deletes every message in
+the channel and returns success. polyemesis refuses an empty id before the URL
+is built.
 
 ## WebSocket
 

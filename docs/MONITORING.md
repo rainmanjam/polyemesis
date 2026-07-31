@@ -10,6 +10,11 @@ instead.
 - [Metric conventions](#metric-conventions)
 - [Queries to start from](#queries-to-start-from)
 - [Built-in alerts](#built-in-alerts)
+- [Automation](#automation)
+
+Prometheus is not the only way out. polyemesis also publishes retained state to
+an MQTT broker, with Home Assistant discovery, which suits a dashboard you
+already run better than a scrape target does — see [MQTT.md](MQTT.md).
 
 ---
 
@@ -104,6 +109,7 @@ Full route reference: [API.md](API.md).
 
 ## See also
 
+- [MQTT.md](MQTT.md) — retained telemetry and Home Assistant discovery
 - [API.md](API.md#authentication) — tokens, sessions and CSRF
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — organised by what you observe
 - [../SECURITY.md](../SECURITY.md) — what a token can and cannot do

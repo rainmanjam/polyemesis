@@ -126,6 +126,30 @@ func Get(p db.Platform) (Provider, error) {
 // request handler.
 var httpClient = &http.Client{Timeout: 20 * time.Second}
 
+// tokenStatusError is a non-2xx response from a platform token endpoint. It
+// carries the numeric status so a caller -- classifyCheckError, specifically
+// -- can distinguish "the platform refused this credential" from "the
+// platform could not answer" by comparing an int, rather than by parsing a
+// status code back out of a formatted string.
+//
+// This is a different type from statusError in metadata.go on purpose, not
+// an oversight: that one carries the request URL and already means something
+// specific to scopeAdvice and fbAdvice, which switch on its Status field for
+// Graph/Helix metadata writes. Reusing it here would make a metadata
+// permission error and a token-endpoint failure look like the same kind of
+// thing to any future `case *statusError` that assumes one meaning.
+type tokenStatusError struct {
+	code int
+	body string
+}
+
+// Error's wording is unchanged from the fmt.Errorf this type replaced, so
+// nothing that previously read the message -- logs, other error text built
+// with %w -- changes behaviour.
+func (e *tokenStatusError) Error() string {
+	return fmt.Sprintf("token endpoint returned %d: %s", e.code, e.body)
+}
+
 // postForm performs an OAuth token request and decodes the standard response.
 func postForm(ctx context.Context, endpoint string, form url.Values, headers map[string]string) (*Token, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
@@ -146,7 +170,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values, headers map
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, snippet(body))
+		return nil, &tokenStatusError{code: resp.StatusCode, body: snippet(body)}
 	}
 
 	var out struct {
@@ -282,6 +306,10 @@ type SetupGuide struct {
 	// they had to be. Read it from ManualKeyFor rather than hard-coding it.
 	ManualStreamKey bool   `json:"manualStreamKey,omitempty"`
 	Note            string `json:"note,omitempty"`
+	// RedirectWarnings are computed per request by the API layer, which is
+	// where the configuration and the inbound Host live. Empty here; filled in
+	// by handlePlatformGuides.
+	RedirectWarnings []string `json:"redirectWarnings,omitempty"`
 }
 
 // Guides returns the setup instructions rendered on the credentials page.
