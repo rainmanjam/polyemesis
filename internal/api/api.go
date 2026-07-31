@@ -389,6 +389,11 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/platforms/guides", s.handlePlatformGuides)
 			r.Get("/platforms/credentials", s.handleListCreds)
 			r.Put("/platforms/credentials/{platform}", s.handlePutCreds)
+			// POST rather than GET despite reading nothing: it makes an
+			// outbound call to a third party, so it is neither safe nor
+			// idempotent, and POST puts it behind requireCSRF with the rest of
+			// the state-changing group.
+			r.Post("/platforms/credentials/{platform}/check", s.handleCheckCreds)
 			r.Delete("/platforms/credentials/{platform}", s.handleDeleteCreds)
 			r.Get("/platforms/accounts", s.handleListAccounts)
 			r.Delete("/platforms/accounts/{id}", s.handleDeleteAccount)
