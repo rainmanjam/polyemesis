@@ -2160,3 +2160,75 @@ export interface AutomodMatrixView {
   checkers: AutomodChecker[];
   platforms: string[];
 }
+
+// ------------------------------------------------- lifecycle webhooks
+
+export type HookTrigger =
+  | "ingest.published"
+  | "ingest.disconnected"
+  | "destination.up"
+  | "destination.down";
+
+/** A stored lifecycle webhook. `url` is always masked and `secret` is never
+ *  present: the plaintext key is returned once, by the create call, and cannot
+ *  be read back. */
+export interface Hook {
+  id: number;
+  name: string;
+  enabled: boolean;
+  url: string;
+  hasSecret: boolean;
+  triggers: HookTrigger[];
+  timeoutSeconds: number;
+  maxAttempts: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HookMeta {
+  triggers: HookTrigger[];
+  specVersion: string;
+  headers: Record<string, string>;
+  bounds: Record<string, number>;
+  stats: {
+    queued: number;
+    dropped: number;
+    sent: number;
+    failed: number;
+    retries: number;
+    endpoints: number;
+    lastSent?: string;
+    lastError?: string;
+  };
+}
+
+export interface HookDelivery {
+  hookId: number;
+  trigger: HookTrigger | "test";
+  sequence: number;
+  id: string;
+  at: string;
+  attempts: number;
+  status?: number;
+  durationMs: number;
+  error?: string;
+  response?: string;
+}
+
+/** What the test button gets back. It carries the exact body and signature that
+ *  were sent, because the operator is checking their own verification code
+ *  against real bytes rather than against the documentation. */
+export interface HookTestResult {
+  status: number;
+  durationMs: number;
+  response?: string;
+  body: string;
+  signature: string;
+}
+
+export interface HookCreated {
+  id: number;
+  hook: Hook;
+  secret: string;
+  secretNote: string;
+}

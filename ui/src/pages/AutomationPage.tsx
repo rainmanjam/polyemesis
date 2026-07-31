@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { HooksCard } from "@/components/HooksCard";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertTriangle,
   Bell,
   CalendarClock,
   Loader2,
+  Webhook,
   Pencil,
   Plus,
   Send,
@@ -264,6 +266,11 @@ export function AutomationPage() {
             <TabsTrigger value="schedules">
               <CalendarClock className="h-3.5 w-3.5" /> Schedules
             </TabsTrigger>
+            {/* A sibling of Alerts, not a mode of it. An alert is for a person
+                and coalesces; a hook is for a script and must not. */}
+            <TabsTrigger value="hooks">
+              <Webhook className="h-3.5 w-3.5" /> Webhooks
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="alerts">
@@ -316,6 +323,9 @@ export function AutomationPage() {
                 })
               }
             />
+          </TabsContent>
+          <TabsContent value="hooks">
+            <HooksCard />
           </TabsContent>
         </Tabs>
       )}
