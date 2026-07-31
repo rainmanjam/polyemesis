@@ -35,6 +35,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/recording"
@@ -192,7 +193,19 @@ type Engine struct {
 	// delivering. Both are outside e.mu: the watcher is touched only by
 	// alertLoop, and the notifier is explicitly non-blocking, which is the
 	// whole reason a slow endpoint cannot reach the reconcile loop.
-	alerter    *alerts.Notifier
+	alerter *alerts.Notifier
+	// hooks delivers lifecycle webhooks and hookWatch derives their edges.
+	//
+	// The dispatcher is SHARED across every engine -- it is handed in by the
+	// manager, not built here -- because a sequence number, a delivery log and
+	// a retry queue all belong to the endpoint, and an endpoint is subscribed
+	// to by the whole install rather than by one programme. The watcher is
+	// per engine, because "has this source been publishing" is per source.
+	//
+	// Both may be nil on an Engine assembled field by field, which is how the
+	// tests build one; every use is nil-safe.
+	hooks      *hooks.Dispatcher
+	hookWatch  *hooks.Watcher
 	alertWatch *alerts.Watcher
 	// sched flips destinations' enabled flags on a timetable, through the same
 	// path a human uses.
@@ -367,6 +380,9 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	// with neither configured does no work beyond one cheap sweep.
 	e.alerter = alerts.New(log, store)
 	e.alertWatch = alerts.NewWatcher(alerts.WatchConfig{})
+	// Named from the source row on the first sweep; SourceRef starts with the
+	// id alone so an event raised before that still identifies its programme.
+	e.hookWatch = hooks.NewWatcher(hooks.SourceRef{ID: sourceID}, hooks.WatchConfig{})
 	e.sched = scheduler.New(log, store, scheduleActuator{e}, scheduler.WithOnResult(e.onSchedule))
 	return e, nil
 }
@@ -525,7 +541,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.alerter != nil {
 		e.wg.Add(2)
 		go func() { defer e.wg.Done(); e.alerter.Run(e.ctx) }()
-		go func() { defer e.wg.Done(); e.alertLoop(e.ctx) }()
+		go func() { defer e.wg.Done(); e.observeLoop(e.ctx) }()
 	}
 	if e.sched != nil {
 		e.wg.Add(1)
@@ -4676,6 +4692,21 @@ const (
 // tests build one.
 func (e *Engine) Alerts() *alerts.Notifier { return e.alerter }
 
+// Hooks exposes the dispatcher so the API can report its counters, list recent
+// deliveries and send a test. Nil when no dispatcher was wired.
+func (e *Engine) Hooks() *hooks.Dispatcher { return e.hooks }
+
+// SetHooks attaches the shared dispatcher.
+//
+// A setter rather than a New parameter, matching SetTranscriber: engines are
+// created whenever a source is added, long after main built the dispatcher, and
+// a programme whose hooks silently never fire is a bug nobody reports.
+func (e *Engine) SetHooks(d *hooks.Dispatcher) {
+	e.mu.Lock()
+	e.hooks = d
+	e.mu.Unlock()
+}
+
 // Scheduler exposes the schedule runner for the same reason.
 func (e *Engine) Scheduler() *scheduler.Runner { return e.sched }
 
@@ -4711,14 +4742,28 @@ func (e *Engine) onSchedule(r scheduler.Result) {
 	e.bus.Publish(eventSchedule, r)
 }
 
-// alertLoop samples the pipeline and hands each snapshot to the watcher.
+// observeWanted reports whether a sweep is worth building.
+//
+// Extracted so the gate is testable without an engine. The failure it guards is
+// silent: this loop used to skip everything when no ALERT rules existed, and a
+// hook is a second consumer of the same snapshot, so an install with hooks and
+// no alert rules would have observed nothing at all.
+func observeWanted(alertRules, hookRules bool) bool { return alertRules || hookRules }
+
+// observeLoop samples the pipeline and hands each snapshot to BOTH watchers.
+//
+// They answer different questions -- "is this an incident worth waking
+// somebody" against "did this transition happen" -- and so cross different
+// edges at different times: a destination failing raises a hook at 10s and an
+// alert at 20s. Deriving the second set from a second sampler would mean two
+// Status() calls at two cadences that could disagree about what they saw.
 //
 // One sweep raises every alert rather than a Publish call scattered through the
 // reconcile, because everything worth alerting on is a TRANSITION — "has been
 // down for twenty seconds", "is out of tolerance again" — and a transition
 // needs somewhere to remember the previous state. Sweeping also guarantees an
 // alert is never raised while e.mu is held by the thing it is about.
-func (e *Engine) alertLoop(ctx context.Context) {
+func (e *Engine) observeLoop(ctx context.Context) {
 	if e.alerter == nil || e.alertWatch == nil {
 		return
 	}
@@ -4745,11 +4790,15 @@ func (e *Engine) alertLoop(ctx context.Context) {
 			live := !firstRx && rx > lastRx
 			lastRx, firstRx = rx, false
 
-			// A server with no alert rules pays for one cached lookup and
-			// nothing else — no status snapshot, no queries, no disk read.
-			// Adding the first rule starts the timers from that moment, which
-			// is the only honest thing it could do.
-			if !e.alerter.HasRules() {
+			// A server with neither an alert rule nor a hook pays for two
+			// cached lookups and nothing else — no status snapshot, no
+			// queries, no disk read. Adding the first one starts the timers
+			// from that moment, which is the only honest thing it could do.
+			//
+			// e.hooks may be nil; HasHooks is nil-safe, the same discipline
+			// alerts.Notifier and transcribe.Tools use. Guarding at the call
+			// site instead is what makes the two diverge.
+			if !observeWanted(e.alerter.HasRules(), e.hooks.HasHooks()) {
 				haveDisk = false
 				continue
 			}
@@ -4761,6 +4810,16 @@ func (e *Engine) alertLoop(ctx context.Context) {
 			snap.Disk = disk
 			for _, ev := range e.alertWatch.Observe(snap) {
 				e.alerter.Publish(ev)
+			}
+			if e.hookWatch != nil {
+				// Re-stamped every sweep: the source row is named after the
+				// engine is built, and an event carrying only an id tells a
+				// script which programme but not which one an operator would
+				// recognise.
+				e.hookWatch.SetSource(hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()})
+				for _, ev := range e.hookWatch.Observe(snap) {
+					e.hooks.Publish(ev)
+				}
 			}
 		}
 	}

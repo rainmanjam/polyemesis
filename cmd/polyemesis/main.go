@@ -23,6 +23,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	// Aliased: main.go already has a `hooks` type for the service lifecycle
+	// callbacks, and that name is the older claim on it.
+	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 )
@@ -251,6 +254,19 @@ func run(h *hooks) error {
 	} else {
 		log.Warn("chat retention settings unreadable; using the built-in defaults", "err", err)
 	}
+
+	// Lifecycle webhooks. One dispatcher for the whole process, handed to every
+	// engine: a sequence number and a delivery log belong to the endpoint, and
+	// an endpoint is subscribed to by the install rather than by one programme.
+	//
+	// Started unconditionally and inert until an operator adds a hook. The
+	// dispatcher re-reads the table on a ticker, so creating one takes effect
+	// without a restart -- the same shape as the alert notifier's rule cache.
+	hookd := webhooks.NewDispatcher(log, webhooks.SourceFunc(func() ([]webhooks.Hook, error) {
+		return store.EnabledHooks(box)
+	}))
+	go hookd.Run(ctx)
+	eng.SetHooks(hookd)
 
 	srv := api.New(api.Options{
 		Log: log, Config: cfg,
