@@ -31,6 +31,17 @@ its first tagged release.
   broker — the container's exit code, status and last log lines. No timeout was
   changed and no retry was added; the flake rate is still the thing being
   measured. See issue #38.
+- **The Windows service now announces the recording-truncation defect itself.**
+  Stopping the service still truncates the in-progress recording — the graceful
+  stop is a `CTRL_BREAK` console event and a service has no console — but the
+  service no longer lets that happen silently. Every start writes a warning to
+  the Event Viewer under event ID 3, naming the cause, the bound (only the
+  segment in progress; earlier segments are finalised and playable), and the
+  workaround. `docs/TROUBLESHOOTING.md` carries the same under the symptom.
+  The defect itself is unchanged and remains open: both candidate fixes —
+  allocating a console, or asking FFmpeg to quit over stdin — need a real
+  Windows host to verify, and shipping an unverified fix to the process
+  machinery every stream depends on is the worse trade.
 - **The macOS SRT wildcard failure is documented where it is met.** The startup
   warning fires at boot; operators meet the failure when they point an encoder
   at the box. `docs/TROUBLESHOOTING.md` now carries the measured matrix under

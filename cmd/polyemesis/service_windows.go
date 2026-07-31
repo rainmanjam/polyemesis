@@ -42,7 +42,44 @@ const (
 const (
 	eventIDLifecycle uint32 = 1
 	eventIDLog       uint32 = 2
+	// Its own ID so an operator can filter for it, and so it is not lost among
+	// the lifecycle chatter it sits next to.
+	eventIDRecordingTruncation uint32 = 3
 )
+
+// recordingTruncationWarning is emitted on EVERY service start, deliberately.
+//
+// Running under the SCM IS the failing condition -- there is no separate check
+// to make. GenerateConsoleCtrlEvent is delivered through the caller's console
+// and a service has none, so the graceful CTRL_BREAK in
+// internal/supervisor/proc_windows.go fails immediately and the supervisor
+// terminates the child instead. FFmpeg never writes the container index for the
+// segment it was filling.
+//
+// Said at start rather than at stop because by the time it happens the operator
+// has already lost the segment, and a service stop is frequently a reboot
+// nobody is watching. Said every time rather than once because the audience is
+// whoever reads the Event Viewer after losing a recording, not whoever
+// installed the service.
+//
+// The loss is bounded to the CURRENT segment: the recorder writes segmented
+// MKV, so everything already rolled over is intact and playable. That number is
+// the operator's lever, and naming it here is the difference between a warning
+// and an apology.
+const recordingTruncationWarning = "KNOWN DEFECT: stopping this service truncates an in-progress recording.\r\n" +
+	"\r\n" +
+	"Why: the graceful stop is a CTRL_BREAK console event, and a Windows service has no " +
+	"console for it to travel through. The recorder is terminated instead of being asked " +
+	"to finish, so it never writes the index for the segment it was filling.\r\n" +
+	"\r\n" +
+	"What is lost: only the segment in progress. Earlier segments have already been " +
+	"finalised and are playable. Shorter recording.segmentSeconds means less at risk.\r\n" +
+	"\r\n" +
+	"To avoid it: stop recording from the UI, and wait for the recording to appear in the " +
+	"Recordings list, before stopping the service.\r\n" +
+	"\r\n" +
+	"Tracked in CHANGELOG.md under Known limitations. Running polyemesis from a console " +
+	"instead of as a service is unaffected."
 
 // runService hands control to the SCM when it was the SCM that started us.
 // A console launch reports false, leaving main() on the interactive path.
@@ -94,6 +131,7 @@ func (h *serviceHandler) Execute(args []string, r <-chan svc.ChangeRequest, s ch
 		defer elog.Close()
 	}
 	h.report(eventlog.Info, eventIDLifecycle, "polyemesis service starting")
+	h.report(eventlog.Warning, eventIDRecordingTruncation, recordingTruncationWarning)
 
 	phases := make(chan phase, 16)
 	stop := make(chan struct{})

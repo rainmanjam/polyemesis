@@ -222,6 +222,25 @@ The free-space guard halts recording rather than filling the disk. The
 **Recordings** page reports the state and the reason. It resumes when space is
 available.
 
+### Windows: the last part of a recording is missing after a service stop
+
+Known defect, and the loss is bounded rather than total.
+
+The graceful stop is a `CTRL_BREAK` console event. A Windows **service** has no
+console for it to travel through, so the supervisor terminates the recorder
+instead of asking it to finish, and FFmpeg never writes the container index for
+the segment it was filling. The service logs this warning at every start, under
+event ID 3 in the Event Viewer.
+
+**Only the in-progress segment is affected.** The recorder writes segmented MKV,
+so every segment that had already rolled over is finalised and plays normally. A
+shorter `recording.segmentSeconds` puts less at risk each time.
+
+**To avoid it:** stop recording from the UI and wait for it to appear in the
+**Recordings** list before stopping the service. Running polyemesis from a
+console rather than as a service is unaffected — there the `CTRL_BREAK` is
+delivered and the recording is finalised.
+
 ### A job never runs
 
 The governor defers work under load — this is deliberate, so post-production
