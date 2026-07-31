@@ -1,0 +1,124 @@
+# Measure how often an acceptance suite fails without anything changing.
+#
+# Issue #38 records two suites failing and then passing on rerun, on unrelated
+# branches, on the same day. That is a pattern, not a rate -- and the rate is
+# what any later fix has to be measured against. Without a baseline, "I fixed
+# the flake" is unfalsifiable: a suite that failed 1 run in 20 will look fixed
+# after any change at all.
+#
+# It also exists because the evidence erases itself. `gh run rerun --failed`
+# OVERWRITES the job's recorded conclusion, so querying past runs for failures
+# returns nothing once anyone has rerun them. The only surviving trace is
+# run_attempt > 1. Anything that wants the rate has to record it at the time,
+# which is what this does.
+#
+# Deliberately REPORT-ONLY. It does not fail on a bad rate, because nobody
+# knows yet what a bad rate is -- that is the thing being measured. Baking in a
+# threshold now would be asserting the answer before taking the measurement.
+name: flake rate
+
+on:
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Comma-separated suites to measure"
+        type: string
+        default: "acceptance-mqtt,acceptance-failover"
+      runs:
+        description: "Repetitions per suite"
+        type: string
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      suites: ${{ steps.split.outputs.suites }}
+    steps:
+      # Read from the environment, never interpolated into the script: the
+      # input is a string a human types and must not reach the shell as code.
+      - name: Split the suite list
+        id: split
+        env:
+          SUITES: ${{ inputs.suites }}
+        run: |
+          json=$(printf '%s' "$SUITES" | tr ',' '\n' | sed 's/[[:space:]]//g' \
+            | grep -E '^acceptance[a-z0-9-]*$' | jq -R . | jq -sc .)
+          if [ "$json" = "[]" ] || [ -z "$json" ]; then
+            echo "no valid suite names in: $SUITES" >&2
+            exit 1
+          fi
+          echo "suites=$json" >> "$GITHUB_OUTPUT"
+          echo "measuring: $json"
+
+  measure:
+    name: "${{ matrix.suite }} x${{ inputs.runs }}"
+    needs: plan
+    runs-on: ubuntu-latest
+    # Each repetition takes minutes and there are several. The default six-hour
+    # ceiling would sit burning a runner if a suite hangs rather than fails.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Run it repeatedly and record every outcome
+        env:
+          SUITE: ${{ matrix.suite }}
+          RUNS: ${{ inputs.runs }}
+        run: |
+          case "$SUITE" in acceptance*) ;; *) echo "refusing: $SUITE"; exit 1 ;; esac
+          case "$RUNS" in ''|*[!0-9]*) echo "runs must be a number"; exit 1 ;; esac
+          [ -x "./scripts/$SUITE.sh" ] || { echo "no such suite: $SUITE"; exit 1; }
+
+          pass=0; fail=0
+          : > /tmp/outcomes.txt
+          for i in $(seq 1 "$RUNS"); do
+            start=$(date +%s)
+            if "./scripts/$SUITE.sh" > "/tmp/${SUITE}-$i.log" 2>&1; then
+              rc=PASS; pass=$((pass + 1))
+            else
+              rc=FAIL; fail=$((fail + 1))
+            fi
+            printf '%s\t%s\t%ss\n' "$i" "$rc" "$(( $(date +%s) - start ))" >> /tmp/outcomes.txt
+            echo "  run $i: $rc ($(( $(date +%s) - start ))s)"
+            # The last line of a failing run is usually the assertion that
+            # broke, which is the thing worth reading in the summary.
+            [ "$rc" = FAIL ] && tail -3 "/tmp/${SUITE}-$i.log" | sed 's/^/      /'
+          done
+
+          {
+            echo "### $SUITE"
+            echo
+            echo "**$fail failed / $RUNS runs**, unchanged tree, same runner image."
+            echo
+            echo '| run | result | duration |'
+            echo '|---|---|---|'
+            awk -F'\t' '{printf "| %s | %s | %s |\n", $1, $2, $3}' /tmp/outcomes.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "RESULT $SUITE: $fail/$RUNS failed"
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: flake-logs-${{ matrix.suite }}
+          path: /tmp/*.log
+          if-no-files-found: ignore
