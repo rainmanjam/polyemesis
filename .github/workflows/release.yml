@@ -177,9 +177,17 @@ jobs:
       # Docker Hub does not read the repository's README on its own: without
       # this the listing shows an empty overview, which is what a page nobody
       # scrolls past looks like. Only on a real tag, and only if it can log in.
+      #
+      # SCOPE: this needs a Docker Hub token with read/write/DELETE, which is a
+      # wider scope than pushing an image needs. With a read/write token the
+      # login succeeds, the images publish, and only this step fails -- with a
+      # bare "Error: Forbidden" on the PATCH. That is what happened on v0.1.0:
+      # seven tags published and the listing page stayed blank, because
+      # continue-on-error below quite correctly refused to fail the release
+      # over a description. If this step is red, check the token scope first.
       - name: Push the README to Docker Hub
         if: env.PUBLISH == 'true'
-        uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77 # v4.0.2
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
