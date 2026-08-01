@@ -42,6 +42,8 @@ func TestUIBoundsMatchTheGoValidators(t *testing.T) {
 		"renditionGOPSeconds":     {int(MinRenditionGOP), int(MaxRenditionGOP)},
 		"audioBitrateKbps":        {32, 512},
 		"recordingSegmentSeconds": {10, 86400},
+		"chatHistoryMessages":     {MinChatHistoryMessages, MaxChatHistoryMessages},
+		"alertRetryAttempts":      {MinAlertRetryAttempts, MaxAlertRetryAttempts},
 	}
 
 	for name, bounds := range want {

@@ -1081,6 +1081,7 @@ type Settings struct {
 	Destinations DestinationSettings `json:"destinations"`
 	Chat         ChatSettings        `json:"chat"`
 	Automod      AutomodSettings     `json:"automod"`
+	Alerts       AlertSettings       `json:"alerts"`
 }
 
 // AutomodSettings is everything about automatic chat moderation except the
@@ -1186,6 +1187,19 @@ type ChatSettings struct {
 	// delete -- so this is about how promptly "deleted" becomes true on disk
 	// rather than about load.
 	PurgeMinutes int `json:"purgeMinutes"`
+	// HistoryMessages is the in-memory ring a browser reads on connect, before
+	// it falls back to querying the database.
+	//
+	// It pairs with RetentionHours and KeepMessages above and answers a
+	// different question. Those two decide how deep a moderator's user card can
+	// go; this decides how much scrollback arrives WITHOUT a query, which is
+	// what a late-joining operator sees in the moment they open the page.
+	//
+	// Bounded much lower than KeepMessages, and the reason is where the two
+	// live. KeepMessages is rows on disk, paid for only as they arrive.
+	// This ring is allocated in full at construction, so the number is memory
+	// reserved on a silent channel exactly as on a busy one.
+	HistoryMessages int `json:"historyMessages"`
 }
 
 // ChatSettings bounds, chosen to be generous rather than tidy. The cost of the
@@ -1197,6 +1211,17 @@ const (
 	MaxChatRetentionHours = 24 * 365 * 5
 	MaxChatKeepMessages   = 5_000_000
 	MaxChatPurgeMinutes   = 24 * 60
+	// MaxChatHistoryMessages is two orders of magnitude below
+	// MaxChatKeepMessages on purpose. The ring is allocated up front, so this
+	// ceiling is a memory reservation and not a limit on what may accumulate:
+	// at roughly 200 bytes a message it is about 10 MB held whether or not
+	// anyone ever says anything.
+	MaxChatHistoryMessages = 50_000
+	// MinChatHistoryMessages keeps a connecting browser from receiving nothing
+	// at all. Zero would be a legitimate wish -- "do not buffer" -- but it
+	// reads on the page as chat being broken, and the operator has no way to
+	// tell those apart.
+	MinChatHistoryMessages = 1
 )
 
 func (c ChatSettings) problems() []string {
@@ -1215,6 +1240,50 @@ func (c ChatSettings) problems() []string {
 	if c.PurgeMinutes < 1 || c.PurgeMinutes > MaxChatPurgeMinutes {
 		probs = append(probs, fmt.Sprintf(
 			"chat purge interval %d minutes out of range (1-%d)", c.PurgeMinutes, MaxChatPurgeMinutes))
+	}
+	if c.HistoryMessages < MinChatHistoryMessages || c.HistoryMessages > MaxChatHistoryMessages {
+		probs = append(probs, fmt.Sprintf(
+			"chat history %d messages out of range (%d-%d)",
+			c.HistoryMessages, MinChatHistoryMessages, MaxChatHistoryMessages))
+	}
+	return probs
+}
+
+// AlertSettings is install-wide alert delivery policy. Per-rule matching lives
+// on the rule row; this is how hard delivery tries once a rule has fired.
+type AlertSettings struct {
+	// RetryAttempts is how many times one delivery is tried before it is given
+	// up on, first try included.
+	//
+	// The failure story is an endpoint that is down rather than slow. Bounded
+	// is the whole point: retrying forever turns one dead webhook into a
+	// permanently busy goroutine, and the queue behind it into a backlog that
+	// never drains. What an operator gets to decide is how long "down" is
+	// tolerated before the alert is dropped, which is a judgement about their
+	// endpoint and not one this project can make for them.
+	//
+	// The backoff curve underneath is deliberately NOT exposed. It was chosen
+	// against measured behaviour, no failure story argues for changing it, and
+	// a knob nobody has a reason to turn still has to be validated, documented
+	// and supported -- the same argument that leaves the Low rows in
+	// docs/roadmap/UNREACHABLE-KNOBS.md alone.
+	RetryAttempts int `json:"retryAttempts"`
+}
+
+// AlertSettings bounds. The upper end is chosen against the backoff curve
+// rather than picked round: attempts back off to a 30s ceiling, so ten attempts
+// is already several minutes of chasing one dead endpoint.
+const (
+	MinAlertRetryAttempts = 1
+	MaxAlertRetryAttempts = 10
+)
+
+func (a AlertSettings) problems() []string {
+	var probs []string
+	if a.RetryAttempts < MinAlertRetryAttempts || a.RetryAttempts > MaxAlertRetryAttempts {
+		probs = append(probs, fmt.Sprintf(
+			"alert retry attempts %d out of range (%d-%d)",
+			a.RetryAttempts, MinAlertRetryAttempts, MaxAlertRetryAttempts))
 	}
 	return probs
 }
@@ -1353,7 +1422,15 @@ func DefaultSettings() Settings {
 			RetentionHours: 2,
 			KeepMessages:   2000,
 			PurgeMinutes:   5,
+			// chat.DefaultHistory. Unchanged from the value every install ran
+			// before this was reachable, so making it settable does not also
+			// change it -- pinned by TestChatDefaultsMatchTheChatPackage.
+			HistoryMessages: 500,
 		},
+		// alerts' own defaultAttempts, for the same reason: exposing a knob is
+		// not an occasion to move it. Pinned by
+		// TestAlertDefaultsMatchTheAlertsPackage.
+		Alerts: AlertSettings{RetryAttempts: 4},
 		// Automod is ON, and does NOTHING except flag for review.
 		//
 		// Those two facts together are the point. Shipping it off means an
@@ -1457,6 +1534,9 @@ func (s Settings) Validate() error {
 		add("%s", p)
 	}
 	for _, p := range s.Chat.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.Alerts.problems() {
 		add("%s", p)
 	}
 

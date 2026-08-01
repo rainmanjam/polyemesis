@@ -8,7 +8,97 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Chat scrollback sent on connect is now an operator setting**
+  (`chat.historyMessages`). This is the in-memory ring a browser reads the
+  instant it opens the page, before any stored history is queried — a different
+  number from the retention bounds beside it, which govern what is kept on disk.
+  Applied live by resizing the ring, so it takes effect on the next connection
+  rather than the next restart. Bounded 1–50,000 rather than at the millions
+  `keepMessages` allows, because the ring is allocated in full up front: the
+  ceiling is memory reserved whether or not anyone is talking.
+- **Alert delivery attempts are now an operator setting**
+  (`alerts.retryAttempts`). How hard a webhook that is not answering gets chased
+  before the alert is dropped, 1–10, first try included. Applied to every
+  running engine and remembered for engines created later, so a source added
+  after the save does not quietly run a different budget from the rest. Only
+  retryable failures are affected — a 404 from a deleted webhook is still
+  permanent. The backoff curve underneath stays unexposed: it was chosen against
+  measured behaviour and nothing argues for moving it.
+
+  These were the last two knobs `docs/roadmap/UNREACHABLE-KNOBS.md` rated worth
+  exposing. Building them surfaced a separate defect: `db.ChatSettings` cited a
+  test, `TestChatDefaultsMatchTheChatPackage`, that kept the package default and
+  the settings default in step. **That test did not exist in any package under
+  any name.** Both pairs are now genuinely pinned.
+
+- **Changing a destination's reconnect policy no longer drops it.**
+  `minBackoffSeconds`, `maxBackoffSeconds` and `giveUpAfter` govern what the
+  supervisor does *after* FFmpeg exits and never reach the command line, yet
+  editing one used to tear the destination down and rebuild it — so the only way
+  to say "be more patient with this platform" was to drop the connection to it.
+  They are now delivered to the running process. A retune shortens a backoff
+  already in flight and never lengthens it, and never resets the restart
+  counters. Raising the give-up threshold on a destination that has already
+  given up does restart it, deliberately: leaving it failed for ever would be
+  the silent no-op this work exists to remove.
+- **Saving settings now reports what it did.** `PUT /api/v1/settings` returns a
+  `reload` array alongside the settings, naming what restarted, what applied
+  live, and why. "Saved" is a statement about the database; this is a statement
+  about the stream. See [docs/HOT-RELOAD.md](docs/HOT-RELOAD.md).
+- **Every settings field now has a recorded reload class.** 141 rules — one per
+  leaf of the settings tree — each naming a class, the function that carries the
+  change, and a reason. A reflection walk fails the build when a field is added
+  without one, when a rule names a field that no longer exists, or when it names
+  a function nobody wrote. The distribution: 87 live, 49 respawn, 1 rebind, 2
+  on-demand, 2 next-start.
+
+### Fixed
+
+- **`meters.intervalMs` was stored, reported as saved, and ignored.** The value
+  was captured into the metering sidecar's stdout handler when it spawned, and
+  it is not part of that process's restart signature — so changing it did
+  nothing at all until some unrelated edit happened to restart the meters.
+  Lowering the interval to watch a quiet channel appeared to work and did not.
+  The throttle now reads the current value per frame.
+- **The VA-API probe tested the wrong GPU on a multi-GPU host.** Detection
+  already ranked the render nodes under `/dev/dri` and handed the encode the
+  right one; the probe ignored that and named `/dev/dri/renderD128` regardless.
+  On a machine whose first render node is display-only — or a container passed
+  `renderD129` — VA-API was tested on hardware it would never run on, failed,
+  and was withheld from the editor on the strength of it. The probe now names
+  the node detection chose. Where detection finds no usable node it still names
+  `renderD128`, because a VA-API probe with no device fails on every machine
+  including the ones where VA-API works, and "no node found" must not be
+  reported as "this encoder is broken".
+
+### Changed
+
+- **A timed-out wait in the acceptance suites now reports what it observed.**
+  `acceptance-failover` and `acceptance-mqtt` both asserted causes they had
+  never measured, and `acceptance-mqtt` discarded `docker run`'s stdout, stderr
+  and exit status at the call site. Failures now carry the trajectory of every
+  sample taken, whether the value arrived just after the ceiling, and — for the
+  broker — the container's exit code, status and last log lines. No timeout was
+  changed and no retry was added; the flake rate is still the thing being
+  measured. See issue #38.
+- **The Windows service now announces the recording-truncation defect itself.**
+  Stopping the service still truncates the in-progress recording — the graceful
+  stop is a `CTRL_BREAK` console event and a service has no console — but the
+  service no longer lets that happen silently. Every start writes a warning to
+  the Event Viewer under event ID 3, naming the cause, the bound (only the
+  segment in progress; earlier segments are finalised and playable), and the
+  workaround. `docs/TROUBLESHOOTING.md` carries the same under the symptom.
+  The defect itself is unchanged and remains open: both candidate fixes —
+  allocating a console, or asking FFmpeg to quit over stdin — need a real
+  Windows host to verify, and shipping an unverified fix to the process
+  machinery every stream depends on is the worse trade.
+- **The macOS SRT wildcard failure is documented where it is met.** The startup
+  warning fires at boot; operators meet the failure when they point an encoder
+  at the box. `docs/TROUBLESHOOTING.md` now carries the measured matrix under
+  the symptom, because the existing checklist sent readers to the firewall,
+  which the hosted-runner results rule out. See issue #28.
 
 ## [0.1.0] — 2026-07-31
 

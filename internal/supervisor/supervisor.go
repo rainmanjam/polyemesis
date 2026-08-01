@@ -94,6 +94,10 @@ type Spec struct {
 	// cleanly once an hour for a week must never accumulate its way to the
 	// limit, so a run longer than stableAfter resets the count, exactly as it
 	// already resets the backoff.
+	//
+	// MaxRestarts, MinBackoff and MaxBackoff seed the process's Policy. After
+	// Start they are read only through Policy()/SetPolicy(); reading spec here
+	// would mean a retune applied to a running destination had no effect.
 	MaxRestarts int
 
 	// StartDelay holds the FIRST spawn back. Restarts are unaffected: a
@@ -126,6 +130,24 @@ type Spec struct {
 	// and typically one sink shared by every process so the persisted log
 	// reads as a single interleaved timeline.
 	LogSink LogWriter
+}
+
+// Policy is the part of a Spec that can change while the process is running.
+//
+// It is separated out because everything else in a Spec ends up in an argv, and
+// FFmpeg has no channel for changing an argv in flight. These three never reach
+// the child at all -- they describe what the SUPERVISOR does once it has exited
+// -- so retuning them is a memory write rather than a restart.
+//
+// Before this existed the only way to apply "be more patient with this
+// destination" was to drop its connection: the three values rode in destSpec,
+// so editing them tore the destination down and built it again. An operator
+// raising a give-up threshold because a platform was flapping got a guaranteed
+// outage as the price of asking for fewer of them.
+type Policy struct {
+	MinBackoff  time.Duration
+	MaxBackoff  time.Duration
+	MaxRestarts int
 }
 
 // Status is the externally visible state of a process.
@@ -167,6 +189,17 @@ type Process struct {
 	cancel  context.CancelFunc
 	done    chan struct{}
 	running bool
+
+	// policyMu guards pol. Deliberately NOT p.mu: setState takes p.mu and then
+	// calls OnState, which fans out to the WebSocket, and a reconcile applying
+	// a policy must never end up waiting behind a browser.
+	policyMu sync.Mutex
+	pol      Policy
+	// retune wakes a supervisor that is sleeping out a backoff, so a lowered
+	// ceiling takes effect now rather than after the wait it was already in.
+	// Buffered by one and written non-blocking: applying a policy must never
+	// block on a supervisor that is mid-spawn.
+	retune chan struct{}
 }
 
 // New creates a supervised process. It does not start it.
@@ -178,10 +211,94 @@ func New(log *slog.Logger, spec Spec) *Process {
 		spec.MaxBackoff = defaultMaxBackoff
 	}
 	return &Process{
-		spec:  spec,
-		log:   log.With("process", spec.Name),
-		state: StateStopped,
-		logs:  newRing(logRingSize),
+		spec:   spec,
+		pol:    Policy{MinBackoff: spec.MinBackoff, MaxBackoff: spec.MaxBackoff, MaxRestarts: spec.MaxRestarts},
+		retune: make(chan struct{}, 1),
+		log:    log.With("process", spec.Name),
+		state:  StateStopped,
+		logs:   newRing(logRingSize),
+	}
+}
+
+// Policy returns the live restart policy.
+func (p *Process) Policy() Policy {
+	p.policyMu.Lock()
+	defer p.policyMu.Unlock()
+	return p.pol
+}
+
+// SetPolicy retunes a process that is already running.
+//
+// It deliberately does NOT reset the restart counter or the consecutive-failure
+// count. A settings save touches every destination, so resetting them would
+// mean that saving a log level silently granted every destination that had been
+// failing all night a fresh set of lives -- and one that should have given up
+// would retry for ever, which is the condition GiveUpAfter exists to end.
+//
+// A lowered MaxRestarts applies from the NEXT exit and never retroactively: a
+// process is not failed for exits it made under the old rules.
+func (p *Process) SetPolicy(pol Policy) {
+	if pol.MinBackoff <= 0 {
+		pol.MinBackoff = defaultMinBackoff
+	}
+	if pol.MaxBackoff <= 0 {
+		pol.MaxBackoff = defaultMaxBackoff
+	}
+	// A ceiling below the floor would make backoff *= 2 clamp downwards for
+	// ever, pinning the retry curve at the floor. The API validates the pair,
+	// so this only catches a caller that constructed a Policy by hand.
+	if pol.MaxBackoff < pol.MinBackoff {
+		pol.MaxBackoff = pol.MinBackoff
+	}
+
+	p.policyMu.Lock()
+	changed := p.pol != pol
+	p.pol = pol
+	p.policyMu.Unlock()
+	if !changed {
+		return
+	}
+
+	select {
+	case p.retune <- struct{}{}:
+	default:
+	}
+}
+
+// waitBackoff sleeps out a retry delay, returning false when the process was
+// stopped during it.
+//
+// A policy change during the wait shortens it to the new ceiling and never
+// lengthens it. Both halves are deliberate: an operator who lowers MaxBackoff
+// while a destination is crawling expects it back sooner, and one who raises it
+// does not expect the destination they are already watching to go quiet for
+// longer than it had already promised.
+func (p *Process) waitBackoff(ctx context.Context, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			return true
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+			return true
+		case <-p.retune:
+			timer.Stop()
+			if max := p.Policy().MaxBackoff; time.Until(deadline) > max {
+				deadline = time.Now().Add(max)
+				// Status.NextRetryIn is what the dashboard counts down, so it
+				// has to move with the deadline or the card lies for the rest
+				// of the wait.
+				p.mu.Lock()
+				p.nextRetry = deadline
+				p.mu.Unlock()
+			}
+		}
 	}
 }
 
@@ -266,7 +383,9 @@ func (p *Process) Restart(ctx context.Context) {
 func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 	defer close(done)
 
-	backoff := p.spec.MinBackoff
+	// From the policy, not the spec: a retune that landed between New and
+	// Start must be the curve this run starts on.
+	backoff := p.Policy().MinBackoff
 	// Consecutive restarts that did not reach stableAfter. Reset by a healthy
 	// run, not by a successful spawn: a process that starts and dies in two
 	// seconds has not recovered from anything.
@@ -318,7 +437,7 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		// A process that stayed up is healthy; its next failure should retry
 		// promptly rather than inherit an old backoff.
 		if ranFor > stableAfter {
-			backoff = p.spec.MinBackoff
+			backoff = p.Policy().MinBackoff
 			consecutive = 0
 		}
 		consecutive++
@@ -326,7 +445,11 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		// Out of patience. StateFailed rather than StateStopped: stopped is
 		// what an operator asked for, failed is what happened to them, and the
 		// alert watcher only treats one of those as an incident.
-		if p.spec.MaxRestarts > 0 && consecutive > p.spec.MaxRestarts {
+		// Read here rather than at the top of supervise: the limit an exit is
+		// judged against is the one in force when it exited, which is what
+		// makes a lowered limit apply from the next exit rather than to the
+		// history that preceded it.
+		if pol := p.Policy(); pol.MaxRestarts > 0 && consecutive > pol.MaxRestarts {
 			give := fmt.Sprintf("gave up after %d consecutive restarts", consecutive-1)
 			if msg != "" {
 				give += ": " + msg
@@ -346,16 +469,14 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		p.appendLog(fmt.Sprintf("process exited after %s; retrying in %s",
 			ranFor.Round(time.Second), backoff.Round(time.Second)), "warning")
 
-		select {
-		case <-ctx.Done():
+		if !p.waitBackoff(ctx, backoff) {
 			p.setState(StateStopped, "")
 			return
-		case <-time.After(backoff):
 		}
 
 		backoff *= 2
-		if backoff > p.spec.MaxBackoff {
-			backoff = p.spec.MaxBackoff
+		if max := p.Policy().MaxBackoff; backoff > max {
+			backoff = max
 		}
 	}
 }

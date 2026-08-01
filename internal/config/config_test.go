@@ -168,6 +168,31 @@ func TestLoadKeepsLegacyCertPathsSoUpgradesServeTheSameCertificate(t *testing.T)
 	}
 }
 
+// The `enhancedRtmp` field was removed from Config, and this is the assumption
+// that made removing it safe rather than a breaking change for anyone holding a
+// config file that still names it.
+//
+// The field's own comment claimed it existed so such files would keep parsing.
+// They keep parsing regardless, because Load uses yaml.Unmarshal rather than a
+// decoder with KnownFields(true), and an unrecognised key is ignored. If that
+// ever changes -- someone tightens Load to reject unknown keys, which is a
+// defensible thing to want -- this test fails and names the upgrade that would
+// otherwise break in the field rather than in CI.
+func TestOldConfigWithEnhancedRtmpStillParses(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "addr: \":9001\"\nenhancedRtmp: true\ntrustProxyHeaders: true\n"))
+	if err != nil {
+		t.Fatalf("a config carrying the removed enhancedRtmp key failed to load: %v", err)
+	}
+	// The keys around it must survive too: an ignored key must be ignored, not
+	// treated as the end of the document.
+	if cfg.Addr != ":9001" {
+		t.Errorf("addr = %q, want \":9001\"", cfg.Addr)
+	}
+	if !cfg.TrustProxyHeaders {
+		t.Error("the key AFTER the removed one was dropped")
+	}
+}
+
 func TestLoadWithNoFileDefaultsToTLSOff(t *testing.T) {
 	cfg, err := Load(filepath.Join(t.TempDir(), "absent.yaml"))
 	if err != nil {

@@ -503,6 +503,39 @@ func TestSettingsValidate(t *testing.T) {
 			mutate: func(s *Settings) { s.Ingest.SRT.Passphrase = "" },
 		},
 		{
+			// Zero would be a coherent wish -- "do not buffer" -- but on the
+			// page it is indistinguishable from chat being broken, and the
+			// operator has no way to tell those apart.
+			name:    "a zero chat history ring is refused rather than read as no-buffering",
+			mutate:  func(s *Settings) { s.Chat.HistoryMessages = 0 },
+			wantErr: "chat history",
+		},
+		{
+			name:    "a chat history ring above the ceiling is refused",
+			mutate:  func(s *Settings) { s.Chat.HistoryMessages = MaxChatHistoryMessages + 1 },
+			wantErr: "chat history",
+		},
+		{
+			name:   "the chat history ceiling itself is accepted",
+			mutate: func(s *Settings) { s.Chat.HistoryMessages = MaxChatHistoryMessages },
+		},
+		{
+			// 1 is "never retry", which is a real answer for an endpoint whose
+			// owner would rather drop an alert than see it twice.
+			name:   "one delivery attempt means never retry, and is allowed",
+			mutate: func(s *Settings) { s.Alerts.RetryAttempts = 1 },
+		},
+		{
+			name:    "zero delivery attempts would never deliver at all",
+			mutate:  func(s *Settings) { s.Alerts.RetryAttempts = 0 },
+			wantErr: "alert retry attempts",
+		},
+		{
+			name:    "delivery attempts above the ceiling are refused",
+			mutate:  func(s *Settings) { s.Alerts.RetryAttempts = MaxAlertRetryAttempts + 1 },
+			wantErr: "alert retry attempts",
+		},
+		{
 			name:   "a 10-character srt passphrase is accepted",
 			mutate: func(s *Settings) { s.Ingest.SRT.Passphrase = strings.Repeat("a", 10) },
 		},

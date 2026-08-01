@@ -121,10 +121,10 @@ the SRT port.
 OBS 30.2+ can send multiple audio tracks over Enhanced RTMP/FLV. **polyemesis
 does not support this.** RTMP ingest is single-track.
 
-`config.yaml` accepts an `enhancedRtmp` key, but it is an inert placeholder for
-that unbuilt feature: **setting it to `true` does nothing.** No code path reads
-it and no endpoint reports it — RTMP ingest behaves identically either way. It
-exists only so that config files which already carry the key keep parsing.
+`config.yaml` used to declare an `enhancedRtmp` key. It has been removed: it
+was an inert placeholder that read as a switch, and it was kept on the belief
+that old config files needed it to keep parsing. They do not — unknown keys are
+ignored — so the key is gone and a config that still names it loads fine.
 
 For multiple audio tracks, use SRT ingest.
 

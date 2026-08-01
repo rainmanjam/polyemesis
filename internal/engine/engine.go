@@ -99,9 +99,25 @@ type Engine struct {
 	// every child on purpose: the file reads as a single interleaved timeline.
 	// It is read on the stderr goroutine of every child and swapped whenever
 	// the logging settings change, so it is atomic rather than under e.mu.
-	sink    atomic.Pointer[supervisor.FileSink]
-	sinkMu  sync.Mutex
-	sinkCfg db.LoggingSettings
+	sink atomic.Pointer[supervisor.FileSink]
+
+	// meterInterval is the metering throttle, in nanoseconds.
+	//
+	// Atomic rather than under e.mu because it is read on the metering child's
+	// stdout goroutine for every astats frame -- up to fifty a second -- and
+	// taking the engine lock at that rate to answer a question that changes
+	// once a month would be absurd. It exists at all because the value used to
+	// be captured into the StdoutHandler closure at spawn time, which made
+	// editing it a silent no-op.
+	meterInterval atomic.Int64
+
+	// reloadRec is the note collector for the reconcile currently in flight,
+	// nil the rest of the time. Atomic because it is read from teardown paths
+	// that hold e.mu.
+	reloadRec  atomic.Pointer[reloadRecorder]
+	lastReload atomic.Pointer[ReloadReport]
+	sinkMu     sync.Mutex
+	sinkCfg    db.LoggingSettings
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -777,6 +793,25 @@ func (e *Engine) Reconcile() error {
 	if err != nil {
 		return err
 	}
+	// Installed before the first sub-reconcile and cleared after the last, so a
+	// note raised by previewLoop or by the storage guard -- neither of which is
+	// a consequence of anything an operator just saved -- is dropped rather
+	// than reported as one.
+	rec := newReloadRecorder()
+	e.reloadRec.Store(rec)
+	defer func() {
+		e.reloadRec.Store(nil)
+		rep := ReloadReport{SourceID: e.sourceID, SourceName: e.SourceName(), Notes: rec.snapshot()}
+		e.lastReload.Store(&rep)
+		// Nil-checked unlike the publishers around it. Those all run on paths
+		// that only exist after New; this one runs on every Reconcile, and a
+		// partially-built Engine in a test is a pattern this package already
+		// uses -- it panicked exactly that way once during this work.
+		if len(rep.Notes) > 0 && e.bus != nil {
+			e.bus.Publish(eventReload, rep)
+		}
+	}()
+
 	e.mu.Lock()
 	prev := e.settings
 	e.settings = settings
@@ -1248,7 +1283,41 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 // reconcileMeters restarts the metering sidecar whenever the ingest's track
 // layout changes, because the merged channel numbering it parses depends on
 // the exact per-track channel counts.
+// applyMeterInterval publishes a changed metering throttle to the sidecar that
+// is already running.
+//
+// Called before every early return in reconcileMeters, deliberately: a change
+// made while the meters are down (no probe yet, or metering switched off) has
+// to survive until they come back, or the operator has to make it twice.
+func (e *Engine) applyMeterInterval(m db.MeterSettings) {
+	e.meterInterval.Store(int64(time.Duration(m.IntervalMS) * time.Millisecond))
+	e.noteReload("meters", "meters", reloadLive, "metering interval applied without a respawn")
+}
+
+// meterThrottle rate-limits metering frames on their way to the WebSocket.
+//
+// It holds the ENGINE rather than a Duration. That is the whole point: astats
+// prints far faster than any UI can draw, so the frames have to be shed, but
+// the rate at which they are shed is an operator setting that must not require
+// respawning the sidecar to change. A captured Duration is what made
+// meters.intervalMs a setting that stored and did nothing.
+type meterThrottle struct {
+	e    *Engine
+	last time.Time
+}
+
+func (t *meterThrottle) allow(now time.Time) bool {
+	if now.Sub(t.last) < time.Duration(t.e.meterInterval.Load()) {
+		return false
+	}
+	t.last = now
+	return true
+}
+
 func (e *Engine) reconcileMeters(s db.Settings) {
+	// Before every early return below. See applyMeterInterval.
+	e.applyMeterInterval(s.Meters)
+
 	e.mu.RLock()
 	cur := e.meters
 	e.mu.RUnlock()
@@ -1297,23 +1366,24 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	url := meterHub.Subscribe("meters", port)
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
-	interval := time.Duration(s.Meters.IntervalMS) * time.Millisecond
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "meters", Kind: "meters", Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true,
 		// astats prints far faster than any UI can draw; throttle here rather
-		// than flooding every WebSocket client with 50 frames a second.
+		// than flooding every WebSocket client with 50 frames a second. The
+		// rate is read per frame from the engine, so lowering it applies to
+		// this sidecar without respawning it.
 		StdoutHandler: func(r io.Reader) error {
-			var last time.Time
+			th := &meterThrottle{e: e}
 			return ffmpeg.ParseLevels(r, channels, func(l ffmpeg.Levels) {
-				if time.Since(last) < interval {
+				now := time.Now()
+				if !th.allow(now) {
 					return
 				}
-				last = time.Now()
 				e.mu.Lock()
 				e.levels = l
-				e.levelsAt = last
+				e.levelsAt = now
 				e.mu.Unlock()
 				e.bus.Publish(events.TypeLevels, l)
 			})
@@ -1604,6 +1674,11 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			next.row = p.row
 			e.dests[id] = &next
 			e.mu.Unlock()
+			// AFTER the unlock. SetPolicy itself is a memory write, but the
+			// revival path calls Restart, which blocks for up to stopTimeout.
+			// Holding e.mu across that would stall every Status() the dashboard
+			// asks for and every other tier's reconcile behind it.
+			e.applyDestPolicy(&next, p.row)
 			continue
 		}
 		e.mu.Unlock()
@@ -1702,13 +1777,13 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		strconv.Itoa(row.Transport.MuxQueuePackets),
 		strconv.Itoa(row.Transport.MuxQueueBytes),
 		strconv.Itoa(row.Transport.RWTimeoutSeconds),
-		// The reconnect policy is a property of the SUPERVISOR, not of the
-		// command line, so it does not show up in the argv -- which is exactly
-		// why it has to be named here. Without it, raising a give-up threshold
-		// would be stored and never reach the process it governs.
-		strconv.Itoa(row.Resilience.MinBackoffSeconds),
-		strconv.Itoa(row.Resilience.MaxBackoffSeconds),
-		strconv.Itoa(row.Resilience.GiveUpAfter),
+		// Resilience is deliberately ABSENT. It is a property of the
+		// supervisor, not of the command line, and supervisor.SetPolicy now
+		// carries it into a process that is already running -- see
+		// applyDestPolicy. The reasoning that first put it here was right about
+		// the danger (a setting stored and never reaching the process it
+		// governs) and wrong about the remedy: the remedy was to deliver it,
+		// not to drop the operator's connection in order to deliver it.
 		// Audio encoding: both change the command line.
 		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
 	})
@@ -1734,6 +1809,77 @@ func secondsOr(v int, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return time.Duration(v) * time.Second
+}
+
+// destPolicy is the reconnect policy for one destination row.
+//
+// The zero value must map to the zero Policy, not to an explicit 1s/30s: that
+// is what leaves supervisor.New's own defaults in place, which is what every
+// destination ran on before the policy was configurable.
+func destPolicy(row *db.Destination) supervisor.Policy {
+	return supervisor.Policy{
+		MinBackoff:  secondsOr(row.Resilience.MinBackoffSeconds, 0),
+		MaxBackoff:  secondsOr(row.Resilience.MaxBackoffSeconds, 0),
+		MaxRestarts: row.Resilience.GiveUpAfter,
+	}
+}
+
+// applyDestPolicy carries a changed reconnect policy into a destination that is
+// already running, and revives one that had given up under a stricter rule.
+//
+// The revival is the one place this work chooses a restart over a live apply,
+// and it is chosen deliberately. Raising GiveUpAfter on a destination that has
+// already exhausted the old limit and would otherwise sit in StateFailed for
+// ever is exactly the "stored, reported as applied, and does nothing" failure
+// this file is littered with warnings about. Lowering it is NOT retroactive: a
+// destination is not executed for exits it made under the old rules.
+//
+// Start() cannot do the revival -- supervise returns down the give-up path
+// without clearing p.running, so Start takes its idempotence early return.
+// Restart() is the only door, and its Stop returns immediately because the
+// supervise goroutine has already closed done.
+func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
+	if d == nil || d.proc == nil {
+		return
+	}
+	before := d.proc.Policy()
+	want := destPolicy(row)
+	if before == want {
+		return
+	}
+	d.proc.SetPolicy(want)
+	e.log.Info("destination reconnect policy retuned without a restart",
+		"dest", row.Name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
+		"giveUpAfter", want.MaxRestarts)
+	e.noteReload("destination", row.Name, reloadLive,
+		fmt.Sprintf("reconnect policy retuned to %s..%s, giving up after %d",
+			want.MinBackoff, want.MaxBackoff, want.MaxRestarts))
+
+	if d.proc.Status().State != supervisor.StateFailed || !moreForgiving(before, want) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	d.proc.Restart(ctx)
+	e.log.Info("destination revived: it had given up under the previous limit",
+		"dest", row.Name, "giveUpAfter", want.MaxRestarts)
+	e.noteReload("destination", row.Name, reloadRestart,
+		"it had given up under the previous limit and the new one is more forgiving")
+}
+
+// moreForgiving reports whether want allows more attempts than before.
+//
+// 0 means unlimited, so it is the MOST forgiving value rather than the least.
+// Compared as a plain number it sorts exactly the wrong way round, which would
+// revive a destination the operator had just told to give up sooner.
+func moreForgiving(before, want supervisor.Policy) bool {
+	if want.MaxRestarts == 0 {
+		return before.MaxRestarts != 0
+	}
+	if before.MaxRestarts == 0 {
+		return false
+	}
+	return want.MaxRestarts > before.MaxRestarts
 }
 
 // expertArgv parses a destination's hand-written arguments into an argv.
@@ -1866,10 +2012,11 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
 		// own defaults in place, which is what every destination ran on before
-		// this was configurable.
-		MinBackoff:  secondsOr(row.Resilience.MinBackoffSeconds, 0),
-		MaxBackoff:  secondsOr(row.Resilience.MaxBackoffSeconds, 0),
-		MaxRestarts: row.Resilience.GiveUpAfter,
+		// this was configurable. The same three values are re-applied without a
+		// restart by applyDestPolicy when they change.
+		MinBackoff:  destPolicy(row).MinBackoff,
+		MaxBackoff:  destPolicy(row).MaxBackoff,
+		MaxRestarts: destPolicy(row).MaxRestarts,
 		// Spaced out so going live does not spawn every destination in the
 		// same tick. First spawn only -- a reconnect is never delayed.
 		StartDelay: startDelay,
@@ -1888,6 +2035,7 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	proc.Start()
 	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
+	e.noteReload("destination", row.Name, reloadRestart, "started")
 	return nil
 }
 
@@ -1895,6 +2043,8 @@ func (e *Engine) teardownDest(d *destination) {
 	if d == nil {
 		return
 	}
+	e.noteReload("destination", d.row.Name, reloadRestart,
+		"its command line changed, or it was disabled or removed")
 	if d.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 		d.proc.Stop(ctx)
@@ -2334,12 +2484,15 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	proc.Start()
 	e.log.Info("rendition started", "rendition", row.Name, "encoder", row.Encoder,
 		"bitrate", row.VideoBitrate, "consumers", consumers, "relayPort", hub.Port())
+	e.noteReload("rendition", row.Name, reloadRestart, "started")
 }
 
 func (e *Engine) teardownRendition(r *rendition) {
 	if r == nil {
 		return
 	}
+	e.noteReload("rendition", r.row.Name, reloadRestart,
+		"its encode signature changed, or nothing selects it any more")
 	if r.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 		r.proc.Stop(ctx)

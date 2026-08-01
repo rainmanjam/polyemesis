@@ -384,7 +384,7 @@ func TestEncoderVendorOfNamesTheSilicon(t *testing.T) {
 func TestProbeArgsAreAOneFrameEncodeThatWritesNothing(t *testing.T) {
 	for _, name := range probeCandidates {
 		t.Run(name, func(t *testing.T) {
-			args := probeArgs(name)
+			args := probeArgs(name, "")
 			line := strings.Join(args, " ")
 
 			for _, want := range []string{
@@ -403,10 +403,58 @@ func TestProbeArgsAreAOneFrameEncodeThatWritesNothing(t *testing.T) {
 	}
 }
 
+// The probe must test the node the ENCODE would use, not the first one on the
+// box.
+//
+// This is the whole of the bug. chooseVAAPIDevice already ranks render nodes
+// and hands the engine the right one, and the probe named renderD128 regardless
+// -- so on a multi-GPU host whose first render node is display-only, or in a
+// container passed renderD129, VAAPI was tested on hardware it would never run
+// on, failed, and was withheld on the strength of that.
+func TestProbeArgsNameTheDetectedRenderNode(t *testing.T) {
+	const detected = "/dev/dri/renderD129"
+
+	line := strings.Join(probeArgs(EncoderVAAPI, detected), " ")
+	if !strings.Contains(line, "-vaapi_device "+detected) {
+		t.Errorf("vaapi probe %q does not name the detected node %q", line, detected)
+	}
+	if strings.Contains(line, defaultVAAPIDevice) {
+		t.Errorf("vaapi probe %q still names the hardcoded default alongside %q", line, detected)
+	}
+}
+
+// Detection finding no render node must not be reported as VAAPI being broken.
+//
+// Dropping -vaapi_device would look like the conservative choice and is the
+// opposite: VAAPI probed without a device fails on every machine INCLUDING the
+// ones where it works, so an omitted flag converts "no node found" into a
+// confident, wrong "this encoder does not work here".
+func TestProbeArgsFallBackRatherThanDropTheDevice(t *testing.T) {
+	line := strings.Join(probeArgs(EncoderVAAPI, ""), " ")
+	if !strings.Contains(line, "-vaapi_device "+defaultVAAPIDevice) {
+		t.Errorf("vaapi probe %q dropped the device instead of falling back", line)
+	}
+}
+
+// Detection is not paid for when nothing in the candidate list would use it.
+func TestVAAPIDetectionIsSkippedWhenNoCandidateNeedsIt(t *testing.T) {
+	if anyVAAPI([]string{EncoderX264, EncoderNVENC, EncoderVideoToolbox}) {
+		t.Error("anyVAAPI said yes for a list with no vaapi encoder in it")
+	}
+	if !anyVAAPI([]string{EncoderX264, EncoderVAAPI}) {
+		t.Error("anyVAAPI missed a vaapi encoder in the list")
+	}
+	if got := probeVAAPIDevice(context.Background(), []string{EncoderX264}); got != "" {
+		t.Errorf("probeVAAPIDevice = %q for a non-vaapi list, want empty", got)
+	}
+}
+
 // The probe has to carry the same per-encoder flags the real encode does, or
 // it measures the flags rather than the hardware.
 func TestProbeArgsCarryVAAPIsDeviceAndUpload(t *testing.T) {
-	args := probeArgs(EncoderVAAPI)
+	// Empty is the "detection found nothing" case, which must still name a
+	// device: see TestProbeArgsFallBackRatherThanDropTheDevice.
+	args := probeArgs(EncoderVAAPI, "")
 	line := strings.Join(args, " ")
 
 	if !strings.Contains(line, "-vaapi_device "+defaultVAAPIDevice) {
@@ -423,7 +471,7 @@ func TestProbeArgsCarryVAAPIsDeviceAndUpload(t *testing.T) {
 
 	// And no other encoder may pay for any of it.
 	for _, name := range []string{EncoderX264, EncoderNVENC, EncoderQSV, EncoderAMF, EncoderVideoToolbox} {
-		other := strings.Join(probeArgs(name), " ")
+		other := strings.Join(probeArgs(name, "/dev/dri/renderD129"), " ")
 		for _, bad := range []string{"-vaapi_device", "hwupload", "format=nv12"} {
 			if strings.Contains(other, bad) {
 				t.Errorf("%s probe carries %q", name, bad)

@@ -36,6 +36,10 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 # Shared teardown. See lib-cleanup.sh: killing the server alone orphans its
 # FFmpeg children, and they corrupt the NEXT run's relay ports.
 . "$SCRIPTS/lib-cleanup.sh"
+# Shared observation. See lib-observe.sh: a wait that gives up has to report
+# what it saw, or a primary that arrived 200ms late reads exactly like one that
+# never arrived. Issue #38.
+. "$SCRIPTS/lib-observe.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 
@@ -79,17 +83,51 @@ publish() {
 }
 unpublish() { pkill -f "failover-publisher" 2>/dev/null; }
 
+# publisher_postmortem says whether the encoder standing in for OBS is even
+# alive, and what it last said.
+#
+# A primary that never goes on air is far more often a publisher that failed to
+# connect than a selector that failed to switch -- and the publisher's own log
+# is the only place that distinction is written down. Without this, both look
+# identical from the status line, which is how issue #38's failure came to be
+# reported as "the primary never went on air" when nothing had established that
+# the primary was ever publishing.
+publisher_postmortem() {
+  local f
+  if pgrep -f "failover-publisher" >/dev/null 2>&1; then
+    note "the publisher process is still running"
+  else
+    note "the publisher process is GONE -- it exited early or never started"
+  fi
+  for f in publisher-*.log; do
+    [ -f "$f" ] || continue
+    [ -s "$f" ] || { note "$f is empty (ffmpeg said nothing)"; continue; }
+    note "$f (last 5 lines):"
+    tail -5 "$f" | sed 's/^/          /'
+  done
+  note "server.log (last 8 lines):"
+  tail -8 server.log 2>/dev/null | sed 's/^/          /'
+}
+
 # waitfor polls the driver's status line until a field matches, or times out.
 # The status line is "<active> <switches> <primaryLive> <destRestarts>".
 #   waitfor <field-number> <wanted> <seconds>
+#
+# Delegates to poly_poll_field so a timeout prints the whole trajectory rather
+# than returning a bare 1. The caller used to recover context by sampling
+# readstatus AGAIN after the deadline, which reports the state at the moment of
+# the post-mortem and not the state during the wait -- the two are different
+# readings and only the second one answers "was it close?".
 waitfor() {
-  local idx="$1" want="$2" secs="$3" i cur
-  for i in $(seq 1 "$((secs * 2))"); do
-    cur=$(readstatus | awk -v n="$idx" '{print $n}')
-    [ "$cur" = "$want" ] && return 0
-    sleep 0.5
-  done
-  return 1
+  local idx="$1" want="$2" secs="$3" name
+  case "$idx" in
+    1) name="the active feed" ;;
+    2) name="the switch count" ;;
+    3) name="primaryLive" ;;
+    4) name="the destination restart count" ;;
+    *) name="field $idx" ;;
+  esac
+  poly_poll_field "$name to become $want" "$idx" "$want" "$secs" readstatus
 }
 
 # readstatus returns a status line with all four fields, retrying a read that
@@ -132,7 +170,9 @@ publish
 if waitfor 1 primary 40 ; then
   ok "the primary is on air once it delivers"
 else
-  bad "the primary never went on air: $(readstatus)"; exit 1
+  bad "the primary never went on air within 40s"
+  publisher_postmortem
+  exit 1
 fi
 # Let a few seconds of real primary land in the file before anything is cut.
 sleep 6
@@ -146,7 +186,8 @@ unpublish
 if waitfor 1 slate 30 ; then
   ok "the slate went on air after the grace period"
 else
-  bad "the slate never took over: $(readstatus)"
+  bad "the slate never took over within 30s"
+  publisher_postmortem
 fi
 sleep 6
 

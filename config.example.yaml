@@ -107,8 +107,8 @@ ffmpeg:
   probe: ""
 
 # PLACEHOLDER — HAS NO EFFECT. Enhanced RTMP / multitrack FLV ingest (OBS
-# 30.2+) is not implemented. Setting this to true changes nothing: no code
-# branches on it, and RTMP ingest stays single-track either way. It is accepted
-# here only so existing config files keep parsing. For multitrack ingest today,
-# use SRT.
-enhancedRtmp: false
+# 30.2+) is not implemented, and RTMP ingest is single-track either way. There
+# is no key for it: an `enhancedRtmp` key was removed once it was established
+# that unknown keys are ignored, so it had been offering a switch that did
+# nothing. A config file that still carries it keeps loading. For multitrack
+# ingest today, use SRT.

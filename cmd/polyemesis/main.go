@@ -243,6 +243,11 @@ func run(h *hooks) error {
 		// reverts on restart is worse than one that never worked, because the
 		// operator has already stopped checking it.
 		api.ApplyAutomod(hub, store, box, log, s.Automod)
+		// Alert delivery, for the third time and the same reason. Safe to call
+		// before the engines exist: the Manager remembers the budget and hands
+		// it to each engine as it is created, so this does not depend on
+		// running after Start.
+		api.ApplyAlertSettings(eng, s.Alerts)
 	} else {
 		log.Warn("chat retention settings unreadable; using the built-in defaults", "err", err)
 	}
