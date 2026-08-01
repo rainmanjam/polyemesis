@@ -17,13 +17,33 @@
 # likely explanation for the "flaky under load" behaviour seen in the postprod
 # suite -- which was investigated as a product regression and was not one.
 #
+# THE WORK-DIR SWEEP HAS A HOLE, and a 20-run measurement found it. The sweep
+# below kills `ffmpeg.*$work`, which matches any child whose argv carries a path
+# under the working directory -- the recorder, the clipper, the playout muxer.
+# It does NOT match the INGEST, whose argv is only
+# `-i rtmp://0.0.0.0:<port>/live ... udp://127.0.0.1:<relay>`: no work-dir path
+# appears anywhere in it. So the ingest survived teardown, kept its listen port,
+# and the leftover COUNT missed it too because it used the same pattern -- the
+# leak was both unkilled and invisible.
+#
+# Measured consequence: acceptance-failover failed 10 runs out of 20 back to
+# back, every failure with "Address already in use" on the ingest port and a
+# 43-second duration against a 40-second ceiling. It alternated almost perfectly
+# -- a run leaked the port, the next died fast, its quick death leaked less, and
+# the one after that passed.
+#
 # USAGE
 #
 #   source "$(dirname "$0")/lib-cleanup.sh"
-#   trap 'poly_cleanup "$PORT" "$WORK"' EXIT
+#   trap 'poly_cleanup "$PORT" "$WORK" "$INGEST"' EXIT
 #
 # WORK is optional; pass it when the suite has a working directory, so the
 # backstop sweep can identify this run's processes by their command line.
+#
+# The third argument is optional and is the list of ports the NEXT run has to be
+# able to bind -- an ingest listener, typically. Pass it whenever the suite binds
+# a fixed port that is not the server's own, because that is the one the work-dir
+# sweep cannot see.
 
 # poly_stop_server signals one server and WAITS for it to go.
 #
@@ -42,6 +62,81 @@ poly_stop_server() {
   pkill -9 -f "polyemesis -addr :$port" 2>/dev/null
 }
 
+# poly_port_holders prints the PIDs holding a port, or nothing.
+#
+# lsof rather than ss or netstat: it is the one tool present on both the macOS
+# developer machines and the Linux runners, and ci.yml already installs it for
+# the suites that read relay ports out of it.
+poly_port_holders() {
+	local port="$1"
+	[ -n "$port" ] || return 0
+	command -v lsof >/dev/null 2>&1 || return 0
+	lsof -ti ":$port" 2>/dev/null
+}
+
+# poly_wait_port_ready waits for something to START listening on a port.
+#
+# The mirror image of poly_free_port, and it lives here because it needs the
+# same poly_port_holders. This file is now about ports and processes rather than
+# strictly teardown; the name has not caught up.
+#
+# It exists because "the server said it is ready" is not "the ingest is
+# accepting connections". The server logs its web UI and the suite proceeds,
+# while the ingest child is still being spawned and has not bound its listen
+# socket yet. A publisher that arrives in that window gets Connection refused
+# and exits immediately, and the suite then waits out its full ceiling for a
+# primary that was never going to arrive.
+#
+# Measured at roughly 1 run in 20 before this existed -- the entire residual
+# flake rate of acceptance-failover once the port leak was fixed.
+poly_wait_port_ready() {
+	local port="$1" secs="${2:-15}"
+	[ -n "$port" ] || return 0
+	local deadline=$(( $(date +%s) + secs ))
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		[ -n "$(poly_port_holders "$port")" ] && return 0
+		sleep 0.1
+	done
+	printf "  \033[33mWARN\033[0m  nothing is listening on port %s after %ss.\n" "$port" "$secs"
+	printf "        A publisher started now would be refused, and the wait that\n"
+	printf "        follows would blame the source for never going on air.\n"
+	return 1
+}
+
+# poly_free_port waits for a port to be released, then takes it back by force.
+#
+# The wait comes first because a graceful teardown does release it, just not
+# instantly: the supervisor signals each child and the kernel needs a moment to
+# reclaim the socket. Killing immediately would hide a teardown that works.
+#
+# The kill is the backstop, and it is safe to be blunt here for a reason the
+# work-dir sweep cannot claim: the server for this run is already gone by the
+# time this is called, so anything still holding a port this suite owns is this
+# suite's orphan. A wide `pkill -x ffmpeg` would not be safe; this is, because
+# the predicate is a specific port rather than a program name.
+poly_free_port() {
+	local port="$1" pids
+	[ -n "$port" ] || return 0
+
+	for _ in $(seq 1 20); do
+		[ -z "$(poly_port_holders "$port")" ] && return 0
+		sleep 0.25
+	done
+
+	pids=$(poly_port_holders "$port")
+	[ -z "$pids" ] && return 0
+	printf "  \033[33mWARN\033[0m  port %s still held 5s after teardown; reclaiming it.\n" "$port"
+	printf "        The next run would have failed to bind with \"Address already in use\".\n"
+	# shellcheck disable=SC2086
+	kill -9 $pids 2>/dev/null
+	for _ in $(seq 1 12); do
+		[ -z "$(poly_port_holders "$port")" ] && return 0
+		sleep 0.25
+	done
+	printf "  \033[31mFAIL\033[0m  port %s is STILL held after kill -9.\n" "$port"
+	return 1
+}
+
 # poly_cleanup stops the server(s) and reports anything that outlived them.
 #
 # The stray check is source inspection rather than a broader kill: a sweep wide
@@ -49,7 +144,7 @@ poly_stop_server() {
 # another terminal. Reporting makes the leak visible, which is the one thing it
 # was not before.
 poly_cleanup() {
-  local ports="$1" work="${2:-}"
+  local ports="$1" work="${2:-}" bindports="${3:-}"
   local p
   for p in $ports; do
     poly_stop_server "$p"
@@ -60,6 +155,13 @@ poly_cleanup() {
     pkill -9 -f "ffmpeg.*$work" 2>/dev/null
   fi
   wait 2>/dev/null
+
+  # AFTER the work-dir sweep, because that is what releases the ports a
+  # well-behaved teardown was always going to release. What is left here is
+  # what the sweep cannot see.
+  for p in $bindports; do
+    poly_free_port "$p"
+  done
 
   local left=0
   if [ -n "$work" ]; then
