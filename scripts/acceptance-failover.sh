@@ -318,19 +318,25 @@ else
 fi
 
 step "8. The output timeline"
+# ONE FILE, EVERY SWITCH IN THE RUN. This is the whole of steps 2 to 7 measured
+# end to end, not the slate cycle alone: the recording spans primary -> slate ->
+# primary (steps 2 to 4), primary -> filler and back when the pin goes on and
+# off (step 6), and primary -> filler when the encoder is cut (step 7). Five
+# switches, five chances to hand a platform a timestamp that goes backwards, and
+# the checks below cover all of them at once.
 drive stopall >/dev/null 2>&1
 sleep 8
 OUTFILE=data/recordings/onair.mkv
 if [ ! -s "$OUTFILE" ]; then
   bad "no output was produced, so the timeline could not be measured"
 else
-  ok "the destination produced a continuous output across the whole cycle"
+  ok "the destination produced a continuous output across every switch in the run"
 
   # TIMELINE MONOTONICITY. A feed started without -output_ts_offset republishes
-  # from zero, so the switch hands the destination a timestamp behind the one
+  # from zero, so a switch hands the destination a timestamp behind the one
   # before it, and a platform answers a backwards jump by dropping the
   # connection. Counting backwards steps is the direct measurement of the flag
-  # working.
+  # working, and one count over this file covers every switch above.
   #
   # DTS, NOT PTS. The first version of this check measured pts_time and reported
   # 268 backwards steps on a stream that was completely healthy. Presentation
@@ -343,14 +349,17 @@ else
          -of csv=p=0 "$OUTFILE" 2>/dev/null |
          awk -F, 'BEGIN{prev=-1e9;n=0} {if ($1=="N/A") next; t=$1+0; if (t < prev - 0.001) n++; prev=t} END{print n+0}')
   if [ "${back:-1}" -eq 0 ]; then
-    ok "no backwards decode timestamp across either switch"
+    ok "no backwards decode timestamp across any switch in the run"
   else
     bad "$back backwards DTS step(s) — a platform drops the connection on these"
   fi
 
   # The switch must be visible IN THE BYTES, not only in the status field. The
   # publisher sends a 1 kHz tone and the slate is silent, so a file that carries
-  # both means the destination really was fed from two different sources.
+  # both means the destination really was fed from two different sources. Only
+  # the SLATE period can produce silence -- the filler in steps 6 and 7 carries a
+  # 2 kHz tone of its own -- so this stays a check on the slate specifically even
+  # though the file now spans the filler switches too.
   quiet=$(ffmpeg -hide_banner -nostats -i "$OUTFILE" \
           -af "silencedetect=n=-50dB:d=1" -f null - 2>&1 | grep -c "silence_start" || true)
   if [ "${quiet:-0}" -ge 1 ]; then
@@ -368,9 +377,9 @@ else
         -of csv=p=0 "$OUTFILE" 2>/dev/null |
         awk -F, '{if ($1!="N/A") last=$1+0} END{printf "%d", last}')
   if [ "${dur:-0}" -ge 15 ]; then
-    ok "the output spans the whole down-and-back cycle (${dur}s)"
+    ok "the output spans the whole run, slate cycle and filler switches (${dur}s)"
   else
-    bad "the output spans only ${dur:-0}s; it did not survive the cycle"
+    bad "the output spans only ${dur:-0}s; it did not survive the run"
   fi
 fi
 
@@ -380,11 +389,16 @@ printf "  %d passed, %d failed\n\n" "$pass" "$fail"
 # so a suite that fell over early could otherwise report "all passed" having
 # measured almost nothing.
 #
-# Raised from 12 to 17 by the filler case in steps 6 and 7: five checks, and
-# every one of them lives after a `bad ... exit 1` precondition, so a run that
-# could not build the clip or enable the tier has to be told apart from one that
-# measured the case and liked what it saw.
-EXPECTED_CHECKS=17
+# The filler case in steps 6 and 7 added five of these, and every one of them
+# lives after a `bad ... exit 1` precondition, so a run that could not build the
+# clip or enable the tier has to be told apart from one that measured the case
+# and liked what it saw.
+#
+# COUNTED, not estimated: a complete run reaches eighteen ok/bad calls, and this
+# number was one short of that. A floor set below the real count is a floor a
+# silently-skipped check walks straight over, which is the one thing it is here
+# to stop. If you add or remove a check, change this line in the same commit.
+EXPECTED_CHECKS=18
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

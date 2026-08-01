@@ -3011,6 +3011,18 @@ func candidatesFor(c sourceChoice) []candidate {
 		// It ranks ABOVE the slate for the mirror-image reason: both are
 		// holding patterns, but one of them is programming somebody chose and
 		// the other is a card saying the picture is missing.
+		//
+		// There is deliberately no `&& c.playlistEnabled` here to mirror the
+		// backup's line above, and the asymmetry is the design rather than an
+		// omission. The backup's hub is the listener's and outlives every
+		// publisher, so its counter cannot tell enabled from disabled; the
+		// playlist's hub belongs to the tier and dies with it, so
+		// reconcilePlaylist zeroes this liveness as it tears the tier down --
+		// see the comment there. That covers the untick a setting gate would
+		// cover AND the three it would not: failover switched off entirely, a
+		// file path that fails confinement, and a path edit that swaps one hub
+		// for another. The invariant the two ends maintain between them: no
+		// hub, no liveness, no candidate.
 		{kind: sourcePlaylist, available: c.playlistRunning},
 		// The slate has no liveness to check. It synthesises its own picture, so
 		// "enabled" is the whole of "would this deliver bytes".
@@ -3404,6 +3416,13 @@ func (e *Engine) sampleSources(s db.Settings, now time.Time) {
 	// can only answer with "the playlist source has no relay to read". Zeroing
 	// first makes both read as what they are: this is a different playlist, and
 	// it has delivered nothing yet.
+	//
+	// reconcilePlaylist now zeroes the same liveness as it tears a tier down,
+	// which is what makes the correction immediate rather than one sweep late,
+	// so in practice this branch finds pl.rx already zero. It stays as the
+	// second line of defence for the invariant, not as its enforcement: this is
+	// the only place that reads the counter, and a counter read without a
+	// rollback guard is how the first version of this went wrong.
 	pl := e.sel.live[sourcePlaylist]
 	if playlistRx < pl.rx {
 		*pl = liveness{}
@@ -3494,7 +3513,7 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 			// Unreachable today and a bug if it ever happens: a real decision
 			// never yields sourceNone. best() panics on an available one and
 			// every fallback is sourcePrimary, which is why all 3200 rows of
-			// the frozen table decide primary, backup, playout or slate and
+			// the frozen table decide primary, backup, playlist or slate and
 			// none ever decides none.
 			e.log.Error("selector decided on no source at all; no feed started",
 				"source", e.sourceID, "cause", "the candidate list produced sourceNone from a decision that did not panic")
@@ -4235,6 +4254,25 @@ func playlistSig(s db.Settings) string {
 // ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the prefix
 // pins it to the file protocol whatever the name looks like -- exactly as
 // pullSource does when it resolves one.
+//
+// THE FILE'S CODEC PARAMETERS MUST MATCH THE INGEST'S, AND NOTHING CHECKS.
+// `-c copy` here and a copy hop in startFeed mean the file's codec, resolution,
+// frame rate and pixel format reach every destination exactly as they were
+// encoded. A destination that is also copying passes them straight to the
+// platform, so switching to a file that differs is a mid-stream codec change --
+// and platforms answer that by dropping the connection, which is the one thing
+// this whole tier exists to prevent. The slate re-encodes to the ingest's
+// PROBED geometry for precisely this reason; the playlist cannot, because
+// re-encoding a programme that was already encoded once is a cost an operator
+// did not ask for. scripts/acceptance-failover.sh builds its filler clip to
+// match the publisher deliberately, and says so.
+//
+// It is not validated here because validation would mean probing the operator's
+// file at settings-save time and comparing it against an ingest that may not be
+// connected yet -- a feature with its own failure modes (an unprobeable file, a
+// geometry that changes when the encoder reconnects), not a check this function
+// can make from an argv. Until that exists the constraint is documented where
+// an operator meets it, in docs/SCHEDULED-BROADCAST.md.
 func playlistFeedArgs(path, outURL string) []string {
 	return []string{
 		"-hide_banner", "-nostdin", "-loglevel", "warning",
@@ -4283,6 +4321,39 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 			// See detachFeedForSilence: a deliberate teardown must not be
 			// mistaken for a start that failed.
 			e.sel.feedAt = time.Time{}
+		}
+		// A TIER THAT HAS BEEN TORN DOWN MUST NOT READ AS DELIVERING, and this
+		// is the line that makes that true at the instant it stops being a
+		// place to send viewers rather than up to a sweep later.
+		//
+		// The liveness this zeroes is the ONLY thing candidatesFor consults
+		// about the playlist. Leave it standing and the very next decision --
+		// applySourceChoice, which reconcileSelector calls immediately after
+		// this function with no sample in between -- reads a counter describing
+		// a hub that has just been closed, holds the playlist, and asks
+		// startFeed for a relay that no longer exists. What an operator does to
+		// reach that is not exotic: they untick the playlist while it is on
+		// air. The result was roughly two seconds of dead air on every
+		// destination, because the sweep that would have corrected it arrives
+		// after ensureFeed's failed-start backoff has already begun.
+		//
+		// Zeroed HERE rather than gated in candidatesFor on
+		// Failover.Playlist.Enabled, which was the other candidate fix and is
+		// the shape the backup's own line has. That gate would answer the
+		// untick and nothing else: playlistSig is also empty when the whole
+		// failover feature goes off and when the file path fails confinement,
+		// and it changes for a path EDIT, which closes this hub and builds a
+		// fresh one counting from zero. In every one of those the setting still
+		// reads enabled while the hub is gone or new, so a gate on the setting
+		// would leave the same stale-liveness hole open under a different
+		// cause. One assignment at the single place the tier can go away covers
+		// all four, and it keeps chooseSource's inputs describing DELIVERY
+		// rather than mixing in a process fact -- which is what the comment on
+		// sourceChoice.playlistRunning promises a reader.
+		if e.sel != nil {
+			if pl := e.sel.live[sourcePlaylist]; pl != nil {
+				*pl = liveness{}
+			}
 		}
 		e.playlist = nil
 		e.mu.Unlock()

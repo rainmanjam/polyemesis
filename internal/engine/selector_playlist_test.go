@@ -252,18 +252,30 @@ func TestARunningPlaylistThatHasDeliveredNothingIsNotPutOnAir(t *testing.T) {
 	}
 }
 
-// TestAPlaylistThatHasBeenTornDownStopsBeingOfferedAtOnce covers the one way a
-// byte counter can go backwards, which sample() alone cannot see.
+// TestDisablingAPlaylistThatIsOnAirHandsTheSlateTheStreamImmediately is the
+// operator action the tier is most likely to meet: untick "playlist" while the
+// file is what viewers are watching.
 //
-// sample() takes a counter that only rises and ignores anything at or below what
-// it has seen -- correct for an ingest, whose hub outlives every publisher. The
-// playlist's hub does not: reconcilePlaylist CLOSES it whenever the file path
-// changes and builds a fresh one counting from zero, and closes it for good when
-// the tier is switched off. Without the reset in sampleSources a torn-down
-// playlist stays "alive" for a whole grace window, and the selector spends it
-// choosing a source whose hub is gone -- which startFeed can only answer by
-// refusing, leaving nothing on air that the slate should have been holding.
-func TestAPlaylistThatHasBeenTornDownStopsBeingOfferedAtOnce(t *testing.T) {
+// It goes through reconcileSelector, and THAT IS THE TEST. An earlier version of
+// this test called reconcilePlaylist and then sampleSources by hand and asserted
+// on the liveness, and it passed against code that produced two seconds of dead
+// air on exactly this action -- because production never runs that pair in that
+// order. reconcileSelector reconciles the tier and then DECIDES, with no sample
+// between the two, so the decision reads whatever the teardown left behind. A
+// test that inserts the missing sample itself proves a sequence that does not
+// occur, and it is the second guard on this branch to pass that way: the first
+// was a settings field that satisfied a UI-nameability check because the check
+// matched on a leaf name rather than the path an operator actually sees. Both
+// have the same shape -- the assertion was true, and it was not the claim. Drive
+// the production entry point, assert on what is ON AIR, and the guard can only
+// pass for the reason it names.
+//
+// What must happen: the tier goes, the playlist stops being a candidate in the
+// same breath, and the slate takes the stream. What must NOT happen: the
+// selector holds a playlist whose hub it has just closed, startFeed answers with
+// "the playlist source has no relay to read", and nothing is on air until the
+// failed-start backoff expires.
+func TestDisablingAPlaylistThatIsOnAirHandsTheSlateTheStreamImmediately(t *testing.T) {
 	e := playlistEngine(t)
 	s := playlistOnSettings()
 
@@ -281,34 +293,46 @@ func TestAPlaylistThatHasBeenTornDownStopsBeingOfferedAtOnce(t *testing.T) {
 		e.teardownBackup(e.backup)
 	})
 
+	// No encoder has ever connected and the backup is off, so the playlist
+	// delivering is all it takes to put it on air -- the same route a real
+	// deployment takes when a file covers an outage.
 	now := time.Now()
 	e.deliver(sourcePlaylist, now)
+	e.step(s, now)
+
 	e.mu.RLock()
-	alive := e.sel.live[sourcePlaylist].alive(now, failoverGrace(s))
+	active := e.sel.active
 	e.mu.RUnlock()
-	if !alive {
-		t.Fatal("the playlist did not read as delivering after bytes arrived, " +
-			"so the teardown below would prove nothing")
+	if active != sourcePlaylist {
+		t.Fatalf("the playlist is not on air (active=%s), so disabling it below would prove nothing", active)
 	}
 
-	// Switched off, exactly as an operator would: the tier goes, and with it the
-	// hub whose counter said the playlist was delivering.
+	// The operator unticks it. reconcileSelector is what a settings save calls,
+	// and the signature has not moved -- failover is still enabled -- so this
+	// takes the "already running" window: reconcile the tier, then decide.
 	off := s
 	off.Failover.Playlist.Enabled = false
-	e.selMu.Lock()
-	e.reconcilePlaylist(off)
-	e.selMu.Unlock()
+	e.reconcileSelector(off, wantSelector(off), "")
+
 	if h := e.playlistHub(); h != nil {
 		t.Fatal("the playlist tier survived being disabled")
 	}
 
-	// The very next sweep, not one grace window later.
-	e.sampleSources(off, now)
 	e.mu.RLock()
-	alive = e.sel.live[sourcePlaylist].alive(now, failoverGrace(off))
+	active, feed := e.sel.active, e.sel.feed
 	e.mu.RUnlock()
-	if alive {
-		t.Error("a playlist with no hub at all still reads as delivering; the selector " +
-			"would rank it above the slate and then find nothing to read")
+
+	if active == sourcePlaylist {
+		t.Error("the selector held the playlist through the save that tore its tier down; " +
+			"it is now feeding from a hub that has been closed, and every destination " +
+			"is on dead air until the failed-start backoff lets the slate in")
+	}
+	if active != sourceSlate {
+		t.Errorf("active = %s after the playlist was disabled, want %s: the slate is what "+
+			"holds the stream when nothing else can deliver", active, sourceSlate)
+	}
+	if feed == nil {
+		t.Error("nothing is on air after the playlist was disabled; a source that cannot " +
+			"be fed must be given up in the same decision that tears it down, not a sweep later")
 	}
 }

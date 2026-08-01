@@ -112,17 +112,70 @@ between items. Several files in order needs the concat demuxer and a
 normalise-on-import step — the upload path is now in place, so that work no
 longer has to build one first.
 
-**It occupies the primary ingest.** While a file is playing, the primary hub has
-bytes flowing, so failover sees the programme as live and will not switch to a
-backup or a slate. If you need failover *and* filler, that interaction is part of
-the full playlist design and is not solved here.
+**It occupies the primary ingest.** This route *is* the primary — the file is
+what the ingest pulls — so while it plays the primary hub has bytes on it and
+failover reads the programme as live. Nothing here can change that, and nothing
+should: you asked for the file to be the source.
+
+What has changed is that this is no longer the only way to put a file on air.
+Failover now has a **playlist** of its own, and that one does not touch the
+ingest — see below.
+
+## Filler while failover is watching: the failover playlist
+
+If what you want is *programming that covers an outage* rather than *a file as
+the source*, use the failover playlist instead. It plays a file into a hub of its
+own, so the primary's hub stays empty and the primary is still watched the whole
+time it plays. It ranks below both ingests and above the slate: an outage lands
+on your programme rather than on a standby card, and a real encoder pre-empts it
+the moment one arrives. You can pin it if you want it to win anyway.
+
+| | this page's route (pull ingest) | the failover playlist |
+|---|---|---|
+| What the file is | the source | what runs when no encoder is delivering |
+| Failover while it plays | reads the programme as live | fully live; the primary is watched throughout |
+| It starts | when you save the setting | when nothing else can deliver, or when you pin it |
+| Where | *Settings → Ingest → Pull* | `failover.playlist` in the settings API |
+
+There is no form control for it yet — set `failover.playlist.enabled` and
+`failover.playlist.filePath` (relative to the data directory, confined to it
+exactly as a pull URL is) through the settings API. The control arrives with the
+sequencing work in [the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md).
+
+### The file must match your encoder's codec, and nothing checks
+
+**This is the one way to get the failover playlist badly wrong.** The playlist is
+copied, not re-encoded — `-c copy` from the file, and a copy hop into the
+selector — so the file's codec, resolution, frame rate and pixel format reach
+your destinations exactly as they were encoded. A destination that is also
+copying hands them straight to the platform. If the file does not match what your
+encoder sends, the switch onto it is a **mid-stream codec change**, and platforms
+answer that by dropping the connection — which is the one thing the whole
+failover tier exists to prevent. Point it at a 1080p HEVC file while your encoder
+sends 720p H.264 and every platform connection breaks the moment the file goes
+on air.
+
+Match the file to your encoder: same codec, same resolution, same frame rate,
+same pixel format. Re-encode it once, ahead of time, if it does not already
+match.
+
+Nothing validates this. Checking would mean probing your file when you save the
+setting and comparing it against an ingest that may not be connected yet, which
+is its own piece of work and is not built. Until it is, the constraint is yours
+to hold. `scripts/acceptance-failover.sh` builds its filler clip to match its
+publisher for exactly this reason, and says so in a comment.
+
+The **slate** has no such constraint — it is synthesised at the *probed* geometry
+of the departed ingest, which is precisely why it can never cause this.
 
 ## If you only want filler
 
-For "something on screen when the encoder drops", you want the **slate**, not
-this — *Settings → Failover*. A slate is built at the probed geometry of the
-departed ingest so a copying destination does not choke on the change, and it
-yields the moment the real feed returns. Filler and programme are different jobs.
+For "something on screen when the encoder drops" and nothing more, you want the
+**slate** — *Settings → Failover*. A slate is built at the probed geometry of the
+departed ingest so a copying destination does not choke on the change, it needs
+no file and no matching, and it yields the moment the real feed returns. Reach
+for the failover playlist above when the filler should be *your* programming and
+you are willing to match its codec. Filler and programme are different jobs.
 
 ---
 

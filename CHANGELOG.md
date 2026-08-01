@@ -31,8 +31,45 @@ its first tagged release.
   frozen in `internal/engine/testdata/selector_golden.txt` grows from 1024 rows
   to 3200, and a second table proves the addition is additive: all 1024
   decisions that predate the playlist are byte-for-byte what they were,
-  reason strings included. The operator setting that turns a playlist feed on
-  is still to come — until it lands, no deployment can reach the new rows.
+  reason strings included. The settings that turn a playlist feed on, and the
+  tier that answers them, are the entry below.
+- **A file can hold the stream, and failover keeps watching while it does.** The
+  playlist is a supervised FFmpeg loop publishing into **a relay hub of its
+  own**, and that hub is the whole of the design. A file played into the
+  *primary's* hub puts bytes on it; the primary therefore reads live; and
+  failover never switches away from a live primary — so a file on air would have
+  disabled the entire failover feature, silently, for as long as it played. With
+  its own hub the primary's stays empty and every failover decision underneath
+  stays reachable. `scripts/acceptance-failover.sh` measures precisely that: the
+  encoder drops while the file is on air, the primary is *seen* to go down, and
+  the destination rides the switch onto the file without restarting.
+
+  Two settings turn it on — `failover.playlist.enabled` and
+  `failover.playlist.filePath`, the path relative to the data directory and
+  confined to it exactly as a `file://` pull source and the slate's still are. A
+  path that escapes it is refused at validation and never becomes an FFmpeg
+  argument. There is no form control for them yet: they are reachable through the
+  settings API, and the control belongs with the sequencing work rather than
+  with this. Both are hot-reloadable and neither disturbs anything else — a save
+  that touches the recorder or a destination costs the playlist nothing, and
+  editing the path restarts only the playlist's own process.
+
+  Disabling the playlist while it is on air hands the stream to the slate in the
+  same breath, rather than leaving the selector holding a source whose hub has
+  just been closed. That was worth two seconds of dead air on every destination
+  while the failed-start backoff expired, on an ordinary operator action, and it
+  is fixed here rather than shipped: a tier that has been torn down stops
+  counting as a candidate at the instant it goes, not at the next sweep.
+
+  **The file's codec parameters must match what your encoder sends.** It is
+  copied, not re-encoded, so its codec, resolution, frame rate and pixel format
+  reach destinations unchanged, and switching onto a file that differs is a
+  mid-stream codec change — which platforms answer by dropping the connection.
+  The slate cannot cause this because it is synthesised at the departed ingest's
+  probed geometry; the playlist can, and nothing validates it yet. Probing the
+  file at save time is its own piece of work.
+  [docs/SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md) states the
+  constraint where an operator meets it.
 - **Lifecycle webhooks.** A signed POST the moment the stream starts or stops,
   or a destination goes up or down — one delivery per transition, in order, with
   an HMAC-SHA256 over the timestamp and body. Deliberately not an alert: an alert
