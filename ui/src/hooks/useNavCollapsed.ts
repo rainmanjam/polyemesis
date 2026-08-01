@@ -55,8 +55,12 @@ export function useNavCollapsed(): [boolean, () => void] {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // metaKey for macOS, ctrlKey elsewhere. The browser binds neither to
-      // anything on a page with no rich-text editing.
+      // metaKey for macOS, ctrlKey elsewhere. Firefox binds this combination
+      // at browser-chrome level to "Toggle Bookmarks Sidebar", and
+      // preventDefault below deliberately takes it over whenever focus is
+      // outside a text field -- not "the browser binds nothing here". That
+      // trade-off is accepted because Ctrl/Cmd+B is the convention VS Code,
+      // Slack and Notion already trained users on for a collapsible sidebar.
       if (e.key.toLowerCase() !== "b" || !(e.metaKey || e.ctrlKey)) return;
       if (isTyping(e.target)) return;
       e.preventDefault();

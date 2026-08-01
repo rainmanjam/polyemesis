@@ -339,6 +339,32 @@ test.describe("sidebar collapse", () => {
     await expect(page.locator("nav")).toContainText("Dashboard", innerText);
   });
 
+  // Regression guard for a defect found by driving a real browser: the map
+  // over NAV used to return a bare <NavLink> when expanded and a
+  // <Tooltip><TooltipTrigger asChild> wrapping the SAME <NavLink> when
+  // collapsed -- same `key`, but a different element type at the same array
+  // position, so React unmounted and remounted the anchor on every toggle
+  // instead of reconciling it. A keyboard user tabbed to a link, pressed
+  // Ctrl/Cmd+B, and document.activeElement became <body>. Tooltip/TooltipTrigger
+  // now mount unconditionally (only TooltipContent is gated on navCollapsed),
+  // so the trigger's element type never changes and this must keep passing.
+  test("toggling the sidebar with the keyboard shortcut does not drop focus", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const routingLink = page.getByRole("link", { name: "Routing" });
+    await routingLink.focus();
+    await expect(routingLink).toBeFocused();
+
+    await page.keyboard.press("ControlOrMeta+b");
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+    await expect(routingLink).toBeFocused();
+
+    await page.keyboard.press("ControlOrMeta+b");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+    await expect(routingLink).toBeFocused();
+  });
+
   // Regression guard for a defect found by driving a real browser: the label
   // span is display:none and the icon is aria-hidden while collapsed, so
   // without an aria-label on the NavLink itself the collapsed rail is

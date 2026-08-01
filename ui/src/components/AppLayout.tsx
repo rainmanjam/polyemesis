@@ -213,58 +213,78 @@ export function AppLayout({
           >
             {NAV.map(({ to, labelKey, label, icon: Icon, end }) => {
               const text = labelKey ? t(labelKey) : label;
-              const link = (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={end}
-                  // The icon is aria-hidden (lucide's default when an icon
-                  // gets no a11y prop of its own) and the label span below is
-                  // display:none while collapsed, so without this the
-                  // collapsed rail is fourteen unnamed links -- the
-                  // accessibility tree has a URL and nothing else to read.
-                  // Same t(labelKey) call as the visible label and the
-                  // tooltip, so the three can never disagree.
-                  aria-label={text}
-                  // className must stay a plain STRING, never the
-                  // `({ isActive }) => string` function form NavLink also
-                  // accepts: Radix Slot (what TooltipTrigger asChild uses)
-                  // concatenates className as a string, so a function
-                  // className is stringified into the class attribute --
-                  // literally the function's source text -- before Router
-                  // ever calls it, and every utility class on it is lost.
-                  // Drive the active look from `aria-current="page"`
-                  // instead, which NavLink already sets on itself.
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
-                    navCollapsed && "md:justify-center md:px-0",
-                    "text-muted-foreground hover:bg-accent hover:text-foreground",
-                    "aria-[current=page]:bg-primary-dim aria-[current=page]:text-foreground",
-                  )}
-                >
-                  <Icon className="h-3.5 w-3.5 shrink-0" />
-                  {/* md:hidden, which compiles to display:none and therefore
-                      leaves the accessibility tree. NOT sr-only: the name
-                      still needs to reach the accessibility tree while
-                      collapsed, which is what aria-label on the NavLink
-                      above is for -- the visible label and the accessible
-                      name are two different mechanisms on purpose, so the
-                      rail can stay visually icon-only while still reading
-                      identically to the expanded nav non-visually.
-
-                      Conditioned on the breakpoint AND the state, because the
-                      drawer below md keeps its labels even while collapsed. */}
-                  <span className={cn(navCollapsed && "md:hidden")}>{text}</span>
-                </NavLink>
-              );
-
-              // Only while collapsed. Expanded, the label is already on screen
-              // and a tooltip repeating it is noise that also delays every hover.
-              if (!navCollapsed) return link;
+              // Tooltip/TooltipTrigger mount UNCONDITIONALLY -- only
+              // TooltipContent below is gated on navCollapsed. Earlier this
+              // map returned a bare <NavLink> when expanded and a
+              // <Tooltip><TooltipTrigger asChild>...</Tooltip> when collapsed:
+              // same `key`, but a DIFFERENT element type at the same array
+              // position, so toggling forced React to unmount and remount the
+              // whole subtree instead of reconciling it. The <a> DOM node was
+              // destroyed and recreated, and with it any focus that was on
+              // it -- a keyboard user tabbed to a link, pressed Ctrl/Cmd+B,
+              // and landed on <body>. Keeping the trigger's element type
+              // constant across the toggle is what lets React diff instead of
+              // replace, so focus survives.
               return (
                 <Tooltip key={to}>
-                  <TooltipTrigger asChild>{link}</TooltipTrigger>
-                  <TooltipContent side="right">{text}</TooltipContent>
+                  <TooltipTrigger asChild>
+                    <NavLink
+                      key={to}
+                      to={to}
+                      end={end}
+                      // The icon is aria-hidden (lucide's default when an icon
+                      // gets no a11y prop of its own) and the label span below is
+                      // display:none while collapsed, so without this the
+                      // collapsed rail is fourteen unnamed links -- the
+                      // accessibility tree has a URL and nothing else to read.
+                      // Same t(labelKey) call as the visible label and the
+                      // tooltip, so the three can never disagree.
+                      aria-label={text}
+                      // className must stay a plain STRING, never the
+                      // `({ isActive }) => string` function form NavLink also
+                      // accepts: Radix Slot (what TooltipTrigger asChild uses)
+                      // concatenates className as a string, so a function
+                      // className is stringified into the class attribute --
+                      // literally the function's source text -- before Router
+                      // ever calls it, and every utility class on it is lost.
+                      // Drive the active look from `aria-current="page"`
+                      // instead, which NavLink already sets on itself.
+                      className={cn(
+                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
+                        navCollapsed && "md:justify-center md:px-0",
+                        "text-muted-foreground hover:bg-accent hover:text-foreground",
+                        "aria-[current=page]:bg-primary-dim aria-[current=page]:text-foreground",
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      {/* md:hidden, which compiles to display:none and therefore
+                          leaves the accessibility tree. NOT sr-only: the name
+                          still needs to reach the accessibility tree while
+                          collapsed, which is what aria-label on the NavLink
+                          above is for -- the visible label and the accessible
+                          name are two different mechanisms on purpose, so the
+                          rail can stay visually icon-only while still reading
+                          identically to the expanded nav non-visually.
+
+                          Conditioned on the breakpoint AND the state, because the
+                          drawer below md keeps its labels even while collapsed. */}
+                      <span className={cn(navCollapsed && "md:hidden")}>{text}</span>
+                    </NavLink>
+                  </TooltipTrigger>
+                  {/* Only while collapsed. Expanded, the label is already on
+                      screen and a tooltip repeating it is noise that also
+                      delays every hover. Rendering no TooltipContent at all
+                      (rather than an empty one) means no tooltip appears. */}
+                  {navCollapsed && (
+                    // aria-hidden: the link already carries the name via its
+                    // own aria-label above, so a screen reader announcing the
+                    // tooltip's aria-describedby too repeats it verbatim --
+                    // "Dashboard, link, Dashboard". This content is a visual
+                    // affordance for sighted users only.
+                    <TooltipContent side="right" aria-hidden>
+                      {text}
+                    </TooltipContent>
+                  )}
                 </Tooltip>
               );
             })}

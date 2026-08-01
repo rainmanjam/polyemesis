@@ -76,6 +76,10 @@ its first tagged release.
   page said saved and the history did not move. The purge now runs hourly and
   re-reads its settings each sweep, the same shape recording retention already
   used. Found by the reload classification table, which refused to call it live.
+- **The sidebar collapses to an icon-only rail on desktop.** A footer chevron
+  or Ctrl/Cmd+B toggles it, and the preference is remembered in
+  `localStorage`, the same place `polyemesis.language` already lives. Below
+  the `md` breakpoint the off-canvas drawer is unchanged.
 
 ### Fixed
 
