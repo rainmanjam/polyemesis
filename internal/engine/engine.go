@@ -259,29 +259,48 @@ type Engine struct {
 	// sweep, a reconcile and an operator's manual switch can all reach it at
 	// once. Always taken BEFORE e.mu, never the other way round.
 	selMu sync.Mutex
-	// selPanicMsg and selPanicAt remember the last selector decision panic
-	// this engine logged, so a persistent one -- e.g. a map entry a future
-	// change forgot, hit on every sweep until an operator or a deploy fixes
-	// it -- costs one stack walk and one full log line, not two of each every
-	// second. Read and written only from decideSource, which every caller
-	// (both reconcileSelector windows, SwitchSource, and the sweep) reaches
-	// with selMu already held, so neither field needs a lock of its own.
+	// selPanicMsg, selPanicAt and selPanicRelog remember and bound the last
+	// selector decision panic this engine logged, so a persistent one -- e.g.
+	// a map entry a future change forgot, hit on every sweep until an
+	// operator or a deploy fixes it -- costs one stack walk and one full log
+	// line, not two of each every second. Read and written only from
+	// decideSource, which every caller (both reconcileSelector windows,
+	// SwitchSource, and the sweep) reaches with selMu already held, so none
+	// of the three fields needs a lock of its own.
 	selPanicMsg string
 	selPanicAt  time.Time
+	// selPanicRelog is the window; its zero value means selPanicRelogDefault
+	// (see decideSource), so a production Engine -- which never sets this
+	// field -- gets exactly that window without any constructor having to
+	// initialise it.
+	selPanicRelog time.Duration
 	// decideFn is a test seam that substitutes decideSource's call to
 	// chooseSource. Nil -- always true in production -- means "use the real
 	// chooseSource", so leaving it unset is what keeps decideSource's
 	// behaviour unchanged: this field only ever matters to a test that sets
 	// it.
 	//
-	// It is a field on Engine, not a package-level var, because a
-	// package-level var one test swaps is a var every other test in this
-	// package races over under `go test -race`: this package's tests build
-	// engines directly as &Engine{...} (see failoverEngine and
-	// TestSlateSpecFollowsTheProbedIngestRatherThanAForm) rather than sharing
-	// one, and a field set once at construction, before the engine is used by
-	// anything concurrent, needs no lock of its own -- exactly like
-	// selPanicMsg and selPanicAt above.
+	// decideFn and selPanicRelog are fields on Engine, not package-level
+	// vars, because a package-level var is shared by every Engine that
+	// exists in the test binary, not just the one under test: a leaked
+	// selectorLoop goroutine from an unrelated engine built with New() (see
+	// manager_test.go, which starts one on every engine whether or not
+	// failover is enabled) would read a package-level var concurrently with
+	// a test in this package writing it -- a real `go test -race` failure,
+	// and one that would only start firing once a production panic became
+	// reachable, which is exactly what the planned fourth candidate kind
+	// risks.
+	//
+	// What actually makes setting these two fields safe in this package's
+	// tests is narrower than "before the engine is used": it is that those
+	// tests build their engine directly as &Engine{...} (see failoverEngine
+	// and TestSlateSpecFollowsTheProbedIngestRatherThanAForm) rather than
+	// through New(), so no selectorLoop -- or any other goroutine of this
+	// particular engine's -- ever exists to read either field concurrently.
+	// Setting decideFn only after reconcileSelector has already built the
+	// tier, as TestSwitchSourceRollsBackPinOnARecoveredPanic does, is still
+	// safe on that same basis: reconcileSelector runs synchronously on the
+	// test's own goroutine and starts no goroutine that reads decideFn.
 	decideFn func(sourceChoice) (sourceKind, string)
 	// previewSeen is the last playlist request and previewAt the last start
 	// attempt; together they drive on-demand start and idle stop.
@@ -3334,9 +3353,13 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 	return nil
 }
 
-// selPanicRelog bounds how often a PERSISTENT decision panic re-logs its full
-// stack. The underlying cause (a map entry missing a reason) does not change
-// between sweeps, so the tenth identical stack trace in five seconds tells an
+// selPanicRelogDefault bounds how often a PERSISTENT decision panic re-logs
+// its full stack, for every Engine that leaves its own selPanicRelog field at
+// the zero value -- which is every production Engine, since only a test ever
+// sets that field (see its comment on the Engine struct for why the window
+// lives there, per-instance, rather than in a package-level var). The
+// underlying cause (a map entry missing a reason) does not change between
+// sweeps, so the tenth identical stack trace in five seconds tells an
 // operator nothing the first one didn't -- it only spends CPU walking the
 // stack and log volume repeating it, on the same 500ms ticker that is also
 // the thing hammering the panic.
@@ -3344,10 +3367,7 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 // It is a window since the last STACK WAS LOGGED, not since the last panic --
 // see decideSource. Measured the other way it would never elapse, and "bounds
 // how often" would quietly mean "logs it once".
-//
-// A var rather than a const only so a test can shorten the window: production
-// never assigns it, and the value is time.Minute exactly as before.
-var selPanicRelog = time.Minute
+const selPanicRelogDefault = time.Minute
 
 // decideSource is chooseSource with a recover around it, and it is the ONE
 // place that recover needs to live: chooseSource has exactly one caller
@@ -3404,13 +3424,17 @@ func (e *Engine) decideSource(c sourceChoice) (kind sourceKind, reason string, d
 			return
 		}
 		msg := fmt.Sprint(r)
+		window := e.selPanicRelog
+		if window == 0 {
+			window = selPanicRelogDefault
+		}
 		// The window is measured from the last STACK, not from the last panic.
 		// Refreshing selPanicAt on every panic would restart the clock twice a
-		// second, time.Since would never reach selPanicRelog, and the full
+		// second, time.Since would never reach the window, and the full
 		// stack would be logged once EVER rather than once a minute -- so an
 		// operator opening the logs an hour into an incident would find only
 		// stackless lines and a first stack that had long since rotated out.
-		fresh := msg != e.selPanicMsg || time.Since(e.selPanicAt) > selPanicRelog
+		fresh := msg != e.selPanicMsg || time.Since(e.selPanicAt) > window
 		if fresh {
 			e.selPanicMsg, e.selPanicAt = msg, time.Now()
 			e.log.Error("selector decision panicked; holding the current source",
