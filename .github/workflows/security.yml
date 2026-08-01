@@ -9,9 +9,16 @@
 name: security
 
 on:
+  # main only, for the same reason ci.yml is: a PR branch fires both `push` and
+  # `pull_request`, so ["**"] ran every scan twice per commit and posted each
+  # result to the PR twice over. These jobs are short enough that the duplicates
+  # completed rather than cancelling, which made the waste quieter than ci.yml's
+  # but no less real.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+  # A branch with no PR open gets no automatic scan, so run it here by hand.
+  workflow_dispatch:
   schedule:
     # Monday morning, offset from ci.yml's 06:17 so the two do not contend.
     - cron: "43 6 * * 1"

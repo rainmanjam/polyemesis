@@ -1,15 +1,26 @@
 # Continuous integration.
 #
-# Runs on every push and pull request. Deliberately does NOT run the container
-# acceptance suite on every commit — that suite builds an image and publishes
-# several real streams into it, which takes minutes. It runs on a schedule and
-# before a release instead, where its cost buys something.
+# Runs on pull requests, on main, and on demand. Deliberately does NOT run the
+# container acceptance suite on every commit — that suite builds an image and
+# publishes several real streams into it, which takes minutes. It runs on a
+# schedule and before a release instead, where its cost buys something.
 name: ci
 
 on:
+  # main only, NOT ["**"]. A PR branch fires both `push` and `pull_request`, so
+  # matching every branch here produced two runs per commit and left the
+  # concurrency group below to kill one of them. Those cancellations were
+  # harmless but they attach cancelled contexts to the head commit, which the
+  # PR reports as UNSTABLE and `gh pr checks` prints as "fail" -- indis-
+  # tinguishable at a glance from a real regression, and it cost someone a
+  # pointless seventeen-job rerun to find that out.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+  # The escape hatch for the case the old ["**"] was protecting: a branch with
+  # no PR open now gets no automatic CI, so run it here by hand. A draft PR
+  # does the same thing and keeps running on every push.
+  workflow_dispatch:
   # The container suite is the only thing that catches base-image drift: an
   # Alpine branch republishing FFmpeg at a new -r revision makes the pinned
   # build fail, and that failure is the prompt to bump on purpose. Nothing in
@@ -22,24 +33,18 @@ on:
 # streams and wait on them, so a superseded run can sit for its full 20-minute
 # ceiling consuming a runner nobody is waiting on.
 concurrency:
-  # head_ref || ref_name, NOT github.ref, and the difference is a doubling of
-  # this workflow's cost.
+  # Still needed, but for a different reason than it used to be. The `push`
+  # trigger above no longer matches PR branches, so there are no push/pull
+  # twins left to deduplicate. What remains is the ordinary case: pushing twice
+  # to a branch with an open PR fires two `pull_request` runs, and the older one
+  # should die rather than sit for its full 20-minute ceiling publishing real
+  # streams nobody is waiting on.
   #
-  # Every push to a PR branch fires this twice -- once for `push` and once for
-  # `pull_request`. github.ref differs between those two events
-  # (refs/heads/BRANCH versus refs/pull/N/merge), so a group keyed on it puts
-  # the twins in SEPARATE groups and neither dedupes the other: two full runs,
-  # 17 jobs each, eleven of them acceptance suites that publish real streams.
-  #
-  # github.head_ref is the source branch on a pull_request and empty on a push;
-  # github.ref_name is the bare branch name on a push. Together they resolve to
-  # the same string for both events, so the twins share one group and the second
-  # cancels the first.
-  #
-  # The alternative -- `push: branches: [main]` and let PRs cover the rest --
-  # gives exactly one run with no cancellation at all, but silently drops CI for
-  # a branch with no PR open. `branches: ["**"]` above looks deliberate, so this
-  # keeps it.
+  # head_ref || ref_name rather than github.ref: head_ref is the source branch
+  # on a pull_request and empty on a push, ref_name is the bare branch name on a
+  # push. Together they give one stable key per branch across both events, which
+  # github.ref does not -- it is refs/heads/BRANCH on a push and
+  # refs/pull/N/merge on a pull_request.
   group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
@@ -323,7 +328,7 @@ jobs:
         suite:
           - acceptance-docker      # 29 checks: routing, passthrough, persistence
           - acceptance-multisource # 18 checks: two programmes, one port, by token
-          - acceptance-browser     # 24 checks: Playwright against the image
+          - acceptance-browser     # 30 checks: Playwright against the image
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7

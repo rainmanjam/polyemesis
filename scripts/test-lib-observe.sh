@@ -95,10 +95,29 @@ rc=$?
   || ok "a satisfied wait is silent"
 
 step "6. An oscillating value is bounded, and admits what it dropped"
-reset; POLY_TRAJ_MAX_RUNS=4 poly_poll_until "the broker" never-matches 1 flapping \
+# Ceiling 2 and a cap of 2, NOT ceiling 1 and a cap of 4, and the difference is
+# a test that failed roughly one run in twenty.
+#
+# poly_poll_until builds its deadline from `date +%s`, which counts whole
+# seconds. A ceiling of N therefore buys anywhere between N-1 and N seconds of
+# polling, decided by nothing but where in the wall-clock second the call
+# happened to land. At ceiling 1 that lower bound is ZERO: start at X.98 and the
+# very first deadline check already reads X+1, so the loop breaks having taken a
+# single sample. One sample is one run, one run is under any cap, nothing is
+# elided, and the "further run(s) elided" line this step waits for never prints.
+#
+# Measured at 1 failure in 20 locally and hit on a CI runner, always this check.
+# Nothing about it was a product fault, which is the part that makes it costly:
+# a red build whose message reads "runs were dropped silently" sends the reader
+# hunting for a reporting bug that does not exist.
+#
+# Ceiling 2 puts the floor at a full second -- about twenty samples at the 0.05
+# interval set above -- against the three a cap of 2 needs to elide anything.
+# That is a margin of roughly six times rather than the none it had.
+reset; POLY_TRAJ_MAX_RUNS=2 poly_poll_until "the broker" never-matches 2 flapping \
   > "$WORK/f" 2>&1
 runs=$(grep -c "^          t+" "$WORK/f")
-[ "$runs" -le 4 ] \
+[ "$runs" -le 2 ] \
   && ok "the trajectory is capped at POLY_TRAJ_MAX_RUNS ($runs shown)" \
   || bad "the cap did not hold: $runs runs printed"
 grep -q "further run(s) elided" "$WORK/f" \
