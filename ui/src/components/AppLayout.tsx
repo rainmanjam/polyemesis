@@ -5,6 +5,8 @@ import {
   AudioLines,
   CalendarClock,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Disc,
   Languages,
   Layers,
@@ -30,8 +32,15 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData } from "@/hooks/useLiveData";
+import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
 import { duration, kbps } from "@/lib/format";
 import {
@@ -80,6 +89,7 @@ export function AppLayout({
 }) {
   const { status, connected } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [navCollapsed, toggleNav] = useNavCollapsed();
   const location = useLocation();
   const t = useT();
   const stateLabel = useStateLabel();
@@ -183,32 +193,75 @@ export function AppLayout({
 
       <div className="flex min-h-0 flex-1">
         {/* ---- sidebar ---- */}
-        <nav
-          className={cn(
-            "z-40 flex w-44 shrink-0 flex-col gap-0.5 border-r border-border bg-background p-2",
-            "max-md:absolute max-md:inset-y-11 max-md:left-0 max-md:transition-transform",
-            mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
-          )}
-        >
-          {NAV.map(({ to, labelKey, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
-                  isActive
-                    ? "bg-primary-dim text-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                )
-              }
+        <TooltipProvider delayDuration={0}>
+          <nav
+            aria-expanded={!navCollapsed}
+            className={cn(
+              "z-40 flex shrink-0 flex-col gap-0.5 border-r border-border bg-background p-2 transition-[width]",
+              navCollapsed ? "md:w-12" : "md:w-44",
+              // The drawer is always full width: a collapsed rail behind a
+              // hamburger would be an icon strip nobody asked for, and the
+              // drawer already solves the problem collapsing solves.
+              "w-44",
+              "max-md:absolute max-md:inset-y-11 max-md:left-0 max-md:transition-transform",
+              mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
+            )}
+          >
+            {NAV.map(({ to, labelKey, label, icon: Icon, end }) => {
+              const text = labelKey ? t(labelKey) : label;
+              const link = (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
+                      navCollapsed && "md:justify-center md:px-0",
+                      isActive
+                        ? "bg-primary-dim text-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )
+                  }
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  {/* md:hidden, which compiles to display:none and therefore
+                      leaves the accessibility tree. NOT sr-only: a
+                      visually-hidden label stays in the tree, which would make
+                      the collapsed rail read identically to the expanded one
+                      and the tooltip redundant noise on top of it.
+
+                      Conditioned on the breakpoint AND the state, because the
+                      drawer below md keeps its labels even while collapsed. */}
+                  <span className={cn(navCollapsed && "md:hidden")}>{text}</span>
+                </NavLink>
+              );
+
+              // Only while collapsed. Expanded, the label is already on screen
+              // and a tooltip repeating it is noise that also delays every hover.
+              if (!navCollapsed) return link;
+              return (
+                <Tooltip key={to}>
+                  <TooltipTrigger asChild>{link}</TooltipTrigger>
+                  <TooltipContent side="right">{text}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+
+            {/* Pinned to the bottom, so the target does not move as the width
+                changes. mt-auto rather than a spacer div. */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={toggleNav}
+              aria-label={t("chrome.toggleNav")}
+              aria-expanded={!navCollapsed}
+              className="mt-auto hidden self-end md:flex"
             >
-              <Icon className="h-3.5 w-3.5 shrink-0" />
-              {labelKey ? t(labelKey) : label}
-            </NavLink>
-          ))}
-        </nav>
+              {navCollapsed ? <ChevronRight /> : <ChevronLeft />}
+            </Button>
+          </nav>
+        </TooltipProvider>
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           <Outlet />
