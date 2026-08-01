@@ -51,9 +51,14 @@ worth the `storage` event listener it would take to fix.
 `w-44` becomes `w-12`. The icon already carries `shrink-0`, so it needs no
 change.
 
-**The label is removed from the DOM, not hidden with CSS.** A visually-hidden
-label is still announced by a screen reader, which would make the collapsed rail
-read identically to the expanded one and the tooltip redundant noise on top.
+**The label is hidden with `display:none`, never `sr-only`.** The distinction is
+which CSS, not CSS versus JSX: `display:none` leaves the accessibility tree, a
+visually-hidden label does not. An `sr-only` label would make the collapsed rail
+read identically to the expanded one and turn the tooltip into redundant noise.
+
+It cannot simply be dropped from the JSX either, because the drawer below `md`
+keeps its labels while collapsed — so the condition is the breakpoint AND the
+state.
 
 Each entry gains a `Tooltip` carrying its label, from the same `t(labelKey)`
 call the expanded nav uses — one source, so the two can never disagree.
@@ -129,7 +134,7 @@ guard while lying to every operator who does not read English.
 
 | Case | Why it matters |
 |---|---|
-| Collapsed nav renders icons and no label text | The DOM-removal decision, asserted rather than assumed |
+| Collapsed nav renders icons and no visible label | The display:none decision, asserted rather than assumed |
 | Tooltip carries the label the expanded nav shows | The two must come from one source |
 | `localStorage` throwing → expanded, no throw | The Safari private-mode path `i18n.ts` already documents |
 | Shortcut fires from `document.body` | The feature works |
