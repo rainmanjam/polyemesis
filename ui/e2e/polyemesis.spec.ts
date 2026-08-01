@@ -311,8 +311,14 @@ test.describe("sidebar collapse", () => {
     await page.reload();
     await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
 
-    // Put it back, so a later test does not start against a collapsed nav.
-    await page.evaluate(() => localStorage.setItem("polyemesis.nav.collapsed", "false"));
+    // No cleanup here on purpose. Each test gets its own fresh browser context
+    // (see the comment on this in auth.setup.ts) seeded from the ONE
+    // storageState snapshot playwright.config.ts points every test at --
+    // e2e/.auth/state.json, captured before any test ran. localStorage is part
+    // of that snapshot, but writes made during this test never reach the file
+    // on disk, so the next test's context reads the same unmodified snapshot
+    // regardless of what this one left behind. A reset write here would be
+    // dead code with nothing downstream to read it.
   });
 
   test("the shortcut toggles it, and not while typing", async ({ page }) => {
