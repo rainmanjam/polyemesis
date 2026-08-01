@@ -338,4 +338,36 @@ test.describe("sidebar collapse", () => {
     await composer.press("ControlOrMeta+b");
     await expect(page.locator("nav")).toContainText("Dashboard", innerText);
   });
+
+  // Regression guard for a defect found by driving a real browser: the label
+  // span is display:none and the icon is aria-hidden while collapsed, so
+  // without an aria-label on the NavLink itself the collapsed rail is
+  // fourteen unnamed links -- a WCAG 4.1.2 failure that no text-content
+  // assertion above would ever catch, because it is about the accessibility
+  // tree, not visible or innerText content.
+  test("collapsed links keep their accessible names", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
+  });
+
+  // Regression guard for a defect found by driving a real browser: react-router's
+  // NavLink accepts a FUNCTION className, but Radix Slot (what TooltipTrigger
+  // asChild uses underneath) concatenates className as a string, so the
+  // function got stringified into the class attribute before Router ever
+  // called it -- every utility on it lost, including `flex` itself. The
+  // anchor still passed every text-based assertion above because the
+  // stringified source happens to tokenise into mostly-real class names; only
+  // a real computed-style check catches the anchor silently falling back to
+  // its default `display: block`.
+  test("a collapsed nav link still computes display: flex", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    const dashboardLink = page.getByRole("link", { name: "Dashboard" });
+    await expect(dashboardLink).toHaveCSS("display", "flex");
+  });
 });

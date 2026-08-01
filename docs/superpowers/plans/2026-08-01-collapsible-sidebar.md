@@ -136,6 +136,14 @@ const [navCollapsed, toggleNav] = useNavCollapsed();
 
 - [ ] **Step 3: Replace the sidebar block**
 
+> **Correction (post-ship):** the `aria-expanded={!navCollapsed}` on the
+> `<nav>` below did not survive review and is not in shipped code.
+> `aria-expanded` is not a supported ARIA state for `role="navigation"` (the
+> `<nav>` element's implicit role) — only widgets such as buttons support it.
+> It stays on the footer chevron button further down, which is the control
+> the state actually describes. This is a historical record of the plan as
+> written; do not reinstate the attribute on the `<nav>`.
+
 Replace the whole `<nav>…</nav>` block with:
 
 ```tsx

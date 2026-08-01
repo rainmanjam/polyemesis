@@ -51,10 +51,23 @@ worth the `storage` event listener it would take to fix.
 `w-44` becomes `w-12`. The icon already carries `shrink-0`, so it needs no
 change.
 
-**The label is hidden with `display:none`, never `sr-only`.** The distinction is
-which CSS, not CSS versus JSX: `display:none` leaves the accessibility tree, a
-visually-hidden label does not. An `sr-only` label would make the collapsed rail
-read identically to the expanded one and turn the tooltip into redundant noise.
+**The label stays hidden with `display:none`, and the link also carries an
+`aria-label`.** The original version of this section argued for `display:none`
+over `sr-only` on the grounds that a visually-hidden label "would make the
+collapsed rail read identically to the expanded one" — as if that were a
+reason to avoid it. **That reasoning was wrong, and has been reversed.** Reading
+identically non-visually is exactly what should happen: the rail is a purely
+visual affordance, and a screen-reader user gets no benefit from the nav
+losing its names just because it lost its width. The bug this shipped —
+fourteen unnamed `link` entries in the accessibility tree, found by driving a
+real browser — is the direct cost of the original reasoning.
+
+The fix keeps the visual side unchanged (`display:none` via `md:hidden`, still
+never `sr-only` — the rail must stay icon-only to look at) and separately
+supplies the accessible name via `aria-label={t(labelKey)}` on the `NavLink`
+itself, using the same `t(labelKey)` call the visible label and the tooltip
+already use, so the three can never disagree. The name no longer depends on
+which CSS is currently hiding the label.
 
 It cannot simply be dropped from the JSX either, because the drawer below `md`
 keeps its labels while collapsed — so the condition is the breakpoint AND the
@@ -126,7 +139,17 @@ guard while lying to every operator who does not read English.
 
 ## Accessibility
 
-- Both controls: `aria-label={t("chrome.toggleNav")}` and `aria-expanded`.
+- The footer chevron button: `aria-label={t("chrome.toggleNav")}` and
+  `aria-expanded`. **Not the `<nav>`.** An earlier version of this section put
+  `aria-expanded` on the `<nav>` too, reasoning that the collapsed rail is a
+  different presentation of the same landmark. That is not a supported ARIA
+  state for `role="navigation"` (the implicit role of `<nav>`) — only widgets
+  such as buttons support `aria-expanded` — so it was removed from the `<nav>`
+  and kept only on the button, which is the control the state actually
+  describes.
+- Each `NavLink` carries `aria-label={t(labelKey)}`, independent of collapsed
+  state, so the accessible name never depends on which CSS is currently
+  hiding the visible label (see "Collapsed rendering" above).
 - The `<nav>` keeps its landmark role at both widths.
 - Focus order is unchanged; collapsing removes text, not tab stops.
 
