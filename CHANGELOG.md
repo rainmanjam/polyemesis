@@ -10,6 +10,29 @@ its first tagged release.
 
 ### Added
 
+- **The failover selector can put a playlist on air.** A fourth candidate,
+  ranked below both ingests and above the slate: a scheduled programme is a
+  fallback for "nobody is streaming", not a pre-emption of somebody who is, so a
+  presenter who is live stays live. An operator who wants the playlist to win
+  anyway pins it, the same way they would pin the backup.
+
+  What it changes for a viewer: an outage that used to land on the standby card
+  now lands on programming, and a selector already sitting on the card leaves it
+  for the playlist rather than waiting for an encoder. The return to a real
+  ingest is immediate and is not subject to the return mode, exactly as leaving
+  the slate already was — there is no flapping risk between a file and an
+  encoder to bound.
+
+  Five new reasons reach `Failover.Reason` — `the playlist is running`, `the
+  primary ingest stopped delivering and the playlist is running`, `neither
+  ingest is delivering, so the playlist is on air`, `an operator selected the
+  playlist`, and `the playlist stopped running` when it ends and the standby
+  card takes over. None of the existing fourteen were reworded. The decision table
+  frozen in `internal/engine/testdata/selector_golden.txt` grows from 1024 rows
+  to 3200, and a second table proves the addition is additive: all 1024
+  decisions that predate the playlist are byte-for-byte what they were,
+  reason strings included. The operator setting that turns a playlist feed on
+  is still to come — until it lands, no deployment can reach the new rows.
 - **Lifecycle webhooks.** A signed POST the moment the stream starts or stops,
   or a destination goes up or down — one delivery per transition, in order, with
   an HMAC-SHA256 over the timestamp and body. Deliberately not an alert: an alert

@@ -2696,6 +2696,10 @@ const (
 	sourceNone    sourceKind = ""
 	sourcePrimary sourceKind = "primary"
 	sourceBackup  sourceKind = "backup"
+	// sourcePlayout is a scheduled playlist feed: a real programme, but not a
+	// live one. It sits between the ingests and the slate -- see candidatesFor
+	// for why that is the ordering and not the other one.
+	sourcePlayout sourceKind = "playout"
 	sourceSlate   sourceKind = "slate"
 )
 
@@ -2899,9 +2903,18 @@ type sourceChoice struct {
 
 	backupEnabled bool
 	slateEnabled  bool
-	grace         time.Duration
-	autoReturn    bool
-	returnStable  time.Duration
+	// playoutRunning is whether a playlist feed is actually running, which is
+	// the whole of "would the playlist deliver bytes if we switched to it" --
+	// a playlist plays out of a file, so there is no liveness history to keep
+	// and no grace window to wait out. It is a plain field, sampled by the
+	// caller under the lock like everything else here, rather than a lookup
+	// into playout state made from inside the decision: chooseSource has to
+	// stay pure and cheap, because the golden table's only claim to being
+	// exhaustive is that every input it branches on can be enumerated.
+	playoutRunning bool
+	grace          time.Duration
+	autoReturn     bool
+	returnStable   time.Duration
 }
 
 // candidate is one source the selector may choose, and whether it can be
@@ -2922,7 +2935,7 @@ type candidate struct {
 }
 
 // candidatesFor turns a snapshot into the ordered list the ladder implies:
-// primary, then backup, then slate.
+// primary, then backup, then the playlist, then slate.
 //
 // rank is assigned from position rather than written out, so this literal is
 // the ONE place the preference order lives. Two spellings of the same ordering
@@ -2935,6 +2948,21 @@ func candidatesFor(c sourceChoice) []candidate {
 		// place to send viewers, so the setting gates availability rather than
 		// membership: the candidate stays in the list and stays unavailable.
 		{kind: sourceBackup, available: c.backupEnabled && c.backup.alive(c.now, c.grace)},
+		// THE PLAYLIST RANKS BELOW BOTH INGESTS, AND THAT IS A DECISION.
+		//
+		// A scheduled broadcast is a fallback for "nobody is streaming", not a
+		// pre-emption of somebody who is. Put it above the primary and the
+		// failure it buys is the one nobody forgives: a presenter live on air
+		// is cut off mid-sentence because a playlist entry came due. An
+		// operator who genuinely wants the playlist to win says so by pinning
+		// it, and the pin path outranks this whole ladder already — so the
+		// wanted behaviour costs nothing and the unwanted one cannot happen by
+		// accident.
+		//
+		// It ranks ABOVE the slate for the mirror-image reason: both are
+		// holding patterns, but one of them is programming somebody chose and
+		// the other is a card saying the picture is missing.
+		{kind: sourcePlayout, available: c.playoutRunning},
 		// The slate has no liveness to check. It synthesises its own picture, so
 		// "enabled" is the whole of "would this deliver bytes".
 		{kind: sourceSlate, available: c.slateEnabled},
@@ -3053,6 +3081,7 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// unavailable here, so it cannot win its own branch.
 		return best(map[sourceKind]string{
 			sourcePrimary: "the backup ingest stopped delivering and the primary is back",
+			sourcePlayout: "neither ingest is delivering, so the playlist is on air",
 			sourceSlate:   "neither ingest is delivering",
 		}, sourcePrimary, "the backup ingest stopped delivering")
 
@@ -3066,8 +3095,31 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		return best(map[sourceKind]string{
 			sourcePrimary: "the primary ingest is delivering again",
 			sourceBackup:  "the backup ingest is delivering",
+			sourcePlayout: "the playlist is running",
 			sourceSlate:   "",
 		}, sourcePrimary, "the slate was switched off")
+
+	case sourcePlayout:
+		// The playlist is a holding pattern too, so it leaves the same way the
+		// slate does: the moment a real ingest is back, and without consulting
+		// the return mode. The flap risk the return mode exists to bound is a
+		// risk between two LIVE encoders; there is none here, because the
+		// playlist never stops delivering and so can never hand the primary a
+		// window to flap in.
+		//
+		// Staying put is silent, exactly as the slate branch is. Without that
+		// empty string a selector already on the playlist would republish the
+		// same reason on every 500ms sweep for the whole scheduled programme,
+		// and an operator reading the log would find a failover storm where
+		// nothing at all had moved. That is the trap a fourth kind walks into
+		// by being added only to the maps of branches it can arrive in, and
+		// never to a branch of its own.
+		return best(map[sourceKind]string{
+			sourcePrimary: "the primary ingest is delivering again",
+			sourceBackup:  "the backup ingest is delivering",
+			sourcePlayout: "",
+			sourceSlate:   "the playlist stopped running",
+		}, sourcePrimary, "the playlist stopped running")
 
 	default:
 		// Already on the primary means the primary winning is not news, so the
@@ -3087,6 +3139,7 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		return best(map[sourceKind]string{
 			sourcePrimary: onPrimary,
 			sourceBackup:  "the primary ingest stopped delivering",
+			sourcePlayout: "the primary ingest stopped delivering and the playlist is running",
 			sourceSlate:   "the primary ingest stopped delivering and no backup is on air",
 		}, sourcePrimary, noOther)
 	}
@@ -3101,6 +3154,12 @@ func pinReason(k sourceKind) (string, bool) {
 		return "an operator selected the primary ingest", true
 	case sourceBackup:
 		return "an operator selected the backup ingest", true
+	// The pin is how an operator overrides the ranking decision candidatesFor
+	// explains: the playlist loses to a live encoder on the ladder, and this is
+	// the sentence that says somebody wanted it to win anyway. Still honoured
+	// only while the playlist is actually running, like every other pin.
+	case sourcePlayout:
+		return "an operator selected the playlist", true
 	case sourceSlate:
 		return "an operator selected the slate", true
 	}
@@ -3302,9 +3361,26 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		backup:        *sel.live[sourceBackup],
 		backupEnabled: s.Failover.Backup.Enabled,
 		slateEnabled:  s.Failover.Slate.Enabled,
-		grace:         failoverGrace(s),
-		autoReturn:    s.Failover.Return == db.FailoverReturnAuto,
-		returnStable:  time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
+		// Left false deliberately, and this is the only place that can change
+		// it. The decision knows how to rank a playlist feed; the settings that
+		// would let an operator switch one on, and the feed that would run it,
+		// arrive with the wire work. Reported as "not running" until then, which
+		// is true — so every reachable decision is the one it was before.
+		//
+		// WHOEVER MAKES THIS TRUE MUST TEACH THE FEED LAYER FIRST. Three
+		// functions build a feed -- feedUpstreamSig, startFeed and
+		// downstreamFeedInput -- and all three used to treat a kind they did
+		// not recognise as the primary, so a decision of sourcePlayout that
+		// reached ensureFeed would have started the primary's command line
+		// while sel.active recorded "playout". They now refuse instead, and
+		// errNoFeedShape names all three in the message, so the mistake fails
+		// where it is made rather than going to air. SwitchSource still rejects
+		// "playout" too, so the pin pinReason is ready to honour cannot yet be
+		// set by an operator.
+		playoutRunning: false,
+		grace:          failoverGrace(s),
+		autoReturn:     s.Failover.Return == db.FailoverReturnAuto,
+		returnStable:   time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
 	}
 	e.mu.Unlock()
 
@@ -3316,14 +3392,18 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 	// hand this back, and only when c.cur was itself sourceNone -- the
 	// selector's first decision, before any feed has ever run, or the first
 	// one after the tier restarts. There is no current source to hold, so
-	// there is nothing to do: calling ensureFeed(sourceNone) would start a
-	// feed anyway, because ensureFeed's own short-circuit needs an existing
-	// feed or a recent start attempt to have something to compare against,
-	// neither of which exists yet. That feed would be a PRIMARY-shaped one
-	// too -- feedUpstreamSig has no sourceNone case, so it falls into the
-	// same default branch primary does -- while e.sel.active stayed recorded
-	// as none. Skipping ensureFeed entirely is what keeps a broken decision
-	// from producing a running feed the bookkeeping cannot describe.
+	// there is nothing to do, and this returns rather than calling
+	// ensureFeed(sourceNone).
+	//
+	// ensureFeed would now refuse that kind itself -- errNoFeedShape lists the
+	// kinds positively and sourceNone is not among them -- but this guard is
+	// still the one that belongs here, and it is not redundant: refusing inside
+	// ensureFeed would record an error on the tier describing a missing feed
+	// shape, when the true story is that the decision itself failed and there
+	// was nothing to hold. The two are logged apart on purpose below. Before
+	// either guard existed this started a PRIMARY-shaped feed while
+	// e.sel.active stayed recorded as none, because every function that builds
+	// a feed treated an unrecognised kind as the primary.
 	//
 	// It used to return here in silence, which was the one thing worse than the
 	// blank reason this whole file exists to prevent: a decision that reached
@@ -3335,9 +3415,9 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		if decided {
 			// Unreachable today and a bug if it ever happens: a real decision
 			// never yields sourceNone. best() panics on an available one and
-			// every fallback is sourcePrimary, which is why all 1024 rows of
-			// the frozen table decide primary, slate or backup and none ever
-			// decides none.
+			// every fallback is sourcePrimary, which is why all 3200 rows of
+			// the frozen table decide primary, backup, playout or slate and
+			// none ever decides none.
 			e.log.Error("selector decided on no source at all; no feed started",
 				"source", e.sourceID, "cause", "the candidate list produced sourceNone from a decision that did not panic")
 		} else {
@@ -3457,9 +3537,44 @@ func (e *Engine) decideSource(c sourceChoice) (kind sourceKind, reason string, d
 	return kind, reason, true
 }
 
+// holdForUnfeedableKind records a decision the feed layer cannot carry out and
+// leaves everything else exactly as it was.
+//
+// It logs once per distinct cause rather than on every 500ms sweep. The cause
+// cannot change between sweeps -- it is a missing case in the source, not a
+// condition that clears -- so the hundredth identical line tells an operator
+// nothing the first did, while the sweep producing it is the same one already
+// hammering the fault. sel.err is the dedupe key AND the operator-visible
+// record, which is what keeps the quiet sweeps from being silent ones: the
+// tier goes on reporting the fault through the API for as long as it lasts.
+func (e *Engine) holdForUnfeedableKind(want sourceKind, err error) {
+	e.mu.Lock()
+	repeat := e.sel != nil && e.sel.err == err.Error()
+	if e.sel != nil {
+		e.sel.err = err.Error()
+	}
+	e.mu.Unlock()
+	if repeat {
+		return
+	}
+	e.log.Error("the selector chose a source no feed can run; holding the current feed",
+		"source", e.sourceID, "want", string(want), "err", err)
+}
+
 // ensureFeed starts, replaces or leaves the feed alone. The caller must hold
 // selMu.
 func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, reason string, now time.Time) {
+	// The boundary for the three functions below, and the reason none of their
+	// loud failures reaches a production crash: a kind the feed layer cannot
+	// build is refused HERE, before anything is torn down. The running feed
+	// keeps running, active and reason are left alone, and the tier records why
+	// -- which is the same "hold what you have and say so" the recovered
+	// decision panic settles on, for the same reason. Starting nothing is
+	// better than starting the primary under another name.
+	if err := errNoFeedShape(want); err != nil {
+		e.holdForUnfeedableKind(want, err)
+		return
+	}
 	upstream := e.feedUpstreamSig(s, want, silenceSig)
 
 	e.mu.Lock()
@@ -3542,9 +3657,52 @@ func feedRunning(f *sourceFeed) bool {
 	return true
 }
 
+// errNoFeedShape names a source kind that the feed layer does not know how to
+// run, and it exists because "does not know how to run it" used to be spelled
+// as silence.
+//
+// THREE functions decide what a feed actually is -- feedUpstreamSig hashes what
+// its command line depends on, startFeed builds that command line, and
+// downstreamFeedInput picks the hub it reads -- and until this commit ALL THREE
+// treated an unrecognised kind as the primary. A kind added to the ladder and
+// missed in any one of them therefore produced a running process reading the
+// PRIMARY's hub while sel.active recorded the new kind and Failover.Reason told
+// the operator that new source was on air. Bookkeeping and process disagreeing,
+// with no error, no panic and no test failure -- and the selector's panic
+// recovery never fires, because nothing panicked.
+//
+// This is the same class of defect best() already refuses in chooseFrom (a
+// winning candidate with no reason registered), caught the same way and for the
+// same reason: a kind that reaches a place nobody taught about it must fail
+// where it is noticed, not produce a plausible-looking wrong answer.
+//
+// The kinds are listed positively. A future kind is then a case that is
+// VISIBLY absent here rather than one silently absorbed by a default.
+func errNoFeedShape(kind sourceKind) error {
+	switch kind {
+	case sourcePrimary, sourceBackup, sourceSlate:
+		return nil
+	case sourcePlayout:
+		return fmt.Errorf("the selector chose %q, but no feed knows how to run a playlist yet: "+
+			"feedUpstreamSig, startFeed and downstreamFeedInput each need a sourcePlayout case "+
+			"before playoutRunning is ever allowed to be true", kind)
+	}
+	return fmt.Errorf("no feed knows how to run source %q", kind)
+}
+
 // feedUpstreamSig hashes what one feed's command line depends on, so a settings
 // change respawns the feed and disturbs nothing downstream of it.
+//
+// It panics on a kind with no feed shape rather than hashing one. It cannot
+// return an error -- its result is a hash folded into a respawn decision, and
+// there is no value it could return that means "refuse" -- so the loud failure
+// is the only honest one available here. ensureFeed rejects such a kind before
+// this is ever reached, which is what keeps the panic off every production
+// path; see the guard there.
 func (e *Engine) feedUpstreamSig(s db.Settings, kind sourceKind, silenceSig string) string {
+	if err := errNoFeedShape(kind); err != nil {
+		panic("feedUpstreamSig: " + err.Error())
+	}
 	switch kind {
 	case sourceBackup:
 		return hashStrings([]string{"backup", backupIngestSig(s)})
@@ -3563,6 +3721,10 @@ func (e *Engine) feedUpstreamSig(s db.Settings, kind sourceKind, silenceSig stri
 		}
 		return hashStrings(parts)
 	default:
+		// sourcePrimary, and nothing else: errNoFeedShape above has already
+		// turned every other kind away. Left as a default rather than written
+		// as `case sourcePrimary` so the compiler still sees a total function,
+		// but the set it stands for is now one kind wide instead of open.
 		return primaryFeedSig(silenceSig)
 	}
 }
@@ -3631,14 +3793,22 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 	feed := &sourceFeed{kind: kind, upstream: upstream, offset: offset, startedAt: now}
 	var args []string
 
-	if kind == sourceSlate {
+	// Switched on the kind exhaustively rather than "slate, or else the primary
+	// shape". The else was the mechanism: an unrecognised kind fell into the
+	// relay branch, downstreamFeedInput handed it the primary's hub, and a
+	// process started that read the primary while calling itself something
+	// else. This function can report a failure -- fail() records it on the tier
+	// and logs it -- so an unfeedable kind is returned as an error rather than
+	// as a panic.
+	switch kind {
+	case sourceSlate:
 		spec, encFallback := e.slateSpec(s, out, offset)
 		if encFallback != "" {
 			e.log.Warn("slate encoder unusable; falling back to software",
 				"encoder", string(s.Failover.Slate.Encoder), "reason", encFallback)
 		}
 		args = ffmpeg.SlateArgs(spec)
-	} else {
+	case sourcePrimary, sourceBackup:
 		in := e.downstreamFeedInput(kind)
 		if in == nil {
 			return fail(fmt.Errorf("the %s ingest has no relay to read", kind))
@@ -3649,6 +3819,11 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		}
 		feed.in, feed.port, feed.subName = in, port, selectorSubName
 		args = relayFeedArgs(in.Subscribe(selectorSubName, port), out, offset)
+	default:
+		// sourcePlayout lands here today, and so would any later kind. Nothing
+		// is started and nothing is recorded as active: a feed that cannot be
+		// built must not leave a process behind that pretends it was.
+		return fail(errNoFeedShape(kind))
 	}
 
 	feed.proc = supervisor.New(e.log, supervisor.Spec{
@@ -3674,14 +3849,26 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 }
 
 // downstreamFeedInput is the hub one ingest feed reads.
+//
+// This is the function that actually made a mislabelled feed primary-shaped: it
+// was `if kind == sourceBackup` and everything else fell through to
+// sourceHub(). A kind nobody taught it about got the primary's bytes and no
+// complaint. It is now a closed switch, and startFeed calls it only for the two
+// kinds that HAVE a hub, so the panic below is a "this cannot happen" marker
+// rather than a path -- the same division of labour as chooseFrom's best(),
+// which panics while decideSource holds the recovery.
 func (e *Engine) downstreamFeedInput(kind sourceKind) *relay.Hub {
-	if kind == sourceBackup {
+	switch kind {
+	case sourceBackup:
 		return e.backupHub()
+	case sourcePrimary:
+		// sourceHub(), not e.hub: with a video-only primary the silence tier is
+		// between the two, and feeding the selector from the raw ingest would
+		// publish a stream with no audio track at all.
+		return e.sourceHub()
 	}
-	// sourceHub(), not e.hub: with a video-only primary the silence tier is
-	// between the two, and feeding the selector from the raw ingest would
-	// publish a stream with no audio track at all.
-	return e.sourceHub()
+	panic(fmt.Sprintf("downstreamFeedInput: source %q has no ingest hub to read -- "+
+		"only the primary and the backup do, and startFeed must not ask about any other kind", kind))
 }
 
 func (e *Engine) teardownFeed(f *sourceFeed) {

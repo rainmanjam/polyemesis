@@ -21,7 +21,11 @@ import (
 func TestCandidatesForIsTheLadderOrder(t *testing.T) {
 	got := candidatesFor(sourceChoice{now: goldenNow, grace: goldenGrace})
 
-	want := []sourceKind{sourcePrimary, sourceBackup, sourceSlate}
+	// The playlist sits between the ingests and the slate, and that placement is
+	// the decision Task 4 made rather than a detail of how the list is built:
+	// below a live encoder because a scheduled programme is a fallback for
+	// "nobody is streaming", above the slate because it is still programming.
+	want := []sourceKind{sourcePrimary, sourceBackup, sourcePlayout, sourceSlate}
 	if len(got) != len(want) {
 		t.Fatalf("got %d candidates, want %d", len(got), len(want))
 	}
@@ -52,15 +56,15 @@ func TestCandidatesForAvailabilityMatchesLiveness(t *testing.T) {
 	}{{
 		name: "nothing delivering and nothing enabled",
 		c:    sourceChoice{now: goldenNow, grace: goldenGrace},
-		want: map[sourceKind]bool{sourcePrimary: false, sourceBackup: false, sourceSlate: false},
+		want: map[sourceKind]bool{sourcePrimary: false, sourceBackup: false, sourcePlayout: false, sourceSlate: false},
 	}, {
 		name: "everything delivering and enabled",
 		c: sourceChoice{
 			now: goldenNow, grace: goldenGrace,
 			primary: delivering, backup: delivering,
-			backupEnabled: true, slateEnabled: true,
+			backupEnabled: true, slateEnabled: true, playoutRunning: true,
 		},
-		want: map[sourceKind]bool{sourcePrimary: true, sourceBackup: true, sourceSlate: true},
+		want: map[sourceKind]bool{sourcePrimary: true, sourceBackup: true, sourcePlayout: true, sourceSlate: true},
 	}, {
 		// The distinction the whole tier turns on: a source that stopped
 		// delivering is unavailable even though its hub and its process are
@@ -70,7 +74,7 @@ func TestCandidatesForAvailabilityMatchesLiveness(t *testing.T) {
 			now: goldenNow, grace: goldenGrace,
 			primary: stale, backup: stale, backupEnabled: true,
 		},
-		want: map[sourceKind]bool{sourcePrimary: false, sourceBackup: false, sourceSlate: false},
+		want: map[sourceKind]bool{sourcePrimary: false, sourceBackup: false, sourcePlayout: false, sourceSlate: false},
 	}, {
 		// A backup that is delivering but switched off must not be offered, or
 		// a failover would send viewers to a source the operator disabled.
@@ -79,12 +83,20 @@ func TestCandidatesForAvailabilityMatchesLiveness(t *testing.T) {
 			now: goldenNow, grace: goldenGrace,
 			primary: delivering, backup: delivering, backupEnabled: false,
 		},
-		want: map[sourceKind]bool{sourcePrimary: true, sourceBackup: false, sourceSlate: false},
+		want: map[sourceKind]bool{sourcePrimary: true, sourceBackup: false, sourcePlayout: false, sourceSlate: false},
 	}, {
 		// The slate has no liveness at all: enabled is the whole test.
 		name: "slate enabled with no ingest at all",
 		c:    sourceChoice{now: goldenNow, grace: goldenGrace, slateEnabled: true},
-		want: map[sourceKind]bool{sourcePrimary: false, sourceBackup: false, sourceSlate: true},
+		want: map[sourceKind]bool{sourcePrimary: false, sourceBackup: false, sourcePlayout: false, sourceSlate: true},
+	}, {
+		// The playlist has no liveness either, and no enabled flag separate
+		// from it: a playlist feed that is running IS the availability. It is
+		// the one candidate whose availability cannot go stale, which is also
+		// why it never needs the grace window the ingests are judged against.
+		name: "playlist running with no ingest and no slate",
+		c:    sourceChoice{now: goldenNow, grace: goldenGrace, playoutRunning: true},
+		want: map[sourceKind]bool{sourcePrimary: false, sourceBackup: false, sourcePlayout: true, sourceSlate: false},
 	}}
 
 	for _, tc := range cases {
@@ -117,7 +129,14 @@ func TestChooseFromDecidesByRankNotSlicePosition(t *testing.T) {
 	}
 
 	inOrder := candidatesFor(c)
-	shuffled := []candidate{inOrder[2], inOrder[0], inOrder[1]}
+	// Every candidate, in an order that is nothing like the ladder's. Reversed
+	// rather than a rotation missing an entry, so a list that has grown a
+	// fourth kind is still shuffled in full: a "shuffle" that quietly dropped
+	// the tail of the list would pass whatever chooseFrom did with it.
+	shuffled := make([]candidate, 0, len(inOrder))
+	for i := len(inOrder) - 1; i >= 0; i-- {
+		shuffled = append(shuffled, inOrder[i])
+	}
 
 	wantKind, wantReason := chooseFrom(inOrder, c)
 	if wantKind != sourceBackup {
