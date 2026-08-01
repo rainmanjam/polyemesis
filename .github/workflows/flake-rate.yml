@@ -83,6 +83,29 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      # Everything below this line was missing, and its absence made this
+      # workflow measure nothing at all: the suites bail on their own preflight
+      # with "build first: make build" in under a second, so the first run of
+      # this job reported 10/10 failures that were entirely its own fault. A
+      # measurement instrument that has never been run is not a measurement
+      # instrument -- which is the same lesson issue #38 is about, arriving from
+      # an unexpected direction.
+      #
+      # Kept in step with the acceptance job in ci.yml. If that one grows a
+      # dependency, this one needs it too, or the rate measured here stops
+      # describing the thing CI actually runs.
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -qq
+          # lsof as well: several suites read the engine's relay port out of it
+          # to measure the right socket, and they fail obscurely without it.
+          sudo apt-get install -y --no-install-recommends ffmpeg lsof
+          ffmpeg -hide_banner -version | head -1
+
+      # The suites run the real binary with the UI embedded, so it has to be
+      # the real build rather than `go build ./cmd/...`.
+      - run: make build
+
       - name: Run it repeatedly and record every outcome
         env:
           SUITE: ${{ matrix.suite }}
