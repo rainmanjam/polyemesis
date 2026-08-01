@@ -230,7 +230,94 @@ else
   bad "expected at least 2 switches, saw ${switches:-0}"
 fi
 
-step "6. The output timeline"
+step "6. Filler starts playing, with the encoder still on air"
+# THE CASE THIS WHOLE SUB-PROJECT EXISTS FOR, and it was impossible to write
+# before it. A playing file used to feed the PRIMARY's hub, so the primary
+# always had bytes on it, the selector read the programme as live, and it would
+# never switch to a backup or a slate. Playing a file silently disabled the
+# entire failover feature -- everything steps 2 to 5 just measured turned itself
+# off the first time anybody put a file on air, and nothing said so.
+#
+# The playlist is enabled HERE rather than in step 1 deliberately: it outranks
+# the slate, so a tier running from the start would have taken the slate's place
+# in step 3 and this suite would have stopped measuring the cycle it was
+# originally written for.
+FILLER_TONE=2000
+# Same geometry, frame rate and codec as the publisher above. The destination
+# copies video, so filler that did not match would be measuring a platform's
+# tolerance for a mid-stream codec change rather than the selector's switch.
+ffmpeg -hide_banner -loglevel error \
+  -f lavfi -i "testsrc2=size=640x360:rate=30" \
+  -f lavfi -i "sine=frequency=$FILLER_TONE:sample_rate=48000" \
+  -map 0:v -map 1:a -c:v libx264 -preset ultrafast -g 30 -pix_fmt yuv420p \
+  -b:v 1200k -c:a aac -b:a 128k -ac 2 -t 8 \
+  -y data/recordings/filler.ts 2>/dev/null
+[ -s data/recordings/filler.ts ] || { bad "could not build the filler clip"; exit 1; }
+OUT=$(drive playlist recordings/filler.ts)
+case "$OUT" in *PLAYLIST_OK*) : ;; *) bad "enable playlist: $OUT"; exit 1 ;; esac
+
+# The pin is how this suite SEES the file delivering while the encoder is still
+# connected, and it has to see that before cutting the encoder or the step below
+# proves nothing about filler. A pin is honoured only while its source is
+# actually delivering, so the playlist becoming active IS the evidence that its
+# own hub is carrying bytes. There is no status field to read instead, and "the
+# tier is running" would be the wrong question anyway: a path that is confined
+# but names no file leaves FFmpeg backing off forever with the process reported
+# healthy the whole time.
+OUT=$(drive pin playlist)
+case "$OUT" in *PIN_OK*) : ;; *) bad "pin playlist: $OUT"; exit 1 ;; esac
+if waitfor 1 playlist 40 ; then
+  ok "the filler is on air while the encoder is still publishing"
+else
+  # Not fatal. The checks below say what happened when the encoder dropped, and
+  # a run that stopped here would report a cause nobody had measured -- the
+  # habit issue #38 exists to break.
+  bad "the filler never went on air, so nothing was playing when the encoder dropped"
+  publisher_postmortem
+fi
+
+OUT=$(drive pin auto)
+case "$OUT" in *PIN_OK*) : ;; *) bad "pin auto: $OUT"; exit 1 ;; esac
+if waitfor 1 primary 40 ; then
+  ok "a live encoder pre-empts the filler as soon as the pin is released"
+else
+  bad "the primary never came back after the pin was released: $(readstatus)"
+fi
+sleep 4
+
+step "7. THE POINT: the encoder drops while the filler plays"
+unpublish
+# THE REGRESSION, in one field. Before the playlist got a hub of its own, the
+# file's bytes landed on the PRIMARY's relay, so primaryLive stayed true for as
+# long as the file played -- with no encoder connected at all -- and every
+# failover decision underneath it became unreachable.
+if waitfor 3 false 30 ; then
+  ok "the primary is seen to go down even though a file is on air"
+else
+  bad "primaryLive stayed true with no encoder connected -- the filler is feeding the primary's hub"
+  publisher_postmortem
+fi
+if waitfor 1 playlist 30 ; then
+  ok "the selector left the dead primary and put the filler on air"
+else
+  bad "the selector never switched away from the primary while the filler played"
+fi
+
+FILLER_STATUS=$(readstatus)
+set -- $FILLER_STATUS; restarts_filler="${4:-0}"
+note "with the filler on air: $FILLER_STATUS"
+# Same measurement as step 5, against the same baseline: a switch that restarts
+# a destination drops the platform connection, and it does that whether the
+# source arriving is a slate or a scheduled programme.
+if [ "$restarts_filler" = "-1" ]; then
+  bad "no destination process was reported across the filler switch"
+elif [ "$restarts_filler" -eq "$restarts_before" ]; then
+  ok "the destination rode the switch to filler without restarting ($restarts_filler restarts)"
+else
+  bad "the destination restarted when the filler went on air ($restarts_before -> $restarts_filler)"
+fi
+
+step "8. The output timeline"
 drive stopall >/dev/null 2>&1
 sleep 8
 OUTFILE=data/recordings/onair.mkv
@@ -292,7 +379,12 @@ printf "  %d passed, %d failed\n\n" "$pass" "$fail"
 # Fixed-value guard. Several checks live behind an "if the file exists" branch,
 # so a suite that fell over early could otherwise report "all passed" having
 # measured almost nothing.
-EXPECTED_CHECKS=12
+#
+# Raised from 12 to 17 by the filler case in steps 6 and 7: five checks, and
+# every one of them lives after a `bad ... exit 1` precondition, so a run that
+# could not build the clip or enable the tier has to be told apart from one that
+# measured the case and liked what it saw.
+EXPECTED_CHECKS=17
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
