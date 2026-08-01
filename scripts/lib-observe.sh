@@ -46,6 +46,21 @@
 # sample index back into wall-clock time.
 POLY_POLL_INTERVAL="${POLY_POLL_INTERVAL:-0.5}"
 
+# A CEILING IS A CEILING, NOT A FLOOR. The deadline below is built from
+# `date +%s`, which counts whole seconds, so a ceiling of N seconds buys
+# anywhere between N-1 and N seconds of actual polling -- decided by nothing but
+# where in the wall-clock second the call happened to land. A ceiling of 1 can
+# therefore take a SINGLE sample and give up.
+#
+# That is fine for the acceptance suites, whose ceilings are tens of seconds and
+# whose samplers are asking a real server a real question. It is a trap for
+# anything asserting on how many samples a wait produced: test-lib-observe.sh
+# step 6 did exactly that at ceiling 1 and failed about one run in twenty until
+# its ceiling was raised. Sub-second precision here would mean date +%s%N or
+# per-platform date flags, which is not worth it -- so the granularity is
+# documented instead, and callers who care about a sample FLOOR should raise the
+# ceiling rather than assume one.
+
 # Cap on how many distinct runs the trajectory prints. A stable signal produces
 # one or two runs, so this only bites on a value that oscillates -- exactly the
 # case where an unbounded dump would bury the reader in noise.
