@@ -283,6 +283,24 @@ the current value.
 | `GET` `DELETE` | `/jobs/{id}` |
 | `POST` | `/jobs/{id}/cancel`, `/retry`, `/release` |
 
+### Lifecycle webhooks
+
+Signed POSTs on stream and destination transitions. One delivery per
+transition, in order, for a script. See [HOOKS.md](HOOKS.md) for the envelope
+and how to verify a signature.
+
+| Method | Path |
+|---|---|
+| `GET` | `/hooks/meta` |
+| `GET` `POST` | `/hooks` |
+| `GET` `PUT` `DELETE` | `/hooks/{id}` |
+| `POST` | `/hooks/{id}/test` |
+| `GET` | `/hooks/{id}/deliveries` |
+
+`POST /hooks` is the only call that ever returns the signing key, and it returns
+it once. The stored URL is masked everywhere it is read back, so an edit that
+submits the masked value unchanged keeps the real one.
+
 ### Alerts and schedules
 
 | Method | Path |

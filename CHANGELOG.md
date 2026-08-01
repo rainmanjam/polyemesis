@@ -10,6 +10,22 @@ its first tagged release.
 
 ### Added
 
+- **Lifecycle webhooks.** A signed POST the moment the stream starts or stops,
+  or a destination goes up or down — one delivery per transition, in order, with
+  an HMAC-SHA256 over the timestamp and body. Deliberately not an alert: an alert
+  coalesces, debounces and rate-floors because a person is reading it, and a
+  script cannot act on eleven events it was never given.
+
+  It delivers an event that did not previously exist. The alert watcher only
+  emits `ingest.recovered` after it has emitted `ingest.lost`, so an install
+  whose streamer connects shortly after boot produced neither — there has been
+  no "the stream started" event in polyemesis until now.
+
+  Ordering is per endpoint and is bought with head-of-line blocking, bounded at
+  33s by default. A 4xx is never retried. No destination URL, stream key,
+  publish token or ingest passphrase reaches a payload, enforced centrally and
+  guarded by a test that plants a key in three fields. Automation → Webhooks.
+  See [docs/HOOKS.md](docs/HOOKS.md).
 - **Chat scrollback sent on connect is now an operator setting**
   (`chat.historyMessages`). This is the in-memory ring a browser reads the
   instant it opens the page, before any stored history is queried — a different

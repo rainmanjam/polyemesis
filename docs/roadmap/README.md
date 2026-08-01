@@ -31,6 +31,21 @@ claim is often more instructive than the right one.
 | **12** | [Chat automod](CHAT-AUTOMOD.md) | — | ✅ **shipped** | Rules, then per-author history, then an optional model. The acting half already exists — four adapters expose ban/timeout/delete — so this is only the deciding half |
 | — | [Unreachable knobs](UNREACHABLE-KNOBS.md) | — | survey | The sibling of item 0, for *settings* rather than features: knobs the server honours that no operator can reach. Surveyed 2026-07-30; one shipped, the rest open |
 
+## Two things shipped that were never on this list
+
+Both came from a written plan rather than from the sequence above, and both are
+recorded here so a reader of this table is not misled about what exists.
+
+**Hot configuration reload.** Settings that never reach an FFmpeg command line
+are now delivered to the process already running, rather than replacing it. 141
+settings fields carry a recorded reload class, guarded by a reflection walk that
+fails the build when a field is added without one. It found three defects on the
+way in, one of them live: `meters.intervalMs` was stored, reported as saved, and
+ignored. See [../HOT-RELOAD.md](../HOT-RELOAD.md).
+
+**Lifecycle webhooks.** Signed POSTs on stream and destination transitions, for
+a script rather than a person. See [../HOOKS.md](../HOOKS.md).
+
 [WHIP](WEBRTC.md#whip-design) ingest is a separate decision, deliberately not
 given a number: it carries one audio track, so it has RTMP's exact limitation
 and cannot feed the per-destination routing this product exists for. Decide it
