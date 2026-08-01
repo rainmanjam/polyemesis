@@ -275,3 +275,61 @@ test.describe("anchor grid", () => {
     await expect(group.getByRole("radio", { checked: true })).toHaveCount(1);
   });
 });
+
+test.describe("sidebar collapse", () => {
+  // The nav is the app shell, so a mistake here is visible on every page. These
+  // pin the three decisions that are easy to undo by accident: the label leaves
+  // the DOM, the preference survives a reload, and the shortcut does not fire
+  // while somebody is typing.
+
+  // useInnerText, throughout this block, on purpose: toContainText defaults to
+  // textContent, which reads straight through display:none. A first pass of
+  // this suite failed against a correctly-collapsing sidebar because the label
+  // spans are still in the DOM -- only their CSS visibility changes -- so the
+  // default matcher saw every label concatenated regardless of collapsed
+  // state. innerText is what actually distinguishes display:none (leaves the
+  // rendered text) from sr-only (does not), which is the property this block
+  // means to pin.
+  const innerText = { useInnerText: true };
+
+  test("collapsing removes the labels and expanding brings them back", async ({ page }) => {
+    await signIn(page);
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+  });
+
+  test("the collapsed state survives a reload", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    await page.reload();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    // Put it back, so a later test does not start against a collapsed nav.
+    await page.evaluate(() => localStorage.setItem("polyemesis.nav.collapsed", "false"));
+  });
+
+  test("the shortcut toggles it, and not while typing", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/chat");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+
+    await page.locator("body").press("ControlOrMeta+b");
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+    await page.locator("body").press("ControlOrMeta+b");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+
+    // The case the guard exists for. The chat composer is a textarea; the
+    // sidebar must not move while somebody is writing a message into it.
+    const composer = page.locator("textarea").first();
+    await composer.click();
+    await composer.press("ControlOrMeta+b");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+  });
+});
