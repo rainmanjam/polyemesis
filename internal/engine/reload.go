@@ -46,15 +46,17 @@ const (
 	ClassOnDemand ReloadClass = "on_demand"
 	// ClassNextStart is stored now and acted on at the next process start.
 	//
-	// This class exists because writing the table found one, and the choice was
-	// between recording it and mislabelling it. Job-history retention is read
-	// exactly once, by purgeJobHistory at boot, so lowering it does nothing an
-	// operator can observe until they restart -- a smaller cousin of the
-	// meters.intervalMs defect rather than the same thing, because the value
-	// does eventually apply.
+	// NOTHING USES IT, and that is the intended steady state. It was added
+	// because writing this table found one -- job-history retention, read once
+	// at boot, so lowering it did nothing an operator could observe until they
+	// restarted -- and the choice was between recording that honestly and
+	// mislabelling it as live. Recording it is what made it obvious enough to
+	// fix, which took an hour once it had a name.
 	//
-	// A rule in this class is an admission, not a design. Anything landing here
-	// should be read as a candidate for ClassLive that nobody has wired yet.
+	// Kept rather than deleted because the next one will be found the same way,
+	// and a reviewer needs somewhere to put it that is not a lie. A rule in this
+	// class is an admission, not a design: anything landing here should be read
+	// as a candidate for ClassLive that nobody has wired yet.
 	ClassNextStart ReloadClass = "next_start"
 )
 
@@ -222,8 +224,8 @@ var settingsReload = map[string]ReloadRule{
 	"postProd.deferSeconds": {ClassLive, "handlePutJobPolicy", "how far ahead a blocked job is parked; read by the governor per decision"},
 	"postProd.whisperModel": {ClassLive, "handlePutJobPolicy", "chosen per transcribe job at admission, not held by a running process"},
 	// Retention is the one honest exception in this file. See ClassNextStart.
-	"postProd.retainDays": {ClassNextStart, "purgeJobHistory", "read once at boot and never again, so lowering it does nothing observable until the next restart"},
-	"postProd.retainJobs": {ClassNextStart, "purgeJobHistory", "read once at boot; same gap as retainDays"},
+	"postProd.retainDays": {ClassLive, "purgeJobHistoryLoop", "re-read every sweep through the settings func the loop was handed, the same shape recording retention uses"},
+	"postProd.retainJobs": {ClassLive, "purgeJobHistoryLoop", "re-read every sweep; the floor that survives whatever their age"},
 
 	"postProd.kinds.kind":         {ClassLive, "handlePutJobPolicy", "per-kind policy, consulted by the governor per admission"},
 	"postProd.kinds.mode":         {ClassLive, "handlePutJobPolicy", "per-kind policy, consulted per admission"},
