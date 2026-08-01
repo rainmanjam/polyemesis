@@ -163,13 +163,28 @@ func TestChooseSourceGoldenIsExhaustive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read %s: %v\nRegenerate with: go test ./internal/engine/ -run Golden -update", path, err)
 	}
-	if string(raw) == got {
+
+	// Normalise CRLF before comparing, because this table is compared byte for
+	// byte and Windows checks text files out with CRLF unless told otherwise.
+	//
+	// Without this the test fails on windows-latest and nowhere else, reporting
+	// "1024 of 1024 rows changed" -- every row differing only by an invisible
+	// \r. The diff it prints to explain itself comes out BLANK, because the
+	// carriage return sends the cursor back over the line it just wrote. So the
+	// failure names the loudest possible cause, a total rewrite of the selector,
+	// and shows no evidence for it.
+	//
+	// .gitattributes pins this file to LF, which is the real fix. This line is
+	// the belt to that pair of braces: it keeps the test honest in a clone made
+	// before .gitattributes existed, where the working copy is already CRLF.
+	prev := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if prev == got {
 		return
 	}
 
 	// Name the rows that moved rather than dumping 1024 lines. The diff is the
 	// review artifact for any change to this function, so it has to be readable.
-	oldLines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	oldLines := strings.Split(strings.TrimRight(prev, "\n"), "\n")
 	moved := 0
 	for i := range lines {
 		if i >= len(oldLines) {

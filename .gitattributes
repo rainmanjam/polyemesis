@@ -1,0 +1,27 @@
+# Line endings.
+#
+# Git on Windows checks text files out with CRLF by default. That is harmless
+# for anything this repository compiles or parses, and NOT harmless for a file
+# compared byte for byte.
+#
+# internal/engine/testdata/selector_golden.txt is exactly that: 1024 rows
+# freezing every reachable answer of chooseSource, asserted against the running
+# code as whole bytes. Checked out with CRLF it fails on windows-latest and
+# nowhere else, reporting "1024 of 1024 rows changed" -- every row differing
+# only by an invisible \r. Worse, the diff it prints to justify that claim
+# arrives BLANK, because the carriage return sends the cursor back over the line
+# just written. The failure therefore accuses the selector of a total rewrite
+# and shows nothing to support it, which is the most expensive shape a CI
+# failure can take.
+#
+# Pinned by directory rather than by name so the next golden file inherits the
+# fix instead of rediscovering the bug.
+**/testdata/** text eol=lf
+
+# The acceptance suites and their shared libraries run under bash on Linux and
+# macOS runners. A CRLF checkout makes the shebang line end in \r, and the
+# kernel then looks for an interpreter literally named "bash\r" -- reported as
+# "bad interpreter: No such file or directory", which reads as a missing shell
+# rather than a line-ending problem. Nothing runs these on Windows today; this
+# is here so that stays true by construction rather than by luck.
+*.sh text eol=lf
