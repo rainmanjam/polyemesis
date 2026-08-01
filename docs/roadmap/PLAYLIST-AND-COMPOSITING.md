@@ -305,7 +305,12 @@ function.
    pre-recorded broadcast. This answers three of five tracker requests
    immediately, at essentially zero cost and zero risk. **The single
    highest-leverage day in either feature.**
-2. **Selector generalisation** — the shared prerequisite, done once.
+2. **Selector generalisation** — the shared prerequisite, done once. ✅ **Shipped.**
+   `chooseSource` ranks an ordered candidate list, and a playlist is already the
+   fourth candidate, ranked below both ingests and above the slate. What remains
+   for phase 1 is wiring: nothing sets `playoutRunning` yet, and `SwitchSource`
+   still refuses a `"playout"` pin, so the decision exists and cannot yet be
+   reached.
 3. **Playlist phases 1–4** — bigger demand, lower technical risk, does not
    disturb the multi-source isolation boundary.
 4. **Compositing** — larger, riskier, and the one that puts the audio

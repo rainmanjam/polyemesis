@@ -20,7 +20,7 @@ claim is often more instructive than the right one.
 | **1** | [Playlist — Phase 0](PLAYLIST-AND-COMPOSITING.md#playlist-the-mostly-wiring-claim-is-half-right) | 1 d | ✅ **done** | Scheduled file broadcast already worked. Now documented, and pinned by a 15-check suite in CI |
 | **2** | [LL-HLS](LL-HLS.md) | 3 d | ✅ **done** | Preview latency 4.2–6.2 s → 2.2–3.2 s, zero new dependencies. Also fixed a 30 fps assumption that made every segment 20% long on a 25 fps ingest |
 | **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | **shipped** | Exactly one net-new module. Retained telemetry has no existing path at all |
-| **4** | Selector generalisation | **~3–5 d** | ready | Shared prerequisite for 5 and 7. Doing it once is much safer than twice in the most safety-critical pure function in the tree |
+| **4** | Selector generalisation | **~3–5 d** | ✅ **done** | The prerequisite 5 and 7 both needed. `chooseSource` now ranks an ordered candidate list, and a playlist is the fourth candidate. Provably behaviour-preserving up to the point it changed on purpose: a 1024-row exhaustive table froze every reachable decision first, and all 1024 are byte-identical today |
 | **5** | [Playlist — full](PLAYLIST-AND-COMPOSITING.md#sequencing-take-the-concat-demuxer) | **17–22 d** | ready | Most-requested by volume; lower technical risk than compositing |
 | **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **v0.5 shipped** | The most-repeated unmet request. Sits before 7 because it extracts the `overlay`/`evenExpr` helpers compositing then reuses |
 | **7** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | ready | Largest, riskiest, and the one that puts the audio differentiator in play |
@@ -82,9 +82,11 @@ the only items with no architectural risk at all:
 
 After that the next two are still small — MQTT telemetry at 5–6 days and the
 overlays v0.5 at 6 — but both introduce something new: MQTT takes a dependency
-and a broker, and overlays restructure the rendition argument builder. **Items 4
-onward are all multi-week**, and item 4 is the point at which the selector, the
-most safety-critical pure function in the tree, gets opened up.
+and a broker, and overlays restructure the rendition argument builder. **Items 5
+onward are all multi-week.** Item 4 was the point at which the selector, the
+most safety-critical pure function in the tree, got opened up; it came in under
+its estimate because the input space turned out to be enumerable — 1024
+combinations is a number you freeze as data rather than sample.
 
 So the honest shape is three tiers, not two: a week of pure win, a fortnight of
 small-but-real features, and then everything else.
