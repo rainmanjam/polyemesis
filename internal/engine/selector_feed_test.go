@@ -9,23 +9,33 @@ import (
 
 // These tests are about the gap between DECIDING a source and RUNNING one.
 //
-// Task 4 taught the selector to rank a fourth kind. It did not teach the feed
-// layer to build one, and it did not have to -- playlistRunning is never true
-// yet. What made that dangerous is how the feed layer USED to treat a kind it
-// did not recognise: feedUpstreamSig hashed it as the primary, startFeed built
-// the primary's command line for it, and downstreamFeedInput handed it the
-// primary's hub. All three by falling through a default, none of them saying a
-// word.
+// Admitting the playlist to the ladder and teaching the feed layer to build one
+// were separate commits, and in between them the danger was how the feed layer
+// USED to treat a kind it did not recognise: feedUpstreamSig hashed it as the
+// primary, startFeed built the primary's command line for it, and
+// downstreamFeedInput handed it the primary's hub. All three by falling through
+// a default, none of them saying a word.
 //
-// So the failure a later task was one missed case away from shipping is: the
-// sweep decides "playlist", sel.active records "playlist", Failover.Reason tells
-// the operator the playlist is on air -- and the process that is actually
-// running is reading the primary's bytes. No error, no panic, no test failure,
-// and the selector's panic recovery never fires because nothing panicked. That
-// is strictly worse than a crash, because it is a broadcast going out under a
-// label that is a lie.
+// So the failure that was one missed case away from shipping is: the sweep
+// decides some new kind, sel.active records it, Failover.Reason tells the
+// operator that source is on air -- and the process actually running is reading
+// the primary's bytes. No error, no panic, no test failure, and the selector's
+// panic recovery never fires because nothing panicked. That is strictly worse
+// than a crash, because it is a broadcast going out under a label that is a lie.
+//
+// The playlist is now buildable, so these tests are written against a FIFTH kind
+// that is not. That is deliberate and it is the durable form of the test: the
+// guard's whole value is what it does to the NEXT kind somebody adds, and a test
+// pinned to a kind that has since been taught would have quietly stopped
+// covering anything the day it was.
 //
 // A comment cannot fail CI. These can.
+
+// sourceUnbuilt stands for the next kind added to the ladder before anybody
+// teaches the feed layer to run it. It is deliberately not a real sourceKind
+// const in engine.go: nothing in production may ever decide it, and the only
+// thing it is for is walking the three refusals.
+const sourceUnbuilt sourceKind = "nextkind"
 
 // wantPanic runs fn and returns what it panicked with, failing the test if it
 // returned normally instead. Returning normally is the defect under test here:
@@ -79,11 +89,11 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	// Site 1: feedUpstreamSig. It returns a hash, and no hash means "refuse",
 	// so it panics. Its message has to name every function that needs a case,
 	// because the whole failure mode is teaching some of them and not the rest.
-	msg := wantPanic(t, "feedUpstreamSig(sourcePlaylist)", func() {
-		e.feedUpstreamSig(s, sourcePlaylist, "")
+	msg := wantPanic(t, "feedUpstreamSig(sourceUnbuilt)", func() {
+		e.feedUpstreamSig(s, sourceUnbuilt, "")
 	})
 	t.Logf("feedUpstreamSig panicked: %s", msg)
-	for _, name := range []string{"feedUpstreamSig", "startFeed", "downstreamFeedInput", "playlist"} {
+	for _, name := range []string{"feedUpstreamSig", "startFeed", "downstreamFeedInput", string(sourceUnbuilt)} {
 		if !strings.Contains(msg, name) {
 			t.Errorf("the panic does not mention %q: %s\n"+
 				"the message is the only thing that tells the next person which sites still need a case", name, msg)
@@ -93,11 +103,11 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	// Site 2: downstreamFeedInput. It used to be `if kind == sourceBackup`
 	// with everything else falling through to the primary's hub -- the
 	// mechanism that actually made a mislabelled feed primary-shaped.
-	msg = wantPanic(t, "downstreamFeedInput(sourcePlaylist)", func() {
-		e.downstreamFeedInput(sourcePlaylist)
+	msg = wantPanic(t, "downstreamFeedInput(sourceUnbuilt)", func() {
+		e.downstreamFeedInput(sourceUnbuilt)
 	})
 	t.Logf("downstreamFeedInput panicked: %s", msg)
-	if !strings.Contains(msg, "playlist") {
+	if !strings.Contains(msg, string(sourceUnbuilt)) {
 		t.Errorf("the panic does not name the kind it refused: %s", msg)
 	}
 
@@ -105,12 +115,12 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	// the tier and logs it -- so it returns an error rather than panicking, and
 	// the important half of the assertion is that no process was started.
 	buf.Reset()
-	feed := e.startFeed(s, sourcePlaylist, "sig", "", time.Now())
+	feed := e.startFeed(s, sourceUnbuilt, "sig", "", time.Now())
 	if feed != nil {
 		t.Errorf("startFeed built a feed for a kind it cannot run: kind=%s in=%v",
 			feed.kind, feed.in != nil)
 	}
-	if logged := buf.String(); !strings.Contains(logged, "start source feed") || !strings.Contains(logged, "playlist") {
+	if logged := buf.String(); !strings.Contains(logged, "start source feed") || !strings.Contains(logged, string(sourceUnbuilt)) {
 		t.Errorf("startFeed did not report the refusal: %s", logged)
 	} else {
 		t.Logf("startFeed logged: %s", strings.TrimSpace(logged))
@@ -119,8 +129,24 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	e.mu.RLock()
 	recorded := e.sel.err
 	e.mu.RUnlock()
-	if !strings.Contains(recorded, "playlist") {
+	if !strings.Contains(recorded, string(sourceUnbuilt)) {
 		t.Errorf("the tier recorded %q, want the refusal an operator can read back through the API", recorded)
+	}
+}
+
+// TestTheFeedBuildersAcceptEveryKindTheLadderCanOffer is the other half of the
+// guard, and without it the one above is satisfied by a feed layer that refuses
+// EVERYTHING. candidatesFor is the ladder; every kind on it has to be buildable,
+// or the selector can reach a decision that ensureFeed will only ever hold.
+func TestTheFeedBuildersAcceptEveryKindTheLadderCanOffer(t *testing.T) {
+	// Every kind candidatesFor can rank, taken from the ladder itself so a sixth
+	// one added there is covered here without anybody remembering to.
+	for _, cand := range candidatesFor(sourceChoice{}) {
+		if err := errNoFeedShape(cand.kind); err != nil {
+			t.Errorf("the selector can offer %s and no feed can build one: %v\n"+
+				"a candidate the feed layer refuses is a decision that can only ever be held",
+				cand.kind, err)
+		}
 	}
 }
 
@@ -159,7 +185,7 @@ func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *te
 
 	buf.Reset()
 	e.selMu.Lock()
-	e.ensureFeed(s, "", sourcePlaylist, "the playlist is running", time.Now())
+	e.ensureFeed(s, "", sourceUnbuilt, "a kind no feed can run", time.Now())
 	e.selMu.Unlock()
 
 	e.mu.RLock()
@@ -180,7 +206,7 @@ func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *te
 	if reasonAfter != reasonBefore {
 		t.Errorf("sel.reason moved to %q; an operator must not be told a switch happened when none did", reasonAfter)
 	}
-	if !strings.Contains(recorded, "playlist") {
+	if !strings.Contains(recorded, string(sourceUnbuilt)) {
 		t.Errorf("the tier recorded %q, want the reason the switch did not happen", recorded)
 	}
 	first := buf.String()
@@ -194,7 +220,7 @@ func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *te
 	// A log storm is how a real fault becomes unreadable.
 	buf.Reset()
 	e.selMu.Lock()
-	e.ensureFeed(s, "", sourcePlaylist, "the playlist is running", time.Now())
+	e.ensureFeed(s, "", sourceUnbuilt, "a kind no feed can run", time.Now())
 	e.selMu.Unlock()
 	if repeated := buf.String(); repeated != "" {
 		t.Errorf("the same refusal logged again on the next sweep: %s", repeated)

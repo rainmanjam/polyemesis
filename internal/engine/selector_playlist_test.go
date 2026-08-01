@@ -3,6 +3,7 @@ package engine
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -15,8 +16,7 @@ import (
 // The hub is the point. A file played into the primary's hub puts bytes on it,
 // the primary therefore reads live, and failover never switches away from a live
 // primary -- so a file on air would have quietly disabled the entire feature.
-// These tests are about the tier existing and being torn down; nothing here
-// decides anything, because playlistRunning is still hardcoded false.
+// These tests are about the tier existing, delivering and being torn down.
 
 // playlistEngine is failoverEngine with a data directory, which the playlist
 // needs and nothing else in that helper does.
@@ -208,12 +208,18 @@ func TestAnUnusablePlaylistFileStartsNothing(t *testing.T) {
 	}
 }
 
-// TestARunningPlaylistStillDecidesNothing is the boundary of this task written
-// down. The tier exists and the process is up, and the selector must still not
-// be able to choose it: playlistRunning is hardcoded false until the feed layer
-// knows how to build a playlist feed, and until then a decision of "playlist"
-// would reach three functions that refuse it.
-func TestARunningPlaylistStillDecidesNothing(t *testing.T) {
+// TestARunningPlaylistThatHasDeliveredNothingIsNotPutOnAir is why
+// playlistRunning is sampled from BYTES rather than from "the tier is up".
+//
+// PlaylistFileProblem checks that an operator's path is confined to the data
+// directory; it does not check that the path names a file. A confined path that
+// names nothing therefore passes validation, playlistSig is non-empty, the tier
+// starts, and the process fails to open its input and backs off. Here the tier
+// is up for the whole test and its hub never carries a byte -- which is the same
+// state -- and the selector must not offer it. Ranking a candidate above the
+// slate is a promise that it would deliver; the slate exists so that an operator
+// never sees nothing, and a playlist that cannot deliver must not displace it.
+func TestARunningPlaylistThatHasDeliveredNothingIsNotPutOnAir(t *testing.T) {
 	e := playlistEngine(t)
 	s := playlistOnSettings()
 
@@ -240,7 +246,69 @@ func TestARunningPlaylistStillDecidesNothing(t *testing.T) {
 	active := e.sel.active
 	e.mu.RUnlock()
 	if active == sourcePlaylist {
-		t.Error("the selector put the playlist on air; no feed can run one yet, " +
-			"so the process on air would be reading somebody else's bytes")
+		t.Error("the selector put a playlist on air that has never delivered a byte; " +
+			"sampling the tier's existence rather than its hub offers a candidate " +
+			"that can never carry the broadcast")
+	}
+}
+
+// TestAPlaylistThatHasBeenTornDownStopsBeingOfferedAtOnce covers the one way a
+// byte counter can go backwards, which sample() alone cannot see.
+//
+// sample() takes a counter that only rises and ignores anything at or below what
+// it has seen -- correct for an ingest, whose hub outlives every publisher. The
+// playlist's hub does not: reconcilePlaylist CLOSES it whenever the file path
+// changes and builds a fresh one counting from zero, and closes it for good when
+// the tier is switched off. Without the reset in sampleSources a torn-down
+// playlist stays "alive" for a whole grace window, and the selector spends it
+// choosing a source whose hub is gone -- which startFeed can only answer by
+// refusing, leaving nothing on air that the slate should have been holding.
+func TestAPlaylistThatHasBeenTornDownStopsBeingOfferedAtOnce(t *testing.T) {
+	e := playlistEngine(t)
+	s := playlistOnSettings()
+
+	e.reconcileSelector(s, wantSelector(s), "")
+	t.Cleanup(func() {
+		e.selMu.Lock()
+		defer e.selMu.Unlock()
+		if e.sel != nil {
+			e.teardownFeed(e.sel.feed)
+			if e.sel.hub != nil {
+				_ = e.sel.hub.Close()
+			}
+		}
+		e.teardownPlaylist(e.playlist)
+		e.teardownBackup(e.backup)
+	})
+
+	now := time.Now()
+	e.deliver(sourcePlaylist, now)
+	e.mu.RLock()
+	alive := e.sel.live[sourcePlaylist].alive(now, failoverGrace(s))
+	e.mu.RUnlock()
+	if !alive {
+		t.Fatal("the playlist did not read as delivering after bytes arrived, " +
+			"so the teardown below would prove nothing")
+	}
+
+	// Switched off, exactly as an operator would: the tier goes, and with it the
+	// hub whose counter said the playlist was delivering.
+	off := s
+	off.Failover.Playlist.Enabled = false
+	e.selMu.Lock()
+	e.reconcilePlaylist(off)
+	e.selMu.Unlock()
+	if h := e.playlistHub(); h != nil {
+		t.Fatal("the playlist tier survived being disabled")
+	}
+
+	// The very next sweep, not one grace window later.
+	e.sampleSources(off, now)
+	e.mu.RLock()
+	alive = e.sel.live[sourcePlaylist].alive(now, failoverGrace(off))
+	e.mu.RUnlock()
+	if alive {
+		t.Error("a playlist with no hub at all still reads as delivering; the selector " +
+			"would rank it above the slate and then find nothing to read")
 	}
 }
