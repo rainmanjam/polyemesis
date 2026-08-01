@@ -236,10 +236,13 @@ Desktop only. Below md the drawer already solves this, and it keeps its labels
 at every width -- a collapsed rail behind a hamburger would be an icon strip
 nobody asked for.
 
-The label is removed from the DOM rather than hidden with CSS. A visually-hidden
-label is still announced, which would make the collapsed rail read identically
-to the expanded one to a screen reader and turn the tooltip into redundant noise
-on top of it.
+The label is hidden with display:none, never sr-only. The distinction is which
+CSS: display:none leaves the accessibility tree, a visually-hidden label does
+not -- and an sr-only label would make the collapsed rail read identically to the
+expanded one to a screen reader, with the tooltip as redundant noise on top.
+
+It is conditioned on the breakpoint as well as the state, because the drawer
+below md keeps its labels while collapsed.
 
 The tooltip attaches only while collapsed, for the same reason inverted: the
 label is already on screen when expanded.
