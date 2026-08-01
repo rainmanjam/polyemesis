@@ -2925,10 +2925,27 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 	// the sentence that goes with having won. fallbackKind is where the
 	// selector parks when nothing at all is available — never sourceNone,
 	// because handing the pipeline nothing is worse than every alternative.
+	//
+	// reasons is looked up with comma-ok rather than a plain index, and a miss
+	// panics instead of returning "". A plain index is what this looked like
+	// until a review of the candidate-list cutover: available(k) matches the
+	// FIRST candidate of a kind in rank order, while best here matches the
+	// FIRST AVAILABLE one, and those two agree only when the list has one
+	// candidate per kind. candidatesFor always builds it that way today, but
+	// nothing in the type checks that a future caller -- or a map literal
+	// missing the entry for a kind Task 4 adds -- keeps it true. Get it wrong
+	// and a plain index hands the operator a blank Failover.Reason on a real
+	// switch, which reads as "nothing happened" when something did. A panic
+	// naming the kind is a test failure at the point the list is built wrong,
+	// which is the whole point of a candidate winning a reason nobody wrote.
 	best := func(reasons map[sourceKind]string, fallbackKind sourceKind, fallbackReason string) (sourceKind, string) {
 		for _, cand := range ranked {
 			if cand.available {
-				return cand.kind, reasons[cand.kind]
+				reason, ok := reasons[cand.kind]
+				if !ok {
+					panic(fmt.Sprintf("chooseFrom: candidate %q won but this branch has no reason registered for it -- add one to the map", cand.kind))
+				}
+				return cand.kind, reason
 			}
 		}
 		return fallbackKind, fallbackReason
@@ -3018,97 +3035,6 @@ func pinReason(k sourceKind) (string, bool) {
 // the end of a broadcast that they streamed the backup all night.
 func chooseSource(c sourceChoice) (sourceKind, string) {
 	return chooseFrom(candidatesFor(c), c)
-}
-
-// chooseSourceLadder is the hardcoded ladder chooseSource used to be, kept
-// verbatim for exactly as long as it takes to prove the candidate list
-// equivalent to it. TestChooseFromMatchesTheOldLadder compares the two over
-// every input the function can distinguish; without a reference implementation
-// in the tree that comparison could only be made against a file of expected
-// output, which proves the same thing one step further from the code.
-//
-// Deleted once the generalisation lands. Nothing in production calls it.
-func chooseSourceLadder(c sourceChoice) (sourceKind, string) {
-	primaryLive := c.primary.alive(c.now, c.grace)
-	backupLive := c.backupEnabled && c.backup.alive(c.now, c.grace)
-
-	// A slate is always available when it is enabled: it synthesises its own
-	// picture, so it has no liveness to check.
-	switch c.pinned {
-	case sourceSlate:
-		if c.slateEnabled {
-			return sourceSlate, "an operator selected the slate"
-		}
-	case sourcePrimary:
-		if primaryLive {
-			return sourcePrimary, "an operator selected the primary ingest"
-		}
-	case sourceBackup:
-		if backupLive {
-			return sourceBackup, "an operator selected the backup ingest"
-		}
-	}
-
-	switch c.cur {
-	case sourceBackup:
-		if backupLive {
-			// The flapping guard. Manual is the default because an encoder that
-			// dropped once usually drops again, and each automatic return is a
-			// visible cut for every viewer.
-			if primaryLive && c.autoReturn && c.primary.stableFor(c.now) >= c.returnStable {
-				return sourcePrimary, "the primary ingest has been delivering steadily again"
-			}
-			return sourceBackup, ""
-		}
-		if primaryLive {
-			// Manual return means "do not flap", not "never recover": with the
-			// backup gone there is nothing to flap between.
-			return sourcePrimary, "the backup ingest stopped delivering and the primary is back"
-		}
-		if c.slateEnabled {
-			return sourceSlate, "neither ingest is delivering"
-		}
-		return sourcePrimary, "the backup ingest stopped delivering"
-
-	case sourceSlate:
-		// A slate is a holding pattern, never a destination. The return to a
-		// real source is immediate and is NOT subject to the return mode: the
-		// flap risk is already bounded by the grace period on the way out, and
-		// sitting on a standby card while the show is back on air is the worse
-		// failure by a wide margin.
-		if primaryLive {
-			return sourcePrimary, "the primary ingest is delivering again"
-		}
-		if backupLive {
-			return sourceBackup, "the backup ingest is delivering"
-		}
-		if !c.slateEnabled {
-			return sourcePrimary, "the slate was switched off"
-		}
-		return sourceSlate, ""
-
-	default:
-		if primaryLive {
-			if c.cur == sourcePrimary {
-				return sourcePrimary, ""
-			}
-			return sourcePrimary, "the primary ingest is delivering"
-		}
-		if backupLive {
-			return sourceBackup, "the primary ingest stopped delivering"
-		}
-		if c.slateEnabled {
-			return sourceSlate, "the primary ingest stopped delivering and no backup is on air"
-		}
-		// Nothing better exists, so stay parked on the primary rather than
-		// switching to nothing: a feed that is merely waiting still holds its
-		// place, and it starts carrying the stream the moment an encoder
-		// arrives.
-		if c.cur == sourcePrimary {
-			return sourcePrimary, ""
-		}
-		return sourcePrimary, "there is no other source to run"
-	}
 }
 
 // reconcileSelector brings the tier, the backup listener and the feed into line

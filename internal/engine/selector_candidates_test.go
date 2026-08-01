@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -10,39 +11,6 @@ import (
 // in failover_test.go; what is unproven by either is that the candidate list is
 // a faithful rewrite rather than a plausible one, and that the ordering it
 // carries is load-bearing rather than decorative.
-
-// TestChooseFromMatchesTheOldLadder is the equivalence proof, run against the
-// reference implementation instead of against a file.
-//
-// The golden table already says "nothing moved", but it says it about
-// chooseSource, which is now a wrapper — so it can only fail once the two paths
-// have already been wired together. This compares them directly over the same
-// 1024 inputs, which means a mismatch names the input AND has the old answer to
-// hand, rather than sending the reader to a text file to work out which of the
-// two implementations was right.
-func TestChooseFromMatchesTheOldLadder(t *testing.T) {
-	choices := allSourceChoices()
-	if len(choices) == 0 {
-		t.Fatal("no inputs enumerated -- this test would pass vacuously")
-	}
-
-	mismatches := 0
-	for _, c := range choices {
-		wantKind, wantReason := chooseSourceLadder(c)
-		gotKind, gotReason := chooseFrom(candidatesFor(c), c)
-		if gotKind == wantKind && gotReason == wantReason {
-			continue
-		}
-		mismatches++
-		if mismatches <= 12 {
-			t.Errorf("%s\n  ladder:     %s %q\n  candidates: %s %q",
-				goldenRow(c), orNone(wantKind), wantReason, orNone(gotKind), gotReason)
-		}
-	}
-	if mismatches > 12 {
-		t.Errorf("... and %d further inputs disagree", mismatches-12)
-	}
-}
 
 // TestCandidatesForIsTheLadderOrder pins the preference order on its own.
 //
@@ -182,4 +150,43 @@ func TestChooseFromDoesNotMutateItsInput(t *testing.T) {
 				i, orNone(before[i].kind), orNone(cands[i].kind))
 		}
 	}
+}
+
+// TestChooseFromRefusesToWinWithoutAReason locks in a review finding from the
+// candidate-list cutover: available(k) matches the FIRST candidate of a kind
+// in rank order, while best (inside chooseFrom) matches the FIRST AVAILABLE
+// one. Those two only agree when the list has one candidate per kind, which
+// candidatesFor always builds today -- but a malformed list, built directly
+// as this test does, can pull them apart: a rank-0 backup that is down and a
+// rank-1 backup that is up makes available(sourceBackup) say no while best
+// picks the rank-1 one and says yes.
+//
+// Before this fix, that meant a plain map index: the sourceBackup branch's
+// fallback map has no entry for sourceBackup, on the reasoning that it
+// cannot win there -- true only for a well-formed list -- so a miss quietly
+// returned "" instead of a sentence, and Failover.Reason went blank on what
+// looked, to an operator, like a switch that never happened. This proves the
+// miss is now a panic naming the candidate, not a blank string, so the same
+// gap in Task 4's fourth kind fails the build instead of shipping quietly.
+func TestChooseFromRefusesToWinWithoutAReason(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("chooseFrom returned normally over a malformed candidate list; want a panic naming the candidate with no registered reason")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "backup") {
+			t.Errorf("panic value %v does not name the unreasoned candidate", r)
+		}
+	}()
+
+	c := sourceChoice{now: goldenNow, grace: goldenGrace, cur: sourceBackup, backupEnabled: true}
+	// Two backup candidates: available(sourceBackup) reads the rank-0 one and
+	// says no, so chooseFrom takes the branch that assumes backup cannot win;
+	// best then walks past rank 0 and hands the rank-1 one the win instead.
+	malformed := []candidate{
+		{kind: sourceBackup, available: false, rank: 0},
+		{kind: sourceBackup, available: true, rank: 1},
+	}
+	chooseFrom(malformed, c)
 }
