@@ -275,3 +275,125 @@ test.describe("anchor grid", () => {
     await expect(group.getByRole("radio", { checked: true })).toHaveCount(1);
   });
 });
+
+test.describe("sidebar collapse", () => {
+  // The nav is the app shell, so a mistake here is visible on every page. These
+  // pin the three decisions that are easy to undo by accident: the label leaves
+  // the DOM, the preference survives a reload, and the shortcut does not fire
+  // while somebody is typing.
+
+  // useInnerText, throughout this block, on purpose: toContainText defaults to
+  // textContent, which reads straight through display:none. A first pass of
+  // this suite failed against a correctly-collapsing sidebar because the label
+  // spans are still in the DOM -- only their CSS visibility changes -- so the
+  // default matcher saw every label concatenated regardless of collapsed
+  // state. innerText is what actually distinguishes display:none (leaves the
+  // rendered text) from sr-only (does not), which is the property this block
+  // means to pin.
+  const innerText = { useInnerText: true };
+
+  test("collapsing removes the labels and expanding brings them back", async ({ page }) => {
+    await signIn(page);
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+  });
+
+  test("the collapsed state survives a reload", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    await page.reload();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    // No cleanup here on purpose. Each test gets its own fresh browser context
+    // (see the comment on this in auth.setup.ts) seeded from the ONE
+    // storageState snapshot playwright.config.ts points every test at --
+    // e2e/.auth/state.json, captured before any test ran. localStorage is part
+    // of that snapshot, but writes made during this test never reach the file
+    // on disk, so the next test's context reads the same unmodified snapshot
+    // regardless of what this one left behind. A reset write here would be
+    // dead code with nothing downstream to read it.
+  });
+
+  test("the shortcut toggles it, and not while typing", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/chat");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+
+    await page.locator("body").press("ControlOrMeta+b");
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+    await page.locator("body").press("ControlOrMeta+b");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+
+    // The case the guard exists for. The chat composer is a textarea; the
+    // sidebar must not move while somebody is writing a message into it.
+    const composer = page.locator("textarea").first();
+    await composer.click();
+    await composer.press("ControlOrMeta+b");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+  });
+
+  // Regression guard for a defect found by driving a real browser: the map
+  // over NAV used to return a bare <NavLink> when expanded and a
+  // <Tooltip><TooltipTrigger asChild> wrapping the SAME <NavLink> when
+  // collapsed -- same `key`, but a different element type at the same array
+  // position, so React unmounted and remounted the anchor on every toggle
+  // instead of reconciling it. A keyboard user tabbed to a link, pressed
+  // Ctrl/Cmd+B, and document.activeElement became <body>. Tooltip/TooltipTrigger
+  // now mount unconditionally (only TooltipContent is gated on navCollapsed),
+  // so the trigger's element type never changes and this must keep passing.
+  test("toggling the sidebar with the keyboard shortcut does not drop focus", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const routingLink = page.getByRole("link", { name: "Routing" });
+    await routingLink.focus();
+    await expect(routingLink).toBeFocused();
+
+    await page.keyboard.press("ControlOrMeta+b");
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+    await expect(routingLink).toBeFocused();
+
+    await page.keyboard.press("ControlOrMeta+b");
+    await expect(page.locator("nav")).toContainText("Dashboard", innerText);
+    await expect(routingLink).toBeFocused();
+  });
+
+  // Regression guard for a defect found by driving a real browser: the label
+  // span is display:none and the icon is aria-hidden while collapsed, so
+  // without an aria-label on the NavLink itself the collapsed rail is
+  // fourteen unnamed links -- a WCAG 4.1.2 failure that no text-content
+  // assertion above would ever catch, because it is about the accessibility
+  // tree, not visible or innerText content.
+  test("collapsed links keep their accessible names", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
+  });
+
+  // Regression guard for a defect found by driving a real browser: react-router's
+  // NavLink accepts a FUNCTION className, but Radix Slot (what TooltipTrigger
+  // asChild uses underneath) concatenates className as a string, so the
+  // function got stringified into the class attribute before Router ever
+  // called it -- every utility on it lost, including `flex` itself. The
+  // anchor still passed every text-based assertion above because the
+  // stringified source happens to tokenise into mostly-real class names; only
+  // a real computed-style check catches the anchor silently falling back to
+  // its default `display: block`.
+  test("a collapsed nav link still computes display: flex", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await expect(page.locator("nav")).not.toContainText("Dashboard", innerText);
+
+    const dashboardLink = page.getByRole("link", { name: "Dashboard" });
+    await expect(dashboardLink).toHaveCSS("display", "flex");
+  });
+});
