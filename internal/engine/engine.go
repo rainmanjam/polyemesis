@@ -2696,6 +2696,10 @@ const (
 	sourceNone    sourceKind = ""
 	sourcePrimary sourceKind = "primary"
 	sourceBackup  sourceKind = "backup"
+	// sourcePlayout is a scheduled playlist feed: a real programme, but not a
+	// live one. It sits between the ingests and the slate -- see candidatesFor
+	// for why that is the ordering and not the other one.
+	sourcePlayout sourceKind = "playout"
 	sourceSlate   sourceKind = "slate"
 )
 
@@ -2899,9 +2903,18 @@ type sourceChoice struct {
 
 	backupEnabled bool
 	slateEnabled  bool
-	grace         time.Duration
-	autoReturn    bool
-	returnStable  time.Duration
+	// playoutRunning is whether a playlist feed is actually running, which is
+	// the whole of "would the playlist deliver bytes if we switched to it" --
+	// a playlist plays out of a file, so there is no liveness history to keep
+	// and no grace window to wait out. It is a plain field, sampled by the
+	// caller under the lock like everything else here, rather than a lookup
+	// into playout state made from inside the decision: chooseSource has to
+	// stay pure and cheap, because the golden table's only claim to being
+	// exhaustive is that every input it branches on can be enumerated.
+	playoutRunning bool
+	grace          time.Duration
+	autoReturn     bool
+	returnStable   time.Duration
 }
 
 // candidate is one source the selector may choose, and whether it can be
@@ -2922,7 +2935,7 @@ type candidate struct {
 }
 
 // candidatesFor turns a snapshot into the ordered list the ladder implies:
-// primary, then backup, then slate.
+// primary, then backup, then the playlist, then slate.
 //
 // rank is assigned from position rather than written out, so this literal is
 // the ONE place the preference order lives. Two spellings of the same ordering
@@ -2935,6 +2948,21 @@ func candidatesFor(c sourceChoice) []candidate {
 		// place to send viewers, so the setting gates availability rather than
 		// membership: the candidate stays in the list and stays unavailable.
 		{kind: sourceBackup, available: c.backupEnabled && c.backup.alive(c.now, c.grace)},
+		// THE PLAYLIST RANKS BELOW BOTH INGESTS, AND THAT IS A DECISION.
+		//
+		// A scheduled broadcast is a fallback for "nobody is streaming", not a
+		// pre-emption of somebody who is. Put it above the primary and the
+		// failure it buys is the one nobody forgives: a presenter live on air
+		// is cut off mid-sentence because a playlist entry came due. An
+		// operator who genuinely wants the playlist to win says so by pinning
+		// it, and the pin path outranks this whole ladder already — so the
+		// wanted behaviour costs nothing and the unwanted one cannot happen by
+		// accident.
+		//
+		// It ranks ABOVE the slate for the mirror-image reason: both are
+		// holding patterns, but one of them is programming somebody chose and
+		// the other is a card saying the picture is missing.
+		{kind: sourcePlayout, available: c.playoutRunning},
 		// The slate has no liveness to check. It synthesises its own picture, so
 		// "enabled" is the whole of "would this deliver bytes".
 		{kind: sourceSlate, available: c.slateEnabled},
@@ -3053,6 +3081,7 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// unavailable here, so it cannot win its own branch.
 		return best(map[sourceKind]string{
 			sourcePrimary: "the backup ingest stopped delivering and the primary is back",
+			sourcePlayout: "neither ingest is delivering, so the playlist is on air",
 			sourceSlate:   "neither ingest is delivering",
 		}, sourcePrimary, "the backup ingest stopped delivering")
 
@@ -3066,8 +3095,31 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		return best(map[sourceKind]string{
 			sourcePrimary: "the primary ingest is delivering again",
 			sourceBackup:  "the backup ingest is delivering",
+			sourcePlayout: "the playlist is running",
 			sourceSlate:   "",
 		}, sourcePrimary, "the slate was switched off")
+
+	case sourcePlayout:
+		// The playlist is a holding pattern too, so it leaves the same way the
+		// slate does: the moment a real ingest is back, and without consulting
+		// the return mode. The flap risk the return mode exists to bound is a
+		// risk between two LIVE encoders; there is none here, because the
+		// playlist never stops delivering and so can never hand the primary a
+		// window to flap in.
+		//
+		// Staying put is silent, exactly as the slate branch is. Without that
+		// empty string a selector already on the playlist would republish the
+		// same reason on every 500ms sweep for the whole scheduled programme,
+		// and an operator reading the log would find a failover storm where
+		// nothing at all had moved. That is the trap a fourth kind walks into
+		// by being added only to the maps of branches it can arrive in, and
+		// never to a branch of its own.
+		return best(map[sourceKind]string{
+			sourcePrimary: "the primary ingest is delivering again",
+			sourceBackup:  "the backup ingest is delivering",
+			sourcePlayout: "",
+			sourceSlate:   "the playlist stopped running",
+		}, sourcePrimary, "the playlist stopped running")
 
 	default:
 		// Already on the primary means the primary winning is not news, so the
@@ -3087,6 +3139,7 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		return best(map[sourceKind]string{
 			sourcePrimary: onPrimary,
 			sourceBackup:  "the primary ingest stopped delivering",
+			sourcePlayout: "the primary ingest stopped delivering and the playlist is running",
 			sourceSlate:   "the primary ingest stopped delivering and no backup is on air",
 		}, sourcePrimary, noOther)
 	}
@@ -3101,6 +3154,12 @@ func pinReason(k sourceKind) (string, bool) {
 		return "an operator selected the primary ingest", true
 	case sourceBackup:
 		return "an operator selected the backup ingest", true
+	// The pin is how an operator overrides the ranking decision candidatesFor
+	// explains: the playlist loses to a live encoder on the ladder, and this is
+	// the sentence that says somebody wanted it to win anyway. Still honoured
+	// only while the playlist is actually running, like every other pin.
+	case sourcePlayout:
+		return "an operator selected the playlist", true
 	case sourceSlate:
 		return "an operator selected the slate", true
 	}
@@ -3302,9 +3361,24 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		backup:        *sel.live[sourceBackup],
 		backupEnabled: s.Failover.Backup.Enabled,
 		slateEnabled:  s.Failover.Slate.Enabled,
-		grace:         failoverGrace(s),
-		autoReturn:    s.Failover.Return == db.FailoverReturnAuto,
-		returnStable:  time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
+		// Left false deliberately, and this is the only place that can change
+		// it. The decision knows how to rank a playlist feed; the settings that
+		// would let an operator switch one on, and the feed that would run it,
+		// arrive with the wire work. Reported as "not running" until then, which
+		// is true — so every reachable decision is the one it was before.
+		//
+		// WHOEVER MAKES THIS TRUE MUST DO TWO OTHER THINGS FIRST. feedUpstreamSig
+		// and startFeed both switch on the kind and both fall through to a
+		// PRIMARY-shaped feed by default, so a decision of sourcePlayout that
+		// reached ensureFeed today would start the primary's command line while
+		// sel.active recorded "playout" — the bookkeeping and the process
+		// disagreeing, which is the state the whole recovery path exists to
+		// avoid. And SwitchSource still rejects "playout", so the pin that
+		// pinReason is ready to honour cannot yet be set by an operator.
+		playoutRunning: false,
+		grace:          failoverGrace(s),
+		autoReturn:     s.Failover.Return == db.FailoverReturnAuto,
+		returnStable:   time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
 	}
 	e.mu.Unlock()
 
@@ -3335,9 +3409,9 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		if decided {
 			// Unreachable today and a bug if it ever happens: a real decision
 			// never yields sourceNone. best() panics on an available one and
-			// every fallback is sourcePrimary, which is why all 1024 rows of
-			// the frozen table decide primary, slate or backup and none ever
-			// decides none.
+			// every fallback is sourcePrimary, which is why all 3200 rows of
+			// the frozen table decide primary, backup, playout or slate and
+			// none ever decides none.
 			e.log.Error("selector decided on no source at all; no feed started",
 				"source", e.sourceID, "cause", "the candidate list produced sourceNone from a decision that did not panic")
 		} else {

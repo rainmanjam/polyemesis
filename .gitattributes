@@ -4,10 +4,10 @@
 # for anything this repository compiles or parses, and NOT harmless for a file
 # compared byte for byte.
 #
-# internal/engine/testdata/selector_golden.txt is exactly that: 1024 rows
+# internal/engine/testdata/selector_golden.txt is exactly that: 3200 rows
 # freezing every reachable answer of chooseSource, asserted against the running
 # code as whole bytes. Checked out with CRLF it fails on windows-latest and
-# nowhere else, reporting "1024 of 1024 rows changed" -- every row differing
+# nowhere else, reporting "3200 of 3200 rows changed" -- every row differing
 # only by an invisible \r. Worse, the diff it prints to justify that claim
 # arrives BLANK, because the carriage return sends the cursor back over the line
 # just written. The failure therefore accuses the selector of a total rewrite

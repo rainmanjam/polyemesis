@@ -14,7 +14,7 @@ import (
 // exists before any of that work rather than alongside it.
 //
 // chooseSource is pure and every field it branches on is an enum or a boolean,
-// so its input space is 1024 wide: 4 current x 4 pinned x 2^6 flags. That is
+// so its input space is 3200 wide: 5 current x 5 pinned x 2^7 flags. That is
 // not a number that needs sampling -- it is a number you enumerate. So "does
 // the new implementation behave like the old one" stops being a question about
 // 25 hand-written cases and becomes a question that can be ANSWERED, on every
@@ -30,7 +30,7 @@ import (
 // WHAT THIS DOES NOT PROVE. It freezes current behaviour INCLUDING any current
 // bug. That is the point -- a refactor and a bug fix in one commit are
 // indistinguishable in a bisect -- but "the golden test passes" means "nothing
-// moved", not "the selector is correct". And 1024 is exhaustive over the fields
+// moved", not "the selector is correct". And 3200 is exhaustive over the fields
 // the function branches on, not over reality: liveness carries timestamps that
 // this collapses to alive/not-alive and stable/not-stable, so an off-by-one at
 // exactly returnStable is outside the net. TestChooseSourceSwitchesOnDelivery-
@@ -50,8 +50,13 @@ const (
 //
 // Ordered, not map-iterated, so the golden file diffs cleanly: a reordering
 // would otherwise read as a behaviour change and bury the one row that moved.
+// sourcePlayout is appended LAST to kinds, and playoutRunning is nested
+// between slateEnabled and autoReturn, so that filtering the enumeration down
+// to "the playlist is not in play" yields the pre-playout 1024 in their
+// original order -- which is what makes the byte-for-byte comparison in
+// TestAdmittingThePlaylistMovedNoDecisionThatDidNotInvolveIt possible at all.
 func allSourceChoices() []sourceChoice {
-	kinds := []sourceKind{sourceNone, sourcePrimary, sourceBackup, sourceSlate}
+	kinds := []sourceKind{sourceNone, sourcePrimary, sourceBackup, sourceSlate, sourcePlayout}
 	bools := []bool{false, true}
 
 	// Two livenesses per source: one delivering inside the grace window, one
@@ -77,27 +82,35 @@ func allSourceChoices() []sourceChoice {
 					for _, backupLive := range bools {
 						for _, backupEnabled := range bools {
 							for _, slateEnabled := range bools {
-								for _, autoReturn := range bools {
-									p := dead
-									if primaryLive {
-										p = live(stable)
+								// The playlist contributes exactly one bit. It
+								// plays out of a file, so unlike an ingest it
+								// has no liveness history to enumerate: running
+								// or not is the whole of what the decision can
+								// ask about it.
+								for _, playoutRunning := range bools {
+									for _, autoReturn := range bools {
+										p := dead
+										if primaryLive {
+											p = live(stable)
+										}
+										b := dead
+										if backupLive {
+											b = live(false)
+										}
+										out = append(out, sourceChoice{
+											now:            goldenNow,
+											cur:            cur,
+											pinned:         pinned,
+											primary:        p,
+											backup:         b,
+											backupEnabled:  backupEnabled,
+											slateEnabled:   slateEnabled,
+											playoutRunning: playoutRunning,
+											grace:          goldenGrace,
+											autoReturn:     autoReturn,
+											returnStable:   goldenReturnStable,
+										})
 									}
-									b := dead
-									if backupLive {
-										b = live(false)
-									}
-									out = append(out, sourceChoice{
-										now:           goldenNow,
-										cur:           cur,
-										pinned:        pinned,
-										primary:       p,
-										backup:        b,
-										backupEnabled: backupEnabled,
-										slateEnabled:  slateEnabled,
-										grace:         goldenGrace,
-										autoReturn:    autoReturn,
-										returnStable:  goldenReturnStable,
-									})
 								}
 							}
 						}
@@ -111,6 +124,29 @@ func allSourceChoices() []sourceChoice {
 
 // goldenRow renders one input and its answer as a single stable line.
 func goldenRow(c sourceChoice) string {
+	kind, reason := chooseSource(c)
+	return fmt.Sprintf(
+		"cur=%-7s pinned=%-7s primaryLive=%-5t stable=%-5t backupLive=%-5t backupEnabled=%-5t slateEnabled=%-5t playoutRunning=%-5t autoReturn=%-5t => %-7s %q",
+		orNone(c.cur), orNone(c.pinned),
+		c.primary.alive(c.now, c.grace),
+		c.primary.stableFor(c.now) >= c.returnStable,
+		c.backup.alive(c.now, c.grace),
+		c.backupEnabled, c.slateEnabled, c.playoutRunning, c.autoReturn,
+		orNone(kind), reason,
+	)
+}
+
+// goldenRowBeforeThePlaylist renders a row in the EXACT format the table used
+// before sourcePlayout existed -- no playoutRunning column.
+//
+// It is not dead weight and it is not a duplicate of goldenRow. Adding a field
+// to goldenRow's format string rewrites the text of all 1024 pre-existing lines,
+// so the golden diff for this change shows 100% of rows moved and proves
+// nothing at all: the one question worth answering -- did admitting a fourth
+// candidate change a decision that has nothing to do with it -- is invisible in
+// it. Rendering the old format for the rows where the playlist is out of play
+// asks that question directly and answers it in bytes.
+func goldenRowBeforeThePlaylist(c sourceChoice) string {
 	kind, reason := chooseSource(c)
 	return fmt.Sprintf(
 		"cur=%-7s pinned=%-7s primaryLive=%-5t stable=%-5t backupLive=%-5t backupEnabled=%-5t slateEnabled=%-5t autoReturn=%-5t => %-7s %q",
@@ -136,7 +172,15 @@ func TestChooseSourceGoldenIsExhaustive(t *testing.T) {
 	// The count is asserted rather than trusted. A harness that silently
 	// enumerated 900 would be a safety net with a hole in the middle, and the
 	// hole would be invisible: the file would still diff cleanly.
-	const want = 4 * 4 * 2 * 2 * 2 * 2 * 2 * 2
+	//
+	// 3200 = 5 cur x 5 pinned x 2^7 flags. Admitting the playlist did NOT
+	// quadruple 1024: it added one value to each of the two kind-valued fields
+	// (4->5, twice) and one boolean (playoutRunning), so the growth is
+	// (5/4)^2 x 2 = 3.125x. Written as the product it is derived from rather
+	// than as a literal, because "4096" is what this looks like to arithmetic
+	// done from memory, and a wrong constant here fails as a count mismatch
+	// that reads like a broken enumeration.
+	const want = 5 * 5 * 2 * 2 * 2 * 2 * 2 * 2 * 2
 	if len(choices) != want {
 		t.Fatalf("enumerated %d inputs, want %d -- the net has a hole in it", len(choices), want)
 	}
@@ -168,7 +212,7 @@ func TestChooseSourceGoldenIsExhaustive(t *testing.T) {
 	// byte and Windows checks text files out with CRLF unless told otherwise.
 	//
 	// Without this the test fails on windows-latest and nowhere else, reporting
-	// "1024 of 1024 rows changed" -- every row differing only by an invisible
+	// "3200 of 3200 rows changed" -- every row differing only by an invisible
 	// \r. The diff it prints to explain itself comes out BLANK, because the
 	// carriage return sends the cursor back over the line it just wrote. So the
 	// failure names the loudest possible cause, a total rewrite of the selector,
@@ -182,7 +226,7 @@ func TestChooseSourceGoldenIsExhaustive(t *testing.T) {
 		return
 	}
 
-	// Name the rows that moved rather than dumping 1024 lines. The diff is the
+	// Name the rows that moved rather than dumping 3200 lines. The diff is the
 	// review artifact for any change to this function, so it has to be readable.
 	oldLines := strings.Split(strings.TrimRight(prev, "\n"), "\n")
 	moved := 0
@@ -208,4 +252,90 @@ func TestChooseSourceGoldenIsExhaustive(t *testing.T) {
 	t.Errorf("%d of %d rows changed. If that was deliberate, regenerate with "+
 		"-update and review the diff row by row; every changed row is a moment "+
 		"an operator would have to explain.", moved, len(lines))
+}
+
+// goldenNoPlayoutFile is the decision table EXACTLY as it stood before
+// sourcePlayout existed: 1024 rows, the pre-playout format, generated by the
+// commit before the playlist was admitted.
+//
+// It has no -update path, on purpose. Every other golden file in this package
+// is regenerated when behaviour moves deliberately; this one is a historical
+// record, and a record you can rewrite when it contradicts you is not one. If a
+// future change genuinely has to move a decision frozen here, deleting and
+// re-cutting this file by hand is the ceremony that change deserves.
+const goldenNoPlayoutFile = "selector_golden_no_playout.txt"
+
+// TestAdmittingThePlaylistMovedNoDecisionThatDidNotInvolveIt is the real review
+// of Task 4, and it exists because the review the plan asked for cannot be done.
+//
+// "Review the golden diff row by row" assumes the diff carries signal. It does
+// not: goldenRow renders every field into one line, so ADDING the playoutRunning
+// column rewrites the text of all 1024 pre-existing rows whether or not a single
+// decision moved. git diff reports 100% changed, a human reviewer confirms that
+// 100% of rows look plausible, and a regression hiding among them is reviewed
+// past rather than caught.
+//
+// So the claim is made directly instead. For every one of the 1024 inputs that
+// existed before -- the playlist not running, and neither cur nor pinned set to
+// it -- the decision must be BYTE-IDENTICAL to what the selector decided before
+// the fourth candidate was admitted, reason string included. That is what
+// "additive" means, and it is checkable rather than eyeballable.
+//
+// A failure here is not a golden file to regenerate. It means admitting the
+// playlist changed a decision that has nothing to do with a playlist, which is
+// precisely the regression the candidate-list refactor was built to make
+// impossible, and it wants explaining before anything is regenerated.
+func TestAdmittingThePlaylistMovedNoDecisionThatDidNotInvolveIt(t *testing.T) {
+	var lines []string
+	for _, c := range allSourceChoices() {
+		// The pre-playout subset: the playlist is not running, and it is
+		// neither what is on air nor what is pinned. Filtering an inner loop
+		// and the tail of `kinds` preserves the original enumeration order, so
+		// this can be compared to the old file line for line rather than as a
+		// set -- see the comment on allSourceChoices.
+		if c.playoutRunning || c.cur == sourcePlayout || c.pinned == sourcePlayout {
+			continue
+		}
+		lines = append(lines, goldenRowBeforeThePlaylist(c))
+	}
+
+	// Asserted, because a filter that accidentally excluded half the table
+	// would make this test pass by having nothing left to disagree about.
+	const want = 4 * 4 * 2 * 2 * 2 * 2 * 2 * 2
+	if len(lines) != want {
+		t.Fatalf("the pre-playout subset is %d rows, want %d -- the filter is wrong, "+
+			"and a smaller subset proves proportionally less", len(lines), want)
+	}
+
+	path := filepath.Join("testdata", goldenNoPlayoutFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v -- this file is a historical record and is "+
+			"not regenerated; restore it from history rather than rewriting it", path, err)
+	}
+	// Same CRLF normalisation as the main table, for the same reason.
+	oldLines := strings.Split(strings.TrimRight(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n"), "\n")
+	if len(oldLines) != len(lines) {
+		t.Fatalf("%s has %d rows, the pre-playout subset has %d", path, len(oldLines), len(lines))
+	}
+
+	moved := 0
+	for i := range lines {
+		if oldLines[i] == lines[i] {
+			continue
+		}
+		moved++
+		if moved <= 12 {
+			t.Errorf("row %d moved without the playlist being involved:\n  was: %s\n  now: %s",
+				i, oldLines[i], lines[i])
+		}
+	}
+	if moved > 12 {
+		t.Errorf("... and %d further rows moved", moved-12)
+	}
+	if moved > 0 {
+		t.Errorf("%d of %d decisions that predate the playlist changed. Admitting a "+
+			"candidate that is not running must change nothing; do not regenerate "+
+			"anything until each of these is explained.", moved, len(lines))
+	}
 }
