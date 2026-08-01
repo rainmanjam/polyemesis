@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -265,6 +267,31 @@ func TestChooseSourceGoldenIsExhaustive(t *testing.T) {
 // re-cutting this file by hand is the ceremony that change deserves.
 const goldenNoPlayoutFile = "selector_golden_no_playout.txt"
 
+// goldenNoPlayoutSHA256 is what binds that file to history, and without it the
+// test below is load-bearing under the failure it targets but VACUOUS under the
+// likeliest accident.
+//
+// "No -update path" is a convention, and the convention lives in this file
+// rather than in the data. Nothing stops somebody whose invariance test is
+// failing from re-cutting the frozen table with a one-line script -- the same
+// reflex that regenerating the main golden table correctly rewards -- at which
+// point the comparison is the change against itself, it passes green, and the
+// proof that Task 4 was additive has quietly become a proof of nothing.
+//
+// A hash checked in source cannot be re-cut by regenerating the file. It has to
+// be edited deliberately, in a different file, by somebody who has read why it
+// is here.
+//
+// The bytes it covers are `git show <task-4-parent>:internal/engine/testdata/
+// selector_golden.txt` -- the decision table exactly as it stood before
+// sourcePlayout existed. The file carries no header line saying so, and that
+// was checked rather than assumed: the comparison below is positional, line i
+// of the file against line i of the rendered subset, so any header shifts every
+// row and fails the test. Byte-identity with the table main actually shipped is
+// worth more than a comment inside it, and this hash is the warning the file
+// itself cannot carry.
+const goldenNoPlayoutSHA256 = "4e06849e2c0d912861061fea52f0e926f321b4f38b1802db2988a2eefaf6845c"
+
 // TestAdmittingThePlaylistMovedNoDecisionThatDidNotInvolveIt is the real review
 // of Task 4, and it exists because the review the plan asked for cannot be done.
 //
@@ -312,6 +339,19 @@ func TestAdmittingThePlaylistMovedNoDecisionThatDidNotInvolveIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read %s: %v -- this file is a historical record and is "+
 			"not regenerated; restore it from history rather than rewriting it", path, err)
+	}
+	// Checked BEFORE the rows are compared, so a re-cut file fails as "you
+	// rewrote the evidence" rather than as a clean pass. Hashed over the bytes
+	// on disk with the same CRLF normalisation the comparison uses, or the
+	// check would fail on Windows for a file nobody touched.
+	if sum := sha256.Sum256([]byte(strings.ReplaceAll(string(raw), "\r\n", "\n"))); hex.EncodeToString(sum[:]) != goldenNoPlayoutSHA256 {
+		t.Fatalf("%s is not the table it is supposed to be.\n  on disk: %s\n  expected: %s\n\n"+
+			"This file is the pre-playout decision table, frozen so that admitting a fourth "+
+			"candidate can be PROVED additive. It is not a golden file to regenerate: re-cutting "+
+			"it from the current code makes this test compare the change against itself and pass "+
+			"green, which is worse than no test at all. If you got here by regenerating it, "+
+			"restore it (git checkout -- %s) and read the failure it was reporting.",
+			path, hex.EncodeToString(sum[:]), goldenNoPlayoutSHA256, path)
 	}
 	// Same CRLF normalisation as the main table, for the same reason.
 	oldLines := strings.Split(strings.TrimRight(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n"), "\n")

@@ -23,10 +23,11 @@ its first tagged release.
   the slate already was — there is no flapping risk between a file and an
   encoder to bound.
 
-  Four new reasons reach `Failover.Reason` (`the playlist is running`, `the
+  Five new reasons reach `Failover.Reason` — `the playlist is running`, `the
   primary ingest stopped delivering and the playlist is running`, `neither
   ingest is delivering, so the playlist is on air`, `an operator selected the
-  playlist`). None of the existing fourteen were reworded. The decision table
+  playlist`, and `the playlist stopped running` when it ends and the standby
+  card takes over. None of the existing fourteen were reworded. The decision table
   frozen in `internal/engine/testdata/selector_golden.txt` grows from 1024 rows
   to 3200, and a second table proves the addition is additive: all 1024
   decisions that predate the playlist are byte-for-byte what they were,
