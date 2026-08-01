@@ -13,15 +13,18 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -256,6 +259,15 @@ type Engine struct {
 	// sweep, a reconcile and an operator's manual switch can all reach it at
 	// once. Always taken BEFORE e.mu, never the other way round.
 	selMu sync.Mutex
+	// selPanicMsg and selPanicAt remember the last selector decision panic
+	// this engine logged, so a persistent one -- e.g. a map entry a future
+	// change forgot, hit on every sweep until an operator or a deploy fixes
+	// it -- costs one stack walk and one full log line, not two of each every
+	// second. Read and written only from decideSource, which every caller
+	// (both reconcileSelector windows, SwitchSource, and the sweep) reaches
+	// with selMu already held, so neither field needs a lock of its own.
+	selPanicMsg string
+	selPanicAt  time.Time
 	// previewSeen is the last playlist request and previewAt the last start
 	// attempt; together they drive on-demand start and idle stop.
 	previewSeen time.Time
@@ -2858,92 +2870,216 @@ type sourceChoice struct {
 	returnStable  time.Duration
 }
 
-// chooseSource decides what should be feeding the selector, and says why.
+// candidate is one source the selector may choose, and whether it can be
+// chosen right now.
 //
-// An empty reason means "no change"; a non-empty one is written to the log and
-// published, because a failover nobody notices is how an operator discovers at
-// the end of a broadcast that they streamed the backup all night.
-func chooseSource(c sourceChoice) (sourceKind, string) {
-	primaryLive := c.primary.alive(c.now, c.grace)
-	backupLive := c.backupEnabled && c.backup.alive(c.now, c.grace)
+// available is not "is the process running" — it is "would this deliver bytes
+// if we switched to it". A slate is always available when enabled because it
+// synthesises its own picture; an ingest is available only when it is actually
+// delivering, which is the distinction the liveness type already draws and the
+// reason the selector switches on delivery rather than on process state.
+type candidate struct {
+	kind      sourceKind
+	available bool
+	// rank orders the list. Lower is preferred. It is a field rather than the
+	// slice position so a future caller can build the list in any order and
+	// still get a stable decision.
+	rank int
+}
 
-	// A slate is always available when it is enabled: it synthesises its own
-	// picture, so it has no liveness to check.
-	switch c.pinned {
-	case sourceSlate:
-		if c.slateEnabled {
-			return sourceSlate, "an operator selected the slate"
+// candidatesFor turns a snapshot into the ordered list the ladder implies:
+// primary, then backup, then slate.
+//
+// rank is assigned from position rather than written out, so this literal is
+// the ONE place the preference order lives. Two spellings of the same ordering
+// is how a reordering ends up half-applied — the list reads one way, the
+// decision goes the other, and nothing fails until an outage.
+func candidatesFor(c sourceChoice) []candidate {
+	out := []candidate{
+		{kind: sourcePrimary, available: c.primary.alive(c.now, c.grace)},
+		// A backup that is delivering into a hub nobody enabled is still not a
+		// place to send viewers, so the setting gates availability rather than
+		// membership: the candidate stays in the list and stays unavailable.
+		{kind: sourceBackup, available: c.backupEnabled && c.backup.alive(c.now, c.grace)},
+		// The slate has no liveness to check. It synthesises its own picture, so
+		// "enabled" is the whole of "would this deliver bytes".
+		{kind: sourceSlate, available: c.slateEnabled},
+	}
+	for i := range out {
+		out[i].rank = i
+	}
+	return out
+}
+
+// chooseFrom is the ladder, expressed over a candidate list.
+//
+// Every branch below picks the best AVAILABLE candidate and then names why,
+// which is the shape the ladder always had; the reasons are keyed by the kind
+// that won because they are a contract. They reach an operator through
+// Failover.Reason, so rewording one is a user-visible change.
+//
+// PRECONDITION: cands and c must describe the SAME INSTANT. This function has
+// two sources of truth and reads both. Preference order and "can this deliver
+// bytes right now" come from cands; everything else -- c.cur, c.pinned,
+// c.autoReturn, c.returnStable, and the liveness histories behind
+// c.primary/c.backup -- comes from c. Two rules read one of each in the same
+// breath: the pin below asks available(c.pinned), and the flapping guard asks
+// available(sourcePrimary) alongside c.primary.stableFor(c.now). Build cands
+// from a snapshot fresher (or staler) than c and those rules straddle two
+// different moments: the `>= returnStable` boundary would be evaluated against
+// a primary the list never judged, so the selector could return to a primary
+// the list calls dead, or refuse to return to one it calls alive. chooseSource
+// keeps the two consistent by construction -- it derives cands from the same c
+// it passes -- and that is exactly why the golden table cannot see a violation
+// here. A future caller that assembles candidates itself owns this precondition.
+//
+// It also assumes the list is well formed: one candidate per kind, and no
+// available sourceNone. best() panics on the ways that matter rather than
+// deciding from a list that cannot mean what it says.
+func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
+	ranked := slices.Clone(cands)
+	slices.SortStableFunc(ranked, func(a, b candidate) int { return cmp.Compare(a.rank, b.rank) })
+
+	// available answers about one named source, for the rules that are about a
+	// particular source rather than about preference order.
+	available := func(k sourceKind) bool {
+		for _, cand := range ranked {
+			if cand.kind == k {
+				return cand.available
+			}
 		}
-	case sourcePrimary:
-		if primaryLive {
-			return sourcePrimary, "an operator selected the primary ingest"
+		return false
+	}
+
+	// best is the ladder itself: the first available candidate wins, and says
+	// the sentence that goes with having won. fallbackKind is where the
+	// selector parks when nothing at all is available — never sourceNone,
+	// because handing the pipeline nothing is worse than every alternative.
+	//
+	// reasons is looked up with comma-ok rather than a plain index, and a miss
+	// panics instead of returning "". A plain index is what this looked like
+	// until a review of the candidate-list cutover: available(k) matches the
+	// FIRST candidate of a kind in rank order, while best here matches the
+	// FIRST AVAILABLE one, and those two agree only when the list has one
+	// candidate per kind. candidatesFor always builds it that way today, but
+	// nothing in the type checks that a future caller -- or a map literal
+	// missing the entry for a kind Task 4 adds -- keeps it true. Get it wrong
+	// and a plain index hands the operator a blank Failover.Reason on a real
+	// switch, which reads as "nothing happened" when something did. A panic
+	// naming the kind is a test failure at the point the list is built wrong,
+	// which is the whole point of a candidate winning a reason nobody wrote.
+	//
+	// An available sourceNone is rejected the same way, and BEFORE the reason
+	// lookup, because it is malformed for a different reason: sourceNone is the
+	// absence of a source, not a source that can be on air, so a list offering
+	// it as available says something that cannot be true. Returning it would be
+	// worse than the blank reason above -- applySourceChoice's want ==
+	// sourceNone guard would drop the decision, and a dropped decision is a
+	// failover that silently did not happen. Today a "" kind happens to trip
+	// the missing-reason panic below, because no branch registers a reason
+	// under the empty key -- but only by accident, and a map literal that ever
+	// gained a sourceNone entry would turn that accident into a silent
+	// discard. This check does not read the reasons map, so no map can undo it.
+	best := func(reasons map[sourceKind]string, fallbackKind sourceKind, fallbackReason string) (sourceKind, string) {
+		for _, cand := range ranked {
+			if cand.available {
+				if cand.kind == sourceNone {
+					panic("chooseFrom: the candidate list offers sourceNone as available, but sourceNone is the absence of a source and can never be put on air -- fix the list that was built")
+				}
+				reason, ok := reasons[cand.kind]
+				if !ok {
+					panic(fmt.Sprintf("chooseFrom: candidate %q won but this branch has no reason registered for it -- add one to the map", cand.kind))
+				}
+				return cand.kind, reason
+			}
 		}
-	case sourceBackup:
-		if backupLive {
-			return sourceBackup, "an operator selected the backup ingest"
-		}
+		return fallbackKind, fallbackReason
+	}
+
+	// An operator's pin outranks the ladder, but only while the pinned source
+	// is available: a pin that outlived its source would strand the broadcast
+	// on a dead input.
+	if reason, ok := pinReason(c.pinned); ok && available(c.pinned) {
+		return c.pinned, reason
 	}
 
 	switch c.cur {
 	case sourceBackup:
-		if backupLive {
+		if available(sourceBackup) {
 			// The flapping guard. Manual is the default because an encoder that
 			// dropped once usually drops again, and each automatic return is a
 			// visible cut for every viewer.
-			if primaryLive && c.autoReturn && c.primary.stableFor(c.now) >= c.returnStable {
+			if available(sourcePrimary) && c.autoReturn && c.primary.stableFor(c.now) >= c.returnStable {
 				return sourcePrimary, "the primary ingest has been delivering steadily again"
 			}
 			return sourceBackup, ""
 		}
-		if primaryLive {
-			// Manual return means "do not flap", not "never recover": with the
-			// backup gone there is nothing to flap between.
-			return sourcePrimary, "the backup ingest stopped delivering and the primary is back"
-		}
-		if c.slateEnabled {
-			return sourceSlate, "neither ingest is delivering"
-		}
-		return sourcePrimary, "the backup ingest stopped delivering"
+		// Manual return means "do not flap", not "never recover": with the
+		// backup gone there is nothing to flap between. The backup is known
+		// unavailable here, so it cannot win its own branch.
+		return best(map[sourceKind]string{
+			sourcePrimary: "the backup ingest stopped delivering and the primary is back",
+			sourceSlate:   "neither ingest is delivering",
+		}, sourcePrimary, "the backup ingest stopped delivering")
 
 	case sourceSlate:
 		// A slate is a holding pattern, never a destination. The return to a
 		// real source is immediate and is NOT subject to the return mode: the
 		// flap risk is already bounded by the grace period on the way out, and
 		// sitting on a standby card while the show is back on air is the worse
-		// failure by a wide margin.
-		if primaryLive {
-			return sourcePrimary, "the primary ingest is delivering again"
-		}
-		if backupLive {
-			return sourceBackup, "the backup ingest is delivering"
-		}
-		if !c.slateEnabled {
-			return sourcePrimary, "the slate was switched off"
-		}
-		return sourceSlate, ""
+		// failure by a wide margin. Staying put is silent; a slate that has been
+		// switched off underneath us falls through to the primary.
+		return best(map[sourceKind]string{
+			sourcePrimary: "the primary ingest is delivering again",
+			sourceBackup:  "the backup ingest is delivering",
+			sourceSlate:   "",
+		}, sourcePrimary, "the slate was switched off")
 
 	default:
-		if primaryLive {
-			if c.cur == sourcePrimary {
-				return sourcePrimary, ""
-			}
-			return sourcePrimary, "the primary ingest is delivering"
-		}
-		if backupLive {
-			return sourceBackup, "the primary ingest stopped delivering"
-		}
-		if c.slateEnabled {
-			return sourceSlate, "the primary ingest stopped delivering and no backup is on air"
+		// Already on the primary means the primary winning is not news, so the
+		// reason stays empty and nothing is logged or published.
+		onPrimary := ""
+		if c.cur != sourcePrimary {
+			onPrimary = "the primary ingest is delivering"
 		}
 		// Nothing better exists, so stay parked on the primary rather than
 		// switching to nothing: a feed that is merely waiting still holds its
 		// place, and it starts carrying the stream the moment an encoder
 		// arrives.
-		if c.cur == sourcePrimary {
-			return sourcePrimary, ""
+		noOther := ""
+		if c.cur != sourcePrimary {
+			noOther = "there is no other source to run"
 		}
-		return sourcePrimary, "there is no other source to run"
+		return best(map[sourceKind]string{
+			sourcePrimary: onPrimary,
+			sourceBackup:  "the primary ingest stopped delivering",
+			sourceSlate:   "the primary ingest stopped delivering and no backup is on air",
+		}, sourcePrimary, noOther)
 	}
+}
+
+// pinReason is the sentence for an honoured manual override, and whether the
+// kind is one an operator can pin at all. sourceNone is not: it is the absence
+// of a pin, not a pin on nothing.
+func pinReason(k sourceKind) (string, bool) {
+	switch k {
+	case sourcePrimary:
+		return "an operator selected the primary ingest", true
+	case sourceBackup:
+		return "an operator selected the backup ingest", true
+	case sourceSlate:
+		return "an operator selected the slate", true
+	}
+	return "", false
+}
+
+// chooseSource decides what should be feeding the selector, and says why.
+//
+// An empty reason means "no change"; a non-empty one is written to the log and
+// published, because a failover nobody notices is how an operator discovers at
+// the end of a broadcast that they streamed the backup all night.
+func chooseSource(c sourceChoice) (sourceKind, string) {
+	return chooseFrom(candidatesFor(c), c)
 }
 
 // reconcileSelector brings the tier, the backup listener and the feed into line
@@ -2966,7 +3102,10 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 	// broken tier would go on refusing destinations that no longer need it.
 	if cur != nil && cur.spec == want && want != "" {
 		e.reconcileBackupIngest(s)
-		e.applySourceChoice(s, silenceSig, time.Now())
+		// Ignored on purpose: a reconcile has no caller to fail to, and a
+		// decision that could not be made has already logged itself. Holding
+		// the current source is what this path wants anyway.
+		_ = e.applySourceChoice(s, silenceSig, time.Now())
 		return
 	}
 
@@ -3016,7 +3155,8 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 		"relayPort", hub.Port())
 
 	e.reconcileBackupIngest(s)
-	e.applySourceChoice(s, silenceSig, now)
+	// Ignored for the same reason as the "already running" window above.
+	_ = e.applySourceChoice(s, silenceSig, now)
 }
 
 // selectorProblem is the reason a destination cannot run that the selector is
@@ -3063,7 +3203,10 @@ func (e *Engine) sweepSelector(now time.Time) {
 		return
 	}
 	e.sampleSources(s, now)
-	e.applySourceChoice(s, e.heldSilence(), now)
+	// Ignored on purpose: the ticker has no caller to fail to. A decision that
+	// could not be made holds the current source and logs, and the next tick
+	// tries again 500ms later.
+	_ = e.applySourceChoice(s, e.heldSilence(), now)
 }
 
 // sampleSources folds each candidate hub's byte counter into its liveness.
@@ -3094,14 +3237,28 @@ func failoverGrace(s db.Settings) time.Duration {
 	return time.Duration(s.Failover.GraceSeconds) * time.Second
 }
 
+// errSelectorUndecided says the selector produced no source to put on air, so
+// nothing was switched. It is what a recovered decision panic looks like from
+// the outside: the three background callers ignore it and hold what they have,
+// and SwitchSource turns it into a failure for the operator rather than
+// reporting a switch that did not happen.
+var errSelectorUndecided = errors.New("the source selector could not decide which source to put on air")
+
 // applySourceChoice decides which source should be on air and makes it so. The
 // caller must hold selMu.
-func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Time) {
+//
+// It returns errSelectorUndecided when the decision failed and the current
+// source was held instead. Nothing was switched in that case, so a caller that
+// asked for a specific source must not report success. The background callers
+// -- the sweep ticker and both reconcile windows -- have nobody to report to
+// and deliberately ignore it: holding is already the behaviour they want, and
+// making them start failing would turn a decision bug into a reconcile outage.
+func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Time) error {
 	e.mu.Lock()
 	sel := e.sel
 	if sel == nil || sel.hub == nil {
 		e.mu.Unlock()
-		return
+		return nil
 	}
 	c := sourceChoice{
 		now:           now,
@@ -3117,8 +3274,137 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 	}
 	e.mu.Unlock()
 
-	want, reason := chooseSource(c)
+	want, reason, decided := e.decideSource(c)
+	// want == sourceNone can ONLY happen here on a recovered panic with
+	// nothing to hold: chooseFrom's own best() never returns sourceNone on a
+	// real decision (its fallback is always sourcePrimary -- see the comment
+	// on candidatesFor), so decideSource's recover is the only path that can
+	// hand this back, and only when c.cur was itself sourceNone -- the
+	// selector's first decision, before any feed has ever run, or the first
+	// one after the tier restarts. There is no current source to hold, so
+	// there is nothing to do: calling ensureFeed(sourceNone) would start a
+	// feed anyway, because ensureFeed's own short-circuit needs an existing
+	// feed or a recent start attempt to have something to compare against,
+	// neither of which exists yet. That feed would be a PRIMARY-shaped one
+	// too -- feedUpstreamSig has no sourceNone case, so it falls into the
+	// same default branch primary does -- while e.sel.active stayed recorded
+	// as none. Skipping ensureFeed entirely is what keeps a broken decision
+	// from producing a running feed the bookkeeping cannot describe.
+	//
+	// It used to return here in silence, which was the one thing worse than the
+	// blank reason this whole file exists to prevent: a decision that reached
+	// no feed and left no trace. The two ways of getting here are logged apart
+	// on purpose, and neither repeats the panic itself -- decideSource has
+	// already named the cause, and once a minute its stack -- so this line adds
+	// only what that one cannot know, which is that nothing is on air.
+	if want == sourceNone {
+		if decided {
+			// Unreachable today and a bug if it ever happens: a real decision
+			// never yields sourceNone. best() panics on an available one and
+			// every fallback is sourcePrimary, which is why all 1024 rows of
+			// the frozen table decide primary, slate or backup and none ever
+			// decides none.
+			e.log.Error("selector decided on no source at all; no feed started",
+				"source", e.sourceID, "cause", "the candidate list produced sourceNone from a decision that did not panic")
+		} else {
+			e.log.Error("selector has no current source to hold; no feed started",
+				"source", e.sourceID, "cause", "the decision panicked before any feed had ever run, so there was nothing to hold")
+		}
+		return errSelectorUndecided
+	}
 	e.ensureFeed(s, silenceSig, want, reason, now)
+	if !decided {
+		return errSelectorUndecided
+	}
+	return nil
+}
+
+// selPanicRelog bounds how often a PERSISTENT decision panic re-logs its full
+// stack. The underlying cause (a map entry missing a reason) does not change
+// between sweeps, so the tenth identical stack trace in five seconds tells an
+// operator nothing the first one didn't -- it only spends CPU walking the
+// stack and log volume repeating it, on the same 500ms ticker that is also
+// the thing hammering the panic.
+//
+// It is a window since the last STACK WAS LOGGED, not since the last panic --
+// see decideSource. Measured the other way it would never elapse, and "bounds
+// how often" would quietly mean "logs it once".
+const selPanicRelog = time.Minute
+
+// decideSource is chooseSource with a recover around it, and it is the ONE
+// place that recover needs to live: chooseSource has exactly one caller
+// (here), and this is in turn called from every production path that can
+// reach the selector's decision -- both windows of reconcileSelector, the
+// operator's SwitchSource, and the sweep's ticker. Recovering here, rather
+// than separately in each of those four, is what keeps a fix from covering
+// three of them and leaving the fourth fatal.
+//
+// It is placed at the DECISION, not around applySourceChoice's ensureFeed
+// call that follows it. applySourceChoice is the function that performs a
+// switch -- teardownFeed, then startFeed, then only after both succeed does
+// it update e.sel.feed/active -- so recovering across that whole sequence
+// could catch a panic mid-switch and leave e.sel's bookkeeping pointing at a
+// feed that teardownFeed already stopped: a half-switched state that is worse
+// than the panic it was hiding. chooseSource runs entirely before any of that
+// teardown or start begins, so a panic here can only ever mean "the decision
+// itself is broken", never "the switch got halfway done". Recovering at
+// exactly this boundary makes surviving it safe BY CONSTRUCTION rather than
+// by care taken in ensureFeed.
+//
+// On a recovered panic this holds the current source with no reason AND
+// reports decided=false, which is the least action available: not "switch to
+// whatever best() almost
+// picked" (that candidate had no explanation, and this file exists precisely
+// so an unexplained switch is never shown to an operator as one), and not
+// "crash" either. The invariant chooseFrom's best() leans on -- one candidate
+// per kind -- is enforced by candidatesFor's convention, not by the compiler,
+// so a change that breaks it (Task 4 adds a fourth candidate kind) reaches
+// this on every reconcile a settings change triggers, not only on a tick.
+//
+// "Hold the current source" only means something when there is one. On the
+// selector's first decision -- c.cur is sourceNone, no feed has ever run --
+// there is nothing to hold, and the caller must not treat sourceNone as a
+// destination: this was considered, not missed, and applySourceChoice is
+// where it is handled, by skipping ensureFeed entirely rather than starting
+// a feed the bookkeeping cannot describe. See the comment there.
+//
+// decided is how the recovery leaves the building. Holding the current source
+// is the right BEHAVIOUR for the three callers that have nobody to report to
+// -- the ticker and both reconcile windows just carry on -- but it is a lie to
+// the one that does: SwitchSource would otherwise return nil to an operator
+// whose source was never put on air, with the log saying it was and the pin
+// LATCHED, so every later sweep re-panics on the same input forever. A
+// substituted value cannot be told apart from a real one; a separate flag can.
+//
+// Deliberately NOT inside chooseFrom, chooseSource or best: those are called
+// directly by selector_candidates_test.go and selector_golden_test.go, and a
+// recover placed there would swallow the panic those tests exist to observe.
+func (e *Engine) decideSource(c sourceChoice) (kind sourceKind, reason string, decided bool) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		msg := fmt.Sprint(r)
+		// The window is measured from the last STACK, not from the last panic.
+		// Refreshing selPanicAt on every panic would restart the clock twice a
+		// second, time.Since would never reach selPanicRelog, and the full
+		// stack would be logged once EVER rather than once a minute -- so an
+		// operator opening the logs an hour into an incident would find only
+		// stackless lines and a first stack that had long since rotated out.
+		fresh := msg != e.selPanicMsg || time.Since(e.selPanicAt) > selPanicRelog
+		if fresh {
+			e.selPanicMsg, e.selPanicAt = msg, time.Now()
+			e.log.Error("selector decision panicked; holding the current source",
+				"source", e.sourceID, "panic", msg, "stack", string(debug.Stack()))
+		} else {
+			e.log.Error("selector decision panicked again; holding the current source",
+				"source", e.sourceID, "panic", msg)
+		}
+		kind, reason, decided = c.cur, "", false
+	}()
+	kind, reason = chooseSource(c)
+	return kind, reason, true
 }
 
 // ensureFeed starts, replaces or leaves the feed alone. The caller must hold
@@ -3598,15 +3884,39 @@ func (e *Engine) SwitchSource(kind string) error {
 		e.mu.Unlock()
 		return fmt.Errorf("failover is not enabled, so there is nothing to switch between")
 	}
+	prev := e.sel.pinned
 	e.sel.pinned = want
 	e.mu.Unlock()
 
+	// The pin has to be committed before the decision, because the decision
+	// reads it. That makes rolling it back the only way to keep the pin and
+	// what actually happened in step: a failed decision switched nothing, and a
+	// pin that survived one would be LATCHED -- re-read by every 500ms sweep,
+	// re-panicking on the same input forever, with the dashboard showing a
+	// pinned source that is not the active one and the operator holding an
+	// HTTP 200 that said it worked. Rolled back under e.mu exactly as it was
+	// set, and still inside the selMu the whole method holds, so no sweep can
+	// observe the pin between the failure and the rollback. Nothing is
+	// published: the state is what it was before the call.
+	if err := e.applySourceChoice(e.Settings(), e.heldSilence(), time.Now()); err != nil {
+		e.mu.Lock()
+		if e.sel != nil {
+			e.sel.pinned = prev
+		}
+		e.mu.Unlock()
+		e.log.Error("source selection was not applied; the pin was rolled back",
+			"source", e.sourceID, "requested", kind, "err", err)
+		return fmt.Errorf("could not select source %q: %w", kind, err)
+	}
+
+	// Logged only once the switch has actually been applied. Announcing it
+	// first is how the log came to say a source was selected on sweeps where
+	// nothing was.
 	if want == sourceNone {
 		e.log.Info("source selection returned to automatic")
 	} else {
 		e.log.Info("source selected by operator", "source", string(want))
 	}
-	e.applySourceChoice(e.Settings(), e.heldSilence(), time.Now())
 	e.publishStatus()
 	return nil
 }
