@@ -168,6 +168,11 @@ case "$OUT" in *FAILOVER_OK*) ok "failover enabled with a slate" ;; *) bad "fail
 case "$OUT" in *DEST_OK*)     ok "one destination on the selector" ;; *) bad "dest: $OUT"; exit 1 ;; esac
 
 step "2. The primary goes on air"
+# Before publishing, not after. The server reporting ready means its HTTP
+# listener is up; the ingest child is spawned after that and binds 1938 a moment
+# later. A publisher that arrives first is refused and exits, and the wait below
+# then spends its whole 40s ceiling on a primary that was never coming.
+poly_wait_port_ready "$INGEST" 15 || true
 publish
 if waitfor 1 primary 40 ; then
   ok "the primary is on air once it delivers"

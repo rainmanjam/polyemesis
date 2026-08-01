@@ -111,7 +111,34 @@ else
 fi
 wait 2>/dev/null
 
-step "4. An empty port argument is a no-op rather than an error"
+step "4. Waiting for a listener returns as soon as one appears"
+# The inverse of the reclaim, and the fix for the residual flake: a publisher
+# started before the ingest binds is refused and exits.
+( sleep 0.5; hold_port >/dev/null 2>&1 ) &
+starter=$!
+start=$(date +%s)
+if poly_wait_port_ready "$PORT" 10 >/dev/null 2>&1; then
+	took=$(( $(date +%s) - start ))
+	if [ "$took" -le 5 ]; then
+		ok "returned once something was listening (${took}s)"
+	else
+		bad "took ${took}s to notice a listener that appeared after 0.5s"
+	fi
+else
+	bad "never noticed a listener that appeared during the wait"
+fi
+wait "$starter" 2>/dev/null
+poly_free_port "$PORT" >/dev/null 2>&1
+
+step "5. Waiting for a listener that never comes gives up loudly"
+out=$(poly_wait_port_ready "$PORT" 1 2>&1)
+if printf '%s' "$out" | grep -q "nothing is listening"; then
+	ok "a port nobody binds is reported rather than waited on forever"
+else
+	bad "the wait gave up silently; the next failure would blame the source"
+fi
+
+step "6. An empty port argument is a no-op rather than an error"
 if poly_free_port "" >/dev/null 2>&1; then
 	ok "no port to free is not an error"
 else
@@ -119,7 +146,7 @@ else
 fi
 
 total=$((pass + fail))
-EXPECTED_CHECKS=5
+EXPECTED_CHECKS=7
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

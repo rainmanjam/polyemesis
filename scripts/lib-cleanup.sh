@@ -74,6 +74,35 @@ poly_port_holders() {
 	lsof -ti ":$port" 2>/dev/null
 }
 
+# poly_wait_port_ready waits for something to START listening on a port.
+#
+# The mirror image of poly_free_port, and it lives here because it needs the
+# same poly_port_holders. This file is now about ports and processes rather than
+# strictly teardown; the name has not caught up.
+#
+# It exists because "the server said it is ready" is not "the ingest is
+# accepting connections". The server logs its web UI and the suite proceeds,
+# while the ingest child is still being spawned and has not bound its listen
+# socket yet. A publisher that arrives in that window gets Connection refused
+# and exits immediately, and the suite then waits out its full ceiling for a
+# primary that was never going to arrive.
+#
+# Measured at roughly 1 run in 20 before this existed -- the entire residual
+# flake rate of acceptance-failover once the port leak was fixed.
+poly_wait_port_ready() {
+	local port="$1" secs="${2:-15}"
+	[ -n "$port" ] || return 0
+	local deadline=$(( $(date +%s) + secs ))
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		[ -n "$(poly_port_holders "$port")" ] && return 0
+		sleep 0.1
+	done
+	printf "  \033[33mWARN\033[0m  nothing is listening on port %s after %ss.\n" "$port" "$secs"
+	printf "        A publisher started now would be refused, and the wait that\n"
+	printf "        follows would blame the source for never going on air.\n"
+	return 1
+}
+
 # poly_free_port waits for a port to be released, then takes it back by force.
 #
 # The wait comes first because a graceful teardown does release it, just not
