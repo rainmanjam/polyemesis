@@ -128,7 +128,7 @@ func allSourceChoices() []sourceChoice {
 func goldenRow(c sourceChoice) string {
 	kind, reason := chooseSource(c)
 	return fmt.Sprintf(
-		"cur=%-7s pinned=%-7s primaryLive=%-5t stable=%-5t backupLive=%-5t backupEnabled=%-5t slateEnabled=%-5t playoutRunning=%-5t autoReturn=%-5t => %-7s %q",
+		"cur=%-7s pinned=%-7s primaryLive=%-5t stable=%-5t backupLive=%-5t backupEnabled=%-5t slateEnabled=%-5t playlistRunning=%-5t autoReturn=%-5t => %-7s %q",
 		orNone(c.cur), orNone(c.pinned),
 		c.primary.alive(c.now, c.grace),
 		c.primary.stableFor(c.now) >= c.returnStable,
