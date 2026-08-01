@@ -195,7 +195,11 @@ export function AppLayout({
         {/* ---- sidebar ---- */}
         <TooltipProvider delayDuration={0}>
           <nav
-            aria-expanded={!navCollapsed}
+            // No aria-expanded here: it is not a supported state for
+            // role="navigation" (the implicit role of <nav>) per the ARIA
+            // spec's supported-states table. The toggle button carries the
+            // state instead -- button role does support it, and it is the
+            // control the state actually describes.
             className={cn(
               "z-40 flex shrink-0 flex-col gap-0.5 border-r border-border bg-background p-2 transition-[width]",
               navCollapsed ? "md:w-12" : "md:w-44",
