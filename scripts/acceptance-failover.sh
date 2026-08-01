@@ -51,7 +51,9 @@ note() { printf "        %s\n" "$1"; }
 
 cleanup() {
   pkill -f "failover-publisher" 2>/dev/null
-  poly_cleanup "$PORT" "$WORK"
+  # INGEST is passed because the ingest ffmpeg's argv carries no work-dir path,
+  # so the sweep above cannot see it. It is the port that leaked.
+  poly_cleanup "$PORT" "$WORK" "$INGEST"
 }
 trap cleanup EXIT
 

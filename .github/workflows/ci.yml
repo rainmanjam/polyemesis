@@ -98,6 +98,17 @@ jobs:
       # printed conclusion. The negative case is the one under test.
       - run: ./scripts/test-lib-observe.sh
 
+      # The acceptance suites' shared teardown. Same argument as the guard
+      # above, and a sharper one: this teardown was silently leaking the ingest
+      # port on every run, which made acceptance-failover fail 10 times out of
+      # 20 back to back. A harness that measures itself is worse than no
+      # harness, because a real regression gets dismissed as "that suite is
+      # flaky". Needs lsof, which this job does not otherwise install.
+      - name: ./scripts/test-lib-cleanup.sh
+        run: |
+          sudo apt-get install -y --no-install-recommends lsof
+          ./scripts/test-lib-cleanup.sh
+
   # The same build and test, on the operating systems polyemesis actually ships
   # for.
   #
