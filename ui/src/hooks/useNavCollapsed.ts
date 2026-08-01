@@ -73,3 +73,4 @@ export function useNavCollapsed(): [boolean, () => void] {
   const toggle = useCallback(() => setCollapsed((v) => !v), []);
   return [collapsed, toggle];
 }
+
