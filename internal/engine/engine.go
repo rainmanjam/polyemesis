@@ -23,6 +23,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -3145,7 +3146,40 @@ func (e *Engine) selectorLoop(ctx context.Context) {
 	}
 }
 
+// sweepSelector recovers from a panic in the failover decision, matching the
+// isolation the chat hub gives a panicking adapter and the job queue gives a
+// panicking worker (see runOnce in internal/chat/hub.go and runWorker in
+// internal/jobs/queue.go): the caller of a thing that can panic owns a
+// recover, so that one bad tick costs itself and not everything around it.
+//
+// chooseFrom's best() panics rather than returning a blank Failover.Reason
+// when a candidate wins with no registered reason -- deliberately, because
+// candidatesFor is the only thing that keeps "one candidate per kind" true,
+// and nothing in the type system enforces it. That is exactly why this
+// recover has to exist: an invariant enforced by convention rather than by
+// the compiler WILL eventually be broken by a change that does not notice
+// (Task 4 adds a fourth candidate kind), and this function runs on the
+// selectorLoop goroutine with every destination on this source subscribed to
+// the hub it decides. Without a recover here, that panic is not "one stream
+// shows a wrong reason" -- it is every destination on the instance going
+// down, chat and recordings and all, over what is normally a display string.
+//
+// Deliberately NOT inside chooseFrom or best: those are called directly by
+// tests (selector_candidates_test.go, selector_golden_test.go), and a recover
+// placed there would swallow the panic those tests exist to observe. The
+// recover belongs at the boundary a production caller actually owns, which
+// is this sweep, not the pure function it calls.
+//
+// The ticker re-fires in selectorSweep (500ms), so a sweep that recovers here
+// costs one tick of stale liveness, not the broadcast.
 func (e *Engine) sweepSelector(now time.Time) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.log.Error("selector sweep panicked; skipped this tick",
+				"source", e.sourceID, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+
 	s := e.Settings()
 
 	e.selMu.Lock()
