@@ -258,6 +258,15 @@ type Engine struct {
 	// sweep, a reconcile and an operator's manual switch can all reach it at
 	// once. Always taken BEFORE e.mu, never the other way round.
 	selMu sync.Mutex
+	// selPanicMsg and selPanicAt remember the last selector decision panic
+	// this engine logged, so a persistent one -- e.g. a map entry a future
+	// change forgot, hit on every sweep until an operator or a deploy fixes
+	// it -- costs one stack walk and one full log line, not two of each every
+	// second. Read and written only from decideSource, which every caller
+	// (both reconcileSelector windows, SwitchSource, and the sweep) reaches
+	// with selMu already held, so neither field needs a lock of its own.
+	selPanicMsg string
+	selPanicAt  time.Time
 	// previewSeen is the last playlist request and previewAt the last start
 	// attempt; together they drive on-demand start and idle stop.
 	previewSeen time.Time
@@ -3146,40 +3155,7 @@ func (e *Engine) selectorLoop(ctx context.Context) {
 	}
 }
 
-// sweepSelector recovers from a panic in the failover decision, matching the
-// isolation the chat hub gives a panicking adapter and the job queue gives a
-// panicking worker (see runOnce in internal/chat/hub.go and runWorker in
-// internal/jobs/queue.go): the caller of a thing that can panic owns a
-// recover, so that one bad tick costs itself and not everything around it.
-//
-// chooseFrom's best() panics rather than returning a blank Failover.Reason
-// when a candidate wins with no registered reason -- deliberately, because
-// candidatesFor is the only thing that keeps "one candidate per kind" true,
-// and nothing in the type system enforces it. That is exactly why this
-// recover has to exist: an invariant enforced by convention rather than by
-// the compiler WILL eventually be broken by a change that does not notice
-// (Task 4 adds a fourth candidate kind), and this function runs on the
-// selectorLoop goroutine with every destination on this source subscribed to
-// the hub it decides. Without a recover here, that panic is not "one stream
-// shows a wrong reason" -- it is every destination on the instance going
-// down, chat and recordings and all, over what is normally a display string.
-//
-// Deliberately NOT inside chooseFrom or best: those are called directly by
-// tests (selector_candidates_test.go, selector_golden_test.go), and a recover
-// placed there would swallow the panic those tests exist to observe. The
-// recover belongs at the boundary a production caller actually owns, which
-// is this sweep, not the pure function it calls.
-//
-// The ticker re-fires in selectorSweep (500ms), so a sweep that recovers here
-// costs one tick of stale liveness, not the broadcast.
 func (e *Engine) sweepSelector(now time.Time) {
-	defer func() {
-		if r := recover(); r != nil {
-			e.log.Error("selector sweep panicked; skipped this tick",
-				"source", e.sourceID, "panic", r, "stack", string(debug.Stack()))
-		}
-	}()
-
 	s := e.Settings()
 
 	e.selMu.Lock()
@@ -3242,8 +3218,70 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 	}
 	e.mu.Unlock()
 
-	want, reason := chooseSource(c)
+	want, reason := e.decideSource(c)
 	e.ensureFeed(s, silenceSig, want, reason, now)
+}
+
+// selPanicRelog bounds how often a PERSISTENT decision panic re-logs its full
+// stack. The underlying cause (a map entry missing a reason) does not change
+// between sweeps, so the tenth identical stack trace in five seconds tells an
+// operator nothing the first one didn't -- it only spends CPU walking the
+// stack and log volume repeating it, on the same 500ms ticker that is also
+// the thing hammering the panic.
+const selPanicRelog = time.Minute
+
+// decideSource is chooseSource with a recover around it, and it is the ONE
+// place that recover needs to live: chooseSource has exactly one caller
+// (here), and this is in turn called from every production path that can
+// reach the selector's decision -- both windows of reconcileSelector, the
+// operator's SwitchSource, and the sweep's ticker. Recovering here, rather
+// than separately in each of those four, is what keeps a fix from covering
+// three of them and leaving the fourth fatal.
+//
+// It is placed at the DECISION, not around applySourceChoice's ensureFeed
+// call that follows it. applySourceChoice is the function that performs a
+// switch -- teardownFeed, then startFeed, then only after both succeed does
+// it update e.sel.feed/active -- so recovering across that whole sequence
+// could catch a panic mid-switch and leave e.sel's bookkeeping pointing at a
+// feed that teardownFeed already stopped: a half-switched state that is worse
+// than the panic it was hiding. chooseSource runs entirely before any of that
+// teardown or start begins, so a panic here can only ever mean "the decision
+// itself is broken", never "the switch got halfway done". Recovering at
+// exactly this boundary makes surviving it safe BY CONSTRUCTION rather than
+// by care taken in ensureFeed.
+//
+// On a recovered panic this holds the current source with no reason, which
+// is the least action available: not "switch to whatever best() almost
+// picked" (that candidate had no explanation, and this file exists precisely
+// so an unexplained switch is never shown to an operator as one), and not
+// "crash" either. The invariant chooseFrom's best() leans on -- one candidate
+// per kind -- is enforced by candidatesFor's convention, not by the compiler,
+// so a change that breaks it (Task 4 adds a fourth candidate kind) reaches
+// this on every reconcile a settings change triggers, not only on a tick.
+//
+// Deliberately NOT inside chooseFrom, chooseSource or best: those are called
+// directly by selector_candidates_test.go and selector_golden_test.go, and a
+// recover placed there would swallow the panic those tests exist to observe.
+func (e *Engine) decideSource(c sourceChoice) (kind sourceKind, reason string) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		msg := fmt.Sprint(r)
+		fresh := msg != e.selPanicMsg || time.Since(e.selPanicAt) > selPanicRelog
+		e.selPanicMsg = msg
+		e.selPanicAt = time.Now()
+		if fresh {
+			e.log.Error("selector decision panicked; holding the current source",
+				"source", e.sourceID, "panic", msg, "stack", string(debug.Stack()))
+		} else {
+			e.log.Error("selector decision panicked again; holding the current source",
+				"source", e.sourceID, "panic", msg)
+		}
+		kind, reason = c.cur, ""
+	}()
+	return chooseSource(c)
 }
 
 // ensureFeed starts, replaces or leaves the feed alone. The caller must hold
