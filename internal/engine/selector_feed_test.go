@@ -10,7 +10,7 @@ import (
 // These tests are about the gap between DECIDING a source and RUNNING one.
 //
 // Task 4 taught the selector to rank a fourth kind. It did not teach the feed
-// layer to build one, and it did not have to -- playoutRunning is never true
+// layer to build one, and it did not have to -- playlistRunning is never true
 // yet. What made that dangerous is how the feed layer USED to treat a kind it
 // did not recognise: feedUpstreamSig hashed it as the primary, startFeed built
 // the primary's command line for it, and downstreamFeedInput handed it the
@@ -18,7 +18,7 @@ import (
 // word.
 //
 // So the failure a later task was one missed case away from shipping is: the
-// sweep decides "playout", sel.active records "playout", Failover.Reason tells
+// sweep decides "playlist", sel.active records "playlist", Failover.Reason tells
 // the operator the playlist is on air -- and the process that is actually
 // running is reading the primary's bytes. No error, no panic, no test failure,
 // and the selector's panic recovery never fires because nothing panicked. That
@@ -79,11 +79,11 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	// Site 1: feedUpstreamSig. It returns a hash, and no hash means "refuse",
 	// so it panics. Its message has to name every function that needs a case,
 	// because the whole failure mode is teaching some of them and not the rest.
-	msg := wantPanic(t, "feedUpstreamSig(sourcePlayout)", func() {
-		e.feedUpstreamSig(s, sourcePlayout, "")
+	msg := wantPanic(t, "feedUpstreamSig(sourcePlaylist)", func() {
+		e.feedUpstreamSig(s, sourcePlaylist, "")
 	})
 	t.Logf("feedUpstreamSig panicked: %s", msg)
-	for _, name := range []string{"feedUpstreamSig", "startFeed", "downstreamFeedInput", "playout"} {
+	for _, name := range []string{"feedUpstreamSig", "startFeed", "downstreamFeedInput", "playlist"} {
 		if !strings.Contains(msg, name) {
 			t.Errorf("the panic does not mention %q: %s\n"+
 				"the message is the only thing that tells the next person which sites still need a case", name, msg)
@@ -93,11 +93,11 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	// Site 2: downstreamFeedInput. It used to be `if kind == sourceBackup`
 	// with everything else falling through to the primary's hub -- the
 	// mechanism that actually made a mislabelled feed primary-shaped.
-	msg = wantPanic(t, "downstreamFeedInput(sourcePlayout)", func() {
-		e.downstreamFeedInput(sourcePlayout)
+	msg = wantPanic(t, "downstreamFeedInput(sourcePlaylist)", func() {
+		e.downstreamFeedInput(sourcePlaylist)
 	})
 	t.Logf("downstreamFeedInput panicked: %s", msg)
-	if !strings.Contains(msg, "playout") {
+	if !strings.Contains(msg, "playlist") {
 		t.Errorf("the panic does not name the kind it refused: %s", msg)
 	}
 
@@ -105,12 +105,12 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	// the tier and logs it -- so it returns an error rather than panicking, and
 	// the important half of the assertion is that no process was started.
 	buf.Reset()
-	feed := e.startFeed(s, sourcePlayout, "sig", "", time.Now())
+	feed := e.startFeed(s, sourcePlaylist, "sig", "", time.Now())
 	if feed != nil {
 		t.Errorf("startFeed built a feed for a kind it cannot run: kind=%s in=%v",
 			feed.kind, feed.in != nil)
 	}
-	if logged := buf.String(); !strings.Contains(logged, "start source feed") || !strings.Contains(logged, "playout") {
+	if logged := buf.String(); !strings.Contains(logged, "start source feed") || !strings.Contains(logged, "playlist") {
 		t.Errorf("startFeed did not report the refusal: %s", logged)
 	} else {
 		t.Logf("startFeed logged: %s", strings.TrimSpace(logged))
@@ -119,7 +119,7 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	e.mu.RLock()
 	recorded := e.sel.err
 	e.mu.RUnlock()
-	if !strings.Contains(recorded, "playout") {
+	if !strings.Contains(recorded, "playlist") {
 		t.Errorf("the tier recorded %q, want the refusal an operator can read back through the API", recorded)
 	}
 }
@@ -159,7 +159,7 @@ func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *te
 
 	buf.Reset()
 	e.selMu.Lock()
-	e.ensureFeed(s, "", sourcePlayout, "the playlist is running", time.Now())
+	e.ensureFeed(s, "", sourcePlaylist, "the playlist is running", time.Now())
 	e.selMu.Unlock()
 
 	e.mu.RLock()
@@ -180,7 +180,7 @@ func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *te
 	if reasonAfter != reasonBefore {
 		t.Errorf("sel.reason moved to %q; an operator must not be told a switch happened when none did", reasonAfter)
 	}
-	if !strings.Contains(recorded, "playout") {
+	if !strings.Contains(recorded, "playlist") {
 		t.Errorf("the tier recorded %q, want the reason the switch did not happen", recorded)
 	}
 	first := buf.String()
@@ -194,7 +194,7 @@ func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *te
 	// A log storm is how a real fault becomes unreadable.
 	buf.Reset()
 	e.selMu.Lock()
-	e.ensureFeed(s, "", sourcePlayout, "the playlist is running", time.Now())
+	e.ensureFeed(s, "", sourcePlaylist, "the playlist is running", time.Now())
 	e.selMu.Unlock()
 	if repeated := buf.String(); repeated != "" {
 		t.Errorf("the same refusal logged again on the next sweep: %s", repeated)

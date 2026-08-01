@@ -2696,11 +2696,11 @@ const (
 	sourceNone    sourceKind = ""
 	sourcePrimary sourceKind = "primary"
 	sourceBackup  sourceKind = "backup"
-	// sourcePlayout is a scheduled playlist feed: a real programme, but not a
+	// sourcePlaylist is a scheduled playlist feed: a real programme, but not a
 	// live one. It sits between the ingests and the slate -- see candidatesFor
 	// for why that is the ordering and not the other one.
-	sourcePlayout sourceKind = "playout"
-	sourceSlate   sourceKind = "slate"
+	sourcePlaylist sourceKind = "playlist"
+	sourceSlate    sourceKind = "slate"
 )
 
 // selector is the running tier.
@@ -2903,18 +2903,18 @@ type sourceChoice struct {
 
 	backupEnabled bool
 	slateEnabled  bool
-	// playoutRunning is whether a playlist feed is actually running, which is
+	// playlistRunning is whether a playlist feed is actually running, which is
 	// the whole of "would the playlist deliver bytes if we switched to it" --
 	// a playlist plays out of a file, so there is no liveness history to keep
 	// and no grace window to wait out. It is a plain field, sampled by the
 	// caller under the lock like everything else here, rather than a lookup
-	// into playout state made from inside the decision: chooseSource has to
+	// into playlist state made from inside the decision: chooseSource has to
 	// stay pure and cheap, because the golden table's only claim to being
 	// exhaustive is that every input it branches on can be enumerated.
-	playoutRunning bool
-	grace          time.Duration
-	autoReturn     bool
-	returnStable   time.Duration
+	playlistRunning bool
+	grace           time.Duration
+	autoReturn      bool
+	returnStable    time.Duration
 }
 
 // candidate is one source the selector may choose, and whether it can be
@@ -2962,7 +2962,7 @@ func candidatesFor(c sourceChoice) []candidate {
 		// It ranks ABOVE the slate for the mirror-image reason: both are
 		// holding patterns, but one of them is programming somebody chose and
 		// the other is a card saying the picture is missing.
-		{kind: sourcePlayout, available: c.playoutRunning},
+		{kind: sourcePlaylist, available: c.playlistRunning},
 		// The slate has no liveness to check. It synthesises its own picture, so
 		// "enabled" is the whole of "would this deliver bytes".
 		{kind: sourceSlate, available: c.slateEnabled},
@@ -3080,9 +3080,9 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// backup gone there is nothing to flap between. The backup is known
 		// unavailable here, so it cannot win its own branch.
 		return best(map[sourceKind]string{
-			sourcePrimary: "the backup ingest stopped delivering and the primary is back",
-			sourcePlayout: "neither ingest is delivering, so the playlist is on air",
-			sourceSlate:   "neither ingest is delivering",
+			sourcePrimary:  "the backup ingest stopped delivering and the primary is back",
+			sourcePlaylist: "neither ingest is delivering, so the playlist is on air",
+			sourceSlate:    "neither ingest is delivering",
 		}, sourcePrimary, "the backup ingest stopped delivering")
 
 	case sourceSlate:
@@ -3093,13 +3093,13 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// failure by a wide margin. Staying put is silent; a slate that has been
 		// switched off underneath us falls through to the primary.
 		return best(map[sourceKind]string{
-			sourcePrimary: "the primary ingest is delivering again",
-			sourceBackup:  "the backup ingest is delivering",
-			sourcePlayout: "the playlist is running",
-			sourceSlate:   "",
+			sourcePrimary:  "the primary ingest is delivering again",
+			sourceBackup:   "the backup ingest is delivering",
+			sourcePlaylist: "the playlist is running",
+			sourceSlate:    "",
 		}, sourcePrimary, "the slate was switched off")
 
-	case sourcePlayout:
+	case sourcePlaylist:
 		// The playlist is a holding pattern too, so it leaves the same way the
 		// slate does: the moment a real ingest is back, and without consulting
 		// the return mode. The flap risk the return mode exists to bound is a
@@ -3115,10 +3115,10 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// by being added only to the maps of branches it can arrive in, and
 		// never to a branch of its own.
 		return best(map[sourceKind]string{
-			sourcePrimary: "the primary ingest is delivering again",
-			sourceBackup:  "the backup ingest is delivering",
-			sourcePlayout: "",
-			sourceSlate:   "the playlist stopped running",
+			sourcePrimary:  "the primary ingest is delivering again",
+			sourceBackup:   "the backup ingest is delivering",
+			sourcePlaylist: "",
+			sourceSlate:    "the playlist stopped running",
 		}, sourcePrimary, "the playlist stopped running")
 
 	default:
@@ -3137,10 +3137,10 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 			noOther = "there is no other source to run"
 		}
 		return best(map[sourceKind]string{
-			sourcePrimary: onPrimary,
-			sourceBackup:  "the primary ingest stopped delivering",
-			sourcePlayout: "the primary ingest stopped delivering and the playlist is running",
-			sourceSlate:   "the primary ingest stopped delivering and no backup is on air",
+			sourcePrimary:  onPrimary,
+			sourceBackup:   "the primary ingest stopped delivering",
+			sourcePlaylist: "the primary ingest stopped delivering and the playlist is running",
+			sourceSlate:    "the primary ingest stopped delivering and no backup is on air",
 		}, sourcePrimary, noOther)
 	}
 }
@@ -3158,7 +3158,7 @@ func pinReason(k sourceKind) (string, bool) {
 	// explains: the playlist loses to a live encoder on the ladder, and this is
 	// the sentence that says somebody wanted it to win anyway. Still honoured
 	// only while the playlist is actually running, like every other pin.
-	case sourcePlayout:
+	case sourcePlaylist:
 		return "an operator selected the playlist", true
 	case sourceSlate:
 		return "an operator selected the slate", true
@@ -3370,17 +3370,17 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		// WHOEVER MAKES THIS TRUE MUST TEACH THE FEED LAYER FIRST. Three
 		// functions build a feed -- feedUpstreamSig, startFeed and
 		// downstreamFeedInput -- and all three used to treat a kind they did
-		// not recognise as the primary, so a decision of sourcePlayout that
+		// not recognise as the primary, so a decision of sourcePlaylist that
 		// reached ensureFeed would have started the primary's command line
-		// while sel.active recorded "playout". They now refuse instead, and
+		// while sel.active recorded "playlist". They now refuse instead, and
 		// errNoFeedShape names all three in the message, so the mistake fails
 		// where it is made rather than going to air. SwitchSource still rejects
-		// "playout" too, so the pin pinReason is ready to honour cannot yet be
+		// "playlist" too, so the pin pinReason is ready to honour cannot yet be
 		// set by an operator.
-		playoutRunning: false,
-		grace:          failoverGrace(s),
-		autoReturn:     s.Failover.Return == db.FailoverReturnAuto,
-		returnStable:   time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
+		playlistRunning: false,
+		grace:           failoverGrace(s),
+		autoReturn:      s.Failover.Return == db.FailoverReturnAuto,
+		returnStable:    time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
 	}
 	e.mu.Unlock()
 
@@ -3682,10 +3682,10 @@ func errNoFeedShape(kind sourceKind) error {
 	switch kind {
 	case sourcePrimary, sourceBackup, sourceSlate:
 		return nil
-	case sourcePlayout:
+	case sourcePlaylist:
 		return fmt.Errorf("the selector chose %q, but no feed knows how to run a playlist yet: "+
-			"feedUpstreamSig, startFeed and downstreamFeedInput each need a sourcePlayout case "+
-			"before playoutRunning is ever allowed to be true", kind)
+			"feedUpstreamSig, startFeed and downstreamFeedInput each need a sourcePlaylist case "+
+			"before playlistRunning is ever allowed to be true", kind)
 	}
 	return fmt.Errorf("no feed knows how to run source %q", kind)
 }
@@ -3820,7 +3820,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		feed.in, feed.port, feed.subName = in, port, selectorSubName
 		args = relayFeedArgs(in.Subscribe(selectorSubName, port), out, offset)
 	default:
-		// sourcePlayout lands here today, and so would any later kind. Nothing
+		// sourcePlaylist lands here today, and so would any later kind. Nothing
 		// is started and nothing is recorded as active: a feed that cannot be
 		// built must not leave a process behind that pretends it was.
 		return fail(errNoFeedShape(kind))
