@@ -190,3 +190,43 @@ func TestChooseFromRefusesToWinWithoutAReason(t *testing.T) {
 	}
 	chooseFrom(malformed, c)
 }
+
+// TestChooseFromRefusesAnAvailableNoneCandidate closes the other way a
+// malformed list could reach an operator, and it is the quieter of the two.
+//
+// sourceNone is the ABSENCE of a source, so "available: none" is a sentence
+// that cannot be true. best used to return whatever kind won, verbatim, which
+// meant a list saying that got sourceNone back as a decision -- and
+// applySourceChoice's `if want == sourceNone` guard then dropped it. That guard
+// exists for a recovered panic, where holding is right; used on a malformed
+// list it turned a failover into nothing at all, with no log and no reason,
+// which is strictly worse than the blank Failover.Reason the test above exists
+// to prevent: a blank reason is at least visible.
+//
+// The panic must not depend on the reasons map. Today the empty kind happens to
+// miss every branch's map and trips the missing-reason panic by accident; a map
+// literal that ever gained a sourceNone entry would silently restore the
+// discard. This drives the branch whose map DOES carry an empty-string reason
+// for a real kind, so a reader can see the check is its own.
+func TestChooseFromRefusesAnAvailableNoneCandidate(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("chooseFrom returned normally over a list offering an available sourceNone; want a panic")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "sourceNone") {
+			t.Errorf("panic value %v does not name sourceNone as the malformed candidate", r)
+		}
+	}()
+
+	// cur == slate is the branch whose reason map holds an entry whose VALUE is
+	// "" (sourceSlate: ""), so a reader cannot confuse the panic below with a
+	// blank-reason miss.
+	c := sourceChoice{now: goldenNow, grace: goldenGrace, cur: sourceSlate, slateEnabled: true}
+	malformed := []candidate{
+		{kind: sourceNone, available: true, rank: 0},
+		{kind: sourceSlate, available: true, rank: 1},
+	}
+	chooseFrom(malformed, c)
+}
