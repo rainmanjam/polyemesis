@@ -36,11 +36,13 @@ func TestSwitchSourceRollsBackPinOnARecoveredPanic(t *testing.T) {
 	e := failoverEngine(t)
 	// A buffer-backed logger, not failoverEngine's default io.Discard one,
 	// because this test needs to see what SwitchSource told the operator --
-	// specifically, that it did NOT tell them the switch succeeded. Assigned
-	// before any goroutine of this engine's exists (failoverEngine starts
-	// none, and reconcileSelector below runs synchronously on this
-	// goroutine), so there is nothing to race with it.
-	var buf bytes.Buffer
+	// specifically, that it did NOT tell them the switch succeeded.
+	// reconcileSelector below runs synchronously here, but it starts a real
+	// supervisor goroutine (startFeed) that goes on logging asynchronously
+	// into this same logger for the rest of the test -- e.g. supervisor.go's
+	// own Warn -- so this needs syncBuffer, not a bare bytes.Buffer, even
+	// though the assignment itself happens before that goroutine exists.
+	var buf syncBuffer
 	e.log = slog.New(slog.NewTextHandler(&buf, nil))
 
 	s := failoverOnSettings()

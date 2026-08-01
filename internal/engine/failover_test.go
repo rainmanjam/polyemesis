@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +17,47 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
+
+// ---------------------------------------------------------------- log capture
+
+// syncBuffer is a goroutine-safe stand-in for bytes.Buffer, for tests that
+// wire a buffer-backed logger into an engine and then read it back.
+//
+// A bare bytes.Buffer is documented as unsafe for concurrent use, and several
+// selector tests do exactly that: they assign a *bytes.Buffer-backed
+// slog.Logger to e.log and then call reconcileSelector/startFeed, which spawn
+// a real supervisor goroutine (internal/supervisor.(*Process).supervise).
+// That goroutine logs asynchronously -- e.g. a Warn when a process stalls --
+// straight into the same buffer the test goroutine is calling Reset()/String()
+// on. `go test -race` caught it as two concurrent writers to one
+// bytes.Buffer; it is intermittent because it only fires when the supervisor
+// goroutine's log write and the test's Reset/String happen to overlap, so it
+// can pass locally for many runs and still be a real, load-bearing bug.
+//
+// Every place a test needs to read back what the engine logged, use this
+// instead of a bare bytes.Buffer.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *syncBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
 
 // setSettings writes the engine's live settings the way production does: under
 // the lock.

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bytes"
 	"log/slog"
 	"strings"
 	"testing"
@@ -60,7 +59,7 @@ func wantPanic(t *testing.T, what string, fn func()) string {
 // the third's silence look like success.
 func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 	e := failoverEngine(t)
-	var buf bytes.Buffer
+	var buf syncBuffer
 	e.log = slog.New(slog.NewTextHandler(&buf, nil))
 
 	s := failoverOnSettings()
@@ -134,7 +133,7 @@ func TestTheThreeFeedBuildersRefuseAKindTheyCannotBuild(t *testing.T) {
 // crash on the sweep goroutine, which is not an improvement on a silent one.
 func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *testing.T) {
 	e := failoverEngine(t)
-	var buf bytes.Buffer
+	var buf syncBuffer
 	e.log = slog.New(slog.NewTextHandler(&buf, nil))
 
 	s := failoverOnSettings()
