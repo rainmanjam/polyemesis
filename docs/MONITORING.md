@@ -109,6 +109,9 @@ Full route reference: [API.md](API.md).
 
 ## See also
 
+- [HOOKS.md](HOOKS.md) — the machine-readable counterpart to the alerts above:
+  one signed delivery per transition, never coalesced, for a script rather than
+  a person
 - [MQTT.md](MQTT.md) — retained telemetry and Home Assistant discovery
 - [API.md](API.md#authentication) — tokens, sessions and CSRF
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — organised by what you observe

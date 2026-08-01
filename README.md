@@ -63,6 +63,14 @@ hot. One upload, one video encode, different audio per platform.
   queue, Whisper transcription with full-text search, and a clipper.
 - **Prometheus metrics** and in-process alert rules with webhook delivery.
   [→ MONITORING.md](docs/MONITORING.md)
+- **Lifecycle webhooks** — a signed POST the moment the stream starts or stops,
+  or a destination goes up or down. One delivery per transition, in order, so a
+  script can act on it; alerts coalesce for a human, these deliberately do not.
+  [→ HOOKS.md](docs/HOOKS.md)
+- **Most settings apply without dropping anything.** The dividing line is
+  mechanical — a value that reaches an FFmpeg command line replaces the process
+  that runs it, and a value that does not is delivered to the process still
+  running. Saving tells you which happened. [→ HOT-RELOAD.md](docs/HOT-RELOAD.md)
 - **Retained MQTT telemetry** with Home Assistant discovery, so the stream shows
   up as entities in a dashboard you already run. [→ MQTT.md](docs/MQTT.md)
 - **TLS that configures itself** — Let's Encrypt when the box has a public name,
