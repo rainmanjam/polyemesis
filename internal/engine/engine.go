@@ -268,6 +268,21 @@ type Engine struct {
 	// with selMu already held, so neither field needs a lock of its own.
 	selPanicMsg string
 	selPanicAt  time.Time
+	// decideFn is a test seam that substitutes decideSource's call to
+	// chooseSource. Nil -- always true in production -- means "use the real
+	// chooseSource", so leaving it unset is what keeps decideSource's
+	// behaviour unchanged: this field only ever matters to a test that sets
+	// it.
+	//
+	// It is a field on Engine, not a package-level var, because a
+	// package-level var one test swaps is a var every other test in this
+	// package races over under `go test -race`: this package's tests build
+	// engines directly as &Engine{...} (see failoverEngine and
+	// TestSlateSpecFollowsTheProbedIngestRatherThanAForm) rather than sharing
+	// one, and a field set once at construction, before the engine is used by
+	// anything concurrent, needs no lock of its own -- exactly like
+	// selPanicMsg and selPanicAt above.
+	decideFn func(sourceChoice) (sourceKind, string)
 	// previewSeen is the last playlist request and previewAt the last start
 	// attempt; together they drive on-demand start and idle stop.
 	previewSeen time.Time
@@ -3329,7 +3344,10 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 // It is a window since the last STACK WAS LOGGED, not since the last panic --
 // see decideSource. Measured the other way it would never elapse, and "bounds
 // how often" would quietly mean "logs it once".
-const selPanicRelog = time.Minute
+//
+// A var rather than a const only so a test can shorten the window: production
+// never assigns it, and the value is time.Minute exactly as before.
+var selPanicRelog = time.Minute
 
 // decideSource is chooseSource with a recover around it, and it is the ONE
 // place that recover needs to live: chooseSource has exactly one caller
@@ -3403,7 +3421,15 @@ func (e *Engine) decideSource(c sourceChoice) (kind sourceKind, reason string, d
 		}
 		kind, reason, decided = c.cur, "", false
 	}()
-	kind, reason = chooseSource(c)
+	// choose is chooseSource unless a test has substituted decideFn -- see
+	// its comment on the Engine struct. Indirecting through a local rather
+	// than branching inline keeps this identical to calling chooseSource
+	// directly when decideFn is nil, which is every production call.
+	choose := chooseSource
+	if e.decideFn != nil {
+		choose = e.decideFn
+	}
+	kind, reason = choose(c)
 	return kind, reason, true
 }
 
