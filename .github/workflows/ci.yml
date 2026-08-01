@@ -311,24 +311,98 @@ jobs:
       - run: make release
       - run: ls -lh dist/
 
+  # Which container suites this run needs.
+  #
+  # A separate job rather than an `if:` on the matrix below, for two reasons.
+  # The matrix context is not available to a job-level `if`, so "run only the
+  # browser suite" cannot be expressed there at all. And a suite that is not
+  # wanted should not EXIST as a skipped job: main's runs already carry enough
+  # grey "skipping" rows that a genuinely skipped check stops being noticed.
+  #
+  # Cheap: a checkout and a git diff, against three jobs that each build an
+  # image and publish real streams.
+  container-suites:
+    name: "which container suites"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      suites: ${{ steps.pick.outputs.suites }}
+    steps:
+      # Full history: the diff below needs both endpoints of the PR, and the
+      # default shallow fetch has neither.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: pick
+        # Through env, never interpolated into the script. Two of these are
+        # attacker-influenced on a fork PR, and `run:` is a shell.
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          ALL='["acceptance-docker","acceptance-multisource","acceptance-browser"]'
+
+          # main and the weekly schedule keep the full set. This job changes
+          # what PRs get, and takes nothing away from anywhere else.
+          if [ "$EVENT" = "schedule" ] || [ "$REF" = "refs/heads/main" ]; then
+            echo "suites=$ALL" >> "$GITHUB_OUTPUT"
+            echo "full set: main or schedule"
+            exit 0
+          fi
+
+          # A PR that touches ui/ gets the browser suite and only the browser
+          # suite. acceptance-docker and acceptance-multisource assert routing
+          # and token handling, which no UI change reaches -- running them here
+          # would cost two image builds to prove something the PR cannot break.
+          #
+          # Captured to a variable and matched with a here-string rather than
+          # piped into grep. Under `set -o pipefail`, `git diff | grep -q` can
+          # report the PIPELINE as failed when grep matches early and exits,
+          # leaving git to die of SIGPIPE. It did not reproduce at 196 files, so
+          # this is a latent hazard rather than an observed bug -- but its
+          # failure mode is a ui/ PR silently NOT getting the browser suite,
+          # which is the exact thing this job exists to stop happening.
+          if [ "$EVENT" = "pull_request" ]; then
+            CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            if grep -q '^ui/' <<<"$CHANGED"; then
+              echo 'suites=["acceptance-browser"]' >> "$GITHUB_OUTPUT"
+              echo "browser only: this PR touches ui/"
+              exit 0
+            fi
+          fi
+
+          echo 'suites=[]' >> "$GITHUB_OUTPUT"
+          echo "none: no ui/ change on this PR"
+
   # The suites that need the shipped IMAGE rather than a host binary: SRT ingest
   # (Ubuntu's FFmpeg may lack libsrt, the image never does), the one-port
   # token-routing path, and the browser running against the real artefact.
   #
   # Expensive — each builds the image and publishes real streams into it — so
-  # they run on main and on a schedule rather than on every branch push.
+  # the full set runs on main and on a schedule rather than on every push.
+  #
+  # The browser suite is the exception, and #53 is why. Five guards were added
+  # there for three defects that had passed tsc, oxlint, go vet, go test -race
+  # and six reviews -- a nav that lost its CSS classes, a collapsed rail with no
+  # accessible names, and a toggle that destroyed keyboard focus. Every one of
+  # those guards contributed NOTHING to that PR's status, because this job only
+  # ran after the merge. Tests that cannot fail before you merge are not a gate.
   container:
     name: "container: ${{ matrix.suite }}"
-    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
+    needs: container-suites
+    if: needs.container-suites.outputs.suites != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        suite:
-          - acceptance-docker      # 29 checks: routing, passthrough, persistence
-          - acceptance-multisource # 18 checks: two programmes, one port, by token
-          - acceptance-browser     # 30 checks: Playwright against the image
+        # acceptance-docker      29 checks: routing, passthrough, persistence
+        # acceptance-multisource 18 checks: two programmes, one port, by token
+        # acceptance-browser     30 checks: Playwright against the image
+        suite: ${{ fromJSON(needs.container-suites.outputs.suites) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
