@@ -51,8 +51,15 @@ its first tagged release.
   leaf of the settings tree — each naming a class, the function that carries the
   change, and a reason. A reflection walk fails the build when a field is added
   without one, when a rule names a field that no longer exists, or when it names
-  a function nobody wrote. The distribution: 87 live, 49 respawn, 1 rebind, 2
-  on-demand, 2 next-start.
+  a function nobody wrote. The distribution: 89 live, 49 respawn, 1 rebind, 2
+  on-demand, 0 next-start.
+
+- **Job-history retention now applies without a restart.** `postProd.retainDays`
+  and `postProd.retainJobs` were read exactly once, at boot, so lowering them
+  did nothing an operator could observe until the next restart — the settings
+  page said saved and the history did not move. The purge now runs hourly and
+  re-reads its settings each sweep, the same shape recording retention already
+  used. Found by the reload classification table, which refused to call it live.
 
 ### Fixed
 

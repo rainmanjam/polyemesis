@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -148,5 +149,100 @@ func TestTheClipKindIsSpeltOnceAcrossTheWiring(t *testing.T) {
 		if other == clipper.JobKind {
 			t.Errorf("two features registered the same job kind %q", other)
 		}
+	}
+}
+
+// Job-history retention used to be read exactly once, at boot, so lowering it
+// did nothing an operator could observe until they restarted the server. The
+// settings page said saved and the history did not move.
+//
+// The fix is the shape internal/recording already uses: the loop is handed a
+// FUNCTION rather than a value, and calls it every sweep. Capturing the value
+// would move the same bug one level up -- from "read once at boot" to "read
+// once when the loop started", which is the same instant.
+func TestJobRetentionIsRereadEverySweepRatherThanCapturedAtStartup(t *testing.T) {
+	dir := t.TempDir()
+	store, err := db.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer store.Close()
+
+	old := time.Now().AddDate(0, 0, -400)
+	seed := func() int64 {
+		j, err := store.EnqueueJob(jobs.Job{Kind: "test.kind", Target: "x", Attempts: 1, MaxAttempts: 1})
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		if err := store.FinishJob(j.ID, jobs.StateDone, "", old); err != nil {
+			t.Fatalf("finish: %v", err)
+		}
+		return j.ID
+	}
+	id := seed()
+	q := jobs.New(slog.Default(), store)
+
+	// Starts as keep-forever, which is what the loop reads on its first sweep.
+	var mu sync.Mutex
+	current := db.PostProdSettings{RetainDays: 0}
+	read := func() db.PostProdSettings {
+		mu.Lock()
+		defer mu.Unlock()
+		return current
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); purgeJobHistoryLoop(ctx, slog.Default(), q, read, 5*time.Millisecond) }()
+
+	// The first sweep must not have purged it.
+	time.Sleep(20 * time.Millisecond)
+	if _, err := store.GetJob(id); err != nil {
+		t.Fatalf("the job was purged while retention said keep forever: %v", err)
+	}
+
+	// Now lower it, exactly as saving the settings form would. A loop that
+	// captured its settings at startup never sees this.
+	mu.Lock()
+	current = db.PostProdSettings{RetainDays: 30}
+	mu.Unlock()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := store.GetJob(id); err != nil {
+			cancel()
+			<-done
+			return // purged: the change reached a loop that was already running
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	t.Fatal("a 400-day-old job survived three seconds after retention was lowered to 30 days; " +
+		"the sweep is reading a value captured when it started")
+}
+
+// Cancelling the context must stop the loop, or a shutdown waits on a ticker.
+func TestJobRetentionLoopStopsWithItsContext(t *testing.T) {
+	dir := t.TempDir()
+	store, err := db.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer store.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		purgeJobHistoryLoop(ctx, slog.Default(), jobs.New(slog.Default(), store),
+			func() db.PostProdSettings { return db.PostProdSettings{} }, time.Hour)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the purge loop outlived its context")
 	}
 }

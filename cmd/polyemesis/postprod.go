@@ -102,7 +102,18 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 
 	// The stored history bound, applied once at startup. Nothing else calls
 	// Purge, and a job row is tiny — but "tiny forever" is still a leak.
-	purgeJobHistory(log, q, settings.PostProd)
+	// Re-read every sweep rather than captured here: see purgeJobHistoryLoop.
+	go purgeJobHistoryLoop(ctx, log, q, func() db.PostProdSettings {
+		s, err := store.GetSettings()
+		if err != nil {
+			// Keep-forever is the safe answer to an unreadable settings row.
+			// Purging on a guess would delete history the operator may have
+			// asked to keep, and unlike a missed sweep that is not recoverable.
+			log.Warn("cannot read job retention settings; skipping this sweep", "err", err)
+			return db.PostProdSettings{}
+		}
+		return s.PostProd
+	}, jobPurgeEvery)
 
 	// Existing installs get their sessions built from the recordings already
 	// indexed, so upgrading does not look like losing your history. Idempotent
@@ -206,6 +217,45 @@ func recordingTimeline(store *db.DB, recordingsDir string) clipper.Resolver {
 			Path:     filepath.Join(recordingsDir, rec.Filename),
 			Duration: time.Duration(rec.DurationMS) * time.Millisecond,
 		}})
+	}
+}
+
+// jobPurgeEvery is how often the retention bound is re-applied.
+//
+// An hour, where the recorder's equivalent sweep runs every 30 seconds, and the
+// difference is the unit: recording retention is bounded in GB against a disk
+// that fills, while this is bounded in DAYS against rows that are a few hundred
+// bytes each. An hour is prompt enough that "I lowered retention" is something
+// an operator sees happen, and rare enough that the query is invisible.
+const jobPurgeEvery = time.Hour
+
+// purgeJobHistoryLoop applies the retention bound now and every jobPurgeEvery
+// after that, re-reading the settings each sweep.
+//
+// It takes a FUNCTION rather than a value, which is the whole point and the
+// same shape recording.Manager.Run uses. Retention was read exactly once, at
+// boot, so lowering it did nothing an operator could observe until they
+// restarted -- the settings page said saved and the history did not move.
+// Capturing the value here instead would move that bug one level up rather than
+// fix it: from "read once at boot" to "read once when the loop started", which
+// is the same instant.
+//
+// every is a parameter so the test can drive it without waiting an hour.
+func purgeJobHistoryLoop(ctx context.Context, log *slog.Logger, q *jobs.Queue,
+	settings func() db.PostProdSettings, every time.Duration) {
+	// Once immediately, so a restart reflects whatever is stored rather than
+	// waiting out the first tick.
+	purgeJobHistory(log, q, settings())
+
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			purgeJobHistory(log, q, settings())
+		}
 	}
 }
 

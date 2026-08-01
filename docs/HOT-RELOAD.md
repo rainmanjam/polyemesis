@@ -21,11 +21,11 @@ stale; the table cannot.**
 
 | Class | What it means | Fields |
 |---|---|---|
-| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 87 |
+| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 89 |
 | `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 49 |
 | `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 1 |
 | `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 2 |
-| `next_start` | Stored now, acted on at the next process start | 2 |
+| `next_start` | Stored now, acted on at the next process start | **0** |
 
 Most of what an operator can change already applies without touching a process.
 The 49 are the ones that reach an FFmpeg argv.
@@ -43,7 +43,7 @@ The 49 are the ones that reach an FFmpeg argv.
 | `failover.{graceSeconds,return,returnStableSeconds}` | Re-read by the selector sweep every 500 ms |
 | `playout.{maxDiskMb,sessionIdleSeconds,maxSessions}` | Pushed into the playout manager before any variant is touched |
 | `chat.*`, `automod.*`, `alerts.*`, `mqtt.*` | Applied out of band by the settings handler |
-| `postProd.*` | Pushed into the jobs governor by the jobs policy endpoint |
+| `postProd.*` | Pushed into the jobs governor by the jobs policy endpoint; retention is re-read by the purge sweep |
 
 ### Requires a respawn — the value is in an argv or a socket bind
 
@@ -150,11 +150,13 @@ Stated here rather than discovered later.
   field marked `live` genuinely applies live. Only the settings this work moved
   — `destinations[].resilience.*` and `meters.intervalMs` — have behavioural
   tests behind the claim.
-- **`postProd.retainDays` and `postProd.retainJobs` are `next_start`.** Job
-  history is purged once at boot and never again, so lowering retention does
-  nothing observable until a restart. This is recorded rather than fixed; it is
-  a smaller cousin of the `meters.intervalMs` defect and a candidate for `live`
-  that nobody has wired.
+- **Nothing is `next_start` any more, and the class is kept empty on purpose.**
+  It was added for job-history retention, which was read once at boot so
+  lowering it did nothing observable until a restart. Recording that honestly
+  rather than mislabelling it as live is what made it obvious enough to fix —
+  the purge now re-reads its settings every sweep. The class stays because the
+  next one will be found the same way, and a reviewer needs somewhere to put it
+  that is not a lie.
 - **A settings save still reconciles everything.** Every engine walks its whole
   tier tree and re-hashes every signature on every save. That cost is unchanged
   and is O(engines × tiers) per save.
