@@ -19,6 +19,23 @@ function readStored(): boolean {
   }
 }
 
+/** Whether a keystroke belongs to something the user is typing into.
+ *
+ *  This is the app's FIRST global key listener -- every other handler is
+ *  element-scoped, on the chat composer, the anchor grid, the confirm dialog and
+ *  the upload dropzone. So this predicate is the pattern the next shortcut will
+ *  copy, and it is written to be copied.
+ *
+ *  polyemesis has a chat panel. Someone typing Cmd+B mid-message must not lose
+ *  their sidebar, and a product where that happens once is a product where the
+ *  shortcut gets turned off.
+ */
+function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
 /** The collapsed state of the desktop sidebar, and a toggle for it.
  *
  *  Read once on mount rather than subscribed to: two tabs disagreeing about a
@@ -35,6 +52,19 @@ export function useNavCollapsed(): [boolean, () => void] {
       // survive this session, which is the documented Safari behaviour.
     }
   }, [collapsed]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      // metaKey for macOS, ctrlKey elsewhere. The browser binds neither to
+      // anything on a page with no rich-text editing.
+      if (e.key.toLowerCase() !== "b" || !(e.metaKey || e.ctrlKey)) return;
+      if (isTyping(e.target)) return;
+      e.preventDefault();
+      setCollapsed((v) => !v);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const toggle = useCallback(() => setCollapsed((v) => !v), []);
   return [collapsed, toggle];
