@@ -144,6 +144,8 @@ var settingsReload = map[string]ReloadRule{
 	"failover.backup.pull.rtspTransport":            {ClassRespawn, "backupIngestSig", "an FFmpeg input option"},
 	"failover.slate.enabled":                        {ClassLive, "applySourceChoice", "whether the slate is an eligible choice is re-read every 500ms; the slate's own argv is not"},
 	"failover.slate.imagePath":                      {ClassRespawn, "feedUpstreamSig", "the input file in the slate feed's argv"},
+	"failover.playlist.enabled":                     {ClassLive, "applySourceChoice", "whether the playlist is an eligible choice is re-read every 500ms; the playlist feed's own argv is not"},
+	"failover.playlist.filePath":                    {ClassRespawn, "feedUpstreamSig", "the input file in the playlist feed's argv"},
 
 	// ----------------------------------------------------------------- synth
 	"synth.silenceOnVideoOnly": {ClassRespawn, "wantSilence", "starts or stops the silence tier, which moves silenceSig and therefore every passthrough consumer"},

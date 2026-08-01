@@ -55,6 +55,11 @@ func TestUITypesCanNameEverySettingsField(t *testing.T) {
 		// and the UI edits annotations through /source/annotations rather than
 		// through the settings blob.
 		"ingest.annotations": "edited through the annotations editor, not the settings form",
+		// The settings and reload plumbing for the playlist's own relay hub
+		// lands in this task; the UI control is a later task in the same
+		// sub-project (DESIGN 2026-08-01-playlist-own-hub) and will remove
+		// this line when it adds one.
+		"failover.playlist.filePath": "UI control lands in a later task of the playlist-own-hub feature",
 	}
 
 	var missing []string
