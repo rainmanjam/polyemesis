@@ -3219,6 +3219,24 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 	e.mu.Unlock()
 
 	want, reason := e.decideSource(c)
+	// want == sourceNone can ONLY happen here on a recovered panic with
+	// nothing to hold: chooseFrom's own best() never returns sourceNone on a
+	// real decision (its fallback is always sourcePrimary -- see the comment
+	// on candidatesFor), so decideSource's recover is the only path that can
+	// hand this back, and only when c.cur was itself sourceNone -- the
+	// selector's first decision, before any feed has ever run, or the first
+	// one after the tier restarts. There is no current source to hold, so
+	// there is nothing to do: calling ensureFeed(sourceNone) would start a
+	// feed anyway, because ensureFeed's own short-circuit needs an existing
+	// feed or a recent start attempt to have something to compare against,
+	// neither of which exists yet. That feed would be a PRIMARY-shaped one
+	// too -- feedUpstreamSig has no sourceNone case, so it falls into the
+	// same default branch primary does -- while e.sel.active stayed recorded
+	// as none. Skipping ensureFeed entirely is what keeps a broken decision
+	// from producing a running feed the bookkeeping cannot describe.
+	if want == sourceNone {
+		return
+	}
 	e.ensureFeed(s, silenceSig, want, reason, now)
 }
 
@@ -3258,6 +3276,13 @@ const selPanicRelog = time.Minute
 // per kind -- is enforced by candidatesFor's convention, not by the compiler,
 // so a change that breaks it (Task 4 adds a fourth candidate kind) reaches
 // this on every reconcile a settings change triggers, not only on a tick.
+//
+// "Hold the current source" only means something when there is one. On the
+// selector's first decision -- c.cur is sourceNone, no feed has ever run --
+// there is nothing to hold, and the caller must not treat sourceNone as a
+// destination: this was considered, not missed, and applySourceChoice is
+// where it is handled, by skipping ensureFeed entirely rather than starting
+// a feed the bookkeeping cannot describe. See the comment there.
 //
 // Deliberately NOT inside chooseFrom, chooseSource or best: those are called
 // directly by selector_candidates_test.go and selector_golden_test.go, and a
