@@ -145,6 +145,10 @@ type Engine struct {
 	sel *selector
 	// backup is the second listener, nil unless the tier is running one.
 	backup *backupIngest
+	// playlist is the file-playout tier, nil unless settings enable it. It is a
+	// sibling of backup and not of the slate: both are a supervised process with
+	// a hub of its own, running whether or not anybody is watching.
+	playlist *playlistTier
 	// heldSilenceSig freezes the silence tier's signature while the selector is
 	// standing in for a departed primary. See holdSilence.
 	heldSilenceSig string
@@ -643,12 +647,12 @@ func (e *Engine) Stop() {
 	e.loud = map[int64]*loudnessMon{}
 	e.clipCap, e.clipPort, e.clipHub, e.clipSig = nil, 0, nil, ""
 	silence := e.silence
-	sel, backup := e.sel, e.backup
+	sel, backup, playlist := e.sel, e.backup, e.playlist
 	recorder, preview, meters, ingest := e.recorder, e.preview, e.meters, e.ingest
 	e.dests = map[int64]*destination{}
 	e.rends = map[int64]*rendition{}
 	e.silence = nil
-	e.sel, e.backup = nil, nil
+	e.sel, e.backup, e.playlist = nil, nil, nil
 	e.recorder, e.preview, e.meters, e.ingest = nil, nil, nil, nil
 	e.mu.Unlock()
 	e.selMu.Unlock()
@@ -711,6 +715,10 @@ func (e *Engine) Stop() {
 	}
 	e.teardownSilence(silence)
 	e.teardownBackup(backup)
+	// The same level as the backup and torn down with it: both are hubs the
+	// selector's feed reads, and the feed above has already gone. A tier left
+	// here would hold a UDP socket and an FFmpeg child past shutdown.
+	e.teardownPlaylist(playlist)
 
 	if ingest != nil {
 		ingest.Stop(ctx)
@@ -2757,6 +2765,22 @@ type backupIngest struct {
 	sig  string
 }
 
+// playlistTier is the file on loop, and it is shaped exactly like backupIngest
+// because it answers the same question the backup does: what else could be on
+// air, and is it ready before anybody asks for it.
+//
+// The hub of its own is the entire point of the tier. A file played into the
+// PRIMARY's hub carries bytes into it, so the primary reads live, and a live
+// primary is the one thing failover never switches away from -- putting a file
+// on air would have silently disabled the whole feature. With its own relay the
+// primary goes quiet when the encoder goes quiet, which is the truth the
+// selector needs.
+type playlistTier struct {
+	proc *supervisor.Process
+	hub  *relay.Hub
+	sig  string
+}
+
 // liveness is one candidate source's delivery record, derived from bytes on its
 // hub rather than from its process state. An SRT listener sits in "running"
 // for as long as it waits for a publisher, so process state answers a different
@@ -2864,6 +2888,20 @@ func (e *Engine) backupHub() *relay.Hub {
 		return nil
 	}
 	return e.backup.hub
+}
+
+// playlistHub is the playlist tier's relay, or nil when there is none.
+//
+// Nil rather than a panic for the same reason backupHub answers nil: every
+// caller asks BEFORE knowing whether the tier is running, and "no hub" is a
+// normal answer for a feature that is off by default.
+func (e *Engine) playlistHub() *relay.Hub {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.playlist == nil {
+		return nil
+	}
+	return e.playlist.hub
 }
 
 // holdSilence freezes the silence tier's signature while the selector is
@@ -3195,6 +3233,7 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 	// broken tier would go on refusing destinations that no longer need it.
 	if cur != nil && cur.spec == want && want != "" {
 		e.reconcileBackupIngest(s)
+		e.reconcilePlaylist(s)
 		// Ignored on purpose: a reconcile has no caller to fail to, and a
 		// decision that could not be made has already logged itself. Holding
 		// the current source is what this path wants anyway.
@@ -3214,6 +3253,10 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 	}
 	if want == "" {
 		e.reconcileBackupIngest(s)
+		// Reached with the whole feature switched off, which is when the tier
+		// most needs stopping: playlistSig is empty without Failover.Enabled, so
+		// this is the call that takes the file off air with the selector.
+		e.reconcilePlaylist(s)
 		return
 	}
 
@@ -3248,6 +3291,7 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 		"relayPort", hub.Port())
 
 	e.reconcileBackupIngest(s)
+	e.reconcilePlaylist(s)
 	// Ignored for the same reason as the "already running" window above.
 	_ = e.applySourceChoice(s, silenceSig, now)
 }
@@ -4088,6 +4132,166 @@ func (e *Engine) teardownBackup(b *backupIngest) {
 	}
 	if b.hub != nil {
 		_ = b.hub.Close()
+	}
+}
+
+// ------------------------------------------------------------ playlist tier
+
+// playlistSig hashes everything the playlist's command depends on, and is empty
+// when the tier must not run.
+//
+// An unusable path hashes empty rather than being started and left to fail:
+// PlaylistFileProblem is the same confinement a file:// pull source and the
+// slate's still are held to, and a path that fails it is operator input trying
+// to leave the data directory, not a file to hand FFmpeg anyway.
+func playlistSig(s db.Settings) string {
+	p := s.Failover.Playlist
+	if !s.Failover.Enabled || !p.Enabled {
+		return ""
+	}
+	if p.PlaylistFileProblem() != nil {
+		return ""
+	}
+	return hashStrings([]string{"playlist", strings.TrimSpace(p.FilePath)})
+}
+
+// playlistFeedArgs builds the loop that publishes one file into the playlist's
+// own hub. It is the backup's command with a file where the socket was:
+// `-map 0 -c copy`, so a programme that was encoded once is not re-encoded here.
+//
+// The two input flags are the whole difference from every other feed, and
+// neither is optional. -stream_loop -1 is what makes a file that ends look like
+// a source that does not, so the tier is still delivering an hour later instead
+// of exiting once and leaving the selector with a candidate that vanished.
+// Without -re FFmpeg reads a file as fast as the disk allows: an hour of
+// programme arrives at the relay in seconds, the hub's consumers are handed a
+// timeline racing away from wall clock, and what an operator sees is a playlist
+// that "played" and disappeared. The same pair, for the same reason, is what
+// pullFile emits for a file:// ingest.
+//
+// The "file:" prefix is not decoration either: a bare path containing a colon
+// ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the prefix
+// pins it to the file protocol whatever the name looks like -- exactly as
+// pullSource does when it resolves one.
+func playlistFeedArgs(path, outURL string) []string {
+	return []string{
+		"-hide_banner", "-nostdin", "-loglevel", "warning",
+		"-nostats", "-progress", "pipe:1",
+		"-stream_loop", "-1",
+		"-re",
+		// The file's own timestamps restart at every loop boundary; genpts gives
+		// the relay a monotonic base without touching the payload.
+		"-fflags", "+genpts",
+		"-i", "file:" + path,
+		"-map", "0",
+		"-c", "copy",
+		"-f", "mpegts",
+		"-flush_packets", "1",
+		ffmpeg.RelayOutputURL(outURL),
+	}
+}
+
+// reconcilePlaylist starts, stops or restarts the playlist tier. The caller
+// must hold selMu.
+//
+// Signature-compared rather than restarted unconditionally, exactly as the
+// backup listener is: a respawn is visible downstream -- the hub goes quiet
+// while FFmpeg reopens the file and the loop restarts from the top -- so a
+// settings save that touches the recorder or a destination must not cost the
+// playlist a gap. The no-op is the common case, not the optimisation.
+func (e *Engine) reconcilePlaylist(s db.Settings) {
+	want := playlistSig(s)
+
+	e.mu.Lock()
+	cur := e.playlist
+	e.mu.Unlock()
+	if cur != nil && cur.sig == want {
+		return
+	}
+
+	if cur != nil {
+		// The feed reads this hub, so it goes first -- a feed left running
+		// across the teardown would spin on a relay that has gone away. No feed
+		// can be of this kind yet (startFeed refuses sourcePlaylist until the
+		// wire work lands), but the hub it would read is being closed two lines
+		// below, and that hazard is not the sort to be added later.
+		e.mu.Lock()
+		var feed *sourceFeed
+		if e.sel != nil && e.sel.feed != nil && e.sel.feed.kind == sourcePlaylist {
+			feed, e.sel.feed = e.sel.feed, nil
+			// See detachFeedForSilence: a deliberate teardown must not be
+			// mistaken for a start that failed.
+			e.sel.feedAt = time.Time{}
+		}
+		e.playlist = nil
+		e.mu.Unlock()
+		e.teardownFeed(feed)
+		e.teardownPlaylist(cur)
+	}
+	if want == "" {
+		if s.Failover.Enabled && s.Failover.Playlist.Enabled {
+			// Only reachable through settings that never passed validation --
+			// db.Settings.Validate rejects an unconfined path -- so it is said
+			// out loud rather than left as a tier that quietly never starts.
+			e.log.Warn("playlist not started; its file is unusable",
+				"path", s.Failover.Playlist.FilePath,
+				"err", s.Failover.Playlist.PlaylistFileProblem())
+		}
+		return
+	}
+
+	hub, err := relay.New(e.log, 0)
+	if err != nil {
+		e.log.Error("playlist: no relay", "err", err)
+		return
+	}
+
+	// Resolved here rather than stored absolute, exactly as the slate's still
+	// and a file:// pull source are: the settings hold a path relative to the
+	// data directory, and this is where it becomes one FFmpeg can open.
+	path := filepath.Join(e.cfg.DataDir,
+		filepath.FromSlash(strings.TrimSpace(s.Failover.Playlist.FilePath)))
+
+	proc := supervisor.New(e.log, supervisor.Spec{
+		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,
+		Args: playlistFeedArgs(path, hub.InputURL()),
+		// AutoRestart, unlike a selector feed: this process publishes into its
+		// OWN hub and carries no timestamp offset, so there is nothing for a
+		// sweep to rebuild and no reason to make an operator wait for one. A
+		// file that FFmpeg cannot open backs off toward five seconds and says so
+		// every time, which is what the supervisor's backoff is for.
+		AutoRestart: true,
+		MinBackoff:  500 * time.Millisecond,
+		MaxBackoff:  5 * time.Second,
+		OnLog:       e.onLog, OnState: e.onState, LogSink: logSink{e},
+	})
+
+	e.mu.Lock()
+	if e.stopped {
+		e.mu.Unlock()
+		_ = hub.Close()
+		return
+	}
+	e.playlist = &playlistTier{proc: proc, hub: hub, sig: want}
+	e.mu.Unlock()
+
+	proc.Start()
+	e.log.Info("playlist started", "file", path, "relayPort", hub.Port(),
+		"reason", "a playlist publishes into a hub of its own, so a file on air "+
+			"never makes the primary ingest read live")
+}
+
+func (e *Engine) teardownPlaylist(p *playlistTier) {
+	if p == nil {
+		return
+	}
+	if p.proc != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+		p.proc.Stop(ctx)
+		cancel()
+	}
+	if p.hub != nil {
+		_ = p.hub.Close()
 	}
 }
 
@@ -5660,6 +5864,9 @@ func (e *Engine) Processes() []*supervisor.Process {
 	}
 	if e.backup != nil {
 		procs = append(procs, e.backup.proc)
+	}
+	if e.playlist != nil {
+		procs = append(procs, e.playlist.proc)
 	}
 	if e.sel != nil && e.sel.feed != nil {
 		procs = append(procs, e.sel.feed.proc)

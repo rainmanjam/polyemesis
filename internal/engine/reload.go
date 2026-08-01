@@ -144,8 +144,13 @@ var settingsReload = map[string]ReloadRule{
 	"failover.backup.pull.rtspTransport":            {ClassRespawn, "backupIngestSig", "an FFmpeg input option"},
 	"failover.slate.enabled":                        {ClassLive, "applySourceChoice", "whether the slate is an eligible choice is re-read every 500ms; the slate's own argv is not"},
 	"failover.slate.imagePath":                      {ClassRespawn, "feedUpstreamSig", "the input file in the slate feed's argv"},
-	"failover.playlist.enabled":                     {ClassLive, "applySourceChoice", "whether the playlist is an eligible choice is re-read every 500ms; the playlist feed's own argv is not"},
-	"failover.playlist.filePath":                    {ClassRespawn, "feedUpstreamSig", "the input file in the playlist feed's argv"},
+	// Both were ClassLive/ClassRespawn-on-feedUpstreamSig when the playlist was
+	// only a decision. It is a tier now -- a supervised process on a hub of its
+	// own, exactly like the backup listener -- so enabling it spawns a child and
+	// the file reaches that child's argv. Classified like the backup's two
+	// equivalents above, and for the same reasons.
+	"failover.playlist.enabled":  {ClassRespawn, "reconcilePlaylist", "starts or stops the playlist tier; its eligibility as a choice is re-read every 500ms, but the process is not"},
+	"failover.playlist.filePath": {ClassRespawn, "playlistSig", "the input file in the playlist tier's argv"},
 
 	// ----------------------------------------------------------------- synth
 	"synth.silenceOnVideoOnly": {ClassRespawn, "wantSilence", "starts or stops the silence tier, which moves silenceSig and therefore every passthrough consumer"},
