@@ -13,6 +13,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -2858,12 +2859,176 @@ type sourceChoice struct {
 	returnStable  time.Duration
 }
 
+// candidate is one source the selector may choose, and whether it can be
+// chosen right now.
+//
+// available is not "is the process running" — it is "would this deliver bytes
+// if we switched to it". A slate is always available when enabled because it
+// synthesises its own picture; an ingest is available only when it is actually
+// delivering, which is the distinction the liveness type already draws and the
+// reason the selector switches on delivery rather than on process state.
+type candidate struct {
+	kind      sourceKind
+	available bool
+	// rank orders the list. Lower is preferred. It is a field rather than the
+	// slice position so a future caller can build the list in any order and
+	// still get a stable decision.
+	rank int
+}
+
+// candidatesFor turns a snapshot into the ordered list the ladder implies:
+// primary, then backup, then slate.
+//
+// rank is assigned from position rather than written out, so this literal is
+// the ONE place the preference order lives. Two spellings of the same ordering
+// is how a reordering ends up half-applied — the list reads one way, the
+// decision goes the other, and nothing fails until an outage.
+func candidatesFor(c sourceChoice) []candidate {
+	out := []candidate{
+		{kind: sourcePrimary, available: c.primary.alive(c.now, c.grace)},
+		// A backup that is delivering into a hub nobody enabled is still not a
+		// place to send viewers, so the setting gates availability rather than
+		// membership: the candidate stays in the list and stays unavailable.
+		{kind: sourceBackup, available: c.backupEnabled && c.backup.alive(c.now, c.grace)},
+		// The slate has no liveness to check. It synthesises its own picture, so
+		// "enabled" is the whole of "would this deliver bytes".
+		{kind: sourceSlate, available: c.slateEnabled},
+	}
+	for i := range out {
+		out[i].rank = i
+	}
+	return out
+}
+
+// chooseFrom is the ladder, expressed over a candidate list.
+//
+// Every branch below picks the best AVAILABLE candidate and then names why,
+// which is the shape the ladder always had; the reasons are keyed by the kind
+// that won because they are a contract. They reach an operator through
+// Failover.Reason, so rewording one is a user-visible change.
+func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
+	ranked := slices.Clone(cands)
+	slices.SortStableFunc(ranked, func(a, b candidate) int { return cmp.Compare(a.rank, b.rank) })
+
+	// available answers about one named source, for the rules that are about a
+	// particular source rather than about preference order.
+	available := func(k sourceKind) bool {
+		for _, cand := range ranked {
+			if cand.kind == k {
+				return cand.available
+			}
+		}
+		return false
+	}
+
+	// best is the ladder itself: the first available candidate wins, and says
+	// the sentence that goes with having won. fallbackKind is where the
+	// selector parks when nothing at all is available — never sourceNone,
+	// because handing the pipeline nothing is worse than every alternative.
+	best := func(reasons map[sourceKind]string, fallbackKind sourceKind, fallbackReason string) (sourceKind, string) {
+		for _, cand := range ranked {
+			if cand.available {
+				return cand.kind, reasons[cand.kind]
+			}
+		}
+		return fallbackKind, fallbackReason
+	}
+
+	// An operator's pin outranks the ladder, but only while the pinned source
+	// is available: a pin that outlived its source would strand the broadcast
+	// on a dead input.
+	if reason, ok := pinReason(c.pinned); ok && available(c.pinned) {
+		return c.pinned, reason
+	}
+
+	switch c.cur {
+	case sourceBackup:
+		if available(sourceBackup) {
+			// The flapping guard. Manual is the default because an encoder that
+			// dropped once usually drops again, and each automatic return is a
+			// visible cut for every viewer.
+			if available(sourcePrimary) && c.autoReturn && c.primary.stableFor(c.now) >= c.returnStable {
+				return sourcePrimary, "the primary ingest has been delivering steadily again"
+			}
+			return sourceBackup, ""
+		}
+		// Manual return means "do not flap", not "never recover": with the
+		// backup gone there is nothing to flap between. The backup is known
+		// unavailable here, so it cannot win its own branch.
+		return best(map[sourceKind]string{
+			sourcePrimary: "the backup ingest stopped delivering and the primary is back",
+			sourceSlate:   "neither ingest is delivering",
+		}, sourcePrimary, "the backup ingest stopped delivering")
+
+	case sourceSlate:
+		// A slate is a holding pattern, never a destination. The return to a
+		// real source is immediate and is NOT subject to the return mode: the
+		// flap risk is already bounded by the grace period on the way out, and
+		// sitting on a standby card while the show is back on air is the worse
+		// failure by a wide margin. Staying put is silent; a slate that has been
+		// switched off underneath us falls through to the primary.
+		return best(map[sourceKind]string{
+			sourcePrimary: "the primary ingest is delivering again",
+			sourceBackup:  "the backup ingest is delivering",
+			sourceSlate:   "",
+		}, sourcePrimary, "the slate was switched off")
+
+	default:
+		// Already on the primary means the primary winning is not news, so the
+		// reason stays empty and nothing is logged or published.
+		onPrimary := ""
+		if c.cur != sourcePrimary {
+			onPrimary = "the primary ingest is delivering"
+		}
+		// Nothing better exists, so stay parked on the primary rather than
+		// switching to nothing: a feed that is merely waiting still holds its
+		// place, and it starts carrying the stream the moment an encoder
+		// arrives.
+		noOther := ""
+		if c.cur != sourcePrimary {
+			noOther = "there is no other source to run"
+		}
+		return best(map[sourceKind]string{
+			sourcePrimary: onPrimary,
+			sourceBackup:  "the primary ingest stopped delivering",
+			sourceSlate:   "the primary ingest stopped delivering and no backup is on air",
+		}, sourcePrimary, noOther)
+	}
+}
+
+// pinReason is the sentence for an honoured manual override, and whether the
+// kind is one an operator can pin at all. sourceNone is not: it is the absence
+// of a pin, not a pin on nothing.
+func pinReason(k sourceKind) (string, bool) {
+	switch k {
+	case sourcePrimary:
+		return "an operator selected the primary ingest", true
+	case sourceBackup:
+		return "an operator selected the backup ingest", true
+	case sourceSlate:
+		return "an operator selected the slate", true
+	}
+	return "", false
+}
+
 // chooseSource decides what should be feeding the selector, and says why.
 //
 // An empty reason means "no change"; a non-empty one is written to the log and
 // published, because a failover nobody notices is how an operator discovers at
 // the end of a broadcast that they streamed the backup all night.
 func chooseSource(c sourceChoice) (sourceKind, string) {
+	return chooseFrom(candidatesFor(c), c)
+}
+
+// chooseSourceLadder is the hardcoded ladder chooseSource used to be, kept
+// verbatim for exactly as long as it takes to prove the candidate list
+// equivalent to it. TestChooseFromMatchesTheOldLadder compares the two over
+// every input the function can distinguish; without a reference implementation
+// in the tree that comparison could only be made against a file of expected
+// output, which proves the same thing one step further from the code.
+//
+// Deleted once the generalisation lands. Nothing in production calls it.
+func chooseSourceLadder(c sourceChoice) (sourceKind, string) {
 	primaryLive := c.primary.alive(c.now, c.grace)
 	backupLive := c.backupEnabled && c.backup.alive(c.now, c.grace)
 
