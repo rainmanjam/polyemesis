@@ -62,6 +62,12 @@ import type {
   TrackAnnotation,
   TranscriptTrack,
   TranscriptView,
+  Hook,
+  HookMeta,
+  HookDelivery,
+  HookTestResult,
+  HookCreated,
+  HookTrigger
 } from "./types";
 
 const BASE = "/api/v1";
@@ -694,4 +700,20 @@ export const api = {
     del<{ status: string }>(`/platforms/accounts/${id}`),
   /** A full-page navigation, not XHR: the platform's consent screen owns the tab. */
   connectUrl: (platform: string) => `${BASE}/oauth/${platform}/start`,
+
+  hooks: {
+    meta: () => get<HookMeta>("/hooks/meta"),
+    list: () => get<Hook[]>("/hooks"),
+    create: (body: Partial<Hook> & { url: string; secret?: string }) =>
+      post<HookCreated>("/hooks", body),
+    update: (id: number, body: Partial<Hook> & { secret?: string }) =>
+      put<Hook>(`/hooks/${id}`, body),
+    remove: (id: number) => del<{ status: string }>(`/hooks/${id}`),
+    test: (id: number, trigger?: HookTrigger) =>
+      post<HookTestResult>(
+        `/hooks/${id}/test${trigger ? `?trigger=${trigger}` : ""}`,
+        {},
+      ),
+    deliveries: (id: number) => get<HookDelivery[]>(`/hooks/${id}/deliveries`),
+  },
 };

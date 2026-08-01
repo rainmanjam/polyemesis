@@ -25,6 +25,7 @@ deliberately does not do, and how to get it running. These are the details.
 | [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md) | Going live from a file, on a schedule, with no encoder attached |
 | [MONITORING.md](MONITORING.md) | Prometheus metrics, alerts, and automation with API tokens |
 | [MQTT.md](MQTT.md) | Retained telemetry and Home Assistant discovery |
+| [HOOKS.md](HOOKS.md) | Signed lifecycle webhooks — one POST per transition, for a script rather than a person |
 | [API.md](API.md) | Every HTTP route, authentication, and a worked example |
 | [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md) | The palette, type scale and motion vocabulary the app and website share |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Organised by what you observe |

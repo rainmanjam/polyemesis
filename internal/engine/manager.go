@@ -11,6 +11,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
@@ -63,6 +64,11 @@ type Manager struct {
 	// with nothing to show an operator that the two disagree. Zero means
 	// "never set", and leaves the alerts package default in place.
 	alertAttempts int
+
+	// hooks is remembered for the same reason the transcriber is: engines are
+	// created after Start whenever a source is added, and a programme whose
+	// hooks silently never fire is a bug nobody reports.
+	hooks *hooks.Dispatcher
 }
 
 // NewManager builds the manager. No engines exist until Start.
@@ -153,6 +159,7 @@ func (m *Manager) Sync() error {
 		m.mu.RLock()
 		tw, dir, nice := m.tw, m.modelsDir, m.nice
 		attempts := m.alertAttempts
+		hookd := m.hooks
 		m.mu.RUnlock()
 		if tw != nil {
 			eng.SetTranscriber(tw, dir, nice)
@@ -162,6 +169,9 @@ func (m *Manager) Sync() error {
 		// other engine is using. SetRetry tolerates a nil Notifier.
 		if attempts > 0 {
 			eng.Alerts().SetRetry(attempts)
+		}
+		if hookd != nil {
+			eng.SetHooks(hookd)
 		}
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
@@ -439,6 +449,17 @@ func (m *Manager) LastReload() []ReloadReport {
 		out = append(out, eng.LastReload())
 	}
 	return out
+}
+
+// SetHooks attaches the shared lifecycle-hook dispatcher to every engine, now
+// and to any created later.
+func (m *Manager) SetHooks(d *hooks.Dispatcher) {
+	m.mu.Lock()
+	m.hooks = d
+	m.mu.Unlock()
+	for _, eng := range m.Engines() {
+		eng.SetHooks(d)
+	}
 }
 
 // SetAlertRetry applies the alert delivery budget to every engine, now and to
