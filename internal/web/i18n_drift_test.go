@@ -48,8 +48,25 @@ func TestEveryLocaleCarriesTheSameKeys(t *testing.T) {
 	if !ok {
 		t.Fatal("en.json is missing; it is the source every other locale is measured against")
 	}
-	if len(locales) < 2 {
-		t.Fatalf("found %d locale files; the guard has nothing to compare", len(locales))
+
+	// The count is asserted, not trusted. Everything below compares each locale
+	// it FINDS against en.json, so deleting a locale outright does not break a
+	// single comparison -- it removes them. Measured: with ja.json moved aside
+	// the whole package still passed, and Japanese had silently stopped shipping.
+	//
+	// Same reasoning as the selector golden table, which asserts its 1024 rows
+	// for the same reason: a harness that quietly checked fourteen files while
+	// the product claims fifteen is a safety net with a hole in the middle, and
+	// the hole is invisible precisely because nothing fails.
+	//
+	// Hardcoded so that adding or retiring a language is a deliberate edit here.
+	// That is the point rather than a chore: it is the moment to ask whether the
+	// new locale is actually translated or is English wearing a filename.
+	const wantLocales = 15
+	if len(locales) != wantLocales {
+		t.Fatalf("found %d locale files, want %d: %v\nIf a language was added or "+
+			"retired on purpose, change wantLocales and say so in the commit message.",
+			len(locales), wantLocales, sortedNames(locales))
 	}
 
 	for name, m := range locales {
@@ -132,6 +149,19 @@ func TestPlaceholdersSurviveTranslation(t *testing.T) {
 			}
 		}
 	}
+}
+
+// sortedNames returns the locale filenames, sorted, so a count failure names
+// what it actually found rather than leaving the reader to go and look. Map
+// iteration order would otherwise make the same failure read differently on
+// every run.
+func sortedNames(locales map[string]map[string]string) []string {
+	out := make([]string, 0, len(locales))
+	for name := range locales {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // missing returns the keys of a that b does not have, sorted so the failure is
