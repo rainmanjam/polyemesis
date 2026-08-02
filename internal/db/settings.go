@@ -518,10 +518,15 @@ type PlaylistItem struct {
 // name calls this, and no caller anywhere writes its own strings.TrimSpace
 // over an Upload.
 //
-// One exception, deliberate and recorded: playlistmedia.DerivativePath trims
-// independently, because it takes a name out of a job's JSON params rather than
-// out of a PlaylistItem, and internal/playlistmedia does not import this
-// package. That one is ledgered as carried.
+// The one exception this used to carry is now closed: playlistmedia.
+// DerivativePath used to trim independently, because it took a name out of a
+// job's JSON params rather than out of a PlaylistItem, and internal/playlistmedia
+// could not import this package. Nothing about that has changed except that it
+// now can (internal/db does not import internal/playlistmedia, so there is no
+// cycle), and B2's playlistmedia.ProfileVersion made a second, private trim in
+// that function too dangerous to keep: a fifth site that ever disagreed with
+// this one would key a derivative's filename on a name the rest of the system
+// does not recognise as the same upload.
 func PlaylistUploadName(upload string) string { return strings.TrimSpace(upload) }
 
 // PlaylistSettings is an ordered list of uploads the selector can put on air
