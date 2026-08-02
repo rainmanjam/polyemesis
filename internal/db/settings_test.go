@@ -101,6 +101,37 @@ func TestAPlaylistItemRejectsADotUpload(t *testing.T) {
 	}
 }
 
+// TestAPlaylistIsBoundedInLength is the ceiling on how much work one settings
+// document can commit the engine to.
+//
+// The list is not free to hold. engine.playlistItemsReady stats every item
+// twice on every reconcile while selMu is held -- the lock an operator's
+// failover POST queues behind -- the whole document is a single JSON row read
+// on most API requests, and in sub-project B2 the list becomes a concat file
+// FFmpeg has to parse. Without a bound the only limit is what a client can POST.
+//
+// The mutation: delete the len(p.Items) > MaxPlaylistItems check in
+// PlaylistFileProblem and this passes.
+func TestAPlaylistIsBoundedInLength(t *testing.T) {
+	s := DefaultSettings()
+	s.Failover.Playlist.Enabled = true
+	s.Failover.Playlist.Items = make([]PlaylistItem, MaxPlaylistItems+1)
+	for i := range s.Failover.Playlist.Items {
+		s.Failover.Playlist.Items[i] = PlaylistItem{Upload: "loop.mp4"}
+	}
+	if err := s.Validate(); err == nil {
+		t.Errorf("a playlist of %d items was accepted; every reconcile walks the whole "+
+			"list under selMu", MaxPlaylistItems+1)
+	}
+
+	// And the bound is a bound, not a refusal: exactly the maximum is fine, or
+	// the constant would be off by one against its own name.
+	s.Failover.Playlist.Items = s.Failover.Playlist.Items[:MaxPlaylistItems]
+	if err := s.Validate(); err != nil {
+		t.Errorf("a playlist of exactly %d items was refused: %v", MaxPlaylistItems, err)
+	}
+}
+
 func TestAnEnabledPlaylistNeedsAtLeastOneItem(t *testing.T) {
 	s := DefaultSettings()
 	s.Failover.Playlist.Enabled = true

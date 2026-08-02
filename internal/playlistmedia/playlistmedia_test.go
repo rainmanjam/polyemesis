@@ -14,28 +14,20 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
-func TestTheNormalisedProfileIsFixedAndComplete(t *testing.T) {
-	// Every item must agree on codec, timebase, resolution and channel layout
-	// or the concat demuxer errors or produces garbage. Fixed, not derived:
-	// matching the live encoder would move the target on every settings change
-	// and leave every existing derivative stale with nothing saying so.
-	args := normaliseArgs("/in.mov", "/out.ts")
-	joined := strings.Join(args, " ")
-	for _, want := range []string{
-		"-c:v", "libx264", "-pix_fmt", "yuv420p",
-		"-r", "30", "-c:a", "aac", "-ac", "2", "-ar", "48000",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("normalise argv is missing %q: %v", want, args)
-		}
-	}
-}
-
-// TestEveryProfileFlagCarriesTheValueWeMeant is the substring test above done
-// properly. Contains("-ac") would still pass if the argv said `-ac 6`, and a
-// six-channel item in a stereo playlist is precisely the mismatch this package
-// exists to prevent, so each flag is checked as a PAIR and checked to appear
-// exactly once — a second `-r` later in the argv would silently win.
+// TestEveryProfileFlagCarriesTheValueWeMeant is the profile check, and the only
+// one: every item must agree on codec, timebase, resolution and channel layout
+// or the concat demuxer errors or produces garbage, and the profile is fixed
+// rather than derived because matching the live encoder would move the target
+// on every settings change and leave every existing derivative stale with
+// nothing saying so.
+//
+// A substring check over the joined argv used to sit above this one and was
+// deleted as duplication: Contains("-ac") would still pass if the argv said
+// `-ac 6`, and a six-channel item in a stereo playlist is precisely the
+// mismatch this package exists to prevent. Every mutation that test could
+// catch, this one catches strictly better -- each flag is checked as a PAIR and
+// checked to appear exactly once, because a second `-r` later in the argv would
+// silently win.
 func TestEveryProfileFlagCarriesTheValueWeMeant(t *testing.T) {
 	args := normaliseArgs("/in.mov", "/out.ts")
 	for _, tc := range []struct{ flag, value string }{

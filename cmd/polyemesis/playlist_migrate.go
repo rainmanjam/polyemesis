@@ -90,7 +90,22 @@ func migrateLegacyPlaylistFilePath(store *db.DB, dataDir string, log *slog.Logge
 		// contribute.
 		return nil
 	}
-	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: legacy}}
+	// Validated with the SAME validator the settings API applies, immediately
+	// before the write. Resolve and the stat above answer "does this name a
+	// real upload"; they do not answer "is this a value db.Settings.Validate
+	// will accept", and the two differ -- most concretely at
+	// MaxPlaylistItemUpload, which a legacy filePath predates and is not bound
+	// by. A 600-character bare filename that exists on disk would migrate
+	// happily here and then make the operator's NEXT settings save fail
+	// validation on a value they never typed. Vanishingly unlikely; refusing it
+	// is one call and makes this migration's guarantee total, which is worth
+	// more than the case is likely.
+	migrated := db.PlaylistSettings{Items: []db.PlaylistItem{{Upload: legacy}}}
+	if err := migrated.PlaylistFileProblem(); err != nil {
+		refuse("is not a value the settings validator will accept", "err", err)
+		return nil
+	}
+	s.Failover.Playlist.Items = migrated.Items
 	if err := store.PutSettings(s); err != nil {
 		return fmt.Errorf("persist migrated playlist: %w", err)
 	}

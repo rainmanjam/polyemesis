@@ -449,14 +449,6 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 	return p
 }
 
-// Config is the processor's resolved configuration.
-func (p *Processor) Config() Config { return p.cfg }
-
-// SetConfig replaces the configuration, so a settings change reaches the worker
-// without a restart. Only the next job sees it; one already running keeps what
-// it started under.
-func (p *Processor) SetConfig(cfg Config) { p.cfg = cfg.Normalized() }
-
 // Register wires the worker into a queue.
 func (p *Processor) Register(r Registry) error {
 	return r.Register(KindNormalise, NormaliseLimit, jobs.WorkerFunc(p.RunNormalise))
@@ -469,8 +461,19 @@ type NormaliseParams struct {
 	// Upload is the STORED UPLOAD NAME, not a path and not a playlist position.
 	Upload string `json:"upload"`
 	// DurationMS is the source's duration, used for the progress bar and for
-	// the disk estimate. Optional: zero costs a moving progress bar and a
-	// weaker free-space guard, both of which are documented where they bite.
+	// the disk estimate.
+	//
+	// NOTHING POPULATES IT TODAY, and that is a stated cost rather than an
+	// oversight. The only production submitter is the settings handler
+	// (api.Server.enqueuePlaylistNormalisation), which would have to run
+	// ffprobe on operator media inside an HTTP request to fill it in -- a
+	// synchronous subprocess in the request path, on a machine that may be
+	// carrying a live stream. So every real job arrives with zero, and two
+	// things are weaker for it: the progress bar moves without a percentage,
+	// and checkSpace estimates the derivative from the SOURCE'S SIZE instead of
+	// duration x bitrate, which estimateBytes reports as bounded=false -- a
+	// guess that is logged and still fails closed, not a guard that is skipped.
+	// A caller that has a probed duration to hand should pass it.
 	DurationMS int64 `json:"durationMs,omitempty"`
 }
 

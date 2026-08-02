@@ -430,6 +430,18 @@ const (
 	// It used to bound a data-dir-relative path; it now bounds an upload's
 	// stored name, which is shorter in practice but needs no smaller a ceiling.
 	MaxPlaylistItemUpload = 512
+	// MaxPlaylistItems bounds how many entries one playlist may hold.
+	//
+	// The list is not free to walk. engine.playlistItemsReady stats every item
+	// twice on EVERY reconcile while selMu is held -- the same lock an
+	// operator's POST /failover/source queues behind -- and the whole settings
+	// document is one JSON row that is read on most API requests. A thousand
+	// items is far more than any broadcast rotation and still a bounded amount
+	// of work; without a ceiling the only limit is what a client can POST.
+	//
+	// It also bounds what sub-project B2 will turn this list into: a concat
+	// file handed to FFmpeg, one line per item.
+	MaxPlaylistItems = 1000
 )
 
 // BackupIngestSettings is the second listener, running alongside the primary on
@@ -586,6 +598,10 @@ func (p PlaylistSettings) PlaylistFileProblem() error {
 		}
 		return nil
 	}
+	if len(p.Items) > MaxPlaylistItems {
+		return fmt.Errorf("playlist has %d items, more than the %d allowed",
+			len(p.Items), MaxPlaylistItems)
+	}
 	for i, item := range p.Items {
 		if err := playlistUploadProblem(item.Upload); err != nil {
 			return fmt.Errorf("playlist item %d: %w", i, err)
@@ -597,12 +613,20 @@ func (p PlaylistSettings) PlaylistFileProblem() error {
 // playlistUploadProblem reports why an item's Upload cannot name an upload, or
 // nil.
 //
-// This is a shape check, not an existence check: it cannot ask internal/uploads
-// whether the name resolves to a real, normalised file, because settings
-// validation has no Store to ask. That question -- resolving through
-// uploads.Store.Resolve and requiring a normalised derivative -- belongs to
-// engine.go's readiness gate, so a candidate that names an upload which was
-// deleted or never normalised is refused there instead of here.
+// This is a shape check, not an existence check, and deliberately so: it cannot
+// ask internal/uploads whether the name is a real file, because settings
+// validation has no Store to ask and internal/db must not grow one. Importing
+// internal/uploads here would put an os.MkdirAll and a stat behind every
+// db.GetSettings -- ~20 callers, several of them per-request handlers -- which
+// is the defect Task 1 had to undo once already.
+//
+// EXISTENCE IS CHECKED, just not here. The settings handler asks the uploads
+// store it already holds (api.Server.playlistUploadProblems, called from
+// handlePutSettings) so that "that file is not there" is a 400 an operator
+// reads, which is what the spec requires. Whether the item has also been
+// NORMALISED is a third question, answered later still, by engine.go's
+// readiness gate -- normalisation is asynchronous, so an item can be perfectly
+// valid and not yet playable.
 func playlistUploadProblem(upload string) error {
 	u := strings.TrimSpace(upload)
 	if u == "" {

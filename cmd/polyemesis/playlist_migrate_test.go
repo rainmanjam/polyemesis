@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -117,6 +118,61 @@ func TestMigrateLegacyPlaylistFilePathRefusesWhatItCannotHonestlyMigrate(t *test
 					"migration exists to avoid. log:\n%s", tc.legacy, buf.String())
 			}
 		})
+	}
+}
+
+// TestMigrateLegacyPlaylistFilePathRefusesAValueTheValidatorWouldReject closes
+// the gap between "names a real upload" and "is a legal playlist item".
+//
+// Resolve and the stat answer the first question; db.Settings.Validate answers
+// the second, and they are not the same question. "C:loop.mp4" has no
+// separator, so uploads.Store.Resolve is happy with it, and on a POSIX
+// filesystem it is a perfectly ordinary filename that can really exist -- but
+// PlaylistFileProblem refuses it, because on Windows that is a drive-relative
+// path and an item is a bare name everywhere or nowhere. Migrated without the
+// validator's opinion, it would be written into settings and then make the
+// operator's NEXT save fail on a value they never typed.
+//
+// The mutation: delete the migrated.PlaylistFileProblem() check in
+// migrateLegacyPlaylistFilePath and this fails, with the bad value persisted.
+func TestMigrateLegacyPlaylistFilePathRefusesAValueTheValidatorWouldReject(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the value under test cannot be created as a file on Windows, " +
+			"which is the very reason the validator refuses it")
+	}
+	const legacy = "C:loop.mp4"
+
+	store := testStore(t)
+	dataDir := t.TempDir()
+	log, buf := testLogger()
+
+	uploadsDir := filepath.Join(dataDir, uploads.Dir)
+	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	// It really is on disk, so resolve and stat both succeed and only the
+	// validator can be the reason this is refused.
+	if err := os.WriteFile(filepath.Join(uploadsDir, legacy), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed upload: %v", err)
+	}
+	seedLegacyPlaylist(t, store, legacy)
+
+	if err := migrateLegacyPlaylistFilePath(store, dataDir, log); err != nil {
+		t.Fatalf("migrateLegacyPlaylistFilePath: %v", err)
+	}
+
+	got, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if len(got.Failover.Playlist.Items) != 0 {
+		t.Errorf("legacy filePath %q was migrated to %+v even though the settings "+
+			"validator refuses it; the operator's next save would fail on a value "+
+			"this migration wrote", legacy, got.Failover.Playlist.Items)
+	}
+	if !strings.Contains(buf.String(), "left unmigrated") {
+		t.Errorf("no WARN logged; dropping a value silently is what this migration "+
+			"exists to avoid. log:\n%s", buf.String())
 	}
 }
 
