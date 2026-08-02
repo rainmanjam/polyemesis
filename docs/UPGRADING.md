@@ -94,6 +94,42 @@ If you run Kick chat on a host with restricted outbound access, allow
 unverified delivery was accepted; an unauthenticated write path is not something
 to fail open on, so it now fails closed instead.
 
+### `failover.playlist.filePath` → `failover.playlist.items` — **breaking**
+
+The playlist is now an ordered list of **stored uploads** rather than one file
+path, and `filePath` is gone. This is the only change on this page that can
+break an existing automation, so read it before upgrading if you set the
+playlist through the API.
+
+What changes:
+
+- **Any payload that still sets `failover.playlist.filePath` is rejected with
+  400.** The settings decoder refuses unknown fields, so there is no silent
+  no-op — a script that has not been updated fails loudly on its next
+  `PUT /api/v1/settings`. Send `failover.playlist.items` instead:
+  `{"items": [{"upload": "filler.ts"}]}`.
+- An item names an **upload**, not a path. Upload the file through the media
+  page (or `POST /api/v1/media`) and use the stored name it returns. A name
+  containing a `/`, a `\` or a `..` is refused, and so is a name that does not
+  match an upload that actually exists.
+- **The old value is migrated for you only when it can be**: at startup, a
+  legacy `filePath` that is a bare filename already sitting in the uploads
+  directory becomes the single item of the new list. Anything else — a
+  `media/loop.mp4`-style path, or a name with no matching upload — is **left
+  unmigrated with a WARN in the log**, because `filePath` was resolved relative
+  to the data directory and an item is resolved inside `uploads/`, so copying
+  the string across would have pointed at a different file. If you see that
+  warning, upload the file and re-select it in the playlist.
+- **Items must be normalised before a playlist goes on air.** Saving a playlist
+  queues one `playlist.normalise` job per distinct upload, which transcodes it
+  to the single profile every item has to share. The playlist is unavailable —
+  and the slate stays on air — until every item's job has finished. Like all
+  background work it yields to a live stream, so an item added while you are
+  broadcasting normalises when the stream ends. Watch it on the Jobs page.
+- Today the list may hold several items but only the **first** one plays.
+  Sequencing is a later change; the list is stored, validated and normalised in
+  full now so that nothing has to be re-entered when it arrives.
+
 ### `tls.enabled` → `tls.mode`
 
 The old boolean still works, so an existing config keeps its behaviour:

@@ -504,6 +504,11 @@ internal/
                via whisper.cpp
   media/       a finished recording to the derived files a library needs: a
                low-bitrate proxy, keyframe index, thumbnails
+  uploads/     operator-supplied files, and the one place a stored name is
+               turned into a path inside the uploads directory
+  playlistmedia/
+               one upload to the single normalised derivative a playlist item
+               must have before the failover playlist may go on air
 
   -- operations
   scheduler/   starts and stops destinations at a time the operator chose
