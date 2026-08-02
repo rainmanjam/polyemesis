@@ -289,6 +289,21 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
+      # A dry run builds the SBOM and then destroys it with the runner, so the
+      # rehearsal could only ever prove the step exited 0. Uploading it makes a
+      # dry run answer the question people actually have -- what is IN the bill
+      # of materials -- before a tag exists to attach it to.
+      #
+      # Only on a dry run: a real release already carries these as assets, and
+      # a second copy that expires in 90 days would be the one someone links to.
+      - name: Upload SBOM for inspection (dry run only)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sbom-dry-run
+          path: dist/polyemesis-sbom.*.json
+          if-no-files-found: error
+
       - name: Publish GitHub Release
         if: env.PUBLISH == 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
