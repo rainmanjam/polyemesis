@@ -154,8 +154,15 @@ func TestAnItemThatIsAlreadyNormalisedIsNotQueuedAgain(t *testing.T) {
 	}
 }
 
-// TestSavingAPlaylistItemThatNamesNoUploadIsRefused is the spec's "a missing
-// upload is a settings error", which nothing implemented.
+// The two halves of "a missing upload is a settings error" are tested against
+// each other on purpose, because the rule is a boundary rather than a check:
+// an item the operator is INTRODUCING must be refused, and an item they
+// INHERITED must not be, or a deleted file locks them out of the settings page
+// entirely. Either test alone would be satisfied by a check that is simply
+// always on or always off.
+
+// TestSavingAPlaylistItemThatNamesNoUploadIsRefused is the spec's rule, in the
+// direction the spec states it.
 //
 // Without it the save returns 200, the playlist never becomes available, and
 // the only trace anywhere is an Info log line saying "not every item has been
@@ -175,6 +182,86 @@ func TestSavingAPlaylistItemThatNamesNoUploadIsRefused(t *testing.T) {
 	if got := normaliseJobs(t, q); len(got) != 0 {
 		t.Errorf("a refused settings save still queued work: %+v", got)
 	}
+}
+
+// TestADeletedUploadDoesNotLockTheOperatorOutOfSettings is the other half, and
+// it is about a check that was too strict rather than too loose.
+//
+// The sequence is entirely ordinary: save a playlist, delete the file. There is
+// no in-use guard on DELETE /api/v1/media/{name} (deliberately -- it belongs
+// with the orphan sweep), so the stored item now names nothing. With existence
+// checked on every item, EVERY subsequent settings save 400s -- with the
+// playlist disabled, and for a change with nothing to do with the playlist --
+// and the operator cannot clear it, because the settings UI has no playlist
+// control yet and the page GETs the whole document and PUTs it back, so the
+// stale item round-trips untouched. Deleting a file bricked the settings page
+// with no in-product recovery.
+//
+// VALIDATION REJECTS WHAT THE OPERATOR IS INTRODUCING; IT MUST NOT PUNISH THEM
+// FOR PRE-EXISTING STATE THEY HAVE NO CONTROL TO EDIT. The safety property is
+// unaffected: engine.playlistItemsReady stats the resolved upload on every
+// reconcile, so the playlist still cannot go on air.
+//
+// The mutation: drop the `inherited` skip in playlistUploadProblems -- so every
+// item is checked again, which is what shipped -- and the unrelated save below
+// comes back 400.
+func TestADeletedUploadDoesNotLockTheOperatorOutOfSettings(t *testing.T) {
+	h, sign, srv, _ := playlistJobServer(t)
+	seedUpload(t, srv, "doomed.ts")
+
+	// A perfectly good save, which is what makes the item pre-existing.
+	savePlaylist(t, h, sign, []string{"doomed.ts"}, http.StatusOK)
+
+	// The operator deletes the upload through the media page. Nothing warns
+	// them, and nothing rewrites the settings row.
+	send(t, h, sign, http.MethodDelete, "/api/v1/media/doomed.ts", nil, http.StatusNoContent)
+
+	// An entirely unrelated change: the recorder's segment length. The playlist
+	// block travels along untouched because the settings page always PUTs the
+	// whole document.
+	var s map[string]any
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &s)
+	rec, _ := s["recording"].(map[string]any)
+	if rec == nil {
+		t.Fatal("settings carried no recording block")
+	}
+	rec["segmentSeconds"] = 900
+
+	fo, _ := s["failover"].(map[string]any)
+	pl, _ := fo["playlist"].(map[string]any)
+	items, _ := pl["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("the stale item is not in the document, so this proves nothing: %v", pl["items"])
+	}
+
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", s, http.StatusOK)
+
+	// And the unrelated change really landed, rather than the 200 coming from
+	// somewhere that skipped the write.
+	var after map[string]any
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &after)
+	got, _ := after["recording"].(map[string]any)
+	if got == nil || got["segmentSeconds"] != float64(900) {
+		t.Errorf("the unrelated setting did not persist: %v", got["segmentSeconds"])
+	}
+}
+
+// TestANewItemIsStillRefusedWhenAnOldOneIsAlreadyBroken is the boundary itself:
+// inheriting a broken item must not buy an operator the right to add another.
+//
+// Without this, "skip what is already stored" could be read as "skip
+// everything once anything is broken", and the spec's rule would quietly stop
+// applying to the very list it matters most for.
+func TestANewItemIsStillRefusedWhenAnOldOneIsAlreadyBroken(t *testing.T) {
+	h, sign, srv, _ := playlistJobServer(t)
+	seedUpload(t, srv, "doomed.ts")
+
+	savePlaylist(t, h, sign, []string{"doomed.ts"}, http.StatusOK)
+	send(t, h, sign, http.MethodDelete, "/api/v1/media/doomed.ts", nil, http.StatusNoContent)
+
+	// The stale item rides along, and the operator adds a second one that names
+	// nothing either. The NEW one must still be refused.
+	savePlaylist(t, h, sign, []string{"doomed.ts", "also-missing.ts"}, http.StatusBadRequest)
 }
 
 // The refusal has to name the item, or an operator with a twelve-item playlist

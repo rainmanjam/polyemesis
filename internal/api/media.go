@@ -116,6 +116,23 @@ func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteMedia removes one stored upload.
+//
+// NO IN-USE GUARD, and that is a known gap rather than a decision. Deleting an
+// upload that a saved playlist item names leaves the item pointing at nothing:
+// the playlist stops being able to go on air (engine.playlistItemsReady stats
+// the resolved upload, so it refuses) and the operator is told only by a log
+// line. It also orphans the normalised derivative under playlist-media/, which
+// nothing sweeps.
+//
+// Both halves belong to the same piece of work -- the orphan sweep this
+// endpoint would own -- and both are carried deliberately.
+//
+// What is NOT carried is the consequence for the settings API.
+// playlistUploadProblems checks existence only for items a save INTRODUCES,
+// precisely so that a delete here cannot make every later settings save fail
+// on state the operator has no control to edit: the settings page has no
+// playlist control yet, and it PUTs the whole document back, so a stale item
+// would round-trip forever with no way to remove it.
 func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 	store, err := s.uploadStore()
 	if err != nil {

@@ -3,10 +3,10 @@ package api
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // The two things a settings save has to do about a playlist beyond storing it:
@@ -21,8 +21,9 @@ import (
 // The API layer, by contrast, already builds a store per request
 // (Server.uploadStore) and is where the operator is standing.
 
-// playlistUploadProblems reports why the configured items cannot be used, or
-// nil.
+// playlistUploadProblems reports why an item the operator is INTRODUCING
+// cannot be used, or nil. want is the incoming playlist; stored is the one
+// already saved.
 //
 // EXISTENCE, which db.PlaylistSettings.PlaylistFileProblem deliberately cannot
 // check. The spec makes this binding -- "a missing upload is a settings error"
@@ -33,26 +34,62 @@ import (
 // item has been normalised yet", which is the wrong sentence for "that file
 // does not exist".
 //
-// Checked whether or not the playlist is enabled, for the same reason
-// PlaylistFileProblem checks the shape of a disabled list: a half-configured
-// playlist is caught when it is saved, not when it is switched on in a hurry.
+// VALIDATION REJECTS WHAT THE OPERATOR IS INTRODUCING; IT MUST NOT PUNISH THEM
+// FOR PRE-EXISTING STATE THEY HAVE NO CONTROL TO EDIT. That is why stored is a
+// parameter. Checking every item unconditionally looked stricter and was
+// strictly worse: DELETE /api/v1/media/{name} has no in-use guard, so deleting
+// a file that a saved item names made EVERY subsequent PUT /settings 400 --
+// with the playlist disabled, and for an unrelated change like an alert
+// threshold. The operator could not clear it either, because the settings UI
+// has no playlist control yet (FailoverSettings in ui/src/lib/types.ts carries
+// no playlist field until B2) and the page GETs the whole document and PUTs it
+// back, so the stale item round-trips untouched. Deleting a file bricked the
+// settings page with no in-product recovery, which is worse than the problem
+// this check was added to solve.
+//
+// THE SAFETY PROPERTY IS NOT WEAKENED, because validation is not the runtime
+// gate. A stale item whose upload is gone still fails engine.playlistItemsReady
+// -- which stats the resolved upload on every reconcile -- so the playlist
+// still never goes on air, and the operator still cannot get a broken item PAST
+// this check by introducing one. Validation answers "may this be saved", the
+// readiness gate answers "may this go to air", and those are different jobs.
+//
+// "Introducing" is by NAME rather than by position, so re-ordering an existing
+// list is not mistaken for typing two new items. A name already somewhere in
+// the stored list is state the operator inherited; anything else they are
+// adding or editing now.
 //
 // Resolution goes through the uploads store, never a join, exactly as the
 // engine's readiness gate does -- it is the boundary that makes items upload
 // NAMES rather than paths.
-func (s *Server) playlistUploadProblems(p db.PlaylistSettings) error {
-	if len(p.Items) == 0 {
+func (s *Server) playlistUploadProblems(want, stored db.PlaylistSettings) error {
+	if len(want.Items) == 0 {
 		return nil
 	}
-	store, err := s.uploadStore()
-	if err != nil {
-		// Fail closed. Not being able to ask is not the same as the answer
-		// being yes, and this only happens when the data directory is
-		// unusable -- which the operator needs told regardless.
-		return fmt.Errorf("playlist items cannot be checked: %w", err)
+	inherited := make(map[string]bool, len(stored.Items))
+	for _, item := range stored.Items {
+		inherited[db.PlaylistUploadName(item.Upload)] = true
 	}
-	for i, item := range p.Items {
-		name := strings.TrimSpace(item.Upload)
+
+	var store *uploads.Store
+	for i, item := range want.Items {
+		name := db.PlaylistUploadName(item.Upload)
+		if inherited[name] {
+			continue
+		}
+		if store == nil {
+			// Built lazily, so a save that introduces nothing does no
+			// filesystem work at all -- which is most saves, since the settings
+			// page PUTs the whole document back on every unrelated change.
+			var err error
+			if store, err = s.uploadStore(); err != nil {
+				// Fail closed. Not being able to ask is not the same as the
+				// answer being yes, and this only happens when the data
+				// directory is unusable -- which the operator needs told
+				// regardless.
+				return fmt.Errorf("playlist items cannot be checked: %w", err)
+			}
+		}
 		path, err := store.Resolve(name)
 		if err != nil {
 			return fmt.Errorf("playlist item %d: %w", i, err)
@@ -103,7 +140,11 @@ func (s *Server) enqueuePlaylistNormalisation(p db.PlaylistSettings) {
 		return
 	}
 	for _, item := range p.Items {
-		name := strings.TrimSpace(item.Upload)
+		// db.PlaylistUploadName, never a TrimSpace of our own: this and the
+		// existence check above are the two internal/api sites the whitespace
+		// rule has to reach, and a private copy here is how the engine and the
+		// validator once came to disagree about what an item names.
+		name := db.PlaylistUploadName(item.Upload)
 		if name == "" {
 			continue
 		}
