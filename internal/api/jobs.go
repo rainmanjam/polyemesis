@@ -13,6 +13,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -114,6 +115,8 @@ var kindCatalogue = []struct {
 		"Re-encodes an old recording to HEVC to reclaim disk. Lossy, verified after the fact, and never applied to a recording younger than the configured age."},
 	{clipper.JobKind, "Clip export",
 		"A keyframe-accurate cut out of a finished recording, copied losslessly wherever the cut lands on a keyframe."},
+	{playlistmedia.KindNormalise, "Playlist normalise",
+		"Transcodes one uploaded playlist item to the single fixed profile every item must share. A playlist will not go on air until every one of its items has been through this."},
 }
 
 func kindLabel(k jobs.Kind) string {

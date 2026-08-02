@@ -14,7 +14,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // The post-production tier is assembled here and nowhere else.
@@ -64,7 +66,13 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 		log.Info("whisper detected", "path", whisper.Binary, "version", whisper.Version)
 	}
 
-	q := jobs.New(log, store, jobs.WithConcurrency(settings.PostProd.Concurrency))
+	q := jobs.New(log, store,
+		jobs.WithConcurrency(settings.PostProd.Concurrency),
+		// A finished normalisation has to reach the engine, or the playlist tier
+		// it unblocks stays off air until something unrelated happens to
+		// reconcile. See reconcileOnNormalise.
+		jobs.WithOnChange(reconcileOnNormalise(log, eng.Reconcile)),
+	)
 
 	// The governor comes first because the processors need its NiceCommand.
 	gov := jobs.NewGovernor(log, q,
@@ -172,6 +180,81 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *
 	cutter := clipper.New(log, tools.FFmpeg, tools.FFprobe)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
 	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve)))
+
+	// Playlist normalisation. THIS IS THE PRODUCER OF THE FILE THE PLAYLIST
+	// TIER REFUSES TO START WITHOUT: engine.playlistItemsReady requires a
+	// normalised derivative for every item, and this worker is the only thing
+	// in the product that writes one. Registered here and submitted from the
+	// settings handler, an unregistered kind would leave every playlist
+	// permanently unavailable -- the spec's stated worst outcome -- while the
+	// package sat in the tree looking complete.
+	//
+	// A store that cannot be built is passed through as nil rather than made a
+	// startup failure, the same fail-open rule as everything else in this
+	// function: the job then fails with "no upload store is configured", which
+	// names the problem, where a kind that quietly does not exist does not.
+	upStore, uerr := uploads.New(cfg.DataDir)
+	if uerr != nil {
+		log.Error("cannot open the uploads store; playlist items cannot be normalised", "error", uerr)
+	}
+	np := playlistmedia.New(log, playlistmedia.Config{
+		FFmpeg:  tools.FFmpeg,
+		FFprobe: tools.FFprobe,
+		// The SAME DataDir string the engine builds DerivativePath from, not an
+		// absolute-ised copy of it: the writer and the readiness check must
+		// agree on the path byte for byte or the derivative lands somewhere the
+		// gate never looks.
+		DataDir: cfg.DataDir,
+		Uploads: uploadResolver(upStore),
+	}, playlistmedia.WithExecer(niceExecer(gov)))
+	if err := np.Register(q); err != nil {
+		log.Error("cannot register the playlist normalisation job kind", "error", err)
+	}
+}
+
+// uploadResolver hands the processor its resolver, or nothing at all.
+//
+// A typed nil *uploads.Store assigned to the interface field would be non-nil
+// as an interface and the worker's "no upload store is configured" guard would
+// never fire -- it would panic on the first Resolve instead.
+func uploadResolver(s *uploads.Store) playlistmedia.Resolver {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+// reconcileOnNormalise turns a finished normalisation job into a reconcile.
+//
+// THE MISSING EDGE. engine.reconcilePlaylist refuses to start a tier until every
+// item has a derivative, and it is reached only through Engine.Reconcile --
+// which settings saves, the API, the manager and the scheduler call, and a
+// finishing job does not. Without this a playlist whose last item finished
+// transcoding stayed off air until an operator happened to save something else.
+// The selector's own 500 ms sweep does not help: it calls sweepSelector, which
+// never touches the playlist.
+//
+// Only StateDone, and only this kind. A failed or retrying job has written no
+// derivative, so reconciling would re-read exactly the state that has just been
+// refused; every other kind produces nothing the engine's configuration depends
+// on. "Done" includes the reuse path, where the derivative was already there --
+// that is still the answer the gate was waiting for.
+//
+// On its own goroutine because WithOnChange's contract is that the callback does
+// not block: it is called from the queue's per-job goroutine, and a reconcile
+// stops and starts supervised processes.
+func reconcileOnNormalise(log *slog.Logger, reconcile func() error) func(jobs.Job) {
+	return func(j jobs.Job) {
+		if j.Kind != playlistmedia.KindNormalise || j.State != jobs.StateDone {
+			return
+		}
+		go func() {
+			if err := reconcile(); err != nil {
+				log.Warn("a normalised playlist item did not reach the engine",
+					"job", j.ID, "upload", j.Target, "error", err)
+			}
+		}()
+	}
 }
 
 // niceWrapper adapts the governor's variadic NiceCommand to the slice-taking
