@@ -82,21 +82,26 @@ func TestTheNormaliseWorkerIsRegisteredWithTheQueue(t *testing.T) {
 // hook a playlist whose last item finished transcoding sits off air until an
 // operator happens to save something unrelated.
 //
-// The mutation: drop jobs.WithOnChange from the queue built in startPostProd,
-// or drop either arm of reconcileOnNormalise's guard, and the reconcile never
-// arrives.
+// It goes through newJobQueue, which is the constructor startPostProd itself
+// calls, rather than assembling a queue of its own. A test that passed its own
+// jobs.WithOnChange would prove the callback works and prove nothing about
+// whether the server ever attaches it -- the exact shape of defect this
+// sub-project has produced four times.
+//
+// The mutation: drop the jobs.WithOnChange option from newJobQueue, or drop
+// either arm of reconcileOnNormalise's guard, and the reconcile never arrives.
 func TestAFinishedNormalisationReconcilesTheEngine(t *testing.T) {
 	store, _ := wiringStore(t)
 	log := wiringLogger()
 
 	reconciled := make(chan struct{}, 1)
-	q := jobs.New(log, store, jobs.WithOnChange(reconcileOnNormalise(log, func() error {
+	q := newJobQueue(log, store, 1, func() error {
 		select {
 		case reconciled <- struct{}{}:
 		default:
 		}
 		return nil
-	})))
+	})
 	if err := q.Register(playlistmedia.KindNormalise, 1,
 		jobs.WorkerFunc(func(context.Context, jobs.Job, jobs.Reporter) error { return nil })); err != nil {
 		t.Fatalf("register: %v", err)

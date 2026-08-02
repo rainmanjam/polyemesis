@@ -66,13 +66,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 		log.Info("whisper detected", "path", whisper.Binary, "version", whisper.Version)
 	}
 
-	q := jobs.New(log, store,
-		jobs.WithConcurrency(settings.PostProd.Concurrency),
-		// A finished normalisation has to reach the engine, or the playlist tier
-		// it unblocks stays off air until something unrelated happens to
-		// reconcile. See reconcileOnNormalise.
-		jobs.WithOnChange(reconcileOnNormalise(log, eng.Reconcile)),
-	)
+	q := newJobQueue(log, store, settings.PostProd.Concurrency, eng.Reconcile)
 
 	// The governor comes first because the processors need its NiceCommand.
 	gov := jobs.NewGovernor(log, q,
@@ -222,6 +216,26 @@ func uploadResolver(s *uploads.Store) playlistmedia.Resolver {
 		return nil
 	}
 	return s
+}
+
+// newJobQueue builds the queue this tier runs on.
+//
+// A named constructor rather than a jobs.New call inlined in startPostProd, so
+// that a test can build THE SAME QUEUE the server builds. Only the change hook
+// makes that worth doing: it is a single line whose absence is invisible --
+// everything still compiles, every job still runs, and the only symptom is a
+// playlist that never comes back on air. A test that assembled its own queue
+// with its own options would prove the callback works and prove nothing about
+// whether the server ever attaches it, which is the exact shape of defect this
+// sub-project has now produced four times.
+func newJobQueue(log *slog.Logger, store *db.DB, concurrency int, reconcile func() error) *jobs.Queue {
+	return jobs.New(log, store,
+		jobs.WithConcurrency(concurrency),
+		// A finished normalisation has to reach the engine, or the playlist tier
+		// it unblocks stays off air until something unrelated happens to
+		// reconcile. See reconcileOnNormalise.
+		jobs.WithOnChange(reconcileOnNormalise(log, reconcile)),
+	)
 }
 
 // reconcileOnNormalise turns a finished normalisation job into a reconcile.
