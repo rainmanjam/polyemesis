@@ -58,9 +58,13 @@ Nothing else in this plan may be built until this task's numbers exist. The spec
 
 Build three real derivatives of different lengths, concatenate with `-stream_loop -1`, capture two full wraps, and assert on packet timestamps.
 
-```go
-//go:build integration
+**NO build tag.** This package's `integration_test.go` uses none — it is an
+ordinary test that skips on `testing.Short()` and on a missing binary, which is
+how it still runs under CI's plain `go test ./...`. A `//go:build integration`
+tag would exclude this measurement from every CI run, so it would guard nothing
+after the day it was written. Follow the existing convention exactly:
 
+```go
 package playlistmedia
 
 import (
@@ -69,6 +73,21 @@ import (
 	"strings"
 	"testing"
 )
+
+func requireFFmpeg(t *testing.T) (ffmpegBin, ffprobeBin string) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("encodes real files")
+	}
+	var err error
+	if ffmpegBin, err = exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	if ffprobeBin, err = exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe not installed")
+	}
+	return ffmpegBin, ffprobeBin
+}
 
 // TestConcatTimestampsAreMonotonicAcrossSeamsAndWraps is a MEASUREMENT, not a
 // unit test. The spec's timestamp contract asserts things about FFmpeg that
