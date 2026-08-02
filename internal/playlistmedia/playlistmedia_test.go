@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -275,8 +276,28 @@ func TestRunNormaliseWritesThroughAPartialAndPublishes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("derivative was not published: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("derivative mode is %v, want 0600 — nothing outside this process reads it", perm)
+	// Unix only, and the skip is the honest answer rather than a convenience.
+	//
+	// A FileMode is discarded by the syscall layer on Windows: every writable
+	// file reports 0666, so this read `-rw-rw-rw-, want 0600` on the matrix
+	// while asserting nothing at all. internal/tlsx hit the same wall and
+	// answered it by checking the PROPERTY through internal/fsperm, which
+	// applies a real ACL -- but that is not the right answer here. fsperm is
+	// for material that is secret in itself (TLS keys, the ACME cache, the
+	// secrets directory). A derivative is a transcode of an upload, and
+	// uploads.Save uses a bare os.Chmod(0600) under an 0755 directory with no
+	// ACL of its own. Calling CheckPrivate here would assert a property the
+	// upload it came from does not have, and would fail on Windows for a
+	// reason that has nothing to do with this file.
+	//
+	// So: pin the mode where the mode means something, and say plainly that on
+	// Windows a derivative is exactly as protected as the upload beside it --
+	// which is the media tree's existing property, not a gap this test should
+	// pretend to close.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("derivative mode is %v, want 0600 — nothing outside this process reads it", perm)
+		}
 	}
 	res, ok := rep.result.(NormaliseResult)
 	if !ok || res.Path != final || res.Bytes == 0 || res.Reused {
