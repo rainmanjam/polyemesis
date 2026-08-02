@@ -257,11 +257,17 @@ jobs:
       # covers and what the release uploads, so an SBOM written afterwards
       # would ship beside a checksum file that does not describe it.
       - name: SBOM
+        # Through env and quoted, never expanded inline. GITHUB_REF_NAME is a
+        # tag here and therefore maintainer-controlled, but a ref name is on
+        # every injection checklist for good reason, and the safe spelling
+        # costs nothing.
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
           go install github.com/anchore/syft/cmd/syft@v1.50.0
           syft . \
             --source-name polyemesis \
-            --source-version "${GITHUB_REF_NAME//\//-}" \
+            --source-version "${REF_NAME//\//-}" \
             -o spdx-json=dist/polyemesis-sbom.spdx.json \
             -o cyclonedx-json=dist/polyemesis-sbom.cdx.json
           # A BOM that describes nothing is worse than no BOM: it parses
