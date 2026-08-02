@@ -15,6 +15,7 @@
 //	status           print "<active> <switches> <primaryLive> <destRestarts>"
 //	stopall          stop every destination so its file finalises
 //	pin <kind>       put a source on air by hand (primary|backup|slate|auto)
+//	playlist <path>  turn the playlist tier on, pointed at a file in the data dir
 package main
 
 import (
@@ -80,6 +81,12 @@ func main() {
 		}
 		login()
 		pin(os.Args[3])
+	case "playlist":
+		if len(os.Args) < 4 {
+			die("usage: playlist <path-relative-to-the-data-directory>")
+		}
+		login()
+		playlist(os.Args[3])
 	default:
 		die("unknown subcommand " + cmd)
 	}
@@ -274,6 +281,41 @@ func pin(kind string) {
 		die(fmt.Sprintf("pin %s failed: %d %s", kind, code, out))
 	}
 	fmt.Println("PIN_OK")
+}
+
+// playlist turns the playlist tier on, pointed at a file inside the data
+// directory.
+//
+// Turned on MID-RUN by its own subcommand rather than folded into
+// enableFailover, because the playlist outranks the slate: a tier already
+// running when the encoder is cut would take the slate's place, and the suite
+// would stop measuring the slate cycle it was written for. The file on air is
+// only interesting once that cycle has been proved to work without one.
+//
+// Read-modify-write of the whole settings document, exactly as enableFailover
+// does. PUT /settings REPLACES the settings, so posting a lone failover block
+// would reset the ingest to its defaults, move the listener off port 1938 and
+// strand the publisher -- which would look from the outside like the failover
+// this suite is measuring.
+func playlist(path string) {
+	_, out := do(http.MethodGet, "/settings", nil)
+	var s map[string]any
+	if err := json.Unmarshal(out, &s); err != nil {
+		die("settings unreadable: " + err.Error())
+	}
+	f, _ := s["failover"].(map[string]any)
+	if f == nil {
+		die("settings carried no failover block")
+	}
+	// Relative, never absolute: db.PlaylistSettings.PlaylistFileProblem confines
+	// the path to the data directory, and an absolute one is rejected by
+	// validation rather than played.
+	f["playlist"] = map[string]any{"enabled": true, "filePath": path}
+	code, body := do(http.MethodPut, "/settings", s)
+	if code != http.StatusOK {
+		die(fmt.Sprintf("enable playlist failed: %d %s", code, body))
+	}
+	fmt.Println("PLAYLIST_OK")
 }
 
 func stopAll() {

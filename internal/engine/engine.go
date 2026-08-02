@@ -145,6 +145,10 @@ type Engine struct {
 	sel *selector
 	// backup is the second listener, nil unless the tier is running one.
 	backup *backupIngest
+	// playlist is the file-playout tier, nil unless settings enable it. It is a
+	// sibling of backup and not of the slate: both are a supervised process with
+	// a hub of its own, running whether or not anybody is watching.
+	playlist *playlistTier
 	// heldSilenceSig freezes the silence tier's signature while the selector is
 	// standing in for a departed primary. See holdSilence.
 	heldSilenceSig string
@@ -643,12 +647,12 @@ func (e *Engine) Stop() {
 	e.loud = map[int64]*loudnessMon{}
 	e.clipCap, e.clipPort, e.clipHub, e.clipSig = nil, 0, nil, ""
 	silence := e.silence
-	sel, backup := e.sel, e.backup
+	sel, backup, playlist := e.sel, e.backup, e.playlist
 	recorder, preview, meters, ingest := e.recorder, e.preview, e.meters, e.ingest
 	e.dests = map[int64]*destination{}
 	e.rends = map[int64]*rendition{}
 	e.silence = nil
-	e.sel, e.backup = nil, nil
+	e.sel, e.backup, e.playlist = nil, nil, nil
 	e.recorder, e.preview, e.meters, e.ingest = nil, nil, nil, nil
 	e.mu.Unlock()
 	e.selMu.Unlock()
@@ -711,6 +715,10 @@ func (e *Engine) Stop() {
 	}
 	e.teardownSilence(silence)
 	e.teardownBackup(backup)
+	// The same level as the backup and torn down with it: both are hubs the
+	// selector's feed reads, and the feed above has already gone. A tier left
+	// here would hold a UDP socket and an FFmpeg child past shutdown.
+	e.teardownPlaylist(playlist)
 
 	if ingest != nil {
 		ingest.Stop(ctx)
@@ -2696,11 +2704,11 @@ const (
 	sourceNone    sourceKind = ""
 	sourcePrimary sourceKind = "primary"
 	sourceBackup  sourceKind = "backup"
-	// sourcePlayout is a scheduled playlist feed: a real programme, but not a
+	// sourcePlaylist is a scheduled playlist feed: a real programme, but not a
 	// live one. It sits between the ingests and the slate -- see candidatesFor
 	// for why that is the ordering and not the other one.
-	sourcePlayout sourceKind = "playout"
-	sourceSlate   sourceKind = "slate"
+	sourcePlaylist sourceKind = "playlist"
+	sourceSlate    sourceKind = "slate"
 )
 
 // selector is the running tier.
@@ -2752,6 +2760,22 @@ type sourceFeed struct {
 // backupIngest is the second listener, with a hub of its own so it can be
 // receiving from its encoder long before anybody asks it to go on air.
 type backupIngest struct {
+	proc *supervisor.Process
+	hub  *relay.Hub
+	sig  string
+}
+
+// playlistTier is the file on loop, and it is shaped exactly like backupIngest
+// because it answers the same question the backup does: what else could be on
+// air, and is it ready before anybody asks for it.
+//
+// The hub of its own is the entire point of the tier. A file played into the
+// PRIMARY's hub carries bytes into it, so the primary reads live, and a live
+// primary is the one thing failover never switches away from -- putting a file
+// on air would have silently disabled the whole feature. With its own relay the
+// primary goes quiet when the encoder goes quiet, which is the truth the
+// selector needs.
+type playlistTier struct {
 	proc *supervisor.Process
 	hub  *relay.Hub
 	sig  string
@@ -2866,6 +2890,20 @@ func (e *Engine) backupHub() *relay.Hub {
 	return e.backup.hub
 }
 
+// playlistHub is the playlist tier's relay, or nil when there is none.
+//
+// Nil rather than a panic for the same reason backupHub answers nil: every
+// caller asks BEFORE knowing whether the tier is running, and "no hub" is a
+// normal answer for a feature that is off by default.
+func (e *Engine) playlistHub() *relay.Hub {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.playlist == nil {
+		return nil
+	}
+	return e.playlist.hub
+}
+
 // holdSilence freezes the silence tier's signature while the selector is
 // standing in for a departed primary.
 //
@@ -2903,18 +2941,29 @@ type sourceChoice struct {
 
 	backupEnabled bool
 	slateEnabled  bool
-	// playoutRunning is whether a playlist feed is actually running, which is
-	// the whole of "would the playlist deliver bytes if we switched to it" --
-	// a playlist plays out of a file, so there is no liveness history to keep
-	// and no grace window to wait out. It is a plain field, sampled by the
-	// caller under the lock like everything else here, rather than a lookup
-	// into playout state made from inside the decision: chooseSource has to
+	// playlistRunning is whether the playlist is DELIVERING, which is the whole
+	// of "would the playlist carry bytes if we switched to it".
+	//
+	// It is not "the tier is up". PlaylistFileProblem checks path confinement,
+	// not existence, so a path safely inside the data directory that names no
+	// file starts a supervised process which never opens an input -- running,
+	// and permanently empty. Offering that as a candidate would rank a source
+	// that cannot deliver above the slate, and the slate is the thing that
+	// exists so an operator never sees nothing. So it is collapsed from the
+	// playlist hub's own liveness, sampled from that hub's byte counter beside
+	// the two ingests' -- see sampleSources, and the comment on liveness for why
+	// process state answers a different question than failover has to ask.
+	//
+	// One bit, not a liveness: the decision asks nothing else of a playlist.
+	// There is no automatic return TO a file and no stability window to measure,
+	// so alive/not is everything, and it is collapsed by the caller under the
+	// lock rather than looked up from inside the decision -- chooseSource has to
 	// stay pure and cheap, because the golden table's only claim to being
 	// exhaustive is that every input it branches on can be enumerated.
-	playoutRunning bool
-	grace          time.Duration
-	autoReturn     bool
-	returnStable   time.Duration
+	playlistRunning bool
+	grace           time.Duration
+	autoReturn      bool
+	returnStable    time.Duration
 }
 
 // candidate is one source the selector may choose, and whether it can be
@@ -2962,7 +3011,19 @@ func candidatesFor(c sourceChoice) []candidate {
 		// It ranks ABOVE the slate for the mirror-image reason: both are
 		// holding patterns, but one of them is programming somebody chose and
 		// the other is a card saying the picture is missing.
-		{kind: sourcePlayout, available: c.playoutRunning},
+		//
+		// There is deliberately no `&& c.playlistEnabled` here to mirror the
+		// backup's line above, and the asymmetry is the design rather than an
+		// omission. The backup's hub is the listener's and outlives every
+		// publisher, so its counter cannot tell enabled from disabled; the
+		// playlist's hub belongs to the tier and dies with it, so
+		// reconcilePlaylist zeroes this liveness as it tears the tier down --
+		// see the comment there. That covers the untick a setting gate would
+		// cover AND the three it would not: failover switched off entirely, a
+		// file path that fails confinement, and a path edit that swaps one hub
+		// for another. The invariant the two ends maintain between them: no
+		// hub, no liveness, no candidate.
+		{kind: sourcePlaylist, available: c.playlistRunning},
 		// The slate has no liveness to check. It synthesises its own picture, so
 		// "enabled" is the whole of "would this deliver bytes".
 		{kind: sourceSlate, available: c.slateEnabled},
@@ -3080,9 +3141,9 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// backup gone there is nothing to flap between. The backup is known
 		// unavailable here, so it cannot win its own branch.
 		return best(map[sourceKind]string{
-			sourcePrimary: "the backup ingest stopped delivering and the primary is back",
-			sourcePlayout: "neither ingest is delivering, so the playlist is on air",
-			sourceSlate:   "neither ingest is delivering",
+			sourcePrimary:  "the backup ingest stopped delivering and the primary is back",
+			sourcePlaylist: "neither ingest is delivering, so the playlist is on air",
+			sourceSlate:    "neither ingest is delivering",
 		}, sourcePrimary, "the backup ingest stopped delivering")
 
 	case sourceSlate:
@@ -3093,13 +3154,13 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// failure by a wide margin. Staying put is silent; a slate that has been
 		// switched off underneath us falls through to the primary.
 		return best(map[sourceKind]string{
-			sourcePrimary: "the primary ingest is delivering again",
-			sourceBackup:  "the backup ingest is delivering",
-			sourcePlayout: "the playlist is running",
-			sourceSlate:   "",
+			sourcePrimary:  "the primary ingest is delivering again",
+			sourceBackup:   "the backup ingest is delivering",
+			sourcePlaylist: "the playlist is running",
+			sourceSlate:    "",
 		}, sourcePrimary, "the slate was switched off")
 
-	case sourcePlayout:
+	case sourcePlaylist:
 		// The playlist is a holding pattern too, so it leaves the same way the
 		// slate does: the moment a real ingest is back, and without consulting
 		// the return mode. The flap risk the return mode exists to bound is a
@@ -3115,10 +3176,10 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// by being added only to the maps of branches it can arrive in, and
 		// never to a branch of its own.
 		return best(map[sourceKind]string{
-			sourcePrimary: "the primary ingest is delivering again",
-			sourceBackup:  "the backup ingest is delivering",
-			sourcePlayout: "",
-			sourceSlate:   "the playlist stopped running",
+			sourcePrimary:  "the primary ingest is delivering again",
+			sourceBackup:   "the backup ingest is delivering",
+			sourcePlaylist: "",
+			sourceSlate:    "the playlist stopped running",
 		}, sourcePrimary, "the playlist stopped running")
 
 	default:
@@ -3137,10 +3198,10 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 			noOther = "there is no other source to run"
 		}
 		return best(map[sourceKind]string{
-			sourcePrimary: onPrimary,
-			sourceBackup:  "the primary ingest stopped delivering",
-			sourcePlayout: "the primary ingest stopped delivering and the playlist is running",
-			sourceSlate:   "the primary ingest stopped delivering and no backup is on air",
+			sourcePrimary:  onPrimary,
+			sourceBackup:   "the primary ingest stopped delivering",
+			sourcePlaylist: "the primary ingest stopped delivering and the playlist is running",
+			sourceSlate:    "the primary ingest stopped delivering and no backup is on air",
 		}, sourcePrimary, noOther)
 	}
 }
@@ -3158,7 +3219,7 @@ func pinReason(k sourceKind) (string, bool) {
 	// explains: the playlist loses to a live encoder on the ladder, and this is
 	// the sentence that says somebody wanted it to win anyway. Still honoured
 	// only while the playlist is actually running, like every other pin.
-	case sourcePlayout:
+	case sourcePlaylist:
 		return "an operator selected the playlist", true
 	case sourceSlate:
 		return "an operator selected the slate", true
@@ -3195,6 +3256,7 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 	// broken tier would go on refusing destinations that no longer need it.
 	if cur != nil && cur.spec == want && want != "" {
 		e.reconcileBackupIngest(s)
+		e.reconcilePlaylist(s)
 		// Ignored on purpose: a reconcile has no caller to fail to, and a
 		// decision that could not be made has already logged itself. Holding
 		// the current source is what this path wants anyway.
@@ -3214,6 +3276,10 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 	}
 	if want == "" {
 		e.reconcileBackupIngest(s)
+		// Reached with the whole feature switched off, which is when the tier
+		// most needs stopping: playlistSig is empty without Failover.Enabled, so
+		// this is the call that takes the file off air with the selector.
+		e.reconcilePlaylist(s)
 		return
 	}
 
@@ -3238,7 +3304,7 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 	e.sel = &selector{
 		hub: hub, spec: want, startedAt: now, switchedAt: now,
 		live: map[sourceKind]*liveness{
-			sourcePrimary: {}, sourceBackup: {},
+			sourcePrimary: {}, sourceBackup: {}, sourcePlaylist: {},
 		},
 	}
 	e.mu.Unlock()
@@ -3248,6 +3314,7 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 		"relayPort", hub.Port())
 
 	e.reconcileBackupIngest(s)
+	e.reconcilePlaylist(s)
 	// Ignored for the same reason as the "already running" window above.
 	_ = e.applySourceChoice(s, silenceSig, now)
 }
@@ -3312,6 +3379,20 @@ func (e *Engine) sampleSources(s db.Settings, now time.Time) {
 	if h := e.backupHub(); h != nil {
 		backupRx = h.RxBytes()
 	}
+	// The playlist is sampled from bytes for the same reason the two ingests
+	// are, and the failure it guards against is specific: PlaylistFileProblem
+	// checks that the operator's path is CONFINED to the data directory, not
+	// that it names a file. A path that is safely inside it and names nothing
+	// passes validation, playlistSig is non-empty, the tier starts, and FFmpeg
+	// then fails to open the input and backs off toward five seconds. "The tier
+	// is running" is true throughout, and it is the wrong question -- exactly as
+	// it is for an SRT listener that sits in "running" while it waits for a
+	// publisher. Ranking is only worth anything if a candidate offered is a
+	// candidate that would deliver, so what is sampled is delivery.
+	var playlistRx uint64
+	if h := e.playlistHub(); h != nil {
+		playlistRx = h.RxBytes()
+	}
 	grace := failoverGrace(s)
 
 	e.mu.Lock()
@@ -3321,6 +3402,32 @@ func (e *Engine) sampleSources(s db.Settings, now time.Time) {
 	}
 	e.sel.live[sourcePrimary].sample(primaryRx, now, grace)
 	e.sel.live[sourceBackup].sample(backupRx, now, grace)
+
+	// The playlist's counter is the one that goes BACKWARDS, and it has to be
+	// handled rather than fed to sample(), which takes a counter that only ever
+	// rises and ignores anything at or below what it has seen. Two ordinary
+	// things reset it: an operator editing the file path, which makes
+	// reconcilePlaylist close this hub and build a fresh one counting from zero,
+	// and disabling the tier, which leaves no hub to read at all. Fed in as-is,
+	// the first would leave the liveness pinned at the OLD hub's total -- a
+	// playlist that has been re-pointed at a working file reported dead until it
+	// out-counts a file it no longer plays -- and the second would keep offering
+	// a tier that has been torn down for a whole grace window, which startFeed
+	// can only answer with "the playlist source has no relay to read". Zeroing
+	// first makes both read as what they are: this is a different playlist, and
+	// it has delivered nothing yet.
+	//
+	// reconcilePlaylist now zeroes the same liveness as it tears a tier down,
+	// which is what makes the correction immediate rather than one sweep late,
+	// so in practice this branch finds pl.rx already zero. It stays as the
+	// second line of defence for the invariant, not as its enforcement: this is
+	// the only place that reads the counter, and a counter read without a
+	// rollback guard is how the first version of this went wrong.
+	pl := e.sel.live[sourcePlaylist]
+	if playlistRx < pl.rx {
+		*pl = liveness{}
+	}
+	pl.sample(playlistRx, now, grace)
 }
 
 func failoverGrace(s db.Settings) time.Duration {
@@ -3361,26 +3468,16 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		backup:        *sel.live[sourceBackup],
 		backupEnabled: s.Failover.Backup.Enabled,
 		slateEnabled:  s.Failover.Slate.Enabled,
-		// Left false deliberately, and this is the only place that can change
-		// it. The decision knows how to rank a playlist feed; the settings that
-		// would let an operator switch one on, and the feed that would run it,
-		// arrive with the wire work. Reported as "not running" until then, which
-		// is true — so every reachable decision is the one it was before.
-		//
-		// WHOEVER MAKES THIS TRUE MUST TEACH THE FEED LAYER FIRST. Three
-		// functions build a feed -- feedUpstreamSig, startFeed and
-		// downstreamFeedInput -- and all three used to treat a kind they did
-		// not recognise as the primary, so a decision of sourcePlayout that
-		// reached ensureFeed would have started the primary's command line
-		// while sel.active recorded "playout". They now refuse instead, and
-		// errNoFeedShape names all three in the message, so the mistake fails
-		// where it is made rather than going to air. SwitchSource still rejects
-		// "playout" too, so the pin pinReason is ready to honour cannot yet be
-		// set by an operator.
-		playoutRunning: false,
-		grace:          failoverGrace(s),
-		autoReturn:     s.Failover.Return == db.FailoverReturnAuto,
-		returnStable:   time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
+		// Collapsed from the playlist hub's liveness, NOT from "e.playlist !=
+		// nil". A tier can be up and its hub empty forever -- see the field's
+		// comment on sourceChoice -- and a candidate offered on process state
+		// would be a candidate that cannot deliver. Read here under the same
+		// lock as the primary's, from the sample sweepSelector took a moment
+		// ago, so the decision still sees one consistent snapshot.
+		playlistRunning: sel.live[sourcePlaylist].alive(now, failoverGrace(s)),
+		grace:           failoverGrace(s),
+		autoReturn:      s.Failover.Return == db.FailoverReturnAuto,
+		returnStable:    time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
 	}
 	e.mu.Unlock()
 
@@ -3416,7 +3513,7 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 			// Unreachable today and a bug if it ever happens: a real decision
 			// never yields sourceNone. best() panics on an available one and
 			// every fallback is sourcePrimary, which is why all 3200 rows of
-			// the frozen table decide primary, backup, playout or slate and
+			// the frozen table decide primary, backup, playlist or slate and
 			// none ever decides none.
 			e.log.Error("selector decided on no source at all; no feed started",
 				"source", e.sourceID, "cause", "the candidate list produced sourceNone from a decision that did not panic")
@@ -3680,14 +3777,17 @@ func feedRunning(f *sourceFeed) bool {
 // VISIBLY absent here rather than one silently absorbed by a default.
 func errNoFeedShape(kind sourceKind) error {
 	switch kind {
-	case sourcePrimary, sourceBackup, sourceSlate:
+	case sourcePrimary, sourceBackup, sourceSlate, sourcePlaylist:
 		return nil
-	case sourcePlayout:
-		return fmt.Errorf("the selector chose %q, but no feed knows how to run a playlist yet: "+
-			"feedUpstreamSig, startFeed and downstreamFeedInput each need a sourcePlayout case "+
-			"before playoutRunning is ever allowed to be true", kind)
 	}
-	return fmt.Errorf("no feed knows how to run source %q", kind)
+	// The three sites are named in the message rather than in a comment, because
+	// the reader of this line is somebody who has just added a FIFTH kind and is
+	// looking at a failure they did not expect. Teaching two of the three and
+	// missing the last is the mistake this whole guard exists for, and it is the
+	// one a message that merely said "unknown source" would let them repeat.
+	return fmt.Errorf("no feed knows how to run source %q: feedUpstreamSig, startFeed and "+
+		"downstreamFeedInput each need a case for it before the selector is ever allowed "+
+		"to offer it as a candidate", kind)
 }
 
 // feedUpstreamSig hashes what one feed's command line depends on, so a settings
@@ -3706,6 +3806,15 @@ func (e *Engine) feedUpstreamSig(s db.Settings, kind sourceKind, silenceSig stri
 	switch kind {
 	case sourceBackup:
 		return hashStrings([]string{"backup", backupIngestSig(s)})
+	case sourcePlaylist:
+		// playlistSig, exactly as the backup folds in backupIngestSig: the feed
+		// here is only a copy hop out of the playlist's hub, but that hub is
+		// CLOSED and rebuilt whenever reconcilePlaylist sees the signature move
+		// -- an operator editing the file path is the ordinary case -- and a
+		// copy hop left pointing at the old relay would spin on a port nothing
+		// publishes to. Folding the same signature in is what makes the feed
+		// respawn onto the new hub in the same sweep.
+		return hashStrings([]string{"playlist", playlistSig(s)})
 	case sourceSlate:
 		e.mu.RLock()
 		v := e.videoInfo
@@ -3808,10 +3917,18 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 				"encoder", string(s.Failover.Slate.Encoder), "reason", encFallback)
 		}
 		args = ffmpeg.SlateArgs(spec)
-	case sourcePrimary, sourceBackup:
+	case sourcePrimary, sourceBackup, sourcePlaylist:
+		// The playlist joins the two ingests here rather than getting a branch
+		// of its own, and that is the whole shape of the tier: it already runs
+		// its own FFmpeg against the file and publishes into its own hub, so
+		// what the selector needs is the identical copy hop the backup gets --
+		// subscribe to a relay, republish into the selector's hub with the
+		// tier's timestamp offset. Re-reading the file here instead would put a
+		// second decoder on the same input and reset its timeline on every
+		// switch, which is the thing the offset exists to prevent.
 		in := e.downstreamFeedInput(kind)
 		if in == nil {
-			return fail(fmt.Errorf("the %s ingest has no relay to read", kind))
+			return fail(fmt.Errorf("the %s source has no relay to read", kind))
 		}
 		port, err := e.alloc.Allocate()
 		if err != nil {
@@ -3820,9 +3937,9 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		feed.in, feed.port, feed.subName = in, port, selectorSubName
 		args = relayFeedArgs(in.Subscribe(selectorSubName, port), out, offset)
 	default:
-		// sourcePlayout lands here today, and so would any later kind. Nothing
-		// is started and nothing is recorded as active: a feed that cannot be
-		// built must not leave a process behind that pretends it was.
+		// A fifth kind lands here, and lands here VISIBLY: nothing is started
+		// and nothing is recorded as active, because a feed that cannot be built
+		// must not leave a process behind that pretends it was.
 		return fail(errNoFeedShape(kind))
 	}
 
@@ -3848,7 +3965,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 	return feed
 }
 
-// downstreamFeedInput is the hub one ingest feed reads.
+// downstreamFeedInput is the hub one copy-hop feed reads.
 //
 // This is the function that actually made a mislabelled feed primary-shaped: it
 // was `if kind == sourceBackup` and everything else fell through to
@@ -3861,14 +3978,22 @@ func (e *Engine) downstreamFeedInput(kind sourceKind) *relay.Hub {
 	switch kind {
 	case sourceBackup:
 		return e.backupHub()
+	case sourcePlaylist:
+		// The playlist's OWN hub, and naming it here is the point of the tier
+		// having one. Handed the primary's hub instead -- which is what the old
+		// fall-through did -- a file on air would have carried bytes onto the
+		// primary's relay, the primary would have read live, and failover never
+		// switches away from a live primary. The feature would have disabled
+		// itself the first time it was used, silently.
+		return e.playlistHub()
 	case sourcePrimary:
 		// sourceHub(), not e.hub: with a video-only primary the silence tier is
 		// between the two, and feeding the selector from the raw ingest would
 		// publish a stream with no audio track at all.
 		return e.sourceHub()
 	}
-	panic(fmt.Sprintf("downstreamFeedInput: source %q has no ingest hub to read -- "+
-		"only the primary and the backup do, and startFeed must not ask about any other kind", kind))
+	panic(fmt.Sprintf("downstreamFeedInput: source %q has no hub to read -- only the primary, "+
+		"the backup and the playlist do, and startFeed must not ask about any other kind", kind))
 }
 
 func (e *Engine) teardownFeed(f *sourceFeed) {
@@ -4091,6 +4216,217 @@ func (e *Engine) teardownBackup(b *backupIngest) {
 	}
 }
 
+// ------------------------------------------------------------ playlist tier
+
+// playlistSig hashes everything the playlist's command depends on, and is empty
+// when the tier must not run.
+//
+// An unusable path hashes empty rather than being started and left to fail:
+// PlaylistFileProblem is the same confinement a file:// pull source and the
+// slate's still are held to, and a path that fails it is operator input trying
+// to leave the data directory, not a file to hand FFmpeg anyway.
+func playlistSig(s db.Settings) string {
+	p := s.Failover.Playlist
+	if !s.Failover.Enabled || !p.Enabled {
+		return ""
+	}
+	if p.PlaylistFileProblem() != nil {
+		return ""
+	}
+	return hashStrings([]string{"playlist", strings.TrimSpace(p.FilePath)})
+}
+
+// playlistFeedArgs builds the loop that publishes one file into the playlist's
+// own hub. It is the backup's command with a file where the socket was:
+// `-map 0 -c copy`, so a programme that was encoded once is not re-encoded here.
+//
+// The two input flags are the whole difference from every other feed, and
+// neither is optional. -stream_loop -1 is what makes a file that ends look like
+// a source that does not, so the tier is still delivering an hour later instead
+// of exiting once and leaving the selector with a candidate that vanished.
+// Without -re FFmpeg reads a file as fast as the disk allows: an hour of
+// programme arrives at the relay in seconds, the hub's consumers are handed a
+// timeline racing away from wall clock, and what an operator sees is a playlist
+// that "played" and disappeared. The same pair, for the same reason, is what
+// pullFile emits for a file:// ingest.
+//
+// The "file:" prefix is not decoration either: a bare path containing a colon
+// ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the prefix
+// pins it to the file protocol whatever the name looks like -- exactly as
+// pullSource does when it resolves one.
+//
+// THE FILE'S CODEC PARAMETERS MUST MATCH THE INGEST'S, AND NOTHING CHECKS.
+// `-c copy` here and a copy hop in startFeed mean the file's codec, resolution,
+// frame rate and pixel format reach every destination exactly as they were
+// encoded. A destination that is also copying passes them straight to the
+// platform, so switching to a file that differs is a mid-stream codec change --
+// and platforms answer that by dropping the connection, which is the one thing
+// this whole tier exists to prevent. The slate re-encodes to the ingest's
+// PROBED geometry for precisely this reason; the playlist cannot, because
+// re-encoding a programme that was already encoded once is a cost an operator
+// did not ask for. scripts/acceptance-failover.sh builds its filler clip to
+// match the publisher deliberately, and says so.
+//
+// It is not validated here because validation would mean probing the operator's
+// file at settings-save time and comparing it against an ingest that may not be
+// connected yet -- a feature with its own failure modes (an unprobeable file, a
+// geometry that changes when the encoder reconnects), not a check this function
+// can make from an argv. Until that exists the constraint is documented where
+// an operator meets it, in docs/SCHEDULED-BROADCAST.md.
+func playlistFeedArgs(path, outURL string) []string {
+	return []string{
+		"-hide_banner", "-nostdin", "-loglevel", "warning",
+		"-nostats", "-progress", "pipe:1",
+		"-stream_loop", "-1",
+		"-re",
+		// The file's own timestamps restart at every loop boundary; genpts gives
+		// the relay a monotonic base without touching the payload.
+		"-fflags", "+genpts",
+		"-i", "file:" + path,
+		"-map", "0",
+		"-c", "copy",
+		"-f", "mpegts",
+		"-flush_packets", "1",
+		ffmpeg.RelayOutputURL(outURL),
+	}
+}
+
+// reconcilePlaylist starts, stops or restarts the playlist tier. The caller
+// must hold selMu.
+//
+// Signature-compared rather than restarted unconditionally, exactly as the
+// backup listener is: a respawn is visible downstream -- the hub goes quiet
+// while FFmpeg reopens the file and the loop restarts from the top -- so a
+// settings save that touches the recorder or a destination must not cost the
+// playlist a gap. The no-op is the common case, not the optimisation.
+func (e *Engine) reconcilePlaylist(s db.Settings) {
+	want := playlistSig(s)
+
+	e.mu.Lock()
+	cur := e.playlist
+	e.mu.Unlock()
+	if cur != nil && cur.sig == want {
+		return
+	}
+
+	if cur != nil {
+		// The feed reads this hub, so it goes first -- a feed left running
+		// across the teardown would spin on a relay that has gone away. This
+		// is now a live hazard rather than a precaution: startFeed builds a
+		// playlist copy hop out of exactly the hub being closed two lines below.
+		e.mu.Lock()
+		var feed *sourceFeed
+		if e.sel != nil && e.sel.feed != nil && e.sel.feed.kind == sourcePlaylist {
+			feed, e.sel.feed = e.sel.feed, nil
+			// See detachFeedForSilence: a deliberate teardown must not be
+			// mistaken for a start that failed.
+			e.sel.feedAt = time.Time{}
+		}
+		// A TIER THAT HAS BEEN TORN DOWN MUST NOT READ AS DELIVERING, and this
+		// is the line that makes that true at the instant it stops being a
+		// place to send viewers rather than up to a sweep later.
+		//
+		// The liveness this zeroes is the ONLY thing candidatesFor consults
+		// about the playlist. Leave it standing and the very next decision --
+		// applySourceChoice, which reconcileSelector calls immediately after
+		// this function with no sample in between -- reads a counter describing
+		// a hub that has just been closed, holds the playlist, and asks
+		// startFeed for a relay that no longer exists. What an operator does to
+		// reach that is not exotic: they untick the playlist while it is on
+		// air. The result was roughly two seconds of dead air on every
+		// destination, because the sweep that would have corrected it arrives
+		// after ensureFeed's failed-start backoff has already begun.
+		//
+		// Zeroed HERE rather than gated in candidatesFor on
+		// Failover.Playlist.Enabled, which was the other candidate fix and is
+		// the shape the backup's own line has. That gate would answer the
+		// untick and nothing else: playlistSig is also empty when the whole
+		// failover feature goes off and when the file path fails confinement,
+		// and it changes for a path EDIT, which closes this hub and builds a
+		// fresh one counting from zero. In every one of those the setting still
+		// reads enabled while the hub is gone or new, so a gate on the setting
+		// would leave the same stale-liveness hole open under a different
+		// cause. One assignment at the single place the tier can go away covers
+		// all four, and it keeps chooseSource's inputs describing DELIVERY
+		// rather than mixing in a process fact -- which is what the comment on
+		// sourceChoice.playlistRunning promises a reader.
+		if e.sel != nil {
+			if pl := e.sel.live[sourcePlaylist]; pl != nil {
+				*pl = liveness{}
+			}
+		}
+		e.playlist = nil
+		e.mu.Unlock()
+		e.teardownFeed(feed)
+		e.teardownPlaylist(cur)
+	}
+	if want == "" {
+		if s.Failover.Enabled && s.Failover.Playlist.Enabled {
+			// Only reachable through settings that never passed validation --
+			// db.Settings.Validate rejects an unconfined path -- so it is said
+			// out loud rather than left as a tier that quietly never starts.
+			e.log.Warn("playlist not started; its file is unusable",
+				"path", s.Failover.Playlist.FilePath,
+				"err", s.Failover.Playlist.PlaylistFileProblem())
+		}
+		return
+	}
+
+	hub, err := relay.New(e.log, 0)
+	if err != nil {
+		e.log.Error("playlist: no relay", "err", err)
+		return
+	}
+
+	// Resolved here rather than stored absolute, exactly as the slate's still
+	// and a file:// pull source are: the settings hold a path relative to the
+	// data directory, and this is where it becomes one FFmpeg can open.
+	path := filepath.Join(e.cfg.DataDir,
+		filepath.FromSlash(strings.TrimSpace(s.Failover.Playlist.FilePath)))
+
+	proc := supervisor.New(e.log, supervisor.Spec{
+		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,
+		Args: playlistFeedArgs(path, hub.InputURL()),
+		// AutoRestart, unlike a selector feed: this process publishes into its
+		// OWN hub and carries no timestamp offset, so there is nothing for a
+		// sweep to rebuild and no reason to make an operator wait for one. A
+		// file that FFmpeg cannot open backs off toward five seconds and says so
+		// every time, which is what the supervisor's backoff is for.
+		AutoRestart: true,
+		MinBackoff:  500 * time.Millisecond,
+		MaxBackoff:  5 * time.Second,
+		OnLog:       e.onLog, OnState: e.onState, LogSink: logSink{e},
+	})
+
+	e.mu.Lock()
+	if e.stopped {
+		e.mu.Unlock()
+		_ = hub.Close()
+		return
+	}
+	e.playlist = &playlistTier{proc: proc, hub: hub, sig: want}
+	e.mu.Unlock()
+
+	proc.Start()
+	e.log.Info("playlist started", "file", path, "relayPort", hub.Port(),
+		"reason", "a playlist publishes into a hub of its own, so a file on air "+
+			"never makes the primary ingest read live")
+}
+
+func (e *Engine) teardownPlaylist(p *playlistTier) {
+	if p == nil {
+		return
+	}
+	if p.proc != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+		p.proc.Stop(ctx)
+		cancel()
+	}
+	if p.hub != nil {
+		_ = p.hub.Close()
+	}
+}
+
 // ------------------------------------------------------- failover: operator
 
 // SwitchSource puts one source on air by hand.
@@ -4107,10 +4443,17 @@ func (e *Engine) SwitchSource(kind string) error {
 		want = sourceBackup
 	case sourceSlate:
 		want = sourceSlate
+	case sourcePlaylist:
+		// Accepted only now that a playlist feed can actually be built. The pin
+		// itself has been honoured by the decision since the candidate was
+		// added; this list was the one thing keeping an operator from setting
+		// it, and it stayed shut on purpose while a decision of "playlist"
+		// would have reached a feed layer that could not run one.
+		want = sourcePlaylist
 	case sourceNone, "auto":
 		want = sourceNone
 	default:
-		return fmt.Errorf("unknown source %q (primary, backup, slate, auto)", kind)
+		return fmt.Errorf("unknown source %q (primary, backup, slate, playlist, auto)", kind)
 	}
 
 	e.selMu.Lock()
@@ -5660,6 +6003,9 @@ func (e *Engine) Processes() []*supervisor.Process {
 	}
 	if e.backup != nil {
 		procs = append(procs, e.backup.proc)
+	}
+	if e.playlist != nil {
+		procs = append(procs, e.playlist.proc)
 	}
 	if e.sel != nil && e.sel.feed != nil {
 		procs = append(procs, e.sel.feed.proc)

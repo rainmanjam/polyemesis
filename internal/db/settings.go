@@ -425,6 +425,9 @@ const (
 	// MaxSlateImagePath keeps the stored path to something a filesystem and a
 	// form field can both hold.
 	MaxSlateImagePath = 512
+	// MaxPlaylistFilePath mirrors MaxSlateImagePath: the same bound for the
+	// same reason, a filesystem and a form field must both be able to hold it.
+	MaxPlaylistFilePath = 512
 )
 
 // BackupIngestSettings is the second listener, running alongside the primary on
@@ -469,6 +472,20 @@ type SlateSettings struct {
 	Preset  string       `json:"preset"`
 }
 
+// PlaylistSettings is a file the selector can put on air when no encoder is
+// delivering.
+//
+// Deliberately smaller than SlateSettings. The slate carries encoder, preset,
+// colour and bitrate because it SYNTHESISES a picture; a playlist plays a file
+// that already has its own encoding, so it needs none of them.
+type PlaylistSettings struct {
+	Enabled bool `json:"enabled"`
+	// FilePath is relative to the data directory and confined there exactly as
+	// SlateSettings.ImagePath and a file:// pull source are. An operator-supplied
+	// path is the shape SECURITY.md's path confinement section exists to defend.
+	FilePath string `json:"filePath"`
+}
+
 // FailoverSettings turns on the source-selector tier: a permanent relay between
 // the ingest and everything downstream, fed by whichever source is currently
 // live.
@@ -490,6 +507,11 @@ type FailoverSettings struct {
 	ReturnStableSeconds int                  `json:"returnStableSeconds"`
 	Backup              BackupIngestSettings `json:"backup"`
 	Slate               SlateSettings        `json:"slate"`
+	// Playlist is a failover candidate beside Slate: a file the selector can
+	// put on air when no encoder is delivering. It lives here, rather than
+	// its own top-level section, because it is one more answer to the same
+	// question the slate answers -- what feeds the hub when nothing else does.
+	Playlist PlaylistSettings `json:"playlist"`
 }
 
 // SlateImageProblem reports why the configured still cannot be used, or nil.
@@ -515,6 +537,42 @@ func (s SlateSettings) SlateImageProblem() error {
 	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
 		len(rel) > 1 && rel[1] == ':':
 		return errors.New("slate image must be a relative path inside the data directory")
+	}
+	return nil
+}
+
+// PlaylistFileProblem reports why the configured playlist file cannot be
+// used, or nil.
+//
+// Same confinement as SlateSettings.ImagePath and a file:// pull source, and
+// for the same reason: the path is operator input that becomes an FFmpeg
+// argument, and an absolute path here would be a read primitive for whoever
+// reaches the settings API.
+func (p PlaylistSettings) PlaylistFileProblem() error {
+	f := strings.TrimSpace(p.FilePath)
+	if f == "" {
+		if p.Enabled {
+			// An enabled playlist with nothing to play would start a feed that
+			// can never deliver, and the selector would offer a candidate that
+			// always loses -- accepting this now only moves the failure to
+			// runtime, where it is harder to see.
+			return errors.New("playlist is enabled but no file is configured")
+		}
+		return nil
+	}
+	if len(f) > MaxPlaylistFilePath {
+		return fmt.Errorf("playlist file path is longer than %d characters", MaxPlaylistFilePath)
+	}
+	if strings.ContainsAny(f, "\x00\n\r") {
+		return errors.New("playlist file path contains control characters")
+	}
+	// Backslashes are separators on Windows, so normalise before the traversal
+	// check or "..\..\secret.key" walks straight past it.
+	rel := strings.ReplaceAll(f, `\`, "/")
+	switch {
+	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
+		len(rel) > 1 && rel[1] == ':':
+		return errors.New("playlist file must be a relative path inside the data directory")
 	}
 	return nil
 }
@@ -579,6 +637,9 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	}
 	if k := f.Slate.VideoKbps; k < 0 || k > 100_000 {
 		add("slate bitrate %d kbps out of range (0-100000, 0 for the default)", k)
+	}
+	if err := f.Playlist.PlaylistFileProblem(); err != nil {
+		add("%v", err)
 	}
 	return probs
 }

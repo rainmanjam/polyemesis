@@ -54,3 +54,28 @@ func TestChatDefaultsAreTheOldHardCodedOnes(t *testing.T) {
 		t.Fatalf("defaults = %+v, want the 2h/2000/5m the Hub used as constants", c)
 	}
 }
+
+func TestPlaylistFilePathIsConfinedToTheDataDir(t *testing.T) {
+	// The same guarantee SlateSettings.ImagePath and file:// pull sources
+	// already carry. An operator-supplied path is exactly the shape
+	// SECURITY.md's path confinement section exists to defend.
+	for _, bad := range []string{"../etc/passwd", "/etc/passwd", "a/../../b"} {
+		s := DefaultSettings()
+		s.Failover.Playlist.Enabled = true
+		s.Failover.Playlist.FilePath = bad
+		if err := s.Validate(); err == nil {
+			t.Errorf("path %q was accepted; it escapes the data directory", bad)
+		}
+	}
+}
+
+func TestPlaylistNeedsAFileWhenEnabled(t *testing.T) {
+	s := DefaultSettings()
+	s.Failover.Playlist.Enabled = true
+	s.Failover.Playlist.FilePath = ""
+	if err := s.Validate(); err == nil {
+		t.Error("an enabled playlist with no file was accepted; it would " +
+			"start a feed that can never deliver, and the selector would " +
+			"offer a candidate that always loses")
+	}
+}
