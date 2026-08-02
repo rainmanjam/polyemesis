@@ -70,6 +70,16 @@ func New(dataDir string) (*Store, error) {
 // Dir returns the absolute uploads directory.
 func (s *Store) Dir() string { return s.dir }
 
+// FreeBytes reports free bytes on the volume holding path — the same
+// measurement Save's floor is checked against.
+//
+// Exported for internal/playlistmedia, whose normalised derivatives are
+// additional copies of operator media on this same volume and must be measured
+// the same way. The alternative was a FOURTH copy of statfs in this repo, and
+// the three that exist are already one more than the comment in disk_unix.go is
+// comfortable with.
+func FreeBytes(path string) (uint64, error) { return freeBytes(path) }
+
 // Resolve turns a stored name into an absolute path, refusing anything that is
 // not a bare filename inside the uploads directory.
 //

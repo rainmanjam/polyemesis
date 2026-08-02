@@ -1,0 +1,710 @@
+// Package playlistmedia turns one operator upload into the single normalised
+// derivative a playlist item is played from.
+//
+// A playlist is played with FFmpeg's concat demuxer, and the concat demuxer has
+// one hard requirement: every file in the list must share the same codecs, the
+// same timebase, the same resolution and the same channel layout. Feed it a
+// 4K 25 fps ProRes after a 1080p 30 fps H.264 and it either refuses the set or —
+// worse — plays it and produces a stream whose audio drifts and whose picture
+// tears at the join. Neither is something an operator can diagnose while they
+// are on air.
+//
+// The old answer was to ask the operator to produce matching files by hand.
+// That is the wall this package removes: every item is transcoded once, on
+// import, to ONE fixed profile, so compatibility holds by construction rather
+// than by instruction.
+//
+// Three rules run through the file:
+//
+//   - The profile is fixed, not derived. See normaliseArgs.
+//   - The derivative is keyed on the UPLOAD, not on the playlist entry, so an
+//     upload used twice in a playlist is normalised once. See DerivativePath.
+//   - Derivatives live in their own directory under the data directory, never
+//     in uploads/. uploads.Store.List reports every file it finds there as an
+//     operator upload, so a derivative written beside its source would appear
+//     in the media library as a file the operator supplied, be offered as a
+//     playlist item in its own right, and be deletable as one. Same reasoning
+//     as media.Subdir and clips.Subdir.
+//
+// Nothing here happens inline. The one worker is a jobs.Worker because a 1080p
+// transcode saturates whatever it is given and the live stream owns the
+// machine; the queue and its governor decide WHEN, and this package only knows
+// HOW.
+package playlistmedia
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
+)
+
+// Dir is the data-directory child every derivative is written under. See the
+// package comment for why this is not optional.
+const Dir = "playlist-media"
+
+// KindNormalise transcodes one upload to the fixed playlist profile. The queue
+// never interprets a kind, but it is stored in the database and named in the
+// resource policy, so it is spelled once here.
+const KindNormalise jobs.Kind = "playlist.normalise"
+
+// NormaliseLimit is how many normalisations may run at once.
+//
+// One, exactly as every kind in internal/media is one. This is an FFmpeg run
+// that will take every core it is given, and the point of the queue is that
+// heavy work yields to the live stream — two normalisations at once is not
+// twice the throughput, it is twice the contention with the thing that must not
+// stutter. The global concurrency limit bounds the total across kinds.
+const NormaliseLimit = 1
+
+// NormalisedExt is the derivative's extension. MPEG-TS, because it is the
+// container the concat demuxer was designed around: every packet carries its
+// own timing, so a file can be cut into the middle of a stream without a
+// container index that says where anything is.
+const NormalisedExt = ".ts"
+
+// PartialSuffix marks a derivative that is still being written.
+//
+// Every output here is written to <final><PartialSuffix> and renamed into
+// place, for the same reason media and clips do it: a half-written derivative
+// is indistinguishable from a finished one to the readiness check that will
+// decide whether the playlist can go to air, and "the playlist played half a
+// file and stopped" is not a bug report anyone can act on. It also makes the
+// crash story simple — anything ending in .partial is garbage from a dead
+// process.
+const PartialSuffix = ".partial"
+
+// DefaultMinFreeBytes is the room that must remain free after a derivative has
+// been written.
+//
+// A derivative is an ADDITIONAL copy of operator media: normalising a playlist
+// of six hours of footage writes six hours of 1080p H.264 that was not there
+// before. The same 2 GiB reserve the upload path keeps, and for the same
+// reason — the database, the recorder and the HLS preview all live on this
+// volume, and a transcode that fills it does not fail alone.
+const DefaultMinFreeBytes = 2 << 30
+
+const (
+	defaultFileMode = 0o600
+	defaultDirMode  = 0o755
+)
+
+// ErrNoSpace is returned when the volume lacks room for the derivative,
+// checked BEFORE the transcode rather than discovered halfway through it.
+// Mirrors uploads.ErrNoSpace, which is the guard on the way in.
+var ErrNoSpace = errors.New("not enough free disk space to normalise this upload")
+
+// ------------------------------------------------------------------ the profile
+
+// The normalised profile. Fixed values, deliberately not derived from anything.
+//
+// A target derived from the live encoder's settings would move every time an
+// operator changed a bitrate or a resolution, and every derivative already on
+// disk would silently become incompatible with every derivative made after the
+// change — stale with nothing saying so, discovered when a playlist that worked
+// last week tears at the second join. A fixed target can only go stale when
+// this constant block changes, which is a code review.
+//
+// 1080p30 is the profile because it is what the destinations this product
+// pushes to actually ingest, and because upscaling a 720p source is cheap
+// while downscaling a 4K one is the whole point.
+const (
+	NormaliseWidth  = 1920
+	NormaliseHeight = 1080
+	// NormaliseFPS is the output frame rate. Constant, not "whatever the source
+	// had": the concat demuxer will splice a 25 fps file onto a 30 fps one and
+	// let the timestamps collide.
+	NormaliseFPS = 30
+	// NormaliseGOPFrames is two seconds at NormaliseFPS. Every item starts on a
+	// keyframe, which is what lets a join be a join rather than a smear of
+	// macroblocks referring to frames from the previous file.
+	NormaliseGOPFrames = 2 * NormaliseFPS
+
+	NormaliseVideoEncoder = "libx264"
+	NormalisePixFmt       = "yuv420p"
+	// NormalisePreset trades ratio for speed. This job runs ahead of air with
+	// nobody watching it, but it still competes with whatever is live.
+	NormalisePreset = "veryfast"
+	// NormaliseVideoKbps is capped rather than CRF on purpose: a playlist's
+	// items are pushed to the same destinations as a live stream, so the
+	// derivative has to respect the same ceiling, and a bounded bitrate is also
+	// what makes the disk estimate below meaningful.
+	NormaliseVideoKbps = 6000
+
+	NormaliseAudioEncoder = "aac"
+	NormaliseAudioKbps    = 192
+	NormaliseSampleRate   = 48000
+	NormaliseChannels     = 2
+)
+
+// commonArgs are the flags every child process here gets. It mirrors
+// internal/ffmpeg's unexported commonArgs rather than importing it, because
+// that one is not exported; the -y is the addition. Every output is written to
+// a .partial path, and a .partial left behind by a killed process must not make
+// the retry hang on FFmpeg's interactive overwrite prompt.
+func commonArgs() []string {
+	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning", "-y"}
+}
+
+// progressArgs routes machine-readable stats to stdout, leaving stderr as a
+// pure human log — the same split internal/ffmpeg uses, so ffmpeg.ParseProgress
+// reads our children too.
+func progressArgs() []string {
+	return []string{"-nostats", "-progress", "pipe:1"}
+}
+
+// normaliseArgs builds the transcode of one upload to the fixed profile.
+//
+// The hardware probe is deliberately NOT consulted, the same call internal/media
+// makes about its proxies and for a sharper version of the same reason. The GPU
+// is the one resource a live encoder cannot share: a normalisation that asked
+// for it would either be held back by the governor until every ingest was down,
+// or — if it ever slipped past — would contend with an encoder that is ON AIR.
+// This job produces a file nobody is waiting on this second. Losing that race
+// trades a stream for a file, so the cheapest way to never be in it is to never
+// want the GPU.
+func normaliseArgs(in, out string) []string {
+	return buildNormalise(in, out, false)
+}
+
+// normaliseSilentArgs is the same profile for a source with no audio track.
+//
+// It is not a convenience. The concat demuxer matches streams by position, so a
+// video-only item in a playlist of stereo items is exactly the mismatch this
+// package exists to prevent — it does not merely play without sound, it breaks
+// the set. Silence is synthesised at the profile's own sample rate and channel
+// count so that a slate, a bumper or a title card is a first-class item.
+func normaliseSilentArgs(in, out string) []string {
+	return buildNormalise(in, out, true)
+}
+
+// buildNormalise is the single source of the profile. The silent variant
+// differs only in where the audio comes from; every encoding flag below is
+// shared, so the two outputs cannot drift apart into two profiles.
+func buildNormalise(in, out string, silent bool) []string {
+	args := commonArgs()
+	args = append(args, progressArgs()...)
+	args = append(args, "-i", in)
+	if silent {
+		args = append(args, "-f", "lavfi", "-i",
+			fmt.Sprintf("anullsrc=channel_layout=stereo:sample_rate=%d", NormaliseSampleRate))
+	}
+
+	// Explicit maps. Default stream selection would pick the "best" audio track
+	// by its own rules on a source with several, and "whichever track FFmpeg
+	// liked" is not something an operator can predict or a UI can label.
+	args = append(args, "-map", "0:v:0")
+	if silent {
+		// -shortest, so the synthesised silence ends with the picture rather
+		// than running until the heat death of the universe: anullsrc has no
+		// duration of its own.
+		args = append(args, "-map", "1:a:0", "-shortest")
+	} else {
+		args = append(args, "-map", "0:a:0")
+	}
+	// Subtitles, chapters and attachments have no business in a playout file,
+	// and an attachment stream is a common reason a mux refuses to start.
+	args = append(args, "-sn", "-dn", "-map_chapters", "-1")
+
+	// Letterboxed, never stretched or cropped: the operator supplied the framing
+	// and a 4:3 archive clip squeezed to 16:9 is a defect the operator will be
+	// blamed for. setsar=1 is load-bearing — two files can agree on 1920x1080
+	// and still disagree on sample aspect ratio, and the concat demuxer counts
+	// that as a mismatch.
+	args = append(args, "-vf", fmt.Sprintf(
+		"scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2,"+
+			"pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+		NormaliseWidth, NormaliseHeight, NormaliseWidth, NormaliseHeight))
+
+	args = append(args,
+		"-c:v", NormaliseVideoEncoder,
+		"-preset", NormalisePreset,
+		"-pix_fmt", NormalisePixFmt,
+		"-r", strconv.Itoa(NormaliseFPS),
+	)
+	// A keyframe every GOP with no scene-cut exceptions and no open GOP. Counted
+	// in frames rather than seconds because -r above has already fixed the frame
+	// rate, so the two cannot disagree. An open GOP would let the first frames
+	// of an item reference pictures that, after the splice, belong to a
+	// different file.
+	args = append(args,
+		"-g", strconv.Itoa(NormaliseGOPFrames),
+		"-keyint_min", strconv.Itoa(NormaliseGOPFrames),
+		"-sc_threshold", "0",
+		"-flags", "+cgop",
+		"-b:v", strconv.Itoa(NormaliseVideoKbps)+"k",
+		"-maxrate", strconv.Itoa(NormaliseVideoKbps)+"k",
+		"-bufsize", strconv.Itoa(NormaliseVideoKbps*2)+"k",
+	)
+
+	// aresample with async and first_pts=0 fills the gap a source with a late or
+	// ragged audio start would otherwise carry into the playlist as a drift that
+	// accumulates across every item after it.
+	args = append(args,
+		"-c:a", NormaliseAudioEncoder,
+		"-b:a", strconv.Itoa(NormaliseAudioKbps)+"k",
+		"-ac", strconv.Itoa(NormaliseChannels),
+		"-ar", strconv.Itoa(NormaliseSampleRate),
+		"-af", "aresample=async=1:first_pts=0",
+	)
+
+	// MPEG-TS is the container AND the timebase decision: TS timestamps are
+	// 90 kHz by definition, so every derivative shares one whether or not the
+	// sources did. -muxdelay/-muxpreload 0 remove the muxer's default 0.7 s
+	// offset, which would otherwise appear at the front of every item and add
+	// up over a long playlist.
+	args = append(args, "-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", out)
+	return args
+}
+
+// ------------------------------------------------------------------- the paths
+
+// DerivativePath is where one upload's normalised copy lives.
+//
+// Keyed on the upload's stored name and nothing else, which is what makes "the
+// same upload used twice in a playlist normalises once" fall out of the design
+// rather than out of a check somebody has to remember to write. The playlist
+// entry's identity — its position, the playlist it belongs to — deliberately
+// does not appear.
+//
+// The upload's extension is KEPT and .ts appended, rather than replaced.
+// Stripping it would map "show-1a2b.mp4" and "show-1a2b.mkv" onto one
+// derivative, and the loser of that collision would play the other operator's
+// file.
+//
+// upload is a stored upload name, never a path, so it is reduced to its base
+// name before it is joined — the same defence media.LayoutFor applies to a
+// recording name. ValidUploadName is the check; this function has to stay
+// total because callers use it to build a URL and a readiness answer.
+func DerivativePath(dataDir, upload string) string {
+	name := filepath.Base(strings.TrimSpace(upload))
+	return filepath.Join(dataDir, Dir, name+NormalisedExt)
+}
+
+// DerivativeDir is where every upload's derivative lives.
+func DerivativeDir(dataDir string) string { return filepath.Join(dataDir, Dir) }
+
+// ValidUploadName reports whether a name is one this package will touch.
+//
+// Deliberately narrow and checked before any path is built: the name arrives in
+// a job's params, which came from an HTTP request, and everything downstream
+// creates and removes files. The separator check tests BOTH separators on every
+// platform rather than os.PathSeparator, because that constant's meaning
+// changes with GOOS and the bug it caused in internal/recording is written up
+// in uploads.Store.Resolve.
+func ValidUploadName(name string) bool {
+	if name == "" || name == "." || name == ".." || len(name) > 255 {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	return !strings.ContainsAny(name, "\x00\n\r")
+}
+
+// NormaliseTarget is the canonical jobs.Target for a normalisation.
+//
+// It names the UPLOAD, which is what makes the queue's Unique fold do the
+// deduplication for us: submitting a playlist whose second and fifth items are
+// the same file produces one job, not two, because both submissions carry the
+// same kind and the same target.
+func NormaliseTarget(upload string) string { return "upload:" + upload }
+
+// --------------------------------------------------------------- the processor
+
+// Registry is the part of *jobs.Queue this package needs. An interface so the
+// processor can be registered against a fake in tests, and so this package does
+// not depend on the queue's construction.
+type Registry interface {
+	Register(kind jobs.Kind, limit int, w jobs.Worker) error
+}
+
+var _ Registry = (*jobs.Queue)(nil)
+
+// Resolver turns a stored upload name into an absolute path, refusing anything
+// that escapes the uploads directory. An interface so the worker is testable
+// without a Store, and so this package never re-derives the confinement rule
+// that internal/uploads already owns.
+type Resolver interface {
+	Resolve(name string) (string, error)
+}
+
+var _ Resolver = (*uploads.Store)(nil)
+
+// Config is what the processor needs from the rest of the server.
+type Config struct {
+	// FFmpeg and FFprobe are the detected binaries. Empty means detection never
+	// ran or failed, which fails the job with a clear message rather than
+	// preventing startup — a playlist is one feature among many.
+	FFmpeg  string
+	FFprobe string
+	// DataDir is the server's data directory; derivatives live under it.
+	DataDir string
+	// Uploads resolves a stored upload name to a path, normally *uploads.Store.
+	Uploads Resolver
+	// MinFreeBytes is the room that must remain after the derivative is
+	// written. There is no "off": the reserve protects the database and the
+	// recorder, not this job, so zero means the default rather than no guard.
+	MinFreeBytes uint64
+}
+
+// Normalized fills the defaults.
+func (c Config) Normalized() Config {
+	if c.MinFreeBytes == 0 {
+		c.MinFreeBytes = DefaultMinFreeBytes
+	}
+	return c
+}
+
+// AudioProber reports whether a file carries at least one audio stream. A field
+// on Processor so the two profile paths are both reachable in a test on a
+// machine with no media and no FFprobe on it.
+type AudioProber func(ctx context.Context, path string) (bool, error)
+
+// Processor runs the normalisation job.
+type Processor struct {
+	log   *slog.Logger
+	cfg   Config
+	exec  media.Execer
+	audio AudioProber
+	free  func(path string) (uint64, error)
+}
+
+// Option customises a Processor, chiefly for tests.
+type Option func(*Processor)
+
+// WithExecer replaces the subprocess runner, so the worker can be exercised
+// without FFmpeg on the machine.
+func WithExecer(e media.Execer) Option { return func(p *Processor) { p.exec = e } }
+
+// WithAudioProber replaces the audio-stream check.
+func WithAudioProber(a AudioProber) Option { return func(p *Processor) { p.audio = a } }
+
+// WithFreeSpace replaces the free-space reporter, so a full disk can be
+// simulated without one.
+func WithFreeSpace(fn func(path string) (uint64, error)) Option {
+	return func(p *Processor) { p.free = fn }
+}
+
+// New builds a Processor.
+//
+// media.Exec is imported rather than copied. It is the only piece of
+// internal/media used here — nothing recording-shaped comes with it — and it
+// carries the cancellation behaviour that keeps a killed job from leaving an
+// FFmpeg behind competing with the live stream. A second copy of that would be
+// a second place for it to be subtly wrong.
+func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
+	p := &Processor{log: log, cfg: cfg.Normalized(), exec: media.Exec, free: uploads.FreeBytes}
+	p.audio = p.probeAudio
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
+// Config is the processor's resolved configuration.
+func (p *Processor) Config() Config { return p.cfg }
+
+// SetConfig replaces the configuration, so a settings change reaches the worker
+// without a restart. Only the next job sees it; one already running keeps what
+// it started under.
+func (p *Processor) SetConfig(cfg Config) { p.cfg = cfg.Normalized() }
+
+// Register wires the worker into a queue.
+func (p *Processor) Register(r Registry) error {
+	return r.Register(KindNormalise, NormaliseLimit, jobs.WorkerFunc(p.RunNormalise))
+}
+
+// ------------------------------------------------------------------ job params
+
+// NormaliseParams is a normalisation job's payload.
+type NormaliseParams struct {
+	// Upload is the STORED UPLOAD NAME, not a path and not a playlist position.
+	Upload string `json:"upload"`
+	// DurationMS is the source's duration, used for the progress bar and for
+	// the disk estimate. Optional: zero costs a moving progress bar and a
+	// weaker free-space guard, both of which are documented where they bite.
+	DurationMS int64 `json:"durationMs,omitempty"`
+}
+
+// Validate rejects params no attempt can succeed with.
+func (p NormaliseParams) Validate() error {
+	if !ValidUploadName(p.Upload) {
+		return fmt.Errorf("invalid upload name %q", p.Upload)
+	}
+	if p.DurationMS < 0 {
+		return fmt.Errorf("duration %d ms is not a duration", p.DurationMS)
+	}
+	return nil
+}
+
+// NormaliseResult is what the worker hands back.
+type NormaliseResult struct {
+	// Path is the derivative on disk.
+	Path  string `json:"path"`
+	Bytes int64  `json:"bytes"`
+	// Silent records that the source had no audio and the profile's silence was
+	// synthesised, so an operator who expected sound can see why there is none.
+	Silent bool `json:"silent,omitempty"`
+	// Reused records that the derivative was already there and nothing was
+	// re-encoded.
+	Reused bool `json:"reused,omitempty"`
+}
+
+// NewNormaliseJob builds the queue entry.
+//
+// Unique on the upload, so the same file appearing three times in a playlist
+// produces one transcode. Normal priority rather than bulk: nobody is watching
+// it, but the playlist cannot go to air until it lands, so it must not sit
+// behind an archive sweep.
+func NewNormaliseJob(p NormaliseParams) (jobs.Job, error) {
+	if err := p.Validate(); err != nil {
+		return jobs.Job{}, err
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return jobs.Job{}, fmt.Errorf("encode %s params: %w", KindNormalise, err)
+	}
+	return jobs.Job{
+		Kind:     KindNormalise,
+		Target:   NormaliseTarget(p.Upload),
+		Params:   raw,
+		Priority: jobs.PriorityNormal,
+		Unique:   true,
+	}.Normalized(), nil
+}
+
+// ---------------------------------------------------------------- the worker
+
+// RunNormalise transcodes one upload to the fixed profile.
+func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
+	var params NormaliseParams
+	if err := decodeParams(job, &params); err != nil {
+		return err
+	}
+	if err := params.Validate(); err != nil {
+		return jobs.Permanent(err)
+	}
+	if p.cfg.FFmpeg == "" || p.cfg.FFprobe == "" {
+		return jobs.Permanent(errors.New(
+			"FFmpeg was not detected, so playlist items cannot be normalised"))
+	}
+	if p.cfg.Uploads == nil {
+		return jobs.Permanent(errors.New("no upload store is configured"))
+	}
+
+	input, err := p.cfg.Uploads.Resolve(params.Upload)
+	if err != nil {
+		return jobs.Permanent(err)
+	}
+	info, err := os.Stat(input)
+	if err != nil {
+		// An upload that is not on disk is not coming back; retrying would burn
+		// attempts on a file the operator deleted.
+		return jobs.Permanent(fmt.Errorf("upload %s: %w", params.Upload, err))
+	}
+
+	final := DerivativePath(p.cfg.DataDir, params.Upload)
+	// The work already done is not done again. The derivative is keyed on the
+	// upload and an upload's stored name is unique and its bytes never change,
+	// so an existing non-empty derivative is the derivative for these bytes —
+	// re-encoding it would be an hour of CPU spent reproducing a file we
+	// already have, once per playlist that mentions the same item.
+	if st, err := os.Stat(final); err == nil && st.Size() > 0 {
+		rep.Logf("%s is already normalised; nothing to do", params.Upload)
+		rep.SetResult(NormaliseResult{Path: final, Bytes: st.Size(), Reused: true})
+		rep.Progress(1)
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(final), defaultDirMode); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(final), err)
+	}
+
+	if err := p.checkSpace(filepath.Dir(final), info.Size(), params.DurationMS, rep); err != nil {
+		return err
+	}
+
+	hasAudio, err := p.audio(ctx, input)
+	if err != nil {
+		return err
+	}
+	partial := final + PartialSuffix
+	args := normaliseArgs(input, partial)
+	if !hasAudio {
+		args = normaliseSilentArgs(input, partial)
+		rep.Logf("%s has no audio track; synthesising silence so the item still matches the playlist profile", params.Upload)
+	}
+
+	rep.Logf("normalising %s to %dx%d %d fps", params.Upload,
+		NormaliseWidth, NormaliseHeight, NormaliseFPS)
+	if err := p.run(ctx, rep, media.Command{Name: p.cfg.FFmpeg, Args: args}, params.DurationMS); err != nil {
+		// A failed encode has already lost; a leftover .partial is then a
+		// disk-space problem the next attempt inherits.
+		p.discard(partial)
+		return err
+	}
+	if err := publish(partial, final); err != nil {
+		return err
+	}
+	// 0600, matching uploads.Save. Nothing outside this process reads a
+	// derivative: the playout FFmpeg runs as the same user, and widening the
+	// mode on a copy of operator media buys no reader that exists.
+	if err := os.Chmod(final, defaultFileMode); err != nil {
+		return fmt.Errorf("chmod %s: %w", filepath.Base(final), err)
+	}
+
+	res := NormaliseResult{Path: final, Silent: !hasAudio}
+	if st, err := os.Stat(final); err == nil {
+		res.Bytes = st.Size()
+	}
+	rep.SetResult(res)
+	rep.Logf("normalised copy written to %s", filepath.Base(final))
+	return nil
+}
+
+// checkSpace refuses the transcode when the volume could not survive it.
+//
+// Checked before the write, and FAIL CLOSED when the check itself errors —
+// the same direction uploads.Save takes, and for the same reason: the one case
+// where you cannot tell how much room is left is not the case to start writing
+// gigabytes.
+func (p *Processor) checkSpace(dir string, sourceBytes, durationMS int64, rep jobs.Reporter) error {
+	if p.free == nil {
+		return nil
+	}
+	free, err := p.free(dir)
+	if err != nil {
+		return fmt.Errorf("%w: could not read free space: %v", ErrNoSpace, err)
+	}
+	estimate, bounded := estimateBytes(durationMS, sourceBytes)
+	if !bounded {
+		rep.Logf("no duration was supplied, so the free-space check is working from the source's size")
+	}
+	// The floor has to survive the transcode, not merely precede it: checking
+	// `free < floor` alone accepts a two-hour item onto a volume with exactly
+	// the reserve free, writes until ENOSPC, and eats the reserve the database
+	// and the recorder depend on.
+	needed := p.cfg.MinFreeBytes + uint64(estimate)
+	if free < needed {
+		return fmt.Errorf("%w: %d MiB free, about %d MiB needed",
+			ErrNoSpace, free>>20, needed>>20)
+	}
+	return nil
+}
+
+// estimateBytes bounds what the derivative will cost on disk.
+//
+// The profile caps its video bitrate and its audio is constant, so duration
+// alone is a real upper bound. When no duration was supplied the source's own
+// size is the only other number available, and it is a GUESS rather than a
+// bound — a short, low-resolution source normalises LARGER than it arrived —
+// so the caller says so in the job log rather than pretending the guard is as
+// strong as it looks.
+func estimateBytes(durationMS, sourceBytes int64) (n int64, bounded bool) {
+	if durationMS > 0 {
+		bits := int64(NormaliseVideoKbps+NormaliseAudioKbps) * durationMS
+		// +5% for TS packet and PSI overhead, which is real at 188-byte packets.
+		return bits / 8 * 21 / 20, true
+	}
+	if sourceBytes < 0 {
+		sourceBytes = 0
+	}
+	return sourceBytes, false
+}
+
+// probeAudio is the real AudioProber: one ffprobe that prints the codec type of
+// the first audio stream, or nothing at all when there is not one.
+func (p *Processor) probeAudio(ctx context.Context, path string) (bool, error) {
+	out, stderr, err := output(ctx, media.Command{Name: p.cfg.FFprobe, Args: hasAudioArgs(path)})
+	if err != nil {
+		if s := strings.TrimSpace(stderr); s != "" {
+			return false, fmt.Errorf("ffprobe %s: %s", filepath.Base(path), s)
+		}
+		return false, fmt.Errorf("ffprobe %s: %w", filepath.Base(path), err)
+	}
+	return strings.Contains(string(out), "audio"), nil
+}
+
+// hasAudioArgs asks only the question that changes the argv. A full probe would
+// tempt a later reader into deriving the profile from the source, which is the
+// one thing this package must not do.
+func hasAudioArgs(path string) []string {
+	return []string{
+		"-hide_banner", "-v", "error",
+		"-select_streams", "a:0",
+		"-show_entries", "stream=codec_type",
+		"-of", "csv=p=0",
+		path,
+	}
+}
+
+// ------------------------------------------------------------------- plumbing
+
+func decodeParams(job jobs.Job, into any) error {
+	if len(job.Params) == 0 {
+		return jobs.Permanent(fmt.Errorf("%s job %d has no parameters", job.Kind, job.ID))
+	}
+	if err := json.Unmarshal(job.Params, into); err != nil {
+		// Params that will not parse will not parse on the next attempt either.
+		return jobs.Permanent(fmt.Errorf("%s job %d has unreadable parameters: %w", job.Kind, job.ID, err))
+	}
+	return nil
+}
+
+// run executes the transcode, mapping FFmpeg's progress onto the job's bar.
+func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd media.Command, durationMS int64) error {
+	sink := media.Sink{Line: func(l string) { rep.Logf("%s", l) }}
+	if durationMS > 0 {
+		sink.Progress = func(pr ffmpeg.Progress) {
+			rep.Progress(float64(pr.OutTimeMS) / float64(durationMS))
+		}
+	}
+	if err := p.exec(ctx, cmd, sink); err != nil {
+		// Cancellation is not a failure worth retrying — the operator or the
+		// governor asked for it — but it is not this package's call either, so
+		// it goes back unwrapped and the queue decides.
+		return err
+	}
+	rep.Progress(1)
+	return nil
+}
+
+// output runs a command and returns its stdout, for ffprobe. Separate from
+// media.Exec because a probe's answer IS its stdout, where a transcode's stdout
+// is a progress stream nobody keeps.
+func output(ctx context.Context, cmd media.Command) ([]byte, string, error) {
+	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	var stderr strings.Builder
+	c.Stderr = &stderr
+	out, err := c.Output()
+	return out, stderr.String(), err
+}
+
+// discard removes a partial output, best effort.
+func (p *Processor) discard(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) && p.log != nil {
+		p.log.Warn("could not remove a partial derivative", "path", path, "err", err)
+	}
+}
+
+// publish renames a finished .partial into place. Nothing here writes to a
+// final path directly, so a half-written derivative can never be read as a
+// finished one. Same convention as media.publish and clips.Capture.
+func publish(partial, final string) error {
+	if err := os.Rename(partial, final); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("publish %s: %w", filepath.Base(final), err)
+	}
+	return nil
+}
