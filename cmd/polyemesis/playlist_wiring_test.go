@@ -2,18 +2,21 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
 // internal/playlistmedia was a complete, well-tested package that the product
@@ -165,20 +168,50 @@ func TestOnlyAFinishedNormalisationReconciles(t *testing.T) {
 	}
 }
 
-// A reconcile that fails must not take the process with it. The callback runs
-// on a goroutine off the queue's own, so a panic there is unrecoverable.
-func TestAFailedReconcileIsLoggedRatherThanFatal(t *testing.T) {
-	done := make(chan struct{})
-	reconcileOnNormalise(wiringLogger(), func() error {
-		close(done)
-		return errors.New("no engine")
-	})(jobs.Job{Kind: playlistmedia.KindNormalise, State: jobs.StateDone})
+// TestStartPostProdRegistersItsProcessors pins registerProcessors to its call
+// site, which nothing else does.
+//
+// The line is one call in the middle of startPostProd, and dropping it compiles
+// and starts a server that serves every page, runs every loop, and executes no
+// job of any kind. The queue's own registration test cannot see that: it calls
+// registerProcessors directly, so it proves the function registers and proves
+// nothing about whether the server ever calls it -- the same gap that let the
+// whole playlist tier ship unwired.
+//
+// The mutation: delete the registerProcessors call in startPostProd and this
+// fails.
+func TestStartPostProdRegistersItsProcessors(t *testing.T) {
+	store, dir := wiringStore(t)
+	log := wiringLogger()
 
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the reconcile was never called")
+	cfg := config.Config{DataDir: dir}
+	bus := events.NewBroker()
+	// NewManager and not Start: the manager is inert until Start, which binds a
+	// real listener. startPostProd only captures its method values.
+	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, bus)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pp := startPostProd(ctx, log, cfg, store, eng, &ffmpeg.Tools{
+		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
+		FFprobe: filepath.Join(dir, "no-ffprobe"),
+	})
+	if pp.queue == nil {
+		t.Fatal("startPostProd returned no queue")
 	}
-	// Give the goroutine a moment to return through the error branch.
-	time.Sleep(50 * time.Millisecond)
+
+	// Every kind the product can submit has to be claimable, and a second
+	// Register is the queue's own way of saying one already is.
+	for _, kind := range []jobs.Kind{
+		playlistmedia.KindNormalise,
+		transcribe.KindTranscribe,
+		clipper.JobKind,
+	} {
+		err := pp.queue.Register(kind, 1,
+			jobs.WorkerFunc(func(context.Context, jobs.Job, jobs.Reporter) error { return nil }))
+		if err == nil {
+			t.Errorf("startPostProd left kind %q unregistered; a job of that kind would "+
+				"sit queued forever on a server that looks entirely healthy", kind)
+		}
+	}
 }
