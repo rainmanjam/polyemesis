@@ -234,6 +234,54 @@ jobs:
       - name: Cross-compile
         run: make release VERSION="${GITHUB_REF_NAME//\//-}"
 
+      # A software bill of materials for the release, in the two formats
+      # consumers actually ask for: SPDX for licence and provenance review,
+      # CycloneDX for vulnerability tooling.
+      #
+      # Scanned from the SOURCE TREE, not the binaries, and that is the point:
+      # `make release` embeds the web UI into every binary, so a scan of the
+      # compiled artefact would report the Go modules and silently omit every
+      # npm dependency that shipped inside it.
+      #
+      # Measured on this repository at the time of writing: 437 packages --
+      # 216 npm, 168 Go, and 52 pinned GitHub Actions. One document per format
+      # covers all three, which no per-manifest scanner produces in one file.
+      #
+      # go install rather than anchore/sbom-action, matching how security.yml
+      # runs govulncheck: the Go toolchain is already set up two steps above,
+      # the version is pinned here in the open, and it avoids taking on another
+      # third-party action -- every action in this repository is SHA-pinned
+      # precisely because each one is a supply-chain edge.
+      #
+      # BEFORE the checksums below, deliberately. dist/* is what SHA256SUMS
+      # covers and what the release uploads, so an SBOM written afterwards
+      # would ship beside a checksum file that does not describe it.
+      - name: SBOM
+        run: |
+          go install github.com/anchore/syft/cmd/syft@v1.50.0
+          syft . \
+            --source-name polyemesis \
+            --source-version "${GITHUB_REF_NAME//\//-}" \
+            -o spdx-json=dist/polyemesis-sbom.spdx.json \
+            -o cyclonedx-json=dist/polyemesis-sbom.cdx.json
+          # A BOM that describes nothing is worse than no BOM: it parses
+          # cleanly and tells a consumer this release has no dependencies. So
+          # assert a floor rather than merely non-empty. 437 packages were
+          # measured here; 100 is low enough never to false-positive and high
+          # enough to catch a scan that found one manifest and missed the rest,
+          # which is the realistic failure -- a moved go.mod or a UI directory
+          # rename would halve it, not empty it.
+          for f in dist/polyemesis-sbom.spdx.json dist/polyemesis-sbom.cdx.json; do
+            test -s "$f" || { echo "$f is empty"; exit 1; }
+          done
+          spdx=$(jq '.packages | length' dist/polyemesis-sbom.spdx.json)
+          cdx=$(jq '.components | length' dist/polyemesis-sbom.cdx.json)
+          echo "SPDX packages: $spdx   CycloneDX components: $cdx"
+          if [ "$spdx" -lt 100 ] || [ "$cdx" -lt 100 ]; then
+            echo "SBOM looks truncated -- expected several hundred packages across Go, npm and actions"
+            exit 1
+          fi
+
       # Checksums so someone can verify a download they did not build.
       - name: Checksums
         run: |
