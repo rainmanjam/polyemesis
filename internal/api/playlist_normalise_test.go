@@ -94,9 +94,15 @@ func normaliseJobs(t *testing.T, q *jobs.Queue) []jobs.Job {
 // duplicate entry is an hour wasted, and B2's concat list will name the same
 // derivative twice quite happily.
 //
-// The mutation: delete the s.enqueuePlaylistNormalisation call in
-// handlePutSettings and no job exists. Drop the `seen` map and the same upload
-// listed twice submits twice.
+// Nothing in the handler deduplicates: the queue does, by folding a Unique
+// submission onto an active job with the same Target, which
+// playlistmedia.NormaliseTarget keys on the upload name. That is what this test
+// pins -- a Target that stopped naming the upload, or a job that stopped being
+// Unique, would show up here as three jobs.
+//
+// The mutations: delete the s.enqueuePlaylistNormalisation call in
+// handlePutSettings and no job exists at all; drop `Unique: true` from
+// NewNormaliseJob and a.ts is transcoded twice.
 func TestSavingAPlaylistQueuesOneNormalisationPerUpload(t *testing.T) {
 	h, sign, srv, q := playlistJobServer(t)
 	seedUpload(t, srv, "a.ts")

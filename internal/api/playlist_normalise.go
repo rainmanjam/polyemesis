@@ -73,13 +73,15 @@ func (s *Server) playlistUploadProblems(p db.PlaylistSettings) error {
 // this call the readiness gate is a permanent refusal and the playlist feature
 // cannot start at all.
 //
-// ONE DERIVATIVE PER UPLOAD, not per playlist entry. The same file listed
-// twice is one transcode, and that is enforced twice over: the local seen map
-// keeps this loop from submitting twice, and jobs.Queue folds a Unique job onto
-// an active one with the same Target, which playlistmedia.NormaliseTarget keys
-// on the upload name for exactly this reason. The map is not redundant with the
-// fold -- the fold costs a database round trip per duplicate, and the map is
-// also what makes the "submitted" log line count uploads rather than entries.
+// ONE DERIVATIVE PER UPLOAD, not per playlist entry, and THE QUEUE IS WHAT
+// GUARANTEES THAT rather than a check here. NewNormaliseJob sets Unique with a
+// Target of playlistmedia.NormaliseTarget(upload) -- keyed on the upload name
+// and nothing else -- and Queue.Submit folds a Unique submission onto an
+// already-active job with the same kind and target, returning it with
+// created=false. So a playlist whose second and fifth entries are the same file
+// submits twice and transcodes once. Deduplicating again in this loop would be
+// a second copy of a rule that already has an owner, and a second place for it
+// to drift from the target the worker is keyed on.
 //
 // An item whose derivative already exists is skipped rather than submitted.
 // The worker would return "already normalised; nothing to do" in any case, but
@@ -100,14 +102,11 @@ func (s *Server) enqueuePlaylistNormalisation(p db.PlaylistSettings) {
 	if s.jobq == nil || len(p.Items) == 0 {
 		return
 	}
-	seen := make(map[string]bool, len(p.Items))
 	for _, item := range p.Items {
 		name := strings.TrimSpace(item.Upload)
-		if name == "" || seen[name] {
+		if name == "" {
 			continue
 		}
-		seen[name] = true
-
 		if st, err := os.Stat(playlistmedia.DerivativePath(s.cfg.DataDir, name)); err == nil && st.Size() > 0 {
 			continue
 		}
