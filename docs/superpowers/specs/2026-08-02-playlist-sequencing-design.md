@@ -225,10 +225,19 @@ instant to land on.
    inferred from the source and not read from `format.duration` on trust, and it
    is recorded with the derivative. B1's `NormaliseParams.DurationMS` is NOT
    this value — it is a source estimate and it is never populated.
-3. **That duration is written into the list as a `duration` directive after every
-   `file` line.** FFmpeg supports overriding the demuxer's inferred duration for
-   exactly this reason, and doing so removes the dependency on its estimation
-   being exact. A stated tolerance replaces an impossible equality.
+3. **The `duration` directive is supported but NOT required, and that is a
+   measurement rather than a judgement.** FFmpeg allows overriding the demuxer's
+   inferred duration, and this design was written expecting to need it. Measured
+   with the directives present and absent, the packet stream was **identical** —
+   FFmpeg's own estimation of these derivatives is exact enough that the
+   directives changed nothing. So the list writer supports them, the engine emits
+   none, and the reason is recorded rather than left as a mystery for whoever
+   next reads the concat list and wonders why the durations are missing. If the
+   profile changes such that estimation drifts, the mechanism is already there.
+
+The measured duration is still worth having: the operator's playlist editor
+shows each item's length, which is the difference between building a programme
+and guessing at one. That is its justification now, not the directives.
 
 This changes the NORMALISER, which is B1 code. It belongs here because B1 never
 concatenated anything, so nothing could observe the skew.
@@ -245,10 +254,30 @@ So the derivative carries a PROFILE VERSION, and an item is ready only when its
 derivative was produced by the current one. Bumping the profile re-normalises;
 it does not quietly inherit.
 
-**Verification is a probe of packets, not of playback.** Monotonic DTS *and* PTS
-across every item seam and across at least TWO complete list wraps, with
-FFmpeg's own non-monotonic-DTS warnings treated as failures rather than noise. A
-test that only checks the stream plays is a test that passes while drifting.
+**Verification is a probe of packets, not of playback**, across every item seam
+and at least TWO complete list wraps. A test that only checks the stream plays
+is a test that passes while drifting.
+
+**But the rule is monotonic DTS, NOT monotonic PTS**, and an earlier draft of
+this spec demanded both. That was wrong and the measurement caught it:
+**PTS is not monotonic in B-frame video, by definition.** The profile sets no
+`-bf`, so x264 uses B-frames, and presentation order legitimately runs ahead of
+and behind decode order. Requiring monotonic PTS would fail on correct output.
+
+Measured (see `internal/playlistmedia/concat_behaviour_test.go`): three
+derivatives of 2.048s / 3.051s / 1.555s, looped past two full wraps —
+**DTS clean, zero backward steps in either stream, across all five seams and
+both wraps.** Video PTS showed 199 of 413 packets stepping back by *exactly*
+0.066667s — two frame periods at 30 fps — distributed uniformly rather than
+clustered at seams, which is the signature of the reorder window and not of a
+splice defect.
+
+So the contract is: **DTS monotonic everywhere; PTS compared per stream against
+itself and allowed to move within a bounded reorder window; any PTS step larger
+than that window, or any step at all clustered at a seam, is a failure.**
+Comparing interleaved video and audio packets as one sequence is meaningless —
+two independently clocked streams — and reported 254 false violations before the
+comparison was made per stream.
 
 ## `-safe 0` stops being theoretical
 
@@ -415,7 +444,7 @@ stated time, because until it does the selector cannot offer it.
 | Case | Why it matters |
 |---|---|
 | Several mismatched sources normalise, concatenate and play as one timeline | The sub-project's entire premise. Probe the join, do not trust the argv |
-| DTS and PTS are monotonic across every seam AND two full list wraps | The timestamp contract. FFmpeg's non-monotonic warnings are failures here, not noise |
+| DTS is monotonic across every seam AND two full list wraps, per stream | The timestamp contract. PTS is NOT required to be monotonic — B-frames reorder it by design, and demanding otherwise fails on correct output |
 | A short-audio item is padded with silence, a short-video item holds its last frame — and NEITHER is truncated | `-shortest` would have discarded operator media to tidy the arithmetic. Test both directions |
 | Each list entry carries a `duration` measured from the encoded output | Removes the dependency on the demuxer's own estimation being exact |
 | A derivative written by an older profile version is NOT treated as ready | Otherwise B1's unpadded derivatives are silently concatenated by B2 |
