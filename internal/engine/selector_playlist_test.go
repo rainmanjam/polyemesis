@@ -191,22 +191,21 @@ func TestAPlaylistStartsOnceItsLastDerivativeAppears(t *testing.T) {
 	}
 }
 
-// TestAPlaylistItemThatNamesNoUploadStartsNoTier is the resolution half of the
-// rule, and it is why readiness asks uploads.Store.Resolve rather than joining
-// strings. The name reaches the gate having passed PlaylistFileProblem's SHAPE
-// check only; Resolve is what confines it to the uploads directory, and it is
-// the reason items are upload names rather than paths at all.
+// TestAnItemWhoseDerivativeIsMissingStartsNoTier covers the DERIVATIVE branch
+// through reconcilePlaylist: a name that is a perfectly good upload name and
+// has simply never been normalised.
 //
-// Through reconcilePlaylist for the reason the first test gives, and the
-// unit-level check below covers the same rule at the function.
-func TestAPlaylistItemThatNamesNoUploadStartsNoTier(t *testing.T) {
+// It does NOT exercise the confinement check. uploads.Store.Resolve is a SHAPE
+// check -- it refuses "", ".", ".." and anything carrying a separator, and
+// confines what is left to the uploads directory -- but it never asks whether
+// the file exists. "no-such-upload.mp4" therefore RESOLVES happily and is
+// refused one line later, at the derivative. That distinction is the whole
+// reason TestPlaylistItemsReadyRefusesAnUnresolvableName exists separately: an
+// earlier version of this file claimed this test covered Resolve, and the
+// confinement check could have been deleted with both tests still green.
+func TestAnItemWhoseDerivativeIsMissingStartsNoTier(t *testing.T) {
 	e := playlistEngine(t)
 	s := playlistOnSettings()
-	// A name Resolve refuses outright. It cannot be trimmed or joined into
-	// something valid, and a playlist holding one can never play. It also
-	// clears PlaylistFileProblem's own ".." check only because that check runs
-	// on the whole entry -- see playlistUploadProblem -- so the tier would be
-	// started by a reconcile that trusted validation alone.
 	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "no-such-upload.mp4"}}
 
 	e.selMu.Lock()
@@ -218,16 +217,44 @@ func TestAPlaylistItemThatNamesNoUploadStartsNoTier(t *testing.T) {
 	}
 }
 
-// TestPlaylistItemsReadyRefusesAnUnresolvableName is the unit-level half: the
-// resolve branch specifically, which the reconcile-driven tests above reach
-// only through a name that also has no derivative. Both branches must refuse.
+// TestPlaylistItemsReadyRefusesAnUnresolvableName is the CONFINEMENT check, and
+// it is built so that only that check can be the reason it passes.
+//
+// The trick is the seeding below. ".." is refused by uploads.Store.Resolve
+// outright, but it also has no derivative, so a test that stopped there would
+// be satisfied by either branch -- and would still pass with the Resolve call
+// deleted, which is exactly the hole this replaces. Writing a real file at the
+// derivative path takes the os.Stat branch out of the running and leaves
+// Resolve as the only thing that can refuse.
+//
+// The boundary matters beyond tidiness: resolving through the store rather than
+// joining strings is what keeps items upload NAMES rather than paths, and it is
+// what makes FFmpeg's -safe 0 defensible when the concat list arrives. A
+// deleted confinement check is a directory traversal, and it should not be
+// possible for that deletion to leave a green suite.
 func TestPlaylistItemsReadyRefusesAnUnresolvableName(t *testing.T) {
 	e := playlistEngine(t)
-	// ".." is refused by uploads.Store.Resolve outright, alongside "" and ".".
-	// Seeding a derivative for it would be meaningless -- there is no file for
-	// one to be a derivative OF -- so this can only fail on the resolve check.
+
+	// DerivativePath takes filepath.Base of the trimmed name, so ".." lands on
+	// the real, ordinary file "...ts" inside the derivative directory. Seeding
+	// it is legitimate rather than a contrivance: it is precisely the state an
+	// attacker-shaped name would be in if the traversal had already written
+	// something there.
+	derivative := playlistmedia.DerivativePath(e.cfg.DataDir, "..")
+	if err := os.MkdirAll(filepath.Dir(derivative), 0o755); err != nil {
+		t.Fatalf("mkdir derivative dir: %v", err)
+	}
+	if err := os.WriteFile(derivative, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed derivative: %v", err)
+	}
+	if _, err := os.Stat(derivative); err != nil {
+		t.Fatalf("the derivative was not seeded, so the stat branch could still be "+
+			"the reason this test passes: %v", err)
+	}
+
 	if e.playlistItemsReady([]db.PlaylistItem{{Upload: ".."}}) {
-		t.Error("an item that does not resolve to a stored upload was called ready")
+		t.Error("an item that does not resolve to a stored upload was called ready; " +
+			"its derivative exists, so nothing but uploads.Store.Resolve can refuse it")
 	}
 }
 
@@ -302,6 +329,7 @@ func TestThePlaylistPathIsPinnedToTheFileProtocol(t *testing.T) {
 // meant. This proves the item still resolves to the REAL, trimmed path.
 func TestAPlaylistUploadWithSurroundingWhitespaceStillResolves(t *testing.T) {
 	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
 
 	// The upload must actually exist for the assertion below to mean
 	// anything: Resolve succeeding is not the same as resolving to the right
@@ -403,6 +431,7 @@ func TestThePlaylistStartsWithItsOwnHubAndStopsWhenDisabled(t *testing.T) {
 // reading a relay that had closed.
 func TestASaveThatDoesNotTouchThePlaylistDoesNotRespawnIt(t *testing.T) {
 	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
 	s := playlistOnSettings()
 
 	e.selMu.Lock()
