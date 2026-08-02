@@ -1,12 +1,15 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // The playlist tier is the backup listener with a file where the socket is: a
@@ -82,6 +85,64 @@ func TestThePlaylistPathIsPinnedToTheFileProtocol(t *testing.T) {
 		if a == "-i" && args[i+1] != "file:/data/2026:01.ts" {
 			t.Errorf("playlist input is %q, want it pinned to the file protocol", args[i+1])
 		}
+	}
+}
+
+// TestAPlaylistUploadWithSurroundingWhitespaceStillResolves guards
+// playlistItemUpload as the single trim point: playlistSig hashes a trimmed
+// name and reconcilePlaylist resolves through uploads.Store.Resolve, which
+// does NOT reject a stray space (it is not a separator) -- it just includes
+// it literally in the path. Before playlistItemUpload existed, resolution had
+// lost the trim that the code it replaced carried, so a leading space
+// validated, hashed as though trimmed, respawned looking like it should
+// work, and then resolved to a file that was never the one an operator
+// meant. This proves the item still resolves to the REAL, trimmed path.
+func TestAPlaylistUploadWithSurroundingWhitespaceStillResolves(t *testing.T) {
+	e := playlistEngine(t)
+
+	// The upload must actually exist for the assertion below to mean
+	// anything: Resolve succeeding is not the same as resolving to the right
+	// file, and only checking the tier "started" cannot tell those apart.
+	uploadsDir := filepath.Join(e.cfg.DataDir, uploads.Dir)
+	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadsDir, "loop.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed upload file: %v", err)
+	}
+
+	s := playlistOnSettings()
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: " loop.mp4"}}
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	if e.playlistHub() == nil {
+		t.Fatal("the playlist tier did not start")
+	}
+	e.mu.RLock()
+	tier := e.playlist
+	e.mu.RUnlock()
+	if tier == nil {
+		t.Fatal("no playlist tier recorded after reconcile")
+	}
+
+	want := "file:" + filepath.Join(uploadsDir, "loop.mp4")
+	args := tier.proc.Args()
+	found := false
+	for i, a := range args {
+		if a != "-i" || i+1 >= len(args) {
+			continue
+		}
+		found = true
+		if args[i+1] != want {
+			t.Errorf("playlist input = %q, want %q -- a leading space in the "+
+				"upload name must not reach the resolved path", args[i+1], want)
+		}
+	}
+	if !found {
+		t.Fatal("playlist argv has no -i flag")
 	}
 }
 

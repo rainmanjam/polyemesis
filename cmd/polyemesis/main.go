@@ -186,10 +186,11 @@ func run(h *hooks) error {
 		return err
 	}
 	defer store.Close()
-	// GetSettings's legacy playlist migration needs both to decide whether a
-	// FilePath from before Items existed names a real upload -- see
-	// migratePlaylistFilePath's comment for why it must not guess.
-	store.WithDataDir(cfg.DataDir).WithLogger(log)
+	// One-shot, here rather than on internal/db's read path -- see
+	// migrateLegacyPlaylistFilePath's comment for why.
+	if err := migrateLegacyPlaylistFilePath(store, cfg.DataDir, log); err != nil {
+		return err
+	}
 
 	box, err := secrets.LoadOrCreate(cfg.SecretPath())
 	if err != nil {

@@ -4219,6 +4219,25 @@ func (e *Engine) teardownBackup(b *backupIngest) {
 
 // ------------------------------------------------------------ playlist tier
 
+// playlistItemUpload trims item i's Upload -- the ONE place engine.go reads
+// it, so playlistSig's hash and reconcilePlaylist's resolution cannot
+// disagree about what an item names.
+//
+// A second, independent TrimSpace at either call site is exactly how they
+// drifted before: reconcilePlaylist's join-based path building trimmed
+// inline, moving to uploads.Store.Resolve dropped that trim in the move, and
+// playlistSig kept its own copy -- so a leading space in Upload hashed as
+// though trimmed but resolved untrimmed, meaning it validated, respawned
+// looking like it should work, and then failed to open a file that was never
+// the one an operator meant. Trimming here, once, and nowhere else, is what
+// keeps that from happening again the next time this code moves.
+func playlistItemUpload(items []db.PlaylistItem, i int) string {
+	if i < 0 || i >= len(items) {
+		return ""
+	}
+	return strings.TrimSpace(items[i].Upload)
+}
+
 // playlistSig hashes everything the playlist's command depends on, and is empty
 // when the tier must not run.
 //
@@ -4240,8 +4259,8 @@ func playlistSig(s db.Settings) string {
 	// does now.
 	parts := make([]string, 0, len(p.Items)+1)
 	parts = append(parts, "playlist")
-	for _, item := range p.Items {
-		parts = append(parts, strings.TrimSpace(item.Upload))
+	for i := range p.Items {
+		parts = append(parts, playlistItemUpload(p.Items, i))
 	}
 	return hashStrings(parts)
 }
@@ -4408,10 +4427,7 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		e.log.Error("playlist: no uploads store", "err", err)
 		return
 	}
-	var upload string
-	if items := s.Failover.Playlist.Items; len(items) > 0 {
-		upload = items[0].Upload
-	}
+	upload := playlistItemUpload(s.Failover.Playlist.Items, 0)
 	path, err := store.Resolve(upload)
 	if err != nil {
 		// Only reachable through settings that never passed validation --

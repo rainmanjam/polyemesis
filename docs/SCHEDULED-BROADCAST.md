@@ -138,9 +138,14 @@ the moment one arrives. You can pin it if you want it to win anyway.
 | Where | *Settings → Ingest → Pull* | `failover.playlist` in the settings API |
 
 There is no form control for it yet — set `failover.playlist.enabled` and
-`failover.playlist.filePath` (relative to the data directory, confined to it
-exactly as a pull URL is) through the settings API. The control arrives with the
-sequencing work in [the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md).
+`failover.playlist.items` through the settings API. `items` is a list, each
+entry an `{"upload": "<name>"}` naming a file already sent through the
+uploads page — a bare stored filename, never a path, confined to the uploads
+directory exactly as `internal/uploads.Store.Resolve` enforces everywhere
+else it is used. Today the list holds one entry and only the first plays;
+sequencing several arrives with the work in
+[the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md), which also brings the
+control itself.
 
 ### The file must match your encoder's codec, and nothing checks
 

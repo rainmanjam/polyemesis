@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/routing"
-	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // IngestMode selects which listener the ingest supervisor runs.
@@ -609,6 +607,15 @@ func playlistUploadProblem(upload string) error {
 	u := strings.TrimSpace(upload)
 	if u == "" {
 		return errors.New("names no upload")
+	}
+	if u == "." {
+		// Too short to trip the separator or ".." checks below, but
+		// uploads.Store.Resolve refuses it outright (same as "" and ".."),
+		// and a playlist item this validator waved through would never
+		// resolve -- an enabled candidate that can only ever fail to start,
+		// which is exactly what an enabled-with-zero-items playlist is
+		// refused for above.
+		return errors.New("must be a bare uploaded filename, not \".\"")
 	}
 	if len(u) > MaxPlaylistItemUpload {
 		return fmt.Errorf("upload name is longer than %d characters", MaxPlaylistItemUpload)
@@ -1673,35 +1680,41 @@ func (d *DB) GetSettings() (Settings, error) {
 	if err := json.Unmarshal([]byte(raw), &s); err != nil {
 		return Settings{}, fmt.Errorf("decode settings: %w", err)
 	}
-	// A blob written under sub-project A may still carry
-	// failover.playlist.filePath, which PlaylistSettings no longer has a field
-	// for -- json.Unmarshal drops keys it does not recognise without
-	// complaint. Left unhandled, an operator who configured a playlist filler
-	// would have it vanish on the very next load: Items stays empty, the
-	// playlist never starts, and nothing says why -- discovered, if at all,
-	// during the outage the playlist exists to cover.
-	//
-	// migratePlaylistFilePath decides whether that value can be trusted --
-	// see its own comment for why a blind copy is not safe -- and logs loudly
-	// when it cannot, rather than leaving Items empty with nothing said.
-	if len(s.Failover.Playlist.Items) == 0 {
-		if fp := legacyPlaylistFilePath([]byte(raw)); fp != "" {
-			if item, ok := d.migratePlaylistFilePath(fp); ok {
-				s.Failover.Playlist.Items = []PlaylistItem{item}
-			}
-		}
-	}
+	// Deliberately NOT migrating failover.playlist.filePath here any more.
+	// GetSettings has around twenty callers, several of them per-request API
+	// handlers, and confirming a legacy value honestly needs a filesystem
+	// resolve plus a Stat -- see LegacyPlaylistFilePath's comment. Doing that
+	// on every read would block every one of those callers on I/O, and since
+	// nothing here persists the result, it would redo the same work and log
+	// the same warning forever instead of once. cmd/polyemesis runs the real
+	// migration once at startup, where the data directory and a configured
+	// logger already exist, and PutSettings makes it stick.
 	return s, nil
 }
 
-// legacyPlaylistFilePath recovers PlaylistSettings.FilePath (DESIGN
-// 2026-08-01-playlist-items) from a raw settings blob that predates Items.
-// Decoded separately from the main Settings struct because the field no
-// longer exists on PlaylistSettings for json.Unmarshal to land it in.
+// LegacyPlaylistFilePath reports the playlist FilePath recorded before it
+// became Items (DESIGN 2026-08-01-playlist-items), or "" if there is none.
 //
-// Best-effort: a blob that fails even this loose a decode has already failed
-// the primary json.Unmarshal in GetSettings, which returns before this runs.
-func legacyPlaylistFilePath(raw []byte) string {
+// Pure past the SQL read: no filesystem access beyond this table and no
+// logging, on purpose. Confirming that value still names something real
+// needs a data directory and belongs to a caller that has one and a
+// configured logger to report the decision with -- this package deliberately
+// carries neither. See cmd/polyemesis's startup migration, which is the only
+// caller.
+//
+// Naturally idempotent without any extra bookkeeping: once that migration
+// persists Items via PutSettings, the stored blob is marshalled from the
+// current Settings struct, which has no FilePath field left to write --
+// so the very next call finds no legacy key at all and reports "".
+func (d *DB) LegacyPlaylistFilePath() (string, error) {
+	var raw string
+	err := d.sql.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
 	var legacy struct {
 		Failover struct {
 			Playlist struct {
@@ -1709,74 +1722,10 @@ func legacyPlaylistFilePath(raw []byte) string {
 			} `json:"playlist"`
 		} `json:"failover"`
 	}
-	_ = json.Unmarshal(raw, &legacy)
-	return strings.TrimSpace(legacy.Failover.Playlist.FilePath)
-}
-
-// migratePlaylistFilePath decides whether a legacy FilePath can honestly
-// become a PlaylistItem, and reports (false) rather than guessing when it
-// cannot.
-//
-// FilePath and Upload are NOT the same namespace, so copying the string
-// across is not a migration -- it is a different claim wearing the old
-// value's clothes:
-//   - FilePath was relative to the DATA DIRECTORY. A legacy "media/loop.mp4"
-//     has a separator, which fails Upload's bare-filename rule outright --
-//     migrating it anyway would save a settings blob that Validate() then
-//     refuses, so the operator would meet this as a broken save instead of a
-//     missing file.
-//   - Upload is a bare name inside the UPLOADS subdirectory beneath the data
-//     directory. A bare legacy "loop.mp4" that lived at the data root does
-//     not become the upload "loop.mp4" just by being copied: that name now
-//     resolves to <dataDir>/uploads/loop.mp4, a different file that is
-//     probably absent, and the playlist would point at nothing while
-//     Validate() sees a perfectly well-formed item and says nothing is wrong.
-//
-// The only case this can honestly preserve is a bare name that ALREADY
-// resolves to a real file under the uploads directory -- same name, same
-// bytes, a narrower namespace than FilePath allowed but not a different
-// claim. Everything else is refused, loudly, rather than turned into a
-// playlist that is silently wrong: a playlist left unmigrated is at least
-// visible in the logs and the settings form; one that starts pointed at the
-// wrong file, or fails validation on the next save, is a mystery an operator
-// meets during the outage the playlist exists to cover.
-func (d *DB) migratePlaylistFilePath(legacy string) (PlaylistItem, bool) {
-	const help = "upload the file through the uploads page and re-select it in the playlist"
-	if err := playlistUploadProblem(legacy); err != nil {
-		d.logger().Warn("playlist: legacy filePath is not a bare upload name; left unmigrated. "+help,
-			"filePath", legacy, "reason", err)
-		return PlaylistItem{}, false
-	}
-	if strings.TrimSpace(d.dataDir) == "" {
-		// No data directory means no way to confirm the name below, and
-		// guessing yes is exactly the mistake this function exists to avoid.
-		d.logger().Warn("playlist: legacy filePath left unmigrated; no data directory "+
-			"is known to confirm it names a real upload. "+help,
-			"filePath", legacy)
-		return PlaylistItem{}, false
-	}
-	store, err := uploads.New(d.dataDir)
-	if err != nil {
-		d.logger().Warn("playlist: legacy filePath left unmigrated; could not open the uploads store. "+help,
-			"filePath", legacy, "err", err)
-		return PlaylistItem{}, false
-	}
-	resolved, err := store.Resolve(legacy)
-	if err != nil {
-		// playlistUploadProblem already checked the shape above; Resolve is
-		// the actual authority on what escapes the uploads directory, kept
-		// here as the second, defence-in-depth check the rest of this design
-		// relies on everywhere else too.
-		d.logger().Warn("playlist: legacy filePath left unmigrated; does not resolve inside the uploads directory. "+help,
-			"filePath", legacy, "err", err)
-		return PlaylistItem{}, false
-	}
-	if _, err := os.Stat(resolved); err != nil {
-		d.logger().Warn("playlist: legacy filePath left unmigrated; no upload named this exists yet. "+help,
-			"filePath", legacy, "resolved", resolved, "err", err)
-		return PlaylistItem{}, false
-	}
-	return PlaylistItem{Upload: legacy}, true
+	// Best-effort: a blob that fails even this loose a decode is not one this
+	// migration can act on either way.
+	_ = json.Unmarshal([]byte(raw), &legacy)
+	return strings.TrimSpace(legacy.Failover.Playlist.FilePath), nil
 }
 
 // PutSettings stores the settings blob.

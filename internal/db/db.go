@@ -9,7 +9,6 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
-	"log/slog"
 
 	_ "modernc.org/sqlite"
 )
@@ -18,42 +17,17 @@ import (
 var schemaSQL string
 
 // DB wraps the SQLite handle.
+//
+// Deliberately just that: no filesystem path and no logger. This package
+// used to carry an optional data directory and logger for one migration's
+// benefit (a legacy playlist FilePath, DESIGN 2026-08-01-playlist-items),
+// which put filesystem I/O and logging on GetSettings's read path -- read by
+// roughly twenty callers, several of them per-request API handlers. That
+// migration now runs once at startup in cmd/polyemesis, where a real data
+// directory and a real, configured logger already live; see
+// LegacyPlaylistFilePath for the pure half this package still owns.
 type DB struct {
 	sql *sql.DB
-	// dataDir and log are unset by every one of Open's eleven call sites
-	// except cmd/polyemesis/main.go, and that is fine: this package is a SQL
-	// store and has no other reason to know a filesystem path or hold a
-	// logger. GetSettings is the one exception -- confirming a migrated
-	// legacy playlist filename actually names a real upload needs both -- so
-	// they are optional, set separately via WithDataDir and WithLogger
-	// rather than added to Open's signature, which would have touched every
-	// caller for a check only that one migration needs.
-	dataDir string
-	log     *slog.Logger
-}
-
-// WithDataDir tells the store where operator uploads live, for GetSettings's
-// legacy playlist migration. Returns d so it chains after Open.
-func (d *DB) WithDataDir(dir string) *DB {
-	d.dataDir = dir
-	return d
-}
-
-// WithLogger gives the store somewhere to report the legacy playlist
-// migration's decisions. Returns d so it chains after Open.
-func (d *DB) WithLogger(log *slog.Logger) *DB {
-	d.log = log
-	return d
-}
-
-// logger returns d.log, or slog's default if none was ever set. A migration
-// warning nobody can see is indistinguishable from one that never ran, so a
-// caller that never wires a logger still gets one rather than silence.
-func (d *DB) logger() *slog.Logger {
-	if d.log != nil {
-		return d.log
-	}
-	return slog.Default()
 }
 
 // Open opens (creating if needed) the database at path and applies the schema.
