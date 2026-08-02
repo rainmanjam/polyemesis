@@ -94,11 +94,15 @@ item at 0:20 → live → the same item at 1:10 is a visible skip.
 The decision stands, because the alternative's cost is a slate blip on every
 return and that is worse for the failure this feature serves. But the honest
 statement is that this is a trade between two visible artefacts in a minority of
-cases, not the absence of one. **The escape hatch is an operator toggle**, which
-is what OBS and vMix both ship — and B2 is the sub-project that makes it
-reachable, because it brings the UI. If real playlists turn out to be countdowns
-and sponsor reads rather than ambient loops, the toggle is the answer and the
-duration table is its mechanism.
+cases, not the absence of one.
+
+**The operator toggle that OBS and vMix both ship is explicitly NOT in B2**, and
+is named here only so a later reader knows the shape of the answer rather than
+re-deriving it. Shipping it means building both behaviours — the duration table,
+the `out_time_ms` → index mapping, list rotation, and respawn-on-return — plus a
+settings key, a UI control and its own acceptance case. That is a sub-project,
+not a checkbox, and it should be justified by operators hitting the countdown
+case rather than by symmetry with other products.
 
 **It introduces a worse artefact than it removes.** Respawning to reach an item
 boundary means the tier stops delivering, so the slate covers the gap: the
@@ -143,11 +147,16 @@ list while engine A has recorded signature A. Atomic replacement does not help �
 each write is atomic and the wrong one still wins. `selMu` is per-engine and
 establishes no ownership of a shared file.
 
-**So the filename carries the signature**, the exact path is passed to FFmpeg,
-and the file is retained until that process stops. Two engines cannot collide
-because two different lists cannot hash the same. Stale lists are swept when a
-tier stops. Windows replacement semantics stop mattering, because nothing is
-ever replaced.
+**So the filename carries the signature AND the source's identity**, the exact
+path is passed to FFmpeg, and the tier retains that exact path until its own
+process has stopped.
+
+The source identity is not decoration. Signature alone fixes the different-list
+overwrite but not the identical-list case: two sources configured with the SAME
+playlist produce the same hash, so one tier stopping would sweep a file the other
+is still re-reading at its next wrap. A tier deletes ONLY the path it holds, and
+only after its process is gone. Windows replacement semantics stop mattering,
+because nothing is ever replaced.
 
 **Always concat, even for one item.** The roadmap suggested keeping
 `-stream_loop -1` on a single file as a degenerate case. Rejected: two argv
@@ -196,11 +205,45 @@ a derivative whose streams end at different points, and concat's per-file offset
 then applies to a file that does not have one clean end. Across a ten-item list
 that skew accumulates.
 
-**The contract this design commits to:** every derivative's audio and video must
-end together, so that one duration describes the file. That is a change to the
-NORMALISER — `-shortest` on every path, not just the silent one — and it belongs
-here rather than in B1 because B1 never concatenated anything, so nothing could
-observe the skew.
+**`-shortest` is NOT the fix, and an earlier draft of this spec wrongly adopted
+it.** It does not make durations agree — it ends the output when the shortest
+stream ends, so a video-short item loses its trailing audio and an audio-short
+item loses picture. That is operator media being silently discarded, which is a
+worse failure than the skew it was meant to cure.
+
+That draft also set a contract nothing could satisfy: "audio and video end
+together" is arithmetically impossible here. At 30 fps a video frame is 33.3 ms
+and an AAC frame at 48 kHz is 21.3 ms, so the two streams have no common end
+instant to land on.
+
+**The contract this design actually commits to:**
+
+1. **Pad, never truncate.** A derivative whose audio is short is padded with
+   silence; one whose video is short holds its final frame. No operator content
+   is dropped to make the arithmetic tidy.
+2. **The canonical duration is MEASURED FROM THE ENCODED OUTPUT'S PACKETS**, not
+   inferred from the source and not read from `format.duration` on trust, and it
+   is recorded with the derivative. B1's `NormaliseParams.DurationMS` is NOT
+   this value — it is a source estimate and it is never populated.
+3. **That duration is written into the list as a `duration` directive after every
+   `file` line.** FFmpeg supports overriding the demuxer's inferred duration for
+   exactly this reason, and doing so removes the dependency on its estimation
+   being exact. A stated tolerance replaces an impossible equality.
+
+This changes the NORMALISER, which is B1 code. It belongs here because B1 never
+concatenated anything, so nothing could observe the skew.
+
+### Derivatives are versioned, or B2 concatenates B1's
+
+`playlistmedia.DerivativePath` is keyed on the upload's name and nothing else,
+and the enqueue path skips any upload whose derivative already exists. Change the
+normaliser without changing that key and **every derivative B1 already wrote is
+silently reused** — unpadded, with no measured duration — while readiness reports
+the item as ready.
+
+So the derivative carries a PROFILE VERSION, and an item is ready only when its
+derivative was produced by the current one. Bumping the profile re-normalises;
+it does not quietly inherit.
 
 **Verification is a probe of packets, not of playback.** Monotonic DTS *and* PTS
 across every item seam and across at least TWO complete list wraps, with
@@ -303,17 +346,32 @@ the slate wins on the byte counter. Nothing reaches air that cannot play. What
 is missing is not safety but EXPLANATION: the tier respawn-loops indefinitely
 and nothing tells the operator why the playlist stopped.
 
-Three decisions follow:
+Four decisions follow:
 
-1. **`DELETE /api/v1/media/{name}` refuses an upload a playlist item names**, and
-   says which item. This is the in-use guard B1 deferred. It is defensible now
-   in a way it was not then: B1's N1 lockout came from punishing an operator for
-   state they had no control to edit, and B2 gives them the control.
-2. **The delete path reconciles.** Today it does not, so even a permitted
-   deletion leaves the engine's view stale.
-3. **A derivative that vanishes anyway** — swept, or removed by hand — is
-   reported through the readiness endpoint as needing attention, naming the item.
-   The slate has already covered the air by then.
+1. **Runtime readiness asks about the DERIVATIVE, not the upload.** B1's gate
+   required both, for a reason that expires with this sub-project: the argv named
+   the upload, so a deleted upload meant a respawn loop. Once the argv names the
+   derivative, playback is unaffected by the original's absence, and a rule that
+   stops a working playlist because a source file was tidied away is punishing
+   the operator for something the running broadcast does not depend on. Runtime
+   readiness therefore means: the derivative exists and was built by the current
+   profile version.
+2. **A missing upload is a CONFIGURATION problem, reported not enforced.** The
+   readiness endpoint flags the item as needing attention and the UI shows it.
+   The distinction is the same one B1's N1 fix drew — validation governs what may
+   be saved, readiness governs what may go to air — and this keeps them from
+   quietly swapping jobs again.
+3. **`DELETE /api/v1/media/{name}` refuses an upload a playlist item names**, and
+   says which item. This is the in-use guard B1 deferred, defensible now in a way
+   it was not then because B2 gives the operator the control to clear the item.
+   A permitted deletion — one nothing references — removes **the derivative as
+   well as the upload**, and then reconciles. Deleting one and orphaning the
+   other is the leak B1 carried; this is where it closes.
+4. **The reference check and the settings write need one serialization
+   boundary.** Otherwise a PUT validating that an upload exists and a DELETE
+   checking that it is unreferenced can both pass and then commit in the wrong
+   order, leaving a saved item naming a deleted file. Refusing deletion is only
+   a guarantee if it cannot interleave with the save that creates the reference.
 
 **A no-op reconcile cannot see any of this, and that is a real gap.**
 `reconcilePlaylist` returns early when `cur.sig == want`, BEFORE readiness is
@@ -327,19 +385,36 @@ and job completion already does — B1 wired `jobs.WithOnChange`.
 `internal/db/settings.go` and its comment says it exists to bound what B2 turns
 this list into. That bound now does its job.
 
+1000 is not a file-descriptor risk, which was the first worry and the wrong one:
+the concat demuxer parses the list, then opens and probes ONE file at a time,
+closing each before opening the next. It never holds a thousand handles. The real
+constraints are elsewhere and worth stating so the number is revisited for the
+right reason: **every** item must be normalised before the playlist is offered at
+all, so a large list is gated on the slowest transcode in it; each item may be up
+to `MaxDurationMS` (24 hours) of 1080p; and the list is parsed and the first item
+probed before a single byte reaches the hub. **The budget that governs is
+first-byte latency** — a worst-case list must still deliver to its hub inside a
+stated time, because until it does the selector cannot offer it.
+
 ## Testing
 
 | Case | Why it matters |
 |---|---|
 | Several mismatched sources normalise, concatenate and play as one timeline | The sub-project's entire premise. Probe the join, do not trust the argv |
 | DTS and PTS are monotonic across every seam AND two full list wraps | The timestamp contract. FFmpeg's non-monotonic warnings are failures here, not noise |
-| Every derivative's audio and video end together | One duration per file is what concat's offset arithmetic depends on |
+| A short-audio item is padded with silence, a short-video item holds its last frame — and NEITHER is truncated | `-shortest` would have discarded operator media to tidy the arithmetic. Test both directions |
+| Each list entry carries a `duration` measured from the encoded output | Removes the dependency on the demuxer's own estimation being exact |
+| A derivative written by an older profile version is NOT treated as ready | Otherwise B1's unpadded derivatives are silently concatenated by B2 |
+| A worst-case list delivers its first hub byte inside the stated budget | Until it does, the selector cannot offer the playlist at all |
 | A destination rides every item boundary without restarting | The seam is the risk; this is the number that proves normalisation works |
 | A destination riding a MISMATCHED live↔playlist cut, measured not assumed | The failure path B2 does not fix. The existing suite hides it by building filler that matches |
 | Every path in a generated list came from Resolve or DerivativePath | The `-safe 0` boundary, tested rather than asserted |
 | Two engines building lists concurrently each play their own | The list filename carries the signature precisely so this cannot collide |
 | Reordering items respawns the tier; an unrelated settings save does not | `playlistSig` must hash contents, not membership |
 | Deleting an upload a playlist names is refused, and names the item | The in-use guard, and the reason a stale item cannot strand a broadcast |
+| A permitted deletion removes the derivative too, and leaves no orphan | Deleting one and orphaning the other is the leak B1 carried |
+| A DELETE and a settings PUT that race cannot leave an item naming a deleted file | The refusal is only a guarantee if it cannot interleave with the save that creates the reference |
+| Two sources with IDENTICAL playlists: stopping one lets the other finish a wrap | Same signature, same bytes — the list filename must carry source identity too |
 | A derivative removed out-of-band drops the playlist to the slate | A's byte counter is the backstop; this proves it still is once concat re-opens files |
 | A one-item playlist takes the same code path as a ten-item one | No degenerate branch that only breaks in production |
 | An empty enabled playlist is refused at validation | Not left for FFmpeg to discover |
@@ -363,10 +438,12 @@ having to correct.
 - **`engine.go`'s `BUG.` comment** — delete it. The derivative is the input now.
 - **The readiness docstring and the deleted-upload test.** Their stated reason is
   "the argv names the upload, so FFmpeg would respawn-loop on a file that is
-  gone". Once the argv names the DERIVATIVE that is no longer true. Keep
-  requiring the upload to exist — an item naming a deleted upload is a
-  configuration error the operator must see — but rewrite the reason, or it
-  becomes another comment that asserts the opposite of the code.
+  gone". Once the argv names the DERIVATIVE that is no longer true, so the RULE
+  changes and not just its comment: runtime readiness stops requiring the upload
+  (see the deletion section), and the test that asserts a deleted upload starts
+  no tier is REPLACED by one asserting a missing or stale-profile derivative
+  starts no tier. Leaving the old test passing while its rationale is void is
+  how a guard survives past the thing it guarded.
 - **`docs/roadmap/PLAYLIST-AND-COMPOSITING.md`** — record that item-boundary
   resume was considered and rejected, with the reasoning, so it is not
   reintroduced from the old text.
@@ -374,10 +451,16 @@ having to correct.
   UI has no playlist control yet" as part of why the lockout was so bad. Narrow
   it once the control exists.
 - **`docs/SCHEDULED-BROADCAST.md`** — it describes a single-file playlist.
-- **`internal/playlistmedia`** — `-shortest` moves from the silent-audio path to
-  every path, per the timestamp contract. B1 had no way to observe the skew.
-- **`internal/api/media.go`** — the delete endpoint gains an in-use guard and a
-  reconcile.
+- **`internal/playlistmedia`** — padding rather than truncation, a measured
+  output duration recorded with each derivative, and a profile version in the
+  derivative's identity. B1 had no way to observe any of this, because nothing
+  concatenated anything.
+- **`internal/api/media.go`** — the delete endpoint gains an in-use guard, removes
+  the derivative alongside the upload, and reconciles.
+- **`NormaliseParams.DurationMS`** — its comment says a caller with a probed
+  duration should pass it. B2 does not populate it and must not be read as having
+  done so: the value B2 needs is measured from the OUTPUT, after encoding, and is
+  a different quantity from this source-side estimate.
 
 ## Commit shape
 
@@ -409,10 +492,18 @@ derivative made a dead code path look green.
 
 **B2's obligation is therefore to MEASURE it, not to fix it:** an acceptance case
 with a deliberately mismatched publisher, recording what destinations actually do
-at the live↔playlist cut. That turns an unknown into a number. Fixing it means
-either constraining the ingest or re-encoding at the selector — the latter
-reverses a decision made throughout the engine and adds a permanent transcode to
-every broadcast, which is its own roadmap item and not this one.
+at the live↔playlist cut. Fixing it means either constraining the ingest or
+re-encoding at the selector — the latter reverses a decision made throughout the
+engine and adds a permanent transcode to every broadcast, which is its own
+roadmap item and not this one.
+
+**The measurement is a pinned expectation, not a note.** An independent review
+objected that recording a number is not an acceptance criterion, and it is right
+that "we wrote it down" gates nothing. So the measured restart count is asserted
+against a recorded value and the suite FAILS if it goes up. The absolute number
+is not zero and this sub-project does not claim it will be; what is guaranteed is
+that it cannot silently get worse. That is the same ratchet the golden tables
+apply to selector decisions.
 
 ## What could go wrong
 
