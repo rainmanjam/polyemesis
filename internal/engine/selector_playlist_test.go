@@ -9,6 +9,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
@@ -23,10 +24,78 @@ import (
 
 // playlistEngine is failoverEngine with a data directory, which the playlist
 // needs and nothing else in that helper does.
+//
+// It seeds the uploads playlistOnSettings names AND their normalised
+// derivatives, because since the readiness gate a tier does not start until
+// every item has one. An engine with a bare data directory would start nothing,
+// and every "the tier came up" assertion below would be passing or failing for
+// a reason it does not name.
 func playlistEngine(t *testing.T) *Engine {
 	t.Helper()
 	e := failoverEngine(t)
 	e.cfg = config.Config{DataDir: t.TempDir()}
+	seedPlaylistUpload(t, e, "loop.mp4", true)
+	// The respawn test edits the list to this one, and an item that never
+	// became ready would look exactly like a tier that refused to respawn.
+	seedPlaylistUpload(t, e, "other.mp4", true)
+	return e
+}
+
+// seedPlaylistUpload writes the stored upload `name`, and its normalised
+// derivative only when `normalised` is true.
+//
+// An upload WITHOUT a derivative is the state this whole gate exists for: the
+// operator's file has landed, the normalisation job has been queued, and it has
+// not finished. Nothing else distinguishes the two states on disk.
+func seedPlaylistUpload(t *testing.T, e *Engine, name string, normalised bool) {
+	t.Helper()
+
+	uploadsDir := filepath.Join(e.cfg.DataDir, uploads.Dir)
+	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadsDir, name), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed upload %q: %v", name, err)
+	}
+	if !normalised {
+		return
+	}
+
+	// Through playlistmedia.DerivativePath rather than a join of our own, so a
+	// test cannot go on passing against a directory or extension the package
+	// has since moved away from.
+	derivative := playlistmedia.DerivativePath(e.cfg.DataDir, name)
+	if err := os.MkdirAll(filepath.Dir(derivative), 0o755); err != nil {
+		t.Fatalf("mkdir derivative dir: %v", err)
+	}
+	if err := os.WriteFile(derivative, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed derivative for %q: %v", name, err)
+	}
+}
+
+// playlistEngineWithItems is playlistEngine whose settings name the given
+// uploads, in order.
+//
+// Every name is stored. A name containing "transcoding" is stored WITHOUT its
+// derivative, which is how a caller says "this item's normalisation job has not
+// finished" without the helper needing a parallel list of booleans nobody could
+// read at the call site.
+func playlistEngineWithItems(t *testing.T, names ...string) *Engine {
+	t.Helper()
+	e := playlistEngine(t)
+
+	s := playlistOnSettings()
+	items := make([]db.PlaylistItem, 0, len(names))
+	for _, name := range names {
+		seedPlaylistUpload(t, e, name, !strings.Contains(name, "transcoding"))
+		items = append(items, db.PlaylistItem{Upload: name})
+	}
+	s.Failover.Playlist.Items = items
+
+	// Under the lock, via setSettings: playlistReady reads the engine's live
+	// settings, and that field is also read by the status publisher on the
+	// supervisor's goroutine.
+	setSettings(e, s)
 	return e
 }
 
@@ -36,6 +105,104 @@ func playlistOnSettings() db.Settings {
 	s.Failover.Playlist.Enabled = true
 	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "loop.mp4"}}
 	return s
+}
+
+func TestAPlaylistWithAnUnnormalisedItemIsNotOffered(t *testing.T) {
+	// The same rule sub-project A established for a tier that is running but
+	// delivering nothing: a candidate is offered only when it would actually
+	// deliver. Offering a playlist whose item is still transcoding would put a
+	// source on air that cannot play, and it would outrank the slate -- the one
+	// thing that exists so an operator never sees nothing.
+	e := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
+	if e.playlistReady() {
+		t.Error("a playlist with an unnormalised item was offered")
+	}
+}
+
+// TestAPlaylistWhoseItemsAreAllNormalisedIsOffered is the other direction, and
+// it is not decoration: readiness that is never satisfied is a playlist feature
+// that never goes on air at all, and the test above cannot tell that apart from
+// the gate working.
+func TestAPlaylistWhoseItemsAreAllNormalisedIsOffered(t *testing.T) {
+	e := playlistEngineWithItems(t, "first.mp4", "second.mp4")
+	if !e.playlistReady() {
+		t.Error("a playlist whose every item is normalised was refused")
+	}
+}
+
+// TestAPlaylistWithAnUnnormalisedItemStartsNoTier is the WIRING, and it is the
+// half that reaches air.
+//
+// playlistReady returning false is inert on its own. The rule is enforced by
+// the tier not starting: no tier means no hub, no hub means playlistRunning
+// stays false through the byte counter sub-project A settled on, and the slate
+// -- which ranks BELOW the playlist -- keeps the stream. Deliberately not a
+// second availability input to chooseSource: two ways to be unavailable would
+// make the golden table's claim to exhaustiveness false.
+func TestAPlaylistWithAnUnnormalisedItemStartsNoTier(t *testing.T) {
+	e := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(e.Settings())
+	e.selMu.Unlock()
+
+	if h := e.playlistHub(); h != nil {
+		t.Error("the playlist tier started with an item that has not been normalised; " +
+			"its hub would carry bytes, playlistRunning would go true, and the " +
+			"selector would put a source on air that cannot play in preference to the slate")
+	}
+}
+
+// TestAPlaylistStartsOnceItsLastDerivativeAppears answers the re-evaluation
+// question in code: readiness is re-read on every reconcile, so a normalisation
+// job finishing is picked up by the next one. Nothing polls the filesystem, and
+// nothing needs to -- the alternative was a watcher whose only job would be to
+// notice a file that the reconcile after it would have noticed anyway.
+func TestAPlaylistStartsOnceItsLastDerivativeAppears(t *testing.T) {
+	e := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
+	s := e.Settings()
+	t.Cleanup(func() {
+		e.mu.RLock()
+		tier := e.playlist
+		e.mu.RUnlock()
+		e.teardownPlaylist(tier)
+	})
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+	if e.playlistHub() != nil {
+		t.Fatal("the tier started while an item was unready, so what follows would prove nothing")
+	}
+
+	// The normalisation job finishes. No settings change, no signature change.
+	seedPlaylistUpload(t, e, "still-transcoding.mp4", true)
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+	if e.playlistHub() == nil {
+		t.Error("the playlist never started after its last derivative appeared; a tier " +
+			"refused once and never retried is a playlist that silently stays off air")
+	}
+}
+
+// TestAPlaylistItemThatNamesNoUploadIsNotReady is the resolution half of the
+// rule, and it is why readiness asks uploads.Store.Resolve rather than joining
+// strings. The name reaches the gate having passed PlaylistFileProblem's SHAPE
+// check only; Resolve is what confines it to the uploads directory, and it is
+// the reason items are upload names rather than paths at all.
+func TestAPlaylistItemThatNamesNoUploadIsNotReady(t *testing.T) {
+	e := playlistEngine(t)
+	s := playlistOnSettings()
+	// A name Resolve refuses outright. It cannot be trimmed or joined into
+	// something valid, and a playlist holding one can never play.
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: ".."}}
+	setSettings(e, s)
+
+	if e.playlistReady() {
+		t.Error("an item that does not resolve to a stored upload was called ready")
+	}
 }
 
 func TestPlaylistFeedLoopsTheFileAtWallClockSpeed(t *testing.T) {

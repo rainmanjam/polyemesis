@@ -40,6 +40,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/meters"
+	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -4238,6 +4239,87 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 	return strings.TrimSpace(items[i].Upload)
 }
 
+// playlistItemsReady reports whether every item could actually go on air:
+// every one resolves to a stored upload, and every one has been normalised.
+//
+// NORMALISATION IS ASYNCHRONOUS, so "an item names this upload" and "this item
+// can be played" are different states, and there is nothing else on disk that
+// tells them apart. An operator adds an item the moment their file finishes
+// uploading; the transcode that makes it playable is a queued job that runs
+// when the governor lets it, which on a machine that is busy carrying a live
+// stream is not immediately.
+//
+// THE FAILURE THIS PREVENTS: the playlist ranks ABOVE the slate. Start the tier
+// for a list whose first item is still transcoding and the selector is offered
+// a candidate that cannot play, in preference to the slate -- and the slate is
+// the one thing that exists so that an operator never sees nothing. Holding the
+// slate for another few seconds is the cheap outcome; handing the broadcast to
+// a file that is not there yet is not.
+//
+// Resolution goes through uploads.Store.Resolve and NEVER through a string
+// join, for the reason reconcilePlaylist gives at its own call: Upload is a
+// bare stored name, Resolve is the single place that turns one into an absolute
+// path inside the uploads directory, and it is the confinement check standing
+// behind PlaylistFileProblem's shape check. That boundary is also why items are
+// upload names rather than paths in the first place.
+//
+// It asks about the DERIVATIVE, not the upload. The upload is the operator's
+// original in whatever codec their editor produced; the normalised copy is the
+// only thing a playlist can play, and it is keyed on the upload so an upload
+// used twice is normalised once. A missing upload with a derivative present is
+// therefore ready on purpose -- the original can be deleted once it has been
+// normalised, and the tier would still play.
+//
+// This is NOT a second notion of availability. Sub-project A settled that a
+// candidate is available when its hub is delivering bytes, and chooseSource
+// sees one plain boolean for that; a parallel "ready" input would give the
+// selector two ways to be unavailable and make the golden table's claim to
+// exhaustiveness false. This decides whether the hub gets FED at all: an
+// unready playlist starts no tier, so playlistRunning stays false through the
+// existing byte-counter path and the slate wins by the ranking already there.
+//
+// An empty list is vacuously ready and never reaches here anyway: playlistSig
+// is empty for an enabled playlist with no items, so reconcilePlaylist has
+// already returned.
+func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
+	store, err := uploads.New(e.cfg.DataDir)
+	if err != nil {
+		// Without a store nothing can be resolved, so nothing is ready. Said
+		// out loud because it means the data directory is not writable, which
+		// is a great deal more wrong than one unnormalised item.
+		e.log.Error("playlist readiness: no uploads store", "err", err)
+		return false
+	}
+	for i := range items {
+		// playlistItemUpload is the ONE trim point shared with playlistSig, so
+		// readiness cannot disagree with the hash about what an item names.
+		upload := playlistItemUpload(items, i)
+		if _, err := store.Resolve(upload); err != nil {
+			return false
+		}
+		if _, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// playlistReady asks playlistItemsReady of the settings the engine is currently
+// running.
+//
+// Separate from the settings-taking form because reconcilePlaylist must gate
+// the playlist it is ABOUT TO START -- the settings it was handed -- and not
+// whatever the engine last stored. In production those are the same value;
+// Reconcile assigns e.settings before reconcileOutputs runs. Anywhere else they
+// are not, and a gate that consulted the wrong one would refuse or admit a
+// playlist other than the one being started.
+func (e *Engine) playlistReady() bool {
+	e.mu.RLock()
+	items := e.settings.Failover.Playlist.Items
+	e.mu.RUnlock()
+	return e.playlistItemsReady(items)
+}
+
 // playlistSig hashes everything the playlist's command depends on, and is empty
 // when the tier must not run.
 //
@@ -4402,6 +4484,30 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
+	// READINESS GATES THE START, and that is the whole of it -- there is no
+	// second availability input anywhere below. A playlist that is not ready
+	// starts no tier, so it has no hub, so playlistRunning stays false through
+	// the byte counter sampleSources already reads, and the slate wins on the
+	// ranking that is already there.
+	//
+	// Refused rather than started-and-left-to-fail because the playlist ranks
+	// ABOVE the slate: a tier started for an item that is still transcoding
+	// would be a candidate that cannot play, offered in preference to the one
+	// thing that exists so an operator never sees nothing.
+	//
+	// Re-read on every reconcile rather than watched: this returns without
+	// recording a tier, so the next reconcile finds e.playlist nil against a
+	// non-empty signature and tries again. That is what picks the playlist up
+	// when its last normalisation job finishes.
+	if !e.playlistItemsReady(s.Failover.Playlist.Items) {
+		e.log.Info("playlist not started; not every item has been normalised yet",
+			"items", s.Failover.Playlist.Items,
+			"reason", "the playlist ranks above the slate, so a tier started for an item "+
+				"that cannot play would displace the source that exists so an operator "+
+				"never sees nothing; the next reconcile retries")
+		return
+	}
+
 	hub, err := relay.New(e.log, 0)
 	if err != nil {
 		e.log.Error("playlist: no relay", "err", err)
@@ -4419,9 +4525,10 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	// PlaylistFileProblem's shape check.
 	//
 	// Still off the first item only: sequencing beyond one item is a later
-	// sub-project's job (see the plan's "No sequencing" note), and requiring
-	// every item's derivative to exist before the tier starts at all is Task
-	// 3's readiness gate, not this one's.
+	// sub-project's job (see the plan's "No sequencing" note). Every item's
+	// derivative has already been required to exist by the readiness gate
+	// above, including the ones this argv does not yet name -- the gate is
+	// about the playlist an operator saved, not about the one file playing.
 	store, err := uploads.New(e.cfg.DataDir)
 	if err != nil {
 		e.log.Error("playlist: no uploads store", "err", err)
