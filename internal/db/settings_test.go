@@ -1,8 +1,12 @@
 package db
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // Chat retention is an operator setting because the moderator's user card reads
@@ -95,14 +99,29 @@ func TestAnEnabledPlaylistNeedsAtLeastOneItem(t *testing.T) {
 }
 
 // TestALegacyPlaylistFilePathMigratesToASingleItem guards the load-time
-// migration. A deployment that set FilePath under sub-project A has that
-// value sitting in its stored settings blob; PlaylistSettings no longer has a
-// field for json.Unmarshal to land it in, so without this migration the value
-// is silently dropped on the very next load -- Items stays empty, the
-// playlist never starts, and an operator discovers it, if at all, during the
-// outage the playlist exists to cover.
+// migration for the one case it can honestly preserve: a bare name that
+// ALREADY exists as a real upload. A deployment that set FilePath under
+// sub-project A has that value sitting in its stored settings blob;
+// PlaylistSettings no longer has a field for json.Unmarshal to land it in, so
+// without this migration the value is silently dropped on the very next load
+// -- Items stays empty, the playlist never starts, and an operator discovers
+// it, if at all, during the outage the playlist exists to cover.
 func TestALegacyPlaylistFilePathMigratesToASingleItem(t *testing.T) {
 	d := testDB(t)
+	dataDir := t.TempDir()
+	d.WithDataDir(dataDir)
+
+	// The file must actually exist under <dataDir>/uploads for the migration
+	// to trust the name -- see migratePlaylistFilePath's comment for why a
+	// bare name alone is not enough: FilePath and Upload are different
+	// namespaces, and this is the one case where they happen to agree.
+	uploadsDir := filepath.Join(dataDir, uploads.Dir)
+	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadsDir, "loop.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed upload file: %v", err)
+	}
 
 	legacy := `{"failover":{"playlist":{"enabled":true,"filePath":"loop.mp4"}}}`
 	if _, err := d.SQL().Exec(`INSERT INTO settings (id, json) VALUES (1, ?)`, legacy); err != nil {
@@ -116,8 +135,57 @@ func TestALegacyPlaylistFilePathMigratesToASingleItem(t *testing.T) {
 
 	want := []PlaylistItem{{Upload: "loop.mp4"}}
 	if !reflect.DeepEqual(got.Failover.Playlist.Items, want) {
-		t.Fatalf("Items = %+v, want %+v -- a legacy FilePath must survive as a "+
-			"single-item list, or an operator's configured filler vanishes on "+
-			"upgrade with nothing saying why", got.Failover.Playlist.Items, want)
+		t.Fatalf("Items = %+v, want %+v -- a legacy FilePath naming a real "+
+			"upload must survive as a single-item list, or an operator's "+
+			"configured filler vanishes on upgrade with nothing saying why",
+			got.Failover.Playlist.Items, want)
+	}
+}
+
+// TestAnUnmigratableLegacyPlaylistFilePathIsNotSilentlyKept is the other half
+// of the migration: FilePath and Upload are different namespaces (a
+// data-dir-relative path vs. a bare name inside uploads/), so a value that
+// cannot honestly be re-expressed as an Upload must not be smuggled across as
+// one. A silently-wrong item -- pointing at a file that is not the operator's
+// filler, or failing validation on the very next settings save -- is worse
+// than an empty list, because an empty list at least fails the way
+// TestAnEnabledPlaylistNeedsAtLeastOneItem already covers, visibly.
+func TestAnUnmigratableLegacyPlaylistFilePathIsNotSilentlyKept(t *testing.T) {
+	tests := []struct {
+		name   string
+		legacy string
+	}{
+		// A separator means the legacy value cannot even be an Upload's shape,
+		// let alone name a real one.
+		{"path-shaped", "media/loop.mp4"},
+		// Bare, but nothing by that name has ever been uploaded -- the data
+		// directory here is empty, so this must not be assumed to resolve.
+		{"bare but no matching upload exists", "loop.mp4"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := testDB(t)
+			d.WithDataDir(t.TempDir())
+
+			legacy := `{"failover":{"playlist":{"enabled":true,"filePath":` +
+				`"` + tc.legacy + `"}}}`
+			if _, err := d.SQL().Exec(`INSERT INTO settings (id, json) VALUES (1, ?)`, legacy); err != nil {
+				t.Fatalf("seed legacy settings: %v", err)
+			}
+
+			got, err := d.GetSettings()
+			if err != nil {
+				t.Fatalf("GetSettings: %v", err)
+			}
+
+			if len(got.Failover.Playlist.Items) != 0 {
+				t.Errorf("legacy filePath %q was migrated to %+v; it cannot be "+
+					"honestly represented as an upload, so it must be left "+
+					"unmigrated (and reported, not silently dropped) rather than "+
+					"becoming a playlist item that points at the wrong file or "+
+					"fails validation on the next save",
+					tc.legacy, got.Failover.Playlist.Items)
+			}
+		})
 	}
 }

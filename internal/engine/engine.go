@@ -48,6 +48,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // relayPortBase is where per-consumer loopback ports are allocated from.
@@ -4388,19 +4389,39 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
-	// PROVISIONAL, pending Task 3 of DESIGN 2026-08-01-playlist-items: joins
-	// the data directory the way the old single FilePath was resolved, rather
-	// than resolving the upload through uploads.Store.Resolve as the design
-	// requires. Task 3 replaces this with real resolution and a readiness gate
-	// over every item's normalised derivative; until it lands this preserves
-	// today's behaviour off the first item, because sequencing beyond one item
-	// is a later sub-project's job, not this one's (see the plan's "No
-	// sequencing" note).
+	// Resolved through the uploads store, not a string join: Upload is a bare
+	// stored name inside <dataDir>/uploads, not a data-dir-relative path the
+	// way the old FilePath was, and uploads.Store.Resolve is the one place
+	// that turns a name into an absolute path under that directory. Joining
+	// DataDir with the name directly -- what an earlier version of this code
+	// did -- looks for the file one level too high and finds nothing for
+	// every real upload; Resolve is also the second, defence-in-depth check
+	// against a name escaping the uploads directory, behind
+	// PlaylistFileProblem's shape check.
+	//
+	// Still off the first item only: sequencing beyond one item is a later
+	// sub-project's job (see the plan's "No sequencing" note), and requiring
+	// every item's derivative to exist before the tier starts at all is Task
+	// 3's readiness gate, not this one's.
+	store, err := uploads.New(e.cfg.DataDir)
+	if err != nil {
+		e.log.Error("playlist: no uploads store", "err", err)
+		return
+	}
 	var upload string
 	if items := s.Failover.Playlist.Items; len(items) > 0 {
 		upload = items[0].Upload
 	}
-	path := filepath.Join(e.cfg.DataDir, filepath.FromSlash(strings.TrimSpace(upload)))
+	path, err := store.Resolve(upload)
+	if err != nil {
+		// Only reachable through settings that never passed validation --
+		// PlaylistFileProblem already refuses anything Resolve would reject on
+		// shape -- so it is said out loud rather than left as a tier that
+		// quietly never starts.
+		e.log.Warn("playlist not started; its upload does not resolve",
+			"upload", upload, "err", err)
+		return
+	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,

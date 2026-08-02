@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // IngestMode selects which listener the ingest supervisor runs.
@@ -1678,9 +1680,15 @@ func (d *DB) GetSettings() (Settings, error) {
 	// would have it vanish on the very next load: Items stays empty, the
 	// playlist never starts, and nothing says why -- discovered, if at all,
 	// during the outage the playlist exists to cover.
+	//
+	// migratePlaylistFilePath decides whether that value can be trusted --
+	// see its own comment for why a blind copy is not safe -- and logs loudly
+	// when it cannot, rather than leaving Items empty with nothing said.
 	if len(s.Failover.Playlist.Items) == 0 {
 		if fp := legacyPlaylistFilePath([]byte(raw)); fp != "" {
-			s.Failover.Playlist.Items = []PlaylistItem{{Upload: fp}}
+			if item, ok := d.migratePlaylistFilePath(fp); ok {
+				s.Failover.Playlist.Items = []PlaylistItem{item}
+			}
 		}
 	}
 	return s, nil
@@ -1703,6 +1711,72 @@ func legacyPlaylistFilePath(raw []byte) string {
 	}
 	_ = json.Unmarshal(raw, &legacy)
 	return strings.TrimSpace(legacy.Failover.Playlist.FilePath)
+}
+
+// migratePlaylistFilePath decides whether a legacy FilePath can honestly
+// become a PlaylistItem, and reports (false) rather than guessing when it
+// cannot.
+//
+// FilePath and Upload are NOT the same namespace, so copying the string
+// across is not a migration -- it is a different claim wearing the old
+// value's clothes:
+//   - FilePath was relative to the DATA DIRECTORY. A legacy "media/loop.mp4"
+//     has a separator, which fails Upload's bare-filename rule outright --
+//     migrating it anyway would save a settings blob that Validate() then
+//     refuses, so the operator would meet this as a broken save instead of a
+//     missing file.
+//   - Upload is a bare name inside the UPLOADS subdirectory beneath the data
+//     directory. A bare legacy "loop.mp4" that lived at the data root does
+//     not become the upload "loop.mp4" just by being copied: that name now
+//     resolves to <dataDir>/uploads/loop.mp4, a different file that is
+//     probably absent, and the playlist would point at nothing while
+//     Validate() sees a perfectly well-formed item and says nothing is wrong.
+//
+// The only case this can honestly preserve is a bare name that ALREADY
+// resolves to a real file under the uploads directory -- same name, same
+// bytes, a narrower namespace than FilePath allowed but not a different
+// claim. Everything else is refused, loudly, rather than turned into a
+// playlist that is silently wrong: a playlist left unmigrated is at least
+// visible in the logs and the settings form; one that starts pointed at the
+// wrong file, or fails validation on the next save, is a mystery an operator
+// meets during the outage the playlist exists to cover.
+func (d *DB) migratePlaylistFilePath(legacy string) (PlaylistItem, bool) {
+	const help = "upload the file through the uploads page and re-select it in the playlist"
+	if err := playlistUploadProblem(legacy); err != nil {
+		d.logger().Warn("playlist: legacy filePath is not a bare upload name; left unmigrated. "+help,
+			"filePath", legacy, "reason", err)
+		return PlaylistItem{}, false
+	}
+	if strings.TrimSpace(d.dataDir) == "" {
+		// No data directory means no way to confirm the name below, and
+		// guessing yes is exactly the mistake this function exists to avoid.
+		d.logger().Warn("playlist: legacy filePath left unmigrated; no data directory "+
+			"is known to confirm it names a real upload. "+help,
+			"filePath", legacy)
+		return PlaylistItem{}, false
+	}
+	store, err := uploads.New(d.dataDir)
+	if err != nil {
+		d.logger().Warn("playlist: legacy filePath left unmigrated; could not open the uploads store. "+help,
+			"filePath", legacy, "err", err)
+		return PlaylistItem{}, false
+	}
+	resolved, err := store.Resolve(legacy)
+	if err != nil {
+		// playlistUploadProblem already checked the shape above; Resolve is
+		// the actual authority on what escapes the uploads directory, kept
+		// here as the second, defence-in-depth check the rest of this design
+		// relies on everywhere else too.
+		d.logger().Warn("playlist: legacy filePath left unmigrated; does not resolve inside the uploads directory. "+help,
+			"filePath", legacy, "err", err)
+		return PlaylistItem{}, false
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		d.logger().Warn("playlist: legacy filePath left unmigrated; no upload named this exists yet. "+help,
+			"filePath", legacy, "resolved", resolved, "err", err)
+		return PlaylistItem{}, false
+	}
+	return PlaylistItem{Upload: legacy}, true
 }
 
 // PutSettings stores the settings blob.
