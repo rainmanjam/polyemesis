@@ -95,6 +95,17 @@ const PartialSuffix = ".partial"
 // volume, and a transcode that fills it does not fail alone.
 const DefaultMinFreeBytes = 2 << 30
 
+// MaxDurationMS is the longest item this job will accept, at a generous
+// twenty-four hours.
+//
+// It is a bound on ARITHMETIC, not a product opinion. estimateBytes multiplies
+// the duration by the profile's bitrate, and an absurd value — a probe that
+// returned nonsense, a caller that passed microseconds — overflows the int64
+// and turns the disk guard's refusal into a message quoting a negative number
+// of megabytes. The guard still fails closed, but an error a reader cannot act
+// on is the failure this repo keeps having to fix.
+const MaxDurationMS = 24 * 60 * 60 * 1000
+
 const (
 	defaultFileMode = 0o600
 	defaultDirMode  = 0o755
@@ -133,6 +144,12 @@ const (
 
 	NormaliseVideoEncoder = "libx264"
 	NormalisePixFmt       = "yuv420p"
+	// NormaliseH264Profile and NormaliseH264Level are what every derivative
+	// declares in its bitstream. High at 4.0 is what 8-bit 4:2:0 1080p30 under
+	// 25 Mbit/s is, and it is what every destination this product pushes to
+	// decodes. See buildNormalise for why they are stated rather than derived.
+	NormaliseH264Profile = "high"
+	NormaliseH264Level   = "4.0"
 	// NormalisePreset trades ratio for speed. This job runs ahead of air with
 	// nobody watching it, but it still competes with whatever is live.
 	NormalisePreset = "veryfast"
@@ -232,6 +249,18 @@ func buildNormalise(in, out string, silent bool) []string {
 		"-preset", NormalisePreset,
 		"-pix_fmt", NormalisePixFmt,
 		"-r", strconv.Itoa(NormaliseFPS),
+		// Profile and level are STATED rather than left to be derived.
+		//
+		// x264 picks both from the preset, the pixel format and the resolution,
+		// so today every derivative comes out High@4.0 whether or not we ask.
+		// That is a derivation, and a derivation is exactly what the rest of
+		// this block refuses: an FFmpeg upgrade that changed the default would
+		// leave every derivative made after it at a different profile from
+		// every derivative made before, with nothing saying so and a decoder
+		// somewhere refusing the second half of a playlist. It is the one
+		// remaining way the fixed target could move without a code review.
+		"-profile:v", NormaliseH264Profile,
+		"-level", NormaliseH264Level,
 	)
 	// A keyframe every GOP with no scene-cut exceptions and no open GOP. Counted
 	// in frames rather than seconds because -r above has already fixed the frame
@@ -367,18 +396,25 @@ func (c Config) Normalized() Config {
 	return c
 }
 
-// AudioProber reports whether a file carries at least one audio stream. A field
-// on Processor so the two profile paths are both reachable in a test on a
+// Stream kinds, spelled as ffprobe's -select_streams spells them.
+const (
+	streamVideo = "v"
+	streamAudio = "a"
+)
+
+// StreamProber reports whether a file carries at least one stream of a kind. A
+// field on Processor so every path through the worker — the silent source, the
+// audio-only source, the file FFprobe cannot read — is reachable in a test on a
 // machine with no media and no FFprobe on it.
-type AudioProber func(ctx context.Context, path string) (bool, error)
+type StreamProber func(ctx context.Context, path, kind string) (bool, error)
 
 // Processor runs the normalisation job.
 type Processor struct {
-	log   *slog.Logger
-	cfg   Config
-	exec  media.Execer
-	audio AudioProber
-	free  func(path string) (uint64, error)
+	log    *slog.Logger
+	cfg    Config
+	exec   media.Execer
+	stream StreamProber
+	free   func(path string) (uint64, error)
 }
 
 // Option customises a Processor, chiefly for tests.
@@ -388,8 +424,8 @@ type Option func(*Processor)
 // without FFmpeg on the machine.
 func WithExecer(e media.Execer) Option { return func(p *Processor) { p.exec = e } }
 
-// WithAudioProber replaces the audio-stream check.
-func WithAudioProber(a AudioProber) Option { return func(p *Processor) { p.audio = a } }
+// WithStreamProber replaces the stream-presence check.
+func WithStreamProber(s StreamProber) Option { return func(p *Processor) { p.stream = s } }
 
 // WithFreeSpace replaces the free-space reporter, so a full disk can be
 // simulated without one.
@@ -406,7 +442,7 @@ func WithFreeSpace(fn func(path string) (uint64, error)) Option {
 // a second place for it to be subtly wrong.
 func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 	p := &Processor{log: log, cfg: cfg.Normalized(), exec: media.Exec, free: uploads.FreeBytes}
-	p.audio = p.probeAudio
+	p.stream = p.probeStream
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -443,8 +479,8 @@ func (p NormaliseParams) Validate() error {
 	if !ValidUploadName(p.Upload) {
 		return fmt.Errorf("invalid upload name %q", p.Upload)
 	}
-	if p.DurationMS < 0 {
-		return fmt.Errorf("duration %d ms is not a duration", p.DurationMS)
+	if p.DurationMS < 0 || p.DurationMS > MaxDurationMS {
+		return fmt.Errorf("duration %d ms is not a playlist item's duration", p.DurationMS)
 	}
 	return nil
 }
@@ -535,14 +571,12 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 		return err
 	}
 
-	hasAudio, err := p.audio(ctx, input)
+	partial := final + PartialSuffix
+	args, silent, err := p.chooseProfile(ctx, params.Upload, input, partial)
 	if err != nil {
 		return err
 	}
-	partial := final + PartialSuffix
-	args := normaliseArgs(input, partial)
-	if !hasAudio {
-		args = normaliseSilentArgs(input, partial)
+	if silent {
 		rep.Logf("%s has no audio track; synthesising silence so the item still matches the playlist profile", params.Upload)
 	}
 
@@ -564,13 +598,49 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 		return fmt.Errorf("chmod %s: %w", filepath.Base(final), err)
 	}
 
-	res := NormaliseResult{Path: final, Silent: !hasAudio}
+	res := NormaliseResult{Path: final, Silent: silent}
 	if st, err := os.Stat(final); err == nil {
 		res.Bytes = st.Size()
 	}
 	rep.SetResult(res)
 	rep.Logf("normalised copy written to %s", filepath.Base(final))
 	return nil
+}
+
+// chooseProfile picks the argv for one source, and refuses what cannot be made
+// into a playlist item at all.
+//
+// Video is REQUIRED. uploads.allowedExt accepts .wav, .flac, .aac, .mp3 and
+// .m4a, so an audio-only upload is reachable straight from the media library.
+// Without this check FFmpeg exits with "Stream map '0:v:0' matches no streams",
+// which comes back through p.run unclassified and therefore RETRYABLE: the
+// queue would spend every attempt re-running a transcode that can never
+// succeed, contending with the live stream each time, and the operator would be
+// shown FFmpeg's sentence instead of the answer.
+//
+// It is deliberately NOT the mirror of the silent case below. Synthesising
+// silence for a video keeps a real picture on air; synthesising black for an
+// audio-only file would put a black screen on air, which is the exact thing an
+// operator reaches for a slate to avoid. Refusing permanently is the honest
+// answer, and it is what stops the retry burn.
+func (p *Processor) chooseProfile(ctx context.Context, upload, input, out string) (args []string, silent bool, err error) {
+	hasVideo, err := p.stream(ctx, input, streamVideo)
+	if err != nil {
+		return nil, false, err
+	}
+	if !hasVideo {
+		return nil, false, jobs.Permanent(fmt.Errorf(
+			"%s has no video track, and a playlist item must contain video; "+
+				"give it a picture or leave it out of the playlist", upload))
+	}
+	hasAudio, err := p.stream(ctx, input, streamAudio)
+	if err != nil {
+		return nil, false, err
+	}
+	if !hasAudio {
+		return normaliseSilentArgs(input, out), true, nil
+	}
+	return normaliseArgs(input, out), false, nil
 }
 
 // checkSpace refuses the transcode when the volume could not survive it.
@@ -623,26 +693,34 @@ func estimateBytes(durationMS, sourceBytes int64) (n int64, bounded bool) {
 	return sourceBytes, false
 }
 
-// probeAudio is the real AudioProber: one ffprobe that prints the codec type of
-// the first audio stream, or nothing at all when there is not one.
-func (p *Processor) probeAudio(ctx context.Context, path string) (bool, error) {
-	out, stderr, err := output(ctx, media.Command{Name: p.cfg.FFprobe, Args: hasAudioArgs(path)})
+// probeStream is the real StreamProber: one ffprobe that prints the codec type
+// of the first stream of a kind, or nothing at all when there is not one.
+//
+// A failure here is PERMANENT. Reaching this point means the file is on disk
+// and readable, so the only remaining reasons FFprobe cannot answer are that
+// the file is truncated, corrupt or not media at all — and none of those become
+// untrue on the next attempt. FFprobe's own words are preserved, because "this
+// upload is broken" is only actionable if the operator can see how.
+func (p *Processor) probeStream(ctx context.Context, path, kind string) (bool, error) {
+	out, stderr, err := output(ctx, media.Command{Name: p.cfg.FFprobe, Args: streamArgs(path, kind)})
 	if err != nil {
 		if s := strings.TrimSpace(stderr); s != "" {
-			return false, fmt.Errorf("ffprobe %s: %s", filepath.Base(path), s)
+			return false, jobs.Permanent(fmt.Errorf("ffprobe could not read %s: %s",
+				filepath.Base(path), s))
 		}
-		return false, fmt.Errorf("ffprobe %s: %w", filepath.Base(path), err)
+		return false, jobs.Permanent(fmt.Errorf("ffprobe could not read %s: %w",
+			filepath.Base(path), err))
 	}
-	return strings.Contains(string(out), "audio"), nil
+	return strings.TrimSpace(string(out)) != "", nil
 }
 
-// hasAudioArgs asks only the question that changes the argv. A full probe would
-// tempt a later reader into deriving the profile from the source, which is the
-// one thing this package must not do.
-func hasAudioArgs(path string) []string {
+// streamArgs asks only the question that changes the argv, for one stream kind.
+// A full probe would tempt a later reader into deriving the profile from the
+// source, which is the one thing this package must not do.
+func streamArgs(path, kind string) []string {
 	return []string{
 		"-hide_banner", "-v", "error",
-		"-select_streams", "a:0",
+		"-select_streams", kind + ":0",
 		"-show_entries", "stream=codec_type",
 		"-of", "csv=p=0",
 		path,

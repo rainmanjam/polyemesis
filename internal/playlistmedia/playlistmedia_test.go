@@ -53,6 +53,11 @@ func TestEveryProfileFlagCarriesTheValueWeMeant(t *testing.T) {
 		{"-maxrate", "6000k"},
 		{"-f", "mpegts"},
 		{"-preset", "veryfast"},
+		// Stated, not derived. x264 would pick both from the preset, the pixel
+		// format and the resolution, which is a value an FFmpeg upgrade could
+		// move without anyone reviewing a line of this repo.
+		{"-profile:v", "high"},
+		{"-level", "4.0"},
 	} {
 		got, n := pairValue(args, tc.flag)
 		switch {
@@ -359,7 +364,7 @@ func TestASourceWithNoAudioStillGetsTheProfilesStereoTrack(t *testing.T) {
 
 	var args []string
 	p := newTestProcessor(t, dir,
-		WithAudioProber(func(context.Context, string) (bool, error) { return false, nil }),
+		WithStreamProber(streams(true, false)),
 		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
 			args = cmd.Args
 			return os.WriteFile(cmd.Args[len(cmd.Args)-1], []byte("normalised"), 0o644)
@@ -376,6 +381,65 @@ func TestASourceWithNoAudioStillGetsTheProfilesStereoTrack(t *testing.T) {
 	}
 	if res, _ := rep.result.(NormaliseResult); !res.Silent {
 		t.Error("the result does not record that the item is silent")
+	}
+}
+
+// An audio-only upload is reachable: uploads.allowedExt accepts .wav, .flac,
+// .aac, .mp3 and .m4a. Without a video probe FFmpeg exits with "Stream map
+// '0:v:0' matches no streams", which comes back unclassified and therefore
+// RETRYABLE, and the queue burns every attempt on a job that can never succeed
+// while contending with the live stream each time.
+//
+// Refused rather than given a synthesised black picture: silence under a real
+// video keeps a picture on air, but black under an audio file PUTS a black
+// screen on air, which is what a slate exists to avoid.
+func TestAnAudioOnlyUploadIsRefusedPermanently(t *testing.T) {
+	dir := t.TempDir()
+	writeUpload(t, dir, "podcast-1a2b.mp3", "source bytes")
+
+	p := newTestProcessor(t, dir,
+		WithStreamProber(streams(false, true)),
+		WithExecer(func(context.Context, media.Command, media.Sink) error {
+			t.Error("FFmpeg was started for a source with no video track")
+			return nil
+		}))
+
+	err := p.RunNormalise(context.Background(), normaliseJob(t, "podcast-1a2b.mp3"), &recorder{})
+	if err == nil {
+		t.Fatal("an audio-only upload was accepted as a playlist item")
+	}
+	if !jobs.IsPermanent(err) {
+		t.Fatalf("error %v is retryable; the queue would burn every attempt on it", err)
+	}
+	// The operator has to be able to act on it, which means knowing which file.
+	if !strings.Contains(err.Error(), "podcast-1a2b.mp3") || !strings.Contains(err.Error(), "video") {
+		t.Errorf("error %q does not name the upload and what is wrong with it", err)
+	}
+}
+
+// A file FFprobe cannot parse will not become parseable on the next attempt.
+// Its own words are preserved, because "this upload is broken" is only
+// actionable if the operator can see how.
+func TestAProbeThatCannotReadTheFileFailsPermanently(t *testing.T) {
+	dir := t.TempDir()
+	writeUpload(t, dir, "truncated-1a2b.mp4", "not media at all")
+
+	p := newTestProcessor(t, dir,
+		WithStreamProber(func(context.Context, string, string) (bool, error) {
+			return false, jobs.Permanent(errors.New(
+				"ffprobe could not read truncated-1a2b.mp4: moov atom not found"))
+		}),
+		WithExecer(func(context.Context, media.Command, media.Sink) error {
+			t.Error("FFmpeg was started on a file FFprobe could not read")
+			return nil
+		}))
+
+	err := p.RunNormalise(context.Background(), normaliseJob(t, "truncated-1a2b.mp4"), &recorder{})
+	if err == nil || !jobs.IsPermanent(err) {
+		t.Fatalf("error = %v, want a permanent failure", err)
+	}
+	if !strings.Contains(err.Error(), "moov atom not found") {
+		t.Errorf("error %q dropped what FFprobe actually said", err)
 	}
 }
 
@@ -435,6 +499,28 @@ func TestTheDiskEstimateIsAnUpperBoundWhenTheDurationIsKnown(t *testing.T) {
 	// low-resolution source normalises LARGER than it arrived.
 	if got, bounded := estimateBytes(0, 4096); bounded || got != 4096 {
 		t.Errorf("estimateBytes(0, 4096) = (%d, %v), want (4096, false)", got, bounded)
+	}
+}
+
+// An absurd duration overflows the int64 multiply in estimateBytes. The guard
+// still fails closed, but it fails closed while quoting a negative number of
+// megabytes, and an error a reader cannot act on is the failure mode this repo
+// keeps having to fix. Bounded at the params, before the arithmetic.
+func TestAnAbsurdDurationIsRefusedBeforeItReachesTheEstimate(t *testing.T) {
+	for _, ms := range []int64{-1, MaxDurationMS + 1, 1 << 62} {
+		if err := (NormaliseParams{Upload: "clip-1a2b.mp4", DurationMS: ms}).Validate(); err == nil {
+			t.Errorf("duration %d ms was accepted", ms)
+		}
+	}
+	for _, ms := range []int64{0, 1, MaxDurationMS} {
+		if err := (NormaliseParams{Upload: "clip-1a2b.mp4", DurationMS: ms}).Validate(); err != nil {
+			t.Errorf("duration %d ms was refused: %v", ms, err)
+		}
+	}
+	// The bound is what keeps the estimate positive, which is what keeps the
+	// refusal message readable.
+	if got, _ := estimateBytes(MaxDurationMS, 0); got <= 0 {
+		t.Errorf("estimate at the maximum duration is %d; it has overflowed", got)
 	}
 }
 
@@ -517,7 +603,7 @@ func newTestProcessor(t *testing.T, dataDir string, opts ...Option) *Processor {
 	t.Helper()
 	base := []Option{
 		WithExecer(func(context.Context, media.Command, media.Sink) error { return nil }),
-		WithAudioProber(func(context.Context, string) (bool, error) { return true, nil }),
+		WithStreamProber(streams(true, true)),
 		WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }),
 	}
 	return New(nil, Config{
@@ -526,6 +612,16 @@ func newTestProcessor(t *testing.T, dataDir string, opts ...Option) *Processor {
 		DataDir: dataDir,
 		Uploads: mustStore(t, dataDir),
 	}, append(base, opts...)...)
+}
+
+// streams is a StreamProber for a source with the given tracks.
+func streams(video, audio bool) StreamProber {
+	return func(_ context.Context, _, kind string) (bool, error) {
+		if kind == "v" {
+			return video, nil
+		}
+		return audio, nil
+	}
 }
 
 func writeUpload(t *testing.T, dataDir, name, content string) string {

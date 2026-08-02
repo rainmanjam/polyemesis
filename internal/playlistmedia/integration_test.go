@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/jobs"
 )
 
 // The unit tests prove the argv says what we meant. This file proves the argv
@@ -51,6 +53,8 @@ func runFFmpeg(t *testing.T, bin string, args ...string) {
 type probeStream struct {
 	CodecName     string `json:"codec_name"`
 	CodecType     string `json:"codec_type"`
+	Profile       string `json:"profile"`
+	Level         int    `json:"level"`
 	Width         int    `json:"width"`
 	Height        int    `json:"height"`
 	PixFmt        string `json:"pix_fmt"`
@@ -169,6 +173,10 @@ func TestNormalisedItemsAgreeWithEachOtherAndReallyConcatenate(t *testing.T) {
 			got, want any
 		}{
 			{"video codec", v.CodecName, "h264"},
+			// Stated in the argv rather than left to x264's defaults, so an
+			// FFmpeg upgrade cannot move it without a test going red.
+			{"H.264 profile", v.Profile, "High"},
+			{"H.264 level", v.Level, 40},
 			{"width", v.Width, NormaliseWidth},
 			{"height", v.Height, NormaliseHeight},
 			{"pixel format", v.PixFmt, NormalisePixFmt},
@@ -222,24 +230,81 @@ func TestNormalisedItemsAgreeWithEachOtherAndReallyConcatenate(t *testing.T) {
 	}
 }
 
-// The audio-stream probe decides which of the two argv builders runs, so it is
-// worth proving against real files rather than only against a fake.
-func TestTheAudioProbeAnswersForRealFiles(t *testing.T) {
+// The stream probe decides which argv runs and whether the job is refused at
+// all, so it is worth proving against real files rather than only against a
+// fake.
+func TestTheStreamProbeAnswersForRealFiles(t *testing.T) {
 	ffmpegBin, ffprobeBin := tools(t)
 	dataDir := t.TempDir()
 	withAudio, silent := synthesiseSources(t, ffmpegBin, dataDir)
+	audioOnly := synthesiseAudioOnly(t, ffmpegBin, dataDir)
 
 	p := New(nil, Config{FFmpeg: ffmpegBin, FFprobe: ffprobeBin, DataDir: dataDir})
 	for _, tc := range []struct {
-		name string
-		want bool
-	}{{withAudio, true}, {silent, false}} {
-		got, err := p.probeAudio(context.Background(), filepath.Join(dataDir, "uploads", tc.name))
+		name              string
+		wantVideo, wantAV bool
+	}{
+		{withAudio, true, true},
+		{silent, true, false},
+		{audioOnly, false, true},
+	} {
+		path := filepath.Join(dataDir, "uploads", tc.name)
+		gotV, err := p.probeStream(context.Background(), path, streamVideo)
 		if err != nil {
-			t.Fatalf("probing %s: %v", tc.name, err)
+			t.Fatalf("probing %s for video: %v", tc.name, err)
 		}
-		if got != tc.want {
-			t.Errorf("probeAudio(%s) = %v, want %v", tc.name, got, tc.want)
+		gotA, err := p.probeStream(context.Background(), path, streamAudio)
+		if err != nil {
+			t.Fatalf("probing %s for audio: %v", tc.name, err)
 		}
+		if gotV != tc.wantVideo || gotA != tc.wantAV {
+			t.Errorf("%s: video=%v audio=%v, want video=%v audio=%v",
+				tc.name, gotV, gotA, tc.wantVideo, tc.wantAV)
+		}
+	}
+}
+
+// synthesiseAudioOnly writes the upload the media library will happily accept
+// and this package must refuse: uploads.allowedExt lists .m4a.
+func synthesiseAudioOnly(t *testing.T, ffmpegBin, dataDir string) string {
+	t.Helper()
+	name := "interview-9c8d7e6f.m4a"
+	runFFmpeg(t, ffmpegBin, "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "sine=frequency=330:sample_rate=44100:duration=2",
+		"-c:a", "aac", "-ac", "2", filepath.Join(dataDir, "uploads", name))
+	return name
+}
+
+// TestARealAudioOnlyUploadIsRefusedPermanently is the unit test's claim made
+// against a real file and a real FFprobe. Without the video probe FFmpeg exits
+// with "Stream map '0:v:0' matches no streams" and the failure comes back
+// RETRYABLE, so the queue re-runs a doomed transcode until the attempt ceiling
+// — competing with the live stream every time.
+func TestARealAudioOnlyUploadIsRefusedPermanently(t *testing.T) {
+	ffmpegBin, ffprobeBin := tools(t)
+	dataDir := t.TempDir()
+	synthesiseSources(t, ffmpegBin, dataDir) // creates the uploads directory
+	audioOnly := synthesiseAudioOnly(t, ffmpegBin, dataDir)
+
+	p := New(nil, Config{
+		FFmpeg:  ffmpegBin,
+		FFprobe: ffprobeBin,
+		DataDir: dataDir,
+		Uploads: mustStore(t, dataDir),
+	}, WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }))
+
+	rep := &recorder{}
+	err := p.RunNormalise(context.Background(), normaliseJob(t, audioOnly), rep)
+	if err == nil {
+		t.Fatal("a real audio-only upload was accepted as a playlist item")
+	}
+	if !jobs.IsPermanent(err) {
+		t.Fatalf("error %v is retryable; the queue would burn every attempt on it", err)
+	}
+	if !strings.Contains(err.Error(), audioOnly) || !strings.Contains(err.Error(), "video") {
+		t.Errorf("error %q does not name the upload and what is wrong with it", err)
+	}
+	if _, statErr := os.Stat(DerivativePath(dataDir, audioOnly)); !os.IsNotExist(statErr) {
+		t.Errorf("the refused upload still produced a derivative: %v", statErr)
 	}
 }
