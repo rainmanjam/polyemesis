@@ -499,6 +499,31 @@ type PlaylistItem struct {
 	Upload string `json:"upload"`
 }
 
+// PlaylistUploadName is THE ONE PLACE a playlist item's Upload is trimmed.
+//
+// It lives in this package because this package owns PlaylistItem, and because
+// the three packages that have to agree about what an item names -- internal/db
+// validating it, internal/engine hashing and resolving it, internal/api
+// checking and enqueuing it -- can all import this one and none of them can
+// import each other.
+//
+// THE FAILURE IT PREVENTS HAS ALREADY HAPPENED ONCE. Validation and the
+// signature hash trimmed; the resolver did not. So " loop.mp4" validated,
+// hashed as "loop.mp4", and resolved to a path that does not exist -- FFmpeg
+// respawn-looped on a file that was never the one the operator meant. Worse,
+// editing " a.mp4" to "a.mp4" moved the argv but NOT the signature, so no
+// respawn fired and the correction never took effect at all. Every added
+// caller is a chance for that disagreement to come back, and the only defence
+// is that there is nothing to disagree with: a caller that needs an item's
+// name calls this, and no caller anywhere writes its own strings.TrimSpace
+// over an Upload.
+//
+// One exception, deliberate and recorded: playlistmedia.DerivativePath trims
+// independently, because it takes a name out of a job's JSON params rather than
+// out of a PlaylistItem, and internal/playlistmedia does not import this
+// package. That one is ledgered as carried.
+func PlaylistUploadName(upload string) string { return strings.TrimSpace(upload) }
+
 // PlaylistSettings is an ordered list of uploads the selector can put on air
 // when no encoder is delivering.
 //
@@ -628,7 +653,7 @@ func (p PlaylistSettings) PlaylistFileProblem() error {
 // readiness gate -- normalisation is asynchronous, so an item can be perfectly
 // valid and not yet playable.
 func playlistUploadProblem(upload string) error {
-	u := strings.TrimSpace(upload)
+	u := PlaylistUploadName(upload)
 	if u == "" {
 		return errors.New("names no upload")
 	}

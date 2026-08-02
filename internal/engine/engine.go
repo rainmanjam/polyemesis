@@ -4220,23 +4220,22 @@ func (e *Engine) teardownBackup(b *backupIngest) {
 
 // ------------------------------------------------------------ playlist tier
 
-// playlistItemUpload trims item i's Upload -- the ONE place engine.go reads
-// it, so playlistSig's hash and reconcilePlaylist's resolution cannot
+// playlistItemUpload is item i's Upload, trimmed -- the ONE place engine.go
+// reads it, so playlistSig's hash and reconcilePlaylist's resolution cannot
 // disagree about what an item names.
 //
-// A second, independent TrimSpace at either call site is exactly how they
-// drifted before: reconcilePlaylist's join-based path building trimmed
-// inline, moving to uploads.Store.Resolve dropped that trim in the move, and
-// playlistSig kept its own copy -- so a leading space in Upload hashed as
-// though trimmed but resolved untrimmed, meaning it validated, respawned
-// looking like it should work, and then failed to open a file that was never
-// the one an operator meant. Trimming here, once, and nowhere else, is what
-// keeps that from happening again the next time this code moves.
+// THE TRIM ITSELF IS db.PlaylistUploadName'S, not a copy of it. This function
+// exists for the bounds check and for being the single engine-side accessor;
+// the whitespace rule lives with the type, where internal/api can reach it too.
+// It used to carry its own strings.TrimSpace, and a second one appeared in
+// internal/api the moment the settings handler started reading items -- which
+// is the same three-way drift, starting again, that this helper was created to
+// end. See db.PlaylistUploadName for the failure.
 func playlistItemUpload(items []db.PlaylistItem, i int) string {
 	if i < 0 || i >= len(items) {
 		return ""
 	}
-	return strings.TrimSpace(items[i].Upload)
+	return db.PlaylistUploadName(items[i].Upload)
 }
 
 // playlistItemsReady reports whether every item could actually go on air:
@@ -4273,7 +4272,7 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 // reported healthy the whole time -- the same "validated, respawned looking
 // like it should work, then failed to open a file" failure playlistItemUpload's
 // comment above exists to prevent. That is reachable, not theoretical:
-// DELETE /media/uploads/{name} removes the upload and leaves the derivative
+// DELETE /api/v1/media/{name} removes the upload and leaves the derivative
 // standing, so without this stat the gate would open on a file nothing can
 // play. An earlier version of this comment claimed the opposite -- that a
 // deleted upload with a surviving derivative was ready ON PURPOSE and "the tier

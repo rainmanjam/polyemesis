@@ -230,7 +230,7 @@ func TestAnItemWhoseDerivativeIsMissingStartsNoTier(t *testing.T) {
 // is a different question from the derivative and became reachable the moment
 // uploads got a delete endpoint.
 //
-// DELETE /media/uploads/{name} removes the upload and leaves the derivative
+// DELETE /api/v1/media/{name} removes the upload and leaves the derivative
 // standing -- nothing sweeps derivatives yet. reconcilePlaylist plays the
 // UPLOAD (the derivative is a readiness token until B2's concat arrives), so a
 // gate that asked only about the derivative would open on a file that is gone:
