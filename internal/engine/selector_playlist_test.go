@@ -31,7 +31,7 @@ func playlistEngine(t *testing.T) *Engine {
 func playlistOnSettings() db.Settings {
 	s := failoverOnSettings()
 	s.Failover.Playlist.Enabled = true
-	s.Failover.Playlist.FilePath = "loop.mp4"
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "loop.mp4"}}
 	return s
 }
 
@@ -172,7 +172,7 @@ func TestASaveThatDoesNotTouchThePlaylistDoesNotRespawnIt(t *testing.T) {
 	}
 
 	// The file, on the other hand, IS in the argv, so changing it must respawn.
-	s.Failover.Playlist.FilePath = "other.mp4"
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "other.mp4"}}
 	e.selMu.Lock()
 	e.reconcilePlaylist(s)
 	e.selMu.Unlock()
@@ -196,7 +196,7 @@ func TestASaveThatDoesNotTouchThePlaylistDoesNotRespawnIt(t *testing.T) {
 func TestAnUnusablePlaylistFileStartsNothing(t *testing.T) {
 	e := playlistEngine(t)
 	s := playlistOnSettings()
-	s.Failover.Playlist.FilePath = "../../etc/shadow"
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "../../etc/shadow"}}
 
 	e.selMu.Lock()
 	e.reconcilePlaylist(s)

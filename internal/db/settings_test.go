@@ -1,6 +1,9 @@
 package db
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // Chat retention is an operator setting because the moderator's user card reads
 // out of that table: no platform publishes a chat-history API, so how far back a
@@ -55,27 +58,66 @@ func TestChatDefaultsAreTheOldHardCodedOnes(t *testing.T) {
 	}
 }
 
-func TestPlaylistFilePathIsConfinedToTheDataDir(t *testing.T) {
-	// The same guarantee SlateSettings.ImagePath and file:// pull sources
-	// already carry. An operator-supplied path is exactly the shape
-	// SECURITY.md's path confinement section exists to defend.
-	for _, bad := range []string{"../etc/passwd", "/etc/passwd", "a/../../b"} {
+func TestAPlaylistItemMustNameAKnownUpload(t *testing.T) {
+	// Items reference uploads, never paths. That is the security boundary
+	// this whole design rests on: the concat demuxer's -safe 0 is only
+	// defensible because every path it sees was chosen by this process, and
+	// uploads.SafeName is what guarantees that.
+	s := DefaultSettings()
+	s.Failover.Playlist.Enabled = true
+	s.Failover.Playlist.Items = []PlaylistItem{{Upload: ""}}
+	if err := s.Validate(); err == nil {
+		t.Error("an item naming no upload was accepted")
+	}
+}
+
+func TestAPlaylistItemRejectsAnythingPathShaped(t *testing.T) {
+	for _, bad := range []string{"../escape.mp4", "/etc/passwd", "sub/dir.mp4"} {
 		s := DefaultSettings()
 		s.Failover.Playlist.Enabled = true
-		s.Failover.Playlist.FilePath = bad
+		s.Failover.Playlist.Items = []PlaylistItem{{Upload: bad}}
 		if err := s.Validate(); err == nil {
-			t.Errorf("path %q was accepted; it escapes the data directory", bad)
+			t.Errorf("item %q was accepted; an upload name is a bare filename, "+
+				"and anything path-shaped means the caller is trying to reach "+
+				"outside the uploads directory", bad)
 		}
 	}
 }
 
-func TestPlaylistNeedsAFileWhenEnabled(t *testing.T) {
+func TestAnEnabledPlaylistNeedsAtLeastOneItem(t *testing.T) {
 	s := DefaultSettings()
 	s.Failover.Playlist.Enabled = true
-	s.Failover.Playlist.FilePath = ""
+	s.Failover.Playlist.Items = nil
 	if err := s.Validate(); err == nil {
-		t.Error("an enabled playlist with no file was accepted; it would " +
-			"start a feed that can never deliver, and the selector would " +
-			"offer a candidate that always loses")
+		t.Error("an enabled playlist with no items was accepted; it would " +
+			"offer a candidate that can never deliver")
+	}
+}
+
+// TestALegacyPlaylistFilePathMigratesToASingleItem guards the load-time
+// migration. A deployment that set FilePath under sub-project A has that
+// value sitting in its stored settings blob; PlaylistSettings no longer has a
+// field for json.Unmarshal to land it in, so without this migration the value
+// is silently dropped on the very next load -- Items stays empty, the
+// playlist never starts, and an operator discovers it, if at all, during the
+// outage the playlist exists to cover.
+func TestALegacyPlaylistFilePathMigratesToASingleItem(t *testing.T) {
+	d := testDB(t)
+
+	legacy := `{"failover":{"playlist":{"enabled":true,"filePath":"loop.mp4"}}}`
+	if _, err := d.SQL().Exec(`INSERT INTO settings (id, json) VALUES (1, ?)`, legacy); err != nil {
+		t.Fatalf("seed legacy settings: %v", err)
+	}
+
+	got, err := d.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+
+	want := []PlaylistItem{{Upload: "loop.mp4"}}
+	if !reflect.DeepEqual(got.Failover.Playlist.Items, want) {
+		t.Fatalf("Items = %+v, want %+v -- a legacy FilePath must survive as a "+
+			"single-item list, or an operator's configured filler vanishes on "+
+			"upgrade with nothing saying why", got.Failover.Playlist.Items, want)
 	}
 }

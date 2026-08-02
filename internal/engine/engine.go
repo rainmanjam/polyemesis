@@ -4221,10 +4221,11 @@ func (e *Engine) teardownBackup(b *backupIngest) {
 // playlistSig hashes everything the playlist's command depends on, and is empty
 // when the tier must not run.
 //
-// An unusable path hashes empty rather than being started and left to fail:
+// An unusable list hashes empty rather than being started and left to fail:
 // PlaylistFileProblem is the same confinement a file:// pull source and the
-// slate's still are held to, and a path that fails it is operator input trying
-// to leave the data directory, not a file to hand FFmpeg anyway.
+// slate's still are held to, and an item that fails it is operator input
+// trying to name something other than a stored upload, not a file to hand
+// FFmpeg anyway.
 func playlistSig(s db.Settings) string {
 	p := s.Failover.Playlist
 	if !s.Failover.Enabled || !p.Enabled {
@@ -4233,7 +4234,15 @@ func playlistSig(s db.Settings) string {
 	if p.PlaylistFileProblem() != nil {
 		return ""
 	}
-	return hashStrings([]string{"playlist", strings.TrimSpace(p.FilePath)})
+	// Every item's name is part of the hash, and in order, so re-sequencing
+	// the list (once sequencing exists) respawns exactly as editing one entry
+	// does now.
+	parts := make([]string, 0, len(p.Items)+1)
+	parts = append(parts, "playlist")
+	for _, item := range p.Items {
+		parts = append(parts, strings.TrimSpace(item.Upload))
+	}
+	return hashStrings(parts)
 }
 
 // playlistFeedArgs builds the loop that publishes one file into the playlist's
@@ -4363,10 +4372,11 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	if want == "" {
 		if s.Failover.Enabled && s.Failover.Playlist.Enabled {
 			// Only reachable through settings that never passed validation --
-			// db.Settings.Validate rejects an unconfined path -- so it is said
-			// out loud rather than left as a tier that quietly never starts.
-			e.log.Warn("playlist not started; its file is unusable",
-				"path", s.Failover.Playlist.FilePath,
+			// db.Settings.Validate rejects an item that fails PlaylistFileProblem
+			// -- so it is said out loud rather than left as a tier that quietly
+			// never starts.
+			e.log.Warn("playlist not started; its items are unusable",
+				"items", s.Failover.Playlist.Items,
 				"err", s.Failover.Playlist.PlaylistFileProblem())
 		}
 		return
@@ -4378,11 +4388,19 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
-	// Resolved here rather than stored absolute, exactly as the slate's still
-	// and a file:// pull source are: the settings hold a path relative to the
-	// data directory, and this is where it becomes one FFmpeg can open.
-	path := filepath.Join(e.cfg.DataDir,
-		filepath.FromSlash(strings.TrimSpace(s.Failover.Playlist.FilePath)))
+	// PROVISIONAL, pending Task 3 of DESIGN 2026-08-01-playlist-items: joins
+	// the data directory the way the old single FilePath was resolved, rather
+	// than resolving the upload through uploads.Store.Resolve as the design
+	// requires. Task 3 replaces this with real resolution and a readiness gate
+	// over every item's normalised derivative; until it lands this preserves
+	// today's behaviour off the first item, because sequencing beyond one item
+	// is a later sub-project's job, not this one's (see the plan's "No
+	// sequencing" note).
+	var upload string
+	if items := s.Failover.Playlist.Items; len(items) > 0 {
+		upload = items[0].Upload
+	}
+	path := filepath.Join(e.cfg.DataDir, filepath.FromSlash(strings.TrimSpace(upload)))
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,
