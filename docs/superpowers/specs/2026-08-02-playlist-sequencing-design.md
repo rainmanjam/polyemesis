@@ -372,6 +372,20 @@ Four decisions follow:
    checking that it is unreferenced can both pass and then commit in the wrong
    order, leaving a saved item naming a deleted file. Refusing deletion is only
    a guarantee if it cannot interleave with the save that creates the reference.
+5. **A deletion must beat any normalisation still in flight for that upload.**
+   Normalisation is asynchronous, so a job queued or running when the upload is
+   deleted will finish afterwards and PUBLISH a derivative — recreating the exact
+   orphan decision 3 exists to prevent, with no upload left to explain it. Two
+   parts, because either alone leaves a window:
+   - deletion removes **every** derivative version for that upload, not just the
+     current profile's, since a version bump can leave more than one on disk;
+   - the worker **re-checks that the upload still resolves immediately before it
+     publishes**, and if it does not, discards the partial and fails
+     `jobs.Permanent` rather than retrying. Publication is already the last,
+     atomic step — putting the check there closes the window without needing
+     the queue to support cancellation, and a job that can never succeed must
+     not burn the queue's attempts, which is the rule B1 established when an
+     audio-only upload was returning a retryable error forever.
 
 **A no-op reconcile cannot see any of this, and that is a real gap.**
 `reconcilePlaylist` returns early when `cur.sig == want`, BEFORE readiness is
@@ -413,6 +427,7 @@ stated time, because until it does the selector cannot offer it.
 | Reordering items respawns the tier; an unrelated settings save does not | `playlistSig` must hash contents, not membership |
 | Deleting an upload a playlist names is refused, and names the item | The in-use guard, and the reason a stale item cannot strand a broadcast |
 | A permitted deletion removes the derivative too, and leaves no orphan | Deleting one and orphaning the other is the leak B1 carried |
+| A normalisation in flight when its upload is deleted publishes NOTHING | Otherwise the job recreates the orphan after the delete, with no upload left to explain it |
 | A DELETE and a settings PUT that race cannot leave an item naming a deleted file | The refusal is only a guarantee if it cannot interleave with the save that creates the reference |
 | Two sources with IDENTICAL playlists: stopping one lets the other finish a wrap | Same signature, same bytes — the list filename must carry source identity too |
 | A derivative removed out-of-band drops the playlist to the slate | A's byte counter is the backstop; this proves it still is once concat re-opens files |
