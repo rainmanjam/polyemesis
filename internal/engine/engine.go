@@ -4263,12 +4263,26 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 // behind PlaylistFileProblem's shape check. That boundary is also why items are
 // upload names rather than paths in the first place.
 //
-// It asks about the DERIVATIVE, not the upload. The upload is the operator's
-// original in whatever codec their editor produced; the normalised copy is the
-// only thing a playlist can play, and it is keyed on the upload so an upload
-// used twice is normalised once. A missing upload with a derivative present is
-// therefore ready on purpose -- the original can be deleted once it has been
-// normalised, and the tier would still play.
+// IT ASKS ABOUT BOTH THE UPLOAD AND ITS DERIVATIVE, and it has to ask about
+// both because they answer different questions and B1 needs both answers.
+//
+// The derivative is what says the item has been NORMALISED, which is the state
+// this gate exists for. The upload is what reconcilePlaylist actually hands
+// FFmpeg (see its comment headed "AND IT PLAYS THE UPLOAD"), so an upload that
+// is gone is a tier that respawn-loops on a missing file with the process
+// reported healthy the whole time -- the same "validated, respawned looking
+// like it should work, then failed to open a file" failure playlistItemUpload's
+// comment above exists to prevent. That is reachable, not theoretical:
+// DELETE /media/uploads/{name} removes the upload and leaves the derivative
+// standing, so without this stat the gate would open on a file nothing can
+// play. An earlier version of this comment claimed the opposite -- that a
+// deleted upload with a surviving derivative was ready ON PURPOSE and "the tier
+// would still play" -- which was a promise about B2's concat input written into
+// B1, where nothing reads the derivative at all.
+//
+// Resolve is not that check: uploads.Store.Resolve is a SHAPE check that
+// confines a name to the uploads directory and never touches the disk, so
+// "no-such-upload.mp4" resolves perfectly happily.
 //
 // This is NOT a second notion of availability. Sub-project A settled that a
 // candidate is available when its hub is delivering bytes, and chooseSource
@@ -4301,9 +4315,15 @@ func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
 		// playlistItemUpload is the ONE trim point shared with playlistSig, so
 		// readiness cannot disagree with the hash about what an item names.
 		upload := playlistItemUpload(items, i)
-		if _, err := store.Resolve(upload); err != nil {
+		path, err := store.Resolve(upload)
+		if err != nil {
 			return false
 		}
+		// The operator's original, which is what the feed's argv names today.
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		// The normalised copy, which is what says the transcode has finished.
 		if _, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload)); err != nil {
 			return false
 		}
@@ -4411,6 +4431,32 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
+	// READINESS IS EVALUATED BEFORE ANYTHING IS TORN DOWN, and the order is the
+	// whole of this check. It used to sit after the teardown block below, so an
+	// operator who appended one item to a playlist that was ON AIR moved the
+	// signature, lost the running tier to the teardown, and then had the gate
+	// refuse to bring it back because the new item had not been normalised yet.
+	// That is dead air, bought for an item B1 would not have played anyway --
+	// it still plays item 0 only -- and it lasted until some unrelated event
+	// happened to reconcile again. Refusing HERE leaves the running tier
+	// exactly as it was, still recorded under the OLD signature, so the next
+	// reconcile after the transcode lands still sees a mismatch and respawns
+	// onto the new list. Nothing is latched.
+	//
+	// Only when want is non-empty. An empty signature means the playlist must
+	// STOP -- the operator disabled it, or the items no longer pass
+	// PlaylistFileProblem -- and a stop must never be held up by a readiness
+	// question about a list that is not going on air.
+	if want != "" && !e.playlistItemsReady(s.Failover.Playlist.Items) {
+		e.log.Info("playlist not started; not every item has been normalised yet",
+			"items", s.Failover.Playlist.Items,
+			"alreadyRunning", cur != nil,
+			"reason", "the playlist ranks above the slate, so a tier started for an item "+
+				"that cannot play would displace the source that exists so an operator "+
+				"never sees nothing; a finished normalisation job reconciles again")
+		return
+	}
+
 	if cur != nil {
 		// The feed reads this hub, so it goes first -- a feed left running
 		// across the teardown would spin on a relay that has gone away. This
@@ -4475,30 +4521,20 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
-	// READINESS GATES THE START, and that is the whole of it -- there is no
-	// second availability input anywhere below. A playlist that is not ready
-	// starts no tier, so it has no hub, so playlistRunning stays false through
-	// the byte counter sampleSources already reads, and the slate wins on the
-	// ranking that is already there.
+	// READINESS GATED THE START ABOVE, before the teardown, and that is the
+	// whole of it -- there is no second availability input anywhere below. A
+	// playlist that is not ready starts no tier, so it has no hub, so
+	// playlistRunning stays false through the byte counter sampleSources
+	// already reads, and the slate wins on the ranking that is already there.
 	//
-	// Refused rather than started-and-left-to-fail because the playlist ranks
-	// ABOVE the slate: a tier started for an item that is still transcoding
-	// would be a candidate that cannot play, offered in preference to the one
-	// thing that exists so an operator never sees nothing.
-	//
-	// Re-read on every reconcile rather than watched: this returns without
-	// recording a tier, so the next reconcile finds e.playlist nil against a
-	// non-empty signature and tries again. That is what picks the playlist up
-	// when its last normalisation job finishes.
-	if !e.playlistItemsReady(s.Failover.Playlist.Items) {
-		e.log.Info("playlist not started; not every item has been normalised yet",
-			"items", s.Failover.Playlist.Items,
-			"reason", "the playlist ranks above the slate, so a tier started for an item "+
-				"that cannot play would displace the source that exists so an operator "+
-				"never sees nothing; the next reconcile retries")
-		return
-	}
-
+	// Re-read on every reconcile rather than watched: an unready reconcile
+	// records no tier, so the next one re-evaluates for free. What FIRES that
+	// next reconcile when the last normalisation job finishes is
+	// cmd/polyemesis/postprod.go's queue change hook, which calls
+	// Manager.Reconcile for a completed playlistmedia.KindNormalise. Without
+	// it nothing would: reconcilePlaylist is reached only from Reconcile, and
+	// Reconcile is only called by settings saves, the API, the manager and the
+	// scheduler -- none of which a finished job is.
 	hub, err := relay.New(e.log, 0)
 	if err != nil {
 		e.log.Error("playlist: no relay", "err", err)

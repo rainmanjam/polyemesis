@@ -164,10 +164,19 @@ func TestAPlaylistWhoseItemsAreAllNormalisedIsOffered(t *testing.T) {
 }
 
 // TestAPlaylistStartsOnceItsLastDerivativeAppears answers the re-evaluation
-// question in code: readiness is re-read on every reconcile, so a normalisation
-// job finishing is picked up by the next one. Nothing polls the filesystem, and
-// nothing needs to -- the alternative was a watcher whose only job would be to
-// notice a file that the reconcile after it would have noticed anyway.
+// question in code: readiness is re-read on every reconcile and nothing is
+// latched, so a normalisation job finishing is picked up by the next one.
+// Nothing polls the filesystem, and nothing needs to -- the alternative was a
+// watcher whose only job would be to notice a file that the reconcile after it
+// would have noticed anyway.
+//
+// This test proves the NO-LATCH half only, which is all a test in this package
+// can prove: it calls reconcilePlaylist twice by hand. What makes the second
+// call happen in production is cmd/polyemesis/postprod.go's queue change hook,
+// covered by TestAFinishedNormalisationReconcilesTheEngine there. The two are
+// deliberately separate -- for a while the hook did not exist and this test
+// still passed, which is precisely how a comment comes to describe a mechanism
+// nothing implements.
 func TestAPlaylistStartsOnceItsLastDerivativeAppears(t *testing.T) {
 	e, s := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
 	t.Cleanup(func() { teardownPlaylistTier(e) })
@@ -217,6 +226,117 @@ func TestAnItemWhoseDerivativeIsMissingStartsNoTier(t *testing.T) {
 	}
 }
 
+// TestAnItemWhoseUploadWasDeletedStartsNoTier covers the UPLOAD branch, which
+// is a different question from the derivative and became reachable the moment
+// uploads got a delete endpoint.
+//
+// DELETE /media/uploads/{name} removes the upload and leaves the derivative
+// standing -- nothing sweeps derivatives yet. reconcilePlaylist plays the
+// UPLOAD (the derivative is a readiness token until B2's concat arrives), so a
+// gate that asked only about the derivative would open on a file that is gone:
+// FFmpeg respawn-loops on a missing input, the hub carries nothing, the slate
+// wins on the byte counter, and the operator is left with a crash-looping child
+// and no explanation. An earlier version of playlistItemsReady's docstring
+// claimed that state was ready ON PURPOSE and that "the tier would still play".
+//
+// The mutation: delete the os.Stat on the resolved upload in
+// playlistItemsReady and this fails, because the derivative below is
+// deliberately left in place so nothing else can refuse.
+func TestAnItemWhoseUploadWasDeletedStartsNoTier(t *testing.T) {
+	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
+	seedPlaylistUpload(t, e, "deleted.mp4", true)
+
+	s := playlistOnSettings()
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "deleted.mp4"}}
+
+	// The operator deletes the upload. Only the upload: handleDeleteMedia
+	// touches nothing under playlist-media/.
+	if err := os.Remove(filepath.Join(e.cfg.DataDir, uploads.Dir, "deleted.mp4")); err != nil {
+		t.Fatalf("remove upload: %v", err)
+	}
+	if _, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, "deleted.mp4")); err != nil {
+		t.Fatalf("the derivative is not there, so the derivative branch could be the "+
+			"reason this test passes: %v", err)
+	}
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	if h := e.playlistHub(); h != nil {
+		t.Error("a playlist whose upload was deleted started a tier; the argv names the " +
+			"upload, so FFmpeg would respawn-loop on a file that is gone while the " +
+			"process reported healthy")
+	}
+}
+
+// TestAppendingAnUnnormalisedItemLeavesARunningPlaylistOnAir is about the ORDER
+// of the readiness gate and the teardown, which is the difference between a
+// gate and an outage.
+//
+// The teardown used to run first. An operator who appended a second item to a
+// playlist that was ON AIR moved the signature, which tore the tier down, and
+// then the gate refused to bring it back because the new item had not been
+// normalised yet -- so the cost of adding an item was dead air, for an item B1
+// would not have played anyway, lasting until something unrelated reconciled.
+//
+// The mutation: move the readiness check back below the teardown block in
+// reconcilePlaylist and this fails, because the running tier is gone.
+func TestAppendingAnUnnormalisedItemLeavesARunningPlaylistOnAir(t *testing.T) {
+	e, s := playlistEngineWithItems(t, "on-air.mp4")
+	t.Cleanup(func() { teardownPlaylistTier(e) })
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	e.mu.RLock()
+	before := e.playlist
+	e.mu.RUnlock()
+	if before == nil {
+		t.Fatal("the playlist never started, so what follows would prove nothing")
+	}
+
+	// The operator appends a second item. It has landed in uploads but its
+	// normalisation job has not finished, which is the ordinary state of an
+	// item seconds after it was added.
+	seedPlaylistUpload(t, e, "just-uploaded.mp4", false)
+	s.Failover.Playlist.Items = append(s.Failover.Playlist.Items,
+		db.PlaylistItem{Upload: "just-uploaded.mp4"})
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	e.mu.RLock()
+	after := e.playlist
+	e.mu.RUnlock()
+	if after == nil {
+		t.Fatal("appending an unnormalised item took a running playlist off air; the " +
+			"programme that was playing was perfectly playable and is now dead air")
+	}
+	if after != before {
+		t.Error("the running tier was replaced rather than left alone, so the file " +
+			"restarted from its first frame for an item that will not be played")
+	}
+
+	// And when the transcode lands, the tier moves to the new list: refusing
+	// must not latch, or the append would never take effect at all.
+	seedPlaylistUpload(t, e, "just-uploaded.mp4", true)
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	e.mu.RLock()
+	third := e.playlist
+	e.mu.RUnlock()
+	if third == nil || third == before {
+		t.Error("the playlist never moved onto the new list after the derivative " +
+			"appeared; the refusal latched")
+	}
+}
+
 // TestPlaylistItemsReadyRefusesAnUnresolvableName is the CONFINEMENT check, and
 // it is built so that only that check can be the reason it passes.
 //
@@ -226,6 +346,16 @@ func TestAnItemWhoseDerivativeIsMissingStartsNoTier(t *testing.T) {
 // deleted, which is exactly the hole this replaces. Writing a real file at the
 // derivative path takes the os.Stat branch out of the running and leaves
 // Resolve as the only thing that can refuse.
+//
+// THE MUTATION IS NOW A SUBSTITUTION RATHER THAN A DELETION, and it is the more
+// honest one: replace `store.Resolve(upload)` with a naive
+// `filepath.Join(e.cfg.DataDir, uploads.Dir, upload)` -- which is what this
+// code did before uploads had a store -- and this fails. ".." then joins to the
+// data directory itself, which exists, so the upload stat passes, the seeded
+// derivative passes, and a traversal is called ready. Simply neutering the
+// error branch no longer works as a mutation because Resolve returns an empty
+// path with its error and nothing stats "" successfully; a mutation has to be
+// the regression that could really happen, and that is the join.
 //
 // The boundary matters beyond tidiness: resolving through the store rather than
 // joining strings is what keeps items upload NAMES rather than paths, and it is
@@ -482,22 +612,54 @@ func TestASaveThatDoesNotTouchThePlaylistDoesNotRespawnIt(t *testing.T) {
 	}
 }
 
-// TestAnUnusablePlaylistFileStartsNothing leans on PlaylistFileProblem rather
-// than a check of its own: the confinement that keeps an operator-supplied path
-// inside the data directory is written once, and a second copy here would be a
-// second thing to keep in step with SECURITY.md.
-func TestAnUnusablePlaylistFileStartsNothing(t *testing.T) {
-	e := playlistEngine(t)
-	s := playlistOnSettings()
-	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "../../etc/shadow"}}
+// TestAnUnusablePlaylistItemStopsTheTier guards playlistSig's
+// PlaylistFileProblem check, and it is written against a RUNNING tier because
+// that is the only state in which that line has an observable of its own.
+//
+// This test used to start from cold and assert no tier appeared, which proved
+// nothing: readiness refuses "../../etc/shadow" as well, so deleting the
+// PlaylistFileProblem check from playlistSig left it green. It was the fourth
+// guard in this sub-project that passed either way.
+//
+// The signature is where the difference lives. An unusable list hashes EMPTY,
+// and an empty signature means STOP -- teardown, unconditionally, ahead of the
+// readiness gate. A non-empty signature for the same list would instead reach
+// the readiness gate, which refuses without tearing anything down (see
+// TestAppendingAnUnnormalisedItemLeavesARunningPlaylistOnAir for why it must),
+// and the tier would go on playing under a configuration the operator has
+// replaced with one that is not allowed to run at all.
+//
+// The mutation: delete the `if p.PlaylistFileProblem() != nil { return "" }`
+// block from playlistSig and this fails with the tier still on air.
+func TestAnUnusablePlaylistItemStopsTheTier(t *testing.T) {
+	e, s := playlistEngineWithItems(t, "on-air.mp4")
+	t.Cleanup(func() { teardownPlaylistTier(e) })
 
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+	if e.playlistHub() == nil {
+		t.Fatal("the playlist never started, so what follows would prove nothing")
+	}
+
+	// A path where an upload name belongs. Unreachable through the API, which
+	// validates it away -- this is the defence behind that, and the reason
+	// items are names rather than paths at all.
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "../../etc/shadow"}}
 	e.selMu.Lock()
 	e.reconcilePlaylist(s)
 	e.selMu.Unlock()
 
 	if h := e.playlistHub(); h != nil {
-		t.Error("a playlist path that escapes the data directory started a process; " +
-			"the confinement check is decorative if the argv is built anyway")
+		t.Error("a playlist item that escapes the uploads directory left the tier " +
+			"running; the confinement check is decorative if an unusable list is " +
+			"treated as merely not-ready-yet")
+	}
+	e.mu.RLock()
+	tier := e.playlist
+	e.mu.RUnlock()
+	if tier != nil {
+		t.Error("a playlist tier was still recorded for an unusable item")
 	}
 }
 
