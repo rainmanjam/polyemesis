@@ -4281,6 +4281,13 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 // An empty list is vacuously ready and never reaches here anyway: playlistSig
 // is empty for an enabled playlist with no items, so reconcilePlaylist has
 // already returned.
+//
+// It takes the items rather than reading e.settings because reconcilePlaylist
+// must gate the playlist it is ABOUT TO START -- the settings it was handed --
+// and not whatever the engine last stored. In production those are the same
+// value; Reconcile assigns e.settings before reconcileOutputs runs. Anywhere
+// else they are not, and a gate that consulted the wrong one would refuse or
+// admit a playlist other than the one being started.
 func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
 	store, err := uploads.New(e.cfg.DataDir)
 	if err != nil {
@@ -4302,22 +4309,6 @@ func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
 		}
 	}
 	return true
-}
-
-// playlistReady asks playlistItemsReady of the settings the engine is currently
-// running.
-//
-// Separate from the settings-taking form because reconcilePlaylist must gate
-// the playlist it is ABOUT TO START -- the settings it was handed -- and not
-// whatever the engine last stored. In production those are the same value;
-// Reconcile assigns e.settings before reconcileOutputs runs. Anywhere else they
-// are not, and a gate that consulted the wrong one would refuse or admit a
-// playlist other than the one being started.
-func (e *Engine) playlistReady() bool {
-	e.mu.RLock()
-	items := e.settings.Failover.Playlist.Items
-	e.mu.RUnlock()
-	return e.playlistItemsReady(items)
 }
 
 // playlistSig hashes everything the playlist's command depends on, and is empty
@@ -4529,6 +4520,20 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	// derivative has already been required to exist by the readiness gate
 	// above, including the ones this argv does not yet name -- the gate is
 	// about the playlist an operator saved, not about the one file playing.
+	//
+	// AND IT PLAYS THE UPLOAD, NOT THE DERIVATIVE. THAT IS DELIBERATE, NOT A
+	// BUG. The gate above insists a normalised copy exists for every item, and
+	// this line then hands FFmpeg the operator's ORIGINAL. Nothing reads the
+	// derivative yet: it becomes the input when the concat demuxer arrives with
+	// sequencing, which is the whole reason the normalised profile is fixed --
+	// concat requires every file in the list to share codecs, timebase,
+	// resolution and channel layout, and a single-item argv has no list to make
+	// consistent. Until then the derivative is a readiness token, and the codec
+	// match this feed needs against the ingest is still the operator's problem,
+	// exactly as playlistFeedArgs says in capitals. Swapping this to the
+	// derivative on its own would change what an operator hears without giving
+	// them sequencing, and would silently re-encode a programme they encoded
+	// once already.
 	store, err := uploads.New(e.cfg.DataDir)
 	if err != nil {
 		e.log.Error("playlist: no uploads store", "err", err)

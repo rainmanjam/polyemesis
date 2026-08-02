@@ -73,14 +73,19 @@ func seedPlaylistUpload(t *testing.T, e *Engine, name string, normalised bool) {
 	}
 }
 
-// playlistEngineWithItems is playlistEngine whose settings name the given
-// uploads, in order.
+// playlistEngineWithItems is playlistEngine, plus the settings that name the
+// given uploads as the playlist, in order.
 //
 // Every name is stored. A name containing "transcoding" is stored WITHOUT its
 // derivative, which is how a caller says "this item's normalisation job has not
 // finished" without the helper needing a parallel list of booleans nobody could
 // read at the call site.
-func playlistEngineWithItems(t *testing.T, names ...string) *Engine {
+//
+// The settings are RETURNED rather than written onto the engine, because that
+// is how reconcilePlaylist is reached in production: Reconcile passes the
+// document down through reconcileOutputs and reconcileSelector, and the gate
+// reads the list it was handed.
+func playlistEngineWithItems(t *testing.T, names ...string) (*Engine, db.Settings) {
 	t.Helper()
 	e := playlistEngine(t)
 
@@ -91,12 +96,7 @@ func playlistEngineWithItems(t *testing.T, names ...string) *Engine {
 		items = append(items, db.PlaylistItem{Upload: name})
 	}
 	s.Failover.Playlist.Items = items
-
-	// Under the lock, via setSettings: playlistReady reads the engine's live
-	// settings, and that field is also read by the status publisher on the
-	// supervisor's goroutine.
-	setSettings(e, s)
-	return e
+	return e, s
 }
 
 // playlistOnSettings enables the feature and the tier with a usable file.
@@ -107,49 +107,59 @@ func playlistOnSettings() db.Settings {
 	return s
 }
 
+// TestAPlaylistWithAnUnnormalisedItemIsNotOffered drives reconcilePlaylist,
+// which is what production calls, and asserts on the CONSEQUENCE.
+//
+// The same rule sub-project A established for a tier that is running but
+// delivering nothing: a candidate is offered only when it would actually
+// deliver. Offering a playlist whose item is still transcoding would put a
+// source on air that cannot play, and it would outrank the slate -- the one
+// thing that exists so an operator never sees nothing.
+//
+// "Not offered" is spelled here as no tier and no hub, deliberately, because
+// that is the only way the playlist can be unavailable. There is no readiness
+// flag for the selector to read: chooseSource sees one boolean, sampled from
+// the playlist hub's byte counter, and a tier that never started has no hub to
+// put bytes on. Asserting on a helper's return value instead would prove the
+// rule computes and prove nothing about the call site -- which is how this
+// project has been bitten twice, once by a test that called reconcilePlaylist
+// and sampleSources in an order production never runs, and once by a settings
+// field that satisfied a UI guard matching on a leaf name.
 func TestAPlaylistWithAnUnnormalisedItemIsNotOffered(t *testing.T) {
-	// The same rule sub-project A established for a tier that is running but
-	// delivering nothing: a candidate is offered only when it would actually
-	// deliver. Offering a playlist whose item is still transcoding would put a
-	// source on air that cannot play, and it would outrank the slate -- the one
-	// thing that exists so an operator never sees nothing.
-	e := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
-	if e.playlistReady() {
-		t.Error("a playlist with an unnormalised item was offered")
+	e, s := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	if h := e.playlistHub(); h != nil {
+		t.Error("a playlist with an unnormalised item was offered: the tier started, so " +
+			"its hub carries bytes, playlistRunning goes true, and the selector puts a " +
+			"source on air that cannot play in preference to the slate")
+	}
+	e.mu.RLock()
+	tier := e.playlist
+	e.mu.RUnlock()
+	if tier != nil {
+		t.Error("a playlist tier was recorded on the engine for an unnormalised item")
 	}
 }
 
 // TestAPlaylistWhoseItemsAreAllNormalisedIsOffered is the other direction, and
-// it is not decoration: readiness that is never satisfied is a playlist feature
-// that never goes on air at all, and the test above cannot tell that apart from
-// the gate working.
+// it is not decoration: a gate that never opens is a playlist feature that
+// never goes on air at all, and the test above cannot tell that apart from the
+// gate working.
 func TestAPlaylistWhoseItemsAreAllNormalisedIsOffered(t *testing.T) {
-	e := playlistEngineWithItems(t, "first.mp4", "second.mp4")
-	if !e.playlistReady() {
-		t.Error("a playlist whose every item is normalised was refused")
-	}
-}
-
-// TestAPlaylistWithAnUnnormalisedItemStartsNoTier is the WIRING, and it is the
-// half that reaches air.
-//
-// playlistReady returning false is inert on its own. The rule is enforced by
-// the tier not starting: no tier means no hub, no hub means playlistRunning
-// stays false through the byte counter sub-project A settled on, and the slate
-// -- which ranks BELOW the playlist -- keeps the stream. Deliberately not a
-// second availability input to chooseSource: two ways to be unavailable would
-// make the golden table's claim to exhaustiveness false.
-func TestAPlaylistWithAnUnnormalisedItemStartsNoTier(t *testing.T) {
-	e := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
+	e, s := playlistEngineWithItems(t, "first.mp4", "second.mp4")
+	t.Cleanup(func() { teardownPlaylistTier(e) })
 
 	e.selMu.Lock()
-	e.reconcilePlaylist(e.Settings())
+	e.reconcilePlaylist(s)
 	e.selMu.Unlock()
 
-	if h := e.playlistHub(); h != nil {
-		t.Error("the playlist tier started with an item that has not been normalised; " +
-			"its hub would carry bytes, playlistRunning would go true, and the " +
-			"selector would put a source on air that cannot play in preference to the slate")
+	if e.playlistHub() == nil {
+		t.Error("a playlist whose every item is normalised was refused; nothing would " +
+			"ever put the file on air")
 	}
 }
 
@@ -159,14 +169,8 @@ func TestAPlaylistWithAnUnnormalisedItemStartsNoTier(t *testing.T) {
 // nothing needs to -- the alternative was a watcher whose only job would be to
 // notice a file that the reconcile after it would have noticed anyway.
 func TestAPlaylistStartsOnceItsLastDerivativeAppears(t *testing.T) {
-	e := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
-	s := e.Settings()
-	t.Cleanup(func() {
-		e.mu.RLock()
-		tier := e.playlist
-		e.mu.RUnlock()
-		e.teardownPlaylist(tier)
-	})
+	e, s := playlistEngineWithItems(t, "ready.mp4", "still-transcoding.mp4")
+	t.Cleanup(func() { teardownPlaylistTier(e) })
 
 	e.selMu.Lock()
 	e.reconcilePlaylist(s)
@@ -187,22 +191,54 @@ func TestAPlaylistStartsOnceItsLastDerivativeAppears(t *testing.T) {
 	}
 }
 
-// TestAPlaylistItemThatNamesNoUploadIsNotReady is the resolution half of the
+// TestAPlaylistItemThatNamesNoUploadStartsNoTier is the resolution half of the
 // rule, and it is why readiness asks uploads.Store.Resolve rather than joining
 // strings. The name reaches the gate having passed PlaylistFileProblem's SHAPE
 // check only; Resolve is what confines it to the uploads directory, and it is
 // the reason items are upload names rather than paths at all.
-func TestAPlaylistItemThatNamesNoUploadIsNotReady(t *testing.T) {
+//
+// Through reconcilePlaylist for the reason the first test gives, and the
+// unit-level check below covers the same rule at the function.
+func TestAPlaylistItemThatNamesNoUploadStartsNoTier(t *testing.T) {
 	e := playlistEngine(t)
 	s := playlistOnSettings()
 	// A name Resolve refuses outright. It cannot be trimmed or joined into
-	// something valid, and a playlist holding one can never play.
-	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: ".."}}
-	setSettings(e, s)
+	// something valid, and a playlist holding one can never play. It also
+	// clears PlaylistFileProblem's own ".." check only because that check runs
+	// on the whole entry -- see playlistUploadProblem -- so the tier would be
+	// started by a reconcile that trusted validation alone.
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "no-such-upload.mp4"}}
 
-	if e.playlistReady() {
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	if h := e.playlistHub(); h != nil {
+		t.Error("a playlist naming an upload with no derivative started a tier")
+	}
+}
+
+// TestPlaylistItemsReadyRefusesAnUnresolvableName is the unit-level half: the
+// resolve branch specifically, which the reconcile-driven tests above reach
+// only through a name that also has no derivative. Both branches must refuse.
+func TestPlaylistItemsReadyRefusesAnUnresolvableName(t *testing.T) {
+	e := playlistEngine(t)
+	// ".." is refused by uploads.Store.Resolve outright, alongside "" and ".".
+	// Seeding a derivative for it would be meaningless -- there is no file for
+	// one to be a derivative OF -- so this can only fail on the resolve check.
+	if e.playlistItemsReady([]db.PlaylistItem{{Upload: ".."}}) {
 		t.Error("an item that does not resolve to a stored upload was called ready")
 	}
+}
+
+// teardownPlaylistTier stops whatever tier a test left running. The supervised
+// child is a binary that does not exist, so it would otherwise sit in the
+// restart backoff for the rest of the package's run.
+func teardownPlaylistTier(e *Engine) {
+	e.mu.RLock()
+	tier := e.playlist
+	e.mu.RUnlock()
+	e.teardownPlaylist(tier)
 }
 
 func TestPlaylistFeedLoopsTheFileAtWallClockSpeed(t *testing.T) {
