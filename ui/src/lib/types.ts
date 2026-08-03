@@ -1629,6 +1629,8 @@ export interface Compliance {
   madeForKids?: boolean;
   /** Twitch labels, id -> enabled. A key set to false actively CLEARS it. */
   labels?: Record<string, boolean>;
+  /** Facebook's audience for a live video. undefined leaves it alone. */
+  facebookPrivacy?: string;
 }
 
 // ------------------------------------------------------------------- expert
