@@ -242,19 +242,22 @@ test.describe("playlist editor", () => {
     // conditionally-hidden one instead of a conditionally-mounted one.
     await expect(row).toContainText(/no longer exists/i, { useInnerText: true });
 
-    // Leave the shared install as it was found -- AFTER A RELOAD, and that is
-    // not tidiness. A SECOND save from one page load is refused with 400
-    // "invalid request body: json: unknown field \"reload\"": PUT /settings
+    // Leave the shared install as it was found -- WITHOUT RELOADING FIRST, and
+    // the absence of that reload is the assertion.
+    //
+    // A second save from one page load used to be refused with 400
+    // "invalid request body: json: unknown field \"reload\"". PUT /settings
     // answers with api.settingsResponse, which embeds db.Settings and adds
-    // `reload`; SettingsPage.save does setSettings(await api.putSettings(next))
-    // and the draft mirrors settings, so the next PUT carries `reload` back
-    // into a decoder with DisallowUnknownFields. Every other spec reloads
-    // between its saves, so nothing had ever asked. This spec routes around
-    // it rather than fixing it here, deliberately -- it is a defect in the
-    // shared settings save path, not in the playlist -- and says so instead of
-    // leaving a reload that looks like a habit.
-    await page.reload();
-    await page.getByRole("tab", { name: "Pipeline" }).click();
+    // `reload`; api.putSettings was typed put<Settings> and handed that whole
+    // object back, so SettingsPage stored `reload` as settings state and the
+    // next PUT carried it into a decoder with DisallowUnknownFields. Every
+    // other spec happens to reload between its saves, so nothing had ever
+    // asked -- and tsc could not, because the declared type said `Settings`
+    // while the wire carried more.
+    //
+    // api.putSettings now strips it. Saving twice from one page load is the
+    // ordinary thing an operator does, so this cleanup does it on purpose: put
+    // the reload back and this test goes green while the bug is live again.
     const cleanup = failoverCard(page);
     await cleanup.getByRole("button", { name: `Remove ${gone}` }).click();
     if (!plWas) await setSwitch(page, "#fo-playlist", false);
