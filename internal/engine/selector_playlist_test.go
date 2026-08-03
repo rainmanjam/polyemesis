@@ -1038,3 +1038,75 @@ func TestDisablingAPlaylistThatIsOnAirHandsTheSlateTheStreamImmediately(t *testi
 			"be fed must be given up in the same decision that tears it down, not a sweep later")
 	}
 }
+
+// TestAScheduledPlaylistStartWillNotStoreInvalidSettings exercises the REAL
+// actuator against a REAL store, which is the only way this defect is visible:
+// every runner test in internal/scheduler uses a fake, and a fake happily
+// accepts a document the database would too.
+//
+// PutSettings does not validate -- it marshals and inserts -- while
+// handlePutSettings calls Settings.Validate first. So a scheduled write is the
+// one path that can store what the API layer would refuse, and the DEFAULT
+// INSTALL is exactly that case: the playlist ships disabled with no items, and
+// "enabled with no items" is a state Validate rejects by name.
+//
+// Unvalidated, an overnight playlist.start stored that document and every later
+// PUT /settings answered 400 for a reason the operator did not cause and could
+// not see.
+//
+// The mutation: delete the s.Validate() call in SetPlaylistEnabled and this
+// fails -- both halves, because it then both returns nil and writes.
+func TestAScheduledPlaylistStartWillNotStoreInvalidSettings(t *testing.T) {
+	e := failoverEngine(t)
+	act := scheduleActuator{e: e}
+
+	// The shipped default: failover playlist off, no items. Enabling it is
+	// precisely what Settings.Validate refuses.
+	if err := act.SetPlaylistEnabled(true); err == nil {
+		t.Fatal("enabling a playlist with no items was accepted; every later " +
+			"PUT /settings would then 400 on a document the operator never wrote")
+	}
+
+	// And nothing was written. An error that still stored the document would be
+	// the same lockout with a log line attached.
+	got, err := e.store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if got.Failover.Playlist.Enabled {
+		t.Error("the settings were stored despite the error")
+	}
+	if err := got.Validate(); err != nil {
+		t.Errorf("stored settings are invalid after a refused schedule: %v", err)
+	}
+}
+
+// The other direction, so the guard above cannot pass by refusing everything: a
+// playlist that HAS items enables normally.
+//
+// The mutation: make SetPlaylistEnabled always return an error and this fails.
+func TestAScheduledPlaylistStartEnablesAValidPlaylist(t *testing.T) {
+	e := failoverEngine(t)
+	act := scheduleActuator{e: e}
+
+	s, err := e.store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	s.Failover.Enabled = true
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "loop.mp4"}}
+	if err := e.store.PutSettings(s); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+
+	if err := act.SetPlaylistEnabled(true); err != nil {
+		t.Fatalf("SetPlaylistEnabled on a playlist with items: %v", err)
+	}
+	got, err := e.store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if !got.Failover.Playlist.Enabled {
+		t.Error("a valid playlist was not enabled")
+	}
+}
