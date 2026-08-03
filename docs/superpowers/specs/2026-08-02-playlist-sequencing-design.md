@@ -225,15 +225,22 @@ instant to land on.
    inferred from the source and not read from `format.duration` on trust, and it
    is recorded with the derivative. B1's `NormaliseParams.DurationMS` is NOT
    this value — it is a source estimate and it is never populated.
-3. **The `duration` directive is supported but NOT required, and that is a
+3. **The `duration` directive is supported but NOT emitted, and that is a
    measurement rather than a judgement.** FFmpeg allows overriding the demuxer's
-   inferred duration, and this design was written expecting to need it. Measured
-   with the directives present and absent, the packet stream was **identical** —
-   FFmpeg's own estimation of these derivatives is exact enough that the
-   directives changed nothing. So the list writer supports them, the engine emits
-   none, and the reason is recorded rather than left as a mystery for whoever
-   next reads the concat list and wonders why the durations are missing. If the
-   profile changes such that estimation drifts, the mechanism is already there.
+   inferred duration, and this design was written expecting to need it.
+
+   An earlier version of this section said the packet stream was "identical"
+   with the directives present and absent, full stop. **That was too strong, and
+   writing the assertion is what caught it.** The streams match only when the
+   directive is EXACT. At three decimals — which is what `ffmpeg.ConcatList`
+   renders, because `ConcatEntry.DurationMS` is milliseconds — the directive
+   falls 333µs short of the real file and every packet after that entry shifts.
+
+   So the only directives this product could emit today are the inaccurate kind,
+   and FFmpeg's own estimate is exact where ours would not be. That is a stronger
+   argument for leaving the field zero than the one it replaces. The list writer
+   keeps the mechanism for a profile that drifts far enough to need it; whoever
+   turns it on needs sub-millisecond units first, and the field's comment says so.
 
 The measured duration is still worth having: the operator's playlist editor
 shows each item's length, which is the difference between building a programme

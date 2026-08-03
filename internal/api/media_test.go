@@ -354,7 +354,7 @@ func TestDeletingAnUploadAPlaylistNamesIsRefused(t *testing.T) {
 // A permitted deletion removes EVERY derivative version, not just the current
 // profile's: a version bump can leave more than one on disk, and deleting the
 // upload while orphaning them is the leak B1 carried. See
-// playlistmedia.DerivativeGlob.
+// playlistmedia.DerivativeVersions.
 //
 // The mutation: remove only DerivativePath's exact name and the v1 file
 // remains.

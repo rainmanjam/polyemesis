@@ -172,6 +172,26 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// THE NAME IS VALIDATED BEFORE ANYTHING IS REMOVED, and the ordering is the
+	// point rather than a tidy-up.
+	//
+	// It used to be validated by store.Delete AFTER the sweep below, which is
+	// how `DELETE /api/v1/media/%2A` managed to destroy every derivative in the
+	// install and then answer "no such upload". That instance is closed --
+	// DerivativeVersions matches by equality and builds no pattern -- but the
+	// ORDERING is what closes the class, and one instance of a class is not the
+	// class.
+	//
+	// The remaining reachable case is Windows: filepath.Base(`..\victim.ts`) is
+	// `victim.ts` on that platform and the raw name is what uploadIsReferenced
+	// compares, so a traversal spelled with a backslash slips past the in-use
+	// guard and reaches the sweep. Resolving first makes the guard's answer and
+	// the sweep's target the same name on every platform.
+	if _, err := store.Resolve(name); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Derivatives before the upload itself: if the process died between the
 	// two removals below, an orphaned derivative next to an upload that is
 	// still there is a smaller problem to notice than a deleted upload whose

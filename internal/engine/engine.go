@@ -4388,9 +4388,17 @@ func playlistSig(s db.Settings) string {
 // NO `duration` DIRECTIVES ARE EMITTED, and that is a measured result rather
 // than a preference: three real derivatives were concatenated, looped past two
 // full wraps and probed over 1068 packets with and without the per-entry
-// directives, and the packet stream was byte-identical either way. See
-// internal/playlistmedia/concat_behaviour_test.go. ffmpeg.ConcatEntry keeps the
-// field for a profile that drifts far enough to need it; this one does not.
+// directives. See internal/playlistmedia/concat_behaviour_test.go.
+//
+// The packet streams are identical ONLY WHEN THE DIRECTIVE IS EXACT. An earlier
+// version of this comment said "byte-identical either way" without that clause,
+// and the measurement does not support it: at three decimals the directive is
+// 333 microseconds short of the file and every packet after the first item
+// shifts. ffmpeg.ConcatList renders `%.3f` because ConcatEntry.DurationMS is
+// MILLISECONDS, so the only directives this product could emit are the
+// inaccurate kind -- which is an argument for leaving the field zero, not
+// against it. The field survives for a profile that drifts far enough to need
+// it, and whoever turns it on needs sub-millisecond precision first.
 //
 // The two input flags are the whole difference from every other feed, and
 // neither is optional. -stream_loop -1 is what makes a file that ends look like
@@ -4604,9 +4612,10 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	// which is the confinement standing behind `-safe 0`.
 	//
 	// No per-entry `duration` directives: DurationMS is left zero deliberately.
-	// Task 1 concatenated three real derivatives, looped past two full wraps and
-	// probed 1068 packets with and without the directives, and the packet stream
-	// was byte-identical. See internal/playlistmedia/concat_behaviour_test.go.
+	// Three real derivatives, looped past two full wraps, 1068 packets probed
+	// with and without them -- identical ONLY when the directive is exact, and
+	// ConcatList renders milliseconds. See the fuller note above playlistFeedArgs
+	// and internal/playlistmedia/concat_behaviour_test.go.
 	// ABSOLUTE, and that is a bug fix rather than tidiness.
 	//
 	// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN

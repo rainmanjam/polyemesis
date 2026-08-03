@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -980,4 +981,66 @@ func stretch(args []string, from, to string) string {
 		}
 	}
 	return strings.Join(args[start:end], " ")
+}
+
+// TestDerivativeVersionsMatchesOnlyThisUploadsOwnDerivatives is the unit-level
+// guard on the function that replaced a glob, and it exists because the glob it
+// replaced deleted every derivative in the install when handed `*`.
+//
+// The cases are chosen to be the ones a prefix match would get wrong. A name
+// that is a PREFIX of another upload ("show.mp4" against "show.mp4.extra.mp4"),
+// a version segment that is not digits ("show.mp4.vNOPE.ts" -- not a file this
+// package ever wrote, and removing it would be deleting somebody else's on the
+// strength of a shared stem), and the glob metacharacters themselves, which are
+// legal in a filename and must therefore match themselves and nothing else.
+//
+// The mutations, one per group: delete the digit loop in isDerivativeOf and
+// vNOPE is claimed; swap CutPrefix's `upload+".v"` for `upload` and the
+// longer-named upload is claimed; return the whole directory and everything is.
+func TestDerivativeVersionsMatchesOnlyThisUploadsOwnDerivatives(t *testing.T) {
+	dir := t.TempDir()
+	derivDir := DerivativeDir(dir)
+	if err := os.MkdirAll(derivDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"show.mp4.v1.ts",           // ours, an older profile
+		"show.mp4.v2.ts",           // ours, current
+		"show.mp4.v10.ts",          // ours, and two digits rather than one
+		"show.mp4.vNOPE.ts",        // NOT ours: the version is not a number
+		"show.mp4.v2.ts.bak",       // NOT ours: something else's suffix
+		"show.mp4.extra.mp4.v1.ts", // a DIFFERENT upload whose name starts with ours
+		"other.mp4.v1.ts",          // unrelated
+		"*.v1.ts",                  // a real file that looks like a pattern
+	} {
+		if err := os.WriteFile(filepath.Join(derivDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		upload string
+		want   []string
+	}{
+		{"show.mp4", []string{"show.mp4.v1.ts", "show.mp4.v10.ts", "show.mp4.v2.ts"}},
+		{"show.mp4.extra.mp4", []string{"show.mp4.extra.mp4.v1.ts"}},
+		// The metacharacter matches ITSELF. Under the old glob this returned
+		// every derivative in the directory.
+		{"*", []string{"*.v1.ts"}},
+		{"?", nil},
+		{"nothing-of-ours.mp4", nil},
+	} {
+		got, err := DerivativeVersions(dir, tc.upload)
+		if err != nil {
+			t.Fatalf("DerivativeVersions(%q): %v", tc.upload, err)
+		}
+		bases := make([]string, 0, len(got))
+		for _, p := range got {
+			bases = append(bases, filepath.Base(p))
+		}
+		sort.Strings(bases)
+		if strings.Join(bases, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("DerivativeVersions(%q) = %v, want %v", tc.upload, bases, tc.want)
+		}
+	}
 }

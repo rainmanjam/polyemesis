@@ -15,9 +15,15 @@ type ConcatEntry struct {
 	// It exists for when a profile drifts enough that the demuxer's own
 	// estimate stops being enough — not because the current one needs it.
 	// Measured on three real derivatives concatenated, looped past two full
-	// wraps, and probed with and without a per-entry duration: the packet
-	// stream was byte-identical either way. See
+	// wraps, and probed with and without a per-entry duration. See
 	// internal/playlistmedia/concat_behaviour_test.go.
+	//
+	// THE STREAMS MATCH ONLY WHEN THE DIRECTIVE IS EXACT, and this field cannot
+	// express an exact one: it is milliseconds, and the renderer below is
+	// `%.3f`, so a file whose real length has microsecond precision gets a
+	// directive that is short — 333µs in the measured case — and every packet
+	// after that entry shifts. Anyone setting this needs finer units here
+	// first. Left unset, the demuxer's own estimate is used and is exact.
 	DurationMS int64
 }
 
