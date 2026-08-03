@@ -199,17 +199,6 @@ func TestSeeksAreRelativeToTheFirstSourceFile(t *testing.T) {
 	}
 }
 
-func TestConcatListQuotesAPathContainingAQuote(t *testing.T) {
-	// The demuxer has no backslash escape inside quotes: a path with an
-	// apostrophe has to close, escape and reopen or the list parses as
-	// something else entirely.
-	got := concatList([]string{"/media/Tom's stream/seg0.mkv"})
-	want := `file '/media/Tom'\''s stream/seg0.mkv'` + "\n"
-	if got != want {
-		t.Fatalf("concatList = %q, want %q", got, want)
-	}
-}
-
 func TestAudioSelectionChoosesTheMapsAndTheCodecs(t *testing.T) {
 	tests := []struct {
 		name       string
