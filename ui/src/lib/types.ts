@@ -204,6 +204,13 @@ export interface Destination {
   /** Compliance metadata. Always present in a server response and empty for a
    *  destination that has not set any. */
   compliance?: Compliance;
+  /** Facebook create-time configuration: which Pages to crosspost to and which
+   *  charity's donate button to attach. Always present in a server response
+   *  and empty for a destination that has not set any. */
+  facebook?: {
+    crosspost?: { pageId: string; createPost?: boolean }[];
+    donateCharityId?: string;
+  };
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;

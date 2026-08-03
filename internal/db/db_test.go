@@ -146,6 +146,63 @@ func TestCreateDestinationDefaultsBitrateAndPlatform(t *testing.T) {
 	}
 }
 
+func TestADestinationRoundTripsItsFacebookBlock(t *testing.T) {
+	d := testDB(t)
+	created, err := d.CreateDestination(&Destination{
+		Name: "fb", Kind: DestRTMP, Platform: PlatformFacebook,
+		URL: "rtmps://live-api.facebook.com:443/rtmp/", StreamKey: "k",
+		AudioBitrate: 160, Profile: routing.DefaultProfile(),
+		Facebook: FacebookSettings{
+			Crosspost: []CrosspostTarget{
+				{PageID: "1234", CreatePost: true},
+				{PageID: "5678"},
+			},
+			DonateCharityID: "999",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	got, err := d.GetDestination(created.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if len(got.Facebook.Crosspost) != 2 {
+		t.Fatalf("crosspost = %+v, want two targets", got.Facebook.Crosspost)
+	}
+	// CreatePost is what selects enable_crossposting_and_create_post over
+	// enable_crossposting. Losing it posts as a Page nobody asked to post as.
+	if !got.Facebook.Crosspost[0].CreatePost || got.Facebook.Crosspost[1].CreatePost {
+		t.Errorf("createPost flags = %v/%v, want true/false",
+			got.Facebook.Crosspost[0].CreatePost, got.Facebook.Crosspost[1].CreatePost)
+	}
+	if got.Facebook.DonateCharityID != "999" {
+		t.Errorf("donateCharityId = %q, want 999", got.Facebook.DonateCharityID)
+	}
+}
+
+func TestADestinationWithNoFacebookBlockReadsBackEmpty(t *testing.T) {
+	// Every destination that existed before this column did reads '{}'. An
+	// unreadable or non-empty default would make every pre-existing Facebook
+	// destination start sending parameters nobody set.
+	d := testDB(t)
+	created, err := d.CreateDestination(&Destination{
+		Name: "plain", Kind: DestRTMP, Platform: PlatformCustom,
+		URL: "rtmp://example.invalid/live", StreamKey: "k",
+		AudioBitrate: 160, Profile: routing.DefaultProfile(),
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	got, err := d.GetDestination(created.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if len(got.Facebook.Crosspost) != 0 || got.Facebook.DonateCharityID != "" {
+		t.Errorf("facebook = %+v, want zero", got.Facebook)
+	}
+}
+
 // seedDestinations creates one destination per name and returns their ids in
 // creation order, which is also the order they are listed in.
 func seedDestinations(t *testing.T, d *DB, names ...string) []int64 {
