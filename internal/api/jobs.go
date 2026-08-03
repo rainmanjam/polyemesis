@@ -588,6 +588,12 @@ func (s *Server) handleGetJobPolicy(w http.ResponseWriter, r *http.Request) {
 // to change a nice level would be the precise mistake this tier exists to
 // avoid.
 func (s *Server) handlePutJobPolicy(w http.ResponseWriter, r *http.Request) {
+	// Buffered before the store's settings mutex is taken, for the reason
+	// readJSONBody exists: the decode below runs inside that lock.
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
 	// Read, replace and write in one span inside db.UpdateSettings. This block
 	// is a slice of the same JSON document PUT /settings and the scheduler write
 	// -- there is no way to store only the post-production fields -- so a
@@ -598,7 +604,7 @@ func (s *Server) handlePutJobPolicy(w http.ResponseWriter, r *http.Request) {
 		before = settings.PostProd.Concurrency
 
 		var req db.PostProdSettings
-		if !decodeJSON(w, r, &req) {
+		if !decodeJSONFrom(w, body, &req) {
 			return errResponseWritten
 		}
 		settings.PostProd = req

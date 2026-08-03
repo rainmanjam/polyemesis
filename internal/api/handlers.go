@@ -702,6 +702,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
+	// The body is buffered BEFORE any lock is taken, because the decode below
+	// happens inside the store's settings mutex and reading a network stream in
+	// there would hold it at the speed of the client's connection. See
+	// readJSONBody.
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
 	// Everything from reading the stored document to storing the new one is one
 	// span inside db.UpdateSettings, which holds the STORE's settings lock
 	// across it. s.settingsMu above is a different boundary and cannot serve
@@ -726,7 +734,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			Enabled: settings.Failover.Playlist.Enabled,
 			Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
 		}
-		if !decodeJSON(w, r, settings) {
+		if !decodeJSONFrom(w, body, settings) {
 			return errResponseWritten
 		}
 		// Validated HERE as well as inside UpdateSettings, and the order is the

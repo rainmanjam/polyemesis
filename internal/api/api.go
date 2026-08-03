@@ -3,9 +3,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -705,9 +707,41 @@ func writeStoreError(w http.ResponseWriter, err error) {
 var errResponseWritten = errors.New("the handler has already written the response")
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	// 1 MB is far more than any polyemesis payload; the cap stops a malformed
-	// or malicious body from being buffered wholesale.
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return false
+	}
+	return decodeJSONFrom(w, body, v)
+}
+
+// readJSONBody buffers the request body, so that a caller holding a lock can
+// take the NETWORK out of the locked span.
+//
+// The two settings handlers need this. They decode over the STORED document --
+// that is what makes a partial payload safe -- so the decode has to happen
+// inside db.UpdateSettings, which holds the store's settings mutex. Reading the
+// body there would hold that mutex for as long as the body took to arrive, and
+// the body arrives at the speed of the operator's network. ReadHeaderTimeout
+// bounds the headers only (cmd/polyemesis/main.go), so a save from a phone on a
+// dying connection would stall every other settings writer in the install --
+// including the scheduler's sweep, which is not a request that can be retried
+// by a human who noticed.
+//
+// 1 MB is far more than any polyemesis payload; the cap stops a malformed or
+// malicious body from being buffered wholesale. Exceeding it fails here rather
+// than at Decode, with the same status and the same message text.
+func readJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return nil, false
+	}
+	return body, true
+}
+
+// decodeJSONFrom is decodeJSON's second half, over bytes already read.
+func decodeJSONFrom(w http.ResponseWriter, body []byte, v any) bool {
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
