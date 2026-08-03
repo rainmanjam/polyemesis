@@ -129,13 +129,18 @@ func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 // makes refusing defensible: an operator who hits the 409 below can go remove
 // the item and retry, instead of being stuck.
 //
-// EVERY DERIVATIVE VERSION is removed, via playlistmedia.DerivativeGlob,
-// rather than only the one name playlistmedia.DerivativePath would compute
-// right now. See DerivativeGlob's own comment for why it is written against a
-// versioned naming scheme even though nothing produces a versioned derivative
-// yet: the point is that removing only today's exact name would silently stop
-// being enough the day something does, orphaning every earlier version with
-// nothing left in the product that ever looks for them again.
+// EVERY DERIVATIVE VERSION is removed, via playlistmedia.DerivativeVersions,
+// rather than only the one name playlistmedia.DerivativePath computes today.
+// ProfileVersion is at 2, so a v1 file can genuinely still be on disk beside a
+// v2, and removing only the current name would orphan it with nothing left in
+// the product that ever looks for it again.
+//
+// DerivativeVersions reads the directory and compares names; it does NOT build
+// a glob. The name here is a URL path segment, and `*`, `?` and `[` are all
+// legal in a filename, so a pattern built from it is a pattern the caller
+// controls. That is not hypothetical: this handler previously globbed, and
+// `DELETE /api/v1/media/%2A` removed every derivative in the install before the
+// name was validated at all.
 //
 // RECONCILES afterward, like a settings save does, so a file the engine was
 // relying on does not leave its view stale until the next unrelated change
@@ -171,7 +176,7 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 	// two removals below, an orphaned derivative next to an upload that is
 	// still there is a smaller problem to notice than a deleted upload whose
 	// derivative is still on disk claiming to be current.
-	matches, err := filepath.Glob(playlistmedia.DerivativeGlob(s.cfg.DataDir, name))
+	matches, err := playlistmedia.DerivativeVersions(s.cfg.DataDir, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

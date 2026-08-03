@@ -403,12 +403,73 @@ func DerivativePath(dataDir, upload string) string {
 		fmt.Sprintf("%s.v%d%s", name, ProfileVersion, NormalisedExt))
 }
 
-// DerivativeGlob matches every version of one upload's derivative, which is
-// what deletion has to remove: a version bump can leave more than one
-// version of the same upload's derivative on disk at once.
-func DerivativeGlob(dataDir, upload string) string {
+// DerivativeVersions lists every version of one upload's derivative that is
+// actually on disk, which is what deletion has to remove: a profile bump can
+// leave more than one version of the same upload's derivative behind.
+//
+// IT READS THE DIRECTORY AND COMPARES NAMES. It does not build a glob, and that
+// is the whole point of the function.
+//
+// The version this replaced returned `<name>.v*<ext>` for filepath.Glob, and the
+// name reaching it comes from a URL path segment. ValidUploadName rejects
+// separators and control characters but says nothing about `*`, `?` or `[` --
+// they are legal in a filename -- so `DELETE /api/v1/media/%2A` produced the
+// pattern `<dataDir>/playlist-media/*.v*.ts` and the caller deleted EVERY
+// DERIVATIVE IN THE INSTALL, before the name was ever validated. A `[` would
+// meanwhile fail the pattern parse and 500.
+//
+// Matching by equality means a metacharacter is just a character, which is what
+// it always was on disk. There is no pattern for a caller to smuggle anything
+// through, so nothing downstream has to remember to escape one.
+func DerivativeVersions(dataDir, upload string) ([]string, error) {
 	name := filepath.Base(db.PlaylistUploadName(upload))
-	return filepath.Join(dataDir, Dir, name+".v*"+NormalisedExt)
+	// A name that could escape the directory has no derivatives by definition,
+	// and asking the filesystem about it is not this function's job.
+	if name == "" || name == "." || name == ".." {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(filepath.Join(dataDir, Dir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No derivative directory yet is not an error: nothing has been
+			// normalised, so there is nothing of this upload's to remove.
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !isDerivativeOf(e.Name(), name) {
+			continue
+		}
+		out = append(out, filepath.Join(dataDir, Dir, e.Name()))
+	}
+	return out, nil
+}
+
+// isDerivativeOf reports whether file is `<upload>.v<digits><ext>`.
+//
+// The digits are checked rather than skipped: `show.mp4.vNOPE.ts` is not a
+// derivative this package ever wrote, and a deletion that removed it would be
+// deleting somebody else's file on the strength of a prefix match.
+func isDerivativeOf(file, upload string) bool {
+	rest, ok := strings.CutPrefix(file, upload+".v")
+	if !ok {
+		return false
+	}
+	digits, ok := strings.CutSuffix(rest, NormalisedExt)
+	if !ok || digits == "" {
+		return false
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // DerivativeDir is where every upload's derivative lives.

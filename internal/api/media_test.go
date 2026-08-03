@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,6 +253,51 @@ func TestDeleteMediaOnAMissingNameIs404(t *testing.T) {
 // A traversal in the delete path must not reach outside the uploads directory.
 // chi will not route a literal slash into {name}, so the reachable hostile
 // forms are the encoded ones and the ones that survive URL parsing.
+// TestDeletingAGlobNameRemovesNobodyElsesDerivative is a REGRESSION test for a
+// destructive defect, and it exists because the traversal test below could never
+// have caught it.
+//
+// The delete handler used to expand playlistmedia.DerivativeGlob through
+// filepath.Glob, and the name it built that pattern from is a URL path segment.
+// ValidUploadName rejects separators and control characters, but `*`, `?` and
+// `[` are legal in a filename and it says nothing about them -- so
+// `DELETE /api/v1/media/%2A` produced `<dataDir>/playlist-media/*.v*.ts` and
+// removed EVERY DERIVATIVE IN THE INSTALL. The name was validated afterwards, by
+// store.Delete, which is far too late to matter: the files were already gone.
+//
+// TestDeleteMediaRefusesTraversal only ever checks that a file OUTSIDE the
+// uploads directory survives. It never looks in playlist-media/, so every
+// derivative in the install could be deleted with that test still green. A guard
+// that watches one directory cannot speak for another.
+//
+// The mutation: put filepath.Glob(DerivativeGlob(...)) back and this fails.
+func TestDeletingAGlobNameRemovesNobodyElsesDerivative(t *testing.T) {
+	h, dataDir, auth := mediaServer(t)
+
+	// Somebody else's derivative, of an upload this request does not name.
+	other := playlistmedia.DerivativePath(dataDir, "someone-elses.mp4")
+	if err := os.MkdirAll(filepath.Dir(other), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("not yours"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every metacharacter that means something to filepath.Match. `[a-z]*` is
+	// here for a second reason: an unterminated class returns ErrBadPattern,
+	// which the old code surfaced as a 500 on what is really a bad request.
+	// 404 either way, which is exactly why the status cannot be the assertion:
+	// the old code deleted the derivatives FIRST and only then asked store.Delete
+	// about the name, so it answered "no such upload" having already destroyed
+	// them. What is asserted is the survivor.
+	for _, name := range []string{"*", "?", "[a-z]*", "*.mp4"} {
+		send(t, h, auth, http.MethodDelete, "/api/v1/media/"+url.PathEscape(name), nil, http.StatusNotFound)
+		if _, err := os.Stat(other); err != nil {
+			t.Fatalf("deleting %q removed a derivative belonging to a different upload: %v", name, err)
+		}
+	}
+}
+
 func TestDeleteMediaRefusesTraversal(t *testing.T) {
 	h, dataDir, auth := mediaServer(t)
 
