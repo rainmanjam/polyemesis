@@ -27,6 +27,22 @@ async function signIn(page: Page) {
   await expect(page.locator("nav")).toBeVisible();
 }
 
+/** Opens /automation and switches to the schedule list.
+ *
+ *  The page lands on Alerts, and the schedules table is not merely hidden
+ *  behind that tab -- it is not in the document at all until the tab is
+ *  selected. A test that only navigated found no rows and could not tell that
+ *  apart from a row that failed to render, which is how the first version of
+ *  this spec failed for a reason that had nothing to do with what it asserts. */
+async function openSchedules(page: Page) {
+  await page.goto("/automation");
+  await page.getByRole("tab", { name: "Schedules" }).click();
+  // The schedule table's own header, not `getByRole("table")`: the panel also
+  // carries a recent-runs table, and matching both would fail on strict mode
+  // rather than on anything this spec is about.
+  await expect(page.getByRole("columnheader", { name: "Schedule" })).toBeVisible();
+}
+
 /** POSTs a schedule through the same route the dialog uses and returns its id.
  *  Created through the API rather than by driving the dialog on purpose: the
  *  dialog is what the review found CORRECT, and driving it would make this
@@ -90,7 +106,7 @@ test.describe("the schedule list says what a schedule acts on", () => {
     const destID = await createSchedule(page, "e2e destination row", "start");
 
     try {
-      await page.goto("/automation");
+      await openSchedules(page);
       const playlistRow = page.getByRole("row").filter({ hasText: "e2e playlist row" });
       const destRow = page.getByRole("row").filter({ hasText: "e2e destination row" });
       await expect(playlistRow).toBeVisible();
@@ -114,7 +130,7 @@ test.describe("the schedule list says what a schedule acts on", () => {
     const stopID = await createSchedule(page, "e2e badge stop", "playlist.stop");
 
     try {
-      await page.goto("/automation");
+      await openSchedules(page);
       const startBadge = page
         .getByRole("row")
         .filter({ hasText: "e2e badge start" })
@@ -140,7 +156,7 @@ test.describe("the schedule list says what a schedule acts on", () => {
         .filter({ hasText: "e2e badge dest" })
         .getByText("start", { exact: true });
       try {
-        await page.reload();
+        await openSchedules(page);
         await expect(destStart).toBeVisible();
         expect(await destStart.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
           startColour,
