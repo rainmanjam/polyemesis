@@ -90,8 +90,17 @@ interface AlertsMeta {
   stats: AlertStats;
 }
 
-type ScheduleAction = "start" | "stop";
+type ScheduleAction = "start" | "stop" | "playlist.start" | "playlist.stop";
 type ScheduleKind = "once" | "daily" | "weekly";
+
+// "start" names two different things now -- starting destinations and starting
+// the failover playlist -- so anything that asks "does this row turn something
+// on?" has to ask it of both, and anything that renders a target has to know
+// which kind of target the row has. Comparing against the bare string "start"
+// is what gave playlist.start the stopped badge and the "every destination"
+// subtitle, which is precisely what its validation forbids.
+const isPlaylistAction = (a: ScheduleAction) => a.startsWith("playlist.");
+const isStartAction = (a: ScheduleAction) => a === "start" || a === "playlist.start";
 
 export interface Schedule {
   id: number;
@@ -791,6 +800,12 @@ function Schedules({
   };
 
   const targets = (s: Schedule) => {
+    // A playlist schedule carries NO destinations, by design: the server
+    // refuses one that names any, and the dialog clears them. Falling through
+    // to the destination wording below would then print "every destination"
+    // under every playlist row -- telling the operator this schedule does the
+    // one thing its validation exists to forbid.
+    if (isPlaylistAction(s.action)) return "the failover playlist";
     const ids = s.destinationIds ?? [];
     if (ids.length === 0) return "every destination";
     return ids.map((id) => destNames.get(id) ?? `#${id}`).join(", ");
@@ -827,7 +842,7 @@ function Schedules({
                   <TableRow key={s.id}>
                     <TableCell>
                       <div className="flex items-center gap-1.5 text-[12px]">
-                        <Badge variant={s.action === "start" ? "live" : "outline"}>
+                        <Badge variant={isStartAction(s.action) ? "live" : "outline"}>
                           {s.action}
                         </Badge>
                         {s.name}
@@ -1013,7 +1028,19 @@ function ScheduleDialog({
               <Label>Action</Label>
               <Select
                 value={form.action}
-                onValueChange={(v) => setForm({ ...form, action: v as ScheduleAction })}
+                onValueChange={(v) => {
+                  const action = v as ScheduleAction;
+                  setForm({
+                    ...form,
+                    action,
+                    // A playlist schedule that also names destinations is
+                    // refused by the server, so a stale pick from before the
+                    // switch must not ride along invisibly.
+                    destinationIds: action.startsWith("playlist.")
+                      ? []
+                      : form.destinationIds,
+                  });
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1021,6 +1048,8 @@ function ScheduleDialog({
                 <SelectContent>
                   <SelectItem value="start">Start destinations</SelectItem>
                   <SelectItem value="stop">Stop destinations</SelectItem>
+                  <SelectItem value="playlist.start">Start the playlist</SelectItem>
+                  <SelectItem value="playlist.stop">Stop the playlist</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1106,20 +1135,26 @@ function ScheduleDialog({
             </>
           )}
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Destinations</Label>
-            <p className="text-[10px] text-muted-foreground">
-              None selected means every destination, which is what "start the show" usually means.
-            </p>
-            <div className="grid gap-1.5 sm:grid-cols-2">
-              {(status?.destinations ?? []).map((d) => (
-                <label key={d.id} className="flex items-center gap-2 text-[11px]">
-                  <Checkbox checked={dests.includes(d.id)} onCheckedChange={() => toggleDest(d.id)} />
-                  <span className="truncate">{d.name}</span>
-                </label>
-              ))}
+          {!form.action.startsWith("playlist.") && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Destinations</Label>
+              <p className="text-[10px] text-muted-foreground">
+                None selected means every destination, which is what "start the show" usually
+                means.
+              </p>
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {(status?.destinations ?? []).map((d) => (
+                  <label key={d.id} className="flex items-center gap-2 text-[11px]">
+                    <Checkbox
+                      checked={dests.includes(d.id)}
+                      onCheckedChange={() => toggleDest(d.id)}
+                    />
+                    <span className="truncate">{d.name}</span>
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <Label htmlFor="sch-grace">Lateness allowance (seconds)</Label>

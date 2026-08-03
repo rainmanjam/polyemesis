@@ -588,23 +588,38 @@ func (s *Server) handleGetJobPolicy(w http.ResponseWriter, r *http.Request) {
 // to change a nice level would be the precise mistake this tier exists to
 // avoid.
 func (s *Server) handlePutJobPolicy(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.store.GetSettings()
-	if err != nil {
-		writeStoreError(w, err)
+	// Buffered before the store's settings mutex is taken, for the reason
+	// readJSONBody exists: the decode below runs inside that lock.
+	body, ok := readJSONBody(w, r)
+	if !ok {
 		return
 	}
-	before := settings.PostProd.Concurrency
+	// Read, replace and write in one span inside db.UpdateSettings. This block
+	// is a slice of the same JSON document PUT /settings and the scheduler write
+	// -- there is no way to store only the post-production fields -- so a
+	// read-modify-write of its own would discard whatever either of those had
+	// just changed, along with every field it never looked at.
+	var before int
+	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
+		before = settings.PostProd.Concurrency
 
-	var req db.PostProdSettings
-	if !decodeJSON(w, r, &req) {
+		var req db.PostProdSettings
+		if err := decodeJSONInto(body, &req); err != nil {
+			return err
+		}
+		settings.PostProd = req
+		return nil
+	})
+	var invalid db.InvalidSettingsError
+	var badRequest badRequestError
+	switch {
+	case errors.As(err, &badRequest):
+		writeError(w, http.StatusBadRequest, badRequest.Error())
 		return
-	}
-	settings.PostProd = req
-	if err := settings.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusBadRequest, invalid.Error())
 		return
-	}
-	if err := s.store.PutSettings(settings); err != nil {
+	case err != nil:
 		writeStoreError(w, err)
 		return
 	}

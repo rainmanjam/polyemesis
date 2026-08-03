@@ -92,19 +92,22 @@ relay has counted continuity-counter breaks all along — so whether a rewind is
 which is when you save the setting — not when the schedule fires. A show
 scheduled for 20:00 begins wherever the loop happens to be at 20:00.
 
-Nothing in the current design can fix that. `scheduler.Actuator` has exactly
-three methods and all of them are destination-level:
+Nothing in the current design can fix that. `scheduler.Actuator` now reaches
+two enabled bits, a destination's and the failover playlist's below, and
+neither is a source:
 
 ```go
 type Actuator interface {
     SetDestinationEnabled(id int64, enabled bool) error
     ListDestinationIDs() ([]int64, error)
+    SetPlaylistEnabled(enabled bool) error
     Reconcile() error
 }
 ```
 
-A schedule cannot touch a source, restart an ingest, or seek. Starting at frame
-0 needs the full playlist work — see
+A schedule still cannot touch a source, restart an ingest, or seek —
+`SetPlaylistEnabled` flips a setting the failover tier reads, not anything the
+pull ingest above uses. Starting at frame 0 needs the full playlist work — see
 [the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md).
 
 **One file, not a playlist.** *This* route — the pull ingest on this page —
@@ -170,6 +173,39 @@ seconds, while ten minutes of filler shows it every ten minutes.
 
 Naming the same upload twice is allowed and costs nothing extra — it is
 transcoded once and appears in the sequence twice.
+
+### Turning it on and off, including on a schedule
+
+*Settings → Failover → Playlist* has the enabled switch described above.
+*Automation → Schedules* can flip the same switch: a schedule with action
+**Start the playlist** or **Stop the playlist** sets
+`failover.playlist.enabled` and asks for a reconcile, through the same
+`SetPlaylistEnabled` call the settings endpoint makes. A scheduled enable is
+indistinguishable from one you clicked yourself, once it lands — the same
+guarantee this document already makes for destinations, above.
+
+Two things about that switch are worth knowing before you schedule it, not
+during a broadcast:
+
+**It is install-wide, not per-programme.** `failover.playlist` lives on
+`db.Settings`, and settings are global — `GetSettings` takes no source id, and
+`db.Source` carries no failover fields at all. Schedule `playlist.start` and
+you turn the playlist on for the **whole install**, not the one programme you
+had in mind. On a single-source install — almost every deployment, and
+everything this document's own acceptance suite models — the distinction does
+not exist, so this never bites. On a two-programme install it is
+all-or-nothing: there is no source id in the schema for the schedule to name.
+
+**It means "filler from 20:00 if nothing is live," not "filler at 20:00
+regardless."** The playlist ranks below both ingests, as the table above shows,
+and a live encoder pre-empts it the moment one arrives — deliberately, not as a
+gap the schedule closes. Scheduling `playlist.start` for 20:00 while an encoder
+is still publishing changes nothing anyone can see: the bit flips, the
+reconcile runs, and the programme already on air keeps playing until that
+encoder stops. Forcing filler onto air over a live encoder needs the pin
+(`POST /failover/source`, `{"source": "playlist"}`) — and the pin lives only in
+memory, with no stored intent behind it, so it stays a manual switch and cannot
+itself be scheduled.
 
 ### Saving is not the same as being ready
 

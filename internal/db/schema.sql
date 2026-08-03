@@ -262,9 +262,9 @@ CREATE TABLE IF NOT EXISTS schedules (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT    NOT NULL,
     enabled         INTEGER NOT NULL DEFAULT 1,
-    action          TEXT    NOT NULL DEFAULT 'start',  -- start | stop
+    action          TEXT    NOT NULL DEFAULT 'start',  -- start | stop | playlist.start | playlist.stop
     kind            TEXT    NOT NULL DEFAULT 'once',   -- once | daily | weekly
-    destination_ids TEXT    NOT NULL DEFAULT '[]',     -- JSON array; empty = every destination
+    destination_ids TEXT    NOT NULL DEFAULT '[]',     -- JSON array; empty = every destination, and required empty for a playlist.* action
     tz              TEXT    NOT NULL DEFAULT '',       -- IANA zone; empty = UTC
     at_minutes      INTEGER NOT NULL DEFAULT 0,        -- minutes past local midnight
     days            TEXT    NOT NULL DEFAULT '[]',     -- JSON array of weekday numbers, Sunday = 0

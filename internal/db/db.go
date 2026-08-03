@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -28,6 +29,29 @@ var schemaSQL string
 // LegacyPlaylistFilePath for the pure half this package still owns.
 type DB struct {
 	sql *sql.DB
+
+	// settingsMu serialises READ-MODIFY-WRITE callers of the settings
+	// singleton, and nothing else.
+	//
+	// The settings are ONE JSON document: PutSettings writes the whole blob,
+	// so two callers that each read it, change a different field and write it
+	// back do not merge -- whichever lands second silently discards every
+	// field the other one changed, not just the field it meant to edit. Four
+	// places in the running server do exactly that (the engine's scheduled
+	// playlist flip, PUT /settings, the annotations mirror in PUT
+	// /annotations, and PUT /jobs/policy), and before this mutex existed none
+	// of them serialised against any of the others.
+	//
+	// The way it stays correct is that every such caller goes through
+	// UpdateSettings. A lock is only a boundary while nobody walks around it,
+	// and a new read-modify-write built out of GetSettings and PutSettings
+	// would be exactly that walk.
+	//
+	// GetSettings and PutSettings deliberately do NOT take it. GetSettings
+	// calls PutSettings to seed defaults on first run, so a lock in either
+	// would deadlock the moment UpdateSettings -- which holds this across both
+	// -- ran against a fresh database.
+	settingsMu sync.Mutex
 }
 
 // Open opens (creating if needed) the database at path and applies the schema.

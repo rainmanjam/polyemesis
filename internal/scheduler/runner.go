@@ -32,6 +32,11 @@ type Actuator interface {
 	SetDestinationEnabled(id int64, enabled bool) error
 	// ListDestinationIDs expands a schedule that targets everything.
 	ListDestinationIDs() ([]int64, error)
+	// SetPlaylistEnabled flips the failover playlist's stored intent.
+	//
+	// INSTALL-WIDE: db.Settings is global, so this is not per-programme. There
+	// is no id parameter because there is nothing to select.
+	SetPlaylistEnabled(enabled bool) error
 	// Reconcile is called once per sweep, and only when something changed.
 	Reconcile() error
 }
@@ -149,6 +154,43 @@ func (r *Runner) Tick(now time.Time) []Result {
 			continue
 		}
 
+		// The playlist half. It must branch HERE, above the destination
+		// expansion: Enables() answers Action == ActionStart, so playlist.stop
+		// reaching the code below would disable every destination in the
+		// install.
+		if s.TargetsPlaylist() {
+			enable := s.Action == ActionPlaylistStart
+			if err := r.act.SetPlaylistEnabled(enable); err != nil {
+				// NOT marked handled: unlike a destination sweep there is no
+				// partial success to avoid re-applying, so the next sweep
+				// should try again while the occurrence is still inside its
+				// grace window.
+				res.Err = err.Error()
+				r.log.Warn("schedule cannot set the playlist",
+					"schedule", s.Name, "err", err)
+				out = append(out, res)
+				r.emit(res)
+				continue
+			}
+			// Without this the setting is written and nothing applies it: Tick
+			// only reconciles when something changed.
+			changed = true
+			res.Fired = true
+			if err := r.store.MarkScheduleRun(s.ID, d.At); err != nil {
+				res.Err = err.Error()
+			}
+			// "target" rather than a playlist-specific key so one log query
+			// finds every schedule that fired, whatever it acted on. The
+			// destination branch below says `"target", "destinations"` for
+			// the same reason and carries the count separately.
+			r.log.Info("schedule fired",
+				"schedule", s.Name, "action", string(s.Action),
+				"target", "playlist", "occurrence", d.At.Format(time.RFC3339))
+			out = append(out, res)
+			r.emit(res)
+			continue
+		}
+
 		targets := s.DestinationIDs
 		if len(targets) == 0 {
 			if !allDone {
@@ -192,7 +234,8 @@ func (r *Runner) Tick(now time.Time) []Result {
 		}
 		r.log.Info("schedule fired",
 			"schedule", s.Name, "action", string(s.Action),
-			"destinations", len(targets), "occurrence", d.At.Format(time.RFC3339))
+			"target", "destinations", "count", len(targets),
+			"occurrence", d.At.Format(time.RFC3339))
 		out = append(out, res)
 		r.emit(res)
 	}

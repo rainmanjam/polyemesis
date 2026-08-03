@@ -46,19 +46,22 @@ That is a genuine answer to at least three of the five tracker requests — "str
 from MP4", "virtual input: looping video", and "scheduling".
 
 **The wart:** the file loops continuously from server start, so at 20:00 you join
-mid-file, not at frame 0. The scheduler cannot fix this. `scheduler.Actuator` has
-exactly three methods and all are destination-level:
+mid-file, not at frame 0. The scheduler cannot fix this. `scheduler.Actuator` is:
 
 ```go
 type Actuator interface {
     SetDestinationEnabled(id int64, enabled bool) error
     ListDestinationIDs() ([]int64, error)
     Reconcile() error
+    SetPlaylistEnabled(enabled bool) error
 }
 ```
 
-`Action` is only `start|stop`. No schedule can touch a source, restart an ingest,
-or select a playlist item.
+`Action` is `start|stop|playlist.start|playlist.stop`. `SetPlaylistEnabled`
+arrived with sub-project C and flips one install-wide settings field; every other
+method is destination-level. **No schedule can touch a source, restart an ingest,
+or select a playlist item** — which is what this section is about, and remains
+true.
 
 ### What does not exist at all
 
@@ -171,11 +174,26 @@ is a toggle with this as the default — not a reinstatement of the original lin
 
 ### Scheduler
 
-Two increments. Today, `action=start` on destinations works and joins mid-file.
-Properly: add `Action` values (`playlist.start` / `source.select`), widen
-`Actuator` with a source-scoped method, add a `source_id` column to `schedules`.
-The skip-if-missed and `MarkScheduleRun` monotonic guard generalise unchanged —
-that machinery is genuinely reusable as-is.
+Two increments. `action=start` on destinations works and joins mid-file.
+
+**The first increment shipped** as sub-project C: `playlist.start` /
+`playlist.stop` flip `failover.playlist.enabled` and ask for a reconcile. The
+skip-if-missed rule and the `MarkScheduleRun` monotonic guard generalised
+unchanged, as predicted here — that machinery really was reusable as-is.
+
+**No `source_id` column was added, and none should be.** This line originally
+prescribed one. `db.Settings` is install-wide: `GetSettings` takes no source id,
+`effectiveSettings` overlays only `settings.Ingest = src.Ingest`, and `db.Source`
+carries no failover fields — so there is no per-source playlist for a `source_id`
+to select, and a column would have been a schema change selecting between
+identical things. Moving the playlist block onto `db.Source` is what would make
+it mean something, and that is deferred until somebody runs two programmes and
+wants different filler on each. See
+`docs/superpowers/specs/2026-08-03-scheduled-playlist-design.md`.
+
+**Still to do:** `source.select`. The selector pin is in-memory only
+(`e.sel.pinned`), so there is no stored intent to flip — scheduling it needs
+somewhere to persist the pin first, or it breaks the invariant below.
 
 Keep the package's stated invariant: *"The runner deliberately cannot start a
 process: it writes the same intent a human would and asks for a reconcile."* A

@@ -3,9 +3,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -690,16 +692,69 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+// badRequestError carries a 400 OUT of a db.UpdateSettings closure, so the
+// response is written after the store's settings lock has been released.
+//
+// The obvious shape -- call writeError inside the closure and tell the handler
+// the response is already written -- puts a socket write inside that lock, and
+// a client that stops reading its response can then hold it. That is the same
+// hazard readJSONBody exists to remove, arriving from the other direction, and
+// it would sit in the handler whose comments claim the network is kept out.
+//
+// So nothing inside a settings closure touches the ResponseWriter. It returns
+// this, the handler matches it with errors.As once UpdateSettings has returned,
+// and the message reaches the client unchanged.
+type badRequestError struct{ msg string }
+
+func (e badRequestError) Error() string { return e.msg }
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	// 1 MB is far more than any polyemesis payload; the cap stops a malformed
-	// or malicious body from being buffered wholesale.
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return false
+	}
+	if err := decodeJSONInto(body, v); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return false
 	}
 	return true
+}
+
+// readJSONBody buffers the request body, so that a caller holding a lock can
+// take the NETWORK out of the locked span.
+//
+// The two settings handlers need this. They decode over the STORED document --
+// that is what makes a partial payload safe -- so the decode has to happen
+// inside db.UpdateSettings, which holds the store's settings mutex. Reading the
+// body there would hold that mutex for as long as the body took to arrive, and
+// the body arrives at the speed of the operator's network. ReadHeaderTimeout
+// bounds the headers only (cmd/polyemesis/main.go), so a save from a phone on a
+// dying connection would stall every other settings writer in the install --
+// including the scheduler's sweep, which is not a request that can be retried
+// by a human who noticed.
+//
+// 1 MB is far more than any polyemesis payload; the cap stops a malformed or
+// malicious body from being buffered wholesale. Exceeding it fails here rather
+// than at Decode, with the same status and the same message text.
+func readJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return nil, false
+	}
+	return body, true
+}
+
+// decodeJSONInto is decodeJSON's second half, over bytes already read. It
+// returns badRequestError rather than writing, so a settings closure can use it
+// without touching the ResponseWriter under the store's lock.
+func decodeJSONInto(body []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return badRequestError{"invalid request body: " + err.Error()}
+	}
+	return nil
 }
 
 func idParam(r *http.Request, name string) (int64, error) {
