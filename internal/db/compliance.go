@@ -58,9 +58,13 @@ func ValidPrivacy(p PrivacyStatus) bool {
 
 // FacebookPrivacy is Facebook's audience for a live video.
 //
-// Empty means LEAVE IT ALONE, exactly as PrivacyStatus does and for the same
-// reason: a privacy write that happens by accident is one the operator finds out
-// about from the audience.
+// Empty means LEAVE IT ALONE, as PrivacyStatus does — but for a WEAKER reason,
+// and the difference matters. PrivacyStatus documents a specific mechanism:
+// YouTube's update is destructive by PART, so omitting a value actively reverts
+// the setting. Nothing of the kind is known about Facebook's update endpoint,
+// because the Graph API reference documents no update section for LiveVideo at
+// all. What holds here is only the general one: a privacy write nobody asked for
+// is one the operator finds out about from the audience.
 //
 // Deliberately NOT PrivacyStatus. That type is documented as YouTube's
 // visibility and its values are public/unlisted/private. Facebook has no
