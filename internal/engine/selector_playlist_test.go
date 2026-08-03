@@ -301,6 +301,70 @@ func TestAStaleProfileDerivativeStartsNoTier(t *testing.T) {
 //
 // The mutation: build the list from item.Upload joined to the data dir and this
 // fails.
+// TestAConcatEntryIsAbsoluteEvenWhenTheDataDirIsNot is a REGRESSION test for a
+// defect the acceptance suite found, not a hypothetical.
+//
+// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN
+// DIRECTORY, and the list lives in <dataDir>/playlist-media -- the very prefix a
+// relative DerivativePath already carries. With `--data data` the demuxer
+// therefore looked for `data/playlist-media/data/playlist-media/x.ts.v2.ts` and
+// the tier respawn-looped on a file that was sitting right there, while
+// readiness had already stat'd it and passed, because readiness resolves from
+// the process's working directory like every other caller.
+//
+// It survived because EVERY EXISTING CALLER HAPPENED TO BE ABSOLUTE: deployments
+// pass an absolute --data, and this package's own helpers build one with
+// t.TempDir(). A path that is only ever exercised as absolute is a path whose
+// relative behaviour nothing watches, which is why this test sets a relative
+// DataDir on purpose.
+//
+// The mutation: drop the filepath.Abs in reconcilePlaylist and this fails.
+func TestAConcatEntryIsAbsoluteEvenWhenTheDataDirIsNot(t *testing.T) {
+	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
+
+	// A relative DataDir, reached the way an operator would: `--data data` from
+	// the directory they launched in. chdir so the relative path still names the
+	// seeded files.
+	abs := e.cfg.DataDir
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(filepath.Dir(abs)); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	e.cfg.DataDir = filepath.Base(abs)
+
+	s := playlistOnSettings()
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	e.mu.RLock()
+	tier := e.playlist
+	e.mu.RUnlock()
+	if tier == nil {
+		t.Fatal("no tier started for a playlist whose derivative exists")
+	}
+	body, err := os.ReadFile(tier.listPath)
+	if err != nil {
+		t.Fatalf("read list: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if !strings.HasPrefix(line, "file ") {
+			continue
+		}
+		p := strings.Trim(strings.TrimPrefix(line, "file "), "'")
+		if !filepath.IsAbs(p) {
+			t.Errorf("concat entry %q is relative; the demuxer resolves it against the "+
+				"list's own directory and would look for it under playlist-media twice", p)
+		}
+	}
+}
+
 func TestEveryConcatPathIsADerivativePath(t *testing.T) {
 	e := playlistEngine(t)
 	t.Cleanup(func() { teardownPlaylistTier(e) })

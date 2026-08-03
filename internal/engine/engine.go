@@ -4591,13 +4591,36 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	// Task 1 concatenated three real derivatives, looped past two full wraps and
 	// probed 1068 packets with and without the directives, and the packet stream
 	// was byte-identical. See internal/playlistmedia/concat_behaviour_test.go.
+	// ABSOLUTE, and that is a bug fix rather than tidiness.
+	//
+	// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN
+	// DIRECTORY -- and the list lives in <dataDir>/playlist-media, which is
+	// exactly the prefix a relative DerivativePath already carries. So
+	// `--data data` produced entries like `data/playlist-media/x.ts.v2.ts` in a
+	// list at `data/playlist-media/`, the demuxer looked for
+	// `data/playlist-media/data/playlist-media/x.ts.v2.ts`, and the tier
+	// respawn-looped on a file that was sitting right there. Readiness had
+	// already stat'd it and passed, because readiness resolves paths from the
+	// process's working directory the way every other caller does.
+	//
+	// Nothing shipped hits it -- deployments pass an absolute --data and the
+	// engine's own tests build one with t.TempDir() -- which is precisely why it
+	// survived: every existing caller happened to be absolute, so the one that
+	// is not had nothing watching it. Found by the acceptance suite.
 	items := s.Failover.Playlist.Items
 	entries := make([]ffmpeg.ConcatEntry, 0, len(items))
 	for i := range items {
-		entries = append(entries, ffmpeg.ConcatEntry{
-			Path: playlistmedia.DerivativePath(e.cfg.DataDir,
-				playlistItemUpload(items, i)),
-		})
+		p := playlistmedia.DerivativePath(e.cfg.DataDir, playlistItemUpload(items, i))
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			// Only when the working directory cannot be read, which is a great
+			// deal more wrong than one playlist. Said out loud rather than
+			// silently feeding the demuxer a path it will double.
+			e.log.Error("playlist: cannot make a derivative path absolute",
+				"path", p, "err", err)
+			return
+		}
+		entries = append(entries, ffmpeg.ConcatEntry{Path: abs})
 	}
 
 	// THE FILENAME CARRIES THE SIGNATURE AND THIS ENGINE'S SOURCE ID, and it
