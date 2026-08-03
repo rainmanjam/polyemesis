@@ -1054,8 +1054,9 @@ func TestDisablingAPlaylistThatIsOnAirHandsTheSlateTheStreamImmediately(t *testi
 // PUT /settings answered 400 for a reason the operator did not cause and could
 // not see.
 //
-// The mutation: delete the s.Validate() call in SetPlaylistEnabled and this
-// fails -- both halves, because it then both returns nil and writes.
+// The mutation: delete the Validate() call in db.UpdateSettings -- which is
+// where SetPlaylistEnabled's validation now lives -- and this fails, both
+// halves, because the flip then both returns nil and writes.
 func TestAScheduledPlaylistStartWillNotStoreInvalidSettings(t *testing.T) {
 	e := failoverEngine(t)
 	act := scheduleActuator{e: e}

@@ -106,6 +106,12 @@ func migrateLegacyPlaylistFilePath(store *db.DB, dataDir string, log *slog.Logge
 		return nil
 	}
 	s.Failover.Playlist.Items = migrated.Items
+	// PutSettings rather than db.UpdateSettings, which is what every
+	// read-modify-write in the RUNNING server goes through. This one runs once
+	// at startup, before the HTTP listener is up and before the engine's
+	// scheduler exists, so there is no second writer for it to be serialised
+	// against -- and it has already done UpdateSettings' other job by hand
+	// above, validating the migrated value with the settings validator itself.
 	if err := store.PutSettings(s); err != nil {
 		return fmt.Errorf("persist migrated playlist: %w", err)
 	}

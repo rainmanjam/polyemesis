@@ -5921,15 +5921,18 @@ func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
 }
 
 // SetPlaylistEnabled flips the playlist's stored intent, exactly as the settings
-// endpoint does. Read-modify-write rather than a targeted UPDATE because
-// PutSettings is the one door settings go through, and a second one would drift.
+// endpoint does. Read-modify-write rather than a targeted UPDATE because the
+// settings are one JSON document, so there is no such thing as writing a single
+// field of them.
 //
 // IT VALIDATES BEFORE IT WRITES, and that is the whole of this function's
-// safety. PutSettings does not validate — it marshals and inserts — while
-// handlePutSettings calls Settings.Validate first. So a scheduled write is the
-// one path that can store a document the API layer would have refused, and on a
-// DEFAULT INSTALL it does: the playlist ships disabled with no items, and
-// "enabled with no items" is a state Validate rejects by name.
+// safety. The validation now lives in db.UpdateSettings rather than here, but
+// the reason it has to happen is unchanged: PutSettings does not validate — it
+// marshals and inserts — while handlePutSettings calls Settings.Validate first.
+// So a scheduled write is the one path that could store a document the API
+// layer would have refused, and on a DEFAULT INSTALL it would: the playlist
+// ships disabled with no items, and "enabled with no items" is a state Validate
+// rejects by name.
 //
 // Left unvalidated, an overnight playlist.start would store that document and
 // every later PUT /settings would answer 400 for a reason the operator did not
@@ -5937,25 +5940,31 @@ func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
 // somebody edited the database. That is the same shape as the settings lockout
 // the previous sub-project had to fix, arriving by a different door.
 //
+// Going through db.UpdateSettings is also what stops a scheduled flip landing
+// on top of a concurrent PUT /settings and discarding it wholesale: this runs
+// in the engine and cannot reach the API server's own settings mutex, so the
+// store is the only place the two can be serialised.
+//
 // The error is returned rather than swallowed so the runner leaves the
 // occurrence unhandled and the run log carries the reason.
 func (a scheduleActuator) SetPlaylistEnabled(enabled bool) error {
-	s, err := a.e.store.GetSettings()
-	if err != nil {
-		return err
-	}
-	if s.Failover.Playlist.Enabled == enabled {
-		// Already there, so there is nothing to write and nothing to validate.
-		// An overlapping schedule, or a restart inside a window, must not cost a
-		// write that anything watching settings would read as a change.
+	_, err := a.e.store.UpdateSettings(func(s *db.Settings) error {
+		if s.Failover.Playlist.Enabled == enabled {
+			// Already there, so there is nothing to write and nothing to
+			// validate. An overlapping schedule, or a restart inside a window,
+			// must not cost a write that anything watching settings would read
+			// as a change.
+			return db.ErrSettingsUnchanged
+		}
+		s.Failover.Playlist.Enabled = enabled
 		return nil
-	}
-	s.Failover.Playlist.Enabled = enabled
-	if err := s.Validate(); err != nil {
+	})
+	var invalid db.InvalidSettingsError
+	if errors.As(err, &invalid) {
 		return fmt.Errorf("a scheduled playlist change would leave the settings "+
 			"invalid, so nothing was written: %w", err)
 	}
-	return a.e.store.PutSettings(s)
+	return err
 }
 
 func (a scheduleActuator) ListDestinationIDs() ([]int64, error) {

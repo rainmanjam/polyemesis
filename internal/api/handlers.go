@@ -491,11 +491,17 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 	// Also mirrored into settings, so a client reading GET /settings still sees
 	// the annotations it wrote and an install that later drops back to a single
 	// source keeps them.
-	if settings, err := s.store.GetSettings(); err == nil {
+	//
+	// Through UpdateSettings like every other read-modify-write of the document:
+	// the mirror rewrites the whole blob, so on its own it would discard a
+	// concurrent settings save entirely. A failure is still only warned about --
+	// the annotations are already on the source, which is where the engine reads
+	// them from, so the save itself succeeded and refusing it now would be a lie.
+	if _, err := s.store.UpdateSettings(func(settings *db.Settings) error {
 		settings.Ingest.Annotations = req.Annotations
-		if err := s.store.PutSettings(settings); err != nil {
-			s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
-		}
+		return nil
+	}); err != nil {
+		s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
 	}
 	if err := s.eng().Reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
@@ -696,46 +702,66 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
-	// Start from the stored settings so a partial payload cannot blank fields
-	// the client did not send.
-	settings, err := s.store.GetSettings()
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	// The stored playlist, copied BEFORE the decode overwrites it.
+	// Everything from reading the stored document to storing the new one is one
+	// span inside db.UpdateSettings, which holds the STORE's settings lock
+	// across it. s.settingsMu above is a different boundary and cannot serve
+	// this one: the engine's scheduled playlist flip writes settings too and has
+	// no way to reach a mutex that lives on the API server, so a save that read,
+	// merged and wrote around it would silently discard whatever the scheduler
+	// had just changed -- and, because the settings are one JSON blob, every
+	// other field with it.
 	//
-	// The copy is not defensive tidiness: json.Unmarshal reuses a slice's
-	// backing array when the capacity allows, so decoding into &settings can
-	// rewrite the stored items IN PLACE and leave "what was already saved" and
-	// "what was just sent" as the same memory. playlistUploadProblems needs
-	// them to be two different values or it cannot tell an item the operator
-	// is introducing from one they inherited.
-	storedPlaylist := db.PlaylistSettings{
-		Enabled: settings.Failover.Playlist.Enabled,
-		Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
-	}
-	if !decodeJSON(w, r, &settings) {
+	// The closure decodes the request over the stored document, so a partial
+	// payload still cannot blank fields the client did not send.
+	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
+		// The stored playlist, copied BEFORE the decode overwrites it.
+		//
+		// The copy is not defensive tidiness: json.Unmarshal reuses a slice's
+		// backing array when the capacity allows, so decoding into settings can
+		// rewrite the stored items IN PLACE and leave "what was already saved"
+		// and "what was just sent" as the same memory. playlistUploadProblems
+		// needs them to be two different values or it cannot tell an item the
+		// operator is introducing from one they inherited.
+		storedPlaylist := db.PlaylistSettings{
+			Enabled: settings.Failover.Playlist.Enabled,
+			Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
+		}
+		if !decodeJSON(w, r, settings) {
+			return errResponseWritten
+		}
+		// Validated HERE as well as inside UpdateSettings, and the order is the
+		// point: the filesystem check below must never run on a document the
+		// shape rules have already refused. Returning the typed error rather
+		// than writing the response keeps one 400 mapping below for both
+		// validation failures, whichever of the two found it.
+		if err := settings.Validate(); err != nil {
+			return db.InvalidSettingsError{Err: err}
+		}
+		// The half of playlist validation that needs a filesystem.
+		// Settings.Validate checks an item's SHAPE and cannot check its
+		// existence -- internal/db has no uploads store and must not grow one --
+		// so the "a missing upload is a settings error" rule is enforced here,
+		// where the store already exists.
+		//
+		// Scoped to items this save INTRODUCES. An unrelated save must not be
+		// refused because an upload some earlier item named has since been
+		// deleted: the operator has no control that can clear it, and the
+		// readiness gate keeps the playlist off air regardless. See
+		// playlistUploadProblems.
+		if err := s.playlistUploadProblems(settings.Failover.Playlist, storedPlaylist); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return errResponseWritten
+		}
+		return nil
+	})
+	var invalid db.InvalidSettingsError
+	switch {
+	case errors.Is(err, errResponseWritten):
 		return
-	}
-	if err := settings.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.As(err, &invalid):
+		writeError(w, http.StatusBadRequest, invalid.Error())
 		return
-	}
-	// The half of playlist validation that needs a filesystem. Settings.Validate
-	// checks an item's SHAPE and cannot check its existence -- internal/db has
-	// no uploads store and must not grow one -- so the "a missing upload is a
-	// settings error" rule is enforced here, where the store already exists.
-	//
-	// Scoped to items this save INTRODUCES. An unrelated save must not be
-	// refused because an upload some earlier item named has since been deleted:
-	// the operator has no control that can clear it, and the readiness gate
-	// keeps the playlist off air regardless. See playlistUploadProblems.
-	if err := s.playlistUploadProblems(settings.Failover.Playlist, storedPlaylist); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.store.PutSettings(settings); err != nil {
+	case err != nil:
 		writeStoreError(w, err)
 		return
 	}

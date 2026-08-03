@@ -690,6 +690,20 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+// errResponseWritten is how a closure passed to db.UpdateSettings says "I have
+// already written the whole HTTP response; abandon the update and return".
+//
+// It exists because the helpers a settings handler runs inside that closure --
+// decodeJSON above all -- answer the client themselves and report only a bool.
+// db.UpdateSettings needs an error to abort on, and the handler needs to know
+// that this particular abort must not be turned into a second response: two
+// writes to one ResponseWriter is a 400 followed by a superfluous-WriteHeader
+// log line and a body the client cannot parse.
+//
+// Matched with errors.Is, never by string, and never returned to a caller
+// outside this package.
+var errResponseWritten = errors.New("the handler has already written the response")
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	// 1 MB is far more than any polyemesis payload; the cap stops a malformed
 	// or malicious body from being buffered wholesale.

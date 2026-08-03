@@ -1782,7 +1782,89 @@ func (d *DB) LegacyPlaylistFilePath() (string, error) {
 	return strings.TrimSpace(legacy.Failover.Playlist.FilePath), nil
 }
 
+// ErrSettingsUnchanged is what a mutate function reports when it looked at the
+// stored document and found nothing to do.
+//
+// It exists because "already in the wanted state" is a legitimate outcome that
+// must not cost a write. The scheduled playlist flip fires on every occurrence
+// -- an overlapping schedule, or a restart inside a window, arrives at a
+// playlist that is already enabled -- and a write there would be a change
+// notification to everything watching settings for a document that did not
+// change.
+var ErrSettingsUnchanged = errors.New("settings unchanged")
+
+// InvalidSettingsError reports that the mutated document failed
+// Settings.Validate, so nothing was written.
+//
+// It exists to be TYPED, not to be worded: the API answers 400 for a document
+// the operator can fix and 500 for a store that failed, and telling those apart
+// by matching on error strings is how that distinction rots. Error() therefore
+// passes the validator's own message straight through -- that message is
+// already what the settings endpoint puts in the response body, and decorating
+// it here would change what every client reads.
+type InvalidSettingsError struct{ Err error }
+
+func (e InvalidSettingsError) Error() string { return e.Err.Error() }
+func (e InvalidSettingsError) Unwrap() error { return e.Err }
+
+// UpdateSettings is THE door for changing the stored settings.
+//
+// The settings are one JSON document and PutSettings writes all of it, so a
+// caller that reads, edits one field and writes back is only safe while nobody
+// else is doing the same thing at the same time -- see DB.settingsMu. This
+// holds that lock across the whole read-mutate-validate-write span so the four
+// callers that do it cannot interleave and drop each other's fields.
+//
+// It VALIDATES before it writes, which PutSettings does not. That is not
+// belt-and-braces: PutSettings marshals and inserts, so any caller that skips
+// Settings.Validate can store a document the settings API would have refused,
+// and every later PUT /settings then answers 400 for a state the operator did
+// not cause and cannot see. The scheduled playlist start shipped exactly that
+// lockout once already; validating here means no future door can bring it back
+// by forgetting.
+//
+// Returns the STORED document, because callers need it afterwards: PUT
+// /settings hands it to the normalisation queue, the chat retention sweeper and
+// the automod engine; PUT /jobs/policy reads PostProd.Policy() out of it.
+//
+// mutate's error is returned UNWRAPPED so a caller can test it with errors.Is,
+// and nothing is written when it is non-nil. Two of those errors are special:
+//
+//   - ErrSettingsUnchanged means "nothing to do": no write, no error, and the
+//     document handed back is the one mutate was given. A mutate that reports
+//     it must not have changed anything, since nothing it changed is stored.
+//   - A validation failure comes back as InvalidSettingsError, so a caller can
+//     tell "the operator sent something impossible" from "the database broke".
+func (d *DB) UpdateSettings(mutate func(*Settings) error) (Settings, error) {
+	d.settingsMu.Lock()
+	defer d.settingsMu.Unlock()
+
+	s, err := d.GetSettings()
+	if err != nil {
+		return Settings{}, err
+	}
+	switch err := mutate(&s); {
+	case errors.Is(err, ErrSettingsUnchanged):
+		return s, nil
+	case err != nil:
+		return Settings{}, err
+	}
+	if err := s.Validate(); err != nil {
+		return Settings{}, InvalidSettingsError{Err: err}
+	}
+	if err := d.PutSettings(s); err != nil {
+		return Settings{}, err
+	}
+	return s, nil
+}
+
 // PutSettings stores the settings blob.
+//
+// It does NOT take DB.settingsMu, and it does not validate. It is the raw
+// write: first-run seeding from GetSettings, the startup playlist migration in
+// cmd/polyemesis, and tests arranging a fixture all reach it directly, and none
+// of those is racing another writer. Anything in the RUNNING server that reads
+// the document before writing it belongs in UpdateSettings instead.
 func (d *DB) PutSettings(s Settings) error {
 	b, err := json.Marshal(s)
 	if err != nil {
