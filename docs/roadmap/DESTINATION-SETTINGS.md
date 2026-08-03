@@ -134,12 +134,14 @@ checking on its own merits, separately from this work.
 
 ## What remains
 
-**One** item from the parts below is not built. It is named here rather than
-left for somebody to discover by grepping for a field that does not exist.
+**Two** items from the parts below are not built — but not the two this section
+used to name, and they are not the same kind of work. Both are named here rather
+than left for somebody to discover by grepping for a field that does not exist.
 
 | Item | Part | Why it is still open |
 |---|---|---|
-| **Facebook's full metadata surface** | D | Facebook advertises `title` and `description` only. It has the largest write surface of any platform here — deliberately deferred as its own feature, not half-built |
+| **Facebook's metadata surface** | D | Facebook advertises `title` and `description` only, against the largest documented write surface of any platform here. Deliberately deferred as its own feature, not half-built. Includes scheduling, which is `event_params` and bounded to seven days out |
+| **Frame-accurate go-live** | — | Not metadata, and not Part D. `inband_go_live` swaps the ingest URL and requires the encoder to inject an AMF0 `onGoLive` packet at a chosen frame — FFmpeg's RTMP muxer has no flag for it. See [Facebook and Kick](#facebook-and-kick). Judge it on its own merits; it inherited Part D's estimate by being listed in the same sentence as a set of create-time fields |
 
 **Staggered go-live was listed here and should not have been.** It shipped in
 `0c5a08d` on 2026-07-29, in the same commit as the other two Part C items and
@@ -274,10 +276,55 @@ which polyemesis can set.
 
 ### Facebook and Kick
 
-Facebook's surface is the largest — `content_tags`, `enable_backup_ingest`,
-`stop_on_delete_stream`, crossposting, audience targeting, spatial audio, 360
-projection, and a frame-accurate `inband_go_live`. `planned_start_time` is gone;
-scheduling now goes through `event_params`. `overlay_url` is confirmed removed.
+Facebook's surface is the largest. Re-verified against the v26.0 reference on
+2026-08-03, and the list holds — `content_tags`, `enable_backup_ingest`,
+`stop_on_delete_stream`, crossposting via `crossposting_actions` on the Page
+edge, audience targeting, spatial audio, and 360 (`is_spherical`, `projection`,
+`stereoscopic_mode`, `encoding_settings`, and the fisheye fields).
+`overlay_url` is confirmed removed for v24.0+.
+
+**Two of the things this sentence used to list are not metadata, and saying so
+is the point of this paragraph.** Both were named inline with the create-time
+fields, which is what made Part D's estimate look like one piece of work.
+
+**Scheduling is not a field.** `planned_start_time` is gone; a scheduled
+broadcast is `POST /<ID>/live_videos?status=SCHEDULED_UNPUBLISHED&event_params=
+<UNIX_TS>`, rescheduled with `POST /<LIVE_VIDEO_ID>?event_params=<UNIX_TS>`.
+**Facebook accepts a start time at most seven days out.** That bound is not
+ours to widen, and it collides with what this repo now ships: a weekly schedule
+(`internal/scheduler`, roadmap item 5C) can name a time further away than
+Facebook will take, so whatever builds this has to decide what happens then —
+refuse it, clamp it, or create the broadcast late. There is also an eligibility
+gate that has nothing to do with our code: the account must be 60+ days old and
+the Page or professional profile needs 100+ followers.
+
+**`inband_go_live` is ingest work, not metadata.** It is a nested field modifier
+on a GET whose side effect reconfigures the broadcast and returns **a different
+ingest URL**:
+
+```http
+GET /<LIVE_VIDEO_ID>?fields=secure_stream_url.inband_go_live(require_inband_signal)
+```
+
+Create with `status=PREVIEW`, issue that GET, discard the URL you were given at
+creation, stream to the new one. The broadcast becomes visible only once the
+status is `LIVE` **and** the encoder emits a go-live message inside the RTMP
+stream: an AMF0 packet (type `0x12`) carrying the string `onGoLive` and an ECMA
+array whose single pair is `timestamp` → the timestamp of the first publicly
+visible frame.
+
+So it means re-pointing a running FFmpeg output at a replacement URL and
+injecting a hand-built AMF0 packet at a chosen frame, which FFmpeg's RTMP muxer
+has no flag for. Different layer, different risk, and it should be judged on its
+own rather than inheriting a metadata estimate.
+
+It is also the one field here that the Graph API **reference** does not document
+at all — it appears in none of the User, Page or Group `live_videos` parameter
+tables, only in the [Broadcasting
+guide](https://developers.facebook.com/docs/live-video-api/guides/streaming/)
+under "Frame-Accurate Go-Live". Meta's own `LiveVideo` node reference currently
+404s. Verifying it meant reading the guide, not the reference, which is why it
+survived this long as a one-word claim.
 
 **Kick's entire metadata surface is three fields** — `stream_title`,
 `category_id`, `custom_tags` — via `PATCH /public/v1/channels`. No description,
