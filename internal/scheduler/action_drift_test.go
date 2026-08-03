@@ -3,6 +3,7 @@ package scheduler
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -53,16 +54,44 @@ func TestEveryScheduleActionIsOfferedByTheUI(t *testing.T) {
 }
 
 // The list above is exhaustive only if somebody remembers to extend it, so this
-// pins the count. A fifth action makes this fail, which is the reminder.
+// DISCOVERS the actions from the source rather than restating them.
 //
-// The same shape as i18n's wantLocales and the settings drift guard's own
-// counts: a list that must be complete needs something that notices when it
-// stops being.
+// The first version compared `len([]Action{a, b, c, d})` against `const 4` and
+// could not fail: both sides were written by the same hand at the same moment,
+// so it asserted that four equals four. A fifth action would have been added to
+// the constant block, missed by the list above, taken the DESTINATION path in
+// the runner — because Enables() knows nothing about targeting — and disabled
+// every destination in the install, with this test green throughout.
+//
+// i18n's locale guard is the shape worth copying and the one that version only
+// claimed to: it walks the locale directory with ReadDir and finds what is
+// there. A guard that restates its input has no input.
 func TestTheActionListInThisFileIsComplete(t *testing.T) {
-	const wantActions = 4
-	got := len([]Action{ActionStart, ActionStop, ActionPlaylistStart, ActionPlaylistStop})
-	if got != wantActions {
-		t.Fatalf("this file checks %d actions; if you added one, add it to the list "+
-			"above and to AutomationPage.tsx, then bump this count", got)
+	raw, err := os.ReadFile("scheduler.go")
+	if err != nil {
+		t.Fatalf("cannot read scheduler.go: %v", err)
+	}
+	// Every `Xxx Action = "..."` in the constant block, found rather than listed.
+	declared := regexp.MustCompile(`(?m)^\s*\w+\s+Action\s*=\s*"([^"]+)"`).
+		FindAllStringSubmatch(string(raw), -1)
+	if len(declared) == 0 {
+		t.Fatal("found no Action constants in scheduler.go; this guard is not looking " +
+			"where they live any more, so it is asserting nothing")
+	}
+
+	checked := map[Action]bool{}
+	for _, a := range []Action{
+		ActionStart, ActionStop, ActionPlaylistStart, ActionPlaylistStop,
+	} {
+		checked[a] = true
+	}
+	for _, m := range declared {
+		if a := Action(m[1]); !checked[a] {
+			t.Errorf("action %q is declared in scheduler.go but the UI guard above does "+
+				"not check it. An unchecked action can reach the runner's DESTINATION "+
+				"path — Enables() answers false for anything that is not ActionStart — "+
+				"and disable every destination in the install. Add it to that list, and "+
+				"to AutomationPage.tsx.", a)
+		}
 	}
 }

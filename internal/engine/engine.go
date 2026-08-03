@@ -5923,17 +5923,38 @@ func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
 // SetPlaylistEnabled flips the playlist's stored intent, exactly as the settings
 // endpoint does. Read-modify-write rather than a targeted UPDATE because
 // PutSettings is the one door settings go through, and a second one would drift.
+//
+// IT VALIDATES BEFORE IT WRITES, and that is the whole of this function's
+// safety. PutSettings does not validate — it marshals and inserts — while
+// handlePutSettings calls Settings.Validate first. So a scheduled write is the
+// one path that can store a document the API layer would have refused, and on a
+// DEFAULT INSTALL it does: the playlist ships disabled with no items, and
+// "enabled with no items" is a state Validate rejects by name.
+//
+// Left unvalidated, an overnight playlist.start would store that document and
+// every later PUT /settings would answer 400 for a reason the operator did not
+// cause and cannot see — locking them out of every unrelated setting until
+// somebody edited the database. That is the same shape as the settings lockout
+// the previous sub-project had to fix, arriving by a different door.
+//
+// The error is returned rather than swallowed so the runner leaves the
+// occurrence unhandled and the run log carries the reason.
 func (a scheduleActuator) SetPlaylistEnabled(enabled bool) error {
 	s, err := a.e.store.GetSettings()
 	if err != nil {
 		return err
 	}
 	if s.Failover.Playlist.Enabled == enabled {
-		// Already there. Writing anyway would move UpdatedAt and make an
-		// overlapping schedule look like a change to anything watching.
+		// Already there, so there is nothing to write and nothing to validate.
+		// An overlapping schedule, or a restart inside a window, must not cost a
+		// write that anything watching settings would read as a change.
 		return nil
 	}
 	s.Failover.Playlist.Enabled = enabled
+	if err := s.Validate(); err != nil {
+		return fmt.Errorf("a scheduled playlist change would leave the settings "+
+			"invalid, so nothing was written: %w", err)
+	}
 	return a.e.store.PutSettings(s)
 }
 
