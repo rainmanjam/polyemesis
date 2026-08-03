@@ -49,7 +49,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
-	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // relayPortBase is where per-consumer loopback ports are allocated from.
@@ -2781,6 +2780,16 @@ type playlistTier struct {
 	proc *supervisor.Process
 	hub  *relay.Hub
 	sig  string
+	// listPath is the concat list this tier's FFmpeg is reading, and the tier
+	// owns exactly that file: it wrote it before spawning and removes that same
+	// path, and no other, once its process has stopped.
+	//
+	// Held as a field rather than recomputed at teardown because a recomputed
+	// name is only as good as the inputs still being what they were. The
+	// signature moves whenever the list does, so a teardown that rebuilt the
+	// name from the CURRENT settings would sweep the wrong file, or none, at
+	// precisely the moment an operator edits a playlist that is on air.
+	listPath string
 }
 
 // liveness is one candidate source's delivery record, derived from bytes on its
@@ -4239,7 +4248,7 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 }
 
 // playlistItemsReady reports whether every item could actually go on air:
-// every one resolves to a stored upload, and every one has been normalised.
+// every one has a derivative this profile produced.
 //
 // NORMALISATION IS ASYNCHRONOUS, so "an item names this upload" and "this item
 // can be played" are different states, and there is nothing else on disk that
@@ -4255,33 +4264,27 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 // slate for another few seconds is the cheap outcome; handing the broadcast to
 // a file that is not there yet is not.
 //
-// Resolution goes through uploads.Store.Resolve and NEVER through a string
-// join, for the reason reconcilePlaylist gives at its own call: Upload is a
-// bare stored name, Resolve is the single place that turns one into an absolute
-// path inside the uploads directory, and it is the confinement check standing
-// behind PlaylistFileProblem's shape check. That boundary is also why items are
-// upload names rather than paths in the first place.
+// IT ASKS ONE QUESTION: is there a non-empty derivative this profile produced?
+// It no longer asks whether the upload survives.
 //
-// IT ASKS ABOUT BOTH THE UPLOAD AND ITS DERIVATIVE, and it has to ask about
-// both because they answer different questions and B1 needs both answers.
+// B1 required the upload too, because the argv NAMED it: a deleted upload was a
+// tier respawn-looping on a missing file with the process reported healthy the
+// whole time. B2's argv names the concat list, every entry of which is a
+// derivative, so the original is never opened and that reason expired with it.
+// Keeping the stat would take a PLAYING programme off air because a source file
+// was tidied away -- punishing the operator for something the broadcast does not
+// depend on. A missing upload is a configuration problem the readiness endpoint
+// reports; it is not a reason to go to black. Validation governs what may be
+// SAVED, readiness governs what may go to AIR, and this is where they stop
+// swapping jobs.
 //
-// The derivative is what says the item has been NORMALISED, which is the state
-// this gate exists for. The upload is what reconcilePlaylist actually hands
-// FFmpeg (see its comment headed "AND IT PLAYS THE UPLOAD"), so an upload that
-// is gone is a tier that respawn-loops on a missing file with the process
-// reported healthy the whole time -- the same "validated, respawned looking
-// like it should work, then failed to open a file" failure playlistItemUpload's
-// comment above exists to prevent. That is reachable, not theoretical:
-// DELETE /api/v1/media/{name} removes the upload and leaves the derivative
-// standing, so without this stat the gate would open on a file nothing can
-// play. An earlier version of this comment claimed the opposite -- that a
-// deleted upload with a surviving derivative was ready ON PURPOSE and "the tier
-// would still play" -- which was a promise about B2's concat input written into
-// B1, where nothing reads the derivative at all.
-//
-// Resolve is not that check: uploads.Store.Resolve is a SHAPE check that
-// confines a name to the uploads directory and never touches the disk, so
-// "no-such-upload.mp4" resolves perfectly happily.
+// Confinement is not lost with the upload stat, it moves to where the path is
+// actually built: playlistmedia.DerivativePath reduces the name to its base
+// before joining, so no item name can name a file outside the derivative
+// directory -- which is the property -c copy's `-safe 0` list depends on, and
+// stronger than the uploads-directory check it replaces. An item that escapes
+// is refused earlier anyway: playlistSig hashes EMPTY when PlaylistFileProblem
+// fails, so an unusable list never reaches this function at all.
 //
 // This is NOT a second notion of availability. Sub-project A settled that a
 // candidate is available when its hub is delivering bytes, and chooseSource
@@ -4302,28 +4305,31 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 // else they are not, and a gate that consulted the wrong one would refuse or
 // admit a playlist other than the one being started.
 func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
-	store, err := uploads.New(e.cfg.DataDir)
-	if err != nil {
-		// Without a store nothing can be resolved, so nothing is ready. Said
-		// out loud because it means the data directory is not writable, which
-		// is a great deal more wrong than one unnormalised item.
-		e.log.Error("playlist readiness: no uploads store", "err", err)
-		return false
-	}
 	for i := range items {
 		// playlistItemUpload is the ONE trim point shared with playlistSig, so
 		// readiness cannot disagree with the hash about what an item names.
 		upload := playlistItemUpload(items, i)
-		path, err := store.Resolve(upload)
-		if err != nil {
-			return false
-		}
-		// The operator's original, which is what the feed's argv names today.
-		if _, err := os.Stat(path); err != nil {
-			return false
-		}
-		// The normalised copy, which is what says the transcode has finished.
-		if _, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload)); err != nil {
+		// The normalised copy, which is what says the transcode has finished AND
+		// is the exact file reconcilePlaylist puts in the concat list below.
+		// os.Stat, never a Resolve: Resolve is a shape check that never touches
+		// the disk, and the question here is existence.
+		//
+		// NON-EMPTY, not merely present. A zero-length file under the finished
+		// name is a transcode that died between create and first write, and
+		// nothing on disk distinguishes it from a finished one except its size.
+		// Admit it and the concat list names an empty file, FFmpeg exits at once
+		// and the tier respawn-loops while the process reports healthy -- the
+		// same shape as B1's deleted-upload loop, and it would do it in
+		// preference to the slate.
+		//
+		// The other three readers of this exact path already treat zero-length
+		// as absent: api.playlistItemStatus, api.enqueuePlaylistNormalisation
+		// and RunNormalise's already-normalised skip. This one decides what goes
+		// to AIR, so a disagreement here is the one that costs a broadcast --
+		// and it would show as an amber UI over a black output, with nothing
+		// reconciling the two.
+		fi, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload))
+		if err != nil || fi.Size() == 0 {
 			return false
 		}
 	}
@@ -4357,9 +4363,42 @@ func playlistSig(s db.Settings) string {
 	return hashStrings(parts)
 }
 
-// playlistFeedArgs builds the loop that publishes one file into the playlist's
-// own hub. It is the backup's command with a file where the socket was:
-// `-map 0 -c copy`, so a programme that was encoded once is not re-encoded here.
+// playlistFeedArgs builds the loop that publishes the WHOLE list into the
+// playlist's own hub. It is the backup's command with a concat list where the
+// socket was: `-map 0 -c copy`, so a programme that was encoded once is not
+// re-encoded here.
+//
+// -f concat over every item's derivative, looped as a whole rather than per
+// item, so the list plays in order and then starts again from the top.
+//
+// THE LIST NAMES DERIVATIVES, which is the point of B1: every entry shares
+// codec, timebase, geometry and channel layout by construction, so `-c copy`
+// across a seam is a copy and not a codec change.
+//
+// -safe 0 because the list holds absolute paths. They are paths this process
+// built through playlistmedia.DerivativePath, from a name uploads.SafeName had
+// already sanitised and DerivativePath then reduces to its base -- never
+// operator text reaching FFmpeg as written, which is the whole reason items
+// reference uploads rather than paths.
+//
+// ALWAYS CONCAT, EVEN FOR ONE ITEM. A single-file special case would mean two
+// argv shapes, two sets of seam behaviour, and a branch that is wrong in a way
+// nobody notices until the one-item playlist is the one on air.
+//
+// NO `duration` DIRECTIVES ARE EMITTED, and that is a measured result rather
+// than a preference: three real derivatives were concatenated, looped past two
+// full wraps and probed over 1068 packets with and without the per-entry
+// directives. See internal/playlistmedia/concat_behaviour_test.go.
+//
+// The packet streams are identical ONLY WHEN THE DIRECTIVE IS EXACT. An earlier
+// version of this comment said "byte-identical either way" without that clause,
+// and the measurement does not support it: at three decimals the directive is
+// 333 microseconds short of the file and every packet after the first item
+// shifts. ffmpeg.ConcatList renders `%.3f` because ConcatEntry.DurationMS is
+// MILLISECONDS, so the only directives this product could emit are the
+// inaccurate kind -- which is an argument for leaving the field zero, not
+// against it. The field survives for a profile that drifts far enough to need
+// it, and whoever turns it on needs sub-millisecond precision first.
 //
 // The two input flags are the whole difference from every other feed, and
 // neither is optional. -stream_loop -1 is what makes a file that ends look like
@@ -4371,10 +4410,28 @@ func playlistSig(s db.Settings) string {
 // that "played" and disappeared. The same pair, for the same reason, is what
 // pullFile emits for a file:// ingest.
 //
-// The "file:" prefix is not decoration either: a bare path containing a colon
-// ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the prefix
-// pins it to the file protocol whatever the name looks like -- exactly as
-// pullSource does when it resolves one.
+// The "file:" prefix pins the LIST to the file protocol, as B1 pinned the
+// upload path and as pullFile and pullSource pin theirs.
+//
+// WHAT IT ACTUALLY PROTECTS IS NARROWER THAN IT LOOKS, and the boundary was
+// measured against FFmpeg 8.1.2 rather than reasoned about. FFmpeg infers a
+// protocol from the characters before the first ":" ONLY while no "/" has
+// appeared, so:
+//
+//   - "2026:01/data/list.txt" -- a RELATIVE data directory whose first segment
+//     carries a colon -- fails with "Protocol not found" unprefixed, and opens
+//     with the prefix. This is the case the prefix buys.
+//   - "/mnt/2026:01/data/list.txt" is fine either way. An ABSOLUTE path can
+//     never be misread, because the leading "/" ends protocol detection before
+//     the colon is reached.
+//   - "data/a:b/list.txt" is fine either way, for the same reason.
+//
+// So the widely-repeated worry -- an operator's data directory containing a
+// colon -- is NOT a failure for any absolute DataDir, which is the ordinary
+// case. The prefix is kept because it makes the guarantee unconditional instead
+// of resting on that argument, it costs one string concatenation, and it keeps
+// every file input in this package spelled the same way. It is not load bearing
+// for a deployment that configures an absolute data directory.
 //
 // THE FILE'S CODEC PARAMETERS MUST MATCH THE INGEST'S, AND NOTHING CHECKS.
 // `-c copy` here and a copy hop in startFeed mean the file's codec, resolution,
@@ -4394,16 +4451,17 @@ func playlistSig(s db.Settings) string {
 // geometry that changes when the encoder reconnects), not a check this function
 // can make from an argv. Until that exists the constraint is documented where
 // an operator meets it, in docs/SCHEDULED-BROADCAST.md.
-func playlistFeedArgs(path, outURL string) []string {
+func playlistFeedArgs(listPath, outURL string) []string {
 	return []string{
 		"-hide_banner", "-nostdin", "-loglevel", "warning",
 		"-nostats", "-progress", "pipe:1",
 		"-stream_loop", "-1",
 		"-re",
-		// The file's own timestamps restart at every loop boundary; genpts gives
-		// the relay a monotonic base without touching the payload.
+		// Each entry's own timestamps restart at every seam and at every loop
+		// boundary; genpts gives the relay a monotonic base without touching the
+		// payload.
 		"-fflags", "+genpts",
-		"-i", "file:" + path,
+		"-f", "concat", "-safe", "0", "-i", "file:" + listPath,
 		"-map", "0",
 		"-c", "copy",
 		"-f", "mpegts",
@@ -4540,55 +4598,85 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
-	// Resolved through the uploads store, not a string join: Upload is a bare
-	// stored name inside <dataDir>/uploads, not a data-dir-relative path the
-	// way the old FilePath was, and uploads.Store.Resolve is the one place
-	// that turns a name into an absolute path under that directory. Joining
-	// DataDir with the name directly -- what an earlier version of this code
-	// did -- looks for the file one level too high and finds nothing for
-	// every real upload; Resolve is also the second, defence-in-depth check
-	// against a name escaping the uploads directory, behind
-	// PlaylistFileProblem's shape check.
+	// EVERY ITEM, IN ORDER, AND IT PLAYS THE DERIVATIVES. The gate above has
+	// already required a derivative for every item; these are the very files it
+	// stat'd, and the operator's originals are not opened at all. That is what
+	// makes the fixed normalised profile load bearing rather than bookkeeping:
+	// the concat demuxer requires every file in the list to share codecs,
+	// timebase, resolution and channel layout, and `-c copy` across a seam is
+	// only a copy because B1 guaranteed it.
 	//
-	// Still off the first item only: sequencing beyond one item is a later
-	// sub-project's job (see the plan's "No sequencing" note). Every item's
-	// derivative has already been required to exist by the readiness gate
-	// above, including the ones this argv does not yet name -- the gate is
-	// about the playlist an operator saved, not about the one file playing.
+	// Built through playlistmedia.DerivativePath, never a join of our own, so
+	// the profile version in the filename cannot drift from the one the
+	// normaliser writes -- and so the name is reduced to its base on the way,
+	// which is the confinement standing behind `-safe 0`.
 	//
-	// AND IT PLAYS THE UPLOAD, NOT THE DERIVATIVE. THAT IS DELIBERATE, NOT A
-	// BUG. The gate above insists a normalised copy exists for every item, and
-	// this line then hands FFmpeg the operator's ORIGINAL. Nothing reads the
-	// derivative yet: it becomes the input when the concat demuxer arrives with
-	// sequencing, which is the whole reason the normalised profile is fixed --
-	// concat requires every file in the list to share codecs, timebase,
-	// resolution and channel layout, and a single-item argv has no list to make
-	// consistent. Until then the derivative is a readiness token, and the codec
-	// match this feed needs against the ingest is still the operator's problem,
-	// exactly as playlistFeedArgs says in capitals. Swapping this to the
-	// derivative on its own would change what an operator hears without giving
-	// them sequencing, and would silently re-encode a programme they encoded
-	// once already.
-	store, err := uploads.New(e.cfg.DataDir)
-	if err != nil {
-		e.log.Error("playlist: no uploads store", "err", err)
+	// No per-entry `duration` directives: DurationMS is left zero deliberately.
+	// Three real derivatives, looped past two full wraps, 1068 packets probed
+	// with and without them -- identical ONLY when the directive is exact, and
+	// ConcatList renders milliseconds. See the fuller note above playlistFeedArgs
+	// and internal/playlistmedia/concat_behaviour_test.go.
+	// ABSOLUTE, and that is a bug fix rather than tidiness.
+	//
+	// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN
+	// DIRECTORY -- and the list lives in <dataDir>/playlist-media, which is
+	// exactly the prefix a relative DerivativePath already carries. So
+	// `--data data` produced entries like `data/playlist-media/x.ts.v2.ts` in a
+	// list at `data/playlist-media/`, the demuxer looked for
+	// `data/playlist-media/data/playlist-media/x.ts.v2.ts`, and the tier
+	// respawn-looped on a file that was sitting right there. Readiness had
+	// already stat'd it and passed, because readiness resolves paths from the
+	// process's working directory the way every other caller does.
+	//
+	// Nothing shipped hits it -- deployments pass an absolute --data and the
+	// engine's own tests build one with t.TempDir() -- which is precisely why it
+	// survived: every existing caller happened to be absolute, so the one that
+	// is not had nothing watching it. Found by the acceptance suite.
+	items := s.Failover.Playlist.Items
+	entries := make([]ffmpeg.ConcatEntry, 0, len(items))
+	for i := range items {
+		p := playlistmedia.DerivativePath(e.cfg.DataDir, playlistItemUpload(items, i))
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			// Only when the working directory cannot be read, which is a great
+			// deal more wrong than one playlist. Said out loud rather than
+			// silently feeding the demuxer a path it will double.
+			e.log.Error("playlist: cannot make a derivative path absolute",
+				"path", p, "err", err)
+			return
+		}
+		entries = append(entries, ffmpeg.ConcatEntry{Path: abs})
+	}
+
+	// THE FILENAME CARRIES THE SIGNATURE AND THIS ENGINE'S SOURCE ID, and it
+	// needs both.
+	//
+	// The signature alone fixes the different-list overwrite but not the
+	// identical-list case. internal/engine/manager.go runs ONE ENGINE PER
+	// SOURCE over a shared data directory, so two sources configured with the
+	// same playlist hash the same: one tier stopping would delete a file the
+	// other's FFmpeg is still re-reading at its next wrap, and the second source
+	// would drop off air for a reason nothing in its own configuration changed.
+	// A tier deletes only the path it holds, and only once its process is gone.
+	listPath := filepath.Join(playlistmedia.DerivativeDir(e.cfg.DataDir),
+		fmt.Sprintf("playlist-%d-%s.txt", e.sourceID, want))
+	if err := os.MkdirAll(filepath.Dir(listPath), 0o755); err != nil {
+		e.log.Error("playlist: no derivative directory for the list", "err", err)
+		_ = hub.Close()
 		return
 	}
-	upload := playlistItemUpload(s.Failover.Playlist.Items, 0)
-	path, err := store.Resolve(upload)
-	if err != nil {
-		// Only reachable through settings that never passed validation --
-		// PlaylistFileProblem already refuses anything Resolve would reject on
-		// shape -- so it is said out loud rather than left as a tier that
-		// quietly never starts.
-		e.log.Warn("playlist not started; its upload does not resolve",
-			"upload", upload, "err", err)
+	if err := os.WriteFile(listPath, []byte(ffmpeg.ConcatList(entries)), 0o600); err != nil {
+		// Written BEFORE the process is spawned, so a list that cannot be
+		// written is a tier that never starts rather than one that respawn-loops
+		// on a file it will never find.
+		e.log.Error("playlist: cannot write the concat list", "path", listPath, "err", err)
+		_ = hub.Close()
 		return
 	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,
-		Args: playlistFeedArgs(path, hub.InputURL()),
+		Args: playlistFeedArgs(listPath, hub.InputURL()),
 		// AutoRestart, unlike a selector feed: this process publishes into its
 		// OWN hub and carries no timestamp offset, so there is nothing for a
 		// sweep to rebuild and no reason to make an operator wait for one. A
@@ -4604,13 +4692,17 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	if e.stopped {
 		e.mu.Unlock()
 		_ = hub.Close()
+		// No tier is recorded, so nothing else will ever own this file. It is
+		// removed here or not at all.
+		_ = os.Remove(listPath)
 		return
 	}
-	e.playlist = &playlistTier{proc: proc, hub: hub, sig: want}
+	e.playlist = &playlistTier{proc: proc, hub: hub, sig: want, listPath: listPath}
 	e.mu.Unlock()
 
 	proc.Start()
-	e.log.Info("playlist started", "file", path, "relayPort", hub.Port(),
+	e.log.Info("playlist started", "list", listPath, "items", len(entries),
+		"relayPort", hub.Port(),
 		"reason", "a playlist publishes into a hub of its own, so a file on air "+
 			"never makes the primary ingest read live")
 }
@@ -4626,6 +4718,21 @@ func (e *Engine) teardownPlaylist(p *playlistTier) {
 	}
 	if p.hub != nil {
 		_ = p.hub.Close()
+	}
+	// AFTER Stop returns, and only the path this tier wrote.
+	//
+	// After, because the concat demuxer re-reads the list at every wrap: remove
+	// it while the process is still running and a tier that was asked to stop
+	// spends its last seconds failing to reopen its own input, logging as though
+	// something were wrong. Only this path, because another source may hold an
+	// identically-hashed list of its own -- which is why the filename carries a
+	// source id at all.
+	//
+	// The error is dropped deliberately. A list that is already gone is the
+	// ordinary outcome of a data directory cleaned up underneath us, and there
+	// is nothing a stopping tier could usefully do about it.
+	if p.listPath != "" {
+		_ = os.Remove(p.listPath)
 	}
 }
 

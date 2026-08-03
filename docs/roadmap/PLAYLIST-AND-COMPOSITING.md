@@ -107,12 +107,67 @@ destination" logic:
 - A live encoder pre-empts the playlist immediately — not subject to the
   stability window, because sitting on filler while the show is back on air is
   the worse failure.
-- Returning to the playlist after the encoder drops resumes at an **item
-  boundary**, not mid-item, or the seam is a visible jump.
+- Returning to the playlist after the encoder drops does **not** resume at an
+  item boundary. See below — this line used to say the opposite, and the
+  opposite was wrong.
 
 This touches an 80-line pure function backed by an 860-line `failover_test.go`
 where every branch is a broadcast decision. **Highest blast radius in either
 feature.**
+
+#### Item-boundary resume: considered, and rejected
+
+The paragraph above originally read *"returning to the playlist after the
+encoder drops resumes at an **item boundary**, not mid-item, or the seam is a
+visible jump."* Sub-project B2 designed against that and rejected it. It is
+written down here, rather than quietly dropped, because it is a plausible idea
+that reads like an obvious requirement and will otherwise be proposed again.
+
+**What the playlist actually does.** One FFmpeg holds the whole playlist open,
+`-stream_loop -1` over a concat list, publishing continuously into a hub of its
+own whether or not it is the source on air. The selector does not start or stop
+it when the encoder drops; it changes which hub the destinations' feed reads.
+So the playlist never *resumes* — it never stopped. Coming back to it lands
+wherever it happens to be, exactly as tuning back to a channel does.
+
+**Why that is right, and not a shortcut.** Three reasons, in the order they
+decided it.
+
+1. *It is what the products in this space do.* OBS's Media Source restarts a
+   file when it is shown again unless "restart when activated" is switched off,
+   and its scene-switch behaviour is a per-source toggle rather than a
+   guarantee. vMix's playlist keeps running behind the mix and returns to the
+   position it is at. AWS Elemental MediaLive's input switching does not
+   reposition a source on a switch back at all. Nobody in this market makes
+   boundary-alignment the unconditional rule, and an operator arriving from any
+   of them would find one surprising.
+2. *Holding a boundary means holding the live encoder off air.* The seam that
+   matters is not the one on the file, it is the one on the show. Aligning to an
+   item boundary can only be done by delaying the switch until the boundary
+   arrives — up to a whole item, and a playlist of ten-minute programmes makes
+   that ten minutes of filler with the encoder back. This tier's own precedence
+   rule already says the opposite: "a live encoder pre-empts the playlist
+   immediately — not subject to the stability window, because sitting on filler
+   while the show is back on air is the worse failure." Boundary resume
+   contradicts a rule the same section states two lines above it.
+3. *A boundary is not a clean seam anyway.* Measured, not assumed: the concat
+   demuxer under `-c copy` does not produce a clean loop boundary either. At the
+   wrap the last item's final frame holds for about 2.5 seconds and the first
+   item plays about 2 seconds short — reproducible with nothing but ffmpeg and
+   the derivatives off disk (see `scripts/acceptance-failover.sh` step 9, which
+   records the measurement). Cutting *to* an item boundary would land on that,
+   so the visible jump the original line wanted to avoid is present at the very
+   place it wanted to move the cut to.
+
+**What this costs.** An operator who edits an on-air playlist gets a respawn:
+the tier's signature changes, the process restarts, and playback begins at item
+one. That is a real cost and it is not hidden — it is why the concat list is
+signature-named and why the table below still lists on-air editing as a risk.
+
+**What would change the answer.** The operator toggle OBS and vMix both ship.
+That is out of scope here rather than rejected: it needs both behaviours, a
+settings key, a control, and an acceptance case of its own. If it is built, it
+is a toggle with this as the default — not a reinstatement of the original line.
 
 ### Scheduler
 

@@ -78,6 +78,12 @@ if [ -z "${E2E_PASSWORD:-}" ]; then
   E2E_PASSWORD="E2E-$(openssl rand -hex 16)"
 fi
 export E2E_PASSWORD
+# The container name, for the one spec that has to reach past the API: the
+# playlist editor's "needing attention" case needs an upload to go missing
+# while a saved item still names it, and the API refuses to create that state
+# on purpose (409). It removes the file with `docker exec`, which is that
+# suite's os.Remove -- see removeUploadOutOfBand in e2e/playlist-editor.spec.ts.
+export E2E_CONTAINER="$CTR"
 BASE_URL="http://127.0.0.1:$PORT" npx --no-install playwright test --config e2e/playwright.config.ts
 status=$?
 

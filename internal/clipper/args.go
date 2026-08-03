@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -83,7 +84,7 @@ func (p Plan) Commands(workDir string) ([]Command, error) {
 			Path: filepath.Join(workDir, "join.txt"),
 			// Order is load-bearing and is not the order of the arguments: the
 			// re-encoded head first, then the copied tail.
-			Content: concatList([]string{head, tail}),
+			Content: ffmpeg.ConcatList([]ffmpeg.ConcatEntry{{Path: head}, {Path: tail}}),
 		}
 		return []Command{
 			// Intermediates are always Matroska. It carries every codec and
@@ -108,9 +109,12 @@ func (p Plan) input(workDir string) input {
 	if !p.Concat {
 		return input{args: []string{"-i", p.Sources[0].Path}}
 	}
-	paths := make([]string, 0, len(p.Sources))
+	entries := make([]ffmpeg.ConcatEntry, 0, len(p.Sources))
 	for _, s := range p.Sources {
-		paths = append(paths, s.Path)
+		// DurationMS stays zero: this package has never measured a source's
+		// duration ahead of time, and the demuxer's own estimate beats a
+		// number nobody computed.
+		entries = append(entries, ffmpeg.ConcatEntry{Path: s.Path})
 	}
 	list := filepath.Join(workDir, "sources.txt")
 	return input{
@@ -118,25 +122,8 @@ func (p Plan) input(workDir string) input {
 		// refuses by default. They are paths this process chose, not paths a
 		// request supplied, so there is nothing here for the check to protect.
 		args: []string{"-f", "concat", "-safe", "0", "-i", list},
-		file: []SidecarFile{{Path: list, Content: concatList(paths)}},
+		file: []SidecarFile{{Path: list, Content: ffmpeg.ConcatList(entries)}},
 	}
-}
-
-// concatList renders the concat demuxer's list file.
-//
-// Single quotes are the demuxer's own quoting, and a path containing one has to
-// close, escape and reopen: the demuxer has no backslash escape inside quotes.
-// Recording paths are chosen by this product and will not contain one — but a
-// clip whose directory a user renamed to "Tom's stream" would otherwise produce
-// a list file that parses as something else entirely.
-func concatList(paths []string) string {
-	var b strings.Builder
-	for _, p := range paths {
-		b.WriteString("file '")
-		b.WriteString(strings.ReplaceAll(p, "'", `'\''`))
-		b.WriteString("'\n")
-	}
-	return b.String()
 }
 
 // copyCommand is a pure stream copy of one span. No frame is decoded, so it

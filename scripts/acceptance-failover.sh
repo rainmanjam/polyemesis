@@ -60,7 +60,27 @@ trap cleanup EXIT
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+WORK="$(pwd)"
 mkdir -p data/recordings
+# AN ABSOLUTE DATA DIRECTORY, AND IT IS NOT A TIDINESS PREFERENCE.
+#
+# THE PLAYLIST TIER CANNOT START WHEN --data IS RELATIVE. Found by this suite,
+# on the first run that put a real derivative behind a real concat list.
+# engine.reconcilePlaylist builds each entry with playlistmedia.DerivativePath,
+# which is relative when DataDir is, and writes those entries into a list that
+# lives INSIDE the derivative directory. FFmpeg's concat demuxer resolves a
+# relative entry against the LIST FILE's directory, so every path is doubled:
+#
+#   Impossible to open 'file:data/playlist-media/data/playlist-media/x.ts.v2.ts'
+#
+# and the tier respawn-loops with the operator told only "No such file or
+# directory". Every shipped deployment passes an absolute path
+# (deploy/polyemesis.service uses /var/lib/polyemesis, the Dockerfile /data), so
+# this is not a production outage -- it is a developer running the binary from a
+# working directory, and the engine's unit tests never saw it because they all
+# construct absolute paths. Reported rather than fixed here: this suite does not
+# get to change engine behaviour to make itself pass.
+DATA="$WORK/data"
 
 # Built once rather than `go run` per call. This suite polls status on a half
 # second cadence through three waits, and a fresh compile each time would make
@@ -71,18 +91,52 @@ go build -o "$DRIVER" "$SCRIPTS/acceptance_failover_driver.go" || {
   echo "cannot build the driver"; exit 1; }
 drive() { "$DRIVER" "http://127.0.0.1:$PORT" "$@" 2>&1; }
 
-# publish starts an encoder against the ingest, standing in for OBS. Named so
-# cleanup can find it, since it outlives any single check.
-publish() {
+# THE PLAYLIST PROFILE, spelled here because the publisher has to match it.
+#
+# playlistmedia normalises every item to ONE FIXED profile -- 1920x1080 at
+# 30 fps, High@4.0, yuv420p -- and nothing derives that from the operator's
+# encoder. The playlist feed and the destination both `-c copy` video, so a
+# publisher of a different geometry means every live<->playlist cut is a
+# mid-stream codec change on the wire. That is a real, unfixed failure, and step
+# 10 measures it deliberately; every step before it publishes AT the profile so
+# that what they measure is the SWITCH rather than a platform's tolerance for a
+# codec change.
+#
+# Keep these three in step with playlistmedia.NormaliseWidth / NormaliseHeight /
+# NormaliseFPS. A drift shows up as the mismatch ratchet in step 10 failing on a
+# case that was supposed to match.
+PROFILE_W=1920
+PROFILE_H=1080
+PROFILE_FPS=30
+# The mismatch ratchet's publisher: neither the profile's resolution nor its
+# frame rate. Both differ on purpose -- an operator who gets one right and the
+# other wrong is the common case, and either alone is enough to break `-c copy`.
+MISMATCH_W=1280
+MISMATCH_H=720
+MISMATCH_FPS=60
+
+# publish_geom starts an encoder against the ingest at a given geometry,
+# standing in for OBS. Named so cleanup can find it, since it outlives any
+# single check.
+#
+# veryfast with an explicit -profile:v/-level rather than ultrafast, and a
+# 2-second GOP: these are playlistmedia's own encoding parameters. ultrafast
+# turns CABAC off, which alone drops the stream to a lower H.264 profile than
+# every derivative declares -- so an encoder that matched the profile's
+# resolution and frame rate would STILL differ from the filler in its bitstream,
+# and the "matched" steps would be measuring the mismatch step's subject.
+publish_geom() { # width height fps
   ffmpeg -hide_banner -loglevel error -re \
-    -f lavfi -i "testsrc2=size=640x360:rate=30" \
+    -f lavfi -i "testsrc2=size=${1}x${2}:rate=${3}" \
     -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
     -metadata comment=failover-publisher \
-    -map 0:v -map 1:a -c:v libx264 -preset ultrafast -g 30 -pix_fmt yuv420p \
-    -b:v 1200k -c:a aac -b:a 128k -ac 2 -shortest -t "${1:-3600}" \
+    -map 0:v -map 1:a -c:v libx264 -preset veryfast \
+    -profile:v high -level 4.0 -g "$((2 * $3))" -pix_fmt yuv420p \
+    -b:v 3000k -c:a aac -b:a 128k -ac 2 -shortest -t 3600 \
     -f flv "rtmp://127.0.0.1:$INGEST/live" \
     > "publisher-$RANDOM.log" 2>&1 &
 }
+publish() { publish_geom "$PROFILE_W" "$PROFILE_H" "$PROFILE_FPS"; }
 unpublish() { pkill -f "failover-publisher" 2>/dev/null; }
 
 # publisher_postmortem says whether the encoder standing in for OBS is even
@@ -132,6 +186,45 @@ waitfor() {
   poly_poll_field "$name to become $want" "$idx" "$want" "$secs" readstatus
 }
 
+# settle waits until the active feed has HELD one value for a stretch, rather
+# than merely reached it once.
+#
+#   settle <want> <hold-seconds> <ceiling-seconds>
+#
+# A NEWLY CONNECTED ENCODER IS NOT STABLE FOR ABOUT FORTY SECONDS, and that is a
+# measurement, not a guess. On an idle machine, with nothing but this server and
+# one publisher, the selector leaves the primary for the slate and comes back
+# roughly 13 seconds and again roughly 36 seconds after the encoder connects,
+# with the publisher delivering continuously throughout -- the ingest's own
+# bitrate window is what goes briefly quiet, not the wire. Reproduced with the
+# 640x360 publisher this suite used before as well, so it is neither new nor
+# something the playlist introduced.
+#
+# It matters here because it is the likely mechanism behind issue #38. Each of
+# those spurious switches has to stop a feed, an FFmpeg reading a UDP input that
+# has gone quiet cannot notice SIGTERM until its read returns, and the engine
+# waits its full 12-second stopTimeout before SIGKILL. Two of those queue behind
+# selMu, and a pin POST issued in the middle of one gives up at the driver's
+# 30-second client timeout -- which is exactly the "pin auto: context deadline
+# exceeded" that issue #38 records without a cause. Anything this suite does
+# with a pin therefore waits for the ingest to settle first.
+settle() {
+  local want="$1" hold="$2" ceil="$3" started held line
+  started=$(date +%s); held=0
+  while [ $(($(date +%s) - started)) -lt "$ceil" ]; do
+    line=$(readstatus)
+    set -- $line
+    if [ "$1" = "$want" ]; then
+      [ "$held" -eq 0 ] && held=$(date +%s)
+      [ $(($(date +%s) - held)) -ge "$hold" ] && return 0
+    else
+      held=0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # readstatus returns a status line with all four fields, retrying a read that
 # came back malformed.
 #
@@ -157,7 +250,7 @@ readstatus() {
 }
 
 step "1. Server, with failover and a slate"
-"$BIN" -addr ":$PORT" -data ./data -log info > server.log 2>&1 &
+"$BIN" -addr ":$PORT" -data "$DATA" -log info > server.log 2>&1 &
 for _ in $(seq 1 40); do sleep 0.3; grep -q "web ui" server.log 2>/dev/null && break; done
 sleep 1
 grep -q "polyemesis" server.log && ok "server started" || { bad "server did not start"; exit 1; }
@@ -167,7 +260,98 @@ case "$OUT" in *SETUP_OK*)    ok "first-run setup" ;;          *) bad "setup: $O
 case "$OUT" in *FAILOVER_OK*) ok "failover enabled with a slate" ;; *) bad "failover: $OUT"; exit 1 ;; esac
 case "$OUT" in *DEST_OK*)     ok "one destination on the selector" ;; *) bad "dest: $OUT"; exit 1 ;; esac
 
-step "2. The primary goes on air"
+step "2. Three playlist items, normalised by the production job"
+# THE PRODUCTION PATH, END TO END, AND NOTHING IS COPIED BY HAND.
+#
+# The previous version of this suite did:
+#
+#     cp data/uploads/filler.ts data/playlist-media/filler.ts.ts
+#
+# commented as standing in "for the transcode job that writes it in a real
+# deployment" -- at a time when no production code registered or submitted that
+# job at all. Eighteen checks green, and the playlist could not start on a real
+# server. A stand-in for an unwired dependency is indistinguishable from a
+# stand-in for a wired one, and that is exactly how it survived. The path in it
+# was wrong too by the time this was written: DerivativePath now carries a
+# profile version, so the file it wrote was one nothing looked for.
+#
+# What runs instead is the real chain, in the real order:
+#   settings save with playlist items
+#     -> api.Server.enqueuePlaylistNormalisation submits one job per upload
+#     -> the worker cmd/polyemesis/postprod.go registered writes the derivative
+#     -> the finished job reconciles the engine.
+# The suite asserts the OUTCOME of that chain through GET /failover/playlist,
+# so nothing here can pass on a fixture the suite supplied itself.
+#
+# STAGED BEFORE THE PUBLISHER, WITH THE TIER OFF, and both halves are load
+# bearing. Enqueuing is what a settings save does whether the playlist is
+# enabled or not, so the items can be normalised while the tier stays off --
+# which matters because the playlist outranks the slate, and a tier already
+# running would take the slate's place in the cycle steps 4 and 5 measure.
+# Before the publisher, because normalisation is DEFERRED work and the
+# governor holds deferred work back while an ingest is live: run this with the
+# encoder connected and the jobs sit in StateDeferred until it disconnects.
+# That is the governor working, not a fault, and it is why this step is here
+# rather than beside the tier it feeds.
+FILLER_TONE=2000
+# THREE ITEMS OF DIFFERENT LENGTHS, AND A COLOUR EACH.
+#
+# Three, because one item cannot tell sequencing apart from B1's behaviour of
+# playing item 0 for ever: both look like a file on air. Different lengths,
+# because with three equal clips a boundary in the wrong place produces exactly
+# the same picture as a boundary in the right one. A flat colour each, because
+# that is what makes which item is on air readable straight out of the
+# destination's own recording -- see step 9.
+#
+# Deliberately NOT at the normalised profile's geometry: these are the
+# OPERATOR'S files, and 1280x720 sources are what the normaliser is for. The
+# derivatives it writes are 1920x1080, which is what the publisher matches.
+#
+# The colours and lengths are read back in step 9, so the three lists below and
+# the expectations there are one fact written twice; change them together.
+FILLER_ITEMS="filler-a.ts filler-b.ts filler-c.ts"
+FILLER_SPECS="filler-a.ts:0xFF0000:3 filler-b.ts:0x00FF00:6 filler-c.ts:0xFF00FF:10"
+# A playlist item names a STORED UPLOAD, not a path, so the clips are written
+# into the uploads directory rather than anywhere convenient. That is the
+# boundary uploads.Store.Resolve defends and the reason items stopped being
+# paths.
+mkdir -p data/uploads
+for spec in $FILLER_SPECS; do
+  item="${spec%%:*}"; rest="${spec#*:}"
+  colour="${rest%%:*}"; secs="${rest#*:}"
+  ffmpeg -hide_banner -loglevel error \
+    -f lavfi -i "color=c=$colour:size=1280x720:rate=30" \
+    -f lavfi -i "sine=frequency=$FILLER_TONE:sample_rate=48000" \
+    -map 0:v -map 1:a -c:v libx264 -preset ultrafast -g 60 -pix_fmt yuv420p \
+    -b:v 1200k -c:a aac -b:a 128k -ac 2 -t "$secs" \
+    -y "data/uploads/$item" 2>/dev/null
+  [ -s "data/uploads/$item" ] || { bad "could not build $item"; exit 1; }
+done
+OUT=$(drive playlist off $FILLER_ITEMS)
+case "$OUT" in *PLAYLIST_OK*) : ;; *) bad "store playlist items: $OUT"; exit 1 ;; esac
+
+# Generous, because this is a real 1080p transcode of three clips at
+# NormaliseLimit=1 -- one at a time, on whatever the machine has left. A wait
+# that gave up early here would report "the playlist is not ready" for a job
+# that was still running, which is the kind of false cause issue #38 exists to
+# stop this suite producing.
+PLREADY_SECS=240
+ready=""
+for _ in $(seq 1 $((PLREADY_SECS * 2))); do
+  ready=$(drive plready 2>&1 | tail -1)
+  case "$ready" in READY) break ;; esac
+  sleep 0.5
+done
+if [ "$ready" = "READY" ]; then
+  ok "the settings save queued the transcodes and every item became ready"
+else
+  bad "no derivative was produced within ${PLREADY_SECS}s: $ready"
+  note "nothing in this suite writes a derivative by hand, so an item that is"
+  note "not ready means the production enqueue path did not deliver one"
+  exit 1
+fi
+
+step "3. The primary goes on air"
 # Before publishing, not after. The server reporting ready means its HTTP
 # listener is up; the ingest child is spawned after that and binds 1938 a moment
 # later. A publisher that arrives first is refused and exits, and the wait below
@@ -187,7 +371,7 @@ BEFORE=$(readstatus)
 set -- $BEFORE; restarts_before="${4:-0}"
 note "before the cut: $BEFORE"
 
-step "3. The encoder disappears — the slate takes over"
+step "4. The encoder disappears — the slate takes over"
 unpublish
 # Grace is 2s; allow generously for the sweep and the feed swap.
 if waitfor 1 slate 30 ; then
@@ -198,20 +382,30 @@ else
 fi
 sleep 6
 
-step "4. The encoder returns — auto-return puts the primary back"
+step "5. The encoder returns — auto-return puts the primary back"
 publish
 if waitfor 1 primary 40 ; then
   ok "the primary was restored automatically"
 else
   bad "auto-return never happened: $(readstatus)"
 fi
-sleep 6
+# Not a `sleep 6`. Everything from step 7 on drives the selector by hand, and a
+# pin issued while the ingest is still in its unsettled first half-minute is
+# issue #38 -- see settle for the measurement behind that. This waits for a
+# quiet stretch instead of guessing at one, and reports what it saw if the
+# stretch never comes rather than sailing on into a failure with no cause.
+if settle primary 25 120; then
+  note "the ingest settled; the primary has held for 25s"
+else
+  note "the ingest never held the primary for 25s in 120s: $(readstatus)"
+  note "expect issue #38 below: a pin issued mid-switch waits on a 12s process stop"
+fi
 
 AFTER=$(readstatus)
 set -- $AFTER; active_after="$1"; switches="${2:-0}"; restarts_after="${4:-0}"
 note "after the cycle: $AFTER"
 
-step "5. THE POINT: the destination never restarted"
+step "6. THE POINT: the destination never restarted"
 # This is the whole feature. If the destination restarted, the platform
 # connection dropped and failover achieved nothing -- the output file could
 # still look perfectly healthy.
@@ -230,7 +424,7 @@ else
   bad "expected at least 2 switches, saw ${switches:-0}"
 fi
 
-step "6. Filler starts playing, with the encoder still on air"
+step "7. Filler starts playing, with the encoder still on air"
 # THE CASE THIS WHOLE SUB-PROJECT EXISTS FOR, and it was impossible to write
 # before it. A playing file used to feed the PRIMARY's hub, so the primary
 # always had bytes on it, the selector read the programme as live, and it would
@@ -238,59 +432,13 @@ step "6. Filler starts playing, with the encoder still on air"
 # entire failover feature -- everything steps 2 to 5 just measured turned itself
 # off the first time anybody put a file on air, and nothing said so.
 #
-# The playlist is enabled HERE rather than in step 1 deliberately: it outranks
+# The playlist is enabled HERE rather than in step 2 deliberately: it outranks
 # the slate, so a tier running from the start would have taken the slate's place
-# in step 3 and this suite would have stopped measuring the cycle it was
-# originally written for.
-FILLER_TONE=2000
-# A playlist item names a STORED UPLOAD, not a path, so the clip is written into
-# the uploads directory rather than anywhere convenient. That is the boundary
-# uploads.Store.Resolve defends and the reason items stopped being paths.
-mkdir -p data/uploads data/playlist-media
-# Same geometry, frame rate and codec as the publisher above. The destination
-# copies video, so filler that did not match would be measuring a platform's
-# tolerance for a mid-stream codec change rather than the selector's switch.
-ffmpeg -hide_banner -loglevel error \
-  -f lavfi -i "testsrc2=size=640x360:rate=30" \
-  -f lavfi -i "sine=frequency=$FILLER_TONE:sample_rate=48000" \
-  -map 0:v -map 1:a -c:v libx264 -preset ultrafast -g 30 -pix_fmt yuv420p \
-  -b:v 1200k -c:a aac -b:a 128k -ac 2 -t 8 \
-  -y data/uploads/filler.ts 2>/dev/null
-[ -s data/uploads/filler.ts ] || { bad "could not build the filler clip"; exit 1; }
-# The NORMALISED DERIVATIVE, written by hand.
-#
-# THE PRODUCTION ENQUEUE PATH IS NOT COVERED BY THIS SUITE, and this comment
-# says so in as many words because the previous version did not: it called this
-# a stand-in "for the transcode job that writes it in a real deployment" at a
-# time when NO production code registered or submitted that job at all. 18/18
-# green, and the feature could not start on a real server. A stand-in for an
-# unwired dependency is indistinguishable from a stand-in for a wired one, which
-# is exactly how that survived.
-#
-# The path IS wired now -- api.Server.enqueuePlaylistNormalisation submits on
-# every settings save, cmd/polyemesis/postprod.go registers the worker, and a
-# finished job reconciles the engine -- and it still cannot run here, for a
-# reason that is a feature rather than an obstacle: normalisation is deferred
-# background work, and the governor's default policy refuses to start deferred
-# work while an ingest is live. The encoder is deliberately publishing
-# throughout this step (that is the point of step 6), so the job the save
-# queues is correctly held back, and waiting for it would mean either cutting
-# the encoder -- destroying what this step measures -- or waiting on a
-# 1080p transcode inside an acceptance suite. Neither is worth it.
-#
-# What DOES cover the production path, by name:
-#   - TestSavingAPlaylistQueuesOneNormalisationPerUpload (internal/api)
-#     -- the settings save submits the job, once per distinct upload.
-#   - TestTheNormaliseWorkerIsRegisteredWithTheQueue (cmd/polyemesis)
-#     -- registerProcessors really registers KindNormalise.
-#   - TestAFinishedNormalisationReconcilesTheEngine (cmd/polyemesis)
-#     -- a completed job drives Reconcile, which is what starts the tier.
-#   - internal/playlistmedia/integration_test.go -- the transcode itself,
-#     against real FFmpeg, spliced with a real concat demuxer.
-#
-# The name is playlistmedia.DerivativePath's: <dataDir>/playlist-media/<upload>.ts.
-cp data/uploads/filler.ts data/playlist-media/filler.ts.ts
-OUT=$(drive playlist filler.ts)
+# in step 4 and this suite would have stopped measuring the cycle it was
+# originally written for. Only the ENABLE happens here -- the items and their
+# derivatives were produced in step 2 by the production job, and nothing in this
+# suite writes a derivative by hand.
+OUT=$(drive playlist on $FILLER_ITEMS)
 case "$OUT" in *PLAYLIST_OK*) : ;; *) bad "enable playlist: $OUT"; exit 1 ;; esac
 
 # The pin is how this suite SEES the file delivering while the encoder is still
@@ -322,7 +470,7 @@ else
 fi
 sleep 4
 
-step "7. THE POINT: the encoder drops while the filler plays"
+step "8. THE POINT: the encoder drops while the filler plays"
 unpublish
 # THE REGRESSION, in one field. Before the playlist got a hub of its own, the
 # file's bytes landed on the PRIMARY's relay, so primaryLive stayed true for as
@@ -343,7 +491,7 @@ fi
 FILLER_STATUS=$(readstatus)
 set -- $FILLER_STATUS; restarts_filler="${4:-0}"
 note "with the filler on air: $FILLER_STATUS"
-# Same measurement as step 5, against the same baseline: a switch that restarts
+# Same measurement as step 6, against the same baseline: a switch that restarts
 # a destination drops the platform connection, and it does that whether the
 # source arriving is a slate or a scheduled programme.
 if [ "$restarts_filler" = "-1" ]; then
@@ -354,14 +502,36 @@ else
   bad "the destination restarted when the filler went on air ($restarts_before -> $restarts_filler)"
 fi
 
-step "8. The output timeline"
-# ONE FILE, EVERY SWITCH IN THE RUN. This is the whole of steps 2 to 7 measured
+# THE SEQUENCING WINDOW. Nothing is asserted here; this is the recording step 9
+# reads.
+#
+# Long enough to contain a WHOLE run of every item wherever in the cycle the
+# switch happened to land. The tier has been playing into its own hub since
+# step 7, so the selector joined it mid-item and the window starts mid-run: one
+# full cycle guarantees every item appears, and a second guarantees at least one
+# appearance of each is bounded on both sides and therefore measurable. The
+# items total 19s, so two cycles is 38s and the wait is 42.
+SEQUENCE_SECS=42
+note "letting the playlist run ${SEQUENCE_SECS}s so a whole cycle lands in the recording"
+sleep "$SEQUENCE_SECS"
+
+step "9. The output timeline, and what actually played"
+# ONE FILE, EVERY SWITCH IN THE RUN. This is the whole of steps 3 to 8 measured
 # end to end, not the slate cycle alone: the recording spans primary -> slate ->
-# primary (steps 2 to 4), primary -> filler and back when the pin goes on and
-# off (step 6), and primary -> filler when the encoder is cut (step 7). Five
+# primary (steps 3 to 5), primary -> filler and back when the pin goes on and
+# off (step 7), and primary -> filler when the encoder is cut (step 8). Five
 # switches, five chances to hand a platform a timestamp that goes backwards, and
 # the checks below cover all of them at once.
-drive stopall >/dev/null 2>&1
+#
+# The output is checked, not discarded. `drive stopall` used to be run with its
+# output thrown away, and it had been failing silently for as long as it existed
+# -- it read `id` off a list whose rows are {"destination": ..., "routing": ...},
+# got 0 every time, and POSTed /destinations/0/stop for a 404 nobody looked at.
+# No destination was ever stopped, so this file was always an unfinalised
+# Matroska, and the duration check below was written around that damage instead
+# of against it.
+OUT=$(drive stopall)
+case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations: $OUT" ;; esac
 sleep 8
 OUTFILE=data/recordings/onair.mkv
 if [ ! -s "$OUTFILE" ]; then
@@ -418,7 +588,219 @@ else
   else
     bad "the output spans only ${dur:-0}s; it did not survive the run"
   fi
+
+  # ------------------------------------------------------ WHAT ACTUALLY PLAYED
+  #
+  # THE ONE THING THIS SUB-PROJECT IS FOR. B1 played item 0 and only item 0,
+  # for ever, and every check above would pass on that behaviour unchanged: a
+  # file was on air, the timeline was monotonic, the destination never
+  # restarted. Sequencing is only visible in the PICTURE.
+  #
+  # Each item is a flat colour, so one pixel per half second says which item was
+  # on air. The frame is averaged down to 1x1 (scale=...:flags=area, which
+  # really averages -- the default filter would sample) and read as raw RGB, so
+  # this needs no filter that reports through a log line and no per-frame
+  # parsing. rgb24 bytes are UNSIGNED, hence "%u": "%d" prints red as -2 0 0.
+  #
+  # The awk then finds the LONGEST unbroken stretch of filler colours -- the
+  # step 8 window, not the few seconds the pin bought in step 7 -- and reports
+  # what happened inside it. Run lengths are counted only for runs bounded on
+  # BOTH sides, because the first and last are cut off by the window's edges and
+  # would read short.
+  SAMPLE_HZ=2
+  seqline=$(ffmpeg -hide_banner -loglevel error -i "$OUTFILE" \
+            -vf "fps=$SAMPLE_HZ,scale=1:1:flags=area" -f rawvideo -pix_fmt rgb24 - 2>/dev/null |
+            hexdump -v -e '3/1 "%u "' -e '"\n"' |
+            awk '
+    { r=$1+0; g=$2+0; b=$3+0; lab="-"
+      # The three filler colours, generous on tolerance: these survive a
+      # yuv420p round trip almost exactly, so anything near-miss is not filler.
+      if (r>205 && g<50 && b<50)  lab="1"
+      else if (r<50 && g>205 && b<50)  lab="2"
+      else if (r>205 && g<50 && b>205) lab="3"
+      seq[n++]=lab }
+    END {
+      start=-1; len=0; i=0
+      while (i<n) {
+        if (seq[i]=="-") { i++; continue }
+        j=i; while (j<n && seq[j]!="-") j++
+        if (j-i>len) { len=j-i; start=i }
+        i=j
+      }
+      if (len==0) { print "distinct=0 outoforder=0 run1=0 run2=0 run3=0 cycle=0 window=0"; exit }
+      bad=0; prev=""; k=start; end=start+len; lastb=-1; cycle=0
+      while (k<end) {
+        lab=seq[k]; m=k
+        while (m<end && seq[m]==lab) m++
+        seen[lab]=1
+        if (k>start && m<end && m-k > run[lab]+0) run[lab]=m-k
+        # The cycle is measured from one item-2 run to the next: the distance
+        # between two appearances of the SAME item is a whole lap of the
+        # playlist however the window happened to be cut.
+        if (lab=="2" && k>start) { if (lastb>=0 && m<end) cycle=k-lastb; lastb=k }
+        if (prev!="" && !((prev=="1"&&lab=="2")||(prev=="2"&&lab=="3")||(prev=="3"&&lab=="1"))) bad++
+        prev=lab; k=m
+      }
+      d=0; for (x in seen) d++
+      printf "distinct=%d outoforder=%d run1=%d run2=%d run3=%d cycle=%d window=%d\n",
+             d, bad, run["1"]+0, run["2"]+0, run["3"]+0, cycle, len
+    }')
+  note "what played: $seqline"
+  set -- $seqline
+  seq_distinct="${1#*=}"; seq_outoforder="${2#*=}"
+  seq_run1="${3#*=}"; seq_run2="${4#*=}"; seq_run3="${5#*=}"; seq_cycle="${6#*=}"
+
+  # 1. MORE THAN THE FIRST ITEM. Three distinct colours in one unbroken filler
+  #    window is the direct refutation of play-item-0-for-ever, and it is the
+  #    check that could not exist before this sub-project.
+  if [ "${seq_distinct:-0}" -eq 3 ]; then
+    ok "all three items reached the destination, not the first one over and over"
+  else
+    bad "only ${seq_distinct:-0} of 3 items ever reached the destination"
+    note "one colour means the tier played item 0 and stopped, which is the behaviour B2 replaced"
+  fi
+
+  # 2. IN THE ORDER THE PLAYLIST NAMES THEM. A concat list assembled in the
+  #    wrong order, or a wrap that restarts somewhere other than the top, shows
+  #    up as a transition that is not a -> b -> c -> a.
+  if [ "${seq_outoforder:-1}" -eq 0 ]; then
+    ok "the items played in the order the playlist names them, and wrapped to the top"
+  else
+    bad "${seq_outoforder} transition(s) did not follow the playlist's order"
+  fi
+
+  # 3. FOR ITS OWN LENGTH, AND A WHOLE LAP FOR THE SUM OF THEM. THIS is why the
+  #    three clips are 3s, 6s and 10s rather than three of the same length: with
+  #    equal items a boundary in the wrong place produces a picture identical to
+  #    a boundary in the right one, so the lengths are the only evidence that the
+  #    seams land where the media says they do.
+  #
+  #    MEASURED ON ITEM 2 AND ON THE LAP, NOT ON EVERY ITEM, and the reason is
+  #    itself a measurement. Items 1 and 3 sit either side of the LOOP boundary,
+  #    and FFmpeg's concat demuxer under `-c copy` does not make that boundary
+  #    cleanly: the last item's final frame holds for about 2.5 seconds and the
+  #    first item then plays about 2 seconds short. Reproduced with nothing but
+  #    ffmpeg, the same `-stream_loop -1 -re -fflags +genpts -f concat -c copy`
+  #    argv playlistFeedArgs builds, and the derivatives straight off disk:
+  #
+  #      1:6 2:12 3:25 1:2 2:12 3:24 1:3 2:6      (samples at 2 Hz)
+  #
+  #    where 6/12/20 is what the media says. The derivatives themselves probe at
+  #    3.12s, 6.12s and 10.12s, so it is not a normalisation fault, and the
+  #    output timeline stays monotonic through it -- the DTS check above passes.
+  #    It is written down here rather than asserted because it is a property of
+  #    the demuxer, not of anything B2 chose; a check pinned to it would fail on
+  #    a different FFmpeg for a reason nobody could act on. What IS asserted is
+  #    what that artefact does not touch:
+  #
+  #      - item 2 is the one item never adjacent to the loop boundary, so its
+  #        length is exact evidence that an interior seam lands on the media.
+  #      - a whole lap must equal the sum of the three items. That is what says
+  #        no item is skipped, repeated, or silently stretched to fill: the wrap
+  #        moves 2 seconds from one item to another and does not change the lap.
+  runs_ok=1
+  if [ "${seq_run2:-0}" -lt 11 ] || [ "${seq_run2:-0}" -gt 13 ]; then
+    runs_ok=0
+    note "item 2 played for ${seq_run2:-0} samples, expected 12 (+/-1) at ${SAMPLE_HZ}Hz"
+  fi
+  # 3 + 6 + 10 seconds at SAMPLE_HZ, with two samples of slack: one for the
+  # sampling phase and one for the padding the normaliser adds per item.
+  if [ "${seq_cycle:-0}" -lt 36 ] || [ "${seq_cycle:-0}" -gt 40 ]; then
+    runs_ok=0
+    note "a whole lap took ${seq_cycle:-0} samples, expected 38 (+/-2) at ${SAMPLE_HZ}Hz"
+  fi
+  if [ "$runs_ok" -eq 1 ]; then
+    ok "the seams follow the media: item 2 ran ${seq_run2}, a whole lap ${seq_cycle} samples at ${SAMPLE_HZ}Hz"
+    note "items 1 and 3 measured ${seq_run1} and ${seq_run3} against 6 and 20; the loop boundary moves about 2s between them"
+  else
+    bad "the seams are not where the media says"
+  fi
 fi
+
+step "10. THE FAILURE THIS DOES NOT FIX: a publisher that does not match the profile"
+# MEASURED, NOT FIXED, AND PINNED SO IT CANNOT SILENTLY GET WORSE.
+#
+# Items are normalised to match EACH OTHER -- one fixed 1920x1080@30 profile, so
+# the concat demuxer will splice them. Nothing normalises them to match the
+# OPERATOR'S ENCODER, and nothing can without either constraining the ingest or
+# re-encoding at the selector, and the latter reverses a decision made
+# throughout the engine. So an operator publishing at any other geometry hands
+# every destination a mid-stream codec change at every live<->playlist cut,
+# because the playlist feed and the destination both `-c copy` video.
+#
+# EVERY STEP ABOVE HIDES THIS ON PURPOSE, exactly as the old suite did: they
+# publish AT the profile, so what they measure is the selector's switch rather
+# than a platform's tolerance for a codec change. This step does the opposite
+# and reports the number.
+#
+# THE NUMBER BELOW WAS MEASURED, NOT CHOSEN. It is what this machine observed
+# across one cut to the playlist and one cut back, with a 1280x720@60 publisher
+# against 1080p30 filler, and it came out ZERO -- which is a smaller number than
+# it looks, and must not be read as "the mismatch is harmless".
+#
+# THIS SUITE'S DESTINATION IS A FILE, AND A FILE CANNOT DROP. The Matroska muxer
+# takes the codec parameters of the first packets it sees, writes them into the
+# header once, and then accepts everything after it without complaint. So the
+# destination process survives the cut and the restart count stays at zero,
+# while the recording it produced declares ONE geometry for content that
+# contains two -- the note printed below shows it. An RTMP platform has no
+# equivalent of that: it reads the header, receives a different stream, and
+# closes the connection. What this case can measure on a file destination is
+# therefore the weaker half of the failure; the stronger half is written down
+# in docs/SCHEDULED-BROADCAST.md where an operator meets it.
+#
+# Pinned anyway, because the guarantee is one-directional and still worth
+# having: a change that makes destinations restart at that cut when they did not
+# before fails here. Do not raise it to make a run pass. A rise is the finding.
+EXPECTED_MISMATCH_RESTARTS=0
+# Its own destination, and it has to be its own. This case EXPECTS restarts, and
+# a restarting file destination truncates and reopens its output -- pointed at
+# onair.mkv it would erase the recording step 9 just measured. It is added after
+# those measurements for the same reason.
+OUT=$(drive adddest mismatch mismatch.mkv)
+case "$OUT" in *DEST_OK*) : ;; *) bad "add the mismatch destination: $OUT"; exit 1 ;; esac
+publish_geom "$MISMATCH_W" "$MISMATCH_H" "$MISMATCH_FPS"
+if waitfor 1 primary 40 ; then
+  ok "the mismatched encoder is on air"
+else
+  bad "the mismatched encoder never went on air within 40s"
+  publisher_postmortem
+fi
+# The baseline is taken AFTER the primary has settled, so the destination's own
+# start -- which lands on filler and is then cut to the encoder -- is outside
+# the measurement. What is measured is the two deliberate cuts below, and only
+# those: a spurious switch during the unsettled window would be counted as a
+# restart this case caused, which is precisely the number that must not drift.
+settle primary 25 120 || note "the mismatched ingest never settled; the count below may include a switch this case did not make"
+mis_before=$(drive restarts mismatch | tail -1)
+OUT=$(drive pin playlist)
+case "$OUT" in *PIN_OK*) : ;; *) bad "pin playlist (mismatch): $OUT" ;; esac
+waitfor 1 playlist 40 || note "the mismatched run never reached the playlist; the count below covers less than two cuts"
+sleep 8
+OUT=$(drive pin auto)
+case "$OUT" in *PIN_OK*) : ;; *) bad "pin auto (mismatch): $OUT" ;; esac
+waitfor 1 primary 40 || note "the mismatched run never came back to the encoder"
+sleep 8
+mis_after=$(drive restarts mismatch | tail -1)
+note "restarts across the mismatched cuts: $mis_before -> $mis_after"
+if [ "${mis_before:--1}" = "-1" ] || [ "${mis_after:--1}" = "-1" ]; then
+  bad "no mismatch destination process was reported; nothing was measured"
+else
+  mis_delta=$((mis_after - mis_before))
+  if [ "$mis_delta" -le "$EXPECTED_MISMATCH_RESTARTS" ]; then
+    ok "the mismatched cut cost $mis_delta restart(s), at or under the pinned $EXPECTED_MISMATCH_RESTARTS"
+  else
+    bad "the mismatched cut cost $mis_delta restart(s), above the pinned $EXPECTED_MISMATCH_RESTARTS"
+    note "this is a regression in a failure B2 does not fix but does bound: destinations"
+    note "now drop MORE often at a live<->playlist cut than when the pin was measured"
+  fi
+fi
+# The damage the restart count cannot show. One header, two geometries: this
+# reports 1920x1080 (the filler's, seen first) at 60 fps (the publisher's),
+# describing a file that is neither for half its length.
+note "the mismatch recording declares: $(ffprobe -v error -select_streams v \
+  -show_entries stream=width,height,r_frame_rate -of csv=p=0 \
+  data/recordings/mismatch.mkv 2>/dev/null) -- for content that is 1280x720@60 for half its length"
 
 step "Summary"
 printf "  %d passed, %d failed\n\n" "$pass" "$fail"
@@ -426,16 +808,18 @@ printf "  %d passed, %d failed\n\n" "$pass" "$fail"
 # so a suite that fell over early could otherwise report "all passed" having
 # measured almost nothing.
 #
-# The filler case in steps 6 and 7 added five of these, and every one of them
-# lives after a `bad ... exit 1` precondition, so a run that could not build the
-# clip or enable the tier has to be told apart from one that measured the case
-# and liked what it saw.
+# The filler case in steps 7 and 8 added five of these, the sequencing readback
+# in step 9 three more, and the mismatch ratchet in step 10 two; every one of
+# them lives after a `bad ... exit 1` precondition, so a run that could not build
+# the clips or enable the tier has to be told apart from one that measured the
+# case and liked what it saw.
 #
-# COUNTED, not estimated: a complete run reaches eighteen ok/bad calls, and this
-# number was one short of that. A floor set below the real count is a floor a
+# COUNTED, not estimated. A floor set below the real count is a floor a
 # silently-skipped check walks straight over, which is the one thing it is here
-# to stop. If you add or remove a check, change this line in the same commit.
-EXPECTED_CHECKS=18
+# to stop. It is a FLOOR, not an equality: a failure that fires an extra `bad`
+# on a path a clean run never takes only raises the total. If you add or remove
+# a check, change this line in the same commit.
+EXPECTED_CHECKS=24
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

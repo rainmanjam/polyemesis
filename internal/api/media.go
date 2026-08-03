@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
@@ -115,24 +116,35 @@ func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
-// handleDeleteMedia removes one stored upload.
+// handleDeleteMedia removes one stored upload, every derivative version made
+// from it, and nothing else -- refusing outright when a stored playlist item
+// still names the upload.
 //
-// NO IN-USE GUARD, and that is a known gap rather than a decision. Deleting an
-// upload that a saved playlist item names leaves the item pointing at nothing:
-// the playlist stops being able to go on air (engine.playlistItemsReady stats
-// the resolved upload, so it refuses) and the operator is told only by a log
-// line. It also orphans the normalised derivative under playlist-media/, which
-// nothing sweeps.
+// THE IN-USE GUARD is new here, and the reason it can exist now is B2, not a
+// change of mind about the risk. B1 shipped without one deliberately: the
+// settings page had no playlist control and always PUTs the whole document
+// back, so refusing a delete would have locked an operator out of every
+// future settings save with no in-product way to clear the offending item --
+// see playlistUploadProblems for that history. B2 ships the control that
+// makes refusing defensible: an operator who hits the 409 below can go remove
+// the item and retry, instead of being stuck.
 //
-// Both halves belong to the same piece of work -- the orphan sweep this
-// endpoint would own -- and both are carried deliberately.
+// EVERY DERIVATIVE VERSION is removed, via playlistmedia.DerivativeVersions,
+// rather than only the one name playlistmedia.DerivativePath computes today.
+// ProfileVersion is at 2, so a v1 file can genuinely still be on disk beside a
+// v2, and removing only the current name would orphan it with nothing left in
+// the product that ever looks for it again.
 //
-// What is NOT carried is the consequence for the settings API.
-// playlistUploadProblems checks existence only for items a save INTRODUCES,
-// precisely so that a delete here cannot make every later settings save fail
-// on state the operator has no control to edit: the settings page has no
-// playlist control yet, and it PUTs the whole document back, so a stale item
-// would round-trip forever with no way to remove it.
+// DerivativeVersions reads the directory and compares names; it does NOT build
+// a glob. The name here is a URL path segment, and `*`, `?` and `[` are all
+// legal in a filename, so a pattern built from it is a pattern the caller
+// controls. That is not hypothetical: this handler previously globbed, and
+// `DELETE /api/v1/media/%2A` removed every derivative in the install before the
+// name was validated at all.
+//
+// RECONCILES afterward, like a settings save does, so a file the engine was
+// relying on does not leave its view stale until the next unrelated change
+// happens to trigger one.
 func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 	store, err := s.uploadStore()
 	if err != nil {
@@ -140,6 +152,62 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
+
+	// settingsMu -- see its declaration on Server. Held across the reference
+	// check below and the removal it gates, the same way handlePutSettings
+	// holds it across its own check-and-store: without a shared lock, a PUT
+	// that already passed playlistUploadProblems could still store a fresh
+	// reference to this exact upload in the gap between the check and the
+	// removal, which is the freshly-saved-item-points-at-nothing state this
+	// guard exists to make impossible rather than merely unlikely.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+
+	if referenced, idx, err := s.uploadIsReferenced(name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if referenced {
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"playlist item %d names this upload; remove it from the playlist before deleting the file", idx))
+		return
+	}
+
+	// THE NAME IS VALIDATED BEFORE ANYTHING IS REMOVED, and the ordering is the
+	// point rather than a tidy-up.
+	//
+	// It used to be validated by store.Delete AFTER the sweep below, which is
+	// how `DELETE /api/v1/media/%2A` managed to destroy every derivative in the
+	// install and then answer "no such upload". That instance is closed --
+	// DerivativeVersions matches by equality and builds no pattern -- but the
+	// ORDERING is what closes the class, and one instance of a class is not the
+	// class.
+	//
+	// The remaining reachable case is Windows: filepath.Base(`..\victim.ts`) is
+	// `victim.ts` on that platform and the raw name is what uploadIsReferenced
+	// compares, so a traversal spelled with a backslash slips past the in-use
+	// guard and reaches the sweep. Resolving first makes the guard's answer and
+	// the sweep's target the same name on every platform.
+	if _, err := store.Resolve(name); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Derivatives before the upload itself: if the process died between the
+	// two removals below, an orphaned derivative next to an upload that is
+	// still there is a smaller problem to notice than a deleted upload whose
+	// derivative is still on disk claiming to be current.
+	matches, err := playlistmedia.DerivativeVersions(s.cfg.DataDir, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, m := range matches {
+		if err := os.Remove(m); err != nil && !os.IsNotExist(err) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	if err := store.Delete(name); err != nil {
 		if os.IsNotExist(err) {
 			writeError(w, http.StatusNotFound, "no such upload")
@@ -149,6 +217,16 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 		// a name with a separator in it is a bad request, not a server error.
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Optional, like every other piece of the post-production tier: a test
+	// fixture that never touches the engine must still be able to delete a
+	// file (see testServer's comment). A running server always has one.
+	if s.mgr != nil {
+		if err := s.mgr.Reconcile(); err != nil {
+			writeError(w, http.StatusInternalServerError, "media deleted but reconcile failed: "+err.Error())
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

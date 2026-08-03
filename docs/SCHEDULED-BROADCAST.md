@@ -107,10 +107,10 @@ A schedule cannot touch a source, restart an ingest, or seek. Starting at frame
 0 needs the full playlist work — see
 [the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md).
 
-**One file, not a playlist.** There is no sequencing and no gapless transition
-between items. Several files in order needs the concat demuxer and a
-normalise-on-import step — the upload path is now in place, so that work no
-longer has to build one first.
+**One file, not a playlist.** *This* route — the pull ingest on this page —
+still takes a single file and has no sequencing. Several files in order is what
+the **failover playlist** below now does; it is a different route with different
+properties, not an upgrade to this one.
 
 **It occupies the primary ingest.** This route *is* the primary — the file is
 what the ingest pulls — so while it plays the primary hub has bytes on it and
@@ -124,29 +124,52 @@ ingest — see below.
 ## Filler while failover is watching: the failover playlist
 
 If what you want is *programming that covers an outage* rather than *a file as
-the source*, use the failover playlist instead. It plays a file into a hub of its
-own, so the primary's hub stays empty and the primary is still watched the whole
-time it plays. It ranks below both ingests and above the slate: an outage lands
-on your programme rather than on a standby card, and a real encoder pre-empts it
-the moment one arrives. You can pin it if you want it to win anyway.
+the source*, use the failover playlist instead. It plays **every item in the
+list, in order, looping** into a hub of its own, so the primary's hub stays
+empty and the primary is still watched the whole time it plays. It ranks below
+both ingests and above the slate: an outage lands on your programme rather than
+on a standby card, and a real encoder pre-empts it the moment one arrives. You
+can pin it if you want it to win anyway.
+
+**It does not stop and restart.** One FFmpeg holds the whole list open for as
+long as the playlist is enabled, whether or not it is the source on air. Coming
+back to it after the encoder drops lands wherever it has got to — it is not
+rewound, and it does not wait for an item boundary. That is deliberate: waiting
+for a boundary would mean holding a live encoder off air for up to a whole item.
+The reasoning is recorded in
+[roadmap/PLAYLIST-AND-COMPOSITING.md](roadmap/PLAYLIST-AND-COMPOSITING.md).
+Editing the list *does* restart it, from item one.
 
 | | this page's route (pull ingest) | the failover playlist |
 |---|---|---|
 | What the file is | the source | what runs when no encoder is delivering |
+| How many files | one | every item in the list, in order, looping |
 | Failover while it plays | reads the programme as live | fully live; the primary is watched throughout |
 | It starts | when you save the setting | when nothing else can deliver, or when you pin it |
-| Where | *Settings → Ingest → Pull* | `failover.playlist` in the settings API |
+| Where | *Settings → Ingest → Pull* | *Settings → Failover → Playlist*, or `failover.playlist` in the settings API |
 
-There is no form control for it yet — set `failover.playlist.enabled` and
+Build the list in *Settings → Failover*, or set `failover.playlist.enabled` and
 `failover.playlist.items` through the settings API. `items` is a list, each
 entry an `{"upload": "<name>"}` naming a file already sent through the
 uploads page — a bare stored filename, never a path, confined to the uploads
 directory exactly as `internal/uploads.Store.Resolve` enforces everywhere
-else it is used. An item naming an upload that does not exist is refused with
-a 400 when you save. Today the list may hold several entries but only the
-first plays; sequencing arrives with the work in
-[the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md), which also brings the
-control itself.
+else it is used. An item *you are adding* that names an upload which does not
+exist is refused with a 400 when you save; an item that was already saved is
+left alone, so a file disappearing behind an existing list never blocks an
+unrelated settings change. **Every entry plays**, in the order the list gives
+them, and the list repeats from the top when it reaches the end.
+
+**The wrap is not a clean cut.** Measured, not assumed: at the point where the
+list repeats, the last item's final frame holds for about 2.5 seconds and the
+first item then plays about 2 seconds short. It is a property of the FFmpeg
+concat demuxer under stream copy — reproducible with nothing but `ffmpeg` and
+the derivatives off disk — not something the list or your files can be arranged
+to avoid. Every item seam *inside* one lap is clean; it is only the lap
+boundary. Plan for it: a lap of a few seconds shows the freeze every few
+seconds, while ten minutes of filler shows it every ten minutes.
+
+Naming the same upload twice is allowed and costs nothing extra — it is
+transcoded once and appears in the sequence twice.
 
 ### Saving is not the same as being ready
 
@@ -172,40 +195,67 @@ Two things follow from where that work runs.
   rather than being retried forever.
 
 The derivative is written to `<dataDir>/playlist-media/` and is keyed on the
-upload, so the same file used twice in a list is transcoded once. Deleting an
-upload that a playlist names will take that playlist off air; remove the item as
-well.
+upload, so the same file used twice in a list is transcoded once.
 
-### The file must match your encoder's codec, and nothing checks
+**You cannot delete an upload the playlist still names.** *Media → Delete*
+answers `409 Conflict` and tells you which item is holding it, because a delete
+that stranded a playlist entry used to be the easiest way to break this feature.
+Remove the item from the list, save, and the delete then succeeds — it takes
+every version of the derivative with it.
+
+If an upload disappears some *other* way — a disk sweep, a restore that missed a
+file — the playlist keeps playing, and this is deliberate. The tier plays the
+derivatives, so an item whose original is gone is unaffected for as long as its
+derivative is there, and the editor goes on showing it as **ready**, because it
+is. What you have lost is the ability to make that item again: if its derivative
+is ever removed, or the normalising profile is versioned up in a future release,
+the item becomes **needs attention** and the whole playlist stops going on air
+until you deal with it. Re-upload the file and swap the item for the new one —
+uploads get a unique stored name, so a fresh upload of the same file does not
+adopt the old item's name.
+
+### Your encoder must match the playlist profile, and nothing checks
 
 **This is the one way to get the failover playlist badly wrong, and normalising
-does not yet solve it.** The normalised derivative described above is required
-before a playlist may start, but it is not what plays: the tier still hands
-FFmpeg your **original** upload. The derivative becomes the input when
-sequencing arrives, which is the point of it — a list of files can only be
-spliced if they share a profile. Until then it is a readiness token, and the
-paragraphs below still apply in full to the file you uploaded.
+solves only half of it.** Your uploads no longer have to match *each other* —
+that is what normalising is for, and it is why a list of mixed files splices
+cleanly. What it cannot do is make them match **you**.
 
-The playlist is
-copied, not re-encoded — `-c copy` from the file, and a copy hop into the
-selector — so the file's codec, resolution, frame rate and pixel format reach
-your destinations exactly as they were encoded. A destination that is also
-copying hands them straight to the platform. If the file does not match what your
-encoder sends, the switch onto it is a **mid-stream codec change**, and platforms
-answer that by dropping the connection — which is the one thing the whole
-failover tier exists to prevent. Point it at a 1080p HEVC file while your encoder
-sends 720p H.264 and every platform connection breaks the moment the file goes
-on air.
+The tier plays the derivatives, and the derivatives are all one fixed profile:
 
-Match the file to your encoder: same codec, same resolution, same frame rate,
-same pixel format. Re-encode it once, ahead of time, if it does not already
-match.
+```text
+1920x1080, 30 fps, H.264 High@4.0, yuv420p, stereo AAC at 48 kHz
+```
 
-Nothing validates this. Checking would mean probing your file when you save the
-setting and comparing it against an ingest that may not be connected yet, which
-is its own piece of work and is not built. Until it is, the constraint is yours
-to hold. `scripts/acceptance-failover.sh` builds its filler clip to match its
-publisher for exactly this reason, and says so in a comment.
+Fixed, not derived from your ingest — deliberately, because a target that
+followed your encoder's settings would silently invalidate every derivative
+already on disk the first time you changed a bitrate.
+
+From there it is copied, not re-encoded — `-c copy` out of the concat demuxer,
+and a copy hop into the selector — so those parameters reach your destinations
+exactly as the normaliser wrote them. A destination that is also copying hands
+them straight to the platform. **If your encoder does not send 1920x1080 at 30
+fps, every switch between your live feed and the playlist is a mid-stream codec
+change**, and platforms answer that by dropping the connection — the one thing
+the whole failover tier exists to prevent. Send 720p60 and the connection breaks
+the moment the playlist goes on air, and again when your encoder comes back.
+
+Set your encoder to 1920x1080 at 30 fps. Nothing else is required of it — the
+bitrate, the preset and the keyframe interval are yours.
+
+Nothing validates this. Checking would mean probing your ingest at settings-save
+time and comparing it against an encoder that may not be connected yet, which is
+its own piece of work with its own failure modes, and is not built. Fixing it
+properly means either constraining what the ingest accepts or re-encoding at the
+selector, and the second reverses a decision made throughout the engine.
+
+It is measured rather than fixed. `scripts/acceptance-failover.sh` publishes at
+the playlist profile for every case except its last, which publishes 1280x720 at
+60 fps on purpose and pins what destinations do at the cut. On a **file**
+destination the answer is that nothing restarts and the recording silently
+declares one geometry for content that has two — a file muxer cannot drop the
+way a platform can, so the suite can only bound the failure, not reproduce its
+worst form.
 
 The **slate** has no such constraint — it is synthesised at the *probed* geometry
 of the departed ingest, which is precisely why it can never cause this.
@@ -217,7 +267,8 @@ For "something on screen when the encoder drops" and nothing more, you want the
 departed ingest so a copying destination does not choke on the change, it needs
 no file and no matching, and it yields the moment the real feed returns. Reach
 for the failover playlist above when the filler should be *your* programming and
-you are willing to match its codec. Filler and programme are different jobs.
+you are willing to publish at 1920x1080 at 30 fps. Filler and programme are
+different jobs.
 
 ---
 

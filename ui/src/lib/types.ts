@@ -819,6 +819,42 @@ export interface FailoverBackup {
   pull?: PullSettings;
 }
 
+/** One entry in the failover playlist, in play order.
+ *
+ *  `upload` names a stored upload -- what Store.List reports as File.Name and
+ *  what Store.Resolve accepts -- rather than a path or an id. See Go's
+ *  db.PlaylistItem.Upload for why that distinction is a security boundary,
+ *  not a style choice: the concat demuxer trusts every path it is given, and
+ *  that is only safe while every path was chosen by this process. */
+export interface PlaylistItem {
+  upload: string;
+}
+
+/** An ordered list of uploads the selector can put on air when no encoder is
+ *  delivering.
+ *
+ *  Deliberately smaller than SlateSettings: a playlist plays files that
+ *  already have their own encoding, so unlike a slate it needs no encoder,
+ *  preset, colour or bitrate of its own. */
+export interface PlaylistSettings {
+  enabled: boolean;
+  items: PlaylistItem[];
+}
+
+/** One playlist item's readiness, as reported by GET /failover/playlist.
+ *  `detail` is only populated for `attention` -- the reason a row needs one
+ *  has to be visible, not just the fact that it is not "ready". */
+export interface PlaylistItemStatus {
+  upload: string;
+  state: "ready" | "transcoding" | "attention";
+  detail?: string;
+}
+
+export interface PlaylistStatus {
+  ready: boolean;
+  items: PlaylistItemStatus[];
+}
+
 export interface FailoverSettings {
   enabled: boolean;
   /** How long the live source may deliver nothing before the tier switches.
@@ -833,6 +869,9 @@ export interface FailoverSettings {
   returnStableSeconds?: number;
   backup?: FailoverBackup;
   slate?: SlateSettings;
+  /** A file playlist as a failover candidate beside the slate: something that
+   *  plays, rather than something that just holds. */
+  playlist?: PlaylistSettings;
 }
 
 // -------------------------------------------------------------------- mqtt

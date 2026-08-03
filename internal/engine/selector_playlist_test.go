@@ -99,6 +99,16 @@ func playlistEngineWithItems(t *testing.T, names ...string) (*Engine, db.Setting
 	return e, s
 }
 
+// playlistEngineWithSourceID is playlistEngine with a chosen sourceID, which is
+// what the list filename has to vary on. Two engines from playlistEngine would
+// share an id and the test would pass for the wrong reason.
+func playlistEngineWithSourceID(t *testing.T, id int64) *Engine {
+	t.Helper()
+	e := playlistEngine(t)
+	e.sourceID = id
+	return e
+}
+
 // playlistOnSettings enables the feature and the tier with a usable file.
 func playlistOnSettings() db.Settings {
 	s := failoverOnSettings()
@@ -200,18 +210,16 @@ func TestAPlaylistStartsOnceItsLastDerivativeAppears(t *testing.T) {
 	}
 }
 
-// TestAnItemWhoseDerivativeIsMissingStartsNoTier covers the DERIVATIVE branch
+// TestAnItemWhoseDerivativeIsMissingStartsNoTier covers the whole of readiness
 // through reconcilePlaylist: a name that is a perfectly good upload name and
 // has simply never been normalised.
 //
-// It does NOT exercise the confinement check. uploads.Store.Resolve is a SHAPE
-// check -- it refuses "", ".", ".." and anything carrying a separator, and
-// confines what is left to the uploads directory -- but it never asks whether
-// the file exists. "no-such-upload.mp4" therefore RESOLVES happily and is
-// refused one line later, at the derivative. That distinction is the whole
-// reason TestPlaylistItemsReadyRefusesAnUnresolvableName exists separately: an
-// earlier version of this file claimed this test covered Resolve, and the
-// confinement check could have been deleted with both tests still green.
+// Since B2 this is the ONLY question readiness asks, so there is no second
+// branch that could be the reason it passes. Confinement is not asked here and
+// is not gone: TestAnUnusablePlaylistItemStopsTheTier covers it where it now
+// lives, in playlistSig's PlaylistFileProblem check, and
+// playlistmedia.TestADerivativePathCannotEscapeItsDirectory covers the
+// base-name reduction that keeps a list entry inside the derivative directory.
 func TestAnItemWhoseDerivativeIsMissingStartsNoTier(t *testing.T) {
 	e := playlistEngine(t)
 	s := playlistOnSettings()
@@ -226,38 +234,34 @@ func TestAnItemWhoseDerivativeIsMissingStartsNoTier(t *testing.T) {
 	}
 }
 
-// TestAnItemWhoseUploadWasDeletedStartsNoTier covers the UPLOAD branch, which
-// is a different question from the derivative and became reachable the moment
-// uploads got a delete endpoint.
+// TestAnItemWhoseDerivativeIsEmptyStartsNoTier is the same gate against the
+// state that LOOKS finished: the derivative exists, under its final name, with
+// nothing in it.
 //
-// DELETE /api/v1/media/{name} removes the upload and leaves the derivative
-// standing -- nothing sweeps derivatives yet. reconcilePlaylist plays the
-// UPLOAD (the derivative is a readiness token until B2's concat arrives), so a
-// gate that asked only about the derivative would open on a file that is gone:
-// FFmpeg respawn-loops on a missing input, the hub carries nothing, the slate
-// wins on the byte counter, and the operator is left with a crash-looping child
-// and no explanation. An earlier version of playlistItemsReady's docstring
-// claimed that state was ready ON PURPOSE and that "the tier would still play".
+// A transcode killed between the create and the first write leaves exactly
+// this, and os.Stat alone cannot tell it from a completed one. The consequence
+// of admitting it is worse than refusing a missing file, because the tier
+// STARTS: the concat list names an empty file, FFmpeg exits immediately, the
+// supervisor respawns it, and the playlist outranks the slate the whole time.
 //
-// The mutation: delete the os.Stat on the resolved upload in
-// playlistItemsReady and this fails, because the derivative below is
-// deliberately left in place so nothing else can refuse.
-func TestAnItemWhoseUploadWasDeletedStartsNoTier(t *testing.T) {
+// The three other readers of this path -- api.playlistItemStatus,
+// api.enqueuePlaylistNormalisation and playlistmedia.RunNormalise's
+// already-normalised skip -- have always required Size() > 0. This is the one
+// that decides what goes to air, and for a while it was the one that did not.
+//
+// The mutation: drop `|| fi.Size() == 0` from playlistItemsReady and this fails.
+func TestAnItemWhoseDerivativeIsEmptyStartsNoTier(t *testing.T) {
 	e := playlistEngine(t)
-	t.Cleanup(func() { teardownPlaylistTier(e) })
-	seedPlaylistUpload(t, e, "deleted.mp4", true)
-
 	s := playlistOnSettings()
-	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "deleted.mp4"}}
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "truncated.mp4"}}
 
-	// The operator deletes the upload. Only the upload: handleDeleteMedia
-	// touches nothing under playlist-media/.
-	if err := os.Remove(filepath.Join(e.cfg.DataDir, uploads.Dir, "deleted.mp4")); err != nil {
-		t.Fatalf("remove upload: %v", err)
-	}
-	if _, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, "deleted.mp4")); err != nil {
-		t.Fatalf("the derivative is not there, so the derivative branch could be the "+
-			"reason this test passes: %v", err)
+	// Seeded normally and then emptied, rather than written empty: the file has
+	// to arrive at the same path DerivativePath computes, and truncating what
+	// the helper wrote is the only way to be sure it is that path and not one a
+	// test built for itself.
+	seedPlaylistUpload(t, e, "truncated.mp4", true)
+	if err := os.Truncate(playlistmedia.DerivativePath(e.cfg.DataDir, "truncated.mp4"), 0); err != nil {
+		t.Fatalf("truncate the derivative: %v", err)
 	}
 
 	e.selMu.Lock()
@@ -265,9 +269,213 @@ func TestAnItemWhoseUploadWasDeletedStartsNoTier(t *testing.T) {
 	e.selMu.Unlock()
 
 	if h := e.playlistHub(); h != nil {
-		t.Error("a playlist whose upload was deleted started a tier; the argv names the " +
-			"upload, so FFmpeg would respawn-loop on a file that is gone while the " +
-			"process reported healthy")
+		t.Error("a playlist whose derivative is zero-length started a tier: the concat " +
+			"list names an empty file, FFmpeg exits at once, and the tier respawn-loops " +
+			"on air in preference to the slate")
+	}
+}
+
+// Readiness asks about the DERIVATIVE and no longer about the upload.
+//
+// B1 required both, because the argv named the upload and a deleted upload meant
+// a respawn loop. The argv names the derivative now, so that reason has expired:
+// playback is unaffected by the original's absence, and stopping a working
+// playlist because a source file was tidied away punishes the operator for
+// something the broadcast does not depend on. A missing upload is reported by
+// the readiness endpoint instead.
+//
+// This REPLACES TestAnItemWhoseUploadWasDeletedStartsNoTier, which asserted the
+// opposite. That test was deleted rather than reworded: a guard that survives
+// past the thing it guarded is the failure this project keeps correcting.
+//
+// The mutation: re-add an os.Stat on the resolved upload in playlistItemsReady
+// and this fails.
+func TestAPlaylistPlaysOnWhenOnlyTheOriginalUploadIsGone(t *testing.T) {
+	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
+	seedPlaylistUpload(t, e, "kept.mp4", true)
+	if err := os.Remove(filepath.Join(e.cfg.DataDir, uploads.Dir, "kept.mp4")); err != nil {
+		t.Fatal(err)
+	}
+
+	s := playlistOnSettings()
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "kept.mp4"}}
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	if h := e.playlistHub(); h == nil {
+		t.Error("the playlist stopped because its ORIGINAL was deleted, though the " +
+			"derivative it actually plays is still there")
+	}
+}
+
+// A derivative written by an older profile is not ready.
+//
+// The mutation: compare only the base name and this fails.
+func TestAStaleProfileDerivativeStartsNoTier(t *testing.T) {
+	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
+	seedPlaylistUpload(t, e, "old.mp4", false) // upload only, no derivative
+	stale := filepath.Join(playlistmedia.DerivativeDir(e.cfg.DataDir), "old.mp4.v1.ts")
+	if err := os.WriteFile(stale, []byte("a v1 derivative"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := playlistOnSettings()
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "old.mp4"}}
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	if h := e.playlistHub(); h != nil {
+		t.Error("a derivative from an older profile started a tier; B2 would " +
+			"concatenate an unpadded file with no measured duration")
+	}
+}
+
+// Every path handed to -safe 0 must be one this process built. This is the
+// boundary that makes the flag defensible, and until B2 there was no list for it
+// to protect.
+//
+// The mutation: build the list from item.Upload joined to the data dir and this
+// fails.
+// TestAConcatEntryIsAbsoluteEvenWhenTheDataDirIsNot is a REGRESSION test for a
+// defect the acceptance suite found, not a hypothetical.
+//
+// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN
+// DIRECTORY, and the list lives in <dataDir>/playlist-media -- the very prefix a
+// relative DerivativePath already carries. With `--data data` the demuxer
+// therefore looked for `data/playlist-media/data/playlist-media/x.ts.v2.ts` and
+// the tier respawn-looped on a file that was sitting right there, while
+// readiness had already stat'd it and passed, because readiness resolves from
+// the process's working directory like every other caller.
+//
+// It survived because EVERY EXISTING CALLER HAPPENED TO BE ABSOLUTE: deployments
+// pass an absolute --data, and this package's own helpers build one with
+// t.TempDir(). A path that is only ever exercised as absolute is a path whose
+// relative behaviour nothing watches, which is why this test sets a relative
+// DataDir on purpose.
+//
+// The mutation: drop the filepath.Abs in reconcilePlaylist and this fails.
+func TestAConcatEntryIsAbsoluteEvenWhenTheDataDirIsNot(t *testing.T) {
+	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
+
+	// A relative DataDir, reached the way an operator would: `--data data` from
+	// the directory they launched in. chdir so the relative path still names the
+	// seeded files.
+	abs := e.cfg.DataDir
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(filepath.Dir(abs)); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	e.cfg.DataDir = filepath.Base(abs)
+
+	s := playlistOnSettings()
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	e.mu.RLock()
+	tier := e.playlist
+	e.mu.RUnlock()
+	if tier == nil {
+		t.Fatal("no tier started for a playlist whose derivative exists")
+	}
+	body, err := os.ReadFile(tier.listPath)
+	if err != nil {
+		t.Fatalf("read list: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if !strings.HasPrefix(line, "file ") {
+			continue
+		}
+		p := strings.Trim(strings.TrimPrefix(line, "file "), "'")
+		if !filepath.IsAbs(p) {
+			t.Errorf("concat entry %q is relative; the demuxer resolves it against the "+
+				"list's own directory and would look for it under playlist-media twice", p)
+		}
+	}
+}
+
+func TestEveryConcatPathIsADerivativePath(t *testing.T) {
+	e := playlistEngine(t)
+	t.Cleanup(func() { teardownPlaylistTier(e) })
+	for _, n := range []string{"a.mp4", "b.mp4"} {
+		seedPlaylistUpload(t, e, n, true)
+	}
+
+	s := playlistOnSettings()
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "a.mp4"}, {Upload: " b.mp4 "}}
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	e.mu.RLock()
+	tier := e.playlist
+	e.mu.RUnlock()
+	if tier == nil {
+		t.Fatal("no tier started")
+	}
+	body, err := os.ReadFile(tier.listPath)
+	if err != nil {
+		t.Fatalf("read list: %v", err)
+	}
+	for _, want := range []string{
+		playlistmedia.DerivativePath(e.cfg.DataDir, "a.mp4"),
+		playlistmedia.DerivativePath(e.cfg.DataDir, "b.mp4"),
+	} {
+		if !strings.Contains(string(body), "file '"+want+"'") {
+			t.Errorf("list does not name %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(string(body), uploads.Dir) {
+		t.Errorf("the list names something under the uploads directory, so -safe 0 "+
+			"was given a path this process did not build:\n%s", body)
+	}
+}
+
+// Two sources with IDENTICAL playlists hash the same, so the signature alone
+// cannot own a filename: one tier stopping would sweep a list the other is still
+// re-reading at its next wrap.
+//
+// The mutation: drop sourceID from the list filename and this fails.
+func TestTwoSourcesWithTheSamePlaylistOwnDifferentLists(t *testing.T) {
+	a := playlistEngineWithSourceID(t, 1)
+	b := playlistEngineWithSourceID(t, 2)
+
+	// ONE DATA DIRECTORY, SHARED, because that is the only shape in which the
+	// collision exists: internal/engine/manager.go runs one engine per source
+	// over a single configured data dir, so both tiers write their lists into
+	// the same playlist-media directory.
+	//
+	// playlistEngine hands each engine its own t.TempDir(), and leaving it that
+	// way would make this test pass on the directory names alone -- green with
+	// the source id dropped from the filename, which is the one regression it
+	// exists to catch. Sharing the directory is what leaves the id as the only
+	// thing that can tell the two lists apart.
+	b.cfg = a.cfg
+
+	t.Cleanup(func() { teardownPlaylistTier(a); teardownPlaylistTier(b) })
+	for _, e := range []*Engine{a, b} {
+		seedPlaylistUpload(t, e, "same.mp4", true)
+		s := playlistOnSettings()
+		s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "same.mp4"}}
+		e.selMu.Lock()
+		e.reconcilePlaylist(s)
+		e.selMu.Unlock()
+	}
+	if a.playlist.listPath == b.playlist.listPath {
+		t.Fatalf("both sources own %s; stopping one deletes the other's list", a.playlist.listPath)
 	}
 }
 
@@ -337,56 +545,30 @@ func TestAppendingAnUnnormalisedItemLeavesARunningPlaylistOnAir(t *testing.T) {
 	}
 }
 
-// TestPlaylistItemsReadyRefusesAnUnresolvableName is the CONFINEMENT check, and
-// it is built so that only that check can be the reason it passes.
+// TestPlaylistItemsReadyRefusesAnUnresolvableName WAS HERE, and it went with
+// the uploads.Store.Resolve call it guarded.
 //
-// The trick is the seeding below. ".." is refused by uploads.Store.Resolve
-// outright, but it also has no derivative, so a test that stopped there would
-// be satisfied by either branch -- and would still pass with the Resolve call
-// deleted, which is exactly the hole this replaces. Writing a real file at the
-// derivative path takes the os.Stat branch out of the running and leaves
-// Resolve as the only thing that can refuse.
+// It asserted that readiness refuses an item whose name does not resolve to a
+// stored upload. B2's readiness resolves no upload at all -- it asks one
+// question, about the derivative -- so there is no Resolve left to delete and
+// the test could only have been kept by rewriting it into something that cannot
+// fail. Deleted for the same reason as
+// TestAnItemWhoseUploadWasDeletedStartsNoTier: a guard outliving the thing it
+// guarded is worse than no guard, because it reads as coverage.
 //
-// THE MUTATION IS NOW A SUBSTITUTION RATHER THAN A DELETION, and it is the more
-// honest one: replace `store.Resolve(upload)` with a naive
-// `filepath.Join(e.cfg.DataDir, uploads.Dir, upload)` -- which is what this
-// code did before uploads had a store -- and this fails. ".." then joins to the
-// data directory itself, which exists, so the upload stat passes, the seeded
-// derivative passes, and a traversal is called ready. Simply neutering the
-// error branch no longer works as a mutation because Resolve returns an empty
-// path with its error and nothing stats "" successfully; a mutation has to be
-// the regression that could really happen, and that is the join.
+// The confinement it stood for did not go anywhere, and is covered twice over
+// by tests that reach production and that can still fail:
 //
-// The boundary matters beyond tidiness: resolving through the store rather than
-// joining strings is what keeps items upload NAMES rather than paths, and it is
-// what makes FFmpeg's -safe 0 defensible when the concat list arrives. A
-// deleted confinement check is a directory traversal, and it should not be
-// possible for that deletion to leave a green suite.
-func TestPlaylistItemsReadyRefusesAnUnresolvableName(t *testing.T) {
-	e := playlistEngine(t)
-
-	// DerivativePath takes filepath.Base of the trimmed name, so ".." lands on
-	// the real, ordinary file "...ts" inside the derivative directory. Seeding
-	// it is legitimate rather than a contrivance: it is precisely the state an
-	// attacker-shaped name would be in if the traversal had already written
-	// something there.
-	derivative := playlistmedia.DerivativePath(e.cfg.DataDir, "..")
-	if err := os.MkdirAll(filepath.Dir(derivative), 0o755); err != nil {
-		t.Fatalf("mkdir derivative dir: %v", err)
-	}
-	if err := os.WriteFile(derivative, []byte("x"), 0o644); err != nil {
-		t.Fatalf("seed derivative: %v", err)
-	}
-	if _, err := os.Stat(derivative); err != nil {
-		t.Fatalf("the derivative was not seeded, so the stat branch could still be "+
-			"the reason this test passes: %v", err)
-	}
-
-	if e.playlistItemsReady([]db.PlaylistItem{{Upload: ".."}}) {
-		t.Error("an item that does not resolve to a stored upload was called ready; " +
-			"its derivative exists, so nothing but uploads.Store.Resolve can refuse it")
-	}
-}
+//   - TestAnUnusablePlaylistItemStopsTheTier drives reconcilePlaylist with
+//     "../../etc/shadow" and asserts the tier stops. That is the check that
+//     actually runs first now -- playlistSig hashes EMPTY when
+//     PlaylistFileProblem fails, so an escaping item never reaches readiness.
+//   - playlistmedia.TestADerivativePathCannotEscapeItsDirectory covers
+//     DerivativePath's base-name reduction, which is what confines every path in
+//     the concat list and is therefore what -safe 0 now rests on.
+//
+// TestEveryConcatPathIsADerivativePath asserts the consequence directly: nothing
+// under the uploads directory reaches the list.
 
 // teardownPlaylistTier stops whatever tier a test left running. The supervised
 // child is a binary that does not exist, so it would otherwise sit in the
@@ -398,14 +580,14 @@ func teardownPlaylistTier(e *Engine) {
 	e.teardownPlaylist(tier)
 }
 
-func TestPlaylistFeedLoopsTheFileAtWallClockSpeed(t *testing.T) {
-	// -stream_loop -1 makes the file look like a feed that never ends, and -re
-	// paces it at wall-clock speed. Without -re FFmpeg reads at disk speed and
-	// buries the relay in an hour of stream in seconds -- the same reason
-	// pullFile carries both flags.
-	args := playlistFeedArgs("/data/loop.mp4", "udp://127.0.0.1:9000")
+func TestPlaylistFeedLoopsTheListAtWallClockSpeed(t *testing.T) {
+	// -stream_loop -1 makes the LIST look like a feed that never ends -- it wraps
+	// the whole concatenation, not each entry -- and -re paces it at wall-clock
+	// speed. Without -re FFmpeg reads at disk speed and buries the relay in an
+	// hour of stream in seconds -- the same reason pullFile carries both flags.
+	args := playlistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-stream_loop -1", "-re", "/data/loop.mp4"} {
+	for _, want := range []string{"-stream_loop -1", "-re", "/data/playlist-1-abc.txt"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("playlist argv is missing %q: %v", want, args)
 		}
@@ -413,12 +595,14 @@ func TestPlaylistFeedLoopsTheFileAtWallClockSpeed(t *testing.T) {
 }
 
 // TestThePlaylistInputFlagsPrecedeTheInput is the half of the argv contract the
-// flags test cannot see: -stream_loop and -re are INPUT options, and FFmpeg
-// applies an input option to whatever -i follows it. Placed after -i they parse
-// without complaint and apply to nothing, so the file plays once, at disk speed,
-// and the tier looks like it worked.
+// flags test cannot see: -stream_loop, -re, -f and -safe are INPUT options, and
+// FFmpeg applies an input option to whatever -i follows it. Placed after -i they
+// parse without complaint and apply to nothing, so the list plays once, at disk
+// speed, and the tier looks like it worked. -f is the sharper one now: after -i
+// it is read as the OUTPUT format, so the list would be probed as though it were
+// media rather than demuxed as a playlist.
 func TestThePlaylistInputFlagsPrecedeTheInput(t *testing.T) {
-	args := playlistFeedArgs("/data/loop.mp4", "udp://127.0.0.1:9000")
+	args := playlistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
 	idx := func(flag string) int {
 		for i, a := range args {
 			if a == flag {
@@ -429,48 +613,108 @@ func TestThePlaylistInputFlagsPrecedeTheInput(t *testing.T) {
 		return -1
 	}
 	input := idx("-i")
-	for _, flag := range []string{"-stream_loop", "-re"} {
+	// idx returns the FIRST match, which for "-f" is the input's "-f concat"
+	// rather than the output's "-f mpegts" -- exactly the one that has to come
+	// first.
+	for _, flag := range []string{"-stream_loop", "-re", "-f", "-safe"} {
 		if idx(flag) > input {
 			t.Errorf("%s comes after -i, so FFmpeg applies it to no input: %v", flag, args)
 		}
 	}
 }
 
-// TestThePlaylistPathIsPinnedToTheFileProtocol covers a path FFmpeg would
-// otherwise re-read as a protocol name: "data/2026:01.ts" names no protocol we
-// meant, and the failure is an unopenable input rather than anything obvious.
-func TestThePlaylistPathIsPinnedToTheFileProtocol(t *testing.T) {
-	args := playlistFeedArgs("/data/2026:01.ts", "udp://127.0.0.1:9000")
-	for i, a := range args {
-		if a == "-i" && args[i+1] != "file:/data/2026:01.ts" {
-			t.Errorf("playlist input is %q, want it pinned to the file protocol", args[i+1])
+// TestThePlaylistDemuxerIsNamedAndItsListIsTrusted replaces
+// TestThePlaylistPathIsPinnedToTheFileProtocol, which asserted the "file:"
+// prefix B1's argv carried on the upload path.
+//
+// That prefix guarded an operator-derived path: an upload name reaching FFmpeg
+// as written, where a colon would have been re-read as a protocol. B2's input is
+// a filename this process composed, and the operator's name never appears in it,
+// so the prefix guarded nothing that is still there and asserting on it would
+// have been asserting on a string.
+//
+// What has to hold instead is this pair. -f concat, because without it FFmpeg
+// probes the list and finds a text file rather than a playlist. -safe 0, because
+// the list holds ABSOLUTE paths and the demuxer refuses those by default -- and
+// the flag is only defensible because every path in that list was built by
+// playlistmedia.DerivativePath, which TestEveryConcatPathIsADerivativePath is
+// what proves.
+//
+// The mutation: drop either flag and this fails.
+func TestThePlaylistDemuxerIsNamedAndItsListIsTrusted(t *testing.T) {
+	args := playlistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-f concat", "-safe 0", "-i file:/data/playlist-1-abc.txt"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("playlist argv is missing %q: %v", want, args)
 		}
 	}
 }
 
-// TestAPlaylistUploadWithSurroundingWhitespaceStillResolves guards
-// playlistItemUpload as the single trim point: playlistSig hashes a trimmed
-// name and reconcilePlaylist resolves through uploads.Store.Resolve, which
-// does NOT reject a stray space (it is not a separator) -- it just includes
-// it literally in the path. Before playlistItemUpload existed, resolution had
-// lost the trim that the code it replaced carried, so a leading space
-// validated, hashed as though trimmed, respawned looking like it should
-// work, and then resolved to a file that was never the one an operator
-// meant. This proves the item still resolves to the REAL, trimmed path.
-func TestAPlaylistUploadWithSurroundingWhitespaceStillResolves(t *testing.T) {
+// TestThePlaylistListPathIsPinnedToTheFileProtocol is the successor to B1's
+// TestThePlaylistPathIsPinnedToTheFileProtocol. That test guarded the prefix on
+// the UPLOAD path, an operator-supplied name; this one guards it on the LIST
+// path, which this process composes.
+//
+// WHAT THE PREFIX PROTECTS WAS MEASURED, not assumed, against FFmpeg 8.1.2:
+// FFmpeg infers a protocol from the characters before the first ":" only while
+// no "/" has appeared. So a RELATIVE data directory whose first segment carries
+// a colon -- "2026:01/data" -- fails with "Protocol not found" unprefixed and
+// opens with the prefix, and that is the case this buys. An ABSOLUTE data
+// directory, "/mnt/2026:01/data", opens either way, because the leading "/"
+// ends protocol detection before the colon is reached.
+//
+// The assertion is therefore deliberately about the ARGV rather than about
+// FFmpeg opening anything: for the ordinary absolute-path deployment there is
+// no behaviour to observe, because unprefixed already works. What is worth
+// holding is that every file input this package builds is spelled the same way,
+// so the guarantee does not rest on the reader re-deriving that argument.
+//
+// The mutation: drop the "file:" prefix from playlistFeedArgs and this fails.
+func TestThePlaylistListPathIsPinnedToTheFileProtocol(t *testing.T) {
+	// A colon in the FIRST segment, which is the only shape FFmpeg misreads.
+	args := playlistFeedArgs("2026:01/data/playlist-media/playlist-1-abc.txt",
+		"udp://127.0.0.1:9000")
+	want := "file:2026:01/data/playlist-media/playlist-1-abc.txt"
+	found := false
+	for i, a := range args {
+		if a != "-i" || i+1 >= len(args) {
+			continue
+		}
+		found = true
+		if args[i+1] != want {
+			t.Errorf("playlist input = %q, want %q -- an unprefixed relative path "+
+				"whose first segment carries a colon is read as a protocol name, and "+
+				"FFmpeg answers it with \"Protocol not found\"", args[i+1], want)
+		}
+	}
+	if !found {
+		t.Fatal("playlist argv has no -i flag")
+	}
+}
+
+// TestAPlaylistUploadWithSurroundingWhitespaceIsTheSamePlaylist guards
+// playlistItemUpload as engine.go's single trim point.
+//
+// It used to assert on the RESOLVED PATH in the argv, because a leading space
+// once validated, hashed as though trimmed, respawned looking like it should
+// work, and then resolved to a file that was never the one an operator meant.
+// That assertion no longer proves the trim: the path in the list is built by
+// playlistmedia.DerivativePath, which trims through db.PlaylistUploadName
+// itself, so it would come out identical with engine.go's trim deleted. Keeping
+// it would have been a guard that cannot fail.
+//
+// What is still engine.go's own is the SIGNATURE. It decides whether a save
+// respawns the tier, and it is the only thing left here that a lost trim would
+// change: " loop.mp4" would hash differently from "loop.mp4", so re-saving a
+// playlist an operator had merely retyped would tear a PLAYING programme down
+// and start it again from its first frame.
+//
+// The mutation: drop db.PlaylistUploadName from playlistItemUpload and this
+// fails on the signature.
+func TestAPlaylistUploadWithSurroundingWhitespaceIsTheSamePlaylist(t *testing.T) {
 	e := playlistEngine(t)
 	t.Cleanup(func() { teardownPlaylistTier(e) })
-
-	// The upload must actually exist for the assertion below to mean
-	// anything: Resolve succeeding is not the same as resolving to the right
-	// file, and only checking the tier "started" cannot tell those apart.
-	uploadsDir := filepath.Join(e.cfg.DataDir, uploads.Dir)
-	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
-		t.Fatalf("mkdir uploads dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(uploadsDir, "loop.mp4"), []byte("x"), 0o644); err != nil {
-		t.Fatalf("seed upload file: %v", err)
-	}
 
 	s := playlistOnSettings()
 	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: " loop.mp4"}}
@@ -489,21 +733,24 @@ func TestAPlaylistUploadWithSurroundingWhitespaceStillResolves(t *testing.T) {
 		t.Fatal("no playlist tier recorded after reconcile")
 	}
 
-	want := "file:" + filepath.Join(uploadsDir, "loop.mp4")
-	args := tier.proc.Args()
-	found := false
-	for i, a := range args {
-		if a != "-i" || i+1 >= len(args) {
-			continue
-		}
-		found = true
-		if args[i+1] != want {
-			t.Errorf("playlist input = %q, want %q -- a leading space in the "+
-				"upload name must not reach the resolved path", args[i+1], want)
-		}
+	trimmed := playlistOnSettings()
+	trimmed.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "loop.mp4"}}
+	if got, want := tier.sig, playlistSig(trimmed); got != want {
+		t.Errorf("signature = %q for %q, want %q -- surrounding whitespace makes a "+
+			"playlist look like a different one, so re-saving it respawns a tier "+
+			"that was playing perfectly well", got, " loop.mp4", want)
 	}
-	if !found {
-		t.Fatal("playlist argv has no -i flag")
+
+	// And the file it plays is still the real, trimmed one: a tier that started
+	// on the right hash but the wrong path is the same failure wearing a
+	// different hat.
+	body, err := os.ReadFile(tier.listPath)
+	if err != nil {
+		t.Fatalf("read list: %v", err)
+	}
+	want := playlistmedia.DerivativePath(e.cfg.DataDir, "loop.mp4")
+	if !strings.Contains(string(body), "file '"+want+"'") {
+		t.Errorf("list does not name %s:\n%s", want, body)
 	}
 }
 

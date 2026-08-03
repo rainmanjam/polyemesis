@@ -11,11 +11,16 @@
 // works at all -- PTS continuity across a switch, and a destination riding the
 // switch without restarting -- and both were covered only against fakes.
 //
-//	(no subcommand)  set up, enable failover with a slate, add one destination
-//	status           print "<active> <switches> <primaryLive> <destRestarts>"
-//	stopall          stop every destination so its file finalises
-//	pin <kind>       put a source on air by hand (primary|backup|slate|auto)
-//	playlist <name>  turn the playlist tier on with one item, naming a stored upload
+//	(no subcommand)      set up, enable failover with a slate, add one destination
+//	status               print "<active> <switches> <primaryLive> <destRestarts>"
+//	stopall              stop every destination so its file finalises
+//	pin <kind>           put a source on air by hand (primary|backup|slate|auto)
+//	playlist <on|off> <upload>...
+//	                     store the playlist's items, with the tier on or off
+//	plready              print READY once every item has a derivative, else why not
+//	adddest <name> <file>  add a second file destination, so a case that expects a
+//	                     restart cannot damage the first one's recording
+//	restarts <name>      print one named destination's restart count, or -1
 package main
 
 import (
@@ -82,11 +87,26 @@ func main() {
 		login()
 		pin(os.Args[3])
 	case "playlist":
-		if len(os.Args) < 4 {
-			die("usage: playlist <stored-upload-name>")
+		if len(os.Args) < 5 {
+			die("usage: playlist <on|off> <stored-upload-name>...")
 		}
 		login()
-		playlist(os.Args[3])
+		playlist(os.Args[3] == "on", os.Args[4:])
+	case "plready":
+		login()
+		playlistReady()
+	case "adddest":
+		if len(os.Args) < 5 {
+			die("usage: adddest <name> <file-url>")
+		}
+		login()
+		addDest(os.Args[3], os.Args[4])
+	case "restarts":
+		if len(os.Args) < 4 {
+			die("usage: restarts <destination-name>")
+		}
+		login()
+		restarts(os.Args[3])
 	default:
 		die("unknown subcommand " + cmd)
 	}
@@ -215,9 +235,17 @@ func sel(on ...int) []map[string]any {
 	return rows
 }
 
-func dest() {
+func dest() { addDest("onair", "onair.mkv") }
+
+// addDest creates one file destination.
+//
+// Named and parameterised rather than hard-coded, because the mismatch ratchet
+// needs a destination of its OWN. That case expects restarts, and a restart
+// truncates the file the destination is writing -- pointed at onair.mkv it
+// would erase the very recording the timeline checks measured.
+func addDest(name, url string) {
 	code, out := do(http.MethodPost, "/destinations", map[string]any{
-		"name": "onair", "kind": "file", "url": "onair.mkv",
+		"name": name, "kind": "file", "url": url,
 		"enabled": true, "audioBitrate": 160,
 		"profile": map[string]any{
 			"mode": "simple", "tracks": sel(0), "matrix": []any{},
@@ -240,38 +268,67 @@ func dest() {
 // that it worked -- "the file has bytes in it" would pass just as happily on a
 // destination that died and came back.
 func status() {
-	_, out := do(http.MethodGet, "/status", nil)
-	var st struct {
-		Failover *struct {
-			Active      string `json:"active"`
-			Switches    int    `json:"switches"`
-			PrimaryLive bool   `json:"primaryLive"`
-		} `json:"failover"`
-		Destinations []struct {
-			Name    string `json:"name"`
-			Process *struct {
-				Restarts int    `json:"restarts"`
-				State    string `json:"state"`
-			} `json:"process"`
-		} `json:"destinations"`
-	}
-	if err := json.Unmarshal(out, &st); err != nil {
-		die("status unreadable: " + err.Error())
-	}
+	st := readStatus()
 	active, switches, live := "none", -1, false
 	if st.Failover != nil {
 		active, switches, live = st.Failover.Active, st.Failover.Switches, st.Failover.PrimaryLive
 	}
 	// -1 means "no destination process at all", which is a different failure
 	// from "restarted 0 times" and must not be reported as the same number.
-	restarts := -1
+	//
+	// The FIRST destination carrying a process, which for every check that reads
+	// this field is "onair" -- it is created before any other and the store lists
+	// in creation order. A case that adds a second destination reads it by name
+	// through `restarts` below rather than trusting that ordering.
+	n := -1
 	for _, d := range st.Destinations {
 		if d.Process != nil {
-			restarts = d.Process.Restarts
+			n = d.Process.Restarts
 			break
 		}
 	}
-	fmt.Printf("%s %d %t %d\n", active, switches, live, restarts)
+	fmt.Printf("%s %d %t %d\n", active, switches, live, n)
+}
+
+type statusDoc struct {
+	Failover *struct {
+		Active      string `json:"active"`
+		Switches    int    `json:"switches"`
+		PrimaryLive bool   `json:"primaryLive"`
+	} `json:"failover"`
+	Destinations []struct {
+		Name    string `json:"name"`
+		Process *struct {
+			Restarts int    `json:"restarts"`
+			State    string `json:"state"`
+		} `json:"process"`
+	} `json:"destinations"`
+}
+
+func readStatus() statusDoc {
+	_, out := do(http.MethodGet, "/status", nil)
+	var st statusDoc
+	if err := json.Unmarshal(out, &st); err != nil {
+		die("status unreadable: " + err.Error())
+	}
+	return st
+}
+
+// restarts prints ONE named destination's restart count.
+//
+// By name, not by position. The mismatch ratchet runs alongside the destination
+// the earlier steps used, and reading "the first one with a process" there would
+// answer about whichever the store happened to list first -- a number that looks
+// exactly like the one being asked for and means something else. -1 keeps its
+// meaning from status: no process at all, which is not "restarted 0 times".
+func restarts(name string) {
+	for _, d := range readStatus().Destinations {
+		if d.Name == name && d.Process != nil {
+			fmt.Println(d.Process.Restarts)
+			return
+		}
+	}
+	fmt.Println(-1)
 }
 
 func pin(kind string) {
@@ -283,26 +340,35 @@ func pin(kind string) {
 	fmt.Println("PIN_OK")
 }
 
-// playlist turns the playlist tier on, pointed at a stored upload.
+// playlist stores the playlist's items, with the tier on or off.
 //
-// An UPLOAD NAME, not a path. Items stopped being paths because
+// UPLOAD NAMES, not paths. Items stopped being paths because
 // uploads.Store.Resolve is the single boundary that turns an operator-supplied
 // name into a file inside the uploads directory, and a path field made that
 // boundary optional. Posting the old "filePath" now fails the settings
 // decoder's unknown-field check outright, which is the intended answer.
 //
-// Turned on MID-RUN by its own subcommand rather than folded into
-// enableFailover, because the playlist outranks the slate: a tier already
-// running when the encoder is cut would take the slate's place, and the suite
-// would stop measuring the slate cycle it was written for. The file on air is
-// only interesting once that cycle has been proved to work without one.
+// SEVERAL items, not one. A single-item playlist cannot tell sequencing apart
+// from B1's play-item-0-forever: both look like one file on air. The suite
+// names three of DIFFERENT LENGTHS for the same reason -- with three equal
+// clips a boundary in the wrong place is indistinguishable from one in the
+// right place.
+//
+// ON AND OFF ARE SEPARATE CALLS, and the off call is why the suite covers the
+// production enqueue path at all. Saving the ITEMS is what makes
+// api.Server.enqueuePlaylistNormalisation submit one normalisation per upload;
+// it does that whether or not the tier is enabled. So the suite can stage the
+// items -- and let the real job write the real derivatives -- while the tier
+// itself stays off until the run is ready for it. Enabling it early would take
+// the slate's place in the failover cycle the suite was originally written to
+// measure, because the playlist outranks the slate.
 //
 // Read-modify-write of the whole settings document, exactly as enableFailover
 // does. PUT /settings REPLACES the settings, so posting a lone failover block
 // would reset the ingest to its defaults, move the listener off port 1938 and
 // strand the publisher -- which would look from the outside like the failover
 // this suite is measuring.
-func playlist(upload string) {
+func playlist(enabled bool, uploads []string) {
 	_, out := do(http.MethodGet, "/settings", nil)
 	var s map[string]any
 	if err := json.Unmarshal(out, &s); err != nil {
@@ -312,30 +378,89 @@ func playlist(upload string) {
 	if f == nil {
 		die("settings carried no failover block")
 	}
-	// A bare stored name, never a path: db.PlaylistSettings.PlaylistFileProblem
+	// Bare stored names, never paths: db.PlaylistSettings.PlaylistFileProblem
 	// refuses anything carrying a separator, and the engine resolves what is
 	// left through uploads.Store.Resolve.
-	f["playlist"] = map[string]any{
-		"enabled": true,
-		"items":   []any{map[string]any{"upload": upload}},
+	items := make([]any, 0, len(uploads))
+	for _, u := range uploads {
+		items = append(items, map[string]any{"upload": u})
 	}
+	f["playlist"] = map[string]any{"enabled": enabled, "items": items}
 	code, body := do(http.MethodPut, "/settings", s)
 	if code != http.StatusOK {
-		die(fmt.Sprintf("enable playlist failed: %d %s", code, body))
+		die(fmt.Sprintf("save playlist failed: %d %s", code, body))
 	}
 	fmt.Println("PLAYLIST_OK")
 }
 
+// playlistReady prints READY once every item has a derivative, and otherwise
+// prints what each item is waiting on.
+//
+// GET /failover/playlist, the endpoint Task 6 added, rather than stat-ing the
+// derivative directory from the shell. Two reasons, and the second is the one
+// that matters: the endpoint is the only thing that knows a job is DEFERRED
+// rather than merely missing, so a suite that stalls can say whether the
+// governor is holding the work back or the transcode failed; and a path built
+// in the shell is a second copy of playlistmedia.DerivativePath, which already
+// carries a profile version this suite got wrong once -- it hand-copied a
+// derivative to a name the code had stopped looking for, and every check
+// downstream went on passing.
+func playlistReady() {
+	_, out := do(http.MethodGet, "/failover/playlist", nil)
+	var st struct {
+		Ready bool `json:"ready"`
+		Items []struct {
+			Upload string `json:"upload"`
+			State  string `json:"state"`
+			Detail string `json:"detail"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(out, &st); err != nil {
+		die("playlist status unreadable: " + err.Error())
+	}
+	if st.Ready {
+		fmt.Println("READY")
+		return
+	}
+	parts := make([]string, 0, len(st.Items))
+	for _, it := range st.Items {
+		p := it.Upload + "=" + it.State
+		if it.Detail != "" {
+			p += "(" + it.Detail + ")"
+		}
+		parts = append(parts, p)
+	}
+	fmt.Println("NOTREADY " + strings.Join(parts, " "))
+}
+
+// stopAll stops every destination so its file finalises.
+//
+// The list body is [{"destination": {...}, "routing": {...}}], NOT a bare array
+// of destinations. Decoding it as the latter was silently reading id 0 off every
+// row, POSTing /destinations/0/stop, taking the 404 without looking and printing
+// STOPPED -- so no destination was ever stopped and the recording the timeline
+// checks read was always an unfinalised Matroska. The checks were written around
+// that damage rather than against it: the duration one reads the last decode
+// timestamp because "format=duration" came back N/A, which is what an
+// unfinalised file reports.
 func stopAll() {
 	_, out := do(http.MethodGet, "/destinations", nil)
 	var rows []struct {
-		ID int64 `json:"id"`
+		Destination struct {
+			ID int64 `json:"id"`
+		} `json:"destination"`
 	}
 	if err := json.Unmarshal(out, &rows); err != nil {
 		die("destinations unreadable: " + err.Error())
 	}
 	for _, r := range rows {
-		do(http.MethodPost, fmt.Sprintf("/destinations/%d/stop", r.ID), nil)
+		if r.Destination.ID == 0 {
+			die("a destination came back with no id; the list shape has changed")
+		}
+		if code, body := do(http.MethodPost,
+			fmt.Sprintf("/destinations/%d/stop", r.Destination.ID), nil); code != http.StatusOK {
+			die(fmt.Sprintf("stop %d failed: %d %s", r.Destination.ID, code, body))
+		}
 	}
 	fmt.Println("STOPPED")
 }

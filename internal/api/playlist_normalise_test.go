@@ -187,15 +187,21 @@ func TestSavingAPlaylistItemThatNamesNoUploadIsRefused(t *testing.T) {
 // TestADeletedUploadDoesNotLockTheOperatorOutOfSettings is the other half, and
 // it is about a check that was too strict rather than too loose.
 //
-// The sequence is entirely ordinary: save a playlist, delete the file. There is
-// no in-use guard on DELETE /api/v1/media/{name} (deliberately -- it belongs
-// with the orphan sweep), so the stored item now names nothing. With existence
-// checked on every item, EVERY subsequent settings save 400s -- with the
-// playlist disabled, and for a change with nothing to do with the playlist --
-// and the operator cannot clear it, because the settings UI has no playlist
-// control yet and the page GETs the whole document and PUTs it back, so the
-// stale item round-trips untouched. Deleting a file bricked the settings page
-// with no in-product recovery.
+// The sequence used to be entirely ordinary: save a playlist, delete the file
+// through DELETE /api/v1/media/{name}. Task 5 closed that path -- the in-use
+// guard on that endpoint now refuses exactly this case, see
+// TestDeletingAnUploadAPlaylistNamesIsRefused in media_test.go -- so the file
+// here is removed straight off disk instead, standing in for every OTHER way
+// an upload can still disappear out from under a stored item (moved, pruned
+// by something outside this process, or gone from before the guard shipped).
+// The stored item now names nothing, exactly as it would have before Task 5.
+//
+// With existence checked on every item, EVERY subsequent settings save 400s
+// -- with the playlist disabled, and for a change with nothing to do with the
+// playlist -- and the operator cannot clear it, because the settings UI has
+// no playlist control yet and the page GETs the whole document and PUTs it
+// back, so the stale item round-trips untouched. That would brick the
+// settings page with no in-product recovery.
 //
 // VALIDATION REJECTS WHAT THE OPERATOR IS INTRODUCING; IT MUST NOT PUNISH THEM
 // FOR PRE-EXISTING STATE THEY HAVE NO CONTROL TO EDIT. The safety property is
@@ -212,9 +218,12 @@ func TestADeletedUploadDoesNotLockTheOperatorOutOfSettings(t *testing.T) {
 	// A perfectly good save, which is what makes the item pre-existing.
 	savePlaylist(t, h, sign, []string{"doomed.ts"}, http.StatusOK)
 
-	// The operator deletes the upload through the media page. Nothing warns
-	// them, and nothing rewrites the settings row.
-	send(t, h, sign, http.MethodDelete, "/api/v1/media/doomed.ts", nil, http.StatusNoContent)
+	// The upload vanishes some way other than the API -- see the comment
+	// above for why this is no longer a DELETE call. Nothing rewrites the
+	// settings row.
+	if err := os.Remove(filepath.Join(srv.cfg.DataDir, uploads.Dir, "doomed.ts")); err != nil {
+		t.Fatalf("remove upload from disk: %v", err)
+	}
 
 	// An entirely unrelated change: the recorder's segment length. The playlist
 	// block travels along untouched because the settings page always PUTs the
@@ -257,7 +266,12 @@ func TestANewItemIsStillRefusedWhenAnOldOneIsAlreadyBroken(t *testing.T) {
 	seedUpload(t, srv, "doomed.ts")
 
 	savePlaylist(t, h, sign, []string{"doomed.ts"}, http.StatusOK)
-	send(t, h, sign, http.MethodDelete, "/api/v1/media/doomed.ts", nil, http.StatusNoContent)
+	// Off disk directly, not through DELETE /api/v1/media/{name}: that
+	// endpoint now refuses to remove an upload a stored item names. See
+	// TestADeletedUploadDoesNotLockTheOperatorOutOfSettings above.
+	if err := os.Remove(filepath.Join(srv.cfg.DataDir, uploads.Dir, "doomed.ts")); err != nil {
+		t.Fatalf("remove upload from disk: %v", err)
+	}
 
 	// The stale item rides along, and the operator adds a second one that names
 	// nothing either. The NEW one must still be refused.

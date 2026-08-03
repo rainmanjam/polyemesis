@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -84,6 +85,19 @@ type Server struct {
 	// one per adapter: the key belongs to Kick, not to an account, so two
 	// connected Kick channels share the fetch.
 	kickKeys *chat.KickKeyFetcher
+
+	// settingsMu is the one serialisation boundary between a playlist
+	// reference existing and an upload it names being removable.
+	// handlePutSettings holds it across validating and storing a settings
+	// document; handleDeleteMedia holds it across checking whether a stored
+	// playlist item names the upload being deleted and removing that
+	// upload's files. Without a shared lock the two can interleave: a save
+	// that already passed its own existence check can still commit after a
+	// concurrent delete decided the same upload was unreferenced, leaving a
+	// freshly saved item pointing at a file that is gone -- exactly the
+	// state the delete's in-use guard exists to prevent. Neither handler is
+	// hot enough for the coarse scope to matter.
+	settingsMu sync.Mutex
 }
 
 // Options configures the server.
@@ -212,6 +226,9 @@ func (s *Server) Handler() http.Handler {
 			// Manual failover. The tier's return mode defaults to manual, so
 			// this is how a broadcast leaves a slate.
 			r.Post("/failover/source", s.handleSwitchSource)
+			// Per-item playlist readiness. Its own GET rather than a field on
+			// the settings blob -- see handlePlaylistStatus.
+			r.Get("/failover/playlist", s.handlePlaylistStatus)
 			r.Get("/stats", s.handleStats)
 			r.Get("/levels", s.handleLevels)
 

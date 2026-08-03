@@ -44,6 +44,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
@@ -191,8 +192,8 @@ func progressArgs() []string {
 // This job produces a file nobody is waiting on this second. Losing that race
 // trades a stream for a file, so the cheapest way to never be in it is to never
 // want the GPU.
-func normaliseArgs(in, out string) []string {
-	return buildNormalise(in, out, false)
+func normaliseArgs(in, out string, videoSecs, audioSecs float64) []string {
+	return buildNormalise(in, out, false, videoSecs, audioSecs)
 }
 
 // normaliseSilentArgs is the same profile for a source with no audio track.
@@ -202,14 +203,30 @@ func normaliseArgs(in, out string) []string {
 // package exists to prevent — it does not merely play without sound, it breaks
 // the set. Silence is synthesised at the profile's own sample rate and channel
 // count so that a slate, a bumper or a title card is a first-class item.
+//
+// It takes no videoSecs or audioSecs, unlike normaliseArgs: -shortest already
+// gives it a stop that costs nothing, because the audio here is synthesised TO
+// MATCH the picture rather than recovered from operator media. See
+// buildNormalise.
 func normaliseSilentArgs(in, out string) []string {
-	return buildNormalise(in, out, true)
+	return buildNormalise(in, out, true, 0, 0)
 }
 
+// PadSlackSecs is added to the computed pad target below, to survive the gap
+// between what a SOURCE probe reports and what the RE-ENCODE actually
+// produces (AAC frame alignment, GOP boundaries at a different frame rate
+// than the source). In the safe direction only: at most a few extra
+// milliseconds of trailing silence or a repeated last frame, never a file
+// shorter than the source. Kept small deliberately -- see buildNormalise's
+// pad target computation for why a generous margin is the wrong instinct
+// here, unlike an unbounded pad that needed a hard stop.
+const PadSlackSecs = 0.05
+
 // buildNormalise is the single source of the profile. The silent variant
-// differs only in where the audio comes from; every encoding flag below is
-// shared, so the two outputs cannot drift apart into two profiles.
-func buildNormalise(in, out string, silent bool) []string {
+// differs only in where the audio comes from and in the padding described
+// below; every encoding flag shared between them lives in one place, so the
+// two outputs cannot drift apart into two profiles.
+func buildNormalise(in, out string, silent bool, videoSecs, audioSecs float64) []string {
 	args := commonArgs()
 	args = append(args, progressArgs()...)
 	args = append(args, "-i", in)
@@ -226,6 +243,13 @@ func buildNormalise(in, out string, silent bool) []string {
 		// -shortest, so the synthesised silence ends with the picture rather
 		// than running until the heat death of the universe: anullsrc has no
 		// duration of its own.
+		//
+		// This is the ONE place -shortest belongs. Everywhere else on the
+		// operator-media path it is exactly the defect PAD, NEVER TRUNCATE
+		// exists to remove -- see the pad filters below -- but here there is
+		// no operator audio behind the shorter stream to lose: the silence
+		// was generated FOR this picture, so ending it with the picture
+		// discards nothing.
 		args = append(args, "-map", "1:a:0", "-shortest")
 	} else {
 		args = append(args, "-map", "0:a:0")
@@ -239,10 +263,35 @@ func buildNormalise(in, out string, silent bool) []string {
 	// blamed for. setsar=1 is load-bearing — two files can agree on 1920x1080
 	// and still disagree on sample aspect ratio, and the concat demuxer counts
 	// that as a mismatch.
-	args = append(args, "-vf", fmt.Sprintf(
+	// The pad target is the LONGER of the source's own two tracks, plus a
+	// small slack for the re-encode's own rounding (PadSlackSecs). Computed
+	// here, once, and used by both filters below: tpad only has something to
+	// do when video is the shorter track, apad only when audio is, and
+	// exactly one of those is ever true for a real mismatch.
+	target := videoSecs
+	if audioSecs > target {
+		target = audioSecs
+	}
+	target += PadSlackSecs
+	videoPad := target - videoSecs
+	if videoPad < 0 {
+		videoPad = 0
+	}
+
+	vf := fmt.Sprintf(
 		"scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2,"+
 			"pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
-		NormaliseWidth, NormaliseHeight, NormaliseWidth, NormaliseHeight))
+		NormaliseWidth, NormaliseHeight, NormaliseWidth, NormaliseHeight)
+	if !silent {
+		// tpad's stop_duration ADDS this many seconds of cloned final frames.
+		// It is zero -- a genuine no-op -- whenever video is already the
+		// longer or equal track, and the exact shortfall otherwise: unlike an
+		// unbounded pad, this needs no -shortest and no external cutoff to
+		// stop, because it is a fixed, finite amount of tape by construction.
+		vf += ",tpad=stop_mode=clone:stop_duration=" +
+			strconv.FormatFloat(videoPad, 'f', 3, 64)
+	}
+	args = append(args, "-vf", vf)
 
 	args = append(args,
 		"-c:v", NormaliseVideoEncoder,
@@ -280,12 +329,23 @@ func buildNormalise(in, out string, silent bool) []string {
 	// aresample with async and first_pts=0 fills the gap a source with a late or
 	// ragged audio start would otherwise carry into the playlist as a drift that
 	// accumulates across every item after it.
+	af := "aresample=async=1:first_pts=0"
+	if !silent {
+		// apad's whole_dur is an ABSOLUTE target duration for the audio
+		// stream, unlike tpad's additive stop_duration -- which is exactly
+		// why the video side above computes a delta and this one does not.
+		// It is a no-op whenever audio is already at least this long, and
+		// extends it with silence otherwise. Same reasoning as tpad: a fixed,
+		// finite target, so no -shortest and no external cutoff is needed to
+		// stop it.
+		af += ",apad=whole_dur=" + strconv.FormatFloat(target, 'f', 3, 64)
+	}
 	args = append(args,
 		"-c:a", NormaliseAudioEncoder,
 		"-b:a", strconv.Itoa(NormaliseAudioKbps)+"k",
 		"-ac", strconv.Itoa(NormaliseChannels),
 		"-ar", strconv.Itoa(NormaliseSampleRate),
-		"-af", "aresample=async=1:first_pts=0",
+		"-af", af,
 	)
 
 	// MPEG-TS is the container AND the timebase decision: TS timestamps are
@@ -298,6 +358,21 @@ func buildNormalise(in, out string, silent bool) []string {
 }
 
 // ------------------------------------------------------------------- the paths
+
+// ProfileVersion identifies what a derivative CONTAINS, and it is part of the
+// derivative's filename rather than a sidecar.
+//
+// DerivativePath is keyed on the upload's name, and the enqueue path
+// (api.Server.enqueuePlaylistNormalisation) skips any upload whose derivative
+// already exists. So without a version in the path, a change to the encode is
+// invisible: every derivative written by the previous profile is silently
+// reused while readiness reports the item ready. B2's padding and measured
+// duration are exactly such a change, and B1's files have neither.
+//
+// Bump this whenever the encode changes what the output contains. Re-encoding
+// is the cost; concatenating a file that predates the contract is the
+// alternative.
+const ProfileVersion = 2
 
 // DerivativePath is where one upload's normalised copy lives.
 //
@@ -316,9 +391,85 @@ func buildNormalise(in, out string, silent bool) []string {
 // name before it is joined — the same defence media.LayoutFor applies to a
 // recording name. ValidUploadName is the check; this function has to stay
 // total because callers use it to build a URL and a readiness answer.
+//
+// db.PlaylistUploadName, never a private strings.TrimSpace: it is the one
+// place a playlist item's name is trimmed, and this was its last recorded
+// exception, carried because this package could not import internal/db when
+// that rule was written. It can now, so the exception is closed rather than
+// carried further.
 func DerivativePath(dataDir, upload string) string {
-	name := filepath.Base(strings.TrimSpace(upload))
-	return filepath.Join(dataDir, Dir, name+NormalisedExt)
+	name := filepath.Base(db.PlaylistUploadName(upload))
+	return filepath.Join(dataDir, Dir,
+		fmt.Sprintf("%s.v%d%s", name, ProfileVersion, NormalisedExt))
+}
+
+// DerivativeVersions lists every version of one upload's derivative that is
+// actually on disk, which is what deletion has to remove: a profile bump can
+// leave more than one version of the same upload's derivative behind.
+//
+// IT READS THE DIRECTORY AND COMPARES NAMES. It does not build a glob, and that
+// is the whole point of the function.
+//
+// The version this replaced returned `<name>.v*<ext>` for filepath.Glob, and the
+// name reaching it comes from a URL path segment. ValidUploadName rejects
+// separators and control characters but says nothing about `*`, `?` or `[` --
+// they are legal in a filename -- so `DELETE /api/v1/media/%2A` produced the
+// pattern `<dataDir>/playlist-media/*.v*.ts` and the caller deleted EVERY
+// DERIVATIVE IN THE INSTALL, before the name was ever validated. A `[` would
+// meanwhile fail the pattern parse and 500.
+//
+// Matching by equality means a metacharacter is just a character, which is what
+// it always was on disk. There is no pattern for a caller to smuggle anything
+// through, so nothing downstream has to remember to escape one.
+func DerivativeVersions(dataDir, upload string) ([]string, error) {
+	name := filepath.Base(db.PlaylistUploadName(upload))
+	// A name that could escape the directory has no derivatives by definition,
+	// and asking the filesystem about it is not this function's job.
+	if name == "" || name == "." || name == ".." {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(filepath.Join(dataDir, Dir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No derivative directory yet is not an error: nothing has been
+			// normalised, so there is nothing of this upload's to remove.
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !isDerivativeOf(e.Name(), name) {
+			continue
+		}
+		out = append(out, filepath.Join(dataDir, Dir, e.Name()))
+	}
+	return out, nil
+}
+
+// isDerivativeOf reports whether file is `<upload>.v<digits><ext>`.
+//
+// The digits are checked rather than skipped: `show.mp4.vNOPE.ts` is not a
+// derivative this package ever wrote, and a deletion that removed it would be
+// deleting somebody else's file on the strength of a prefix match.
+func isDerivativeOf(file, upload string) bool {
+	rest, ok := strings.CutPrefix(file, upload+".v")
+	if !ok {
+		return false
+	}
+	digits, ok := strings.CutSuffix(rest, NormalisedExt)
+	if !ok || digits == "" {
+		return false
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // DerivativeDir is where every upload's derivative lives.
@@ -408,13 +559,29 @@ const (
 // machine with no media and no FFprobe on it.
 type StreamProber func(ctx context.Context, path, kind string) (bool, error)
 
+// DurationProber reports a source's own video and audio track durations, in
+// seconds. A field on Processor for the same reason StreamProber is one:
+// chooseProfile calls it on the operator-media path to compute the pad
+// filters described at buildNormalise, and a test exercising that path must
+// be able to answer without a real FFprobe on the machine.
+//
+// Per-stream rather than a single container-level number: buildNormalise has
+// to know WHICH of the two tracks is shorter to decide which filter has
+// anything to do, and by how much -- a single combined duration cannot
+// answer either question.
+type DurationProber func(ctx context.Context, path string) (videoSecs, audioSecs float64, err error)
+
 // Processor runs the normalisation job.
 type Processor struct {
 	log    *slog.Logger
 	cfg    Config
 	exec   media.Execer
 	stream StreamProber
+	dur    DurationProber
 	free   func(path string) (uint64, error)
+	// beforePublish is a test seam only -- see RunNormalise's pre-publish
+	// recheck for why the hook exists at all.
+	beforePublish func()
 }
 
 // Option customises a Processor, chiefly for tests.
@@ -426,6 +593,9 @@ func WithExecer(e media.Execer) Option { return func(p *Processor) { p.exec = e 
 
 // WithStreamProber replaces the stream-presence check.
 func WithStreamProber(s StreamProber) Option { return func(p *Processor) { p.stream = s } }
+
+// WithDurationProber replaces the source-duration check.
+func WithDurationProber(d DurationProber) Option { return func(p *Processor) { p.dur = d } }
 
 // WithFreeSpace replaces the free-space reporter, so a full disk can be
 // simulated without one.
@@ -443,6 +613,7 @@ func WithFreeSpace(fn func(path string) (uint64, error)) Option {
 func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 	p := &Processor{log: log, cfg: cfg.Normalized(), exec: media.Exec, free: uploads.FreeBytes}
 	p.stream = p.probeStream
+	p.dur = p.probeDuration
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -499,6 +670,20 @@ type NormaliseResult struct {
 	// Reused records that the derivative was already there and nothing was
 	// re-encoded.
 	Reused bool `json:"reused,omitempty"`
+	// DurationMS is the ENCODED OUTPUT's own duration, measured by
+	// ProbeOutputDurationMS after publication -- never NormaliseParams.
+	// DurationMS, which is a source-side estimate that is never populated in
+	// production (see that field) and in any case describes a file the
+	// padding and re-encode have already changed.
+	//
+	// This is not needed for concat correctness: Task 1 measured that a
+	// concat list's per-entry duration directive makes no difference to the
+	// packet stream FFmpeg actually plays. What it IS needed for is Task 7's
+	// operator playlist editor, which shows each item's length -- the
+	// difference between building a programme and guessing at one. A reused
+	// derivative carries zero here rather than re-probing a file this run did
+	// not write; see RunNormalise.
+	DurationMS int64 `json:"durationMs,omitempty"`
 }
 
 // NewNormaliseJob builds the queue entry.
@@ -591,6 +776,26 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 		p.discard(partial)
 		return err
 	}
+
+	// The upload may have been deleted while this job ran -- a transcode of a
+	// 1080p file is not instant, and DELETE /media/{name} does not know or wait
+	// for a job it did not start. Publishing now would recreate exactly the
+	// orphan that delete rule exists to remove, with no upload left on disk to
+	// explain where the derivative came from.
+	//
+	// The check is HERE, at the last atomic step, rather than at dequeue: it
+	// closes the window without the queue needing to support cancellation, and
+	// checking any earlier would still leave the whole transcode's duration as
+	// a window the earlier check could not close.
+	if p.beforePublish != nil {
+		p.beforePublish() // test seam only
+	}
+	if _, err := os.Stat(input); err != nil {
+		p.discard(partial)
+		return jobs.Permanent(fmt.Errorf("upload %s was deleted while it was being "+
+			"normalised; nothing was published", params.Upload))
+	}
+
 	if err := publish(partial, final); err != nil {
 		return err
 	}
@@ -604,6 +809,18 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 	res := NormaliseResult{Path: final, Silent: silent}
 	if st, err := os.Stat(final); err == nil {
 		res.Bytes = st.Size()
+	}
+	// Measured from the file this process just wrote, never from
+	// params.DurationMS -- see NormaliseResult.DurationMS. Best-effort: a
+	// derivative that FFmpeg just finished writing and this process just
+	// renamed into place is about as likely to fail a probe as any file this
+	// package touches, but a probe failure here is not a reason to undo a
+	// publish that has already succeeded.
+	if ms, err := ProbeOutputDurationMS(ctx, p.cfg.FFprobe, final); err == nil {
+		res.DurationMS = ms
+	} else if p.log != nil {
+		p.log.Warn("could not measure a published derivative's duration",
+			"upload", params.Upload, "err", err)
 	}
 	rep.SetResult(res)
 	rep.Logf("normalised copy written to %s", filepath.Base(final))
@@ -643,7 +860,16 @@ func (p *Processor) chooseProfile(ctx context.Context, upload, input, out string
 	if !hasAudio {
 		return normaliseSilentArgs(input, out), true, nil
 	}
-	return normaliseArgs(input, out), false, nil
+	// The source's own two track durations are what buildNormalise's pad
+	// filters are computed from -- see the comment there. A file that has
+	// already answered the two stream-presence probes above but cannot
+	// answer this one is exactly as unreadable as one that fails the first:
+	// permanent, for the same reason probeStream is.
+	videoSecs, audioSecs, err := p.dur(ctx, input)
+	if err != nil {
+		return nil, false, err
+	}
+	return normaliseArgs(input, out, videoSecs, audioSecs), false, nil
 }
 
 // checkSpace refuses the transcode when the volume could not survive it.
@@ -728,6 +954,114 @@ func streamArgs(path, kind string) []string {
 		"-of", "csv=p=0",
 		path,
 	}
+}
+
+// probeDuration is the real DurationProber: one ffprobe reading a source's own
+// video and audio track durations, which chooseProfile uses to compute the
+// pad filters described at buildNormalise.
+//
+// PERMANENT on failure, for the same reason probeStream is: chooseProfile has
+// already confirmed this file's video and audio tracks answer FFprobe, so a
+// failure here means the same unreadable file, not a transient one.
+func (p *Processor) probeDuration(ctx context.Context, path string) (videoSecs, audioSecs float64, err error) {
+	videoSecs, audioSecs, err = probeStreamDurationsSecs(ctx, p.cfg.FFprobe, path)
+	if err != nil {
+		return 0, 0, jobs.Permanent(err)
+	}
+	return videoSecs, audioSecs, nil
+}
+
+// probeStreamDurationsSecs reads a source's own video and audio track
+// durations in one ffprobe call.
+//
+// Per-stream, unlike probeFormatDurationSecs below (which ProbeOutputDurationMS
+// uses on the finished OUTPUT): buildNormalise has to know WHICH of the two
+// tracks is shorter, and by how much, to compute its pad filters, and a single
+// combined container duration cannot answer either question. The finished
+// output has no such question left to answer -- it is already one profile,
+// one duration -- which is why that path reads the simpler, container-level
+// field instead.
+func probeStreamDurationsSecs(ctx context.Context, ffprobe, path string) (videoSecs, audioSecs float64, err error) {
+	out, stderr, err := output(ctx, media.Command{Name: ffprobe, Args: []string{
+		"-hide_banner", "-v", "error",
+		"-show_entries", "stream=codec_type,duration",
+		"-of", "csv=p=0",
+		path,
+	}})
+	if err != nil {
+		if s := strings.TrimSpace(stderr); s != "" {
+			return 0, 0, fmt.Errorf("ffprobe could not read the duration of %s: %s", filepath.Base(path), s)
+		}
+		return 0, 0, fmt.Errorf("ffprobe could not read the duration of %s: %w", filepath.Base(path), err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		kind, secsField, found := strings.Cut(line, ",")
+		if !found {
+			continue
+		}
+		secs, perr := strconv.ParseFloat(strings.TrimSpace(secsField), 64)
+		if perr != nil {
+			continue // e.g. "N/A" -- treated as unanswered, checked below.
+		}
+		switch kind {
+		case "video":
+			videoSecs = secs
+		case "audio":
+			audioSecs = secs
+		}
+	}
+	if videoSecs <= 0 {
+		return 0, 0, fmt.Errorf("%s has no readable video duration", filepath.Base(path))
+	}
+	if audioSecs <= 0 {
+		return 0, 0, fmt.Errorf("%s has no readable audio duration", filepath.Base(path))
+	}
+	return videoSecs, audioSecs, nil
+}
+
+// ProbeOutputDurationMS reads the duration of a file this process just wrote.
+//
+// From the OUTPUT, never the source: the derivative has been re-encoded,
+// padded and remuxed, and the source's duration describes a file that no
+// longer plays. NormaliseParams.DurationMS is the source-side estimate and is
+// not this.
+//
+// This is NOT needed for concat correctness -- Task 1 measured that a concat
+// list's per-entry duration directive makes no difference to the packet
+// stream FFmpeg actually plays, with or without it. What this number is for is
+// NormaliseResult.DurationMS: Task 7's operator playlist editor showing each
+// item's real, padded length, which is the difference between building a
+// programme and guessing at one.
+func ProbeOutputDurationMS(ctx context.Context, ffprobe, path string) (int64, error) {
+	secs, err := probeFormatDurationSecs(ctx, ffprobe, path)
+	if err != nil {
+		return 0, err
+	}
+	return int64(secs*1000 + 0.5), nil // round rather than truncate
+}
+
+// probeFormatDurationSecs is ProbeOutputDurationMS's plumbing: one ffprobe
+// reading a file's CONTAINER-level duration. See probeStreamDurationsSecs
+// above for why the source-side probe reads a different, per-stream field
+// instead.
+func probeFormatDurationSecs(ctx context.Context, ffprobe, path string) (float64, error) {
+	out, stderr, err := output(ctx, media.Command{Name: ffprobe, Args: []string{
+		"-hide_banner", "-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=nw=1:nk=1",
+		path,
+	}})
+	if err != nil {
+		if s := strings.TrimSpace(stderr); s != "" {
+			return 0, fmt.Errorf("ffprobe could not read the duration of %s: %s", filepath.Base(path), s)
+		}
+		return 0, fmt.Errorf("ffprobe could not read the duration of %s: %w", filepath.Base(path), err)
+	}
+	secs, perr := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if perr != nil || secs <= 0 {
+		return 0, fmt.Errorf("%s has no readable duration", filepath.Base(path))
+	}
+	return secs, nil
 }
 
 // ------------------------------------------------------------------- plumbing

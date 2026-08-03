@@ -21,15 +21,48 @@ claim is often more instructive than the right one.
 | **2** | [LL-HLS](LL-HLS.md) | 3 d | ✅ **done** | Preview latency 4.2–6.2 s → 2.2–3.2 s, zero new dependencies. Also fixed a 30 fps assumption that made every segment 20% long on a 25 fps ingest |
 | **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | **shipped** | Exactly one net-new module. Retained telemetry has no existing path at all |
 | **4** | Selector generalisation | **~3–5 d** | ✅ **done** | The prerequisite 5 and 7 both needed. `chooseSource` now ranks an ordered candidate list, and a playlist is the fourth candidate. Provably behaviour-preserving up to the point it changed on purpose: a 1024-row exhaustive table froze every reachable decision first, and all 1024 are byte-identical today |
-| **5** | [Playlist — full](PLAYLIST-AND-COMPOSITING.md#sequencing-take-the-concat-demuxer) | **17–22 d** | ready | Most-requested by volume; lower technical risk than compositing |
-| **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **v0.5 shipped** | The most-repeated unmet request. Sits before 7 because it extracts the `overlay`/`evenExpr` helpers compositing then reuses |
-| **7** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | ready | Largest, riskiest, and the one that puts the audio differentiator in play |
+| **5** | [Playlist — full](PLAYLIST-AND-COMPOSITING.md#sequencing-take-the-concat-demuxer) | **17–22 d** | **A and B shipped · C ready** | Most-requested by volume; lower technical risk than compositing. Built as three sub-projects: A gave the playlist its own hub, B1 made every item a normalised derivative, B2 sequenced them. C is source-scoped scheduling |
+| **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **v0.5 shipped · full deferred** | The most-repeated unmet request. Deferred 2026-08-02 — see below |
+| **7** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | **deferred** | Largest, riskiest, and the one that puts the audio differentiator in play. Deferred 2026-08-02 — see below |
 | **8** | [WebRTC — WHEP](WEBRTC.md) | **8–12 d** | **deferred** | The sub-second preview tier. Independent of everything else; slots in whenever latency becomes the priority |
 | **9** | [Teams and roles](TEAMS-AND-ROLES.md) | **20–30 d** | ready | A security boundary retrofitted across ~120 routes. Do it when it is the priority, not alongside other work |
 | **10** | [Destination settings & metadata](DESTINATION-SETTINGS.md) | **14–19 d** in 4 parts | ✅ **A–D shipped** | Three metadata fields against a documented ten-plus, two of which are compliance items. Shipped 2026-07-29 bar the two items under [what remains](DESTINATION-SETTINGS.md#what-remains) |
 | **11** | [Chat moderation](CHAT-MODERATION.md) | — | ✅ **shipped** | Ban, timeout and delete across four platforms, plus upstream retraction. Shipped 2026-07-30 with every item in the plan and two more the research turned up |
 | **12** | [Chat automod](CHAT-AUTOMOD.md) | — | ✅ **shipped** | Rules, then per-author history, then an optional model. The acting half already exists — four adapters expose ban/timeout/delete — so this is only the deciding half |
 | — | [Unreachable knobs](UNREACHABLE-KNOBS.md) | — | survey | The sibling of item 0, for *settings* rather than features: knobs the server honours that no operator can reach. Surveyed 2026-07-30; one shipped, the rest open |
+
+## Two items deferred, 2026-08-02
+
+Both were researched, both have complete designs, and neither is blocked by
+anything. They are deferred as a priority call, and recorded here rather than
+left as an unexplained gap in the sequence — the next person to read this table
+should not have to guess whether they were forgotten.
+
+**6 — Overlays (full).** The v0.5 image watermark shipped. The remaining ~16 days
+buys text, dynamic data, multiple overlays per rendition, a preview endpoint and
+the editor. The design in [OVERLAYS.md](OVERLAYS.md) stands as written, and three
+of its decisions are already foreclosed by code rather than by opinion: image
+overlays must be real `-i` inputs and never `movie=` (paths routinely contain
+filtergraph separators — `internal/engine/synth.go`), text must use `textfile=`
+and never `text=` for the same escaping reason, and the acknowledgement idiom
+should be borrowed from `Destination.ExpertAckReencode` rather than reinvented.
+The part that still has to be got right first is the `-filter_complex`
+restructure: `-vf` with link labels is proven by `blurredPadFilter`, but a
+SECOND INPUT has never been done in this codebase.
+
+**7 — Compositing.** Unstarted. Its note above is the honest summary: it is the
+largest item and the only one that puts the audio differentiator in play.
+`RenditionArgs` says outright that if `-map 0:a -c:a copy` ever becomes a mixdown
+the product's differentiator is gone, so a composite must CONCATENATE track lists
+and never mix — which collides with `routing.MaxTracks = 6`, since two six-track
+sources overflow it. That is a product decision, not an engineering one, and it
+should be settled before any code is written.
+
+The one part worth remembering if it is ever picked up: point each composite
+input at the contributing source's SELECTOR hub rather than its raw ingest, and
+per-input failover comes free — a dead input is already covered by that source's
+own slate, which dissolves the `xstack`-stalls-on-a-missing-input problem with no
+new machinery.
 
 ## Two things shipped that were never on this list
 

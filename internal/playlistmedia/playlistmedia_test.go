@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,7 +33,7 @@ import (
 // checked to appear exactly once, because a second `-r` later in the argv would
 // silently win.
 func TestEveryProfileFlagCarriesTheValueWeMeant(t *testing.T) {
-	args := normaliseArgs("/in.mov", "/out.ts")
+	args := normaliseArgs("/in.mov", "/out.ts", 2, 2)
 	for _, tc := range []struct{ flag, value string }{
 		{"-c:v", "libx264"},
 		{"-pix_fmt", "yuv420p"},
@@ -69,7 +72,7 @@ func TestEveryProfileFlagCarriesTheValueWeMeant(t *testing.T) {
 // profile: two files can agree on 1920x1080 and still disagree on sample aspect
 // ratio, which the concat demuxer counts as a mismatch.
 func TestTheProfileLetterboxesRatherThanStretchesAndPinsTheSampleAspect(t *testing.T) {
-	vf, n := pairValue(normaliseArgs("/in.mov", "/out.ts"), "-vf")
+	vf, n := pairValue(normaliseArgs("/in.mov", "/out.ts", 2, 2), "-vf")
 	if n != 1 {
 		t.Fatalf("expected exactly one -vf, got %d", n)
 	}
@@ -85,7 +88,7 @@ func TestTheProfileLetterboxesRatherThanStretchesAndPinsTheSampleAspect(t *testi
 }
 
 func TestTheOutputIsTheLastArgumentAndTheInputIsNamedOnce(t *testing.T) {
-	args := normaliseArgs("/in.mov", "/out.ts")
+	args := normaliseArgs("/in.mov", "/out.ts", 2, 2)
 	if got := args[len(args)-1]; got != "/out.ts" {
 		t.Errorf("output should be the final argument, got %q", got)
 	}
@@ -100,7 +103,7 @@ func TestTheOutputIsTheLastArgumentAndTheInputIsNamedOnce(t *testing.T) {
 // must therefore agree on every encoding flag and differ only in where the
 // audio comes from.
 func TestTheSilentProfileEncodesIdenticallyToTheAudioOne(t *testing.T) {
-	audio := normaliseArgs("/in.mov", "/out.ts")
+	audio := normaliseArgs("/in.mov", "/out.ts", 2, 2)
 	silent := normaliseSilentArgs("/in.mov", "/out.ts")
 
 	if in, n := pairValue(silent, "-map"); n != 2 || in != "0:v:0" {
@@ -113,9 +116,38 @@ func TestTheSilentProfileEncodesIdenticallyToTheAudioOne(t *testing.T) {
 		t.Errorf("synthesised silence must already be at the profile's rate and layout: %v", silent)
 	}
 
-	// Everything from the stream-selection flags onward is the profile proper.
-	if got, want := tailFrom(silent, "-sn"), tailFrom(audio, "-sn"); got != want {
-		t.Errorf("the two profiles have drifted apart:\n silent: %s\n  audio: %s", got, want)
+	// The stream-selection header (subtitle, chapter and attachment
+	// stripping) is shared and must not drift.
+	if got, want := stretch(silent, "-sn", "-vf"), stretch(audio, "-sn", "-vf"); got != want {
+		t.Errorf("the two profiles' stream selection has drifted apart:\n silent: %s\n  audio: %s", got, want)
+	}
+	// So is the codec block -- resolution, bitrate, GOP, container -- from
+	// -c:v up to (not including) -af, which is exactly where the two
+	// profiles are SUPPOSED to differ, checked below.
+	if got, want := stretch(silent, "-c:v", "-af"), stretch(audio, "-c:v", "-af"); got != want {
+		t.Errorf("the two profiles' codec settings have drifted apart:\n silent: %s\n  audio: %s", got, want)
+	}
+
+	// The filter chains share their fit-and-pad / resample PREFIX, and the
+	// ordinary profile's pad filters (buildNormalise's PAD, NEVER TRUNCATE)
+	// are the only place they may add to it: the silent profile already has
+	// a correct, costless stop in -shortest plus synthesised silence, and
+	// does not need apad or tpad to reach one.
+	avf, _ := pairValue(audio, "-vf")
+	svf, _ := pairValue(silent, "-vf")
+	if !strings.HasPrefix(avf, svf) || avf == svf {
+		t.Errorf("the ordinary profile should extend the silent one's -vf with tpad, not diverge from it:\n silent: %s\n  audio: %s", svf, avf)
+	}
+	if strings.Contains(svf, "tpad") {
+		t.Errorf("the silent profile pads video it already stops correctly with -shortest: %s", svf)
+	}
+	aaf, _ := pairValue(audio, "-af")
+	saf, _ := pairValue(silent, "-af")
+	if !strings.HasPrefix(aaf, saf) || aaf == saf {
+		t.Errorf("the ordinary profile should extend the silent one's -af with apad, not diverge from it:\n silent: %s\n  audio: %s", saf, aaf)
+	}
+	if strings.Contains(saf, "apad") {
+		t.Errorf("the silent profile pads audio that -shortest already stops correctly: %s", saf)
 	}
 }
 
@@ -123,7 +155,7 @@ func TestTheSilentProfileEncodesIdenticallyToTheAudioOne(t *testing.T) {
 // output: a later reader looking to speed this up would reach for the GPU, and
 // the GPU is the one resource a live encoder cannot share.
 func TestTheHardwareProbeIsNotConsulted(t *testing.T) {
-	joined := strings.Join(normaliseArgs("/in.mov", "/out.ts"), " ")
+	joined := strings.Join(normaliseArgs("/in.mov", "/out.ts", 2, 2), " ")
 	for _, hw := range []string{
 		"nvenc", "videotoolbox", "qsv", "vaapi", "v4l2m2m", "amf", "-hwaccel",
 	} {
@@ -144,7 +176,8 @@ func TestTheDerivativeIsKeyedOnTheUploadAndNothingElse(t *testing.T) {
 	if first != again {
 		t.Fatalf("the same upload produced two derivative paths: %q and %q", first, again)
 	}
-	if want := filepath.Join("/data", Dir, "show-1a2b3c4d.mp4.ts"); first != want {
+	if want := filepath.Join("/data", Dir,
+		fmt.Sprintf("show-1a2b3c4d.mp4.v%d.ts", ProfileVersion)); first != want {
 		t.Errorf("DerivativePath = %q, want %q", first, want)
 	}
 	// The extension is kept rather than replaced: stripping it would map two
@@ -256,10 +289,17 @@ func TestRunNormaliseWritesThroughAPartialAndPublishes(t *testing.T) {
 	writeUpload(t, dir, "clip-1a2b.mp4", "source bytes")
 
 	var sawPartial string
-	p := newTestProcessor(t, dir, WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
-		sawPartial = cmd.Args[len(cmd.Args)-1]
-		return os.WriteFile(sawPartial, []byte("normalised"), 0o644)
-	}))
+	p := newTestProcessor(t, dir,
+		// The upload's content is a placeholder string, not real media, so
+		// chooseProfile's new duration probe -- which would otherwise run a
+		// real FFprobe against it -- is faked like the stream probe already
+		// is. The value is unused: buildNormalise's -t bound never reaches a
+		// fake Execer that ignores its argv.
+		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 2, 2, nil }),
+		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+			sawPartial = cmd.Args[len(cmd.Args)-1]
+			return os.WriteFile(sawPartial, []byte("normalised"), 0o644)
+		}))
 
 	rep := &recorder{}
 	if err := p.RunNormalise(context.Background(), normaliseJob(t, "clip-1a2b.mp4"), rep); err != nil {
@@ -312,13 +352,15 @@ func TestAFailedEncodeLeavesNothingBehind(t *testing.T) {
 	dir := t.TempDir()
 	writeUpload(t, dir, "clip-1a2b.mp4", "source bytes")
 
-	p := newTestProcessor(t, dir, WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
-		out := cmd.Args[len(cmd.Args)-1]
-		if err := os.WriteFile(out, []byte("half a file"), 0o644); err != nil {
-			return err
-		}
-		return errors.New("ffmpeg failed: exit status 1")
-	}))
+	p := newTestProcessor(t, dir,
+		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 2, 2, nil }),
+		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+			out := cmd.Args[len(cmd.Args)-1]
+			if err := os.WriteFile(out, []byte("half a file"), 0o644); err != nil {
+				return err
+			}
+			return errors.New("ffmpeg failed: exit status 1")
+		}))
 	if err := p.RunNormalise(context.Background(), normaliseJob(t, "clip-1a2b.mp4"), &recorder{}); err == nil {
 		t.Fatal("a failed encode reported success")
 	}
@@ -359,10 +401,12 @@ func TestAnUploadThatIsAlreadyNormalisedIsNotNormalisedAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ran bool
-	p2 := newTestProcessor(t, dir, WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
-		ran = true
-		return os.WriteFile(cmd.Args[len(cmd.Args)-1], []byte("normalised"), 0o644)
-	}))
+	p2 := newTestProcessor(t, dir,
+		WithDurationProber(func(context.Context, string) (float64, float64, error) { return 2, 2, nil }),
+		WithExecer(func(_ context.Context, cmd media.Command, _ media.Sink) error {
+			ran = true
+			return os.WriteFile(cmd.Args[len(cmd.Args)-1], []byte("normalised"), 0o644)
+		}))
 	if err := p2.RunNormalise(context.Background(), normaliseJob(t, "clip-1a2b.mp4"), &recorder{}); err != nil {
 		t.Fatalf("RunNormalise: %v", err)
 	}
@@ -453,6 +497,224 @@ func TestAProbeThatCannotReadTheFileFailsPermanently(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "moov atom not found") {
 		t.Errorf("error %q dropped what FFprobe actually said", err)
+	}
+}
+
+// -------------------------------------------------------------- pad, measure, version
+//
+// These five tests exercise a REAL FFmpeg and FFprobe against REAL, deliberately
+// mismatched media -- an argv string that says "apad" proves nothing about
+// whether the padding actually reaches the output, and Task 1's own findings
+// (this package's concat_behaviour_test.go) are exactly the case for measuring
+// rather than arguing. Skipped without FFmpeg or in -short, via tools(t) inside
+// buildSource, the same as every other real-media test in this package.
+
+// sourceSpec is one operator upload's shape: real, independently-set video and
+// audio track lengths, which is exactly the mismatch PAD, NEVER TRUNCATE exists
+// to handle.
+type sourceSpec struct {
+	videoSecs, audioSecs float64
+}
+
+// buildSource writes one real upload with a real video track and a real audio
+// track of the given lengths, from an actual FFmpeg encode -- not a hand-built
+// container with invented timestamps, for the same reason synthesiseSources in
+// integration_test.go and buildDerivatives in concat_behaviour_test.go do it
+// that way: the question these tests answer is what the real profile's argv
+// does to a real file, which a synthetic one cannot speak to.
+func buildSource(t *testing.T, dataDir string, spec sourceSpec) string {
+	t.Helper()
+	ffmpegBin, _ := tools(t)
+	dir := filepath.Join(dataDir, uploads.Dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("item-v%s-a%s.mp4",
+		strconv.FormatFloat(spec.videoSecs, 'f', 1, 64),
+		strconv.FormatFloat(spec.audioSecs, 'f', 1, 64))
+	runFFmpeg(t, ffmpegBin, "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=640x480:rate=25:duration=%s",
+			strconv.FormatFloat(spec.videoSecs, 'f', 2, 64)),
+		"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=440:sample_rate=44100:duration=%s",
+			strconv.FormatFloat(spec.audioSecs, 'f', 2, 64)),
+		"-map", "0:v", "-map", "1:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+		"-c:a", "aac", "-ac", "1", "-ar", "44100",
+		filepath.Join(dir, name))
+	return name
+}
+
+// probeDurationSecs reads a file's own container duration -- the same
+// ffprobe field ProbeOutputDurationMS reads in production, so a test that
+// calls this checks the same number the worker will report.
+// probeDurationSecs reports the SHORTER of the derivative's two track
+// durations, not the container's overall duration.
+//
+// The container-level field (what probeDuration reads, and what
+// ProbeOutputDurationMS reports in production) is not enough to prove PAD,
+// NEVER TRUNCATE held: a container's own duration is effectively the LONGER
+// of its two tracks, so a video track silently cut short by a missing tpad
+// is invisible to it whenever the audio track still reaches the target --
+// which is exactly the mismatched-length case these tests construct. Running
+// this file's own tpad mutation against the container-level field proved the
+// point: it kept passing at a truncated 1.0s video under a 3.07s audio,
+// because the CONTAINER read 3.07s. Reading both tracks and taking the
+// smaller catches a truncation on EITHER side, which is what "kept all of
+// its video" or "kept all of its audio" actually claims.
+func probeDurationSecs(t *testing.T, path string) float64 {
+	t.Helper()
+	_, ffprobeBin := tools(t)
+	v := probeStreamDuration(t, ffprobeBin, path, "v")
+	a := probeStreamDuration(t, ffprobeBin, path, "a")
+	if v < a {
+		return v
+	}
+	return a
+}
+
+// probeStreamDuration reads one stream's own duration field, not the
+// container's.
+func probeStreamDuration(t *testing.T, ffprobeBin, path, kind string) float64 {
+	t.Helper()
+	out, err := exec.Command(ffprobeBin, "-hide_banner", "-v", "error",
+		"-select_streams", kind+":0",
+		"-show_entries", "stream=duration",
+		"-of", "default=nw=1:nk=1", path).Output()
+	if err != nil {
+		t.Fatalf("ffprobe %s stream duration %s: %v", kind, path, err)
+	}
+	// default=nw=1:nk=1 still prints one line per matched stream-entry pair;
+	// -select_streams narrows to one stream, but the field can still repeat
+	// per packet-adjacent section, so take the first non-empty line rather
+	// than the whole (possibly doubled) output.
+	first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	secs, perr := strconv.ParseFloat(strings.TrimSpace(first), 64)
+	if perr != nil {
+		t.Fatalf("parsing %s stream duration of %s (%q): %v", kind, path, out, perr)
+	}
+	return secs
+}
+
+// A short-audio item must be PADDED, not truncated. -shortest would have ended
+// the output when the audio ran out, discarding picture the operator supplied.
+//
+// The mutation: swap the apad filter for "-shortest" and this fails, because
+// the derivative becomes as short as its audio.
+func TestAnItemWithShortAudioKeepsAllOfItsVideo(t *testing.T) {
+	dir := t.TempDir()
+	src := buildSource(t, dir, sourceSpec{videoSecs: 3.0, audioSecs: 1.0})
+	p := newTestProcessor(t, dir)
+
+	if err := p.RunNormalise(context.Background(), normaliseJob(t, src), &recorder{}); err != nil {
+		t.Fatalf("RunNormalise: %v", err)
+	}
+	got := probeDurationSecs(t, DerivativePath(dir, src))
+	if got < 2.9 {
+		t.Errorf("derivative is %.2fs, want ~3.0s — the picture was truncated to "+
+			"the audio, which is operator content silently discarded", got)
+	}
+}
+
+// The mirror, which is the case a fix for the first one usually leaves behind.
+//
+// The mutation: remove the tpad filter and this fails.
+func TestAnItemWithShortVideoKeepsAllOfItsAudio(t *testing.T) {
+	dir := t.TempDir()
+	src := buildSource(t, dir, sourceSpec{videoSecs: 1.0, audioSecs: 3.0})
+	p := newTestProcessor(t, dir)
+
+	if err := p.RunNormalise(context.Background(), normaliseJob(t, src), &recorder{}); err != nil {
+		t.Fatalf("RunNormalise: %v", err)
+	}
+	got := probeDurationSecs(t, DerivativePath(dir, src))
+	if got < 2.9 {
+		t.Errorf("derivative is %.2fs, want ~3.0s — the audio was truncated to the video", got)
+	}
+}
+
+// The duration written into a concat list must come from the ENCODED OUTPUT.
+// A source-side estimate describes a file that no longer exists.
+//
+// The mutation: report params.DurationMS instead of the probed value and this
+// fails, because the job carries zero.
+func TestTheResultCarriesTheMeasuredOutputDuration(t *testing.T) {
+	dir := t.TempDir()
+	src := buildSource(t, dir, sourceSpec{videoSecs: 2.0, audioSecs: 2.0})
+	p := newTestProcessor(t, dir)
+	rep := &recorder{}
+
+	if err := p.RunNormalise(context.Background(), normaliseJob(t, src), rep); err != nil {
+		t.Fatalf("RunNormalise: %v", err)
+	}
+	res, ok := rep.result.(NormaliseResult)
+	if !ok {
+		t.Fatalf("result = %+v, want NormaliseResult", rep.result)
+	}
+	if res.DurationMS < 1900 || res.DurationMS > 2100 {
+		t.Errorf("DurationMS = %d, want ~2000 measured from the encoded output", res.DurationMS)
+	}
+}
+
+// A derivative from an older profile must NOT satisfy readiness, or B2 plays
+// B1's unpadded files forever: DerivativePath is keyed on the upload's name and
+// the enqueue path skips anything that already exists.
+//
+// The mutation: drop the version from DerivativePath and this fails, because
+// the v1 file is found at the v2 path.
+//
+// A hardcoded "show-1a2b.mp4.v1.ts" stale file was tried first here and
+// rejected: it never collides with a versionless path either, so the guard
+// passed under the mutation for a reason that had nothing to do with
+// correctness -- running it, rather than reading it, is what caught that.
+// The pre-Task-2 scheme wrote no version at all ("<upload>.ts"), so that is
+// the real shape a B1-era derivative on disk has, and it is what this test
+// plants.
+func TestAnOlderProfileVersionIsNotTheCurrentDerivative(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(DerivativeDir(dir), "show-1a2b.mp4.ts")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("a pre-versioning derivative"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := DerivativePath(dir, "show-1a2b.mp4")
+	if got == stale {
+		t.Fatal("the current derivative path collides with a pre-versioning file")
+	}
+	if !strings.Contains(filepath.Base(got), fmt.Sprintf(".v%d.", ProfileVersion)) {
+		t.Errorf("DerivativePath = %q, does not name the current profile version %d", got, ProfileVersion)
+	}
+	if _, err := os.Stat(got); !os.IsNotExist(err) {
+		t.Error("a pre-versioning derivative satisfied the current path; B2 would concatenate " +
+			"unpadded B1 files while reporting the item ready")
+	}
+}
+
+// An upload deleted while its normalisation is in flight must not have a
+// derivative published afterwards -- that recreates the orphan the delete rule
+// exists to remove, with no upload left to explain it.
+//
+// The mutation: remove the pre-publish re-check and this fails.
+func TestAnUploadDeletedMidNormalisationPublishesNothing(t *testing.T) {
+	dir := t.TempDir()
+	src := buildSource(t, dir, sourceSpec{videoSecs: 1.0, audioSecs: 1.0})
+	p := newTestProcessor(t, dir)
+	// Delete the upload after the encode starts but before publication, which
+	// is exactly the window an operator's DELETE lands in.
+	p.beforePublish = func() { os.Remove(filepath.Join(dir, uploads.Dir, src)) }
+
+	err := p.RunNormalise(context.Background(), normaliseJob(t, src), &recorder{})
+	if err == nil {
+		t.Fatal("publishing succeeded after the upload was deleted")
+	}
+	if !jobs.IsPermanent(err) {
+		t.Errorf("err = %v, want permanent: an upload that is gone can never "+
+			"be normalised, and a retryable error burns every queue attempt", err)
+	}
+	if _, statErr := os.Stat(DerivativePath(dir, src)); !os.IsNotExist(statErr) {
+		t.Error("a derivative was published for an upload that no longer exists")
 	}
 }
 
@@ -615,10 +877,15 @@ func mustStore(t *testing.T, dataDir string) *uploads.Store {
 func newTestProcessor(t *testing.T, dataDir string, opts ...Option) *Processor {
 	t.Helper()
 	base := []Option{
-		WithExecer(func(context.Context, media.Command, media.Sink) error { return nil }),
 		WithStreamProber(streams(true, true)),
 		WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }),
 	}
+	// No default WithExecer here, unlike before: New's own default is
+	// media.Exec, the REAL subprocess runner, resolving "ffmpeg"/"ffprobe"
+	// below via $PATH. Every test that must not touch a real binary already
+	// supplies its own WithExecer (grep confirms it), so this is a no-op for
+	// them; it is what lets the real-media tests in this file call
+	// newTestProcessor bare and get a genuine transcode.
 	return New(nil, Config{
 		FFmpeg:  "ffmpeg",
 		FFprobe: "ffprobe",
@@ -691,12 +958,115 @@ func containsSubstring(args []string, want string) bool {
 	return false
 }
 
-// tailFrom joins everything from the first occurrence of marker onward.
-func tailFrom(args []string, marker string) string {
+// stretch joins the arguments from the first occurrence of from up to (but
+// not including) the first occurrence of to that follows it, or to the end if
+// to never appears. Used to compare a SECTION of two argvs that is supposed to
+// be shared while another section is allowed, or expected, to differ.
+func stretch(args []string, from, to string) string {
+	start := -1
 	for i, a := range args {
-		if a == marker {
-			return strings.Join(args[i:], " ")
+		if a == from {
+			start = i
+			break
 		}
 	}
-	return ""
+	if start < 0 {
+		return ""
+	}
+	end := len(args)
+	for i := start + 1; i < len(args); i++ {
+		if args[i] == to {
+			end = i
+			break
+		}
+	}
+	return strings.Join(args[start:end], " ")
+}
+
+// TestDerivativeVersionsMatchesOnlyThisUploadsOwnDerivatives is the unit-level
+// guard on the function that replaced a glob, and it exists because the glob it
+// replaced deleted every derivative in the install when handed `*`.
+//
+// The cases are chosen to be the ones a prefix match would get wrong. A name
+// that is a PREFIX of another upload ("show.mp4" against "show.mp4.extra.mp4"),
+// a version segment that is not digits ("show.mp4.vNOPE.ts" -- not a file this
+// package ever wrote, and removing it would be deleting somebody else's on the
+// strength of a shared stem), and the glob metacharacters themselves, which are
+// legal in a filename and must therefore match themselves and nothing else.
+//
+// The mutations, one per group: delete the digit loop in isDerivativeOf and
+// vNOPE is claimed; swap CutPrefix's `upload+".v"` for `upload` and the
+// longer-named upload is claimed; return the whole directory and everything is.
+func TestDerivativeVersionsMatchesOnlyThisUploadsOwnDerivatives(t *testing.T) {
+	dir := t.TempDir()
+	derivDir := DerivativeDir(dir)
+	if err := os.MkdirAll(derivDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []string{
+		"show.mp4.v1.ts",           // ours, an older profile
+		"show.mp4.v2.ts",           // ours, current
+		"show.mp4.v10.ts",          // ours, and two digits rather than one
+		"show.mp4.vNOPE.ts",        // NOT ours: the version is not a number
+		"show.mp4.v2.ts.bak",       // NOT ours: something else's suffix
+		"show.mp4.extra.mp4.v1.ts", // a DIFFERENT upload whose name starts with ours
+		"other.mp4.v1.ts",          // unrelated
+	}
+	// A real file whose NAME is a pattern -- the case the old glob got
+	// catastrophically wrong -- but only where such a file can exist.
+	//
+	// Windows forbids * ? < > : " / \ | in a filename outright, so this seed
+	// fails at os.WriteFile there rather than testing anything. That is not a
+	// gap being papered over: on Windows the hazard cannot take this shape,
+	// because there is no file for a pattern to match. The name still reaches
+	// DerivativeVersions from a URL on every platform, and the empty-result
+	// cases below cover that everywhere.
+	if runtime.GOOS != "windows" {
+		seed = append(seed, "*.v1.ts")
+	}
+	for _, name := range seed {
+		if err := os.WriteFile(filepath.Join(derivDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cases := []struct {
+		upload string
+		want   []string
+	}{
+		{"show.mp4", []string{"show.mp4.v1.ts", "show.mp4.v10.ts", "show.mp4.v2.ts"}},
+		{"show.mp4.extra.mp4", []string{"show.mp4.extra.mp4.v1.ts"}},
+		// A metacharacter matches NOTHING when no file is named for it. This
+		// runs everywhere, and it is the assertion that matters: under the old
+		// glob, `*` returned every derivative in the directory.
+		{"?", nil},
+		{"nothing-of-ours.mp4", nil},
+	}
+	if runtime.GOOS != "windows" {
+		// And where such a file CAN exist, the metacharacter matches itself and
+		// only itself. See the seed above for why this is not run on Windows.
+		cases = append(cases, struct {
+			upload string
+			want   []string
+		}{"*", []string{"*.v1.ts"}})
+	} else {
+		cases = append(cases, struct {
+			upload string
+			want   []string
+		}{"*", nil})
+	}
+	for _, tc := range cases {
+		got, err := DerivativeVersions(dir, tc.upload)
+		if err != nil {
+			t.Fatalf("DerivativeVersions(%q): %v", tc.upload, err)
+		}
+		bases := make([]string, 0, len(got))
+		for _, p := range got {
+			bases = append(bases, filepath.Base(p))
+		}
+		sort.Strings(bases)
+		if strings.Join(bases, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("DerivativeVersions(%q) = %v, want %v", tc.upload, bases, tc.want)
+		}
+	}
 }

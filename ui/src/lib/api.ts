@@ -36,6 +36,7 @@ import type {
   PlayoutProtection,
   PlayoutPublicView,
   PlayoutUrls,
+  PlaylistStatus,
   PostProdSettings,
   Preset,
   PresetOpts,
@@ -257,7 +258,29 @@ export const api = {
 
   // --- settings ---
   getSettings: () => get<Settings>("/settings"),
-  putSettings: (s: Settings) => put<Settings>("/settings", s),
+  /** Saves the settings and returns THE SETTINGS, not the whole response.
+   *
+   *  PUT /settings answers with api.settingsResponse, which embeds db.Settings
+   *  and adds a `reload` report describing what saving just did. This function
+   *  used to be typed `put<Settings>` and hand that whole object back, so
+   *  SettingsPage stored `reload` as part of its settings state and the NEXT
+   *  save PUT it back into a decoder with DisallowUnknownFields -- 400,
+   *  `unknown field "reload"`. A second save from one page load always failed.
+   *
+   *  tsc could never see it: the declared type said `Settings` while the wire
+   *  carried more, so the assertion was simply untrue and nothing checks that.
+   *  Stripping it HERE makes the declaration true, which is the only place it
+   *  can be made true -- every caller downstream is entitled to believe it.
+   *
+   *  `reload` is discarded rather than surfaced because nothing reads it today.
+   *  A caller that wants it should take it from a response type that says so. */
+  putSettings: async (s: Settings): Promise<Settings> => {
+    const { reload: _reload, ...saved } = await put<Settings & { reload?: unknown }>(
+      "/settings",
+      s,
+    );
+    return saved as Settings;
+  },
   /** The MQTT broker password, on its own route.
    *
    *  Not a field on the settings blob: that blob travels outward on every
@@ -266,6 +289,11 @@ export const api = {
    *  time. An empty string CLEARS the stored password. */
   putMqttPassword: (password: string) =>
     put<{ hasPassword: boolean }>("/settings/mqtt-password", { password }),
+  /** Per-item readiness for the configured playlist -- whether the upload
+   *  behind each entry still exists and has what the selector needs to play
+   *  it. Separate from getSettings() because settings only carries what the
+   *  operator TYPED; this reports what the server can actually DO with it. */
+  playlistStatus: () => get<PlaylistStatus>("/failover/playlist"),
 
   // --- transport security ---
   /** Read-only: TLS lives in config.yaml because it has to be right before the

@@ -35,24 +35,39 @@ import (
 // does not exist".
 //
 // VALIDATION REJECTS WHAT THE OPERATOR IS INTRODUCING; IT MUST NOT PUNISH THEM
-// FOR PRE-EXISTING STATE THEY HAVE NO CONTROL TO EDIT. That is why stored is a
-// parameter. Checking every item unconditionally looked stricter and was
-// strictly worse: DELETE /api/v1/media/{name} has no in-use guard, so deleting
-// a file that a saved item names made EVERY subsequent PUT /settings 400 --
-// with the playlist disabled, and for an unrelated change like an alert
-// threshold. The operator could not clear it either, because the settings UI
-// has no playlist control yet (FailoverSettings in ui/src/lib/types.ts carries
-// no playlist field until B2) and the page GETs the whole document and PUTs it
-// back, so the stale item round-trips untouched. Deleting a file bricked the
-// settings page with no in-product recovery, which is worse than the problem
-// this check was added to solve.
+// FOR PRE-EXISTING STATE. That is why stored is a parameter, and the reason has
+// been replaced once already without the scoping changing.
 //
-// THE SAFETY PROPERTY IS NOT WEAKENED, because validation is not the runtime
-// gate. A stale item whose upload is gone still fails engine.playlistItemsReady
-// -- which stats the resolved upload on every reconcile -- so the playlist
-// still never goes on air, and the operator still cannot get a broken item PAST
-// this check by introducing one. Validation answers "may this be saved", the
-// readiness gate answers "may this go to air", and those are different jobs.
+// It began as lockout avoidance, and that argument has EXPIRED: DELETE
+// /api/v1/media/{name} had no in-use guard and the settings page had no
+// playlist control, so deleting a file a saved item named made every
+// subsequent PUT /settings 400 -- for an unrelated change like an alert
+// threshold, with the playlist disabled, and with no in-product way to clear
+// the item, because the page GETs the whole document and PUTs it back. B2
+// closed both halves: handleDeleteMedia now refuses with 409 while a stored
+// item names the upload (see uploadIsReferenced below), and PlaylistEditor is
+// a real control that can remove the item.
+//
+// WHAT KEEPS THE SCOPING IS THAT AN INHERITED BROKEN ITEM IS NOT NECESSARILY
+// BROKEN. The 409 stops an operator stranding an item through the product; it
+// cannot stop a sweep, a tidied disk or a restore that missed a file. And since
+// B2 the tier plays DERIVATIVES, not uploads -- an inherited item whose upload
+// vanished out of band goes on playing from the derivative it already has (see
+// engine.playlistItemsReady and TestAPlaylistPlaysOnWhenOnlyTheOriginalUploadIsGone).
+// Checking every item unconditionally would refuse an unrelated settings save
+// over an item that is on air at that moment.
+//
+// THE SAFETY PROPERTY IS NOT WEAKENED, but not by the mechanism this comment
+// used to name. It once said a stale item still fails engine.playlistItemsReady
+// "which stats the resolved upload"; Task 4 deliberately removed that stat, and
+// readiness now asks only whether a derivative exists. The property survives
+// through the derivative instead: an item the operator INTRODUCES naming an
+// upload nobody has can never become ready by any route, because
+// enqueuePlaylistNormalisation has no file to transcode, so no derivative is
+// ever written, so the whole list stays off air. What the operator gets instead
+// of silence is GET /failover/playlist, which names the item and the reason.
+// Validation answers "may this be saved", readiness answers "may this go to
+// air", and those are still different jobs.
 //
 // "Introducing" is by NAME rather than by position, so re-ordering an existing
 // list is not mistaken for typing two new items. A name already somewhere in
@@ -100,6 +115,30 @@ func (s *Server) playlistUploadProblems(want, stored db.PlaylistSettings) error 
 		}
 	}
 	return nil
+}
+
+// uploadIsReferenced reports whether the STORED playlist -- not any document
+// a caller is proposing -- names this upload, and at which index. It is the
+// in-use guard DELETE /api/v1/media/{name} refuses to proceed past; see
+// handleDeleteMedia.
+//
+// Every stored item is checked, unlike playlistUploadProblems above, which
+// deliberately skips items the operator inherited rather than introduced.
+// That distinction is about which items a SAVE may be refused for; a DELETE
+// is not saving anything, so there is no "introducing" to compare against --
+// an upload named anywhere in what is already on disk is in use.
+func (s *Server) uploadIsReferenced(name string) (bool, int, error) {
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		return false, 0, fmt.Errorf("playlist reference cannot be checked: %w", err)
+	}
+	want := db.PlaylistUploadName(name)
+	for i, item := range settings.Failover.Playlist.Items {
+		if db.PlaylistUploadName(item.Upload) == want {
+			return true, i, nil
+		}
+	}
+	return false, 0, nil
 }
 
 // enqueuePlaylistNormalisation asks for the derivative every item needs.
