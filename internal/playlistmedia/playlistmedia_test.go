@@ -1003,7 +1003,7 @@ func TestDerivativeVersionsMatchesOnlyThisUploadsOwnDerivatives(t *testing.T) {
 	if err := os.MkdirAll(derivDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{
+	seed := []string{
 		"show.mp4.v1.ts",           // ours, an older profile
 		"show.mp4.v2.ts",           // ours, current
 		"show.mp4.v10.ts",          // ours, and two digits rather than one
@@ -1011,25 +1011,51 @@ func TestDerivativeVersionsMatchesOnlyThisUploadsOwnDerivatives(t *testing.T) {
 		"show.mp4.v2.ts.bak",       // NOT ours: something else's suffix
 		"show.mp4.extra.mp4.v1.ts", // a DIFFERENT upload whose name starts with ours
 		"other.mp4.v1.ts",          // unrelated
-		"*.v1.ts",                  // a real file that looks like a pattern
-	} {
+	}
+	// A real file whose NAME is a pattern -- the case the old glob got
+	// catastrophically wrong -- but only where such a file can exist.
+	//
+	// Windows forbids * ? < > : " / \ | in a filename outright, so this seed
+	// fails at os.WriteFile there rather than testing anything. That is not a
+	// gap being papered over: on Windows the hazard cannot take this shape,
+	// because there is no file for a pattern to match. The name still reaches
+	// DerivativeVersions from a URL on every platform, and the empty-result
+	// cases below cover that everywhere.
+	if runtime.GOOS != "windows" {
+		seed = append(seed, "*.v1.ts")
+	}
+	for _, name := range seed {
 		if err := os.WriteFile(filepath.Join(derivDir, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	for _, tc := range []struct {
+	cases := []struct {
 		upload string
 		want   []string
 	}{
 		{"show.mp4", []string{"show.mp4.v1.ts", "show.mp4.v10.ts", "show.mp4.v2.ts"}},
 		{"show.mp4.extra.mp4", []string{"show.mp4.extra.mp4.v1.ts"}},
-		// The metacharacter matches ITSELF. Under the old glob this returned
-		// every derivative in the directory.
-		{"*", []string{"*.v1.ts"}},
+		// A metacharacter matches NOTHING when no file is named for it. This
+		// runs everywhere, and it is the assertion that matters: under the old
+		// glob, `*` returned every derivative in the directory.
 		{"?", nil},
 		{"nothing-of-ours.mp4", nil},
-	} {
+	}
+	if runtime.GOOS != "windows" {
+		// And where such a file CAN exist, the metacharacter matches itself and
+		// only itself. See the seed above for why this is not run on Windows.
+		cases = append(cases, struct {
+			upload string
+			want   []string
+		}{"*", []string{"*.v1.ts"}})
+	} else {
+		cases = append(cases, struct {
+			upload string
+			want   []string
+		}{"*", nil})
+	}
+	for _, tc := range cases {
 		got, err := DerivativeVersions(dir, tc.upload)
 		if err != nil {
 			t.Fatalf("DerivativeVersions(%q): %v", tc.upload, err)

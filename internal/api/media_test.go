@@ -286,12 +286,28 @@ func TestDeletingAGlobNameRemovesNobodyElsesDerivative(t *testing.T) {
 	// Every metacharacter that means something to filepath.Match. `[a-z]*` is
 	// here for a second reason: an unterminated class returns ErrBadPattern,
 	// which the old code surfaced as a 500 on what is really a bad request.
-	// 404 either way, which is exactly why the status cannot be the assertion:
-	// the old code deleted the derivatives FIRST and only then asked store.Delete
-	// about the name, so it answered "no such upload" having already destroyed
-	// them. What is asserted is the survivor.
+	// THE SURVIVOR IS THE ASSERTION, not the status, and the status is
+	// deliberately not pinned because it legitimately differs by platform.
+	//
+	// On POSIX these names are merely absent, so the answer is 404. On Windows
+	// `*` and `?` are not permissible in a filename at all, so the remove fails
+	// with a syntax error and the handler answers 400 -- which is the BETTER
+	// answer: the request was malformed, not merely unsatisfiable. Asserting 404
+	// here failed on windows-latest for that reason, and the product was right
+	// both times.
+	//
+	// What must hold everywhere is that somebody else's derivative is still
+	// there. The old code deleted the derivatives FIRST and only then asked
+	// store.Delete about the name, so it answered "no such upload" having
+	// already destroyed them -- a status assertion would have passed while the
+	// install was being emptied.
 	for _, name := range []string{"*", "?", "[a-z]*", "*.mp4"} {
-		send(t, h, auth, http.MethodDelete, "/api/v1/media/"+url.PathEscape(name), nil, http.StatusNotFound)
+		r := jsonRequest(t, http.MethodDelete, "/api/v1/media/"+url.PathEscape(name), nil)
+		auth(r)
+		if code := do(t, h, r).Code; code != http.StatusNotFound && code != http.StatusBadRequest {
+			t.Errorf("deleting %q: status %d, want 404 (absent) or 400 (malformed on this platform)",
+				name, code)
+		}
 		if _, err := os.Stat(other); err != nil {
 			t.Fatalf("deleting %q removed a derivative belonging to a different upload: %v", name, err)
 		}
