@@ -291,7 +291,7 @@ func TestFacebookIngestPublishesToTheChosenTarget(t *testing.T) {
 			log := fbServer(t, graphStub(t, fbLiveResponse("777")))
 			f := &Facebook{}
 
-			b, err := f.IngestFor(context.Background(), "cid", "user-token", tc.ref)
+			b, err := f.IngestFor(context.Background(), "cid", "user-token", tc.ref, IngestOptions{})
 			if err != nil {
 				t.Fatalf("IngestFor(%q): %v", tc.ref, err)
 			}
@@ -359,7 +359,7 @@ func TestFacebookRefusesAPageItCannotSeeRatherThanFallingBackToTheProfile(t *tes
 	// Publishing a business broadcast to someone's personal timeline because we
 	// could not read the Page list would be worse than refusing.
 	log := fbServer(t, graphStub(t, fbLiveResponse("1")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:999")
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:999", IngestOptions{})
 	if err == nil {
 		t.Fatal("IngestFor(page:999) succeeded for a Page this login does not manage")
 	}
@@ -385,7 +385,7 @@ func TestFacebookIngestReadsBackTheLiveVideoWhenTheCreateOmitsIt(t *testing.T) {
 		}
 	})
 
-	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "")
+	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "", IngestOptions{})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
 	}
@@ -394,6 +394,115 @@ func TestFacebookIngestReadsBackTheLiveVideoWhenTheCreateOmitsIt(t *testing.T) {
 	}
 	if fbCall(*log, http.MethodGet, "/808") == nil {
 		t.Errorf("no follow-up read; calls were %+v", *log)
+	}
+}
+
+func TestFacebookSendsTheStoredPrivacyWhenTheBroadcastIsCreated(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{Privacy: db.FBPrivacySelf})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	if !strings.Contains(post.Query, "privacy") || !strings.Contains(post.Query, "SELF") {
+		t.Errorf("create query %q carries no SELF privacy; Facebook documents "+
+			"LIVE_VIDEO__PRIVACY_REQUIRED and the operator's choice never arrives", post.Query)
+	}
+}
+
+func TestFacebookSendsNoPrivacyParameterWhenNoneWasChosen(t *testing.T) {
+	// ABSENT, not empty. A request carrying privacy= is a different request from
+	// one that omits it, and only the second means "leave it alone".
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	if strings.Contains(post.Query, "privacy") {
+		t.Errorf("create query %q sends a privacy nobody chose", post.Query)
+	}
+}
+
+func TestFacebookCrosspostingCarriesTheActionEachPageAskedFor(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{Crosspost: []db.CrosspostTarget{
+			{PageID: "1234", CreatePost: true},
+			{PageID: "5678"},
+		}})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	raw, err := url.QueryUnescape(post.Query)
+	if err != nil {
+		t.Fatalf("unescape: %v", err)
+	}
+	if !strings.Contains(raw, `"page_id":"1234"`) ||
+		!strings.Contains(raw, `"action":"enable_crossposting_and_create_post"`) {
+		t.Errorf("query %q does not ask 1234 to create a post", raw)
+	}
+	if !strings.Contains(raw, `"page_id":"5678"`) ||
+		!strings.Contains(raw, `"action":"enable_crossposting"`) {
+		t.Errorf("query %q does not share with 5678 without posting", raw)
+	}
+	// The dangerous direction: a page that did NOT ask for a post must not get
+	// one. Count the two action spellings rather than trusting the pair above.
+	if strings.Count(raw, "enable_crossposting_and_create_post") != 1 {
+		t.Errorf("query %q posts as more Pages than asked", raw)
+	}
+}
+
+func TestFacebookSendsNoCrosspostingOrDonateWhenNoneIsStored(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	if strings.Contains(post.Query, "crossposting_actions") {
+		t.Errorf("create query %q crossposts to Pages nobody named", post.Query)
+	}
+	if strings.Contains(post.Query, "donate_button_charity_id") {
+		t.Errorf("create query %q adds a donate button nobody asked for", post.Query)
+	}
+}
+
+func TestARefusedCreateFailsTheKeyFetchRatherThanReturningAKey(t *testing.T) {
+	// A broadcast created with the wrong privacy is the unrecoverable case this
+	// whole sub-project exists for. Handing back a stream key for one is worse
+	// than handing back an error: the operator streams to it.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/live_videos") {
+			http.Error(w, `{"error":{"message":"(#100) Invalid privacy setting"}}`,
+				http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{Privacy: db.FBPrivacySelf})
+	if err == nil {
+		t.Fatalf("a refused create returned a broadcast %+v instead of an error", b)
+	}
+	if b != nil {
+		t.Errorf("broadcast = %+v, want nil alongside the error", b)
 	}
 }
 
@@ -717,7 +826,7 @@ func TestFacebookErrorsNeverCarryTokenMaterial(t *testing.T) {
 		http.Error(w, `{"error":{"message":"(#200) Requires publish_video permission","code":200}}`, http.StatusForbidden)
 	})
 
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "super-secret-token", "")
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "super-secret-token", "", IngestOptions{})
 	if err == nil {
 		t.Fatal("IngestFor succeeded against a 403")
 	}

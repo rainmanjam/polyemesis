@@ -207,6 +207,20 @@ type Broadcast struct {
 	Backups []Ingest `json:"-"`
 }
 
+// IngestOptions carries what a platform needs when the broadcast is CREATED,
+// which is not the same set the composer pushes afterwards.
+//
+// A struct rather than more parameters because the create-time surface is going
+// to grow: scheduling (event_params) and backup ingest both land here, and three
+// signature changes to one interface is three chances to miss a call site. The
+// zero value sends nothing, which is what every caller without a destination in
+// hand passes.
+type IngestOptions struct {
+	Privacy         db.FacebookPrivacy
+	Crosspost       []db.CrosspostTarget
+	DonateCharityID string
+}
+
 // TargetedProvider is the optional capability for a platform where one
 // connected login can publish to more than one destination. Discover it with
 // TargetsFor; never type-assert Provider at a call site, because "absent" is
@@ -222,8 +236,9 @@ type TargetedProvider interface {
 	// account. An empty targetRef means the default.
 	AccountFor(ctx context.Context, clientID, accessToken, targetRef string) (*Account, error)
 	// IngestFor creates (or fetches) the ingest for one target and returns the
-	// broadcast object behind it.
-	IngestFor(ctx context.Context, clientID, accessToken, targetRef string) (*Broadcast, error)
+	// broadcast object behind it. opts carries the create-time fields a stored
+	// destination may have chosen; its zero value sends none of them.
+	IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error)
 }
 
 // TargetsFor returns the multi-target capability for a platform, or false when
@@ -443,7 +458,7 @@ const fbLiveVideoFields = "id,status,title,stream_url,secure_stream_url," +
 // the resulting id, which is why IngestFor exists and why a caller that wants
 // to end the broadcast or push metadata to it should use that instead.
 func (f *Facebook) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
-	b, err := f.IngestFor(ctx, clientID, accessToken, "")
+	b, err := f.IngestFor(ctx, clientID, accessToken, "", IngestOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +468,7 @@ func (f *Facebook) Ingest(ctx context.Context, clientID, accessToken string) (*I
 
 // IngestFor creates a live_video on one target and splits its ingest into the
 // URL and stream key polyemesis stores separately.
-func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetRef string) (*Broadcast, error) {
+func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error) {
 	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
 	if err != nil {
 		return nil, err
@@ -465,9 +480,31 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	//
 	// overlay_url is deliberately absent: Graph removed it in v24.0 and sending
 	// it now is an error rather than a no-op.
+	params := url.Values{"status": {"LIVE_NOW"}}
+	// Every field below is sent ONLY when the operator chose it. Facebook treats
+	// a present-but-empty parameter as a value, so "leave it alone" has to mean
+	// an absent key rather than an empty one.
+	//
+	// Privacy is applied HERE rather than on the metadata push because Facebook
+	// documents LIVE_VIDEO__PRIVACY_REQUIRED -- "You need to set a privacy
+	// before going live" -- and because the reference documents no Updating
+	// section for LiveVideo at all. This is the surface Meta describes.
+	if opts.Privacy != db.FBPrivacyUnchanged && tgt.kind != fbKindPage {
+		params.Set("privacy", fbPrivacyParam(opts.Privacy))
+	}
+	if len(opts.Crosspost) > 0 {
+		enc, err := fbCrosspostParam(opts.Crosspost)
+		if err != nil {
+			return nil, err
+		}
+		params.Set("crossposting_actions", enc)
+	}
+	if opts.DonateCharityID != "" {
+		params.Set("donate_button_charity_id", opts.DonateCharityID)
+	}
+
 	var created fbLiveVideo
-	err = fbPost(ctx, tgt.token, "/"+tgt.node+"/live_videos",
-		url.Values{"status": {"LIVE_NOW"}}, &created)
+	err = fbPost(ctx, tgt.token, "/"+tgt.node+"/live_videos", params, &created)
 	if err != nil {
 		return nil, fbAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
 	}
@@ -512,6 +549,37 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 		}
 	}
 	return b, nil
+}
+
+// fbPrivacyParam is Graph's privacy object, which is a JSON document in a query
+// parameter rather than a bare value.
+func fbPrivacyParam(p db.FacebookPrivacy) string {
+	return `{"value":"` + string(p) + `"}`
+}
+
+// fbCrosspostParam encodes the crossposting changes Graph documents.
+//
+// The two actions differ by whether a post is published as the Page. Defaulting
+// to the quieter one is deliberate: a share nobody notices is recoverable, and a
+// post published as somebody else's Page is not.
+func fbCrosspostParam(targets []db.CrosspostTarget) (string, error) {
+	type action struct {
+		PageID string `json:"page_id"`
+		Action string `json:"action"`
+	}
+	out := make([]action, 0, len(targets))
+	for _, t := range targets {
+		a := "enable_crossposting"
+		if t.CreatePost {
+			a = "enable_crossposting_and_create_post"
+		}
+		out = append(out, action{PageID: t.PageID, Action: a})
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // publishScopes names the permissions the failed call actually needed, so the
