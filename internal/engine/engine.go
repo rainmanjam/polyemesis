@@ -5920,6 +5920,23 @@ func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
 	return a.e.store.SetDestinationEnabled(id, enabled)
 }
 
+// SetPlaylistEnabled flips the playlist's stored intent, exactly as the settings
+// endpoint does. Read-modify-write rather than a targeted UPDATE because
+// PutSettings is the one door settings go through, and a second one would drift.
+func (a scheduleActuator) SetPlaylistEnabled(enabled bool) error {
+	s, err := a.e.store.GetSettings()
+	if err != nil {
+		return err
+	}
+	if s.Failover.Playlist.Enabled == enabled {
+		// Already there. Writing anyway would move UpdatedAt and make an
+		// overlapping schedule look like a change to anything watching.
+		return nil
+	}
+	s.Failover.Playlist.Enabled = enabled
+	return a.e.store.PutSettings(s)
+}
+
 func (a scheduleActuator) ListDestinationIDs() ([]int64, error) {
 	rows, err := a.e.store.ListDestinations()
 	if err != nil {

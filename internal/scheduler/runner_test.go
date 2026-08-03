@@ -44,6 +44,13 @@ type fakeActuator struct {
 	set       map[int64]bool
 	setCalls  int
 	reconcile int
+
+	// playlistEnabled is the stored value. playlistSet is tracked separately
+	// because a test asserting only playlistEnabled cannot tell "disabled
+	// because the schedule ran" from "never touched".
+	playlistEnabled bool
+	playlistSet     bool
+	playlistErr     error
 }
 
 func (f *fakeActuator) SetDestinationEnabled(id int64, enabled bool) error {
@@ -59,6 +66,15 @@ func (f *fakeActuator) SetDestinationEnabled(id int64, enabled bool) error {
 }
 
 func (f *fakeActuator) ListDestinationIDs() ([]int64, error) { return f.all, f.allErr }
+
+func (f *fakeActuator) SetPlaylistEnabled(enabled bool) error {
+	if f.playlistErr != nil {
+		return f.playlistErr
+	}
+	f.playlistEnabled = enabled
+	f.playlistSet = true
+	return nil
+}
 
 func (f *fakeActuator) Reconcile() error { f.reconcile++; return nil }
 
@@ -246,6 +262,144 @@ func TestOnResultIsCalledForEveryScheduleThatActed(t *testing.T) {
 	}
 	if !seen[0].Fired || !seen[1].Skipped {
 		t.Errorf("results = %+v, want a fire then a skip", seen)
+	}
+}
+
+// The feature: a playlist schedule flips the stored setting.
+//
+// Asserted on what was STORED, not on a call being recorded, because the
+// invariant this package is built on is that a schedule writes the same
+// intent a human writes. A fake that merely counts calls would pass while the
+// runner did something else entirely.
+//
+// The mutation: delete the TargetsPlaylist branch in Tick and this fails.
+func TestAPlaylistScheduleEnablesThePlaylist(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	store := &fakeStore{rows: []Schedule{{
+		ID: 1, Name: "filler", Enabled: true,
+		Action: ActionPlaylistStart, Kind: KindOnce,
+		RunAt: at, GraceSeconds: 60,
+	}}}
+	act := &fakeActuator{}
+	r := New(quietLog(), store, act)
+
+	res := r.Tick(at.Add(time.Second))
+
+	if len(res) != 1 || !res[0].Fired {
+		t.Fatalf("results = %+v, want one fired", res)
+	}
+	if !act.playlistSet || !act.playlistEnabled {
+		t.Error("the playlist schedule fired and the playlist was not enabled")
+	}
+}
+
+// And it must RECONCILE. Tick only reconciles when `changed` is set, and the
+// only thing that sets it today is a destination flip. A playlist flip that
+// forgets it writes the setting and reconciles nothing, so the playlist
+// starts whenever some unrelated event next happens to reconcile -- the exact
+// silent-until-something-else-happens failure sub-project B1 rewrote the
+// readiness gate to avoid.
+//
+// The mutation: remove `changed = true` from the playlist branch and this fails.
+func TestAPlaylistScheduleAsksForAReconcile(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	store := &fakeStore{rows: []Schedule{{
+		ID: 1, Name: "filler", Enabled: true,
+		Action: ActionPlaylistStart, Kind: KindOnce,
+		RunAt: at, GraceSeconds: 60,
+	}}}
+	act := &fakeActuator{}
+	r := New(quietLog(), store, act)
+
+	r.Tick(at.Add(time.Second))
+
+	if act.reconcile != 1 {
+		t.Errorf("reconciles = %d, want 1: the setting was written and nothing applied it", act.reconcile)
+	}
+}
+
+// playlist.stop disables the playlist AND TOUCHES NO DESTINATION.
+//
+// Enables() answers false for it, and the destination path reads Enables(): if
+// a playlist action ever reached that path it would disable every destination
+// in the install. This is the test that catches it.
+//
+// The mutation: route by Enables() instead of TargetsPlaylist and this fails
+// with destinations disabled.
+func TestPlaylistStopDisablesThePlaylistAndNoDestinations(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	act := &fakeActuator{playlistEnabled: true}
+	store := &fakeStore{rows: []Schedule{{
+		ID: 1, Name: "stop filler", Enabled: true,
+		Action: ActionPlaylistStop, Kind: KindOnce,
+		RunAt: at, GraceSeconds: 60,
+	}}}
+	r := New(quietLog(), store, act)
+
+	r.Tick(at.Add(time.Second))
+
+	if act.playlistEnabled {
+		t.Error("playlist.stop fired and the playlist is still enabled")
+	}
+	if act.setCalls != 0 || len(act.set) != 0 {
+		t.Errorf("playlist.stop touched destinations (set=%v, calls=%d); Enables() answers false "+
+			"for it and the destination path reads Enables()", act.set, act.setCalls)
+	}
+}
+
+// A failed settings write leaves the occurrence UNHANDLED, so the next sweep
+// retries it inside its grace window.
+//
+// This differs from the destination path on purpose. There, a partial
+// failure is marked handled because retrying would re-apply the flip to the
+// ones that worked. Here there is no partial: one write either lands or does
+// not.
+//
+// The mutation: mark the occurrence handled on error and this fails.
+func TestAFailedPlaylistWriteIsRetriedOnTheNextSweep(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	act := &fakeActuator{playlistErr: errors.New("disk is full")}
+	store := &fakeStore{rows: []Schedule{{
+		ID: 1, Name: "filler", Enabled: true,
+		Action: ActionPlaylistStart, Kind: KindOnce,
+		RunAt: at, GraceSeconds: 600,
+	}}}
+	r := New(quietLog(), store, act)
+
+	res := r.Tick(at.Add(time.Second))
+
+	if len(res) != 1 || res[0].Err == "" {
+		t.Fatalf("results = %+v, want one carrying the error", res)
+	}
+	if len(store.marked) != 0 {
+		t.Error("the occurrence was marked handled after a failed write, so the next " +
+			"sweep will not retry it inside its grace window")
+	}
+}
+
+// A missed playlist occurrence is skipped and marked handled, exactly as a
+// missed destination one is. The skip rule generalising is a claim, and
+// claims get tested.
+//
+// The mutation: exempt playlist actions from the skip branch and this fails.
+func TestAMissedPlaylistOccurrenceIsSkippedNotFiredLate(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	act := &fakeActuator{}
+	store := &fakeStore{rows: []Schedule{{
+		ID: 1, Name: "filler", Enabled: true,
+		Action: ActionPlaylistStart, Kind: KindOnce,
+		RunAt: at, GraceSeconds: 60,
+	}}}
+	r := New(quietLog(), store, act)
+
+	res := r.Tick(at.Add(10 * time.Minute))
+
+	if len(res) != 1 || !res[0].Skipped {
+		t.Fatalf("results = %+v, want one skipped", res)
+	}
+	if act.playlistSet {
+		t.Error("a missed occurrence started the playlist late; the only thing worse " +
+			"than not starting is starting late")
 	}
 }
 
