@@ -30,6 +30,18 @@ const (
 	ActionStart Action = "start"
 	// ActionStop disables them.
 	ActionStop Action = "stop"
+
+	// ActionPlaylistStart enables the failover playlist. INSTALL-WIDE: settings
+	// are global (GetSettings takes no source id), so this is not per-programme.
+	//
+	// It means "filler from now if nothing is live", NOT "filler now regardless".
+	// The playlist ranks below both ingests and a live encoder pre-empts it
+	// immediately, deliberately. Forcing filler over a live encoder needs a pin,
+	// and a pin is in-memory only, so it cannot be scheduled without breaking
+	// this package's invariant.
+	ActionPlaylistStart Action = "playlist.start"
+	// ActionPlaylistStop disables it.
+	ActionPlaylistStop Action = "playlist.stop"
 )
 
 // Kind is how a schedule recurs.
@@ -122,6 +134,17 @@ func (s Schedule) Location() (*time.Location, error) {
 // Enables reports the enabled value this schedule writes when it fires.
 func (s Schedule) Enables() bool { return s.Action == ActionStart }
 
+// TargetsPlaylist reports whether this schedule acts on the playlist rather
+// than on destinations.
+//
+// A predicate rather than a comparison at each call site, because Enables()
+// answers Action == ActionStart and the destination path reads it: route
+// playlist.stop by that boolean and it disables every destination. One place
+// decides which half of the runner a schedule belongs to.
+func (s Schedule) TargetsPlaylist() bool {
+	return s.Action == ActionPlaylistStart || s.Action == ActionPlaylistStop
+}
+
 // Normalized fills the defaults and puts the collections in a stable order, so
 // two schedules that mean the same thing store the same bytes.
 func (s Schedule) Normalized() Schedule {
@@ -186,12 +209,16 @@ func (s Schedule) Validate() error {
 		return fmt.Errorf("schedule name is longer than %d characters", MaxNameLen)
 	}
 	switch s.Action {
-	case ActionStart, ActionStop:
+	case ActionStart, ActionStop, ActionPlaylistStart, ActionPlaylistStop:
 	default:
 		return fmt.Errorf("schedule %q has an unknown action %q", s.Name, s.Action)
 	}
 	if len(s.DestinationIDs) > MaxTargets {
 		return fmt.Errorf("schedule %q targets more than %d destinations", s.Name, MaxTargets)
+	}
+	if s.TargetsPlaylist() && len(s.DestinationIDs) > 0 {
+		return fmt.Errorf("schedule %q acts on the playlist, so it cannot also name "+
+			"%d destination(s); use a second schedule for those", s.Name, len(s.DestinationIDs))
 	}
 	if _, err := s.Location(); err != nil {
 		return err
