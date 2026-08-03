@@ -134,13 +134,28 @@ checking on its own merits, separately from this work.
 
 ## What remains
 
-Two items from the parts below are not built. Both are named here rather than
+**One** item from the parts below is not built. It is named here rather than
 left for somebody to discover by grepping for a field that does not exist.
 
 | Item | Part | Why it is still open |
 |---|---|---|
-| **Staggered go-live** | C | Destinations still all connect at once. The other two Part C items shipped; this one is scheduling rather than policy, and it wants a decision about whether the spacing is per-destination or one global ramp |
 | **Facebook's full metadata surface** | D | Facebook advertises `title` and `description` only. It has the largest write surface of any platform here — deliberately deferred as its own feature, not half-built |
+
+**Staggered go-live was listed here and should not have been.** It shipped in
+`0c5a08d` on 2026-07-29, in the same commit as the other two Part C items and
+named in that commit's own subject line. The next day `80c512c` — a
+documentation pass titled *"say what shipped"* — introduced the claim that it
+was still open, in three places at once: this table, the Part C heading and the
+Part C table. Every reader after that trusted the roadmap over the code, which
+is what a roadmap is for and exactly why a wrong one is expensive: the next
+person to pick this up would have designed and built a feature that already
+existed.
+
+Nothing automated could have caught it. The drift guards in this repo compare
+code against code — `db.Settings` against `types.ts`, `scheduler.Action` against
+the dropdown — and no guard can check a sentence claiming a feature does not
+exist. The only defence is the one that found it: look at what the work would
+touch before deciding how to do it.
 
 Also deferred as a separate feature: **per-destination stored broadcast
 defaults**, so a destination remembers its own title and category rather than the
@@ -205,13 +220,13 @@ mix**, not a re-route: the routing matrix still produces `OutL`/`OutR` and
 `-ac 1` sums them. Wiring individual tracks to a single channel would be a
 change to the matrix, and that is a different feature.
 
-## Part C — Resilience (SHIPPED, except staggered go-live)
+## Part C — Resilience (SHIPPED)
 
 | Setting | Was | Now |
 |---|---|---|
 | Per-destination reconnect policy | One global `reconnectDelayMaxSeconds`, and it was for **pull ingest**, not destinations | `DestResilience.MinBackoffSeconds`/`MaxBackoffSeconds`, per destination |
 | Give-up threshold plus alert | Retried indefinitely; a destination retrying forever looked identical to one that works | `GiveUpAfter`, counted on **consecutive** failures so a destination that reconnects hourly for a week never accumulates its way to the limit |
-| Staggered go-live | All destinations connect at once, spiking CPU and upstream | **Still open** — see [What remains](#what-remains) |
+| Staggered go-live | All destinations connect at once, spiking CPU and upstream | `Destinations.StaggerMS`, install-wide, 0 to disable and capped at 5 s. Counted per process actually started, so a sweep that starts one destination beside seven healthy ones does not make it wait seven slots — and it never delays a RECONNECT, because a destination that drops at 3 am has to come back immediately rather than queue behind processes that are fine |
 
 ## Part D — Metadata (~7–12 days, and the real gap)
 
