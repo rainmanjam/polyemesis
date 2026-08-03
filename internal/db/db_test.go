@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"database/sql"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -148,18 +149,17 @@ func TestCreateDestinationDefaultsBitrateAndPlatform(t *testing.T) {
 
 func TestADestinationRoundTripsItsFacebookBlock(t *testing.T) {
 	d := testDB(t)
-	created, err := d.CreateDestination(&Destination{
-		Name: "fb", Kind: DestRTMP, Platform: PlatformFacebook,
-		URL: "rtmps://live-api.facebook.com:443/rtmp/", StreamKey: "k",
-		AudioBitrate: 160, Profile: routing.DefaultProfile(),
-		Facebook: FacebookSettings{
-			Crosspost: []CrosspostTarget{
-				{PageID: "1234", CreatePost: true},
-				{PageID: "5678"},
-			},
-			DonateCharityID: "999",
+	dst := validDest()
+	dst.Platform = PlatformFacebook
+	dst.URL = "rtmps://live-api.facebook.com:443/rtmp/"
+	dst.Facebook = FacebookSettings{
+		Crosspost: []CrosspostTarget{
+			{PageID: "1234", CreatePost: true},
+			{PageID: "5678"},
 		},
-	})
+		DonateCharityID: "999",
+	}
+	created, err := d.CreateDestination(dst)
 	if err != nil {
 		t.Fatalf("CreateDestination: %v", err)
 	}
@@ -181,16 +181,16 @@ func TestADestinationRoundTripsItsFacebookBlock(t *testing.T) {
 	}
 }
 
+// This creates a fresh row through CreateDestination, which marshals a zero
+// FacebookSettings the same way it would marshal any other value -- it does
+// NOT exercise the column's SQL default or the migration path. What actually
+// happens to a row that predates the facebook column is covered separately by
+// TestMigrateDestinationExpertArgsBackfillsFacebookOnAnUpgradedDatabase below.
 func TestADestinationWithNoFacebookBlockReadsBackEmpty(t *testing.T) {
-	// Every destination that existed before this column did reads '{}'. An
-	// unreadable or non-empty default would make every pre-existing Facebook
-	// destination start sending parameters nobody set.
 	d := testDB(t)
-	created, err := d.CreateDestination(&Destination{
-		Name: "plain", Kind: DestRTMP, Platform: PlatformCustom,
-		URL: "rtmp://example.invalid/live", StreamKey: "k",
-		AudioBitrate: 160, Profile: routing.DefaultProfile(),
-	})
+	dst := validDest()
+	dst.Name = "plain"
+	created, err := d.CreateDestination(dst)
 	if err != nil {
 		t.Fatalf("CreateDestination: %v", err)
 	}
@@ -1247,5 +1247,95 @@ func TestMigrateDestinationExpertArgsDrainsTheOldSidecarTable(t *testing.T) {
 	// destination run with" rather than two that can disagree.
 	if ok, err := tableExists(d.SQL(), "destination_expert_args"); err != nil || ok {
 		t.Errorf("sidecar table still present (exists=%v err=%v)", ok, err)
+	}
+}
+
+// TestMigrateDestinationExpertArgsBackfillsFacebookOnAnUpgradedDatabase builds
+// a destinations table exactly as it was the release before this one -- every
+// column MigrateDestinationExpertArgs has ever added except facebook itself --
+// because that is the one column an upgrading install is actually missing.
+// Same shape of proof as TestMigrateRenditionsUpgradesAPreRenditionsDatabase
+// in renditions_test.go, narrowed to the one column this task added: the
+// claim "a pre-existing row reads back as a zero FacebookSettings" is a claim
+// about the ALTER's default and the scan guard, and neither of those run
+// unless the column is actually missing when Open() is called.
+func TestMigrateDestinationExpertArgsBackfillsFacebookOnAnUpgradedDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-facebook.db")
+
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	if _, err := old.Exec(`CREATE TABLE destinations (
+		id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+		name                    TEXT    NOT NULL,
+		kind                    TEXT    NOT NULL,
+		platform                TEXT    NOT NULL DEFAULT '',
+		account_id              INTEGER,
+		url                     TEXT    NOT NULL DEFAULT '',
+		stream_key              TEXT    NOT NULL DEFAULT '',
+		enabled                 INTEGER NOT NULL DEFAULT 0,
+		audio_bitrate           INTEGER NOT NULL DEFAULT 160,
+		profile                 TEXT    NOT NULL,
+		rendition_id            INTEGER,
+		source_id               INTEGER,
+		extra_input_args        TEXT    NOT NULL DEFAULT '',
+		extra_output_args       TEXT    NOT NULL DEFAULT '',
+		expert_ack_reencode     INTEGER NOT NULL DEFAULT 0,
+		tr_no_duration_filesize INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_packets    INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_bytes      INTEGER NOT NULL DEFAULT 0,
+		tr_rw_timeout_seconds   INTEGER NOT NULL DEFAULT 0,
+		rs_min_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_max_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_give_up_after        INTEGER NOT NULL DEFAULT 0,
+		au_codec                TEXT    NOT NULL DEFAULT '',
+		au_mono                 INTEGER NOT NULL DEFAULT 0,
+		compliance              TEXT    NOT NULL DEFAULT '{}',
+		position                INTEGER NOT NULL DEFAULT 0,
+		created_at              INTEGER NOT NULL,
+		updated_at              INTEGER NOT NULL
+	);
+	INSERT INTO destinations
+		(name, kind, platform, url, stream_key, enabled, audio_bitrate, profile,
+		 rendition_id, source_id, compliance, position, created_at, updated_at)
+	VALUES ('Legacy FB', 'rtmp', 'facebook', 'rtmps://live-api.facebook.com:443/rtmp/', 'abc-123', 1, 160,
+		'{"mode":"simple","tracks":[{"track":0,"enabled":true,"gain":1}],"normalize":"auto","sampleRate":48000}',
+		NULL, NULL, '{}', 0, 1000, 1000);`); err != nil {
+		t.Fatalf("build pre-facebook database: %v", err)
+	}
+	// Proving the column really is absent before Open ever runs, the same way
+	// TestMigrateRenditionsUpgradesAPreRenditionsDatabase proves rendition_id
+	// is absent: otherwise a schema drift elsewhere could make this pass for a
+	// reason that has nothing to do with the facebook migration.
+	if _, err := old.Exec(`SELECT facebook FROM destinations`); err == nil {
+		t.Fatal("facebook column already exists on the hand-built table; this test proves nothing")
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+
+	// Open, and only Open, is what an existing install actually runs on
+	// startup; it must migrate the missing column, because nothing else will.
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-facebook database: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	list, err := d.ListDestinations()
+	if err != nil {
+		t.Fatalf("ListDestinations after migration: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListDestinations = %d rows, want the pre-existing destination", len(list))
+	}
+	legacy := list[0]
+	if legacy.Name != "Legacy FB" {
+		t.Fatalf("pre-existing destination came back as %+v", legacy)
+	}
+	if len(legacy.Facebook.Crosspost) != 0 || legacy.Facebook.DonateCharityID != "" {
+		t.Errorf("Facebook = %+v, want zero -- a pre-existing row must not start "+
+			"sending Facebook parameters nobody set", legacy.Facebook)
 	}
 }
