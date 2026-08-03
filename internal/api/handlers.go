@@ -687,6 +687,15 @@ func (s *Server) handlePutMQTTPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	// settingsMu -- see its declaration on Server. Held for the whole
+	// handler rather than trimmed to just the store call: the only cost of
+	// the wider scope is a concurrent DELETE /api/v1/media/{name} waiting a
+	// little longer, and that is simpler to keep correct than re-deriving
+	// the exact validate-and-store boundary by hand at every future edit to
+	// this function.
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+
 	// Start from the stored settings so a partial payload cannot blank fields
 	// the client did not send.
 	settings, err := s.store.GetSettings()

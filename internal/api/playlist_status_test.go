@@ -9,6 +9,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // Readiness is OBSERVED state and must not ride the settings blob.
@@ -81,10 +82,19 @@ func TestAnItemNeedingAttentionIsNamedWithAReason(t *testing.T) {
 		}
 	}
 
-	// The operator deletes the second upload's file through the media page,
-	// exactly as TestADeletedUploadDoesNotLockTheOperatorOutOfSettings does --
-	// the item is now stale, pointing at nothing, and still on the playlist.
-	send(t, h, sign, http.MethodDelete, "/api/v1/media/doomed.ts", nil, http.StatusNoContent)
+	// The upload goes away OUT OF BAND -- removed from disk rather than through
+	// the media endpoint.
+	//
+	// It used to be a DELETE, and that stopped working the moment the in-use
+	// guard landed: DELETE /api/v1/media/{name} now REFUSES an upload a playlist
+	// item names, with 409, precisely so an operator cannot strand a playlist
+	// this way. Which leaves out-of-band removal as the only route to the state
+	// this test is about -- a sweep, a tidied disk, a restore that missed a file
+	// -- and that is worth knowing rather than papering over: the API can refuse
+	// to CREATE this state, and can still be asked to REPORT it.
+	if err := os.Remove(filepath.Join(srv.cfg.DataDir, uploads.Dir, "doomed.ts")); err != nil {
+		t.Fatalf("remove the upload out of band: %v", err)
+	}
 
 	var status PlaylistStatus
 	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/failover/playlist", nil, http.StatusOK), &status)

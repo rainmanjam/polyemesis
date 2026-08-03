@@ -102,6 +102,30 @@ func (s *Server) playlistUploadProblems(want, stored db.PlaylistSettings) error 
 	return nil
 }
 
+// uploadIsReferenced reports whether the STORED playlist -- not any document
+// a caller is proposing -- names this upload, and at which index. It is the
+// in-use guard DELETE /api/v1/media/{name} refuses to proceed past; see
+// handleDeleteMedia.
+//
+// Every stored item is checked, unlike playlistUploadProblems above, which
+// deliberately skips items the operator inherited rather than introduced.
+// That distinction is about which items a SAVE may be refused for; a DELETE
+// is not saving anything, so there is no "introducing" to compare against --
+// an upload named anywhere in what is already on disk is in use.
+func (s *Server) uploadIsReferenced(name string) (bool, int, error) {
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		return false, 0, fmt.Errorf("playlist reference cannot be checked: %w", err)
+	}
+	want := db.PlaylistUploadName(name)
+	for i, item := range settings.Failover.Playlist.Items {
+		if db.PlaylistUploadName(item.Upload) == want {
+			return true, i, nil
+		}
+	}
+	return false, 0, nil
+}
+
 // enqueuePlaylistNormalisation asks for the derivative every item needs.
 //
 // THIS IS THE ONLY PRODUCTION SUBMITTER OF playlistmedia.KindNormalise. The
