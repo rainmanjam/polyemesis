@@ -36,6 +36,7 @@ import type {
   PlayoutProtection,
   PlayoutPublicView,
   PlayoutUrls,
+  PlaylistStatus,
   PostProdSettings,
   Preset,
   PresetOpts,
@@ -266,6 +267,11 @@ export const api = {
    *  time. An empty string CLEARS the stored password. */
   putMqttPassword: (password: string) =>
     put<{ hasPassword: boolean }>("/settings/mqtt-password", { password }),
+  /** Per-item readiness for the configured playlist -- whether the upload
+   *  behind each entry still exists and has what the selector needs to play
+   *  it. Separate from getSettings() because settings only carries what the
+   *  operator TYPED; this reports what the server can actually DO with it. */
+  playlistStatus: () => get<PlaylistStatus>("/failover/playlist"),
 
   // --- transport security ---
   /** Read-only: TLS lives in config.yaml because it has to be right before the
