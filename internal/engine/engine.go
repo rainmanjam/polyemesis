@@ -4386,14 +4386,28 @@ func playlistSig(s db.Settings) string {
 // that "played" and disappeared. The same pair, for the same reason, is what
 // pullFile emits for a file:// ingest.
 //
-// The input is the LIST, so the "file:" prefix B1 carried is gone with the path
-// it was pinning. That prefix existed because a bare path containing a colon
-// ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the path
-// being pinned was built from an operator's upload name. -f concat names the
-// demuxer explicitly and the argument is a filename this process composed, not
-// operator text. A DATA DIRECTORY CONTAINING A COLON IS THEREFORE THE ONE CASE
-// THIS NO LONGER COVERS -- it is the operator's own configured path, shared with
-// every other file the engine opens, and not something an item name can reach.
+// The "file:" prefix pins the LIST to the file protocol, as B1 pinned the
+// upload path and as pullFile and pullSource pin theirs.
+//
+// WHAT IT ACTUALLY PROTECTS IS NARROWER THAN IT LOOKS, and the boundary was
+// measured against FFmpeg 8.1.2 rather than reasoned about. FFmpeg infers a
+// protocol from the characters before the first ":" ONLY while no "/" has
+// appeared, so:
+//
+//   - "2026:01/data/list.txt" -- a RELATIVE data directory whose first segment
+//     carries a colon -- fails with "Protocol not found" unprefixed, and opens
+//     with the prefix. This is the case the prefix buys.
+//   - "/mnt/2026:01/data/list.txt" is fine either way. An ABSOLUTE path can
+//     never be misread, because the leading "/" ends protocol detection before
+//     the colon is reached.
+//   - "data/a:b/list.txt" is fine either way, for the same reason.
+//
+// So the widely-repeated worry -- an operator's data directory containing a
+// colon -- is NOT a failure for any absolute DataDir, which is the ordinary
+// case. The prefix is kept because it makes the guarantee unconditional instead
+// of resting on that argument, it costs one string concatenation, and it keeps
+// every file input in this package spelled the same way. It is not load bearing
+// for a deployment that configures an absolute data directory.
 //
 // THE FILE'S CODEC PARAMETERS MUST MATCH THE INGEST'S, AND NOTHING CHECKS.
 // `-c copy` here and a copy hop in startFeed mean the file's codec, resolution,
@@ -4423,7 +4437,7 @@ func playlistFeedArgs(listPath, outURL string) []string {
 		// boundary; genpts gives the relay a monotonic base without touching the
 		// payload.
 		"-fflags", "+genpts",
-		"-f", "concat", "-safe", "0", "-i", listPath,
+		"-f", "concat", "-safe", "0", "-i", "file:" + listPath,
 		"-map", "0",
 		"-c", "copy",
 		"-f", "mpegts",

@@ -539,10 +539,52 @@ func TestThePlaylistInputFlagsPrecedeTheInput(t *testing.T) {
 func TestThePlaylistDemuxerIsNamedAndItsListIsTrusted(t *testing.T) {
 	args := playlistFeedArgs("/data/playlist-1-abc.txt", "udp://127.0.0.1:9000")
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-f concat", "-safe 0", "-i /data/playlist-1-abc.txt"} {
+	for _, want := range []string{"-f concat", "-safe 0", "-i file:/data/playlist-1-abc.txt"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("playlist argv is missing %q: %v", want, args)
 		}
+	}
+}
+
+// TestThePlaylistListPathIsPinnedToTheFileProtocol is the successor to B1's
+// TestThePlaylistPathIsPinnedToTheFileProtocol. That test guarded the prefix on
+// the UPLOAD path, an operator-supplied name; this one guards it on the LIST
+// path, which this process composes.
+//
+// WHAT THE PREFIX PROTECTS WAS MEASURED, not assumed, against FFmpeg 8.1.2:
+// FFmpeg infers a protocol from the characters before the first ":" only while
+// no "/" has appeared. So a RELATIVE data directory whose first segment carries
+// a colon -- "2026:01/data" -- fails with "Protocol not found" unprefixed and
+// opens with the prefix, and that is the case this buys. An ABSOLUTE data
+// directory, "/mnt/2026:01/data", opens either way, because the leading "/"
+// ends protocol detection before the colon is reached.
+//
+// The assertion is therefore deliberately about the ARGV rather than about
+// FFmpeg opening anything: for the ordinary absolute-path deployment there is
+// no behaviour to observe, because unprefixed already works. What is worth
+// holding is that every file input this package builds is spelled the same way,
+// so the guarantee does not rest on the reader re-deriving that argument.
+//
+// The mutation: drop the "file:" prefix from playlistFeedArgs and this fails.
+func TestThePlaylistListPathIsPinnedToTheFileProtocol(t *testing.T) {
+	// A colon in the FIRST segment, which is the only shape FFmpeg misreads.
+	args := playlistFeedArgs("2026:01/data/playlist-media/playlist-1-abc.txt",
+		"udp://127.0.0.1:9000")
+	want := "file:2026:01/data/playlist-media/playlist-1-abc.txt"
+	found := false
+	for i, a := range args {
+		if a != "-i" || i+1 >= len(args) {
+			continue
+		}
+		found = true
+		if args[i+1] != want {
+			t.Errorf("playlist input = %q, want %q -- an unprefixed relative path "+
+				"whose first segment carries a colon is read as a protocol name, and "+
+				"FFmpeg answers it with \"Protocol not found\"", args[i+1], want)
+		}
+	}
+	if !found {
+		t.Fatal("playlist argv has no -i flag")
 	}
 }
 
