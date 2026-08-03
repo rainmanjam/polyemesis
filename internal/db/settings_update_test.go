@@ -127,8 +127,10 @@ func TestAFailedMutationWritesNothing(t *testing.T) {
 		t.Fatalf("GetSettings: %v", err)
 	}
 	if !reflect.DeepEqual(before, after) {
-		t.Errorf("the stored settings changed after a refused mutation:\nbefore %+v\nafter  %+v",
-			before, after)
+		// Only the field the closure touched is named: the whole document is
+		// several hundred fields wide and dumping it twice buries the answer.
+		t.Errorf("the stored settings changed after a refused mutation "+
+			"(meter interval %d, was %d)", after.Meters.IntervalMS, before.Meters.IntervalMS)
 	}
 }
 
@@ -171,7 +173,8 @@ func TestAnInvalidDocumentIsRefusedAndNotStored(t *testing.T) {
 		t.Fatalf("GetSettings: %v", err)
 	}
 	if !reflect.DeepEqual(before, after) {
-		t.Errorf("an invalid document was stored:\nbefore %+v\nafter  %+v", before, after)
+		t.Errorf("an invalid document was stored (failover playlist enabled: %v)",
+			after.Failover.Playlist.Enabled)
 	}
 }
 
@@ -212,7 +215,7 @@ func TestErrSettingsUnchangedWritesNothingAndIsNotAnError(t *testing.T) {
 		t.Fatalf("GetSettings: %v", err)
 	}
 	if !reflect.DeepEqual(seed, stored) {
-		t.Errorf("the stored settings changed on a no-op update:\nbefore %+v\nafter  %+v",
-			seed, stored)
+		t.Errorf("the stored settings changed on a no-op update (meter interval %d, was %d)",
+			stored.Meters.IntervalMS, seed.Meters.IntervalMS)
 	}
 }
