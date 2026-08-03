@@ -211,15 +211,19 @@ test.describe("playlist editor", () => {
     // work: the item was saved 800 ms ago, so the in-use guard answers 409 and
     // the file stays exactly where it is.
     removeUploadOutOfBand(gone);
-    await page.reload();
-    await page.getByRole("tab", { name: "Pipeline" }).click();
 
+    // NO RELOAD, deliberately. The operator is standing on this page when the
+    // file goes away, and the editor is supposed to notice: it polls readiness
+    // while any item is unsettled. Reloading here would assert the same text
+    // against a freshly mounted component and leave the catch-up -- which the
+    // component fetched once at mount and never again until this branch --
+    // with nothing watching it. Mutation: make the poll effect return
+    // unconditionally and this row never changes.
     const row = page.locator('[data-testid="playlist-item"]', { hasText: gone });
     // Longer than the default: the fixture is a text blob, so a normalisation
     // job was queued at save and is briefly ACTIVE -- which reads as
-    // "Transcoding", correctly, by the state precedence. The editor polls, so
-    // the row settles on its own; this only has to outlast one job failure
-    // plus one poll interval.
+    // "Transcoding", correctly, by the state precedence. This has to outlast
+    // one job failure plus one poll interval.
     await expect(row.getByText("Needs attention")).toBeVisible({ timeout: 15_000 });
     // "no longer exists" is text ONLY the missing-upload branch produces
     // (internal/api/playlist_status.go). The assertion used to be
@@ -238,11 +242,24 @@ test.describe("playlist editor", () => {
     // conditionally-hidden one instead of a conditionally-mounted one.
     await expect(row).toContainText(/no longer exists/i, { useInnerText: true });
 
-    // Leave the shared install as it was found.
-    await card.getByRole("button", { name: `Remove ${gone}` }).click();
+    // Leave the shared install as it was found -- AFTER A RELOAD, and that is
+    // not tidiness. A SECOND save from one page load is refused with 400
+    // "invalid request body: json: unknown field \"reload\"": PUT /settings
+    // answers with api.settingsResponse, which embeds db.Settings and adds
+    // `reload`; SettingsPage.save does setSettings(await api.putSettings(next))
+    // and the draft mirrors settings, so the next PUT carries `reload` back
+    // into a decoder with DisallowUnknownFields. Every other spec reloads
+    // between its saves, so nothing had ever asked. This spec routes around
+    // it rather than fixing it here, deliberately -- it is a defect in the
+    // shared settings save path, not in the playlist -- and says so instead of
+    // leaving a reload that looks like a habit.
+    await page.reload();
+    await page.getByRole("tab", { name: "Pipeline" }).click();
+    const cleanup = failoverCard(page);
+    await cleanup.getByRole("button", { name: `Remove ${gone}` }).click();
     if (!plWas) await setSwitch(page, "#fo-playlist", false);
     if (!foWas) await setSwitch(page, "#fo-enabled", false);
-    await card.getByRole("button", { name: "Save" }).click();
+    await cleanup.getByRole("button", { name: "Save" }).click();
     await page.waitForTimeout(800);
 
     // The fixture is deleted rather than left behind -- this file's header
