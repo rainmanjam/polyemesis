@@ -321,6 +321,29 @@ func DerivativePath(dataDir, upload string) string {
 	return filepath.Join(dataDir, Dir, name+NormalisedExt)
 }
 
+// DerivativeGlob matches every derivative VERSION on disk for one upload,
+// which is what deletion has to remove -- not just DerivativePath's single,
+// current name.
+//
+// DerivativePath above names one file today, with no version in it.
+// DerivativeGlob is deliberately written against a versioned scheme anyway
+// (<upload>.v<N>.ts): the day this package's profile needs a version in the
+// filename -- so that a changed encode is not silently reused just because a
+// file already sits at the old, unversioned path -- is exactly the day a
+// delete that only ever knew DerivativePath's one current name starts leaving
+// every earlier version behind, orphaned, with nothing else in this package
+// ever looking for it again. Writing the glob this way now means the caller
+// that removes derivatives on delete does not have to change the day that
+// happens.
+//
+// filepath.Base and the same trim as DerivativePath: whatever a derivative
+// for this upload is named, its stem has to match what DerivativePath
+// computes, or this glob could miss a real file.
+func DerivativeGlob(dataDir, upload string) string {
+	name := filepath.Base(strings.TrimSpace(upload))
+	return filepath.Join(dataDir, Dir, name+".v*"+NormalisedExt)
+}
+
 // DerivativeDir is where every upload's derivative lives.
 func DerivativeDir(dataDir string) string { return filepath.Join(dataDir, Dir) }
 

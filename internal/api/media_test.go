@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
+	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
@@ -268,6 +269,80 @@ func TestDeleteMediaRefusesTraversal(t *testing.T) {
 		}
 		if _, err := os.Stat(victim); err != nil {
 			t.Fatalf("delete %q removed a file outside uploads/: %v", name, err)
+		}
+	}
+}
+
+// The in-use guard B1 deferred. Defensible now in a way it was not then: B1's
+// lockout came from punishing an operator for state they could not edit, and
+// B2 gives them the control -- see handleDeleteMedia.
+//
+// A playlist-and-media fixture is needed here rather than plain mediaServer:
+// PUT /settings already reconciles unconditionally (handlePutSettings calls
+// s.mgr.Reconcile with no nil guard), so saving a playlist needs a server
+// with an engine wired, which is what sourceServer/serverUnderTest build.
+//
+// The mutation: delete the uploadIsReferenced check and this returns 204.
+func TestDeletingAnUploadAPlaylistNamesIsRefused(t *testing.T) {
+	h, sign, srv, _ := playlistJobServer(t)
+	seedUpload(t, srv, "used.ts")
+
+	savePlaylist(t, h, sign, []string{"used.ts"}, http.StatusOK)
+
+	del := httptest.NewRequest(http.MethodDelete, "/api/v1/media/used.ts", nil)
+	del.RemoteAddr = "203.0.113.5:44444"
+	sign(del)
+	w := do(t, h, del)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "item 0") {
+		t.Errorf("the refusal does not name the referencing item's index: %s", w.Body.String())
+	}
+	// Refused means refused: the file must still be there.
+	if _, err := os.Stat(filepath.Join(srv.cfg.DataDir, uploads.Dir, "used.ts")); err != nil {
+		t.Fatalf("a refused delete removed the upload anyway: %v", err)
+	}
+}
+
+// A permitted deletion removes EVERY derivative version, not just the current
+// profile's: a version bump can leave more than one on disk, and deleting the
+// upload while orphaning them is the leak B1 carried. See
+// playlistmedia.DerivativeGlob.
+//
+// The mutation: remove only DerivativePath's exact name and the v1 file
+// remains.
+func TestAPermittedDeletionRemovesEveryDerivativeVersion(t *testing.T) {
+	h, dataDir, auth := mediaServer(t)
+
+	r := uploadRequest(t, "file", "unused.ts", "data")
+	auth(r)
+	w := do(t, h, r)
+	var got uploads.File
+	json.Unmarshal(w.Body.Bytes(), &got)
+
+	derivDir := playlistmedia.DerivativeDir(dataDir)
+	if err := os.MkdirAll(derivDir, 0o755); err != nil {
+		t.Fatalf("mkdir derivative dir: %v", err)
+	}
+	v1 := filepath.Join(derivDir, got.Name+".v1.ts")
+	v2 := filepath.Join(derivDir, got.Name+".v2.ts")
+	for _, p := range []string{v1, v2} {
+		if err := os.WriteFile(p, []byte("derivative"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", p, err)
+		}
+	}
+
+	del := httptest.NewRequest(http.MethodDelete, "/api/v1/media/"+got.Name, nil)
+	del.RemoteAddr = "203.0.113.5:44444"
+	auth(del)
+	if w := do(t, h, del); w.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	for _, p := range []string{v1, v2} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("derivative %s still present after delete: %v", p, err)
 		}
 	}
 }
