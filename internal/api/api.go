@@ -692,26 +692,32 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
-// errResponseWritten is how a closure passed to db.UpdateSettings says "I have
-// already written the whole HTTP response; abandon the update and return".
+// badRequestError carries a 400 OUT of a db.UpdateSettings closure, so the
+// response is written after the store's settings lock has been released.
 //
-// It exists because the helpers a settings handler runs inside that closure --
-// decodeJSON above all -- answer the client themselves and report only a bool.
-// db.UpdateSettings needs an error to abort on, and the handler needs to know
-// that this particular abort must not be turned into a second response: two
-// writes to one ResponseWriter is a 400 followed by a superfluous-WriteHeader
-// log line and a body the client cannot parse.
+// The obvious shape -- call writeError inside the closure and tell the handler
+// the response is already written -- puts a socket write inside that lock, and
+// a client that stops reading its response can then hold it. That is the same
+// hazard readJSONBody exists to remove, arriving from the other direction, and
+// it would sit in the handler whose comments claim the network is kept out.
 //
-// Matched with errors.Is, never by string, and never returned to a caller
-// outside this package.
-var errResponseWritten = errors.New("the handler has already written the response")
+// So nothing inside a settings closure touches the ResponseWriter. It returns
+// this, the handler matches it with errors.As once UpdateSettings has returned,
+// and the message reaches the client unchanged.
+type badRequestError struct{ msg string }
+
+func (e badRequestError) Error() string { return e.msg }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	body, ok := readJSONBody(w, r)
 	if !ok {
 		return false
 	}
-	return decodeJSONFrom(w, body, v)
+	if err := decodeJSONInto(body, v); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
 }
 
 // readJSONBody buffers the request body, so that a caller holding a lock can
@@ -739,15 +745,16 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	return body, true
 }
 
-// decodeJSONFrom is decodeJSON's second half, over bytes already read.
-func decodeJSONFrom(w http.ResponseWriter, body []byte, v any) bool {
+// decodeJSONInto is decodeJSON's second half, over bytes already read. It
+// returns badRequestError rather than writing, so a settings closure can use it
+// without touching the ResponseWriter under the store's lock.
+func decodeJSONInto(body []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
-		return false
+		return badRequestError{"invalid request body: " + err.Error()}
 	}
-	return true
+	return nil
 }
 
 func idParam(r *http.Request, name string) (int64, error) {

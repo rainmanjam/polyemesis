@@ -1111,3 +1111,58 @@ func TestAScheduledPlaylistStartEnablesAValidPlaylist(t *testing.T) {
 		t.Error("a valid playlist was not enabled")
 	}
 }
+
+// The spec's row "firing when already enabled changes nothing and respawns
+// nothing", which was the one row of eight with no test.
+//
+// Both tests above start from a DISABLED playlist and call SetPlaylistEnabled
+// once, so the no-op branch in that function could be deleted with the whole
+// suite green -- the branch existed and nothing depended on it.
+//
+// The observable that makes it fail is not "was a write skipped": a redundant
+// write stores a byte-identical document, so nothing downstream can see it.
+// What is visible is that going through the write path VALIDATES, and the
+// document being validated is not the one this schedule is asking to change.
+// So the fixture stores a playlist that is enabled and empty -- invalid, and
+// reachable in the field: it is exactly what the lockout above used to leave
+// behind, and what a hand-edited or restored database can hold.
+//
+// A schedule asking for a state the install is already in must not fail because
+// of that. Without the branch it does: Validate refuses the untouched document,
+// the runner leaves the occurrence unhandled, and it retries every sweep until
+// the grace window closes -- an overlapping schedule turning into a stream of
+// warnings about a change nobody asked for.
+//
+// The mutation: delete the three-line `if s.Failover.Playlist.Enabled ==
+// enabled` branch in scheduleActuator.SetPlaylistEnabled.
+func TestAScheduledPlaylistStartOnAnAlreadyEnabledPlaylistIsANoOp(t *testing.T) {
+	e := failoverEngine(t)
+	act := scheduleActuator{e: e}
+
+	s, err := e.store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	s.Failover.Playlist.Enabled = true
+	// PutSettings, not UpdateSettings: this is the raw door precisely because
+	// the fixture has to store a document the validating door would refuse.
+	if err := e.store.PutSettings(s); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+
+	if err := act.SetPlaylistEnabled(true); err != nil {
+		t.Fatalf("a schedule asking for the state the playlist is already in reported %v; "+
+			"the occurrence then stays unhandled and retries every sweep", err)
+	}
+
+	// And the document is untouched -- neither repaired nor damaged by a flip
+	// that had nothing to do.
+	got, err := e.store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if !got.Failover.Playlist.Enabled || len(got.Failover.Playlist.Items) != 0 {
+		t.Errorf("the stored playlist changed on a no-op: enabled=%v items=%d, want enabled=true items=0",
+			got.Failover.Playlist.Enabled, len(got.Failover.Playlist.Items))
+	}
+}

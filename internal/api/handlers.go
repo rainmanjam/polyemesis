@@ -497,6 +497,15 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 	// concurrent settings save entirely. A failure is still only warned about --
 	// the annotations are already on the source, which is where the engine reads
 	// them from, so the save itself succeeded and refusing it now would be a lie.
+	//
+	// NEW BEHAVIOUR worth naming: this path now validates, because
+	// UpdateSettings validates. A stored document that is invalid for some
+	// unrelated reason used to get the mirror written anyway by raw PutSettings;
+	// now the mirror is skipped and only the log line says so. That is the safer
+	// direction -- it is how a document stops being repeatedly re-stored while
+	// broken -- but it means GET /settings can report annotations that differ
+	// from the source row until the underlying invalidity is fixed. The engine
+	// reads the SOURCE, so nothing on air is affected.
 	if _, err := s.store.UpdateSettings(func(settings *db.Settings) error {
 		settings.Ingest.Annotations = req.Annotations
 		return nil
@@ -693,6 +702,19 @@ func (s *Server) handlePutMQTTPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	// Buffered before EITHER lock, and the order of these two statements is
+	// the whole point. The decode has to happen inside the store's settings
+	// mutex -- decoding over the stored document is what makes a partial
+	// payload safe -- so reading the network there would hold that lock at the
+	// speed of the client's connection, and the server sets no body timeout
+	// (ReadHeaderTimeout bounds headers only). The same argument applies to
+	// settingsMu below, whose whole job is to make a media delete wait: a save
+	// from a stalled connection must not hold it either. See readJSONBody.
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+
 	// settingsMu -- see its declaration on Server. Held for the whole
 	// handler rather than trimmed to just the store call: the only cost of
 	// the wider scope is a concurrent DELETE /api/v1/media/{name} waiting a
@@ -702,14 +724,6 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
-	// The body is buffered BEFORE any lock is taken, because the decode below
-	// happens inside the store's settings mutex and reading a network stream in
-	// there would hold it at the speed of the client's connection. See
-	// readJSONBody.
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
 	// Everything from reading the stored document to storing the new one is one
 	// span inside db.UpdateSettings, which holds the STORE's settings lock
 	// across it. s.settingsMu above is a different boundary and cannot serve
@@ -734,8 +748,8 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			Enabled: settings.Failover.Playlist.Enabled,
 			Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
 		}
-		if !decodeJSONFrom(w, body, settings) {
-			return errResponseWritten
+		if err := decodeJSONInto(body, settings); err != nil {
+			return err
 		}
 		// Validated HERE as well as inside UpdateSettings, and the order is the
 		// point: the filesystem check below must never run on a document the
@@ -756,15 +770,23 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// deleted: the operator has no control that can clear it, and the
 		// readiness gate keeps the playlist off air regardless. See
 		// playlistUploadProblems.
+		//
+		// This is the one thing left inside the store's lock that touches
+		// something outside the process: a MkdirAll and a Stat per introduced
+		// item, on local disk. Bounded and short, unlike a network read, and
+		// moving it out would mean either checking uploads against a document
+		// that is not the one about to be stored or holding the check open
+		// across the write. Recorded rather than claimed away.
 		if err := s.playlistUploadProblems(settings.Failover.Playlist, storedPlaylist); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return errResponseWritten
+			return badRequestError{err.Error()}
 		}
 		return nil
 	})
 	var invalid db.InvalidSettingsError
+	var badRequest badRequestError
 	switch {
-	case errors.Is(err, errResponseWritten):
+	case errors.As(err, &badRequest):
+		writeError(w, http.StatusBadRequest, badRequest.Error())
 		return
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Error())

@@ -74,6 +74,20 @@ func TestEveryScheduleActionIsOfferedByTheUI(t *testing.T) {
 // i18n's locale guard is the shape worth copying and the one that version only
 // claimed to: it walks the locale directory with ReadDir and finds what is
 // there. A guard that restates its input has no input.
+//
+// WHAT IT STILL CANNOT SEE, and this matters more here than the note above,
+// because this guard is the only thing standing between a fifth action and the
+// destination path: it reads scheduler.go alone, and matches only the
+// `Name Action = "value"` form. An action declared in a sibling file of this
+// package, or written `ActionPause = Action("pause")`, is invisible to it. The
+// len(declared) == 0 tripwire below catches the constants MOVING wholesale; it
+// does not catch one being ADDED somewhere else.
+//
+// Closing that needs go/ast over the package rather than a regexp over a file.
+// Recorded rather than done because every action this package has ever had is
+// declared in that one block in that one file, and a guard nobody can read is
+// its own hazard -- but if a second declaration site ever appears, this is the
+// note that says the guard stopped covering the thing it exists for.
 func TestTheActionListInThisFileIsComplete(t *testing.T) {
 	raw, err := os.ReadFile("scheduler.go")
 	if err != nil {

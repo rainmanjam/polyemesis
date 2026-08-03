@@ -31,7 +31,7 @@ import (
 //
 // Mutation that must make it fail: move the readJSONBody call in
 // handlePutSettings back inside the db.UpdateSettings closure (decodeJSON
-// rather than decodeJSONFrom). Measured: the UpdateSettings below then never
+// rather than decodeJSONInto). Measured: the UpdateSettings below then never
 // returns and the test fails on its deadline.
 func TestASlowSettingsBodyDoesNotHoldTheStoreSettingsLock(t *testing.T) {
 	s, _, store := testServer(t, config.Config{})
@@ -57,8 +57,10 @@ func TestASlowSettingsBodyDoesNotHoldTheStoreSettingsLock(t *testing.T) {
 	// The handler is now mid-body. The store must still be reachable.
 	unblocked := make(chan error, 1)
 	go func() {
-		_, err := store.UpdateSettings(func(cur *db.Settings) error {
-			cur.Failover.Playlist.Enabled = false
+		// Changes nothing and says so: this test needs the lock to be free, not
+		// a write to happen, and a mutate that edits before refusing would be
+		// making the store do work this assertion does not depend on.
+		_, err := store.UpdateSettings(func(*db.Settings) error {
 			return db.ErrSettingsUnchanged
 		})
 		unblocked <- err

@@ -5952,8 +5952,15 @@ func (a scheduleActuator) SetPlaylistEnabled(enabled bool) error {
 		if s.Failover.Playlist.Enabled == enabled {
 			// Already there, so there is nothing to write and nothing to
 			// validate. An overlapping schedule, or a restart inside a window,
-			// must not cost a write that anything watching settings would read
-			// as a change.
+			// arrives here every occurrence, and this is what makes that free
+			// rather than a re-validate and a re-write of the whole document.
+			//
+			// It is also what keeps it from becoming an ERROR: without this
+			// branch, a stored document that is invalid for some unrelated
+			// reason would fail Validate on the way through, and a schedule
+			// asking for a state the install is already in would report a
+			// failure, stay unhandled and retry until its grace window ran out.
+			// See db.ErrSettingsUnchanged.
 			return db.ErrSettingsUnchanged
 		}
 		s.Failover.Playlist.Enabled = enabled

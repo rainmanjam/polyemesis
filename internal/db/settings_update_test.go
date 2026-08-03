@@ -196,7 +196,17 @@ func TestErrSettingsUnchangedWritesNothingAndIsNotAnError(t *testing.T) {
 		t.Fatalf("PutSettings: %v", err)
 	}
 
+	// The mutate EDITS the document and then refuses, and that is what makes
+	// the no-write half of this test able to fail at all.
+	//
+	// The first version returned ErrSettingsUnchanged without touching s. A
+	// PutSettings on that path would have stored a byte-identical document, so
+	// the DeepEqual below could not tell a spurious write from no write -- the
+	// exact mutation the test's name promises to catch left it green. Editing
+	// first gives the write something to carry, so if the no-op path ever falls
+	// through to PutSettings the stored interval comes back as 999.
 	got, err := d.UpdateSettings(func(s *Settings) error {
+		s.Meters.IntervalMS = 999
 		return ErrSettingsUnchanged
 	})
 	if err != nil {

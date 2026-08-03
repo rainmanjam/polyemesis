@@ -604,15 +604,17 @@ func (s *Server) handlePutJobPolicy(w http.ResponseWriter, r *http.Request) {
 		before = settings.PostProd.Concurrency
 
 		var req db.PostProdSettings
-		if !decodeJSONFrom(w, body, &req) {
-			return errResponseWritten
+		if err := decodeJSONInto(body, &req); err != nil {
+			return err
 		}
 		settings.PostProd = req
 		return nil
 	})
 	var invalid db.InvalidSettingsError
+	var badRequest badRequestError
 	switch {
-	case errors.Is(err, errResponseWritten):
+	case errors.As(err, &badRequest):
+		writeError(w, http.StatusBadRequest, badRequest.Error())
 		return
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Error())

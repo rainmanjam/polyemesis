@@ -1786,11 +1786,19 @@ func (d *DB) LegacyPlaylistFilePath() (string, error) {
 // stored document and found nothing to do.
 //
 // It exists because "already in the wanted state" is a legitimate outcome that
-// must not cost a write. The scheduled playlist flip fires on every occurrence
-// -- an overlapping schedule, or a restart inside a window, arrives at a
-// playlist that is already enabled -- and a write there would be a change
-// notification to everything watching settings for a document that did not
-// change.
+// is neither a failure nor a reason to write. The scheduled playlist flip fires
+// on every occurrence -- an overlapping schedule, or a restart inside a window,
+// arrives at a playlist that is already enabled -- and reporting that as an
+// error would leave the occurrence unhandled and retried until its grace window
+// ran out.
+//
+// What the no-write half buys is smaller and worth stating exactly, because an
+// earlier version of this comment claimed a change notification and there is no
+// settings watcher in this codebase to notify -- no broadcast, no MQTT topic,
+// no WebSocket frame. It saves a whole-document Validate and a marshal-and-
+// insert per occurrence, and it keeps the stored bytes untouched so anything
+// that ever does watch them, or any backup that diffs them, sees no event where
+// nothing happened.
 var ErrSettingsUnchanged = errors.New("settings unchanged")
 
 // InvalidSettingsError reports that the mutated document failed
@@ -1831,8 +1839,15 @@ func (e InvalidSettingsError) Unwrap() error { return e.Err }
 // and nothing is written when it is non-nil. Two of those errors are special:
 //
 //   - ErrSettingsUnchanged means "nothing to do": no write, no error, and the
-//     document handed back is the one mutate was given. A mutate that reports
-//     it must not have changed anything, since nothing it changed is stored.
+//     document handed back is what is STORED, not what mutate was holding when
+//     it decided. A mutate may edit and then think better of it; the edits are
+//     simply discarded, and the caller never sees a field that is not in the
+//     database.
+//
+// It is NOT re-entrant. settingsMu is a plain Mutex, so a mutate that reaches
+// UpdateSettings again -- directly, or through any helper that writes settings
+// -- deadlocks the whole store rather than failing. A mutate should be a pure
+// edit of the document it is handed.
 //   - A validation failure comes back as InvalidSettingsError, so a caller can
 //     tell "the operator sent something impossible" from "the database broke".
 func (d *DB) UpdateSettings(mutate func(*Settings) error) (Settings, error) {
@@ -1845,7 +1860,13 @@ func (d *DB) UpdateSettings(mutate func(*Settings) error) (Settings, error) {
 	}
 	switch err := mutate(&s); {
 	case errors.Is(err, ErrSettingsUnchanged):
-		return s, nil
+		// Re-read rather than hand back s. A mutate is free to have edited the
+		// document before deciding there was nothing worth storing, and s
+		// carries those edits; returning it would hand the caller fields that
+		// are not in the database. This function promises the STORED document
+		// on every path, and one extra read of a single row is a cheap way to
+		// keep that true no matter what a mutate did on its way to refusing.
+		return d.GetSettings()
 	case err != nil:
 		return Settings{}, err
 	}
