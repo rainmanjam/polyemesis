@@ -243,6 +243,10 @@ step "6. Filler starts playing, with the encoder still on air"
 # in step 3 and this suite would have stopped measuring the cycle it was
 # originally written for.
 FILLER_TONE=2000
+# A playlist item names a STORED UPLOAD, not a path, so the clip is written into
+# the uploads directory rather than anywhere convenient. That is the boundary
+# uploads.Store.Resolve defends and the reason items stopped being paths.
+mkdir -p data/uploads data/playlist-media
 # Same geometry, frame rate and codec as the publisher above. The destination
 # copies video, so filler that did not match would be measuring a platform's
 # tolerance for a mid-stream codec change rather than the selector's switch.
@@ -251,9 +255,42 @@ ffmpeg -hide_banner -loglevel error \
   -f lavfi -i "sine=frequency=$FILLER_TONE:sample_rate=48000" \
   -map 0:v -map 1:a -c:v libx264 -preset ultrafast -g 30 -pix_fmt yuv420p \
   -b:v 1200k -c:a aac -b:a 128k -ac 2 -t 8 \
-  -y data/recordings/filler.ts 2>/dev/null
-[ -s data/recordings/filler.ts ] || { bad "could not build the filler clip"; exit 1; }
-OUT=$(drive playlist recordings/filler.ts)
+  -y data/uploads/filler.ts 2>/dev/null
+[ -s data/uploads/filler.ts ] || { bad "could not build the filler clip"; exit 1; }
+# The NORMALISED DERIVATIVE, written by hand.
+#
+# THE PRODUCTION ENQUEUE PATH IS NOT COVERED BY THIS SUITE, and this comment
+# says so in as many words because the previous version did not: it called this
+# a stand-in "for the transcode job that writes it in a real deployment" at a
+# time when NO production code registered or submitted that job at all. 18/18
+# green, and the feature could not start on a real server. A stand-in for an
+# unwired dependency is indistinguishable from a stand-in for a wired one, which
+# is exactly how that survived.
+#
+# The path IS wired now -- api.Server.enqueuePlaylistNormalisation submits on
+# every settings save, cmd/polyemesis/postprod.go registers the worker, and a
+# finished job reconciles the engine -- and it still cannot run here, for a
+# reason that is a feature rather than an obstacle: normalisation is deferred
+# background work, and the governor's default policy refuses to start deferred
+# work while an ingest is live. The encoder is deliberately publishing
+# throughout this step (that is the point of step 6), so the job the save
+# queues is correctly held back, and waiting for it would mean either cutting
+# the encoder -- destroying what this step measures -- or waiting on a
+# 1080p transcode inside an acceptance suite. Neither is worth it.
+#
+# What DOES cover the production path, by name:
+#   - TestSavingAPlaylistQueuesOneNormalisationPerUpload (internal/api)
+#     -- the settings save submits the job, once per distinct upload.
+#   - TestTheNormaliseWorkerIsRegisteredWithTheQueue (cmd/polyemesis)
+#     -- registerProcessors really registers KindNormalise.
+#   - TestAFinishedNormalisationReconcilesTheEngine (cmd/polyemesis)
+#     -- a completed job drives Reconcile, which is what starts the tier.
+#   - internal/playlistmedia/integration_test.go -- the transcode itself,
+#     against real FFmpeg, spliced with a real concat demuxer.
+#
+# The name is playlistmedia.DerivativePath's: <dataDir>/playlist-media/<upload>.ts.
+cp data/uploads/filler.ts data/playlist-media/filler.ts.ts
+OUT=$(drive playlist filler.ts)
 case "$OUT" in *PLAYLIST_OK*) : ;; *) bad "enable playlist: $OUT"; exit 1 ;; esac
 
 # The pin is how this suite SEES the file delivering while the encoder is still

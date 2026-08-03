@@ -186,6 +186,11 @@ func run(h *hooks) error {
 		return err
 	}
 	defer store.Close()
+	// One-shot, here rather than on internal/db's read path -- see
+	// migrateLegacyPlaylistFilePath's comment for why.
+	if err := migrateLegacyPlaylistFilePath(store, cfg.DataDir, log); err != nil {
+		return err
+	}
 
 	box, err := secrets.LoadOrCreate(cfg.SecretPath())
 	if err != nil {

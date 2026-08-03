@@ -138,13 +138,55 @@ the moment one arrives. You can pin it if you want it to win anyway.
 | Where | *Settings → Ingest → Pull* | `failover.playlist` in the settings API |
 
 There is no form control for it yet — set `failover.playlist.enabled` and
-`failover.playlist.filePath` (relative to the data directory, confined to it
-exactly as a pull URL is) through the settings API. The control arrives with the
-sequencing work in [the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md).
+`failover.playlist.items` through the settings API. `items` is a list, each
+entry an `{"upload": "<name>"}` naming a file already sent through the
+uploads page — a bare stored filename, never a path, confined to the uploads
+directory exactly as `internal/uploads.Store.Resolve` enforces everywhere
+else it is used. An item naming an upload that does not exist is refused with
+a 400 when you save. Today the list may hold several entries but only the
+first plays; sequencing arrives with the work in
+[the roadmap](roadmap/PLAYLIST-AND-COMPOSITING.md), which also brings the
+control itself.
+
+### Saving is not the same as being ready
+
+**A playlist does not go on air the moment you save it.** Saving queues one
+`playlist.normalise` job per distinct upload, which transcodes it to the single
+fixed profile every item has to share — 1080p30 H.264 in MPEG-TS, stereo AAC at
+48 kHz — and the tier refuses to start until *every* item's job has finished.
+Until then nothing is lost: the playlist is simply unavailable, the slate keeps
+the stream, and the server logs `playlist not started; not every item has been
+normalised yet`. When the last job lands the playlist becomes available on its
+own; you do not have to save again.
+
+Two things follow from where that work runs.
+
+- **It yields to your live stream.** Normalisation is ordinary background work
+  under the job governor, and the default policy is that heavy work does not
+  compete with an ingest that is on air. An item you add mid-broadcast will
+  normally start transcoding when the broadcast ends. Add filler *before* you go
+  live, not during.
+- **Watch it on the Jobs page.** The job is listed as *Playlist normalise*, with
+  the reason it is not running if it is being held back. A failure lands there
+  too — an audio-only upload, for instance, is refused permanently and says so,
+  rather than being retried forever.
+
+The derivative is written to `<dataDir>/playlist-media/` and is keyed on the
+upload, so the same file used twice in a list is transcoded once. Deleting an
+upload that a playlist names will take that playlist off air; remove the item as
+well.
 
 ### The file must match your encoder's codec, and nothing checks
 
-**This is the one way to get the failover playlist badly wrong.** The playlist is
+**This is the one way to get the failover playlist badly wrong, and normalising
+does not yet solve it.** The normalised derivative described above is required
+before a playlist may start, but it is not what plays: the tier still hands
+FFmpeg your **original** upload. The derivative becomes the input when
+sequencing arrives, which is the point of it — a list of files can only be
+spliced if they share a profile. Until then it is a readiness token, and the
+paragraphs below still apply in full to the file you uploaded.
+
+The playlist is
 copied, not re-encoded — `-c copy` from the file, and a copy hop into the
 selector — so the file's codec, resolution, frame rate and pixel format reach
 your destinations exactly as they were encoded. A destination that is also

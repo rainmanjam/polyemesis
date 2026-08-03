@@ -694,6 +694,18 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// The stored playlist, copied BEFORE the decode overwrites it.
+	//
+	// The copy is not defensive tidiness: json.Unmarshal reuses a slice's
+	// backing array when the capacity allows, so decoding into &settings can
+	// rewrite the stored items IN PLACE and leave "what was already saved" and
+	// "what was just sent" as the same memory. playlistUploadProblems needs
+	// them to be two different values or it cannot tell an item the operator
+	// is introducing from one they inherited.
+	storedPlaylist := db.PlaylistSettings{
+		Enabled: settings.Failover.Playlist.Enabled,
+		Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
+	}
 	if !decodeJSON(w, r, &settings) {
 		return
 	}
@@ -701,10 +713,29 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// The half of playlist validation that needs a filesystem. Settings.Validate
+	// checks an item's SHAPE and cannot check its existence -- internal/db has
+	// no uploads store and must not grow one -- so the "a missing upload is a
+	// settings error" rule is enforced here, where the store already exists.
+	//
+	// Scoped to items this save INTRODUCES. An unrelated save must not be
+	// refused because an upload some earlier item named has since been deleted:
+	// the operator has no control that can clear it, and the readiness gate
+	// keeps the playlist off air regardless. See playlistUploadProblems.
+	if err := s.playlistUploadProblems(settings.Failover.Playlist, storedPlaylist); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.store.PutSettings(settings); err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	// Ask for the derivative every playlist item needs. AFTER the save, so a
+	// rejected settings document never queues a transcode, and before the
+	// reconcile below only because a job that is instantly runnable may as well
+	// already be queued when the engine looks. See enqueuePlaylistNormalisation
+	// for why this is not done from inside the engine.
+	s.enqueuePlaylistNormalisation(settings.Failover.Playlist)
 	// The ingest block ALSO has to reach the default source, or saving it does
 	// nothing at all.
 	//

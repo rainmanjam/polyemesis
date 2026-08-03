@@ -425,9 +425,23 @@ const (
 	// MaxSlateImagePath keeps the stored path to something a filesystem and a
 	// form field can both hold.
 	MaxSlateImagePath = 512
-	// MaxPlaylistFilePath mirrors MaxSlateImagePath: the same bound for the
+	// MaxPlaylistItemUpload mirrors MaxSlateImagePath: the same bound for the
 	// same reason, a filesystem and a form field must both be able to hold it.
-	MaxPlaylistFilePath = 512
+	// It used to bound a data-dir-relative path; it now bounds an upload's
+	// stored name, which is shorter in practice but needs no smaller a ceiling.
+	MaxPlaylistItemUpload = 512
+	// MaxPlaylistItems bounds how many entries one playlist may hold.
+	//
+	// The list is not free to walk. engine.playlistItemsReady stats every item
+	// twice on EVERY reconcile while selMu is held -- the same lock an
+	// operator's POST /failover/source queues behind -- and the whole settings
+	// document is one JSON row that is read on most API requests. A thousand
+	// items is far more than any broadcast rotation and still a bounded amount
+	// of work; without a ceiling the only limit is what a client can POST.
+	//
+	// It also bounds what sub-project B2 will turn this list into: a concat
+	// file handed to FFmpeg, one line per item.
+	MaxPlaylistItems = 1000
 )
 
 // BackupIngestSettings is the second listener, running alongside the primary on
@@ -472,18 +486,58 @@ type SlateSettings struct {
 	Preset  string       `json:"preset"`
 }
 
-// PlaylistSettings is a file the selector can put on air when no encoder is
-// delivering.
+// PlaylistItem is one entry in the playlist, in play order.
+type PlaylistItem struct {
+	// Upload is the STORED name of an upload -- what Store.List reports as
+	// File.Name and what Store.Resolve accepts. Not a path, and not an id:
+	// internal/uploads has no identifier other than the name it chose.
+	//
+	// The distinction is a security boundary rather than a convenience. The
+	// concat demuxer needs -safe 0 to accept absolute paths, which disables
+	// its own check; that is only defensible while every path it sees was
+	// chosen by this process, which uploads.SafeName is what guarantees.
+	Upload string `json:"upload"`
+}
+
+// PlaylistUploadName is THE ONE PLACE a playlist item's Upload is trimmed.
+//
+// It lives in this package because this package owns PlaylistItem, and because
+// the three packages that have to agree about what an item names -- internal/db
+// validating it, internal/engine hashing and resolving it, internal/api
+// checking and enqueuing it -- can all import this one and none of them can
+// import each other.
+//
+// THE FAILURE IT PREVENTS HAS ALREADY HAPPENED ONCE. Validation and the
+// signature hash trimmed; the resolver did not. So " loop.mp4" validated,
+// hashed as "loop.mp4", and resolved to a path that does not exist -- FFmpeg
+// respawn-looped on a file that was never the one the operator meant. Worse,
+// editing " a.mp4" to "a.mp4" moved the argv but NOT the signature, so no
+// respawn fired and the correction never took effect at all. Every added
+// caller is a chance for that disagreement to come back, and the only defence
+// is that there is nothing to disagree with: a caller that needs an item's
+// name calls this, and no caller anywhere writes its own strings.TrimSpace
+// over an Upload.
+//
+// One exception, deliberate and recorded: playlistmedia.DerivativePath trims
+// independently, because it takes a name out of a job's JSON params rather than
+// out of a PlaylistItem, and internal/playlistmedia does not import this
+// package. That one is ledgered as carried.
+func PlaylistUploadName(upload string) string { return strings.TrimSpace(upload) }
+
+// PlaylistSettings is an ordered list of uploads the selector can put on air
+// when no encoder is delivering.
 //
 // Deliberately smaller than SlateSettings. The slate carries encoder, preset,
-// colour and bitrate because it SYNTHESISES a picture; a playlist plays a file
-// that already has its own encoding, so it needs none of them.
+// colour and bitrate because it SYNTHESISES a picture; a playlist plays files
+// that already have their own encoding, so it needs none of them.
 type PlaylistSettings struct {
 	Enabled bool `json:"enabled"`
-	// FilePath is relative to the data directory and confined there exactly as
-	// SlateSettings.ImagePath and a file:// pull source are. An operator-supplied
-	// path is the shape SECURITY.md's path confinement section exists to defend.
-	FilePath string `json:"filePath"`
+	// Items is the playlist, in play order. Each entry names an upload rather
+	// than a path -- see PlaylistItem.Upload for why that distinction is load
+	// bearing rather than cosmetic. An operator-supplied path here is exactly
+	// the shape SECURITY.md's path confinement section exists to defend, and
+	// PlaylistFileProblem is what refuses it.
+	Items []PlaylistItem `json:"items"`
 }
 
 // FailoverSettings turns on the source-selector tier: a permanent relay between
@@ -541,38 +595,89 @@ func (s SlateSettings) SlateImageProblem() error {
 	return nil
 }
 
-// PlaylistFileProblem reports why the configured playlist file cannot be
+// PlaylistFileProblem reports why the configured playlist items cannot be
 // used, or nil.
 //
-// Same confinement as SlateSettings.ImagePath and a file:// pull source, and
-// for the same reason: the path is operator input that becomes an FFmpeg
-// argument, and an absolute path here would be a read primitive for whoever
-// reaches the settings API.
+// Kept under its old name -- it used to guard one FilePath, and it now guards
+// a list -- because engine.go's playlistSig and reconcilePlaylist call it by
+// this name to decide whether the tier may start at all, and renaming it
+// would be a larger change than this task's model-and-migration scope.
+//
+// Same confinement SlateSettings.ImagePath and a file:// pull source apply,
+// narrowed further: an upload name must be a BARE filename with no
+// separators, because internal/uploads.SafeName has already thrown away
+// whatever path the client originally sent when the file was uploaded, so a
+// stored upload never has one. Anything path-shaped here can only be an
+// attempt to reach outside the uploads directory -- and because the concat
+// demuxer needs -safe 0 to accept the absolute paths this process resolves an
+// Upload to (see PlaylistItem.Upload), this check is the only thing standing
+// between that trust and an operator-chosen path reaching FFmpeg.
 func (p PlaylistSettings) PlaylistFileProblem() error {
-	f := strings.TrimSpace(p.FilePath)
-	if f == "" {
+	if len(p.Items) == 0 {
 		if p.Enabled {
 			// An enabled playlist with nothing to play would start a feed that
 			// can never deliver, and the selector would offer a candidate that
 			// always loses -- accepting this now only moves the failure to
 			// runtime, where it is harder to see.
-			return errors.New("playlist is enabled but no file is configured")
+			return errors.New("playlist is enabled but has no items")
 		}
 		return nil
 	}
-	if len(f) > MaxPlaylistFilePath {
-		return fmt.Errorf("playlist file path is longer than %d characters", MaxPlaylistFilePath)
+	if len(p.Items) > MaxPlaylistItems {
+		return fmt.Errorf("playlist has %d items, more than the %d allowed",
+			len(p.Items), MaxPlaylistItems)
 	}
-	if strings.ContainsAny(f, "\x00\n\r") {
-		return errors.New("playlist file path contains control characters")
+	for i, item := range p.Items {
+		if err := playlistUploadProblem(item.Upload); err != nil {
+			return fmt.Errorf("playlist item %d: %w", i, err)
+		}
 	}
-	// Backslashes are separators on Windows, so normalise before the traversal
-	// check or "..\..\secret.key" walks straight past it.
-	rel := strings.ReplaceAll(f, `\`, "/")
-	switch {
-	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
-		len(rel) > 1 && rel[1] == ':':
-		return errors.New("playlist file must be a relative path inside the data directory")
+	return nil
+}
+
+// playlistUploadProblem reports why an item's Upload cannot name an upload, or
+// nil.
+//
+// This is a shape check, not an existence check, and deliberately so: it cannot
+// ask internal/uploads whether the name is a real file, because settings
+// validation has no Store to ask and internal/db must not grow one. Importing
+// internal/uploads here would put an os.MkdirAll and a stat behind every
+// db.GetSettings -- ~20 callers, several of them per-request handlers -- which
+// is the defect Task 1 had to undo once already.
+//
+// EXISTENCE IS CHECKED, just not here. The settings handler asks the uploads
+// store it already holds (api.Server.playlistUploadProblems, called from
+// handlePutSettings) so that "that file is not there" is a 400 an operator
+// reads, which is what the spec requires. Whether the item has also been
+// NORMALISED is a third question, answered later still, by engine.go's
+// readiness gate -- normalisation is asynchronous, so an item can be perfectly
+// valid and not yet playable.
+func playlistUploadProblem(upload string) error {
+	u := PlaylistUploadName(upload)
+	if u == "" {
+		return errors.New("names no upload")
+	}
+	if u == "." {
+		// Too short to trip the separator or ".." checks below, but
+		// uploads.Store.Resolve refuses it outright (same as "" and ".."),
+		// and a playlist item this validator waved through would never
+		// resolve -- an enabled candidate that can only ever fail to start,
+		// which is exactly what an enabled-with-zero-items playlist is
+		// refused for above.
+		return errors.New("must be a bare uploaded filename, not \".\"")
+	}
+	if len(u) > MaxPlaylistItemUpload {
+		return fmt.Errorf("upload name is longer than %d characters", MaxPlaylistItemUpload)
+	}
+	if strings.ContainsAny(u, "\x00\n\r") {
+		return errors.New("upload name contains control characters")
+	}
+	// Backslashes are separators on Windows too, so normalise before checking
+	// for one, or "sub\\dir.mp4" would slip past a forward-slash-only test.
+	rel := strings.ReplaceAll(u, `\`, "/")
+	if strings.Contains(rel, "/") || strings.Contains(rel, "..") ||
+		(len(rel) > 1 && rel[1] == ':') {
+		return errors.New("must be a bare uploaded filename, not a path")
 	}
 	return nil
 }
@@ -1624,7 +1729,52 @@ func (d *DB) GetSettings() (Settings, error) {
 	if err := json.Unmarshal([]byte(raw), &s); err != nil {
 		return Settings{}, fmt.Errorf("decode settings: %w", err)
 	}
+	// Deliberately NOT migrating failover.playlist.filePath here any more.
+	// GetSettings has around twenty callers, several of them per-request API
+	// handlers, and confirming a legacy value honestly needs a filesystem
+	// resolve plus a Stat -- see LegacyPlaylistFilePath's comment. Doing that
+	// on every read would block every one of those callers on I/O, and since
+	// nothing here persists the result, it would redo the same work and log
+	// the same warning forever instead of once. cmd/polyemesis runs the real
+	// migration once at startup, where the data directory and a configured
+	// logger already exist, and PutSettings makes it stick.
 	return s, nil
+}
+
+// LegacyPlaylistFilePath reports the playlist FilePath recorded before it
+// became Items (DESIGN 2026-08-01-playlist-items), or "" if there is none.
+//
+// Pure past the SQL read: no filesystem access beyond this table and no
+// logging, on purpose. Confirming that value still names something real
+// needs a data directory and belongs to a caller that has one and a
+// configured logger to report the decision with -- this package deliberately
+// carries neither. See cmd/polyemesis's startup migration, which is the only
+// caller.
+//
+// Naturally idempotent without any extra bookkeeping: once that migration
+// persists Items via PutSettings, the stored blob is marshalled from the
+// current Settings struct, which has no FilePath field left to write --
+// so the very next call finds no legacy key at all and reports "".
+func (d *DB) LegacyPlaylistFilePath() (string, error) {
+	var raw string
+	err := d.sql.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var legacy struct {
+		Failover struct {
+			Playlist struct {
+				FilePath string `json:"filePath"`
+			} `json:"playlist"`
+		} `json:"failover"`
+	}
+	// Best-effort: a blob that fails even this loose a decode is not one this
+	// migration can act on either way.
+	_ = json.Unmarshal([]byte(raw), &legacy)
+	return strings.TrimSpace(legacy.Failover.Playlist.FilePath), nil
 }
 
 // PutSettings stores the settings blob.

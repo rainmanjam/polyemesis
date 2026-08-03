@@ -15,7 +15,7 @@
 //	status           print "<active> <switches> <primaryLive> <destRestarts>"
 //	stopall          stop every destination so its file finalises
 //	pin <kind>       put a source on air by hand (primary|backup|slate|auto)
-//	playlist <path>  turn the playlist tier on, pointed at a file in the data dir
+//	playlist <name>  turn the playlist tier on with one item, naming a stored upload
 package main
 
 import (
@@ -83,7 +83,7 @@ func main() {
 		pin(os.Args[3])
 	case "playlist":
 		if len(os.Args) < 4 {
-			die("usage: playlist <path-relative-to-the-data-directory>")
+			die("usage: playlist <stored-upload-name>")
 		}
 		login()
 		playlist(os.Args[3])
@@ -283,8 +283,13 @@ func pin(kind string) {
 	fmt.Println("PIN_OK")
 }
 
-// playlist turns the playlist tier on, pointed at a file inside the data
-// directory.
+// playlist turns the playlist tier on, pointed at a stored upload.
+//
+// An UPLOAD NAME, not a path. Items stopped being paths because
+// uploads.Store.Resolve is the single boundary that turns an operator-supplied
+// name into a file inside the uploads directory, and a path field made that
+// boundary optional. Posting the old "filePath" now fails the settings
+// decoder's unknown-field check outright, which is the intended answer.
 //
 // Turned on MID-RUN by its own subcommand rather than folded into
 // enableFailover, because the playlist outranks the slate: a tier already
@@ -297,7 +302,7 @@ func pin(kind string) {
 // would reset the ingest to its defaults, move the listener off port 1938 and
 // strand the publisher -- which would look from the outside like the failover
 // this suite is measuring.
-func playlist(path string) {
+func playlist(upload string) {
 	_, out := do(http.MethodGet, "/settings", nil)
 	var s map[string]any
 	if err := json.Unmarshal(out, &s); err != nil {
@@ -307,10 +312,13 @@ func playlist(path string) {
 	if f == nil {
 		die("settings carried no failover block")
 	}
-	// Relative, never absolute: db.PlaylistSettings.PlaylistFileProblem confines
-	// the path to the data directory, and an absolute one is rejected by
-	// validation rather than played.
-	f["playlist"] = map[string]any{"enabled": true, "filePath": path}
+	// A bare stored name, never a path: db.PlaylistSettings.PlaylistFileProblem
+	// refuses anything carrying a separator, and the engine resolves what is
+	// left through uploads.Store.Resolve.
+	f["playlist"] = map[string]any{
+		"enabled": true,
+		"items":   []any{map[string]any{"upload": upload}},
+	}
 	code, body := do(http.MethodPut, "/settings", s)
 	if code != http.StatusOK {
 		die(fmt.Sprintf("enable playlist failed: %d %s", code, body))

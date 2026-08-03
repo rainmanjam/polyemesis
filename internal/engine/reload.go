@@ -149,8 +149,14 @@ var settingsReload = map[string]ReloadRule{
 	// own, exactly like the backup listener -- so enabling it spawns a child and
 	// the file reaches that child's argv. Classified like the backup's two
 	// equivalents above, and for the same reasons.
-	"failover.playlist.enabled":  {ClassRespawn, "reconcilePlaylist", "starts or stops the playlist tier; its eligibility as a choice is re-read every 500ms, but the process is not"},
-	"failover.playlist.filePath": {ClassRespawn, "playlistSig", "the input file in the playlist tier's argv"},
+	"failover.playlist.enabled": {ClassRespawn, "reconcilePlaylist", "starts or stops the playlist tier; its eligibility as a choice is re-read every 500ms, but the process is not"},
+	// filePath became items (DESIGN 2026-08-01-playlist-items): the playlist
+	// is now an ordered list of uploads rather than one file, but the list
+	// still reaches the tier's argv exactly as the path did, so the class and
+	// the signature it moves are unchanged. Items is a slice of a struct, so
+	// walkSettings descends into it and the leaf is the nested "upload" field,
+	// not "items" itself.
+	"failover.playlist.items.upload": {ClassRespawn, "playlistSig", "the input file in the playlist tier's argv"},
 
 	// ----------------------------------------------------------------- synth
 	"synth.silenceOnVideoOnly": {ClassRespawn, "wantSilence", "starts or stops the silence tier, which moves silenceSig and therefore every passthrough consumer"},

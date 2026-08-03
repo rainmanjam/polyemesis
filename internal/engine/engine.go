@@ -40,6 +40,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/meters"
+	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -48,6 +49,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // relayPortBase is where per-consumer loopback ports are allocated from.
@@ -4218,13 +4220,124 @@ func (e *Engine) teardownBackup(b *backupIngest) {
 
 // ------------------------------------------------------------ playlist tier
 
+// playlistItemUpload is item i's Upload, trimmed -- the ONE place engine.go
+// reads it, so playlistSig's hash and reconcilePlaylist's resolution cannot
+// disagree about what an item names.
+//
+// THE TRIM ITSELF IS db.PlaylistUploadName'S, not a copy of it. This function
+// exists for the bounds check and for being the single engine-side accessor;
+// the whitespace rule lives with the type, where internal/api can reach it too.
+// It used to carry its own strings.TrimSpace, and a second one appeared in
+// internal/api the moment the settings handler started reading items -- which
+// is the same three-way drift, starting again, that this helper was created to
+// end. See db.PlaylistUploadName for the failure.
+func playlistItemUpload(items []db.PlaylistItem, i int) string {
+	if i < 0 || i >= len(items) {
+		return ""
+	}
+	return db.PlaylistUploadName(items[i].Upload)
+}
+
+// playlistItemsReady reports whether every item could actually go on air:
+// every one resolves to a stored upload, and every one has been normalised.
+//
+// NORMALISATION IS ASYNCHRONOUS, so "an item names this upload" and "this item
+// can be played" are different states, and there is nothing else on disk that
+// tells them apart. An operator adds an item the moment their file finishes
+// uploading; the transcode that makes it playable is a queued job that runs
+// when the governor lets it, which on a machine that is busy carrying a live
+// stream is not immediately.
+//
+// THE FAILURE THIS PREVENTS: the playlist ranks ABOVE the slate. Start the tier
+// for a list whose first item is still transcoding and the selector is offered
+// a candidate that cannot play, in preference to the slate -- and the slate is
+// the one thing that exists so that an operator never sees nothing. Holding the
+// slate for another few seconds is the cheap outcome; handing the broadcast to
+// a file that is not there yet is not.
+//
+// Resolution goes through uploads.Store.Resolve and NEVER through a string
+// join, for the reason reconcilePlaylist gives at its own call: Upload is a
+// bare stored name, Resolve is the single place that turns one into an absolute
+// path inside the uploads directory, and it is the confinement check standing
+// behind PlaylistFileProblem's shape check. That boundary is also why items are
+// upload names rather than paths in the first place.
+//
+// IT ASKS ABOUT BOTH THE UPLOAD AND ITS DERIVATIVE, and it has to ask about
+// both because they answer different questions and B1 needs both answers.
+//
+// The derivative is what says the item has been NORMALISED, which is the state
+// this gate exists for. The upload is what reconcilePlaylist actually hands
+// FFmpeg (see its comment headed "AND IT PLAYS THE UPLOAD"), so an upload that
+// is gone is a tier that respawn-loops on a missing file with the process
+// reported healthy the whole time -- the same "validated, respawned looking
+// like it should work, then failed to open a file" failure playlistItemUpload's
+// comment above exists to prevent. That is reachable, not theoretical:
+// DELETE /api/v1/media/{name} removes the upload and leaves the derivative
+// standing, so without this stat the gate would open on a file nothing can
+// play. An earlier version of this comment claimed the opposite -- that a
+// deleted upload with a surviving derivative was ready ON PURPOSE and "the tier
+// would still play" -- which was a promise about B2's concat input written into
+// B1, where nothing reads the derivative at all.
+//
+// Resolve is not that check: uploads.Store.Resolve is a SHAPE check that
+// confines a name to the uploads directory and never touches the disk, so
+// "no-such-upload.mp4" resolves perfectly happily.
+//
+// This is NOT a second notion of availability. Sub-project A settled that a
+// candidate is available when its hub is delivering bytes, and chooseSource
+// sees one plain boolean for that; a parallel "ready" input would give the
+// selector two ways to be unavailable and make the golden table's claim to
+// exhaustiveness false. This decides whether the hub gets FED at all: an
+// unready playlist starts no tier, so playlistRunning stays false through the
+// existing byte-counter path and the slate wins by the ranking already there.
+//
+// An empty list is vacuously ready and never reaches here anyway: playlistSig
+// is empty for an enabled playlist with no items, so reconcilePlaylist has
+// already returned.
+//
+// It takes the items rather than reading e.settings because reconcilePlaylist
+// must gate the playlist it is ABOUT TO START -- the settings it was handed --
+// and not whatever the engine last stored. In production those are the same
+// value; Reconcile assigns e.settings before reconcileOutputs runs. Anywhere
+// else they are not, and a gate that consulted the wrong one would refuse or
+// admit a playlist other than the one being started.
+func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
+	store, err := uploads.New(e.cfg.DataDir)
+	if err != nil {
+		// Without a store nothing can be resolved, so nothing is ready. Said
+		// out loud because it means the data directory is not writable, which
+		// is a great deal more wrong than one unnormalised item.
+		e.log.Error("playlist readiness: no uploads store", "err", err)
+		return false
+	}
+	for i := range items {
+		// playlistItemUpload is the ONE trim point shared with playlistSig, so
+		// readiness cannot disagree with the hash about what an item names.
+		upload := playlistItemUpload(items, i)
+		path, err := store.Resolve(upload)
+		if err != nil {
+			return false
+		}
+		// The operator's original, which is what the feed's argv names today.
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+		// The normalised copy, which is what says the transcode has finished.
+		if _, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // playlistSig hashes everything the playlist's command depends on, and is empty
 // when the tier must not run.
 //
-// An unusable path hashes empty rather than being started and left to fail:
+// An unusable list hashes empty rather than being started and left to fail:
 // PlaylistFileProblem is the same confinement a file:// pull source and the
-// slate's still are held to, and a path that fails it is operator input trying
-// to leave the data directory, not a file to hand FFmpeg anyway.
+// slate's still are held to, and an item that fails it is operator input
+// trying to name something other than a stored upload, not a file to hand
+// FFmpeg anyway.
 func playlistSig(s db.Settings) string {
 	p := s.Failover.Playlist
 	if !s.Failover.Enabled || !p.Enabled {
@@ -4233,7 +4346,15 @@ func playlistSig(s db.Settings) string {
 	if p.PlaylistFileProblem() != nil {
 		return ""
 	}
-	return hashStrings([]string{"playlist", strings.TrimSpace(p.FilePath)})
+	// Every item's name is part of the hash, and in order, so re-sequencing
+	// the list (once sequencing exists) respawns exactly as editing one entry
+	// does now.
+	parts := make([]string, 0, len(p.Items)+1)
+	parts = append(parts, "playlist")
+	for i := range p.Items {
+		parts = append(parts, playlistItemUpload(p.Items, i))
+	}
+	return hashStrings(parts)
 }
 
 // playlistFeedArgs builds the loop that publishes one file into the playlist's
@@ -4309,6 +4430,32 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
+	// READINESS IS EVALUATED BEFORE ANYTHING IS TORN DOWN, and the order is the
+	// whole of this check. It used to sit after the teardown block below, so an
+	// operator who appended one item to a playlist that was ON AIR moved the
+	// signature, lost the running tier to the teardown, and then had the gate
+	// refuse to bring it back because the new item had not been normalised yet.
+	// That is dead air, bought for an item B1 would not have played anyway --
+	// it still plays item 0 only -- and it lasted until some unrelated event
+	// happened to reconcile again. Refusing HERE leaves the running tier
+	// exactly as it was, still recorded under the OLD signature, so the next
+	// reconcile after the transcode lands still sees a mismatch and respawns
+	// onto the new list. Nothing is latched.
+	//
+	// Only when want is non-empty. An empty signature means the playlist must
+	// STOP -- the operator disabled it, or the items no longer pass
+	// PlaylistFileProblem -- and a stop must never be held up by a readiness
+	// question about a list that is not going on air.
+	if want != "" && !e.playlistItemsReady(s.Failover.Playlist.Items) {
+		e.log.Info("playlist not started; not every item has been normalised yet",
+			"items", s.Failover.Playlist.Items,
+			"alreadyRunning", cur != nil,
+			"reason", "the playlist ranks above the slate, so a tier started for an item "+
+				"that cannot play would displace the source that exists so an operator "+
+				"never sees nothing; a finished normalisation job reconciles again")
+		return
+	}
+
 	if cur != nil {
 		// The feed reads this hub, so it goes first -- a feed left running
 		// across the teardown would spin on a relay that has gone away. This
@@ -4363,26 +4510,81 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	if want == "" {
 		if s.Failover.Enabled && s.Failover.Playlist.Enabled {
 			// Only reachable through settings that never passed validation --
-			// db.Settings.Validate rejects an unconfined path -- so it is said
-			// out loud rather than left as a tier that quietly never starts.
-			e.log.Warn("playlist not started; its file is unusable",
-				"path", s.Failover.Playlist.FilePath,
+			// db.Settings.Validate rejects an item that fails PlaylistFileProblem
+			// -- so it is said out loud rather than left as a tier that quietly
+			// never starts.
+			e.log.Warn("playlist not started; its items are unusable",
+				"items", s.Failover.Playlist.Items,
 				"err", s.Failover.Playlist.PlaylistFileProblem())
 		}
 		return
 	}
 
+	// READINESS GATED THE START ABOVE, before the teardown, and that is the
+	// whole of it -- there is no second availability input anywhere below. A
+	// playlist that is not ready starts no tier, so it has no hub, so
+	// playlistRunning stays false through the byte counter sampleSources
+	// already reads, and the slate wins on the ranking that is already there.
+	//
+	// Re-read on every reconcile rather than watched: an unready reconcile
+	// records no tier, so the next one re-evaluates for free. What FIRES that
+	// next reconcile when the last normalisation job finishes is
+	// cmd/polyemesis/postprod.go's queue change hook, which calls
+	// Manager.Reconcile for a completed playlistmedia.KindNormalise. Without
+	// it nothing would: reconcilePlaylist is reached only from Reconcile, and
+	// Reconcile is only called by settings saves, the API, the manager and the
+	// scheduler -- none of which a finished job is.
 	hub, err := relay.New(e.log, 0)
 	if err != nil {
 		e.log.Error("playlist: no relay", "err", err)
 		return
 	}
 
-	// Resolved here rather than stored absolute, exactly as the slate's still
-	// and a file:// pull source are: the settings hold a path relative to the
-	// data directory, and this is where it becomes one FFmpeg can open.
-	path := filepath.Join(e.cfg.DataDir,
-		filepath.FromSlash(strings.TrimSpace(s.Failover.Playlist.FilePath)))
+	// Resolved through the uploads store, not a string join: Upload is a bare
+	// stored name inside <dataDir>/uploads, not a data-dir-relative path the
+	// way the old FilePath was, and uploads.Store.Resolve is the one place
+	// that turns a name into an absolute path under that directory. Joining
+	// DataDir with the name directly -- what an earlier version of this code
+	// did -- looks for the file one level too high and finds nothing for
+	// every real upload; Resolve is also the second, defence-in-depth check
+	// against a name escaping the uploads directory, behind
+	// PlaylistFileProblem's shape check.
+	//
+	// Still off the first item only: sequencing beyond one item is a later
+	// sub-project's job (see the plan's "No sequencing" note). Every item's
+	// derivative has already been required to exist by the readiness gate
+	// above, including the ones this argv does not yet name -- the gate is
+	// about the playlist an operator saved, not about the one file playing.
+	//
+	// AND IT PLAYS THE UPLOAD, NOT THE DERIVATIVE. THAT IS DELIBERATE, NOT A
+	// BUG. The gate above insists a normalised copy exists for every item, and
+	// this line then hands FFmpeg the operator's ORIGINAL. Nothing reads the
+	// derivative yet: it becomes the input when the concat demuxer arrives with
+	// sequencing, which is the whole reason the normalised profile is fixed --
+	// concat requires every file in the list to share codecs, timebase,
+	// resolution and channel layout, and a single-item argv has no list to make
+	// consistent. Until then the derivative is a readiness token, and the codec
+	// match this feed needs against the ingest is still the operator's problem,
+	// exactly as playlistFeedArgs says in capitals. Swapping this to the
+	// derivative on its own would change what an operator hears without giving
+	// them sequencing, and would silently re-encode a programme they encoded
+	// once already.
+	store, err := uploads.New(e.cfg.DataDir)
+	if err != nil {
+		e.log.Error("playlist: no uploads store", "err", err)
+		return
+	}
+	upload := playlistItemUpload(s.Failover.Playlist.Items, 0)
+	path, err := store.Resolve(upload)
+	if err != nil {
+		// Only reachable through settings that never passed validation --
+		// PlaylistFileProblem already refuses anything Resolve would reject on
+		// shape -- so it is said out loud rather than left as a tier that
+		// quietly never starts.
+		e.log.Warn("playlist not started; its upload does not resolve",
+			"upload", upload, "err", err)
+		return
+	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,

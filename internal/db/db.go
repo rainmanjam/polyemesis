@@ -17,6 +17,15 @@ import (
 var schemaSQL string
 
 // DB wraps the SQLite handle.
+//
+// Deliberately just that: no filesystem path and no logger. This package
+// used to carry an optional data directory and logger for one migration's
+// benefit (a legacy playlist FilePath, DESIGN 2026-08-01-playlist-items),
+// which put filesystem I/O and logging on GetSettings's read path -- read by
+// roughly twenty callers, several of them per-request API handlers. That
+// migration now runs once at startup in cmd/polyemesis, where a real data
+// directory and a real, configured logger already live; see
+// LegacyPlaylistFilePath for the pure half this package still owns.
 type DB struct {
 	sql *sql.DB
 }
