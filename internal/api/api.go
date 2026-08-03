@@ -212,6 +212,9 @@ func (s *Server) Handler() http.Handler {
 			// Manual failover. The tier's return mode defaults to manual, so
 			// this is how a broadcast leaves a slate.
 			r.Post("/failover/source", s.handleSwitchSource)
+			// Per-item playlist readiness. Its own GET rather than a field on
+			// the settings blob -- see handlePlaylistStatus.
+			r.Get("/failover/playlist", s.handlePlaylistStatus)
 			r.Get("/stats", s.handleStats)
 			r.Get("/levels", s.handleLevels)
 
