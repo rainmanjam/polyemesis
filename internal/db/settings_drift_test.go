@@ -55,31 +55,6 @@ func TestUITypesCanNameEverySettingsField(t *testing.T) {
 		// and the UI edits annotations through /source/annotations rather than
 		// through the settings blob.
 		"ingest.annotations": "edited through the annotations editor, not the settings form",
-		// The failover playlist (DESIGN 2026-08-01-playlist-own-hub) has its
-		// settings, validation and reload rules landing now, but no operator
-		// control. Sub-project A -- this one -- covers settings, the tier,
-		// the hub, sampling, an acceptance case and verification, and none of
-		// its six tasks add a UI. The control belongs with sub-project B
-		// (sequencing), where there is a playlist worth configuring rather
-		// than a single file. Until B lands, both are knobs no operator can
-		// reach.
-		//
-		// enabled is listed here too even though the guard currently passes
-		// it: the guard matches by LEAF NAME, not dotted path, and "enabled:"
-		// already appears throughout types.ts for dozens of unrelated
-		// fields, so the pass is an accident of a common name colliding, not
-		// evidence the UI can reach this field. Recording it turns that
-		// accident into a decision, which is what this list is for.
-		"failover.playlist.enabled": "UI control belongs with sub-project B2 (sequencing); passes today only because the leaf name \"enabled\" collides with unrelated fields, not because it is reachable",
-		// filePath became items (DESIGN 2026-08-01-playlist-items): still no
-		// operator control, and the reason has to name sub-project B2
-		// specifically. "a later task of this sub-project" was written here
-		// once before and had to be corrected, because none of this
-		// sub-project's own tasks add a UI -- the control lands with B2.
-		// Items is a slice of a struct, so walk descends into it and the leaf
-		// this guard actually finds is the nested "upload" field, not "items"
-		// itself -- a container name is never a control, only its leaves are.
-		"failover.playlist.items.upload": "UI control belongs with sub-project B2 (sequencing), where there is a playlist worth configuring rather than a single file",
 	}
 
 	var missing []string

@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
+import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -970,6 +971,48 @@ function PipelineSettings({
                     </span>
                   </div>
                 </>
+              )}
+
+              <div className="flex items-center justify-between">
+                <Label htmlFor="fo-playlist">Play a loop when nothing is live</Label>
+                <Switch
+                  id="fo-playlist"
+                  checked={draft.failover?.playlist?.enabled ?? false}
+                  onCheckedChange={(v) =>
+                    setDraft({
+                      ...draft,
+                      failover: {
+                        ...draft.failover,
+                        enabled: true,
+                        playlist: {
+                          items: draft.failover?.playlist?.items ?? [],
+                          ...draft.failover?.playlist,
+                          enabled: v,
+                        },
+                      },
+                    })
+                  }
+                />
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                A second candidate beside the slate: files play instead of a still image. Both can
+                be on -- see the tier order in the Failover design for which wins.
+              </span>
+
+              {draft.failover?.playlist?.enabled && (
+                <PlaylistEditor
+                  items={draft.failover?.playlist?.items ?? []}
+                  onChange={(items) =>
+                    setDraft({
+                      ...draft,
+                      failover: {
+                        ...draft.failover,
+                        enabled: true,
+                        playlist: { ...draft.failover?.playlist, enabled: true, items },
+                      },
+                    })
+                  }
+                />
               )}
             </>
           )}
