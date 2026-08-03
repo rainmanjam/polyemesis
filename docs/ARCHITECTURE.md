@@ -508,7 +508,10 @@ internal/
                turned into a path inside the uploads directory
   playlistmedia/
                one upload to the single normalised derivative a playlist item
-               must have before the failover playlist may go on air
+               is PLAYED FROM -- one fixed 1080p30 profile, so the concat
+               demuxer can splice a list the operator assembled from anything.
+               The profile's version is part of the derivative's filename, so
+               changing the encode cannot silently reuse files that predate it
 
   -- operations
   scheduler/   starts and stops destinations at a time the operator chose
