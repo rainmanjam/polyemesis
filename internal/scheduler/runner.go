@@ -179,6 +179,10 @@ func (r *Runner) Tick(now time.Time) []Result {
 			if err := r.store.MarkScheduleRun(s.ID, d.At); err != nil {
 				res.Err = err.Error()
 			}
+			// "target" rather than a playlist-specific key so one log query
+			// finds every schedule that fired, whatever it acted on. The
+			// destination branch below says `"target", "destinations"` for
+			// the same reason and carries the count separately.
 			r.log.Info("schedule fired",
 				"schedule", s.Name, "action", string(s.Action),
 				"target", "playlist", "occurrence", d.At.Format(time.RFC3339))
@@ -230,7 +234,8 @@ func (r *Runner) Tick(now time.Time) []Result {
 		}
 		r.log.Info("schedule fired",
 			"schedule", s.Name, "action", string(s.Action),
-			"destinations", len(targets), "occurrence", d.At.Format(time.RFC3339))
+			"target", "destinations", "count", len(targets),
+			"occurrence", d.At.Format(time.RFC3339))
 		out = append(out, res)
 		r.emit(res)
 	}

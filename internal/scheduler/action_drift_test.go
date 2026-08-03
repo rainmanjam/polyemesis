@@ -32,6 +32,14 @@ import (
 // with it, because there the requirement IS declaration in types.ts. Here the
 // requirement is "an operator can choose it", and declaring a union member is
 // not that.
+//
+// What this still cannot see, recorded rather than closed: a `<SelectItem
+// value="playlist.start">` inside a JSX comment would satisfy it, and a dropdown
+// refactored to `.map()` over an array of options would fail it even though every
+// action is reachable. The first needs a parser to catch and is not worth one;
+// the second fails LOUDLY and safely, forcing whoever refactors the dropdown to
+// re-derive what this guard should watch — which is the outcome we want anyway.
+// A moved file is the same: os.ReadFile fails and t.Fatalf says so.
 func TestEveryScheduleActionIsOfferedByTheUI(t *testing.T) {
 	path := filepath.Join("..", "..", "ui", "src", "pages", "AutomationPage.tsx")
 	raw, err := os.ReadFile(path)

@@ -514,7 +514,8 @@ internal/
                changing the encode cannot silently reuse files that predate it
 
   -- operations
-  scheduler/   starts and stops destinations at a time the operator chose
+  scheduler/   starts and stops destinations, and the failover playlist, at a
+               time the operator chose
   alerts/      "something an operator would want to know" to webhook deliveries
   mqtt/        retained telemetry, with Home Assistant discovery
 

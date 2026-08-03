@@ -93,6 +93,15 @@ interface AlertsMeta {
 type ScheduleAction = "start" | "stop" | "playlist.start" | "playlist.stop";
 type ScheduleKind = "once" | "daily" | "weekly";
 
+// "start" names two different things now -- starting destinations and starting
+// the failover playlist -- so anything that asks "does this row turn something
+// on?" has to ask it of both, and anything that renders a target has to know
+// which kind of target the row has. Comparing against the bare string "start"
+// is what gave playlist.start the stopped badge and the "every destination"
+// subtitle, which is precisely what its validation forbids.
+const isPlaylistAction = (a: ScheduleAction) => a.startsWith("playlist.");
+const isStartAction = (a: ScheduleAction) => a === "start" || a === "playlist.start";
+
 export interface Schedule {
   id: number;
   name: string;
@@ -791,6 +800,12 @@ function Schedules({
   };
 
   const targets = (s: Schedule) => {
+    // A playlist schedule carries NO destinations, by design: the server
+    // refuses one that names any, and the dialog clears them. Falling through
+    // to the destination wording below would then print "every destination"
+    // under every playlist row -- telling the operator this schedule does the
+    // one thing its validation exists to forbid.
+    if (isPlaylistAction(s.action)) return "the failover playlist";
     const ids = s.destinationIds ?? [];
     if (ids.length === 0) return "every destination";
     return ids.map((id) => destNames.get(id) ?? `#${id}`).join(", ");
@@ -827,7 +842,7 @@ function Schedules({
                   <TableRow key={s.id}>
                     <TableCell>
                       <div className="flex items-center gap-1.5 text-[12px]">
-                        <Badge variant={s.action === "start" ? "live" : "outline"}>
+                        <Badge variant={isStartAction(s.action) ? "live" : "outline"}>
                           {s.action}
                         </Badge>
                         {s.name}
