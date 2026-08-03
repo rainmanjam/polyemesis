@@ -328,7 +328,16 @@ func TestAPlaylistScheduleAsksForAReconcile(t *testing.T) {
 // with destinations disabled.
 func TestPlaylistStopDisablesThePlaylistAndNoDestinations(t *testing.T) {
 	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
-	act := &fakeActuator{playlistEnabled: true}
+	// `all` MUST be populated, and that is the difference between this test
+	// guarding the hazard and merely appearing to.
+	//
+	// A playlist schedule carries no DestinationIDs, so a misroute into the
+	// destination path takes the "empty means every destination" branch and asks
+	// ListDestinationIDs for the list. With an empty `all` that returns nothing,
+	// no destination is flipped, and the assertion below passes while the
+	// misroute it exists to catch is happening. The fixture has to be able to
+	// PRODUCE the failure before the assertion means anything.
+	act := &fakeActuator{playlistEnabled: true, all: []int64{7, 8}}
 	store := &fakeStore{rows: []Schedule{{
 		ID: 1, Name: "stop filler", Enabled: true,
 		Action: ActionPlaylistStop, Kind: KindOnce,
@@ -342,8 +351,10 @@ func TestPlaylistStopDisablesThePlaylistAndNoDestinations(t *testing.T) {
 		t.Error("playlist.stop fired and the playlist is still enabled")
 	}
 	if act.setCalls != 0 || len(act.set) != 0 {
-		t.Errorf("playlist.stop touched destinations (set=%v, calls=%d); Enables() answers false "+
-			"for it and the destination path reads Enables()", act.set, act.setCalls)
+		t.Errorf("playlist.stop disabled destinations %v in %d calls. Enables() answers "+
+			"false for playlist.stop and the destination path reads Enables(), so a "+
+			"playlist action reaching that path takes every destination in the install "+
+			"off air", act.set, act.setCalls)
 	}
 }
 
