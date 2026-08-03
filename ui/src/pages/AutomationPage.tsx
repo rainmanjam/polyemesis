@@ -90,7 +90,7 @@ interface AlertsMeta {
   stats: AlertStats;
 }
 
-type ScheduleAction = "start" | "stop";
+type ScheduleAction = "start" | "stop" | "playlist.start" | "playlist.stop";
 type ScheduleKind = "once" | "daily" | "weekly";
 
 export interface Schedule {
@@ -1013,7 +1013,19 @@ function ScheduleDialog({
               <Label>Action</Label>
               <Select
                 value={form.action}
-                onValueChange={(v) => setForm({ ...form, action: v as ScheduleAction })}
+                onValueChange={(v) => {
+                  const action = v as ScheduleAction;
+                  setForm({
+                    ...form,
+                    action,
+                    // A playlist schedule that also names destinations is
+                    // refused by the server, so a stale pick from before the
+                    // switch must not ride along invisibly.
+                    destinationIds: action.startsWith("playlist.")
+                      ? []
+                      : form.destinationIds,
+                  });
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1021,6 +1033,8 @@ function ScheduleDialog({
                 <SelectContent>
                   <SelectItem value="start">Start destinations</SelectItem>
                   <SelectItem value="stop">Stop destinations</SelectItem>
+                  <SelectItem value="playlist.start">Start the playlist</SelectItem>
+                  <SelectItem value="playlist.stop">Stop the playlist</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1106,20 +1120,26 @@ function ScheduleDialog({
             </>
           )}
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Destinations</Label>
-            <p className="text-[10px] text-muted-foreground">
-              None selected means every destination, which is what "start the show" usually means.
-            </p>
-            <div className="grid gap-1.5 sm:grid-cols-2">
-              {(status?.destinations ?? []).map((d) => (
-                <label key={d.id} className="flex items-center gap-2 text-[11px]">
-                  <Checkbox checked={dests.includes(d.id)} onCheckedChange={() => toggleDest(d.id)} />
-                  <span className="truncate">{d.name}</span>
-                </label>
-              ))}
+          {!form.action.startsWith("playlist.") && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Destinations</Label>
+              <p className="text-[10px] text-muted-foreground">
+                None selected means every destination, which is what "start the show" usually
+                means.
+              </p>
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {(status?.destinations ?? []).map((d) => (
+                  <label key={d.id} className="flex items-center gap-2 text-[11px]">
+                    <Checkbox
+                      checked={dests.includes(d.id)}
+                      onCheckedChange={() => toggleDest(d.id)}
+                    />
+                    <span className="truncate">{d.name}</span>
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <Label htmlFor="sch-grace">Lateness allowance (seconds)</Label>
