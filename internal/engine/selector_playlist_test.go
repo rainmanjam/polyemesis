@@ -234,6 +234,47 @@ func TestAnItemWhoseDerivativeIsMissingStartsNoTier(t *testing.T) {
 	}
 }
 
+// TestAnItemWhoseDerivativeIsEmptyStartsNoTier is the same gate against the
+// state that LOOKS finished: the derivative exists, under its final name, with
+// nothing in it.
+//
+// A transcode killed between the create and the first write leaves exactly
+// this, and os.Stat alone cannot tell it from a completed one. The consequence
+// of admitting it is worse than refusing a missing file, because the tier
+// STARTS: the concat list names an empty file, FFmpeg exits immediately, the
+// supervisor respawns it, and the playlist outranks the slate the whole time.
+//
+// The three other readers of this path -- api.playlistItemStatus,
+// api.enqueuePlaylistNormalisation and playlistmedia.RunNormalise's
+// already-normalised skip -- have always required Size() > 0. This is the one
+// that decides what goes to air, and for a while it was the one that did not.
+//
+// The mutation: drop `|| fi.Size() == 0` from playlistItemsReady and this fails.
+func TestAnItemWhoseDerivativeIsEmptyStartsNoTier(t *testing.T) {
+	e := playlistEngine(t)
+	s := playlistOnSettings()
+	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "truncated.mp4"}}
+
+	// Seeded normally and then emptied, rather than written empty: the file has
+	// to arrive at the same path DerivativePath computes, and truncating what
+	// the helper wrote is the only way to be sure it is that path and not one a
+	// test built for itself.
+	seedPlaylistUpload(t, e, "truncated.mp4", true)
+	if err := os.Truncate(playlistmedia.DerivativePath(e.cfg.DataDir, "truncated.mp4"), 0); err != nil {
+		t.Fatalf("truncate the derivative: %v", err)
+	}
+
+	e.selMu.Lock()
+	e.reconcilePlaylist(s)
+	e.selMu.Unlock()
+
+	if h := e.playlistHub(); h != nil {
+		t.Error("a playlist whose derivative is zero-length started a tier: the concat " +
+			"list names an empty file, FFmpeg exits at once, and the tier respawn-loops " +
+			"on air in preference to the slate")
+	}
+}
+
 // Readiness asks about the DERIVATIVE and no longer about the upload.
 //
 // B1 required both, because the argv named the upload and a deleted upload meant

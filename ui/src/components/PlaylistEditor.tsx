@@ -53,6 +53,14 @@ const STATE_LABEL: Record<PlaylistItemStatus["state"], string> = {
   attention: "Needs attention",
 };
 
+// Slower than the live panes (Meters 2s, Clips 3s) and faster than the ones
+// watching something that changes by the minute (PublicPlayer 15s). What is
+// being waited on here is a transcode under the job governor, so seconds of
+// latency cost nothing -- but this runs on the settings page, where a save is
+// the thing an operator is actually doing, and readiness must not be the
+// reason a PUT queues behind a GET.
+const POLL_MS = 5000;
+
 export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
   const [uploads, setUploads] = useState<MediaFile[]>([]);
   const [status, setStatus] = useState<PlaylistStatus | null>(null);
@@ -64,14 +72,55 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
       const [media, playlist] = await Promise.all([api.media(), api.playlistStatus()]);
       setUploads(media);
       setStatus(playlist);
+      // Cleared on success, not only set on failure: readiness is polled
+      // below, so a single blip -- a reconcile holding the handler, a restart
+      // -- would otherwise leave a stale red banner over a pane that has been
+      // answering correctly ever since.
+      setError("");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     }
   }, []);
 
+  // Keyed on the NAMES, not the array: SettingsPage passes
+  // `draft.failover?.playlist?.items ?? []`, and that `?? []` is a fresh array
+  // on every render of the page. An effect depending on the array itself would
+  // re-run on every unrelated keystroke in the settings form, and while the
+  // playlist is enabled but empty it would re-run forever.
+  const itemsKey = items.map((it) => it.upload).join("\n");
+
+  // At mount, and again whenever the draft's items change. An edit is the
+  // moment the position-matched status below goes stale -- a row inserted at
+  // index 1 shifts every status after it -- so the answer is re-asked rather
+  // than left to the poll interval.
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+  }, [refresh, itemsKey]);
+
+  // Settled means every row is matched to a status entry AND that entry is
+  // ready. Deliberately not PlaylistStatus.ready, which answers about the
+  // SAVED playlist: this pane shows a draft, and a row the server has never
+  // been told about is exactly the row a poll is waiting to hear about.
+  const settled =
+    status !== null &&
+    status.items.length === items.length &&
+    items.every(
+      (it, i) => status.items[i]?.upload === it.upload && status.items[i]?.state === "ready",
+    );
+
+  // AND ON A TIMER WHILE ANYTHING IS UNSETTLED, because every state this pane
+  // shows except "ready" is one the server leaves on its own: a normalisation
+  // job finishes, a save lands and the endpoint starts naming the new items, a
+  // re-uploaded file makes an attention row playable. Fetched once at mount,
+  // "Transcoding" and "Not saved yet" were permanent until the operator
+  // reloaded the page -- on the one pane whose entire purpose is to say why an
+  // item will not play. Stops once every item is matched and ready, so the
+  // steady state of a healthy playlist is no traffic at all.
+  useEffect(() => {
+    if (settled) return;
+    const t = window.setInterval(() => void refresh(), POLL_MS);
+    return () => window.clearInterval(t);
+  }, [refresh, settled]);
 
   // Matched by POSITION, not just name: the status endpoint mirrors the saved
   // settings item-for-item, in the same order (Task 6's contract). Matching
@@ -129,11 +178,13 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
         <ol className="flex flex-col gap-1" aria-label="Playlist items">
           {items.map((item, index) => {
             const st = statusFor(index, item.upload);
-            // Unmatched (not yet saved, or the status endpoint has not caught
-            // up) is deliberately its own case rather than folded into
+            // Unmatched is deliberately its own case rather than folded into
             // "attention": a freshly added row is not broken, it is just
-            // unsaved, and calling it a problem would send an operator
-            // hunting for a fault that does not exist yet.
+            // unsaved, and calling it a problem would send an operator hunting
+            // for a fault that does not exist yet. It is a TRANSIENT case and
+            // the poll above is what makes that true -- the row carries this
+            // label until the save lands and the next refresh finds the
+            // endpoint naming it, not until the operator reloads the page.
             const tone = st ? STATE_TONE[st.state] : undefined;
             const label = st ? STATE_LABEL[st.state] : "Not saved yet";
             return (

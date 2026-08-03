@@ -153,9 +153,20 @@ Build the list in *Settings → Failover*, or set `failover.playlist.enabled` an
 entry an `{"upload": "<name>"}` naming a file already sent through the
 uploads page — a bare stored filename, never a path, confined to the uploads
 directory exactly as `internal/uploads.Store.Resolve` enforces everywhere
-else it is used. An item naming an upload that does not exist is refused with
-a 400 when you save. **Every entry plays**, in the order the list gives them,
-and the list repeats from the top when it reaches the end.
+else it is used. An item *you are adding* that names an upload which does not
+exist is refused with a 400 when you save; an item that was already saved is
+left alone, so a file disappearing behind an existing list never blocks an
+unrelated settings change. **Every entry plays**, in the order the list gives
+them, and the list repeats from the top when it reaches the end.
+
+**The wrap is not a clean cut.** Measured, not assumed: at the point where the
+list repeats, the last item's final frame holds for about 2.5 seconds and the
+first item then plays about 2 seconds short. It is a property of the FFmpeg
+concat demuxer under stream copy — reproducible with nothing but `ffmpeg` and
+the derivatives off disk — not something the list or your files can be arranged
+to avoid. Every item seam *inside* one lap is clean; it is only the lap
+boundary. Plan for it: a lap of a few seconds shows the freeze every few
+seconds, while ten minutes of filler shows it every ten minutes.
 
 Naming the same upload twice is allowed and costs nothing extra — it is
 transcoded once and appears in the sequence twice.
@@ -184,9 +195,24 @@ Two things follow from where that work runs.
   rather than being retried forever.
 
 The derivative is written to `<dataDir>/playlist-media/` and is keyed on the
-upload, so the same file used twice in a list is transcoded once. Deleting an
-upload that a playlist names will take that playlist off air; remove the item as
-well.
+upload, so the same file used twice in a list is transcoded once.
+
+**You cannot delete an upload the playlist still names.** *Media → Delete*
+answers `409 Conflict` and tells you which item is holding it, because a delete
+that stranded a playlist entry used to be the easiest way to break this feature.
+Remove the item from the list, save, and the delete then succeeds — it takes
+every version of the derivative with it.
+
+If an upload disappears some *other* way — a disk sweep, a restore that missed a
+file — the playlist keeps playing, and this is deliberate. The tier plays the
+derivatives, so an item whose original is gone is unaffected for as long as its
+derivative is there, and the editor goes on showing it as **ready**, because it
+is. What you have lost is the ability to make that item again: if its derivative
+is ever removed, or the normalising profile is versioned up in a future release,
+the item becomes **needs attention** and the whole playlist stops going on air
+until you deal with it. Re-upload the file and swap the item for the new one —
+uploads get a unique stored name, so a fresh upload of the same file does not
+adopt the old item's name.
 
 ### Your encoder must match the playlist profile, and nothing checks
 

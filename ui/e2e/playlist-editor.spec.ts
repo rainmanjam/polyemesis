@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 
 /* ===========================================================================
@@ -46,16 +47,51 @@ async function uploadFixture(page: Page, hint: string): Promise<string> {
   }, hint);
 }
 
-async function deleteUpload(page: Page, name: string) {
-  await page.evaluate(async (uploadName) => {
+/** DELETEs an upload and returns the STATUS, which every caller then asserts
+ *  on. It used to ignore the response entirely, and that is how the case below
+ *  came to pass for the wrong reason: the in-use guard answers 409 for an
+ *  upload a saved playlist item names, the refusal was silent, and a test that
+ *  believed it had deleted a file went on to assert about a state it had never
+ *  created. A helper whose failure is invisible is worse than no helper, because
+ *  its callers write assertions believing it ran. */
+async function deleteUpload(page: Page, name: string): Promise<number> {
+  return page.evaluate(async (uploadName) => {
     const match = document.cookie.match(/(?:^|;\s*)polyemesis_csrf=([^;]+)/);
     const csrf = match ? decodeURIComponent(match[1]) : "";
-    await fetch(`/api/v1/media/${encodeURIComponent(uploadName)}`, {
+    const res = await fetch(`/api/v1/media/${encodeURIComponent(uploadName)}`, {
       method: "DELETE",
       credentials: "same-origin",
       headers: csrf ? { "X-CSRF-Token": csrf } : {},
     });
+    return res.status;
   }, name);
+}
+
+/** Removes an upload's FILE from the server's data directory without going
+ *  through the API.
+ *
+ *  THIS IS THE ONLY ROUTE TO "a saved playlist item whose upload is missing",
+ *  and that is a property of the product rather than an inconvenience.
+ *  DELETE /api/v1/media/{name} refuses with 409 while a stored item names the
+ *  upload, precisely so an operator cannot strand a playlist that way; and a
+ *  save that INTRODUCES an item naming a file nobody has is refused with 400.
+ *  So the API can refuse to CREATE this state and can still be asked to REPORT
+ *  it -- exactly the distinction internal/api/playlist_status_test.go records,
+ *  where the equivalent fixture is built with os.Remove for the same reason.
+ *  What is left is how a real install reaches it: a sweep, a tidied disk, a
+ *  restore that missed a file.
+ *
+ *  The suite runs against the shipped container (see e2e/playwright.config.ts
+ *  and scripts/acceptance-browser.sh, which exports E2E_CONTAINER and mounts
+ *  the data volume at /data), so `docker exec` is this suite's os.Remove. It
+ *  throws on any failure rather than reporting one, so a container name that
+ *  stops matching fails the test loudly instead of leaving it green against an
+ *  upload that is still there. */
+function removeUploadOutOfBand(name: string) {
+  const container = process.env.E2E_CONTAINER ?? "poly-browser";
+  execFileSync("docker", ["exec", container, "rm", "--", `/data/uploads/${name}`], {
+    stdio: "pipe",
+  });
 }
 
 /** Clicks a switch only if it is not already in the wanted state, and reports
@@ -147,9 +183,12 @@ test.describe("playlist editor", () => {
     await card.getByRole("button", { name: "Save" }).click();
     await page.waitForTimeout(800);
 
-    await deleteUpload(page, a);
-    await deleteUpload(page, b);
-    await deleteUpload(page, c);
+    // 204 each, asserted: the items were removed and saved above, so the
+    // in-use guard has nothing to refuse. A 409 here would mean the save did
+    // not land, which is the same thing this test's reload assertion is about.
+    expect(await deleteUpload(page, a)).toBe(204);
+    expect(await deleteUpload(page, b)).toBe(204);
+    expect(await deleteUpload(page, c)).toBe(204);
   });
 
   test("an item whose upload is missing is shown as needing attention", async ({ page }) => {
@@ -167,15 +206,29 @@ test.describe("playlist editor", () => {
     await card.getByRole("button", { name: "Save" }).click();
     await page.waitForTimeout(800);
 
-    // Delete the upload out from under the saved playlist item -- the exact
-    // way a real install ends up with a broken entry: nothing edits the
-    // playlist itself, an upload it already named just stops existing.
-    await deleteUpload(page, gone);
+    // The upload goes away OUT OF BAND -- see removeUploadOutOfBand. Calling
+    // DELETE /api/v1/media here is what this test used to do, and it cannot
+    // work: the item was saved 800 ms ago, so the in-use guard answers 409 and
+    // the file stays exactly where it is.
+    removeUploadOutOfBand(gone);
     await page.reload();
     await page.getByRole("tab", { name: "Pipeline" }).click();
 
     const row = page.locator('[data-testid="playlist-item"]', { hasText: gone });
-    await expect(row.getByText("Needs attention")).toBeVisible();
+    // Longer than the default: the fixture is a text blob, so a normalisation
+    // job was queued at save and is briefly ACTIVE -- which reads as
+    // "Transcoding", correctly, by the state precedence. The editor polls, so
+    // the row settles on its own; this only has to outlast one job failure
+    // plus one poll interval.
+    await expect(row.getByText("Needs attention")).toBeVisible({ timeout: 15_000 });
+    // "no longer exists" is text ONLY the missing-upload branch produces
+    // (internal/api/playlist_status.go). The assertion used to be
+    // /upload|found/i, which the "normalisation failed: Invalid data found
+    // when processing input" branch also satisfies -- so it stayed green on
+    // the failed-normalisation state this fixture produces anyway, whether or
+    // not the upload was ever missing. The mutation that must fail this: revert
+    // playlistItemStatus's missing-upload branch.
+    //
     // useInnerText, not the default toContainText: that one matches
     // textContent, which reads THROUGH display:none. The reason line is only
     // ever mounted for an attention row in this component, but asserting on
@@ -183,7 +236,7 @@ test.describe("playlist editor", () => {
     // that a "not visible" claim matters keeps this from silently degrading
     // into a textContent check if the row's markup ever changes to a
     // conditionally-hidden one instead of a conditionally-mounted one.
-    await expect(row).toContainText(/upload|found/i, { useInnerText: true });
+    await expect(row).toContainText(/no longer exists/i, { useInnerText: true });
 
     // Leave the shared install as it was found.
     await card.getByRole("button", { name: `Remove ${gone}` }).click();
@@ -191,5 +244,14 @@ test.describe("playlist editor", () => {
     if (!foWas) await setSwitch(page, "#fo-enabled", false);
     await card.getByRole("button", { name: "Save" }).click();
     await page.waitForTimeout(800);
+
+    // The fixture is deleted rather than left behind -- this file's header
+    // promises the shared install is restored, and the first case does it. 404
+    // rather than 204, and asserted as such: the file went out of band above,
+    // so store.Delete finds nothing. The call still runs because the handler
+    // sweeps every derivative version BEFORE it touches the upload, and a 204
+    // here would mean the out-of-band removal never happened and this test
+    // proved nothing.
+    expect(await deleteUpload(page, gone)).toBe(404);
   });
 });

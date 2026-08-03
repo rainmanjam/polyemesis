@@ -89,13 +89,19 @@ func (s *Server) handlePlaylistStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	st := PlaylistItemStatus{Upload: name}
 
-	// READY asks the one question engine.playlistItemsReady asks: does a
-	// derivative this profile produced already exist. os.Stat, never
-	// store.Resolve -- Resolve is a shape check that never touches the disk,
-	// and this is a question about existence. Zero-length is treated as
-	// absent, matching enqueuePlaylistNormalisation's own check, so a
-	// derivative left truncated by an interrupted write is not mistaken for a
-	// finished one.
+	// READY asks the one question engine.playlistItemsReady asks: is there a
+	// NON-EMPTY derivative this profile produced. os.Stat, never store.Resolve
+	// -- Resolve is a shape check that never touches the disk, and this is a
+	// question about existence.
+	//
+	// Zero-length is treated as absent, and all four readers of this path say
+	// so identically: here, enqueuePlaylistNormalisation, RunNormalise's
+	// already-normalised skip, and engine.playlistItemsReady. The size clause
+	// was missing from the engine once, and the cost of that disagreement is
+	// precise: this endpoint said "transcoding", the engine said "ready", so
+	// the operator read amber here while the tier respawn-looped on an empty
+	// file. An endpoint that explains why the playlist is off air is worth
+	// nothing if it is answering a different question from the gate.
 	if fi, err := os.Stat(playlistmedia.DerivativePath(s.cfg.DataDir, name)); err == nil && fi.Size() > 0 {
 		st.State = playlistItemReady
 		return st

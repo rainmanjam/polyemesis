@@ -4264,8 +4264,8 @@ func playlistItemUpload(items []db.PlaylistItem, i int) string {
 // slate for another few seconds is the cheap outcome; handing the broadcast to
 // a file that is not there yet is not.
 //
-// IT ASKS ONE QUESTION: is there a derivative this profile produced? It no
-// longer asks whether the upload survives.
+// IT ASKS ONE QUESTION: is there a non-empty derivative this profile produced?
+// It no longer asks whether the upload survives.
 //
 // B1 required the upload too, because the argv NAMED it: a deleted upload was a
 // tier respawn-looping on a missing file with the process reported healthy the
@@ -4313,7 +4313,23 @@ func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
 		// is the exact file reconcilePlaylist puts in the concat list below.
 		// os.Stat, never a Resolve: Resolve is a shape check that never touches
 		// the disk, and the question here is existence.
-		if _, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload)); err != nil {
+		//
+		// NON-EMPTY, not merely present. A zero-length file under the finished
+		// name is a transcode that died between create and first write, and
+		// nothing on disk distinguishes it from a finished one except its size.
+		// Admit it and the concat list names an empty file, FFmpeg exits at once
+		// and the tier respawn-loops while the process reports healthy -- the
+		// same shape as B1's deleted-upload loop, and it would do it in
+		// preference to the slate.
+		//
+		// The other three readers of this exact path already treat zero-length
+		// as absent: api.playlistItemStatus, api.enqueuePlaylistNormalisation
+		// and RunNormalise's already-normalised skip. This one decides what goes
+		// to AIR, so a disagreement here is the one that costs a broadcast --
+		// and it would show as an amber UI over a black output, with nothing
+		// reconciling the two.
+		fi, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload))
+		if err != nil || fi.Size() == 0 {
 			return false
 		}
 	}

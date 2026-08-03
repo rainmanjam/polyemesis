@@ -65,7 +65,11 @@ import (
 //   - Q1, does -stream_loop -1 over -f concat actually loop and produce two
 //     full wraps? YES. Captured span (14.144667s) exceeds two full wraps of
 //     the list (13.306668s); ffmpeg accepted the argv without error or
-//     warning.
+//     warning. ASSERTED, by assertWrapped, against the list's own measured
+//     length rather than the figure quoted here -- without it, deleting
+//     -stream_loop -1 from loopThroughConcat gives one ~6.65s pass whose
+//     packets are all perfectly monotonic, and a test named "across seams and
+//     wraps" passes without a single wrap having happened.
 //
 //   - Q2, WITHOUT per-entry duration directives, do DTS and PTS stay
 //     monotonic across every seam and the wrap? DTS: YES, cleanly -- 0
@@ -92,30 +96,172 @@ import (
 //     FFmpeg encode, so the concat demuxer's own cumulative-duration
 //     accounting already matches what the directives would assert.
 //     Directives are belt-and-braces for derivatives built by this
-//     normaliser, not load-bearing.
+//     normaliser, not load-bearing. ASSERTED, in two halves that are only
+//     worth anything together: assertDirectives proves the "with" list really
+//     carries a directive per item (pass nil to writeList and the two subtests
+//     silently become the same run), and assertIdenticalPackets proves the two
+//     captures agree packet for packet. This is the measurement the engine
+//     cites for building ConcatEntry.DurationMS and never emitting it, so it
+//     is the one that must not be able to degenerate into a comparison of
+//     something with itself.
+//
+//     WITH ONE CONDITION THAT WRITING THE ASSERTION FOUND, and that the prose
+//     above had silently assumed: identical only while the directive is
+//     EXACT. Rendered to three decimals rather than six, the same run is not
+//     identical -- the derivatives measure 2.090667 / 3.072000 / 1.600000 on
+//     the machine this was last run on, "2.091" is 333 us long, and every
+//     packet from the second item onward shifts by that much. So "the
+//     directives assert nothing new" is a statement about ACCURATE
+//     directives, and the ones production could emit are millisecond-rounded
+//     by construction. See writeList.
+//
+//     Item durations differ between toolchains -- the 2026-08-02 figures
+//     above are not the 2026 figures a re-run gives -- so every assertion
+//     here computes from the files it just built rather than from any number
+//     recorded in this comment.
+//
+// # Why each Q is a separate assertion and none of them is assertMonotonic
+//
+// Monotonicity is necessary and nowhere near sufficient. A capture that never
+// wrapped is monotonic. A "with directives" capture whose directives were
+// never written is monotonic. Both would have left this file green while
+// measuring nothing it is named for -- which is how a measurement quietly
+// becomes a decoration, and two decisions on this branch rest on the numbers
+// above.
 func TestConcatTimestampsAreMonotonicAcrossSeamsAndWraps(t *testing.T) {
 	ffmpegBin, ffprobeBin := tools(t)
 	dataDir := t.TempDir()
 	durations := []float64{2.0, 3.0, 1.5} // unequal on purpose; see the doc comment.
 	items := buildDerivatives(t, ffmpegBin, ffprobeBin, dataDir, durations)
 
+	// The real, encoder-rounded lengths. They are both what a `duration`
+	// directive would have to carry and what ONE full pass of the list is, so
+	// the wrap assertion is measured against the same file the run played
+	// rather than against the nominal build target or the figure in the doc
+	// comment above.
+	measured := make([]float64, len(items))
+	var listSecs float64
+	for i, it := range items {
+		measured[i] = probeDuration(t, ffprobeBin, it)
+		listSecs += measured[i]
+	}
+
 	// Sum of the real, encoder-rounded durations is ~6.65s; two full wraps
 	// plus margin for GOP alignment at the cutoff is comfortably under 14s.
 	const seconds = 14.0
 
+	var plain, directed []packet
+
 	t.Run("without duration directives", func(t *testing.T) {
 		list := writeList(t, t.TempDir(), items, nil)
-		assertMonotonic(t, loopThroughConcat(t, ffmpegBin, ffprobeBin, list, seconds))
+		plain = loopThroughConcat(t, ffmpegBin, ffprobeBin, list, seconds)
+		assertMonotonic(t, plain)
+		assertWrapped(t, plain, listSecs)
 	})
 
 	t.Run("with duration directives", func(t *testing.T) {
-		measured := make([]float64, len(items))
-		for i, it := range items {
-			measured[i] = probeDuration(t, ffprobeBin, it)
-		}
 		list := writeList(t, t.TempDir(), items, measured)
-		assertMonotonic(t, loopThroughConcat(t, ffmpegBin, ffprobeBin, list, seconds))
+		assertDirectives(t, list, len(items))
+		directed = loopThroughConcat(t, ffmpegBin, ffprobeBin, list, seconds)
+		assertMonotonic(t, directed)
+		assertWrapped(t, directed, listSecs)
 	})
+
+	// Q3, and it can only be asked out here: the two subtests each hold half
+	// the answer and neither can compare itself to the other.
+	if len(plain) == 0 || len(directed) == 0 {
+		t.Fatal("one of the two captures produced nothing, so there is nothing to compare " +
+			"and Q3 -- do duration directives change the packet stream -- is unanswered")
+	}
+	assertIdenticalPackets(t, plain, directed)
+}
+
+// assertWrapped fails unless the capture spans more than two full passes of
+// the list, which is the only evidence that -stream_loop -1 looped at all.
+//
+// DTS, not the container duration ffprobe reports: these are the same
+// timestamps every other assertion in this file reads, so a wrap that the
+// demuxer produced but the muxer's header did not describe still counts, and
+// there is no second notion of "how long the output is" to drift.
+//
+// Two passes rather than one plus a bit, because a single wrap crossed at the
+// very end of the capture would leave the interesting region -- the packets
+// AFTER the wrap -- barely populated. The 14s capture against a ~6.65s list
+// clears this with margin; a failure here means the loop did not happen, not
+// that it was marginal.
+func assertWrapped(t *testing.T, pkts []packet, listSecs float64) {
+	t.Helper()
+	if len(pkts) == 0 {
+		t.Fatal("no packets: nothing was captured, so nothing wrapped")
+	}
+	lo, hi := pkts[0].dts, pkts[0].dts
+	for _, p := range pkts {
+		if p.dts < lo {
+			lo = p.dts
+		}
+		if p.dts > hi {
+			hi = p.dts
+		}
+	}
+	if span, want := hi-lo, 2*listSecs; span <= want {
+		t.Fatalf("captured %.6fs of output from a %.6fs list, which does not exceed two full "+
+			"passes (%.6fs): the input did not loop, so no wrap was crossed and the "+
+			"monotonicity above speaks only for the seams inside one pass",
+			span, listSecs, want)
+	}
+}
+
+// assertDirectives fails unless the list really carries one `duration`
+// directive per item.
+//
+// Without it the "with duration directives" subtest is one argument away from
+// being a second copy of the "without" subtest -- pass nil to writeList and it
+// writes a bare file list, every assertion still passes, and Q3 becomes a
+// comparison of a run against itself. The subtest's NAME is the claim; this is
+// what makes the name checkable.
+func assertDirectives(t *testing.T, list string, items int) {
+	t.Helper()
+	raw, err := os.ReadFile(list)
+	if err != nil {
+		t.Fatalf("reading the concat list back: %v", err)
+	}
+	var got int
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "duration ") {
+			got++
+		}
+	}
+	if got != items {
+		t.Fatalf("the list carries %d duration directives for %d items, so this subtest is not "+
+			"measuring what it is named for:\n%s", got, items, raw)
+	}
+}
+
+// assertIdenticalPackets fails on the first packet where the two captures
+// differ, which is Q3 stated as an assertion rather than as a paragraph.
+//
+// Element by element rather than reflect.DeepEqual on the slices: the whole
+// value of this comparison when it ever goes red is knowing WHICH packet moved
+// and by how much, and "not deeply equal" would send the next reader back to
+// ffprobe to find out.
+func assertIdenticalPackets(t *testing.T, without, with []packet) {
+	t.Helper()
+	if len(without) != len(with) {
+		t.Fatalf("duration directives changed the packet COUNT: %d without, %d with. "+
+			"The engine builds ConcatEntry.DurationMS and deliberately emits nothing; "+
+			"that decision rests on these two runs being identical",
+			len(without), len(with))
+	}
+	for i := range without {
+		if without[i] != with[i] {
+			t.Fatalf("packet %d differs with duration directives: stream %s dts %f pts %f, "+
+				"against stream %s dts %f pts %f without. The directives are not the "+
+				"belt-and-braces this file records them as, and the engine's decision to "+
+				"emit none needs re-taking",
+				i, with[i].stream, with[i].dts, with[i].pts,
+				without[i].stream, without[i].dts, without[i].pts)
+		}
+	}
 }
 
 // buildDerivatives builds one real upload per duration and normalises each
@@ -164,6 +310,22 @@ func buildDerivatives(t *testing.T, ffmpegBin, ffprobeBin, dataDir string, durat
 // writeList renders a concat-demuxer playlist from derivative paths. When
 // durations is non-nil it must have one entry per item, and a `duration`
 // directive follows each `file` line -- the variable Step 3 turns on.
+//
+// SIX DECIMAL PLACES, which is not cosmetic and cost a measurement to find.
+// This wrote three, and at three the "with directives" capture is NOT
+// identical to the plain one: ffprobe reports these derivatives at 2.090667s,
+// 3.072000s, 1.600000s on the machine this was last run on, "2.091" is 333 us
+// long, the demuxer starts the next item at the directive rather than at the
+// file's real end, and every timestamp from there on is shifted by that much.
+// Six places round-trips exactly what ffprobe printed, so the directive
+// asserts what the file already says and the two captures agree.
+//
+// The finding is worth more than the fix: a directive is only harmless while
+// it is EXACT, and a millisecond is not enough resolution to be exact.
+// ConcatEntry.DurationMS is milliseconds, so the directives production could
+// actually emit are the inaccurate kind -- which is a second, sharper reason
+// the engine builds that field and emits nothing (see engine.go's concat list
+// and ffmpeg/concat.go, where a zero duration emits no directive at all).
 func writeList(t *testing.T, dir string, items []string, durations []float64) string {
 	t.Helper()
 	if durations != nil && len(durations) != len(items) {
@@ -173,7 +335,7 @@ func writeList(t *testing.T, dir string, items []string, durations []float64) st
 	for i, item := range items {
 		fmt.Fprintf(&b, "file '%s'\n", item)
 		if durations != nil {
-			fmt.Fprintf(&b, "duration %s\n", strconv.FormatFloat(durations[i], 'f', 3, 64))
+			fmt.Fprintf(&b, "duration %s\n", strconv.FormatFloat(durations[i], 'f', 6, 64))
 		}
 	}
 	list := filepath.Join(dir, "playlist.txt")
@@ -187,6 +349,13 @@ func writeList(t *testing.T, dir string, items []string, durations []float64) st
 // file -- the number a real caller would have on hand, which is what makes
 // the "WITH duration directives" run a fair test of what production code
 // could actually supply, rather than of the nominal build target.
+//
+// Their sum is also what assertWrapped calls one pass of the list. The nominal
+// 2.0/3.0/1.5 would be ~0.65% short of the encoder's real output, which is far
+// too small to change that assertion's verdict -- but taking the length of the
+// list from the files the run actually played, rather than from the numbers it
+// asked for, is the difference between measuring the output and restating the
+// input.
 func probeDuration(t *testing.T, ffprobeBin, path string) float64 {
 	t.Helper()
 	out, err := exec.Command(ffprobeBin, "-hide_banner", "-v", "error",
