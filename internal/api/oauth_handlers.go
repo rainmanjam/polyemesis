@@ -391,7 +391,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ing, broadcastID, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest))
+	ing, broadcastID, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
 	if err != nil {
 		// A platform that publishes no key endpoint is not a transport
 		// failure, and 502 invites a retry that can never succeed. The
@@ -432,11 +432,18 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 // db.Destination and asserting on the three fields it produces is what
 // actually proves a destination stored with FBPrivacyEveryone, say, never
 // reads back as FBPrivacySelf.
-func ingestOptionsFor(dest *db.Destination) oauth.IngestOptions {
+// scheduledFor is a PARAMETER rather than a field read off the destination,
+// because the occurrence belongs to the schedule and not to the destination.
+// FacebookSettings.ScheduledFor records what has already been announced;
+// passing that back in would re-announce the same occurrence forever.
+//
+// Zero is live now, which is what every go-live passes.
+func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.IngestOptions {
 	return oauth.IngestOptions{
 		Privacy:         dest.Compliance.FacebookPrivacy,
 		Crosspost:       dest.Facebook.Crosspost,
 		DonateCharityID: dest.Facebook.DonateCharityID,
+		ScheduledFor:    scheduledFor,
 	}
 }
 
