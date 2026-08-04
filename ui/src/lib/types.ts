@@ -213,6 +213,10 @@ export interface Destination {
   accountId?: number | null;
   url: string;
   streamKey: string;
+  /** The platform's secondary ingest, stored when the broadcast was created.
+   *  Empty when the platform offered none. */
+  backupUrl?: string;
+  backupStreamKey?: string;
   enabled: boolean;
   audioBitrate: number;
   profile: RoutingProfile;
@@ -531,6 +535,12 @@ export interface DestStatus {
   renditionName?: string;
   /** The pre-announced scheduled Facebook broadcast, when one exists. */
   facebookBroadcastId?: string;
+  /** The redundant backup feed's live state, absent when there is no backup.
+   *  Reported separately from `process` because a dead backup beside a healthy
+   *  primary is the one state this must never hide. */
+  backupProcess?: ProcessStatus | null;
+  /** Why there is no backup, when one was asked for. */
+  backupError?: string;
 }
 
 /** One shared video encode's live state.
@@ -1662,6 +1672,11 @@ export interface FacebookSettings {
   scheduledFor?: string;
   /** The Facebook live video created for it — what the card links to. */
   broadcastId?: string;
+  /** Publishes a redundant feed to Facebook's backup ingest endpoint. Doubles
+   *  this destination's upload bandwidth; enabling it reconnects the stream
+   *  once, because a backup endpoint only exists on a broadcast created with
+   *  one. */
+  backupIngest?: boolean;
 }
 
 // ------------------------------------------------------------------- expert

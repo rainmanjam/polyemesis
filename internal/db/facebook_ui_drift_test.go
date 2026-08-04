@@ -92,3 +92,47 @@ func TestTheCardLinksToTheScheduledBroadcast(t *testing.T) {
 			"polyemesis created for them.")
 	}
 }
+
+// A backup nobody can see is worse than no backup: the operator believes they
+// have redundancy. Watches the RENDERED state, not the type -- types.ts
+// declaring backupProcess proves only that the type exists.
+func TestTheCardShowsTheBackupFeedsState(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "components", "DestinationCard.tsx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	// The whole CONDITION, not just the field name. Matching "dest.backupProcess"
+	// alone is satisfied by the reference inside the block, so replacing the
+	// guard with `{false && (` left it green -- measured. A guard that survives
+	// the render being switched off is not watching the render.
+	if !strings.Contains(string(raw), "{dest.backupProcess && (") {
+		t.Error("the card does not render the backup feed's state, so a backup " +
+			"that has been dead for an hour looks identical to a healthy one.")
+	}
+	if !strings.Contains(string(raw), "{dest.backupError && (") {
+		t.Error("the card does not render why a requested backup is missing, so " +
+			"an operator who enabled redundancy and did not get it is never told.")
+	}
+}
+
+// The toggle has to be reachable. A setting the server honours and the dialog
+// never offers is the unreachable-feature shape this repo keeps finding.
+func TestTheDialogOffersTheBackupIngestToggle(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "components", "DestinationDialog.tsx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	src := string(raw)
+	if !strings.Contains(src, "backupIngest: e.target.checked") {
+		t.Error("the destination dialog has no control that SETS backupIngest, so " +
+			"the backup feed can never be turned on from the UI.")
+	}
+	// The two costs are not guessable and an operator who learns about them
+	// afterwards has already paid one of them.
+	if !strings.Contains(src, "upload bandwidth") || !strings.Contains(src, "reconnects the stream") {
+		t.Error("the toggle does not state its costs: it doubles upload bandwidth " +
+			"and reconnects the stream once when enabled.")
+	}
+}

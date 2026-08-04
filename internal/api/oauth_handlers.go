@@ -391,7 +391,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ing, broadcastID, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
+	b, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
 	if err != nil {
 		// A platform that publishes no key endpoint is not a transport
 		// failure, and 502 invites a retry that can never succeed. The
@@ -405,13 +405,24 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	}
 	// Facebook's key IS the broadcast, so this is where a running chat adapter
 	// finds out which live video to read comments from.
-	if broadcastID != "" {
-		s.setFacebookBroadcast(acct.AccountRef, broadcastID)
+	if b.ID != "" {
+		s.setFacebookBroadcast(acct.AccountRef, b.ID)
 	}
 
-	dest.URL = ing.URL
-	dest.StreamKey = ing.Key
+	dest.URL = b.Ingest.URL
+	dest.StreamKey = b.Ingest.Key
 	dest.Kind = db.DestRTMP
+	// Recorded even when empty: a destination that used to have a backup
+	// endpoint and no longer does must stop publishing to the old one, which
+	// belongs to a broadcast that no longer exists.
+	dest.BackupURL, dest.BackupStreamKey = firstBackup(b)
+	var warnings []string
+	if dest.Facebook.BackupIngest && dest.BackupURL == "" {
+		warnings = append(warnings,
+			"Facebook did not offer a backup ingest endpoint for this broadcast, so "+
+				"no redundant feed will be published. The destination is otherwise "+
+				"configured correctly and will go live normally.")
+	}
 	updated, err := s.store.UpdateDestination(dest)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -420,7 +431,24 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after key refresh", "err", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"destination": updated})
+	resp := map[string]any{"destination": updated}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// firstBackup is the secondary ingest a destination will publish to, or empty.
+//
+// Facebook returns a LIST -- one secondary per primary form, rtmp and rtmps --
+// and polyemesis publishes one redundant feed, not N. Taking the first keeps
+// the choice in one place rather than at every call site; the parsing in
+// internal/oauth already puts the secure form first.
+func firstBackup(b *oauth.Broadcast) (url, key string) {
+	if b == nil || len(b.Backups) == 0 {
+		return "", ""
+	}
+	return b.Backups[0].URL, b.Backups[0].Key
 }
 
 // ingestOptionsFor maps a stored destination onto what a broadcast create
@@ -444,6 +472,7 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 		Crosspost:       dest.Facebook.Crosspost,
 		DonateCharityID: dest.Facebook.DonateCharityID,
 		ScheduledFor:    scheduledFor,
+		BackupIngest:    dest.Facebook.BackupIngest,
 	}
 }
 
@@ -456,20 +485,20 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 // returns the broadcast id, which is the handle the chat adapter needs and which
 // Provider.Ingest discards. Every other platform has no targets and falls
 // through to Ingest unchanged.
-func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Ingest, string, error) {
+//
+// Returns the whole Broadcast rather than the pieces, because the pieces kept
+// growing: first the ingest, then the broadcast id, and now the BACKUP ingest,
+// which was being parsed by internal/oauth and discarded right here. A platform
+// with no broadcast object gets a synthetic one so every caller reads one shape.
+func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
 	if tp, ok := oauth.TargetsFor(acct.Platform); ok {
-		b, err := tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
-		if err != nil {
-			return nil, "", err
-		}
-		ing := b.Ingest
-		return &ing, b.ID, nil
+		return tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 	}
 	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return ing, "", nil
+	return &oauth.Broadcast{Ingest: *ing}, nil
 }
 
 // tokenFor loads an account and refreshes its access token if it is expired or

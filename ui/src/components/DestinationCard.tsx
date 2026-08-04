@@ -212,6 +212,24 @@ export function DestinationCard({
           </div>
         ))}
 
+        {/* A backup nobody can see is worse than none: the operator believes
+            they have redundancy. So its state is rendered beside the primary's
+            whether it is healthy or not. */}
+        {dest.backupProcess && (
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <span>backup feed:</span>
+            <span className={dest.backupProcess.state === "running" ? "text-ok" : "text-warn"}>
+              {dest.backupProcess.state}
+            </span>
+          </div>
+        )}
+        {dest.backupError && (
+          <div className="flex items-start gap-1.5 text-[10px] text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{dest.backupError}</span>
+          </div>
+        )}
+
         {/* A public event page was created on the operator's behalf; giving
             them no way to reach it is half a feature. It also makes a dead
             broadcast legible — when this link 404s, they can see for

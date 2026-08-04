@@ -1447,3 +1447,61 @@ func TestReschedulingWithNoBroadcastIdIsRefusedBeforeAnyCall(t *testing.T) {
 		t.Errorf("it called Graph anyway: %+v", *log)
 	}
 }
+
+// Empty means leave alone: the parameter must be ABSENT when the destination
+// did not ask, because Facebook reads a present-but-empty value as a value.
+func TestBackupIngestIsRequestedOnlyWhenTheDestinationAsksForIt(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		on   bool
+		want string
+	}{
+		{"asked for", true, "true"},
+		{"not asked for", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+			if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+				IngestOptions{BackupIngest: tc.on}); err != nil {
+				t.Fatalf("IngestFor: %v", err)
+			}
+			post := fbCall(*log, http.MethodPost, "/me/live_videos")
+			if post == nil {
+				t.Fatalf("no create call; calls were %+v", *log)
+			}
+			q, err := url.ParseQuery(post.Query)
+			if err != nil {
+				t.Fatalf("parse query %q: %v", post.Query, err)
+			}
+			got, present := q["enable_backup_ingest"]
+			if tc.want == "" {
+				if present {
+					t.Errorf("enable_backup_ingest was sent for a destination that did not ask for it")
+				}
+				return
+			}
+			if !present || got[0] != tc.want {
+				t.Errorf("enable_backup_ingest = %v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The backups are parsed today and dropped by everything above this. Pins that
+// IngestFor itself hands them back, split into URL and key, so the layer that
+// stores them has something to store.
+func TestTheCreateResponsesBackupEndpointsReachTheCaller(t *testing.T) {
+	fbServer(t, graphStub(t, fbLiveResponse("777")))
+	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+		IngestOptions{BackupIngest: true})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	if len(b.Backups) == 0 {
+		t.Fatal("no backup ingest returned; fbLiveResponse carries " +
+			"secure_stream_secondary_urls and it is being dropped")
+	}
+	if b.Backups[0].URL == "" || b.Backups[0].Key == "" {
+		t.Errorf("backup ingest is not split into URL and key: %+v", b.Backups[0])
+	}
+}
