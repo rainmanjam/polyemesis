@@ -26,6 +26,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
@@ -100,6 +101,17 @@ type Server struct {
 	// state the delete's in-use guard exists to prevent. Neither handler is
 	// hot enough for the coarse scope to matter.
 	settingsMu sync.Mutex
+
+	// ingestForFn is the seam that makes the line below observable.
+	//
+	// It exists for exactly one reason, and the reason is worth the field: the
+	// call at handleRefreshKey is where a destination's stored privacy becomes
+	// what Facebook is told, and without a seam it can be changed to pass
+	// nothing at all with the whole suite green -- measured, not supposed.
+	// internal/oauth's graph base is unexported and Providers() has no
+	// injection point, so there is no way to observe this from outside the
+	// process. Defaults to the real method; only a test ever replaces it.
+	ingestForFn func(context.Context, oauth.Provider, string, *db.PlatformAccount, oauth.IngestOptions) (*oauth.Ingest, string, error)
 }
 
 // Options configures the server.
@@ -137,7 +149,7 @@ type Options struct {
 
 // New creates the server.
 func New(o Options) *Server {
-	return &Server{
+	s := &Server{
 		log:       o.Log,
 		cfg:       o.Config,
 		store:     o.DB,
@@ -168,6 +180,10 @@ func New(o Options) *Server {
 			o.DB.TokenEpoch,
 		),
 	}
+	// The real implementation, always, except in the one test that replaces it
+	// to observe what handleRefreshKey passed.
+	s.ingestForFn = s.ingestFor
+	return s
 }
 
 // Handler builds the router.
