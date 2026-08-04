@@ -6391,6 +6391,16 @@ type DestStatus struct {
 	// dashboard can group destinations under the encode they share.
 	RenditionID   *int64 `json:"renditionId,omitempty"`
 	RenditionName string `json:"renditionName,omitempty"`
+	// BackupProcess is the redundant output's live state, absent when this
+	// destination has none.
+	//
+	// Reported separately rather than folded into Process, because a backup
+	// that has been dead for an hour beside a healthy primary is the single
+	// state this feature must never hide: the operator believes they have
+	// redundancy, which is worse than knowing they do not.
+	BackupProcess *supervisor.Status `json:"backupProcess,omitempty"`
+	// BackupError says why there is no backup when one was asked for.
+	BackupError string `json:"backupError,omitempty"`
 	// FacebookBroadcastID is the pre-announced scheduled broadcast, when one
 	// exists. Carried on the live status rather than left on the stored row
 	// because the card is where an operator looks, and a public event page
@@ -6545,6 +6555,10 @@ func (e *Engine) Status() Status {
 				ds.RenditionName = names[*row.RenditionID]
 			}
 			ds.FacebookBroadcastID = row.Facebook.BroadcastID
+			if live := e.destByID(dests, row.ID); live != nil {
+				ds.BackupProcess = procStatus(live.backup)
+				ds.BackupError = live.backupErr
+			}
 			if live := e.destByID(dests, row.ID); live != nil {
 				ds.Summary = live.compiled.Summary
 				ds.Tracks = live.compiled.Tracks

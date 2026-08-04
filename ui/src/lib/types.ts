@@ -535,6 +535,12 @@ export interface DestStatus {
   renditionName?: string;
   /** The pre-announced scheduled Facebook broadcast, when one exists. */
   facebookBroadcastId?: string;
+  /** The redundant backup feed's live state, absent when there is no backup.
+   *  Reported separately from `process` because a dead backup beside a healthy
+   *  primary is the one state this must never hide. */
+  backupProcess?: ProcessStatus | null;
+  /** Why there is no backup, when one was asked for. */
+  backupError?: string;
 }
 
 /** One shared video encode's live state.

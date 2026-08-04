@@ -1310,6 +1310,31 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 when the broadcast starts, and left alone entirely if empty.
               </span>
 
+              {/* Both costs stated, because both are real and neither is
+                  guessable. The reconnect is unavoidable rather than sloppy: a
+                  backup endpoint exists only on a broadcast created with one,
+                  and creating one issues a new primary key. */}
+              <div className="flex items-start gap-2">
+                <input
+                  id="fb-backup-ingest"
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={facebook.backupIngest ?? false}
+                  onChange={(e) =>
+                    setFacebook({ ...facebook, backupIngest: e.target.checked || undefined })
+                  }
+                />
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor="fb-backup-ingest">Publish a backup feed</Label>
+                  <span className="text-[10px] text-muted-foreground">
+                    Sends a second copy of this stream to Facebook&rsquo;s backup ingest, so a
+                    dropped connection does not drop the broadcast.{" "}
+                    <strong>Doubles this destination&rsquo;s upload bandwidth</strong>, and turning
+                    it on reconnects the stream once &mdash; so enable it before you go live.
+                  </span>
+                </div>
+              </div>
+
               <div className="flex flex-col gap-2">
                 <Label>Crosspost to Pages</Label>
                 {(facebook.crosspost ?? []).map((t, i) => (
