@@ -51,7 +51,7 @@ What remains is below.
 | `transcribe.WithDefaultModel` | hardware-derived | An install-wide Whisper model choice. The API accepts a per-job `Model` ([library.go:908](../../internal/api/library.go)) and **the UI never sends it**, so model choice — the main speed/accuracy/RAM tradeoff in transcription — is unreachable by clicking and undefaultable | **High.** Small change, direct operator value |
 | `chat.WithHistory` | ~~500 messages~~ `settings.chat.historyMessages` | The in-memory ring a late-joining browser reads before falling back to the database. Pairs directly with retention: that sets how deep a user card goes, this sets how much arrives without a query | ✅ **SHIPPED.** Live via `Hub.SetHistory`, bounded 1–50,000 |
 | `alerts.WithRetry` | ~~package default~~ `settings.alerts.retryAttempts` | The retry budget for a webhook that is down. Was one fixed answer for "how hard do we chase a dead endpoint" | ✅ **SHIPPED.** Attempts only; the backoff curve stays unexposed |
-| `chat.WithSendTimeout` | 15s | How long one slow platform may hold up the fan-out reply that tells the operator the other three worked | **Low-medium.** 15s is defensible; only a badly-behaved platform makes it wrong |
+| `chat.WithSendTimeout` | 15s | How long one slow platform may hold up the fan-out reply that tells the operator the other three worked | **Do not wire.** 15s is defensible, and shortening it has a harm the first pass missed: the timeout cancels OUR wait, not the platform's processing, so a shorter one converts "slow" into "reported failed but actually delivered" — and the operator's fix for that is to re-send, which duplicates the message in their live chat. Nothing connects the setting to the duplicates |
 | `alerts.WithFlushInterval` | 500ms | How often the pending alert set is examined | **Low.** Tuning without a failure story |
 | `alerts.WithRulesTTL` | 5s | Rule-list cache lifetime between database reads | **Low.** Same |
 | `chat.WithFlush` | 1s / 64 | SQLite write pacing for chat | **Low.** Already sized against chat's burst shape |
@@ -127,6 +127,25 @@ existed, in any package, under any name.** Exposing a knob is the moment that
 stops being free — until then there is one number, and afterwards there are two
 that can disagree. Both pairs are now genuinely pinned, in `internal/api`
 because `internal/db` cannot import either package without a cycle.
+
+`chat.WithSendTimeout` was the closest call, and it went the same way for a
+reason worth writing down. By this document's own test it looked like a
+candidate: the delay IS visible to an operator — a slow platform holds up the
+reply telling them the other three worked — and that is exactly the "gave them
+a reason to want it different" argument that carried chat retention.
+
+**What that test misses is whether the operator can predict what turning it
+does.** `sendTimeout` bounds the context handed to the adapter, so it cancels
+the request polyemesis made; it does not cancel what the platform has already
+accepted. Shorten it and a platform that would have succeeded at seven seconds
+is reported as failed at five — while the message goes out. The operator sees a
+failure, re-sends, and their live chat carries the message twice. Nothing in the
+setting, its label, or the failure says that is what happened.
+
+So the rule this row adds to the survey: **a knob whose effect the operator can
+see is not the same as a knob whose effect they can predict.** Visibility was
+the right test for retention because a longer scrollback does exactly what it
+says. It is the wrong test here.
 
 The `Low` rows should be left alone. Each is one fixed number chosen against a
 measured shape, and exposing a knob nobody has a reason to turn adds a setting to
