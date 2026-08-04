@@ -1994,12 +1994,36 @@ func destWritesAFile(row *db.Destination) bool {
 	}
 }
 
+// destSubName is the relay subscription for one of a destination's outputs.
+//
+// THE ROLE IS PART OF THE NAME, ALWAYS, and that is not tidiness.
+// Hub.Subscribe is a map assignment keyed by this string:
+//
+//	h.subs[name] = &subscriber{...}
+//
+// so registering two outputs under one name REPLACES the first. The replaced
+// process keeps running, keeps a correct command line, and keeps a healthy
+// card -- and receives no packets at all. Nothing about the process, its
+// target URL, or the destination's status reveals it.
+//
+// The primary's name is unchanged (`dest:<id>`), so no existing subscription
+// moves; only new roles get a suffix.
+func destSubName(id int64, role string) string {
+	if role == "" {
+		return fmt.Sprintf("dest:%d", id)
+	}
+	return fmt.Sprintf("dest:%d:%s", id, role)
+}
+
+// destRoleBackup names the redundant output's subscription.
+const destRoleBackup = "backup"
+
 func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
 	port, err := e.alloc.Allocate()
 	if err != nil {
 		return err
 	}
-	subName := fmt.Sprintf("dest:%d", row.ID)
+	subName := destSubName(row.ID, "")
 	url := hub.Subscribe(subName, port)
 
 	target := row.Target()
