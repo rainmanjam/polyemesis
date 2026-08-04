@@ -408,15 +408,25 @@ func TestFacebookSendsTheStoredPrivacyWhenTheBroadcastIsCreated(t *testing.T) {
 	if post == nil {
 		t.Fatalf("no create; calls were %+v", *log)
 	}
-	if !strings.Contains(post.Query, "privacy") || !strings.Contains(post.Query, "SELF") {
-		t.Errorf("create query %q carries no SELF privacy; Facebook documents "+
-			"LIVE_VIDEO__PRIVACY_REQUIRED and the operator's choice never arrives", post.Query)
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	// Graph wants a privacy OBJECT, not a bare value -- asserting the exact
+	// envelope is what catches fbPrivacyParam degrading to plain SELF, which a
+	// substring check on the raw query could not tell apart from the real thing.
+	if got := q.Get("privacy"); got != `{"value":"SELF"}` {
+		t.Errorf("create query carries privacy %q, want the {\"value\":\"SELF\"} object; "+
+			"Facebook documents LIVE_VIDEO__PRIVACY_REQUIRED and the operator's choice never arrives", got)
 	}
 }
 
 func TestFacebookSendsNoPrivacyParameterWhenNoneWasChosen(t *testing.T) {
 	// ABSENT, not empty. A request carrying privacy= is a different request from
-	// one that omits it, and only the second means "leave it alone".
+	// one that omits it, and only the second means "leave it alone". Checked by
+	// key presence in the parsed query rather than a raw substring, so a future
+	// field that also happens to contain "privacy" cannot make this pass for the
+	// wrong reason.
 	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
 	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
 		IngestOptions{})
@@ -427,8 +437,36 @@ func TestFacebookSendsNoPrivacyParameterWhenNoneWasChosen(t *testing.T) {
 	if post == nil {
 		t.Fatalf("no create; calls were %+v", *log)
 	}
-	if strings.Contains(post.Query, "privacy") {
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if _, ok := q["privacy"]; ok {
 		t.Errorf("create query %q sends a privacy nobody chose", post.Query)
+	}
+}
+
+func TestAPageBroadcastCarriesNoPersonalAudienceValue(t *testing.T) {
+	// The one thing standing between an operator's SELF choice and a public
+	// Page broadcast is tgt.kind != fbKindPage. A Page has no personal
+	// audience for Facebook to apply the value to.
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:555",
+		IngestOptions{Privacy: db.FBPrivacySelf})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/555/live_videos")
+	if post == nil {
+		t.Fatalf("no create on the Page; calls were %+v", *log)
+	}
+	// Pin that this really reached the Page, so the test cannot pass by the
+	// create silently landing on the profile instead.
+	if post.Auth != "Bearer page-token" {
+		t.Fatalf("create used %q, not the Page's own token", post.Auth)
+	}
+	if strings.Contains(post.Query, "privacy") {
+		t.Errorf("create query %q sends a personal audience value to a Page", post.Query)
 	}
 }
 
@@ -476,11 +514,37 @@ func TestFacebookSendsNoCrosspostingOrDonateWhenNoneIsStored(t *testing.T) {
 	if post == nil {
 		t.Fatalf("no create; calls were %+v", *log)
 	}
-	if strings.Contains(post.Query, "crossposting_actions") {
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if _, ok := q["crossposting_actions"]; ok {
 		t.Errorf("create query %q crossposts to Pages nobody named", post.Query)
 	}
-	if strings.Contains(post.Query, "donate_button_charity_id") {
+	if _, ok := q["donate_button_charity_id"]; ok {
 		t.Errorf("create query %q adds a donate button nobody asked for", post.Query)
+	}
+}
+
+func TestFacebookDonateButtonReachesTheCreateWhenStored(t *testing.T) {
+	// The mirror of the absence test above: absence was covered, presence was
+	// not, and a stored charity id could have been silently dropped forever.
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{DonateCharityID: "999"})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := q.Get("donate_button_charity_id"); got != "999" {
+		t.Errorf("create query carries donate_button_charity_id %q, want 999", got)
 	}
 }
 

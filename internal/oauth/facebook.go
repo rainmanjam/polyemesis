@@ -489,6 +489,12 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	// documents LIVE_VIDEO__PRIVACY_REQUIRED -- "You need to set a privacy
 	// before going live" -- and because the reference documents no Updating
 	// section for LiveVideo at all. This is the surface Meta describes.
+	//
+	// tgt.kind != fbKindPage is a second, independent condition, not a repeat of
+	// the first: a Page broadcast has no personal audience for a value like
+	// SELF to apply to, so an operator's chosen privacy is suppressed for every
+	// Page target regardless of what they picked. That suppression is silent —
+	// nothing here or in internal/api refuses or warns on the combination.
 	if opts.Privacy != db.FBPrivacyUnchanged && tgt.kind != fbKindPage {
 		params.Set("privacy", fbPrivacyParam(opts.Privacy))
 	}

@@ -149,8 +149,12 @@ type Compliance struct {
 	// keys are left alone; a key set to false actively CLEARS that label,
 	// which is how an operator removes one.
 	Labels map[string]bool `json:"labels,omitempty"`
-	// FacebookPrivacy is applied when the Facebook LiveVideo is CREATED, and
-	// attempted again best-effort on a metadata push. Empty leaves it alone.
+	// FacebookPrivacy is applied when the Facebook LiveVideo is CREATED, for a
+	// user or profile target only: a Page broadcast has no personal audience
+	// for this to apply to, so IngestFor suppresses it there regardless of what
+	// is stored here. There is no metadata-push path for it -- Facebook
+	// documents no Updating section for LiveVideo privacy at all. Empty leaves
+	// it alone.
 	FacebookPrivacy FacebookPrivacy `json:"facebookPrivacy,omitempty"`
 }
 
