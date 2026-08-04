@@ -723,10 +723,11 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 				// have landed, and failing the whole row would send the
 				// operator back to redo work that took.
 				//
-				// Into res, not out: the assignments at the end of this function
-				// used to overwrite out.Warnings wholesale, which threw this
-				// away between recording it and showing it.
-				res.Warnings = append(res.Warnings, err.Error())
+				// Recorded on out, which is what makes the append at the end of
+				// this function load-bearing rather than decorative: it was an
+				// assignment, and it threw this away between recording it and
+				// showing it.
+				out.Warnings = append(out.Warnings, err.Error())
 				out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{oauth.FieldContentDetails})
 			case bres != nil:
 				res.Applied = append(res.Applied, bres.Applied...)
