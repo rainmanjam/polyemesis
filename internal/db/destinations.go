@@ -64,6 +64,16 @@ type Destination struct {
 	// StreamKey is appended to URL for RTMP. Kept separate so the UI can mask
 	// it and so a key rotation does not require retyping the endpoint.
 	StreamKey string `json:"streamKey"`
+	// BackupURL and BackupStreamKey are the platform's secondary ingest,
+	// stored when the broadcast was created. Empty when the platform offered
+	// none, which is the normal state for every destination without backup
+	// ingest enabled.
+	//
+	// On Destination rather than in FacebookSettings because the ENGINE
+	// consumes them, and the engine should not have to know which platform a
+	// destination is. Nothing but Facebook populates them today.
+	BackupURL       string `json:"backupUrl,omitempty"`
+	BackupStreamKey string `json:"backupStreamKey,omitempty"`
 	// Enabled is user intent, not live state: "this should be running".
 	Enabled      bool            `json:"enabled"`
 	AudioBitrate int             `json:"audioBitrate"` // kbps
@@ -464,6 +474,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		updated      int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
+		&d.BackupURL, &d.BackupStreamKey,
 		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
 		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
 		&d.Transport.NoDurationFilesize, &d.Transport.MuxQueuePackets,
@@ -520,6 +531,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 }
 
 const destColumns = `id, name, kind, platform, account_id, url, stream_key,
+	backup_url, backup_stream_key,
 	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
@@ -667,14 +679,16 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	dst.Position = int(maxPos.Int64) + 1
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
-		(name, kind, platform, account_id, url, stream_key, enabled, audio_bitrate, profile, rendition_id, source_id,
+		(name, kind, platform, account_id, url, stream_key, backup_url, backup_stream_key,
+		 enabled, audio_bitrate, profile, rendition_id, source_id,
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 		 au_codec, au_mono, compliance, facebook,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
+		dst.BackupURL, dst.BackupStreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
@@ -719,6 +733,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
+		backup_url=?, backup_stream_key=?,
 		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
 		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
@@ -727,6 +742,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		au_codec=?, au_mono=?, compliance=?, facebook=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
+		dst.BackupURL, dst.BackupStreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
@@ -883,6 +899,8 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		// compliance is one: a slice plus a scalar, edited as a unit, and '{}'
 		// is "send nothing".
 		{"facebook", `ALTER TABLE destinations ADD COLUMN facebook TEXT NOT NULL DEFAULT '{}'`},
+		{"backup_url", `ALTER TABLE destinations ADD COLUMN backup_url TEXT NOT NULL DEFAULT ''`},
+		{"backup_stream_key", `ALTER TABLE destinations ADD COLUMN backup_stream_key TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)

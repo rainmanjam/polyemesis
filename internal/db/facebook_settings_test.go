@@ -80,3 +80,67 @@ func TestTheMarkerDoesNotMakeSettingsLookNonEmpty(t *testing.T) {
 			"create-time settings to send")
 	}
 }
+
+// The endpoint lives in its own columns and the toggle rides the existing
+// facebook JSON blob. A field that marshals and does not scan back is a backup
+// URL that disappears on restart -- and the destination then publishes one feed
+// while the card claims two.
+func TestTheBackupEndpointAndToggleSurviveTheDatabase(t *testing.T) {
+	d := testDB(t)
+	created, err := d.CreateDestination(&Destination{
+		Name: "fb", Kind: "rtmp", Platform: PlatformFacebook,
+		URL: "rtmps://live.example/rtmp", StreamKey: "primary-key",
+		BackupURL: "rtmps://backup.example/rtmp", BackupStreamKey: "backup-key",
+		Facebook: FacebookSettings{BackupIngest: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	got, err := d.GetDestination(created.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if got.BackupURL != "rtmps://backup.example/rtmp" || got.BackupStreamKey != "backup-key" {
+		t.Errorf("backup endpoint = %q / %q, want it preserved",
+			got.BackupURL, got.BackupStreamKey)
+	}
+	if !got.Facebook.BackupIngest {
+		t.Error("the toggle did not survive the round trip")
+	}
+}
+
+// UPDATE is a separate statement from INSERT, and forgetting one of them is the
+// realistic mistake: creating works, and then any later edit silently reverts.
+func TestUpdatingADestinationKeepsItsBackupEndpoint(t *testing.T) {
+	d := testDB(t)
+	created, err := d.CreateDestination(&Destination{
+		Name: "fb", Kind: "rtmp", Platform: PlatformFacebook,
+		URL: "rtmps://live.example/rtmp", StreamKey: "k",
+		BackupURL: "rtmps://backup.example/rtmp", BackupStreamKey: "bk",
+		Facebook: FacebookSettings{BackupIngest: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	created.Name = "renamed"
+	if _, err := d.UpdateDestination(created); err != nil {
+		t.Fatalf("UpdateDestination: %v", err)
+	}
+	got, _ := d.GetDestination(created.ID)
+	if got.BackupURL == "" || got.BackupStreamKey == "" {
+		t.Fatalf("an unrelated edit erased the backup endpoint: %q / %q",
+			got.BackupURL, got.BackupStreamKey)
+	}
+	if !got.Facebook.BackupIngest {
+		t.Error("an unrelated edit cleared the toggle")
+	}
+}
+
+// Unlike the announcement marker, BackupIngest IS a create-time parameter, so
+// it must count as a setting to send. Otherwise dropUnsendableSettings would
+// treat a backup-enabled destination as empty.
+func TestTheBackupToggleCountsAsASettingToSend(t *testing.T) {
+	if (FacebookSettings{BackupIngest: true}).Empty() {
+		t.Error("a destination asking for backup ingest reads as having nothing to send")
+	}
+}

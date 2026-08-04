@@ -16,6 +16,20 @@ type FacebookSettings struct {
 	Crosspost []CrosspostTarget `json:"crosspost,omitempty"`
 	// DonateCharityID adds a donate button for one charity.
 	DonateCharityID string `json:"donateCharityId,omitempty"`
+	// BackupIngest asks Facebook to provision a secondary ingest endpoint at
+	// create time, and publishes a redundant feed to it so a dropped
+	// connection does not drop the broadcast.
+	//
+	// Off by default: it doubles this destination's upload bandwidth and its
+	// audio encoding cost, which an operator on a thin or metered uplink has
+	// to choose deliberately.
+	//
+	// TURNING IT ON COSTS ONE RECONNECT, and that is unavoidable rather than
+	// sloppy. A backup endpoint exists only on a broadcast created with it,
+	// and IngestFor creates a new live_video on every call -- so obtaining one
+	// replaces the primary stream key, which is part of Target(), which is in
+	// destSpec. Enable it before going live.
+	BackupIngest bool `json:"backupIngest,omitempty"`
 	// ScheduledFor is the occurrence a broadcast has already been announced
 	// for, NOT a flag.
 	//
@@ -51,5 +65,10 @@ type CrosspostTarget struct {
 
 // Empty reports whether there is nothing to send.
 func (f FacebookSettings) Empty() bool {
-	return len(f.Crosspost) == 0 && f.DonateCharityID == ""
+	// BackupIngest counts, unlike ScheduledFor/BroadcastID above. Empty asks
+	// "is there anything to SEND at create time", and this is a create-time
+	// parameter -- whereas the announcement marker is bookkeeping. Without it
+	// dropUnsendableSettings would read a backup-enabled destination as having
+	// nothing configured.
+	return len(f.Crosspost) == 0 && f.DonateCharityID == "" && !f.BackupIngest
 }
