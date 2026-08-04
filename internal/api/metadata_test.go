@@ -495,7 +495,7 @@ func TestMergeFieldsUnionsWithoutDuplicating(t *testing.T) {
 
 func TestTwoDestinationsOnOneAccountWithDifferentComplianceAreRefused(t *testing.T) {
 	acct := int64(7)
-	_, conflicts := complianceByAccount([]db.Destination{
+	got, conflicts := complianceByAccount([]db.Destination{
 		{Name: "main", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
 		{Name: "backup", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
 	})
@@ -507,6 +507,34 @@ func TestTwoDestinationsOnOneAccountWithDifferentComplianceAreRefused(t *testing
 	// barely better than the silence this replaces.
 	if !strings.Contains(conflicts[0], "main") || !strings.Contains(conflicts[0], "backup") {
 		t.Errorf("conflict %q does not name both destinations", conflicts[0])
+	}
+	// A refusal that still hands the account a value is not a refusal: the
+	// caller has no way to tell "refused" from "resolved to the first one
+	// seen" unless the absence of the entry IS the signal.
+	if _, ok := got[acct]; ok {
+		t.Errorf("account %d is still present in the result despite being reported as a conflict; "+
+			"a caller that reads the map without checking conflicts would silently apply it", acct)
+	}
+}
+
+func TestConflictNamesDestinationsInSortedOrderNotStoreOrder(t *testing.T) {
+	// Store order is c, a, b -- deliberately not sorted. Without the sort,
+	// the first pair compared is (c, a), and the conflict message would name
+	// "c" and "a". The function must sort by name first, so the pair actually
+	// compared is (a, b) and the message names "a" before "b". Using c/a/b
+	// rather than something subtler makes the difference unmistakable: the
+	// two possible messages don't share a first name.
+	acct := int64(7)
+	_, conflicts := complianceByAccount([]db.Destination{
+		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+	})
+	if len(conflicts) != 1 {
+		t.Fatalf("got %d conflicts, want 1: %v", len(conflicts), conflicts)
+	}
+	if !strings.HasPrefix(conflicts[0], `"a" and "b"`) {
+		t.Errorf("conflict = %q, want it to open with %q (sorted order), not store order", conflicts[0], `"a" and "b"`)
 	}
 }
 
@@ -541,11 +569,16 @@ func TestADestinationWithNoComplianceContributesNothing(t *testing.T) {
 }
 
 func TestADestinationWithNoAccountIsIgnored(t *testing.T) {
-	// A hand-typed destination has no token to push with.
+	// A hand-typed destination has no token to push with, so it must
+	// contribute nothing to the resolved map and raise no conflict --
+	// there is no account for it to conflict over.
 	got, conflicts := complianceByAccount([]db.Destination{
 		{Name: "manual", Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
 	})
-	if len(conflicts) != 0 || len(got) != 0 {
-		t.Errorf("got %v / %v, want both empty", got, conflicts)
+	if len(got) != 0 {
+		t.Errorf("got %v, want no account to receive an unowned destination's compliance", got)
+	}
+	if len(conflicts) != 0 {
+		t.Errorf("got conflicts %v, want none: a destination with no account has nothing to conflict with", conflicts)
 	}
 }
