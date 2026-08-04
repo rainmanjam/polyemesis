@@ -221,6 +221,14 @@ type IngestOptions struct {
 	Privacy         db.FacebookPrivacy
 	Crosspost       []db.CrosspostTarget
 	DonateCharityID string
+	// BackupIngest asks Facebook to provision a secondary ingest endpoint, so
+	// a redundant feed can be published alongside the primary.
+	//
+	// Whether the secondary URLs come back WITHOUT this is not established --
+	// our own fixture returns them unconditionally, and a fixture is not
+	// evidence about Meta. So a caller must handle an empty Backups even when
+	// it asked, rather than treating the request as a guarantee.
+	BackupIngest bool
 	// ScheduledFor makes this a SCHEDULED_UNPUBLISHED broadcast at that
 	// instant rather than a LIVE_NOW one, which is what gives a show a
 	// Facebook event page before it starts.
@@ -537,6 +545,9 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	}
 	if opts.DonateCharityID != "" {
 		params.Set("donate_button_charity_id", opts.DonateCharityID)
+	}
+	if opts.BackupIngest {
+		params.Set("enable_backup_ingest", "true")
 	}
 
 	var created fbLiveVideo
