@@ -74,6 +74,16 @@ interface MetaTarget {
   platform: string;
   accountName: string;
   caps: MetaCaps;
+  /** Obligation metadata resolved from this account's destinations, sent on
+   *  every push whether or not anything is typed here. Absent when no
+   *  destination on the account set any. Mirrors internal/api's metadataTarget;
+   *  the stream key it resolves alongside is deliberately never serialised. */
+  compliance?: {
+    privacy?: string;
+    madeForKids?: boolean;
+    labels?: Record<string, boolean>;
+    facebookPrivacy?: string;
+  };
 }
 
 interface MetaOutcome {
@@ -237,6 +247,21 @@ function GoLiveComposer() {
 
   const categoryHint = (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
   const noDescription = (targets ?? []).filter((t) => !t.caps.fields.includes("description"));
+  // What a push will send BEYOND what is typed here.
+  //
+  // Compliance is configured per destination and has no field in this composer,
+  // so without this the operator presses Push and a COPPA declaration, a privacy
+  // setting or a set of content labels goes out with nothing on screen having
+  // mentioned it. A push that does more than it says is the same complaint as a
+  // push that does less.
+  const withCompliance = (targets ?? []).filter((t) => {
+    const c = t.compliance;
+    if (!c) return false;
+    return Boolean(
+      c.privacy || c.facebookPrivacy || c.madeForKids !== undefined ||
+        (c.labels && Object.keys(c.labels).length > 0),
+    );
+  });
   // Same signal as noDescription/categoryHint above, not the broadcast-window
   // fetch below: Facebook resolves tags through top-level Metadata.Tags and
   // has no broadcast resource at all, so gating on broadcastAccounts would
@@ -300,7 +325,13 @@ function GoLiveComposer() {
   const broadcastTouched =
     tags.trim() !== "" || scheduledStart.trim() !== "" ||
     dvr !== "" || autoStart !== "" || autoStop !== "";
-  const empty = !title.trim() && !description.trim() && !category.trim() && !broadcastTouched;
+  // Nothing typed AND nothing stored to send. The second half matters: a push
+  // whose whole purpose is applying a stored COPPA declaration or privacy
+  // setting types nothing here, and a button greyed out on the composer alone
+  // would make the server's own allowance for that unreachable.
+  const empty =
+    !title.trim() && !description.trim() && !category.trim() && !broadcastTouched &&
+    withCompliance.length === 0;
   const busy = pushing || (job !== null && !job.done);
 
   return (
@@ -472,6 +503,15 @@ function GoLiveComposer() {
                 Applies to {accepts("title").length === 1 ? "the connected account" : "every connected account"}.
               </span>
             </div>
+
+            {withCompliance.length > 0 && (
+              <p className="text-[10px] text-muted-foreground">
+                This push also sends the compliance settings stored on{" "}
+                {withCompliance.map((t) => t.accountName || t.platform).join(", ")} &mdash;
+                visibility, made-for-kids and content labels are configured per destination, not
+                here, and go out whether or not you change anything above.
+              </p>
+            )}
           </div>
 
           {/* ---------- what each platform did ---------- */}

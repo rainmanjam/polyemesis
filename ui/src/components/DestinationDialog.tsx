@@ -637,6 +637,23 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     () => (caps?.connect ? accounts.filter((a) => String(a.platform) === caps.connect) : []),
     [accounts, caps],
   );
+  // Whether the connected Facebook account publishes to a PAGE rather than a
+  // profile, which decides whether an audience setting means anything at all.
+  //
+  // A Page broadcast is public: Facebook has no personal audience for a Page,
+  // and IngestFor suppresses privacy for one regardless of what is stored. So
+  // the control is hidden rather than shown-and-ignored -- offering a setting
+  // that silently does nothing is the defect roadmap item 0 exists for.
+  //
+  // Only a ref that SAYS page: counts. A legacy ref carrying no prefix resolves
+  // as "auto" server-side, trying Pages first and falling back to the profile,
+  // so which it is cannot be known here. Those keep the control and its hint,
+  // because hiding it on a guess would take away a setting that does work.
+  const facebookTargetsAPage = useMemo(() => {
+    const acct = accounts.find((a) => String(a.id) === accountId);
+    return acct?.accountRef?.startsWith("page:") ?? false;
+  }, [accounts, accountId]);
+
   const selectedRendition = useMemo(
     () => renditions.find((r) => String(r.id) === renditionId) ?? null,
     [renditions, renditionId],
@@ -1230,7 +1247,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </div>
               )}
 
-              {platform === "facebook" && (
+              {platform === "facebook" && facebookTargetsAPage && (
+                <span className="text-[10px] text-muted-foreground">
+                  This account publishes to a Page, and a Page broadcast is public: Facebook
+                  has no personal audience to restrict it to. There is no audience setting to
+                  make, which is why one is not offered.
+                </span>
+              )}
+
+              {platform === "facebook" && !facebookTargetsAPage && (
                 <div className="flex flex-col gap-1">
                   <Label>Audience</Label>
                   <Select
@@ -1255,10 +1280,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </Select>
                   <span className="text-[10px] text-muted-foreground">
                     Applied when the broadcast is CREATED, not while it airs &mdash; changing this
-                    afterwards takes effect on the next broadcast, not the current one. It also
-                    only applies to a profile broadcast: a Page has no personal audience for
-                    Facebook to restrict to, so a Page broadcast is public regardless of what you
-                    pick here.
+                    afterwards takes effect on the next broadcast, not the current one. If this
+                    destination is later pointed at a Page, the setting stops applying: a Page
+                    broadcast is public regardless.
                   </span>
                 </div>
               )}

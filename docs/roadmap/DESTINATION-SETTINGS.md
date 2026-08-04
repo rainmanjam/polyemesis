@@ -147,7 +147,7 @@ discover by grepping for a field that does not exist.
 
 | Item | Part | Why it is still open |
 |---|---|---|
-| **Facebook's remaining metadata surface** | D | Facebook now sends `title`, `description` and `tags` on the composer push, `privacy`, `crossposting_actions` and `donate_button_charity_id` when the broadcast is created, and `privacy` again post-create through the compliance push. Still missing: `enable_backup_ingest`, `stop_on_delete_stream`, spatial audio, 360 projection, and `event_params` scheduling — which is bounded to seven days out and collides with weekly schedules. Deferred as their own features, not half-built |
+| **Facebook's remaining metadata surface** | D | Facebook now sends `title`, `description` and `tags` on the composer push, `privacy`, `crossposting_actions` and `donate_button_charity_id` when the broadcast is created, and `privacy` again post-create through the compliance push. Still missing: `enable_backup_ingest`, `stop_on_delete_stream`, spatial audio, 360 projection, and `event_params` scheduling — bounded to seven days out, which turns out to constrain only `once` schedules, since a weekly occurrence is never more than seven days away. Deferred as their own features, not half-built |
 | **Frame-accurate go-live** | — | Not metadata, and not Part D. `inband_go_live` swaps the ingest URL and requires the encoder to inject an AMF0 `onGoLive` packet at a chosen frame — FFmpeg's RTMP muxer has no flag for it. See [Facebook and Kick](#facebook-and-kick). Judge it on its own merits; it inherited Part D's estimate by being listed in the same sentence as a set of create-time fields |
 
 **Staggered go-live was listed here and should not have been.** It shipped in
@@ -306,13 +306,35 @@ fields, which is what made Part D's estimate look like one piece of work.
 **Scheduling is not a field.** `planned_start_time` is gone; a scheduled
 broadcast is `POST /<ID>/live_videos?status=SCHEDULED_UNPUBLISHED&event_params=
 <UNIX_TS>`, rescheduled with `POST /<LIVE_VIDEO_ID>?event_params=<UNIX_TS>`.
-**Facebook accepts a start time at most seven days out.** That bound is not
-ours to widen, and it collides with what this repo now ships: a weekly schedule
-(`internal/scheduler`, roadmap item 5C) can name a time further away than
-Facebook will take, so whatever builds this has to decide what happens then —
-refuse it, clamp it, or create the broadcast late. There is also an eligibility
-gate that has nothing to do with our code: the account must be 60+ days old and
-the Page or professional profile needs 100+ followers.
+**Facebook accepts a start time at most seven days out**, and that bound is not
+ours to widen.
+
+**It collides with far less than it first appears, and the correction matters
+because it decides the design.** This document previously said a weekly schedule
+could name a time Facebook would refuse. It cannot. `internal/scheduler` has
+three kinds — `once`, `daily`, `weekly` — and the *next occurrence* of a daily
+schedule is at most a day away, of a weekly one at most seven days by
+definition. **Only a `once` schedule can be set beyond the window.**
+
+That kills "clamp" outright. Silently moving a broadcast's start time is the
+worst option available, and it was only ever needed for a case that does not
+exist.
+
+So: **refuse a `once` schedule more than seven days out, at save time, with a
+message naming the limit.** Daily and weekly need no special handling at all.
+
+And refusing costs less than it sounds, because **the schedule still works**.
+What is bounded is only the pre-announced Facebook broadcast — a discovery
+feature, not the go-live path. The destination still goes live at the scheduled
+time; there is simply no Facebook event page for it until someone is inside the
+window. If a distant one-off ever needs one, the upgrade is to create the
+broadcast when the occurrence enters the seven-day window, using the sweep the
+scheduler already runs — which needs a per-occurrence "already created" marker,
+and that is why it is not the first version.
+
+There is also an eligibility gate that has nothing to do with our code: the
+account must be 60+ days old and the Page or professional profile needs 100+
+followers.
 
 **`inband_go_live` is ingest work, not metadata.** It is a nested field modifier
 on a GET whose side effect reconfigures the broadcast and returns **a different

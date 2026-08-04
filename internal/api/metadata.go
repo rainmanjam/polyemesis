@@ -263,15 +263,18 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		Category:    req.Category,
 		Tags:        req.Tags,
 	}.Trimmed()
-	// Either half is enough to be worth pushing. A broadcast-only push is a
-	// real thing an operator does -- turning the DVR off before going live
-	// without retyping a title that is already correct.
-	if meta.Empty() && req.Broadcast.Empty() {
-		writeError(w, http.StatusBadRequest,
-			"enter a title, a description, a category or a broadcast setting before pushing")
-		return
-	}
-
+	// "Is there anything to do" is deliberately NOT answered here any more.
+	//
+	// It used to be, and the answer went wrong the moment compliance started
+	// being pushed: a request carrying no title and no broadcast setting can
+	// still have work to do, because the destinations behind the selected
+	// accounts may carry a stored privacy, a COPPA declaration or content
+	// labels. Refusing here told the operator nothing would happen while
+	// something would -- and refused the one push a compliance correction
+	// needs, on fields that are legal obligations rather than descriptions.
+	//
+	// The question is only answerable once the targets are known, so it is
+	// asked below, after resolution and filtering.
 	targets, conflicts, err := s.metadataTargets()
 	if err != nil {
 		writeStoreError(w, err)
@@ -305,6 +308,20 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(problems) > 0 {
 		writeError(w, http.StatusBadRequest, strings.Join(problems, " "))
+		return
+	}
+
+	// NOW the emptiness question can be answered honestly, because the stored
+	// compliance behind the selected accounts is known.
+	//
+	// A compliance-only push is a real thing an operator does: correcting a
+	// COPPA declaration or a privacy setting without retyping a title that is
+	// already right. Requiring a description to be re-entered before a legal
+	// declaration can be sent is the wrong way round.
+	if meta.Empty() && req.Broadcast.Empty() && !anyCompliance(targets) {
+		writeError(w, http.StatusBadRequest,
+			"nothing to push: enter a title, a description, a category or a broadcast "+
+				"setting, or set a compliance value on a destination first.")
 		return
 	}
 
@@ -526,6 +543,22 @@ type accountCompliance struct {
 // Destinations with no account are skipped: a hand-typed key has no token to
 // push with. Destinations with empty compliance contribute nothing and never
 // conflict, because "not set" is not a disagreement with anything.
+// anyCompliance reports whether any of these targets has something to send
+// beyond what the operator typed.
+//
+// It is what makes a compliance-only push possible. Without it the emptiness
+// check would go on refusing a request whose whole purpose is applying a stored
+// COPPA declaration or privacy setting -- work the operator configured on a
+// destination and cannot express in the composer at all.
+func anyCompliance(targets []metadataTarget) bool {
+	for _, t := range targets {
+		if !t.Compliance.Empty() {
+			return true
+		}
+	}
+	return false
+}
+
 func complianceByAccount(dests []db.Destination) (map[int64]accountCompliance, []string) {
 	sorted := append([]db.Destination(nil), dests...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
