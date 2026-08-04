@@ -1319,12 +1319,19 @@ func TestThreeDisagreeingDestinationsAreAllWithheldAndAllNamed(t *testing.T) {
 	}
 }
 
-// TestAgreementWithTheAnchorIsNotAConflictAcrossThreeDestinations is the guard
-// against overcorrecting the above: comparing each destination against the one
-// BEFORE it rather than against the first would call a-a-b two conflicts, or
-// a-b-b one plus a spurious second.
-func TestAgreementWithTheAnchorIsNotAConflictAcrossThreeDestinations(t *testing.T) {
+// TestEveryDestinationIsComparedAgainstTheFirstNotItsNeighbour is the guard
+// against overcorrecting the above, and against a subtler shape: comparing each
+// destination against the one BEFORE it rather than against the first.
+//
+// Agreement first — three destinations that all agree are ordinary, not three
+// conflicts. Then the distinguishing case: with a, a, c the anchor is "a", so
+// the message must name "a" and "c". A previous-neighbour comparison would name
+// "b" and "c" instead, blaming a destination that agreed with everything and
+// leaving the operator editing the wrong row. An all-agreeing fixture cannot
+// tell those two implementations apart, which is why this one does not use one.
+func TestEveryDestinationIsComparedAgainstTheFirstNotItsNeighbour(t *testing.T) {
 	acct := int64(7)
+
 	got, conflicts := complianceByTarget([]db.Destination{
 		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
 		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
@@ -1336,6 +1343,21 @@ func TestAgreementWithTheAnchorIsNotAConflictAcrossThreeDestinations(t *testing.
 	}
 	if got[acct].Compliance.Privacy != db.PrivacyPrivate {
 		t.Errorf("resolved privacy = %q, want private", got[acct].Compliance.Privacy)
+	}
+
+	_, conflicts = complianceByTarget([]db.Destination{
+		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+	})
+	if len(conflicts[acct]) != 1 {
+		t.Fatalf("got %d conflicts, want exactly one: only %q disagrees with the anchor",
+			len(conflicts[acct]), "c")
+	}
+	if !strings.HasPrefix(conflicts[acct][0], `"a" and "c"`) {
+		t.Errorf("conflict = %q, want it to open with %q: the disagreement is with the first "+
+			"destination, and naming %q blames one that agreed with everything",
+			conflicts[acct][0], `"a" and "c"`, "b")
 	}
 }
 
