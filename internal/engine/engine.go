@@ -335,6 +335,25 @@ type destination struct {
 	// is what keeps an unrelated edit from cycling a healthy stream.
 	spec string
 	err  string
+
+	// The redundant output, when this destination has one. A SEPARATE
+	// supervised process on a separate subscription and port, which is what
+	// makes "the backup cannot take the primary down" true rather than hopeful
+	// -- the supervisor restarts each independently and neither stops the
+	// other.
+	backup     *supervisor.Process
+	backupPort int
+	backupSub  string
+	// backupSpec is the backup's OWN restart hash, deliberately not derived
+	// from spec. The two must cycle independently: a rotated backup key has to
+	// restart only the backup, and nothing about the backup may ever restart
+	// the primary.
+	backupSpec string
+	// backupErr explains why there is no backup when one was asked for --
+	// no endpoint offered, or no relay port left. Reported rather than logged
+	// alone, because an operator who enabled redundancy and silently did not
+	// get it is worse off than one who never tried.
+	backupErr string
 }
 
 // rendition is one running shared video encode.
@@ -1478,6 +1497,10 @@ type destPlan struct {
 	row      *db.Destination
 	compiled routing.Result
 	spec     string
+	// upstream is the signature of what this destination reads. Carried on the
+	// plan because the BACKUP's hash needs it too, and recomputing it in a
+	// second place is how two hashes drift apart.
+	upstream string
 	// err is a reason not to run at all — a routing graph that will not
 	// compile, or an upstream rendition that is not there. Either way the
 	// destination is shown as broken rather than started against nothing.
@@ -1686,6 +1709,7 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 		} else {
 			p.compiled = compiled
 			p.spec = destSpec(row, compiled, upstream)
+			p.upstream = upstream
 		}
 		plans[row.ID] = p
 	}
@@ -1750,6 +1774,11 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			// Holding e.mu across that would stall every Status() the dashboard
 			// asks for and every other tier's reconcile behind it.
 			e.applyDestPolicy(&next, p.row)
+			// The backup is reconciled here as well as on a fresh start,
+			// because its toggle is absent from destSpec -- so a destination
+			// that survived the stop phase is exactly the case nothing else
+			// would notice the setting changed.
+			e.reconcileBackup(&next, p.compiled, p.upstream)
 			continue
 		}
 		e.mu.Unlock()
@@ -1779,6 +1808,14 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			continue
 		}
 		started++
+
+		// The backup rides alongside, after the primary is up. Reconciled
+		// through the same function the already-running branch uses, so there
+		// is one place that decides whether a redundant feed should exist.
+		e.mu.Lock()
+		d := e.dests[id]
+		e.mu.Unlock()
+		e.reconcileBackup(d, p.compiled, p.upstream)
 	}
 }
 
@@ -2062,6 +2099,45 @@ func (e *Engine) destArgs(row *db.Destination, compiled routing.Result, relayURL
 // destRoleBackup names the redundant output's subscription.
 const destRoleBackup = "backup"
 
+// wantsBackup reports whether this destination should be publishing a
+// redundant feed right now.
+//
+// Both halves are required. The toggle alone is intent; without an endpoint
+// there is nowhere to publish, which is the normal state between enabling the
+// setting and the next broadcast being created.
+func wantsBackup(row *db.Destination) bool {
+	return row.Facebook.BackupIngest && row.BackupURL != "" && row.Kind == db.DestRTMP
+}
+
+// backupTarget is the redundant output's URL, assembled the way Target() does.
+func backupTarget(row *db.Destination) string {
+	if row.BackupStreamKey == "" {
+		return row.BackupURL
+	}
+	return strings.TrimRight(row.BackupURL, "/") + "/" + row.BackupStreamKey
+}
+
+// backupSpecOf hashes everything on the BACKUP's command line.
+//
+// Deliberately not destSpec's value and deliberately not derived from it: they
+// share most inputs but must never share a verdict. Enabling backup already
+// costs one reconnect for an unavoidable reason -- a new broadcast means a new
+// primary key -- and it must not cost a second one for an avoidable reason.
+func backupSpecOf(row *db.Destination, compiled routing.Result, upstream string) string {
+	return hashStrings([]string{
+		strconv.FormatBool(wantsBackup(row)), backupTarget(row),
+		compiled.FilterComplex, strconv.Itoa(row.AudioBitrate),
+		strconv.Itoa(row.Profile.SampleRate), upstream,
+		strconv.Itoa(compiled.VideoDelayMS),
+		row.ExtraInputArgs, row.ExtraOutputArgs,
+		strconv.FormatBool(row.Transport.NoDurationFilesize),
+		strconv.Itoa(row.Transport.MuxQueuePackets),
+		strconv.Itoa(row.Transport.MuxQueueBytes),
+		strconv.Itoa(row.Transport.RWTimeoutSeconds),
+		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
+	})
+}
+
 func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
 	port, err := e.alloc.Allocate()
 	if err != nil {
@@ -2168,6 +2244,113 @@ func (e *Engine) teardownDest(d *destination) {
 	if d.port != 0 {
 		e.alloc.Release(d.port)
 	}
+	e.stopBackup(d)
+}
+
+// reconcileBackup brings the redundant output into line with the row, without
+// ever consulting or touching the primary.
+//
+// Called for a destination that is already running as well as one just
+// started, because the toggle is deliberately ABSENT from destSpec: nothing
+// else would ever notice it changed. Absence from that hash stops the primary
+// cycling; this is what makes the setting take effect.
+func (e *Engine) reconcileBackup(d *destination, compiled routing.Result, upstream string) {
+	if d == nil || d.row == nil {
+		return
+	}
+	want := backupSpecOf(d.row, compiled, upstream)
+	if !wantsBackup(d.row) {
+		// Includes the toggle-on-but-no-endpoint case, which is a real state
+		// between enabling the setting and the next broadcast being created.
+		e.stopBackup(d)
+		d.backupErr = ""
+		if d.row.Facebook.BackupIngest && d.row.BackupURL == "" {
+			d.backupErr = "Facebook has not offered a backup ingest endpoint yet; " +
+				"it is provisioned when the broadcast is created"
+		}
+		return
+	}
+	if d.backup != nil && d.backupSpec == want {
+		return
+	}
+	e.stopBackup(d)
+	e.startBackup(d, compiled, want)
+}
+
+// startBackup spawns the redundant output.
+//
+// The port is asked for LAST and its refusal costs only the backup. There are
+// 500 relay ports shared across every source engine, so exhaustion is a real
+// state -- and it must cost the redundancy rather than the broadcast, which is
+// why this returns quietly with a reason instead of failing the destination.
+func (e *Engine) startBackup(d *destination, compiled routing.Result, spec string) {
+	hub := d.hub
+	if hub == nil {
+		hub = e.hub
+	}
+	port, err := e.alloc.Allocate()
+	if err != nil {
+		d.backupErr = "no relay port is free for the backup feed"
+		e.log.Warn("backup ingest has no relay port; the primary is unaffected",
+			"dest", d.row.Name, "err", err)
+		return
+	}
+	sub := destSubName(d.row.ID, destRoleBackup)
+	url := hub.Subscribe(sub, port)
+
+	proc := supervisor.New(e.log, supervisor.Spec{
+		Name:        sub,
+		Kind:        "destination",
+		Bin:         e.tools.FFmpeg,
+		Args:        e.destArgs(d.row, compiled, url, backupTarget(d.row)),
+		AutoRestart: true,
+		MinBackoff:  destPolicy(d.row).MinBackoff,
+		MaxBackoff:  destPolicy(d.row).MaxBackoff,
+		MaxRestarts: destPolicy(d.row).MaxRestarts,
+		OnLog:       e.onLog,
+		OnState:     e.onState,
+		LogSink:     logSink{e},
+	})
+
+	d.backup = proc
+	d.backupPort = port
+	d.backupSub = sub
+	d.backupSpec = spec
+	d.backupErr = ""
+
+	proc.Start()
+	e.log.Info("backup ingest started", "dest", d.row.Name)
+}
+
+// stopBackup tears down the redundant output and releases everything it held.
+//
+// Unsubscribing and releasing the port matter as much as stopping the process:
+// a stale subscriber keeps the hub writing datagrams into a socket nobody
+// reads, and a leaked port is one fewer of the 500 shared across every source
+// engine. Neither would be noticed until the pool ran out.
+func (e *Engine) stopBackup(d *destination) {
+	if d == nil {
+		return
+	}
+	if d.backup != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+		d.backup.Stop(ctx)
+		cancel()
+		d.backup = nil
+	}
+	if d.backupSub != "" {
+		hub := d.hub
+		if hub == nil {
+			hub = e.hub
+		}
+		hub.Unsubscribe(d.backupSub)
+		d.backupSub = ""
+	}
+	if d.backupPort != 0 {
+		e.alloc.Release(d.backupPort)
+		d.backupPort = 0
+	}
+	d.backupSpec = ""
 }
 
 func renditionLabel(row *db.Destination) string {
