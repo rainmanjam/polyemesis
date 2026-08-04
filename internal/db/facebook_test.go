@@ -2,9 +2,11 @@ package db
 
 import "testing"
 
-// Task 3 uses Empty() to decide whether to send Facebook's create-time
-// parameters at all -- a wrong answer here either sends a request with
-// nothing in it or silently drops settings the operator actually set.
+// Empty() has no production caller today -- oauth.IngestFor checks
+// len(opts.Crosspost) > 0 and opts.DonateCharityID != "" individually rather
+// than calling this method wholesale. These tests exist anyway because the
+// method is exported and a wrong answer from it would mislead whichever
+// caller reaches for it next.
 func TestFacebookSettingsEmpty(t *testing.T) {
 	if !(FacebookSettings{}).Empty() {
 		t.Error("a zero-value FacebookSettings reported not Empty")

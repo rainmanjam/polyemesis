@@ -181,6 +181,53 @@ func TestADestinationRoundTripsItsFacebookBlock(t *testing.T) {
 	}
 }
 
+// The Create path above proves the column round-trips. It does not prove
+// UPDATE writes it: a destination is edited far more often than it is
+// created, and the crosspost list this task just made reachable from the
+// dialog now travels through UpdateDestination on every save after the
+// first. Writing "{}" there instead of the real value stays green on every
+// other test in this file, because they all check GetDestination against a
+// row that was only ever Created, never edited.
+func TestUpdateDestinationPersistsTheFacebookBlock(t *testing.T) {
+	d := testDB(t)
+	dst := validDest()
+	dst.Platform = PlatformFacebook
+	dst.URL = "rtmps://live-api.facebook.com:443/rtmp/"
+	created, err := d.CreateDestination(dst)
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	if !created.Facebook.Empty() {
+		t.Fatalf("a destination created with no Facebook block already carries one: %+v", created.Facebook)
+	}
+
+	created.Facebook = FacebookSettings{
+		Crosspost:       []CrosspostTarget{{PageID: "1234", CreatePost: true}},
+		DonateCharityID: "999",
+	}
+	updated, err := d.UpdateDestination(created)
+	if err != nil {
+		t.Fatalf("UpdateDestination: %v", err)
+	}
+	if len(updated.Facebook.Crosspost) != 1 || updated.Facebook.Crosspost[0].PageID != "1234" {
+		t.Fatalf("crosspost after update = %+v, want the one Page just set", updated.Facebook.Crosspost)
+	}
+	if updated.Facebook.DonateCharityID != "999" {
+		t.Errorf("donateCharityId after update = %q, want 999", updated.Facebook.DonateCharityID)
+	}
+
+	// Read back independently of UpdateDestination's own return value, in case
+	// the write silently failed but the in-memory struct still reflects what
+	// the caller asked for.
+	got, err := d.GetDestination(created.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if len(got.Facebook.Crosspost) != 1 || got.Facebook.DonateCharityID != "999" {
+		t.Errorf("stored facebook block = %+v, want the update to have persisted", got.Facebook)
+	}
+}
+
 // This creates a fresh row through CreateDestination, which marshals a zero
 // FacebookSettings the same way it would marshal any other value -- it does
 // NOT exercise the column's SQL default or the migration path. What actually

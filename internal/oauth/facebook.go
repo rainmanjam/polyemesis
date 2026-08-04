@@ -683,11 +683,17 @@ func (f *Facebook) MetadataCaps() MetadataCaps {
 		// YouTube category or a Twitch game. Saying so here is what keeps it out
 		// of the failure list. Tags ARE accepted: content_tags takes Facebook's
 		// own ad-interest ids, resolved from operator-typed words by resolveTags.
-		// Privacy is accepted too, though not through PushMetadata -- see
-		// UpdateLiveVideoPrivacy, which is the only push on this provider whose
-		// success is confirmed by reading the value back rather than by the
-		// POST's status.
-		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags, FieldPrivacy},
+		//
+		// FieldPrivacy is deliberately absent, unlike YouTube and Twitch's
+		// compliance fields: this list describes what the composer's
+		// PushMetadata call can accept, oauth.Metadata carries no Privacy field
+		// for it to accept, and Facebook has no PushCompliance method for the
+		// composer to call either. Privacy is create-time-only -- see
+		// IngestOptions and the destination dialog's Audience control -- and the
+		// one method that CAN change it after the fact, UpdateLiveVideoPrivacy,
+		// has no caller yet. Advertising the field here would claim a composer
+		// control that does not exist.
+		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags},
 		// Both limits are left at zero — "no published limit". Meta documents no
 		// maximum for either field, and inventing one would reject a title the
 		// platform would have accepted, which is the restrictive-check mistake

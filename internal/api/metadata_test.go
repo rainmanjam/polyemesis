@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -288,6 +290,48 @@ func TestPushMetadataReportsPerPlatformRatherThanOneBoolean(t *testing.T) {
 	}
 	if len(seen) != 2 {
 		t.Fatalf("platforms = %v, want both reported separately", seen)
+	}
+}
+
+// TestPushMetadataCarriesTagsToThePusher closes the gap the whole-branch
+// review found: `Tags: req.Tags` in handlePushMetadata's oauth.Metadata
+// literal was deletable with the entire suite green, because nothing proved
+// the composer's tags survive the trip from the request to the call that
+// actually leaves the process. pushMetadataFn is that trip's seam, the same
+// shape as ingestForFn one handler over -- oauth.MetadataPusher is a real
+// provider (embeds Provider, has no injection point of its own), so this
+// captures the argument one line before it would reach one.
+func TestPushMetadataCarriesTagsToThePusher(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	connectAccount(t, store, s.box, db.PlatformFacebook, "ada")
+	if err := store.PutPlatformCreds(s.box, db.PlatformFacebook, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+
+	var (
+		called   bool
+		captured oauth.Metadata
+	)
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		called = true
+		captured = m
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle, oauth.FieldTags}}, nil
+	}
+
+	job := pushAndSettle(t, h, sign, map[string]any{
+		"title": "Live tonight",
+		"tags":  []string{"cooking", "live"},
+	})
+	if !called {
+		t.Fatal("pushMetadataFn was never invoked; the push did not reach the seam at all")
+	}
+	if !reflect.DeepEqual(captured.Tags, []string{"cooking", "live"}) {
+		t.Errorf("Tags passed to the pusher = %v, want [cooking live]", captured.Tags)
+	}
+	if len(job.Results) != 1 || job.Results[0].State != metaOK {
+		t.Fatalf("job results = %+v, want one ok result", job.Results)
 	}
 }
 

@@ -112,6 +112,16 @@ type Server struct {
 	// injection point, so there is no way to observe this from outside the
 	// process. Defaults to the real method; only a test ever replaces it.
 	ingestForFn func(context.Context, oauth.Provider, string, *db.PlatformAccount, oauth.IngestOptions) (*oauth.Ingest, string, error)
+
+	// pushMetadataFn is ingestForFn's counterpart one handler over: the seam
+	// that makes pushOne's call to a resolved provider's PushMetadata
+	// observable. Composer tags are the reason it exists -- req.Tags reaching
+	// oauth.Metadata is guarded, and a provider's own PushMetadata resolving
+	// tags is guarded, but nothing proved this call in between still passes
+	// them through, and deleting the Tags field from the literal above left the
+	// whole suite green. Defaults to calling the pusher directly; only a test
+	// ever replaces it.
+	pushMetadataFn func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error)
 }
 
 // Options configures the server.
@@ -183,6 +193,11 @@ func New(o Options) *Server {
 	// The real implementation, always, except in the one test that replaces it
 	// to observe what handleRefreshKey passed.
 	s.ingestForFn = s.ingestFor
+	// Same reasoning, one handler over: the real call, always, except in the
+	// one test that replaces it to observe what pushOne passed.
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return pusher.PushMetadata(ctx, clientID, accessToken, accountRef, m)
+	}
 	return s
 }
 

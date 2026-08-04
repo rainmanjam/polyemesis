@@ -1142,7 +1142,7 @@ func TestFacebookSendsNoContentTagsWhenTheOperatorTypedNone(t *testing.T) {
 // ------------------------------------------------------------- privacy push
 
 func TestAConfirmedPrivacyChangeIsReportedAsApplied(t *testing.T) {
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/9":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
@@ -1162,9 +1162,25 @@ func TestAConfirmedPrivacyChangeIsReportedAsApplied(t *testing.T) {
 	if !slices.Contains(res.Applied, FieldPrivacy) {
 		t.Errorf("applied = %v, want FieldPrivacy after Facebook confirmed the change", res.Applied)
 	}
+	// The create path pins the exact {"value":"..."} envelope and says why:
+	// Graph wants an object, and a bare value is a different, malformed
+	// request. This path sends the same fbPrivacyParam encoding and had no
+	// assertion of its own -- unlike the create path, nothing here inspected
+	// the POST it actually sent.
+	post := fbCall(*log, http.MethodPost, "/9")
+	if post == nil {
+		t.Fatalf("no POST to /9; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := q.Get("privacy"); got != `{"value":"ALL_FRIENDS"}` {
+		t.Errorf("update POST carries privacy %q, want the {\"value\":\"ALL_FRIENDS\"} object", got)
+	}
 }
 
-func TestAPrivacyFacebookAccePTedButDidNotApplyIsNotReportedAsApplied(t *testing.T) {
+func TestAPrivacyFacebookAcceptedButDidNotApplyIsNotReportedAsApplied(t *testing.T) {
 	// THE CASE THIS TASK EXISTS FOR. Graph documents no update surface for
 	// LiveVideo, so a 200 means "request accepted", not "field changed". If the
 	// read-back still says EVERYONE, the operator must not be told their
@@ -1224,6 +1240,39 @@ func TestAPrivacyReadBackThatOmitsTheFieldIsNotTreatedAsConfirmation(t *testing.
 	}
 }
 
+func TestAnUnreadablePrivacyConfirmationIsSkippedRatherThanTrusted(t *testing.T) {
+	// The fourth not-confirmed path, named in the method's own doc comment: "an
+	// unreadable response". A GET that fails outright is a different failure
+	// from one that succeeds but omits the field (tested above) -- both must
+	// land as Skipped, but only this one exercises getErr != nil rather than
+	// confirm.Privacy == nil. Until this test existed, that branch could be
+	// rewritten to report Applied unconditionally with the suite still green.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			http.Error(w, `{"error":{"message":"(#1) internal error"}}`, http.StatusInternalServerError)
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("reported a privacy change confirmed by a read-back that could not be read at all")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, " | "), "could not be confirmed") {
+		t.Errorf("warnings %v do not say the read-back itself failed", res.Warnings)
+	}
+}
+
 func TestARefusedPrivacyPushIsSkippedRatherThanAnError(t *testing.T) {
 	// The stored value was already applied when the broadcast was created, so a
 	// refusal here costs a convenience, not the setting.
@@ -1237,6 +1286,40 @@ func TestARefusedPrivacyPushIsSkippedRatherThanAnError(t *testing.T) {
 	}
 	if !slices.Contains(res.Skipped, FieldPrivacy) {
 		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
+
+func TestUpdateLiveVideoPrivacyRefusesAnUnknownValueRatherThanSendingIt(t *testing.T) {
+	// Entry guard, not a Graph round trip: an unknown value must never reach
+	// the wire at all. fbServer's 404-everything handler is the tripwire --
+	// if this guard were dropped, the request would hit it and the test would
+	// fail on the wrong assertion instead of silently passing.
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	_, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FacebookPrivacy("NOT_A_REAL_VALUE"))
+	if err == nil {
+		t.Fatal("UpdateLiveVideoPrivacy accepted a privacy value Facebook does not define")
+	}
+	if len(*log) != 0 {
+		t.Errorf("an invalid value still reached Facebook: %+v", *log)
+	}
+}
+
+func TestUpdateLiveVideoPrivacyRefusesAnEmptyLiveVideoID(t *testing.T) {
+	// Same shape: no broadcast id means there is nothing to address, and the
+	// method must say so rather than POSTing to "/".
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	_, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "", db.FBPrivacySelf)
+	if err == nil {
+		t.Fatal("UpdateLiveVideoPrivacy accepted an empty live video id")
+	}
+	if len(*log) != 0 {
+		t.Errorf("a request with no live video id still reached Facebook: %+v", *log)
 	}
 }
 

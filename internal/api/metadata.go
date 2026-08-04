@@ -527,7 +527,7 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	res := &oauth.MetadataResult{}
 	if !meta.Empty() {
 		var err error
-		res, err = pusher.PushMetadata(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, meta)
+		res, err = s.pushMetadataFn(ctx, pusher, creds.ClientID, acct.AccessToken, acct.AccountRef, meta)
 		if err != nil {
 			out.State = metaError
 			out.Message = err.Error()
