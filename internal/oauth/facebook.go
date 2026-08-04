@@ -32,7 +32,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -219,6 +221,18 @@ type IngestOptions struct {
 	Privacy         db.FacebookPrivacy
 	Crosspost       []db.CrosspostTarget
 	DonateCharityID string
+	// ScheduledFor makes this a SCHEDULED_UNPUBLISHED broadcast at that
+	// instant rather than a LIVE_NOW one, which is what gives a show a
+	// Facebook event page before it starts.
+	//
+	// Zero means live now. That is what every existing caller passes and what
+	// they keep doing -- turning those into scheduled creates would produce
+	// broadcasts that never go live.
+	//
+	// Facebook accepts a start time at most SEVEN DAYS ahead and that bound is
+	// not ours to widen. It is enforced by the caller, which is the only layer
+	// that knows the occurrence; this struct carries whatever it is given.
+	ScheduledFor time.Time
 }
 
 // TargetedProvider is the optional capability for a platform where one
@@ -480,7 +494,20 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	//
 	// overlay_url is deliberately absent: Graph removed it in v24.0 and sending
 	// it now is an error rather than a no-op.
+	// SCHEDULED_UNPUBLISHED is the opposite trade to LIVE_NOW, and that is the
+	// point of it: a LIVE_NOW video is invisible until bytes arrive, whereas a
+	// scheduled one is a PUBLIC event page from the moment it is created. That
+	// visibility days in advance is the whole feature -- it is what lets people
+	// be told about a show before it starts.
+	//
+	// event_params carries the start time. Facebook accepts at most seven days
+	// ahead; the bound is enforced by the caller, which is the only layer that
+	// knows the occurrence.
 	params := url.Values{"status": {"LIVE_NOW"}}
+	if !opts.ScheduledFor.IsZero() {
+		params.Set("status", "SCHEDULED_UNPUBLISHED")
+		params.Set("event_params", strconv.FormatInt(opts.ScheduledFor.Unix(), 10))
+	}
 	// Every field below is sent ONLY when the operator chose it. Facebook treats
 	// a present-but-empty parameter as a value, so "leave it alone" has to mean
 	// an absent key rather than an empty one.

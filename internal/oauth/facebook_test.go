@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -1339,5 +1340,63 @@ func TestAPagePrivacyPushMakesNoRequestAtAll(t *testing.T) {
 	}
 	if !slices.Contains(res.Skipped, FieldPrivacy) {
 		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
+
+// A scheduled broadcast is a DIFFERENT status, not LIVE_NOW plus a field.
+// Asserted on the request Facebook actually receives: a test that only checked
+// IngestFor returned no error would pass with the status unchanged.
+func TestAScheduledBroadcastIsCreatedUnpublishedWithItsStartTime(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+
+	at := time.Unix(1800000000, 0)
+	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+		IngestOptions{ScheduledFor: at}); err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create call; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if s := q.Get("status"); s != "SCHEDULED_UNPUBLISHED" {
+		t.Errorf("status = %q, want SCHEDULED_UNPUBLISHED", s)
+	}
+	if ep := q.Get("event_params"); ep != "1800000000" {
+		t.Errorf("event_params = %q, want the unix start time 1800000000", ep)
+	}
+}
+
+// The zero value is the whole existing world. Every current caller passes
+// IngestOptions{}, and turning those into scheduled creates would produce
+// broadcasts that never go live.
+func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+
+	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+		IngestOptions{}); err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create call; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if s := q.Get("status"); s != "LIVE_NOW" {
+		t.Errorf("status = %q, want LIVE_NOW", s)
+	}
+	// ABSENT, not empty. Facebook reads a present-but-empty parameter as a
+	// value, so this asserts the key does not exist at all -- the same
+	// "empty means leave alone" rule the rest of this file runs on.
+	if _, ok := q["event_params"]; ok {
+		t.Error("event_params was sent for an unscheduled broadcast")
 	}
 }
