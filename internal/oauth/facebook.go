@@ -224,10 +224,20 @@ type IngestOptions struct {
 	// BackupIngest asks Facebook to provision a secondary ingest endpoint, so
 	// a redundant feed can be published alongside the primary.
 	//
-	// Whether the secondary URLs come back WITHOUT this is not established --
-	// our own fixture returns them unconditionally, and a fixture is not
-	// evidence about Meta. So a caller must handle an empty Backups even when
-	// it asked, rather than treating the request as a guarantee.
+	// This flag is what PROVISIONS the backup url; without it the secondary
+	// lists come back empty. Meta's live_videos edge reference:
+	//
+	//	enable_backup_ingest  boolean
+	//	Set this to true to enable a backup ingest url.
+	//	stop_on_delete_stream defaults to false when set
+	//
+	// and the getting-started response shows "secure_stream_secondary_urls":
+	// [] on a create without it. An earlier version of this comment said the
+	// relationship was "not established" -- it is, and the source is the EDGE
+	// reference rather than the LiveVideo node reference, which 404s.
+	//
+	// A caller must still handle an empty Backups even when it asked: eligibility
+	// and account state can refuse what the flag requests.
 	BackupIngest bool
 	// ScheduledFor makes this a SCHEDULED_UNPUBLISHED broadcast at that
 	// instant rather than a LIVE_NOW one, which is what gives a show a

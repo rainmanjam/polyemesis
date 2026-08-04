@@ -373,6 +373,52 @@ under "Frame-Accurate Go-Live". Meta's own `LiveVideo` node reference currently
 404s. Verifying it meant reading the guide, not the reference, which is why it
 survived this long as a one-word claim.
 
+**`stop_on_delete_stream` is documented, and should NOT be built.** Researched
+2026-08-04 against the `live_videos` edge reference, which documents it plainly:
+
+> `stop_on_delete_stream` boolean — Set this to true if stream should be
+> stopped when deleteStream RTMP command received.
+
+The problem is not the field, it is this codebase. `supervisor.signalGroup`
+stops FFmpeg with SIGTERM, and this repo's own comment says what that means:
+*"FFmpeg treats SIGTERM as 'finish up': it flushes buffers and finalises the
+output file."* A clean RTMP close sends `deleteStream`. Every destination runs
+with `AutoRestart: true`.
+
+So `stop_on_delete_stream=true` would end the Facebook broadcast on **every
+restart** — a spec change, a reconcile, a transient failure the supervisor was
+about to recover from — and the respawned FFmpeg would publish into a broadcast
+that no longer exists. It converts a recoverable blip into a permanently lost
+show, which is the opposite of what an operator enabling it would expect.
+
+It would only be safe with auto-restart off, which is not a mode polyemesis
+offers. **Not built, deliberately.** Revisit only if per-destination restart
+policy ever gains an "off".
+
+**The 360 and spatial-audio fields ARE documented** — on the `live_videos`
+EDGE reference, not the `LiveVideo` node reference, which 404s. That distinction
+is why they were previously recorded as unverifiable:
+
+| Field | Type |
+|---|---|
+| `is_spherical` | boolean |
+| `projection` | enum `{EQUIRECTANGULAR, CUBEMAP, HALF_EQUIRECTANGULAR}`, default `EQUIRECTANGULAR` |
+| `stereoscopic_mode` | enum `{MONO, LEFT_RIGHT, TOP_BOTTOM, MULTI_VIEW}` |
+| `spatial_audio_format` | enum `{ambiX_4}`; unspecified means mono or stereo |
+| `encoding_settings` | string — a preset `identifier` from `GET /broadcaster_encoding_settings`, 360 only |
+| `fisheye_video_cropped`, `front_z_rotation`, `original_fov` | boolean, float, int64 |
+
+Sending them correctly is now a solved problem. What remains unverifiable
+without a headset is whether the result LOOKS right, and polyemesis does not
+produce spherical video — it copies whatever the encoder sends. So this is
+metadata describing an ingest we do not control, which is worth knowing before
+anyone scopes it as a feature.
+
+**`enable_backup_ingest` provisions the backup URL** — settled by the same
+reference, and it also notes that `stop_on_delete_stream` defaults to false when
+it is set. That default is correct for redundancy and is what polyemesis already
+gets by not sending the field.
+
 **Kick's entire metadata surface is three fields** — `stream_title`,
 `category_id`, `custom_tags` — via `PATCH /public/v1/channels`. No description,
 no thumbnail, no scheduling.
