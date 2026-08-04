@@ -188,6 +188,14 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 	// one the encoder publishes to, or the event page people were notified
 	// about stays empty beside a live stream.
 	d.StreamKey = b.Ingest.Key
+	// The same store as handleRefreshKey, for the same reason: this path also
+	// creates the broadcast, and a refresh-key-only implementation would lose
+	// backup ingest for every pre-announced show.
+	d.BackupURL, d.BackupStreamKey = firstBackup(b)
+	if d.Facebook.BackupIngest && d.BackupURL == "" {
+		s.log.Warn("pre-announce: Facebook offered no backup ingest endpoint",
+			"destination", d.Name)
+	}
 	d.Facebook.BroadcastID = b.ID
 	d.Facebook.ScheduledFor = at
 	s.saveAnnouncement(d)

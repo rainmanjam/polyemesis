@@ -412,6 +412,17 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	dest.URL = b.Ingest.URL
 	dest.StreamKey = b.Ingest.Key
 	dest.Kind = db.DestRTMP
+	// Recorded even when empty: a destination that used to have a backup
+	// endpoint and no longer does must stop publishing to the old one, which
+	// belongs to a broadcast that no longer exists.
+	dest.BackupURL, dest.BackupStreamKey = firstBackup(b)
+	var warnings []string
+	if dest.Facebook.BackupIngest && dest.BackupURL == "" {
+		warnings = append(warnings,
+			"Facebook did not offer a backup ingest endpoint for this broadcast, so "+
+				"no redundant feed will be published. The destination is otherwise "+
+				"configured correctly and will go live normally.")
+	}
 	updated, err := s.store.UpdateDestination(dest)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -420,7 +431,24 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after key refresh", "err", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"destination": updated})
+	resp := map[string]any{"destination": updated}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// firstBackup is the secondary ingest a destination will publish to, or empty.
+//
+// Facebook returns a LIST -- one secondary per primary form, rtmp and rtmps --
+// and polyemesis publishes one redundant feed, not N. Taking the first keeps
+// the choice in one place rather than at every call site; the parsing in
+// internal/oauth already puts the secure form first.
+func firstBackup(b *oauth.Broadcast) (url, key string) {
+	if b == nil || len(b.Backups) == 0 {
+		return "", ""
+	}
+	return b.Backups[0].URL, b.Backups[0].Key
 }
 
 // ingestOptionsFor maps a stored destination onto what a broadcast create
@@ -444,6 +472,7 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 		Crosspost:       dest.Facebook.Crosspost,
 		DonateCharityID: dest.Facebook.DonateCharityID,
 		ScheduledFor:    scheduledFor,
+		BackupIngest:    dest.Facebook.BackupIngest,
 	}
 }
 

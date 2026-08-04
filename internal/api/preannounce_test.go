@@ -404,3 +404,56 @@ func TestADistantStopScheduleIsNotWarnedAbout(t *testing.T) {
 			"page to be missing: %v", view.Warnings)
 	}
 }
+
+// The scheduled path creates Facebook broadcasts too, and a refresh-key-only
+// implementation loses backup ingest for every pre-announced show -- the
+// feature working on the path someone tested and not on the one they forgot.
+func TestTheScheduledPathStoresTheBackupEndpointToo(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{
+		key: "primary-key", broadcastID: "777",
+		backups: []oauth.Ingest{{URL: "rtmps://backup.example/rtmp", Key: "backup-key"}},
+	}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	d.Facebook.BackupIngest = true
+	if _, err := store.UpdateDestination(d); err != nil {
+		t.Fatalf("enable backup: %v", err)
+	}
+	seedCreds(t, s, store, db.PlatformFacebook)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	got, _ := store.GetDestination(d.ID)
+	if got.BackupURL != "rtmps://backup.example/rtmp" || got.BackupStreamKey != "backup-key" {
+		t.Fatalf("the scheduled path did not store the backup endpoint: %q / %q",
+			got.BackupURL, got.BackupStreamKey)
+	}
+}
+
+// The toggle has to reach the create call, not just the database.
+func TestTheScheduledPathAsksForBackupIngestWhenEnabled(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	d.Facebook.BackupIngest = true
+	if _, err := store.UpdateDestination(d); err != nil {
+		t.Fatalf("enable backup: %v", err)
+	}
+	seedCreds(t, s, store, db.PlatformFacebook)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates) != 1 {
+		t.Fatalf("created %d broadcasts, want 1", len(rec.creates))
+	}
+	if !rec.creates[0].BackupIngest {
+		t.Error("the stored toggle did not reach the create call, so Facebook was " +
+			"never asked for a backup endpoint")
+	}
+}
