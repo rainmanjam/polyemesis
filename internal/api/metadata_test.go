@@ -589,8 +589,10 @@ func TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess(t *testing.T)
 	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
 		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
 	}
+	var gotSettings oauth.BroadcastSettings
 	s.pushBroadcastFn = func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
 		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error) {
+		gotSettings = bs
 		return nil, errors.New("youtube said no: the broadcast is already live")
 	}
 
@@ -611,6 +613,14 @@ func TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess(t *testing.T)
 	if len(res.Applied) == 0 {
 		t.Errorf("applied = %v, want the title that landed: a failed broadcast write must "+
 			"not erase a metadata write that succeeded", res.Applied)
+	}
+	// The operator's own settings have to be what reaches the pusher. Sending a
+	// zero BroadcastSettings here would be the composer-tags defect again: the
+	// call is made, the row reports a result, and the toggle the operator
+	// actually moved was never in the request.
+	if gotSettings.EnableDvr == nil || *gotSettings.EnableDvr {
+		t.Errorf("BroadcastSettings passed to the pusher = %+v, want the explicit "+
+			"enableDvr:false the operator sent", gotSettings)
 	}
 }
 
@@ -681,12 +691,17 @@ func TestAConflictOnAnUnselectedAccountDoesNotBlockThePush(t *testing.T) {
 // the check to the selected accounts also let a selected conflict through, the
 // operator would get exactly the silent one-of-two-declarations write the
 // refusal exists to prevent, just by ticking one box.
+//
+// Two conflicting accounts are selected, not one, because a refusal that stops
+// at the first problem sends the operator round the loop again for the second.
+// Every conflict, for every account addressed.
 func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 	s, h, store := testServer(t, config.Config{})
 	sign := login(t, h)
 
 	clean := connectAccount(t, store, s.box, db.PlatformYouTube, "clean")
 	messy := connectAccount(t, store, s.box, db.PlatformTwitch, "messy")
+	alsoMessy := connectAccount(t, store, s.box, db.PlatformYouTube, "also-messy")
 	for _, d := range []*db.Destination{
 		{Name: "tidy", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
 			URL: "rtmp://a.example/live", StreamKey: "sk-tidy", AccountID: &clean,
@@ -697,6 +712,12 @@ func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 		{Name: "argue-two", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
 			URL: "rtmp://c.example/live", StreamKey: "sk-2", AccountID: &messy,
 			Compliance: db.Compliance{Labels: map[string]bool{"Gambling": true}}},
+		{Name: "squabble-one", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://d.example/live", StreamKey: "sk-3", AccountID: &alsoMessy,
+			Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "squabble-two", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://e.example/live", StreamKey: "sk-4", AccountID: &alsoMessy,
+			Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
 	} {
 		if _, err := store.CreateDestination(d); err != nil {
 			t.Fatalf("create %s: %v", d.Name, err)
@@ -716,15 +737,18 @@ func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 
 	r := jsonRequest(t, http.MethodPost, "/api/v1/metadata/push", map[string]any{
 		"title":      "Live tonight",
-		"accountIds": []int64{messy},
+		"accountIds": []int64{messy, alsoMessy},
 	})
 	sign(r)
 	w := do(t, h, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body %s)", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "argue-one") || !strings.Contains(w.Body.String(), "argue-two") {
-		t.Errorf("the refusal does not name both conflicting destinations: %s", w.Body.String())
+	for _, name := range []string{"argue-one", "argue-two", "squabble-one", "squabble-two"} {
+		if !strings.Contains(w.Body.String(), name) {
+			t.Errorf("the refusal never names %q, so fixing what it does report still leaves "+
+				"the push refused: %s", name, w.Body.String())
+		}
 	}
 	select {
 	case which := <-calls:
@@ -1004,6 +1028,46 @@ func TestTwoDestinationsOnOneAccountWithDifferentComplianceAreRefused(t *testing
 	if _, ok := got[acct]; ok {
 		t.Errorf("account %d is still present in the result despite being reported as a conflict; "+
 			"a caller that reads the map without checking conflicts would silently apply it", acct)
+	}
+}
+
+// TestComplianceByTargetKeepsAConflictingAccountOutOfTheResolvedMap is the
+// second line of defence, tested as such.
+//
+// handlePushMetadata refuses a conflict outright, so this can never be reached
+// through the handler and no call-site guard can see it — which is exactly why
+// it needs its own. The delete is what makes reading the map without checking
+// conflicts fail safe: a caller that skipped the check would otherwise push the
+// first destination's settings while reporting the push refused, which looks
+// handled and is worse than no detection at all.
+func TestComplianceByTargetKeepsAConflictingAccountOutOfTheResolvedMap(t *testing.T) {
+	messy, tidy := int64(7), int64(9)
+	got, conflicts := complianceByTarget([]db.Destination{
+		{Name: "main", AccountID: &messy, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "backup", AccountID: &messy, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+		{Name: "elsewhere", AccountID: &tidy, Compliance: db.Compliance{Privacy: db.PrivacyUnlisted}},
+	})
+
+	if _, ok := got[messy]; ok {
+		t.Errorf("the conflicting account is still in the resolved map as %+v; a caller that "+
+			"read it without checking conflicts would silently apply one of two "+
+			"declarations", got[messy])
+	}
+	if len(conflicts[messy]) == 0 {
+		t.Error("the conflict was not reported against the account it is about, so a push " +
+			"cannot tell whose problem it is")
+	} else if !strings.Contains(conflicts[messy][0], "main") ||
+		!strings.Contains(conflicts[messy][0], "backup") {
+		t.Errorf("conflict %q does not name both destinations", conflicts[messy][0])
+	}
+
+	// The account that never disagreed is untouched by its neighbour's problem.
+	if got[tidy].Compliance.Privacy != db.PrivacyUnlisted {
+		t.Errorf("resolved privacy for the innocent account = %q, want unlisted",
+			got[tidy].Compliance.Privacy)
+	}
+	if len(conflicts[tidy]) != 0 {
+		t.Errorf("the innocent account was reported as conflicting: %v", conflicts[tidy])
 	}
 }
 
