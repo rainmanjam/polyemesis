@@ -1333,8 +1333,14 @@ git commit -m "feat(ui): link to the Facebook event page we created"
 gofmt -l ./internal ./cmd          # must print nothing
 go build ./... && go vet ./...
 go test -race -timeout 20m ./...
-cd ui && npx tsc --noEmit && npx oxlint
+cd ui && npm run build && npx oxlint
 ```
+
+**`npm run build`, NOT `npx tsc --noEmit`.** They are different checks and the
+weaker one passes code CI rejects: `tsc --noEmit` accepted a card reading
+`dest.facebook.broadcastId` off a `DestStatus` that has no such field, and CI's
+`tsc -b` caught it — after fourteen jobs had already failed, because everything
+downstream needs `make build` and `make build` embeds the UI.
 
 `gofmt -l` exits 0 even when it lists files, so read its output — do not chain it with `&&` and assume success.
 
