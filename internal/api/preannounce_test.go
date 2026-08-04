@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -295,5 +297,84 @@ func TestTheNextOccurrenceMovesTheBroadcastRatherThanDuplicatingIt(t *testing.T)
 	}
 	if len(rec.reschedules) != 1 {
 		t.Errorf("rescheduled %d times, want 1", len(rec.reschedules))
+	}
+}
+
+// It WARNS. It never refuses -- the schedule works either way, and what the
+// seven-day bound limits is only the pre-announced Facebook event page.
+func TestADistantOnceScheduleSavesAndWarnsAboutTheEventPage(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	seedDestination(t, s, store, db.PlatformFacebook, "fb")
+
+	var view scheduleView
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "far off", "action": "start", "kind": "once",
+		"runAt": time.Now().Add(23 * 24 * time.Hour).Format(time.RFC3339),
+		"tz":    "UTC", "enabled": true,
+	}, http.StatusCreated), &view)
+
+	if len(view.Warnings) == 0 {
+		t.Fatal("a once schedule 23 days out was saved with no warning; the " +
+			"operator has no way to know no event page will exist")
+	}
+	if !strings.Contains(view.Warnings[0], "seven days") {
+		t.Errorf("the warning does not name the limit: %q", view.Warnings[0])
+	}
+}
+
+// The negative case: inside the window there is nothing to say.
+func TestAScheduleInsideTheWindowIsNotWarnedAbout(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	seedDestination(t, s, store, db.PlatformFacebook, "fb")
+
+	var view scheduleView
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "soon", "action": "start", "kind": "once",
+		"runAt": time.Now().Add(3 * 24 * time.Hour).Format(time.RFC3339),
+		"tz":    "UTC", "enabled": true,
+	}, http.StatusCreated), &view)
+
+	if len(view.Warnings) != 0 {
+		t.Fatalf("warned about a schedule that will get an event page: %v", view.Warnings)
+	}
+}
+
+// Daily and weekly CANNOT exceed the bound: the next occurrence of a weekly
+// schedule is at most seven days away by definition. Warning on them would be
+// noise that teaches people to skip the warning that matters.
+func TestAWeeklyScheduleIsNeverWarnedAbout(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	seedDestination(t, s, store, db.PlatformFacebook, "fb")
+
+	var view scheduleView
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "weekly show", "action": "start", "kind": "weekly",
+		"atMinutes": 1200, "days": []int{0, 3}, "tz": "UTC", "enabled": true,
+	}, http.StatusCreated), &view)
+
+	if len(view.Warnings) != 0 {
+		t.Fatalf("warned about a weekly schedule, which can never exceed the "+
+			"seven-day bound: %v", view.Warnings)
+	}
+}
+
+// No Facebook destination, nothing to warn about.
+func TestADistantScheduleWithNoFacebookDestinationIsNotWarnedAbout(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	seedDestination(t, s, store, db.PlatformTwitch, "tw")
+
+	var view scheduleView
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "far off", "action": "start", "kind": "once",
+		"runAt": time.Now().Add(23 * 24 * time.Hour).Format(time.RFC3339),
+		"tz":    "UTC", "enabled": true,
+	}, http.StatusCreated), &view)
+
+	if len(view.Warnings) != 0 {
+		t.Fatalf("warned about a schedule with no Facebook destination: %v", view.Warnings)
 	}
 }

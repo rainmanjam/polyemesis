@@ -14,6 +14,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/clips"
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
@@ -226,6 +227,49 @@ type scheduleView struct {
 	// "never again" rather than as a date it invented.
 	NextAt    *time.Time `json:"nextAt,omitempty"`
 	LocalTime string     `json:"localTime"`
+	// Warnings names anything about this schedule that will not work the way
+	// an operator might expect. Never a refusal: everything here still saves
+	// and still runs.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// scheduleWarnings names what this schedule cannot do. It never blocks a save.
+//
+// Only KindOnce can trip Facebook's bound: the NEXT occurrence of a daily
+// schedule is at most a day away and of a weekly one at most seven days, BY
+// DEFINITION. An earlier draft of the roadmap claimed weekly schedules collided
+// with this; they cannot, and warning on every weekly show would be noise that
+// teaches people to skip the warning that matters.
+//
+// It warns rather than refusing because the schedule works either way -- what
+// the bound limits is the pre-announced event page, not the go-live path. And
+// it could not refuse consistently even if that were wanted:
+// Schedule.DestinationIDs is empty for "every destination", which is the
+// commonest shape, so a save-time refusal cannot always tell whether a Facebook
+// destination is involved, and a Facebook destination created tomorrow would
+// change the answer.
+func (s *Server) scheduleWarnings(sc scheduler.Schedule, now time.Time) []string {
+	if sc.Kind != scheduler.KindOnce || sc.Action != scheduler.ActionStart {
+		return nil
+	}
+	at, ok := scheduler.Next(sc, now)
+	if !ok || at.Sub(now) <= facebookScheduleHorizon {
+		return nil
+	}
+	dests, err := s.store.ListDestinations()
+	if err != nil {
+		return nil
+	}
+	for _, d := range dests {
+		if d.Platform == db.PlatformFacebook && scheduleTargets(sc, d.ID) {
+			return []string{
+				"No Facebook event page will be created for this schedule. Facebook " +
+					"accepts a start time at most seven days ahead, and this fires later " +
+					"than that. The destination will still go live on time.",
+			}
+		}
+	}
+	return nil
 }
 
 func scheduleViewOf(sc scheduler.Schedule, now time.Time) scheduleView {
@@ -308,7 +352,10 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, scheduleViewOf(*out, time.Now()))
+	now := time.Now()
+	view := scheduleViewOf(*out, now)
+	view.Warnings = s.scheduleWarnings(*out, now)
+	writeJSON(w, http.StatusCreated, view)
 }
 
 func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
@@ -338,7 +385,10 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, scheduleViewOf(*out, time.Now()))
+	now := time.Now()
+	view := scheduleViewOf(*out, now)
+	view.Warnings = s.scheduleWarnings(*out, now)
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
