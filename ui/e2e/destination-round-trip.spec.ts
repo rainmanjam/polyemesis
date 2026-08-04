@@ -3,24 +3,34 @@ import { expect, test, type Page } from "@playwright/test";
 /* ===========================================================================
    The destination editor must give back everything it was given.
 
-   This exists because of a mutation that survived every guard on the branch
-   that added Facebook's create-time settings: changing
-   `setFacebook(destination.facebook ?? {})` to `setFacebook({})` left the whole
-   suite green. An operator would then open a configured Facebook destination,
-   save it without touching anything, and silently lose their crossposting and
-   donate settings.
+   It was written for a mutation a review reported as surviving every guard on
+   the branch that added Facebook's create-time settings:
+   `setFacebook(destination.facebook ?? {})` -> `setFacebook({})`, supposedly
+   wiping a configured block the next time an operator saved the destination.
 
-   Every guard that covers this area is a STRING-PRESENCE check on the source --
-   does the payload literal mention `facebook`, does the dialog offer a
-   `<SelectItem value="SELF">`. Those prove a field is wired and a control is
-   reachable. They cannot see a load path that drops what it read, because
-   nothing about the source text changes shape when it does.
+   THAT MUTATION IS A NO-OP, and finding out why was worth more than the guard
+   would have been. handleUpdateDestination decodes over the EXISTING row, so a
+   body of {"facebook":{}} unmarshals an empty object into an already-populated
+   struct and sets nothing at all. The block survives. Established by running
+   the mutation, twice -- the review reasoned it through and reached the wrong
+   answer, and so did I when I wrote this test to catch it.
 
-   So this asserts the only thing that actually matters: configure a
-   destination, open the editor, save it unchanged, and read it back. The
-   pre-existing compliance block rides along in the same assertion, because it
-   has the identical blind spot and there is no reason to prove this for one
-   JSON column and not its neighbour.
+   What it does guard is real and was untested anywhere: that editing ONE field
+   on a destination leaves every other stored block alone. That depends on the
+   merge above and on the dialog handing back what it loaded, and the guards
+   around it are string-presence checks on source text -- they prove a field is
+   wired and a control is reachable, and cannot see a load path that drops what
+   it read.
+
+   The rename is the control, and it is not decoration. The first version saved
+   the dialog untouched and asserted the blocks survived; it passed even with
+   the load path mutated, because nothing proved a save had happened at all.
+   Changing one field gives the assertions something that MUST move.
+
+   The pre-existing compliance block rides along in the same assertion, because
+   proving this for one JSON column and not the identical one beside it is how
+   the neighbour gets missed.
+
    =========================================================================== */
 
 async function signIn(page: Page) {
@@ -100,8 +110,17 @@ test.describe("the destination editor preserves what it loaded", () => {
 
       const dialog = page.getByRole("dialog");
       await expect(dialog).toBeVisible();
-      // Nothing is changed. A save that only ever preserves values the operator
-      // just retyped is not preserving anything.
+      // ONE field is changed, and it is the control that makes the rest of this
+      // test mean anything.
+      //
+      // The first version saved the dialog untouched and asserted the blocks
+      // survived. It passed with the load path mutated to drop them -- because
+      // nothing proved the save had happened at all, so "the stored values are
+      // still there" was true for the wrong reason. Renaming gives the
+      // assertions below something that MUST change, so a save that silently
+      // did not happen fails loudly instead of passing quietly.
+      const nameField = dialog.getByLabel(/^name$/i);
+      await nameField.fill("e2e round trip renamed");
       await dialog.getByRole("button", { name: /save/i }).click();
       await expect(dialog).toBeHidden();
 
@@ -110,6 +129,13 @@ test.describe("the destination editor preserves what it loaded", () => {
         "GET",
         `/api/v1/destinations/${created.id}`,
       );
+
+      // The control first: if this fails, the save never landed and every
+      // assertion after it would have passed for the wrong reason.
+      expect(
+        after.name,
+        "the rename did not persist, so this test never exercised a save at all",
+      ).toBe("e2e round trip renamed");
 
       expect(
         after.compliance?.facebookPrivacy,
