@@ -284,7 +284,13 @@ jobs:
           tool="$RUNNER_TEMP/syft"
           mkdir -p "$tool"
           tar="$tool/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
-          curl -fsSL -o "$tar" \
+          # --proto and --proto-redir, because -L follows redirects and a
+          # GitHub release URL always redirects to object storage. Without
+          # them the FIRST hop is https and every hop after it is whatever the
+          # server nominates, which is the one part of this download the
+          # checksum below cannot defend: a plaintext hop is interceptable
+          # before there is anything to verify.
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$tar" \
             "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
           # Fail before extracting, never after. A tarball that does not match
           # is not a download to retry; it is a release asset that changed
