@@ -529,6 +529,8 @@ export interface DestStatus {
   /** The shared encode feeding this destination; absent for passthrough. */
   renditionId?: number | null;
   renditionName?: string;
+  /** The pre-announced scheduled Facebook broadcast, when one exists. */
+  facebookBroadcastId?: string;
 }
 
 /** One shared video encode's live state.

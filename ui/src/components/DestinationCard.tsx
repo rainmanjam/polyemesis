@@ -216,9 +216,9 @@ export function DestinationCard({
             them no way to reach it is half a feature. It also makes a dead
             broadcast legible — when this link 404s, they can see for
             themselves what happened. */}
-        {dest.facebook?.broadcastId && (
+        {dest.facebookBroadcastId && (
           <a
-            href={`https://facebook.com/${dest.facebook.broadcastId}`}
+            href={`https://facebook.com/${dest.facebookBroadcastId}`}
             target="_blank"
             rel="noreferrer"
             className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"

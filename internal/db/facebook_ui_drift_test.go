@@ -86,7 +86,7 @@ func TestTheCardLinksToTheScheduledBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read %s: %v", path, err)
 	}
-	if !strings.Contains(string(raw), "facebook.com/${dest.facebook.broadcastId}") {
+	if !strings.Contains(string(raw), "facebook.com/${dest.facebookBroadcastId}") {
 		t.Error("the destination card does not link to the scheduled Facebook " +
 			"broadcast, so an operator has no way to reach the event page " +
 			"polyemesis created for them.")

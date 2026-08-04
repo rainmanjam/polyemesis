@@ -6172,6 +6172,11 @@ type DestStatus struct {
 	// dashboard can group destinations under the encode they share.
 	RenditionID   *int64 `json:"renditionId,omitempty"`
 	RenditionName string `json:"renditionName,omitempty"`
+	// FacebookBroadcastID is the pre-announced scheduled broadcast, when one
+	// exists. Carried on the live status rather than left on the stored row
+	// because the card is where an operator looks, and a public event page
+	// created on their behalf that they cannot reach is half a feature.
+	FacebookBroadcastID string `json:"facebookBroadcastId,omitempty"`
 }
 
 // RenditionStatus is one shared video encode's live state.
@@ -6320,6 +6325,7 @@ func (e *Engine) Status() Status {
 			if row.RenditionID != nil {
 				ds.RenditionName = names[*row.RenditionID]
 			}
+			ds.FacebookBroadcastID = row.Facebook.BroadcastID
 			if live := e.destByID(dests, row.ID); live != nil {
 				ds.Summary = live.compiled.Summary
 				ds.Tracks = live.compiled.Tracks
