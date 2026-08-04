@@ -308,10 +308,15 @@ export const api = {
   listDestinations: () => get<DestinationWithRouting[]>("/destinations"),
   getDestination: (id: number) =>
     get<DestinationWithRouting>(`/destinations/${id}`),
+  /**
+   * `warnings` names any platform-specific settings the server dropped because
+   * this destination's platform cannot send them — a COPPA declaration left
+   * behind by a platform change, say. Present only when something was dropped.
+   */
   createDestination: (d: Partial<Destination>) =>
-    post<{ destination: Destination }>("/destinations", d),
+    post<{ destination: Destination; warnings?: string[] }>("/destinations", d),
   updateDestination: (id: number, d: Partial<Destination>) =>
-    put<DestinationWithRouting>(`/destinations/${id}`, d),
+    put<DestinationWithRouting & { warnings?: string[] }>(`/destinations/${id}`, d),
   deleteDestination: (id: number) => del<{ status: string }>(`/destinations/${id}`),
   /** Display order only — the server does not restart anything for this. */
   reorderDestinations: (ids: number[]) =>

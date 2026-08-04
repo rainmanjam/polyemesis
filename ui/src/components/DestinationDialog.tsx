@@ -727,13 +727,23 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         compliance,
         facebook,
       };
+      // The server drops settings this platform cannot send and says which.
+      // Surfaced rather than swallowed: the case that produces them is
+      // configuring a destination for one platform and then switching it, so
+      // the operator set these on purpose and would otherwise watch a value
+      // they chose disappear with no explanation.
+      //
+      // A separate toast from the success one, and after it, so the order
+      // reads as "it saved, AND this happened to it".
+      let warnings: string[] = [];
       if (editing) {
-        await api.updateDestination(destination.id, payload);
+        ({ warnings = [] } = await api.updateDestination(destination.id, payload));
         toast.success("Destination updated.");
       } else {
-        await api.createDestination(payload);
+        ({ warnings = [] } = await api.createDestination(payload));
         toast.success("Destination created. Set its audio routing next.");
       }
+      for (const w of warnings) toast.warning(w, { duration: 10000 });
       onSaved();
       onOpenChange(false);
     } catch (err) {

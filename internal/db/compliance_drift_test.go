@@ -67,3 +67,24 @@ func TestTheFacebookAudienceControlIsHiddenForAPageAccount(t *testing.T) {
 			"who sets it here is choosing something that cannot happen.")
 	}
 }
+
+// The server drops compliance a destination's platform cannot send and returns
+// a warning saying which. A drop nobody is shown is a setting that vanishes
+// between one save and the next open, so the dialog has to render it.
+//
+// This guard watches the CONSUMPTION, not the field. api.ts declaring
+// `warnings?: string[]` proves only that the type exists -- the same shape of
+// mistake that let unsendable tags ship, where every end of the wire was named
+// and nothing carried a value across it.
+func TestTheDialogShowsWhatTheServerDropped(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "components", "DestinationDialog.tsx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	if !strings.Contains(string(raw), "toast.warning(w") {
+		t.Error("the destination dialog does not render the server's warnings. " +
+			"Settings dropped because the platform cannot send them would then " +
+			"disappear with no explanation, which reads as the form losing them.")
+	}
+}
