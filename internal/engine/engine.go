@@ -2015,6 +2015,50 @@ func destSubName(id int64, role string) string {
 	return fmt.Sprintf("dest:%d:%s", id, role)
 }
 
+// destArgs is one output's FFmpeg command line.
+//
+// Shared by the primary and the backup so the two cannot drift: a redundant
+// feed encoded differently from the one it backs up is not redundancy, and the
+// difference would be invisible until somebody compared two argv strings on the
+// monitoring page.
+//
+// Only the relay it reads and the target it writes differ between them.
+func (e *Engine) destArgs(row *db.Destination, compiled routing.Result, relayURL, target string) []string {
+	return ffmpeg.DestinationArgs(ffmpeg.DestSpec{
+		Kind:          ffmpeg.DestKind(row.Kind),
+		Target:        target,
+		RelayURL:      relayURL,
+		FilterComplex: compiled.FilterComplex,
+		AudioOutLabel: compiled.OutLabel,
+		AudioBitrate:  row.AudioBitrate,
+		SampleRate:    row.Profile.SampleRate,
+		CopyVideo:     true,
+		// A negative routing delay pulls audio ahead of picture, which no
+		// audio filter can do, so the compiler hands the amount over here
+		// and the video is held back instead.
+		VideoDelayMS: compiled.VideoDelayMS,
+		// Expert mode. Spliced by DestinationArgs into the two positions
+		// FFmpeg binds options from, which are the same two the operator
+		// was shown in the confirm dialog.
+		ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
+		ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
+		// Muxer and socket tuning. Its zero value emits nothing, so a
+		// destination that has not opted in produces exactly the command
+		// it always did.
+		// Output audio encoding. Zero value is AAC stereo.
+		Audio: ffmpeg.AudioSpec{
+			Codec: audioCodecOf(row.Audio.Codec),
+			Mono:  row.Audio.Mono,
+		},
+		Transport: ffmpeg.TransportSpec{
+			NoDurationFilesize: row.Transport.NoDurationFilesize,
+			MuxQueuePackets:    row.Transport.MuxQueuePackets,
+			MuxQueueBytes:      row.Transport.MuxQueueBytes,
+			RWTimeoutSeconds:   row.Transport.RWTimeoutSeconds,
+		},
+	})
+}
+
 // destRoleBackup names the redundant output's subscription.
 const destRoleBackup = "backup"
 
@@ -2041,39 +2085,7 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	}
 
 	buildArgs := func(out string) []string {
-		return ffmpeg.DestinationArgs(ffmpeg.DestSpec{
-			Kind:          ffmpeg.DestKind(row.Kind),
-			Target:        out,
-			RelayURL:      url,
-			FilterComplex: compiled.FilterComplex,
-			AudioOutLabel: compiled.OutLabel,
-			AudioBitrate:  row.AudioBitrate,
-			SampleRate:    row.Profile.SampleRate,
-			CopyVideo:     true,
-			// A negative routing delay pulls audio ahead of picture, which no
-			// audio filter can do, so the compiler hands the amount over here
-			// and the video is held back instead.
-			VideoDelayMS: compiled.VideoDelayMS,
-			// Expert mode. Spliced by DestinationArgs into the two positions
-			// FFmpeg binds options from, which are the same two the operator
-			// was shown in the confirm dialog.
-			ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
-			ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
-			// Muxer and socket tuning. Its zero value emits nothing, so a
-			// destination that has not opted in produces exactly the command
-			// it always did.
-			// Output audio encoding. Zero value is AAC stereo.
-			Audio: ffmpeg.AudioSpec{
-				Codec: audioCodecOf(row.Audio.Codec),
-				Mono:  row.Audio.Mono,
-			},
-			Transport: ffmpeg.TransportSpec{
-				NoDurationFilesize: row.Transport.NoDurationFilesize,
-				MuxQueuePackets:    row.Transport.MuxQueuePackets,
-				MuxQueueBytes:      row.Transport.MuxQueueBytes,
-				RWTimeoutSeconds:   row.Transport.RWTimeoutSeconds,
-			},
-		})
+		return e.destArgs(row, compiled, url, out)
 	}
 
 	// Only a file destination needs a fresh argv per spawn, and only because
