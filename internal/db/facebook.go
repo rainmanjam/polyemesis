@@ -1,5 +1,7 @@
 package db
 
+import "time"
+
 // FacebookSettings is per-destination Facebook configuration applied when the
 // broadcast is CREATED rather than pushed afterwards.
 //
@@ -14,6 +16,27 @@ type FacebookSettings struct {
 	Crosspost []CrosspostTarget `json:"crosspost,omitempty"`
 	// DonateCharityID adds a donate button for one charity.
 	DonateCharityID string `json:"donateCharityId,omitempty"`
+	// ScheduledFor is the occurrence a broadcast has already been announced
+	// for, NOT a flag.
+	//
+	// A weekly show needs a new broadcast every week, so "already done" has to
+	// mean "already done for THIS occurrence". A boolean would be true forever
+	// after the first one, and every week after that would get no event page.
+	//
+	// Zero means nothing has been announced.
+	ScheduledFor time.Time `json:"scheduledFor,omitempty"`
+	// BroadcastID is the Facebook live video created for that occurrence. It is
+	// what a reschedule edits and what the UI links to.
+	BroadcastID string `json:"broadcastId,omitempty"`
+}
+
+// AnnouncedFor reports whether a broadcast has already been created for this
+// exact occurrence.
+//
+// Equal rather than ==: these round-trip through JSON, and a time.Time carries
+// a monotonic reading and a location that == compares and Equal does not.
+func (f FacebookSettings) AnnouncedFor(occurrence time.Time) bool {
+	return f.BroadcastID != "" && f.ScheduledFor.Equal(occurrence)
 }
 
 // CrosspostTarget is one Page and what to do with it.

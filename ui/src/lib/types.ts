@@ -1653,6 +1653,13 @@ export interface CrosspostTarget {
 export interface FacebookSettings {
   crosspost?: CrosspostTarget[];
   donateCharityId?: string;
+  /**
+   * The occurrence a broadcast has already been announced for. A time rather
+   * than a flag, because a weekly show needs a new broadcast every week.
+   */
+  scheduledFor?: string;
+  /** The Facebook live video created for it — what the card links to. */
+  broadcastId?: string;
 }
 
 // ------------------------------------------------------------------- expert
