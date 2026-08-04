@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -441,6 +443,58 @@ func fieldList(fields []oauth.MetadataField) string {
 		parts[i] = string(f)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// accountCompliance is one account's resolved compliance, and the destination
+// it came from so a message can name it.
+type accountCompliance struct {
+	Compliance  db.Compliance
+	StreamKey   string
+	Destination string
+}
+
+// complianceByAccount resolves per-destination compliance onto the accounts a
+// push actually addresses, and reports disagreements rather than resolving
+// them.
+//
+// The mismatch is real and not incidental: compliance is stored per
+// DESTINATION, a push is per ACCOUNT, and a compliance write targets whatever
+// the token owns -- YouTube's takes no account reference at all. So two
+// destinations on one account with different values are asking one broadcast to
+// be two things, and picking one would discard a COPPA declaration with nothing
+// anywhere saying so.
+//
+// Destinations with no account are skipped: a hand-typed key has no token to
+// push with. Destinations with empty compliance contribute nothing and never
+// conflict, because "not set" is not a disagreement with anything.
+func complianceByAccount(dests []db.Destination) (map[int64]accountCompliance, []string) {
+	sorted := append([]db.Destination(nil), dests...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	out := map[int64]accountCompliance{}
+	var conflicts []string
+	for _, d := range sorted {
+		if d.AccountID == nil || d.Compliance.Empty() {
+			continue
+		}
+		id := *d.AccountID
+		prev, seen := out[id]
+		if !seen {
+			out[id] = accountCompliance{
+				Compliance: d.Compliance, StreamKey: d.StreamKey, Destination: d.Name,
+			}
+			continue
+		}
+		if !reflect.DeepEqual(prev.Compliance, d.Compliance) {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"%q and %q share one connected account but ask for different compliance "+
+					"settings, and the platform has only one broadcast to apply them to. "+
+					"Make them match, or point one at a different account.",
+				prev.Destination, d.Name))
+			delete(out, id)
+		}
+	}
+	return out, conflicts
 }
 
 // ------------------------------------------------------------------- worker

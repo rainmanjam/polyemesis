@@ -492,3 +492,60 @@ func TestMergeFieldsUnionsWithoutDuplicating(t *testing.T) {
 		})
 	}
 }
+
+func TestTwoDestinationsOnOneAccountWithDifferentComplianceAreRefused(t *testing.T) {
+	acct := int64(7)
+	_, conflicts := complianceByAccount([]db.Destination{
+		{Name: "main", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "backup", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+	})
+	if len(conflicts) == 0 {
+		t.Fatal("two destinations asked one broadcast to be two things and it was allowed; " +
+			"one of the operator's declarations would be discarded with nothing saying so")
+	}
+	// BOTH names, because "there is a conflict" the operator cannot locate is
+	// barely better than the silence this replaces.
+	if !strings.Contains(conflicts[0], "main") || !strings.Contains(conflicts[0], "backup") {
+		t.Errorf("conflict %q does not name both destinations", conflicts[0])
+	}
+}
+
+func TestTwoDestinationsAgreeingIsNotAConflict(t *testing.T) {
+	// The rule refuses disagreement, not duplication. An install with a primary
+	// and a backup destination on one account is ordinary.
+	acct := int64(7)
+	got, conflicts := complianceByAccount([]db.Destination{
+		{Name: "main", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "backup", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+	})
+	if len(conflicts) != 0 {
+		t.Fatalf("identical compliance was refused: %v", conflicts)
+	}
+	if got[acct].Compliance.Privacy != db.PrivacyPrivate {
+		t.Errorf("resolved privacy = %q, want private", got[acct].Compliance.Privacy)
+	}
+}
+
+func TestADestinationWithNoComplianceContributesNothing(t *testing.T) {
+	acct := int64(7)
+	got, conflicts := complianceByAccount([]db.Destination{
+		{Name: "configured", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "untouched", AccountID: &acct},
+	})
+	if len(conflicts) != 0 {
+		t.Fatalf("an empty compliance was treated as disagreement: %v", conflicts)
+	}
+	if got[acct].Compliance.Privacy != db.PrivacyPrivate {
+		t.Errorf("resolved privacy = %q, want the configured one", got[acct].Compliance.Privacy)
+	}
+}
+
+func TestADestinationWithNoAccountIsIgnored(t *testing.T) {
+	// A hand-typed destination has no token to push with.
+	got, conflicts := complianceByAccount([]db.Destination{
+		{Name: "manual", Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+	})
+	if len(conflicts) != 0 || len(got) != 0 {
+		t.Errorf("got %v / %v, want both empty", got, conflicts)
+	}
+}
