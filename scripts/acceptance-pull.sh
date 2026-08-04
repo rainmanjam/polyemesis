@@ -20,20 +20,28 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 # Shared teardown. See lib-cleanup.sh: killing the server alone orphans its
 # FFmpeg children, and they corrupt the NEXT run's relay ports.
 . "$SCRIPTS/lib-cleanup.sh"
+# A deadline of our own. See lib-watchdog.sh: the job ceiling cancels a hung
+# suite and prints nothing, so the suite has to give up first and say what it
+# was waiting for.
+. "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
-step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
+step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 
 cleanup() { poly_cleanup "$PORT" "${WORK:-}"; }
-trap cleanup EXIT
+trap 'poly_watchdog_disarm; cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+# Armed here rather than earlier: the watchdog is a separate process and
+# inherits this directory, which is where server.log will be written and where
+# its report goes looking for it.
+poly_watchdog_arm
 
 # The measurement helper, identical in spirit to the other suites: bandpass at a
 # known frequency and read the RMS back, so "this track arrived" is a number.
