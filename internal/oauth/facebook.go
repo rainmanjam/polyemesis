@@ -485,10 +485,13 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	// a present-but-empty parameter as a value, so "leave it alone" has to mean
 	// an absent key rather than an empty one.
 	//
-	// Privacy is applied HERE rather than on the metadata push because Facebook
-	// documents LIVE_VIDEO__PRIVACY_REQUIRED -- "You need to set a privacy
-	// before going live" -- and because the reference documents no Updating
-	// section for LiveVideo at all. This is the surface Meta describes.
+	// Privacy is applied HERE, at create time, because Facebook documents
+	// LIVE_VIDEO__PRIVACY_REQUIRED -- "You need to set a privacy before going
+	// live" -- and this is the surface Meta actually describes. It can also be
+	// changed afterwards, through UpdateLiveVideoPrivacy, but that path exists
+	// despite Graph rather than because of it: the reference documents no
+	// Updating section for LiveVideo at all, so that method confirms its own
+	// write by reading the value back instead of trusting the POST's status.
 	//
 	// tgt.kind != fbKindPage is a second, independent condition, not a repeat of
 	// the first: a Page broadcast has no personal audience for a value like
@@ -680,7 +683,11 @@ func (f *Facebook) MetadataCaps() MetadataCaps {
 		// YouTube category or a Twitch game. Saying so here is what keeps it out
 		// of the failure list. Tags ARE accepted: content_tags takes Facebook's
 		// own ad-interest ids, resolved from operator-typed words by resolveTags.
-		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags},
+		// Privacy is accepted too, though not through PushMetadata -- see
+		// UpdateLiveVideoPrivacy, which is the only push on this provider whose
+		// success is confirmed by reading the value back rather than by the
+		// POST's status.
+		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags, FieldPrivacy},
 		// Both limits are left at zero — "no published limit". Meta documents no
 		// maximum for either field, and inventing one would reject a title the
 		// platform would have accepted, which is the restrictive-check mistake
@@ -770,6 +777,95 @@ func (f *Facebook) UpdateLiveVideo(ctx context.Context, clientID, accessToken, t
 	}
 	if m.Description != "" {
 		res.Applied = append(res.Applied, FieldDescription)
+	}
+	return res, nil
+}
+
+// fbPrivacyReadFields is what the read-back after a privacy push asks for.
+// Kept separate from fbLiveVideoFields, which serves the create/ingest path
+// and has never needed privacy on it: extending that constant would put a
+// field on every ingest read that only this confirmation step uses.
+const fbPrivacyReadFields = "id,privacy"
+
+// fbLiveVideoPrivacy is the shape of the read-back UpdateLiveVideoPrivacy
+// confirms against. Privacy is a pointer because its ABSENCE has to be
+// distinguishable from every named value: Graph documents no update surface
+// for LiveVideo at all, so a response that omits the field must read as "not
+// confirmed," never as silent agreement with whatever was asked for.
+type fbLiveVideoPrivacy struct {
+	ID      string `json:"id"`
+	Privacy *struct {
+		Value string `json:"value"`
+	} `json:"privacy"`
+}
+
+// UpdateLiveVideoPrivacy changes a broadcast's audience after it is already
+// live -- the convenience that avoids deleting the broadcast to redo the
+// value IngestFor already applied at create time.
+//
+// Graph documents no update surface for LiveVideo at all, so a 200 from the
+// POST proves Facebook accepted the request, not that the field changed.
+// Reporting Applied on that basis would tell an operator their broadcast is
+// friends-only while it is public, which on this field cannot be taken back
+// once someone has seen it. So the write is confirmed by reading the value
+// back, and Applied is reported ONLY when Facebook returns exactly what was
+// asked for. A different value, an absent field, an unreadable response, or
+// an outright refusal of the POST are all Skipped with a warning naming what
+// was actually seen -- Skipped rather than an error, because the value
+// stored at create time is already live and a failed push here costs a
+// convenience, not the setting.
+func (f *Facebook) UpdateLiveVideoPrivacy(ctx context.Context, clientID, accessToken, targetRef, liveVideoID string, p db.FacebookPrivacy) (*MetadataResult, error) {
+	if !db.ValidFacebookPrivacy(p) {
+		return nil, fmt.Errorf("unknown Facebook privacy %q", p)
+	}
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no Facebook live video id was recorded for this destination")
+	}
+	res := &MetadataResult{Target: liveVideoID}
+
+	// Read from the ref alone, before any request: a Page broadcast is public
+	// by nature and has no personal audience for a value like SELF to apply
+	// to, the same reasoning IngestFor uses to suppress privacy at create
+	// time. Resolving the full target here would spend a round trip on an
+	// answer this branch never uses.
+	if kind, _ := parseTargetRef(targetRef); kind == fbKindPage {
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings,
+			"Facebook Pages have no personal audience; this broadcast's privacy was not changed.")
+		return res, nil
+	}
+
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	if postErr := fbPost(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"privacy": {fbPrivacyParam(p)}}, nil); postErr != nil {
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings, "Facebook refused the privacy change: "+postErr.Error())
+		return res, nil
+	}
+
+	var confirm fbLiveVideoPrivacy
+	getErr := fbGet(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"fields": {fbPrivacyReadFields}}, &confirm)
+	switch {
+	case getErr != nil:
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings,
+			"Facebook accepted the privacy change but it could not be confirmed: "+getErr.Error())
+	case confirm.Privacy == nil:
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings,
+			"Facebook accepted the privacy change but the read-back carried no privacy value to confirm it")
+	case confirm.Privacy.Value == string(p):
+		res.Applied = append(res.Applied, FieldPrivacy)
+	default:
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"Facebook still reports this broadcast's privacy as %s, not the requested %s; the change was not confirmed",
+			confirm.Privacy.Value, p))
 	}
 	return res, nil
 }

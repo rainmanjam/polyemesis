@@ -1138,3 +1138,123 @@ func TestFacebookSendsNoContentTagsWhenTheOperatorTypedNone(t *testing.T) {
 		t.Errorf("edit query %q sends empty content_tags", post.Query)
 	}
 }
+
+// ------------------------------------------------------------- privacy push
+
+func TestAConfirmedPrivacyChangeIsReportedAsApplied(t *testing.T) {
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{
+				"id": "9", "privacy": map[string]any{"value": "ALL_FRIENDS"},
+			})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if !slices.Contains(res.Applied, FieldPrivacy) {
+		t.Errorf("applied = %v, want FieldPrivacy after Facebook confirmed the change", res.Applied)
+	}
+}
+
+func TestAPrivacyFacebookAccePTedButDidNotApplyIsNotReportedAsApplied(t *testing.T) {
+	// THE CASE THIS TASK EXISTS FOR. Graph documents no update surface for
+	// LiveVideo, so a 200 means "request accepted", not "field changed". If the
+	// read-back still says EVERYONE, the operator must not be told their
+	// broadcast is now friends-only.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{
+				"id": "9", "privacy": map[string]any{"value": "EVERYONE"},
+			})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("reported a privacy change Facebook did not make; the operator believes " +
+			"the broadcast is friends-only and it is public")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, " | "), "EVERYONE") {
+		t.Errorf("warnings %v do not say what the privacy actually is", res.Warnings)
+	}
+}
+
+func TestAPrivacyReadBackThatOmitsTheFieldIsNotTreatedAsConfirmation(t *testing.T) {
+	// Whether privacy is even readable on a LiveVideo is unverified -- the node
+	// reference 404s. Absence must read as "not confirmed", never as agreement.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"id": "9"})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("treated a read-back with no privacy field as confirmation")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
+
+func TestARefusedPrivacyPushIsSkippedRatherThanAnError(t *testing.T) {
+	// The stored value was already applied when the broadcast was created, so a
+	// refusal here costs a convenience, not the setting.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"(#100) unsupported"}}`, http.StatusBadRequest)
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("a refused privacy push became an error: %v", err)
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
+
+func TestAPagePrivacyPushMakesNoRequestAtAll(t *testing.T) {
+	// A Page broadcast is public by nature. Sending a personal audience value is
+	// a request Facebook has no meaning for, and the operator is told why.
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "page-token",
+		"page:5000", "9", db.FBPrivacySelf)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if fbCall(*log, http.MethodPost, "/9") != nil {
+		t.Error("sent a personal privacy value to a Page broadcast")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}

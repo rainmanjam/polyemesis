@@ -152,9 +152,11 @@ type Compliance struct {
 	// FacebookPrivacy is applied when the Facebook LiveVideo is CREATED, for a
 	// user or profile target only: a Page broadcast has no personal audience
 	// for this to apply to, so IngestFor suppresses it there regardless of what
-	// is stored here. There is no metadata-push path for it -- Facebook
-	// documents no Updating section for LiveVideo privacy at all. Empty leaves
-	// it alone.
+	// is stored here. It may ALSO be pushed afterwards, to a broadcast already
+	// live, through oauth.Facebook.UpdateLiveVideoPrivacy -- but Facebook
+	// documents no Updating section for LiveVideo privacy at all, so that push
+	// is only ever claimed as applied once a read-back confirms the value
+	// actually changed. Empty leaves it alone.
 	FacebookPrivacy FacebookPrivacy `json:"facebookPrivacy,omitempty"`
 }
 
