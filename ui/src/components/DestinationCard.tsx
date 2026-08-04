@@ -212,6 +212,21 @@ export function DestinationCard({
           </div>
         ))}
 
+        {/* A public event page was created on the operator's behalf; giving
+            them no way to reach it is half a feature. It also makes a dead
+            broadcast legible — when this link 404s, they can see for
+            themselves what happened. */}
+        {dest.facebookBroadcastId && (
+          <a
+            href={`https://facebook.com/${dest.facebookBroadcastId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Scheduled Facebook broadcast
+          </a>
+        )}
+
         {/* --- the one action that matters, plus display order --- */}
         <div className="flex gap-1.5">
           {dest.enabled ? (

@@ -529,6 +529,8 @@ export interface DestStatus {
   /** The shared encode feeding this destination; absent for passthrough. */
   renditionId?: number | null;
   renditionName?: string;
+  /** The pre-announced scheduled Facebook broadcast, when one exists. */
+  facebookBroadcastId?: string;
 }
 
 /** One shared video encode's live state.
@@ -1653,6 +1655,13 @@ export interface CrosspostTarget {
 export interface FacebookSettings {
   crosspost?: CrosspostTarget[];
   donateCharityId?: string;
+  /**
+   * The occurrence a broadcast has already been announced for. A time rather
+   * than a flag, because a weekly show needs a new broadcast every week.
+   */
+  scheduledFor?: string;
+  /** The Facebook live video created for it — what the card links to. */
+  broadcastId?: string;
 }
 
 // ------------------------------------------------------------------- expert

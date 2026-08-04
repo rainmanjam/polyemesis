@@ -71,3 +71,24 @@ func TestDestinationDialogSavePayloadCarriesTheFacebookBlock(t *testing.T) {
 			"controls are set to. Add it to the payload literal.")
 	}
 }
+
+// A public page is created on the operator's behalf; giving them no way to
+// reach it is half a feature. It also makes a dead broadcast legible -- when
+// the link 404s they can see what the situation is for themselves.
+//
+// This watches the RENDERED link, not the type. types.ts declaring
+// `broadcastId?: string` proves only that the type exists, which is the shape
+// of mistake that shipped unsendable tags: every end of the wire named, and
+// nothing carrying a value across it.
+func TestTheCardLinksToTheScheduledBroadcast(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "components", "DestinationCard.tsx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	if !strings.Contains(string(raw), "facebook.com/${dest.facebookBroadcastId}") {
+		t.Error("the destination card does not link to the scheduled Facebook " +
+			"broadcast, so an operator has no way to reach the event page " +
+			"polyemesis created for them.")
+	}
+}

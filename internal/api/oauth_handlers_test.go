@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -32,7 +33,7 @@ func TestIngestOptionsForCarriesTheStoredFacebookChoicesToTheProvider(t *testing
 		},
 	}
 
-	got := ingestOptionsFor(dest)
+	got := ingestOptionsFor(dest, time.Time{})
 	want := oauth.IngestOptions{
 		Privacy:         db.FBPrivacySelf,
 		Crosspost:       []db.CrosspostTarget{{PageID: "1234", CreatePost: true}},
@@ -50,7 +51,7 @@ func TestIngestOptionsForCarriesTheStoredFacebookChoicesToTheProvider(t *testing
 func TestIngestOptionsForSendsNothingWhenTheDestinationChoseNothing(t *testing.T) {
 	dest := &db.Destination{Platform: db.PlatformFacebook}
 
-	got := ingestOptionsFor(dest)
+	got := ingestOptionsFor(dest, time.Time{})
 	if !reflect.DeepEqual(got, oauth.IngestOptions{}) {
 		t.Errorf("ingestOptionsFor(unconfigured) = %+v, want the zero value", got)
 	}

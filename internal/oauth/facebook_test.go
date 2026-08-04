@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -1339,5 +1340,110 @@ func TestAPagePrivacyPushMakesNoRequestAtAll(t *testing.T) {
 	}
 	if !slices.Contains(res.Skipped, FieldPrivacy) {
 		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
+
+// A scheduled broadcast is a DIFFERENT status, not LIVE_NOW plus a field.
+// Asserted on the request Facebook actually receives: a test that only checked
+// IngestFor returned no error would pass with the status unchanged.
+func TestAScheduledBroadcastIsCreatedUnpublishedWithItsStartTime(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+
+	at := time.Unix(1800000000, 0)
+	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+		IngestOptions{ScheduledFor: at}); err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create call; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if s := q.Get("status"); s != "SCHEDULED_UNPUBLISHED" {
+		t.Errorf("status = %q, want SCHEDULED_UNPUBLISHED", s)
+	}
+	if ep := q.Get("event_params"); ep != "1800000000" {
+		t.Errorf("event_params = %q, want the unix start time 1800000000", ep)
+	}
+}
+
+// The zero value is the whole existing world. Every current caller passes
+// IngestOptions{}, and turning those into scheduled creates would produce
+// broadcasts that never go live.
+func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+
+	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+		IngestOptions{}); err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create call; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if s := q.Get("status"); s != "LIVE_NOW" {
+		t.Errorf("status = %q, want LIVE_NOW", s)
+	}
+	// ABSENT, not empty. Facebook reads a present-but-empty parameter as a
+	// value, so this asserts the key does not exist at all -- the same
+	// "empty means leave alone" rule the rest of this file runs on.
+	if _, ok := q["event_params"]; ok {
+		t.Error("event_params was sent for an unscheduled broadcast")
+	}
+}
+
+// Moving a show must MOVE its broadcast. Creating a second one would leave the
+// first as an orphaned event page people are still subscribed to.
+func TestReschedulingPostsTheNewStartTimeToTheBroadcastItself(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
+	at := time.Unix(1800000123, 0)
+	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "page-token", "777", at); err != nil {
+		t.Fatalf("RescheduleBroadcast: %v", err)
+	}
+
+	// The broadcast NODE, not the /live_videos edge. The edge creates a
+	// broadcast; the node edits one. That difference is the orphaned event page
+	// this test exists to prevent, so it is asserted on the path rather than on
+	// the call merely having happened.
+	post := fbCall(*log, http.MethodPost, "/777")
+	if post == nil {
+		t.Fatalf("no POST to the live video node; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if ep := q.Get("event_params"); ep != "1800000123" {
+		t.Errorf("event_params = %q, want 1800000123", ep)
+	}
+	if post.Auth != "Bearer page-token" {
+		t.Errorf("Authorization = %q, want the token it was given", post.Auth)
+	}
+}
+
+// An empty id must not become a POST to "/", which Graph answers in a way that
+// looks like success.
+func TestReschedulingWithNoBroadcastIdIsRefusedBeforeAnyCall(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
+	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "tok", "", time.Unix(1, 0)); err == nil {
+		t.Error("rescheduling with no broadcast id succeeded")
+	}
+	if len(*log) != 0 {
+		t.Errorf("it called Graph anyway: %+v", *log)
 	}
 }
