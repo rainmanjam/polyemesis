@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -96,7 +95,9 @@ type Server struct {
 	addr   string
 	lookup Lookup
 
-	srv *srt.Server
+	// srvs are the bound listeners. A wildcard address binds TWO -- one per
+	// address family -- see Start.
+	srvs []*srt.Server
 
 	mu   sync.Mutex
 	live map[int64]*session // by source id
@@ -146,75 +147,82 @@ func (s *Server) Start() error {
 	if s.lookup == nil {
 		return errors.New("srtserver: no lookup configured")
 	}
+	var bound []string
+	for _, addr := range s.bindAddrs() {
+		srv, err := s.listenOn(addr)
+		if err != nil {
+			// One family failing is survivable and common: a host with IPv6
+			// disabled cannot bind [::], and refusing to start there would
+			// trade a macOS bug for a Linux outage. Both failing is fatal,
+			// which is checked after the loop.
+			s.log.Warn("srt ingest could not bind one address family",
+				"addr", addr, "err", err)
+			continue
+		}
+		s.srvs = append(s.srvs, srv)
+		bound = append(bound, addr)
+	}
+	if len(s.srvs) == 0 {
+		return fmt.Errorf("srt listen on %s: no address family could be bound", s.addr)
+	}
+
+	s.started.Store(true)
+	for _, srv := range s.srvs {
+		go func(srv *srt.Server) {
+			if err := srv.Serve(); err != nil && s.started.Load() {
+				s.log.Error("srt server stopped", "err", err)
+			}
+		}(srv)
+	}
+	s.log.Info("one-port srt ingest listening", "addr", s.addr, "bound", bound)
+	return nil
+}
+
+// bindAddrs is the list of addresses to listen on.
+//
+// A WILDCARD BINDS BOTH FAMILIES EXPLICITLY, and that is the fix for issue #28
+// rather than a tidiness preference. gosrt picks its network from the address:
+//
+//	""        -> "udp"   dual-stack, v6only=0
+//	0.0.0.0   -> "udp4"  AF_INET
+//	::        -> "udp6"  AF_INET6, v6only=1
+//
+// Only the first is broken, and only on Darwin: gosrt replies through
+// golang.org/x/net's ipv4.PacketConn with an IPv4 control message on an
+// AF_INET6 socket, which Darwin rejects with "sendmsg: invalid argument" --
+// and packetConn.writeToFrom has no error return, so the failure is discarded.
+// The datagrams arrive, the handshake never completes, and neither side says
+// anything. See datarhei/gosrt#148.
+//
+// Two sockets on one port is not a conflict: Go sets IPV6_V6ONLY for the
+// "udp6" network, so the pair coexists. Measured on darwin before this was
+// written, and pinned by TestAWildcardBindsBothFamilies.
+//
+// An explicit host is left exactly alone -- it already picks a concrete family
+// and was never the failing shape.
+func (s *Server) bindAddrs() []string {
+	host, port, err := net.SplitHostPort(s.addr)
+	if err != nil || host != "" {
+		return []string{s.addr}
+	}
+	return []string{net.JoinHostPort("0.0.0.0", port), net.JoinHostPort("::", port)}
+}
+
+func (s *Server) listenOn(addr string) (*srt.Server, error) {
 	cfg := srt.DefaultConfig()
 	// The listener never publishes outward, so a caller asking to subscribe is
 	// always refused; see handleConnect.
-	s.srv = &srt.Server{
-		Addr:            s.addr,
+	srv := &srt.Server{
+		Addr:            addr,
 		Config:          &cfg,
 		HandleConnect:   s.handleConnect,
 		HandlePublish:   s.handlePublish,
 		HandleSubscribe: s.handleSubscribe,
 	}
-	if err := s.srv.Listen(); err != nil {
-		return fmt.Errorf("srt listen on %s: %w", s.addr, err)
+	if err := srv.Listen(); err != nil {
+		return nil, err
 	}
-	s.started.Store(true)
-	go func() {
-		if err := s.srv.Serve(); err != nil && s.started.Load() {
-			s.log.Error("srt server stopped", "err", err)
-		}
-	}()
-	s.log.Info("one-port srt ingest listening", "addr", s.addr)
-	s.warnIfWildcardOnDarwin()
-	return nil
-}
-
-// warnIfWildcardOnDarwin names a macOS-only failure that is otherwise silent
-// on both sides.
-//
-// A bare ":port" makes gosrt listen with network "udp", which Go binds as a
-// dual-stack socket. On Linux that works: an IPv4 caller completes the SRT
-// handshake normally. On macOS it does not -- the datagrams arrive (a plain
-// net.ListenPacket on the same address receives them) but the handshake never
-// completes, so the publisher sees only an I/O error and this server logs
-// nothing at all, because handleConnect is never reached and its typed
-// refusals never run.
-//
-// Measured, on the same machine, with gosrt v0.11.0:
-//
-//	listen        caller   linux   darwin
-//	:PORT         IPv4     ok      TIMES OUT
-//	:PORT         IPv6     ok      ok
-//	0.0.0.0:PORT  IPv4     ok      ok
-//	127.0.0.1:PORT IPv4    ok      ok
-//
-// The address is NOT changed to 0.0.0.0 to route around it: that would bind
-// IPv4 only and silently drop IPv6 publishers everywhere, trading a warning on
-// one development platform for a regression on the deployment target. A
-// warning costs nothing where the bug does not exist.
-func (s *Server) warnIfWildcardOnDarwin() {
-	if runtime.GOOS != "darwin" {
-		return
-	}
-	host, _, err := net.SplitHostPort(s.addr)
-	if err != nil || host != "" {
-		return
-	}
-	s.log.Warn("on macOS this address accepts IPv6 publishers only",
-		"addr", s.addr,
-		"symptom", "an IPv4 publisher fails with an I/O error and this server logs no refusal",
-		"fix", "bind 0.0.0.0:"+portOf(s.addr)+" instead, or publish over IPv6",
-		"unaffected", "linux, which is what the container images run")
-}
-
-// portOf returns the port from a host:port, or the address unchanged if it
-// cannot be split. Only used to build a suggestion string.
-func portOf(addr string) string {
-	if _, port, err := net.SplitHostPort(addr); err == nil {
-		return port
-	}
-	return addr
+	return srv, nil
 }
 
 // Stop closes the listener and every established publisher.
@@ -222,9 +230,10 @@ func (s *Server) Stop() {
 	if !s.started.Swap(false) {
 		return
 	}
-	if s.srv != nil {
-		s.srv.Shutdown()
+	for _, srv := range s.srvs {
+		srv.Shutdown()
 	}
+	s.srvs = nil
 	s.mu.Lock()
 	sessions := make([]*session, 0, len(s.live))
 	for _, sess := range s.live {
