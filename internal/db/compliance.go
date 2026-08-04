@@ -56,6 +56,50 @@ func ValidPrivacy(p PrivacyStatus) bool {
 	return false
 }
 
+// FacebookPrivacy is Facebook's audience for a live video.
+//
+// Empty means LEAVE IT ALONE, as PrivacyStatus does — but for a WEAKER reason,
+// and the difference matters. PrivacyStatus documents a specific mechanism:
+// YouTube's update is destructive by PART, so omitting a value actively reverts
+// the setting. Nothing of the kind is known about Facebook's update endpoint,
+// because the Graph API reference documents no update section for LiveVideo at
+// all. What holds here is only the general one: a privacy write nobody asked for
+// is one the operator finds out about from the audience.
+//
+// Deliberately NOT PrivacyStatus. That type is documented as YouTube's
+// visibility and its values are public/unlisted/private. Facebook has no
+// unlisted and YouTube has no friends, so sharing the type would need a lossy
+// mapping in the one field here where being wrong cannot be taken back -- and a
+// translation layer is somewhere for that wrongness to hide.
+type FacebookPrivacy string
+
+const (
+	FBPrivacyUnchanged        FacebookPrivacy = ""
+	FBPrivacySelf             FacebookPrivacy = "SELF"
+	FBPrivacyFriends          FacebookPrivacy = "ALL_FRIENDS"
+	FBPrivacyFriendsOfFriends FacebookPrivacy = "FRIENDS_OF_FRIENDS"
+	FBPrivacyEveryone         FacebookPrivacy = "EVERYONE"
+)
+
+// FacebookPrivacies is every value an operator may pick, least exposure first,
+// because the safe choice should be the near one.
+var FacebookPrivacies = []FacebookPrivacy{
+	FBPrivacySelf, FBPrivacyFriends, FBPrivacyFriendsOfFriends, FBPrivacyEveryone,
+}
+
+// ValidFacebookPrivacy reports whether p is a value Facebook accepts.
+func ValidFacebookPrivacy(p FacebookPrivacy) bool {
+	if p == FBPrivacyUnchanged {
+		return true
+	}
+	for _, v := range FacebookPrivacies {
+		if v == p {
+			return true
+		}
+	}
+	return false
+}
+
 // TwitchLabels are the content classification labels Twitch will WRITE.
 //
 // Twitch requires a label for several content classes, so this is compliance
@@ -105,11 +149,22 @@ type Compliance struct {
 	// keys are left alone; a key set to false actively CLEARS that label,
 	// which is how an operator removes one.
 	Labels map[string]bool `json:"labels,omitempty"`
+	// FacebookPrivacy is applied when the Facebook LiveVideo is CREATED, for a
+	// user or profile target only: a Page broadcast has no personal audience
+	// for this to apply to, so IngestFor suppresses it there regardless of what
+	// is stored here. oauth.Facebook.UpdateLiveVideoPrivacy exists to change it
+	// on a broadcast already live -- Facebook documents no Updating section for
+	// LiveVideo at all, so that method only ever claims success once a
+	// read-back confirms the value actually changed -- but nothing in
+	// polyemesis today calls it, so treat this field as create-time-only until
+	// that changes. Empty leaves it alone.
+	FacebookPrivacy FacebookPrivacy `json:"facebookPrivacy,omitempty"`
 }
 
 // Empty reports whether there is nothing to push.
 func (c Compliance) Empty() bool {
-	return c.Privacy == PrivacyUnchanged && c.MadeForKids == nil && len(c.Labels) == 0
+	return c.Privacy == PrivacyUnchanged && c.MadeForKids == nil &&
+		len(c.Labels) == 0 && c.FacebookPrivacy == FBPrivacyUnchanged
 }
 
 // Problems reports what a platform will refuse, so the operator is told at save
@@ -118,6 +173,11 @@ func (c Compliance) Problems() []string {
 	var probs []string
 	if !ValidPrivacy(c.Privacy) {
 		probs = append(probs, fmt.Sprintf("unknown privacy setting %q (public, unlisted, private)", c.Privacy))
+	}
+	if !ValidFacebookPrivacy(c.FacebookPrivacy) {
+		probs = append(probs, fmt.Sprintf(
+			"unknown Facebook privacy %q (SELF, ALL_FRIENDS, FRIENDS_OF_FRIENDS, EVERYONE)",
+			c.FacebookPrivacy))
 	}
 	ids := make([]string, 0, len(c.Labels))
 	for id := range c.Labels {

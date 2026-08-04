@@ -391,7 +391,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ing, broadcastID, err := s.ingestFor(ctx, provider, creds.ClientID, acct)
+	ing, broadcastID, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest))
 	if err != nil {
 		// A platform that publishes no key endpoint is not a transport
 		// failure, and 502 invites a retry that can never succeed. The
@@ -423,6 +423,23 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"destination": updated})
 }
 
+// ingestOptionsFor maps a stored destination onto what a broadcast create
+// needs, so refresh-key sends the privacy, crossposting and donate-button
+// choices the operator already saved.
+//
+// Pulled out to its own function because a live Facebook create call is
+// expensive to fake in a test and this mapping is not: constructing a
+// db.Destination and asserting on the three fields it produces is what
+// actually proves a destination stored with FBPrivacyEveryone, say, never
+// reads back as FBPrivacySelf.
+func ingestOptionsFor(dest *db.Destination) oauth.IngestOptions {
+	return oauth.IngestOptions{
+		Privacy:         dest.Compliance.FacebookPrivacy,
+		Crosspost:       dest.Facebook.Crosspost,
+		DonateCharityID: dest.Facebook.DonateCharityID,
+	}
+}
+
 // ingestFor fetches an ingest, preferring the connected target over the login's
 // default profile.
 //
@@ -432,9 +449,9 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 // returns the broadcast id, which is the handle the chat adapter needs and which
 // Provider.Ingest discards. Every other platform has no targets and falls
 // through to Ingest unchanged.
-func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount) (*oauth.Ingest, string, error) {
+func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Ingest, string, error) {
 	if tp, ok := oauth.TargetsFor(acct.Platform); ok {
-		b, err := tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef)
+		b, err := tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 		if err != nil {
 			return nil, "", err
 		}

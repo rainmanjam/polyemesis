@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -98,17 +99,35 @@ func TestMetadataTrimmedAndEmpty(t *testing.T) {
 		in        Metadata
 		wantEmpty bool
 		wantTitle string
+		// nil means "this case does not care", which is true of every row that
+		// predates Tags -- their input carries none, so Trimmed() produces none
+		// either way and the comparison is not a no-op.
+		wantTags []string
 	}{
-		{"all blank is empty", Metadata{}, true, ""},
-		{"whitespace only is empty", Metadata{Title: "  \n\t "}, true, ""},
-		{"a pasted title is trimmed", Metadata{Title: "  Friday night set\n"}, false, "Friday night set"},
-		{"a category alone is enough", Metadata{Category: "Music"}, false, ""},
+		{"all blank is empty", Metadata{}, true, "", nil},
+		{"whitespace only is empty", Metadata{Title: "  \n\t "}, true, "", nil},
+		{"a pasted title is trimmed", Metadata{Title: "  Friday night set\n"}, false, "Friday night set", nil},
+		{"a category alone is enough", Metadata{Category: "Music"}, false, "", nil},
+		// A tags-only push is a real thing an operator does -- adding words to a
+		// broadcast without retyping a title that is already correct. If Empty()
+		// ever stopped counting Tags, internal/api's `if !meta.Empty()` gate
+		// would skip PushMetadata entirely and Facebook would silently never
+		// receive them, with nothing here or downstream complaining.
+		{"tags alone is enough", Metadata{Tags: []string{"cooking"}}, false, "", []string{"cooking"}},
+		// Defence-in-depth: the composer also filters blanks before sending, but
+		// the doc comment claims this too ("dropped outright"), and nothing
+		// checked it.
+		{"blank tags are dropped, not kept as blanks",
+			Metadata{Tags: []string{"  ", "cooking", "", "\t"}}, false, "", []string{"cooking"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.in.Trimmed()
 			if got.Empty() != tc.wantEmpty {
 				t.Fatalf("Empty() = %v, want %v", got.Empty(), tc.wantEmpty)
+			}
+			if !slices.Equal(got.Tags, tc.wantTags) {
+				t.Fatalf("Tags = %v, want %v", got.Tags, tc.wantTags)
 			}
 			if got.Title != tc.wantTitle {
 				t.Fatalf("Title = %q, want %q", got.Title, tc.wantTitle)

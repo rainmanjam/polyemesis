@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Check, ChevronsUpDown, ExternalLink, Loader2, Search } from "lucide-react";
+import { Check, ChevronsUpDown, ExternalLink, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +38,7 @@ import type {
   DestResilience,
   AudioEncoding,
   Compliance,
+  FacebookSettings,
   PrivacyStatus,
   DestKind,
   Platform,
@@ -563,6 +564,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // Obligation metadata. Empty means "touch nothing", which is what every
   // destination that has never set any carries.
   const [compliance, setCompliance] = useState<Compliance>({});
+  // Facebook create-time settings: crossposting and the donate button. Separate
+  // from compliance -- neither is an obligation, both only apply at the moment
+  // the broadcast is created. Empty means "send neither".
+  const [facebook, setFacebook] = useState<FacebookSettings>({});
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -592,6 +597,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setResilience(destination.resilience ?? {});
       setAudio(destination.audio ?? {});
       setCompliance(destination.compliance ?? {});
+      setFacebook(destination.facebook ?? {});
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -601,6 +607,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setResilience({});
       setAudio({});
       setCompliance({});
+      setFacebook({});
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -701,6 +708,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         resilience,
         audio,
         compliance,
+        facebook,
       };
       if (editing) {
         await api.updateDestination(destination.id, payload);
@@ -1118,14 +1126,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           </div>
 
-          {(platform === "youtube" || platform === "twitch") && (
+          {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
               <p className="text-xs font-medium">Compliance</p>
               <span className="text-[10px] text-muted-foreground">
-                Not cosmetic. COPPA is a law, Twitch requires labels for several content classes,
-                and going live publicly by accident cannot be undone once people have seen it.
-                Anything left unset is not sent at all &mdash; polyemesis never overwrites a
-                setting you did not choose.
+                Not cosmetic. COPPA is a law for YouTube, Twitch requires labels for several
+                content classes, Facebook has no way to widen a broadcast's audience once
+                someone has already seen it, and going live publicly by accident cannot be
+                undone. Anything left unset is not sent at all &mdash; polyemesis never
+                overwrites a setting you did not choose.
               </span>
 
               {platform === "youtube" && (
@@ -1220,6 +1229,133 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </span>
                 </div>
               )}
+
+              {platform === "facebook" && (
+                <div className="flex flex-col gap-1">
+                  <Label>Audience</Label>
+                  <Select
+                    value={compliance.facebookPrivacy || "unset"}
+                    onValueChange={(v) =>
+                      setCompliance({
+                        ...compliance,
+                        facebookPrivacy: v === "unset" ? "" : v,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unset">Leave as it is on Facebook</SelectItem>
+                      <SelectItem value="SELF">Only me</SelectItem>
+                      <SelectItem value="ALL_FRIENDS">Friends</SelectItem>
+                      <SelectItem value="FRIENDS_OF_FRIENDS">Friends of friends</SelectItem>
+                      <SelectItem value="EVERYONE">Public</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-[10px] text-muted-foreground">
+                    Applied when the broadcast is CREATED, not while it airs &mdash; changing this
+                    afterwards takes effect on the next broadcast, not the current one. It also
+                    only applies to a profile broadcast: a Page has no personal audience for
+                    Facebook to restrict to, so a Page broadcast is public regardless of what you
+                    pick here.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Not compliance: neither field is an obligation, and both are
+              create-time-only, same as Audience above -- so this is its own
+              box rather than folded into the amber one. See db.FacebookSettings. */}
+          {platform === "facebook" && (
+            <div className="flex flex-col gap-3 rounded-md border border-border p-2">
+              <p className="text-xs font-medium">Facebook crossposting &amp; donate button</p>
+              <span className="text-[10px] text-muted-foreground">
+                Sent on the same create call as Audience, so the same rule applies: applied once
+                when the broadcast starts, and left alone entirely if empty.
+              </span>
+
+              <div className="flex flex-col gap-2">
+                <Label>Crosspost to Pages</Label>
+                {(facebook.crosspost ?? []).map((t, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      value={t.pageId}
+                      onChange={(e) => {
+                        const next = [...(facebook.crosspost ?? [])];
+                        next[i] = { ...next[i], pageId: e.target.value };
+                        setFacebook({ ...facebook, crosspost: next });
+                      }}
+                      placeholder="Page ID"
+                      className="flex-1 font-mono"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <Switch
+                        id={`dest-fb-crosspost-post-${i}`}
+                        checked={t.createPost ?? false}
+                        onCheckedChange={(v) => {
+                          const next = [...(facebook.crosspost ?? [])];
+                          next[i] = { ...next[i], createPost: v };
+                          setFacebook({ ...facebook, crosspost: next });
+                        }}
+                      />
+                      <Label htmlFor={`dest-fb-crosspost-post-${i}`} className="font-normal">
+                        Also post
+                      </Label>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Remove this Page"
+                      onClick={() => {
+                        const next = (facebook.crosspost ?? []).filter((_, j) => j !== i);
+                        setFacebook({ ...facebook, crosspost: next });
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setFacebook({
+                      ...facebook,
+                      crosspost: [...(facebook.crosspost ?? []), { pageId: "" }],
+                    })
+                  }
+                >
+                  <Plus className="size-3.5" /> Add Page
+                </Button>
+                <span className="text-[10px] text-muted-foreground">
+                  The numeric Page ID from Facebook's own console (Page settings, or
+                  graph.facebook.com/me/accounts while signed in as the Page) &mdash; there is no
+                  lookup here, so paste the id rather than a name or URL. "Also post" publishes as
+                  that Page rather than only sharing the broadcast to it; left off, only the
+                  quieter share happens.
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="dest-fb-donate">Donate button charity ID</Label>
+                <Input
+                  id="dest-fb-donate"
+                  value={facebook.donateCharityId ?? ""}
+                  onChange={(e) =>
+                    setFacebook({ ...facebook, donateCharityId: e.target.value })
+                  }
+                  placeholder="Charity ID"
+                  className="font-mono"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  Also an opaque id from Facebook's fundraisers console, not a charity name to
+                  search for. Leave blank to attach no donate button at all.
+                </span>
+              </div>
             </div>
           )}
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -291,7 +292,7 @@ func TestFacebookIngestPublishesToTheChosenTarget(t *testing.T) {
 			log := fbServer(t, graphStub(t, fbLiveResponse("777")))
 			f := &Facebook{}
 
-			b, err := f.IngestFor(context.Background(), "cid", "user-token", tc.ref)
+			b, err := f.IngestFor(context.Background(), "cid", "user-token", tc.ref, IngestOptions{})
 			if err != nil {
 				t.Fatalf("IngestFor(%q): %v", tc.ref, err)
 			}
@@ -359,7 +360,7 @@ func TestFacebookRefusesAPageItCannotSeeRatherThanFallingBackToTheProfile(t *tes
 	// Publishing a business broadcast to someone's personal timeline because we
 	// could not read the Page list would be worse than refusing.
 	log := fbServer(t, graphStub(t, fbLiveResponse("1")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:999")
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:999", IngestOptions{})
 	if err == nil {
 		t.Fatal("IngestFor(page:999) succeeded for a Page this login does not manage")
 	}
@@ -385,7 +386,7 @@ func TestFacebookIngestReadsBackTheLiveVideoWhenTheCreateOmitsIt(t *testing.T) {
 		}
 	})
 
-	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "")
+	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "", IngestOptions{})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
 	}
@@ -394,6 +395,179 @@ func TestFacebookIngestReadsBackTheLiveVideoWhenTheCreateOmitsIt(t *testing.T) {
 	}
 	if fbCall(*log, http.MethodGet, "/808") == nil {
 		t.Errorf("no follow-up read; calls were %+v", *log)
+	}
+}
+
+func TestFacebookSendsTheStoredPrivacyWhenTheBroadcastIsCreated(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{Privacy: db.FBPrivacySelf})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	// Graph wants a privacy OBJECT, not a bare value -- asserting the exact
+	// envelope is what catches fbPrivacyParam degrading to plain SELF, which a
+	// substring check on the raw query could not tell apart from the real thing.
+	if got := q.Get("privacy"); got != `{"value":"SELF"}` {
+		t.Errorf("create query carries privacy %q, want the {\"value\":\"SELF\"} object; "+
+			"Facebook documents LIVE_VIDEO__PRIVACY_REQUIRED and the operator's choice never arrives", got)
+	}
+}
+
+func TestFacebookSendsNoPrivacyParameterWhenNoneWasChosen(t *testing.T) {
+	// ABSENT, not empty. A request carrying privacy= is a different request from
+	// one that omits it, and only the second means "leave it alone". Checked by
+	// key presence in the parsed query rather than a raw substring, so a future
+	// field that also happens to contain "privacy" cannot make this pass for the
+	// wrong reason.
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if _, ok := q["privacy"]; ok {
+		t.Errorf("create query %q sends a privacy nobody chose", post.Query)
+	}
+}
+
+func TestAPageBroadcastCarriesNoPersonalAudienceValue(t *testing.T) {
+	// The one thing standing between an operator's SELF choice and a public
+	// Page broadcast is tgt.kind != fbKindPage. A Page has no personal
+	// audience for Facebook to apply the value to.
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:555",
+		IngestOptions{Privacy: db.FBPrivacySelf})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/555/live_videos")
+	if post == nil {
+		t.Fatalf("no create on the Page; calls were %+v", *log)
+	}
+	// Pin that this really reached the Page, so the test cannot pass by the
+	// create silently landing on the profile instead.
+	if post.Auth != "Bearer page-token" {
+		t.Fatalf("create used %q, not the Page's own token", post.Auth)
+	}
+	if strings.Contains(post.Query, "privacy") {
+		t.Errorf("create query %q sends a personal audience value to a Page", post.Query)
+	}
+}
+
+func TestFacebookCrosspostingCarriesTheActionEachPageAskedFor(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{Crosspost: []db.CrosspostTarget{
+			{PageID: "1234", CreatePost: true},
+			{PageID: "5678"},
+		}})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	raw, err := url.QueryUnescape(post.Query)
+	if err != nil {
+		t.Fatalf("unescape: %v", err)
+	}
+	if !strings.Contains(raw, `"page_id":"1234"`) ||
+		!strings.Contains(raw, `"action":"enable_crossposting_and_create_post"`) {
+		t.Errorf("query %q does not ask 1234 to create a post", raw)
+	}
+	if !strings.Contains(raw, `"page_id":"5678"`) ||
+		!strings.Contains(raw, `"action":"enable_crossposting"`) {
+		t.Errorf("query %q does not share with 5678 without posting", raw)
+	}
+	// The dangerous direction: a page that did NOT ask for a post must not get
+	// one. Count the two action spellings rather than trusting the pair above.
+	if strings.Count(raw, "enable_crossposting_and_create_post") != 1 {
+		t.Errorf("query %q posts as more Pages than asked", raw)
+	}
+}
+
+func TestFacebookSendsNoCrosspostingOrDonateWhenNoneIsStored(t *testing.T) {
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if _, ok := q["crossposting_actions"]; ok {
+		t.Errorf("create query %q crossposts to Pages nobody named", post.Query)
+	}
+	if _, ok := q["donate_button_charity_id"]; ok {
+		t.Errorf("create query %q adds a donate button nobody asked for", post.Query)
+	}
+}
+
+func TestFacebookDonateButtonReachesTheCreateWhenStored(t *testing.T) {
+	// The mirror of the absence test above: absence was covered, presence was
+	// not, and a stored charity id could have been silently dropped forever.
+	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{DonateCharityID: "999"})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := q.Get("donate_button_charity_id"); got != "999" {
+		t.Errorf("create query carries donate_button_charity_id %q, want 999", got)
+	}
+}
+
+func TestARefusedCreateFailsTheKeyFetchRatherThanReturningAKey(t *testing.T) {
+	// A broadcast created with the wrong privacy is the unrecoverable case this
+	// whole sub-project exists for. Handing back a stream key for one is worse
+	// than handing back an error: the operator streams to it.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/live_videos") {
+			http.Error(w, `{"error":{"message":"(#100) Invalid privacy setting"}}`,
+				http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+		IngestOptions{Privacy: db.FBPrivacySelf})
+	if err == nil {
+		t.Fatalf("a refused create returned a broadcast %+v instead of an error", b)
+	}
+	if b != nil {
+		t.Errorf("broadcast = %+v, want nil alongside the error", b)
 	}
 }
 
@@ -717,7 +891,7 @@ func TestFacebookErrorsNeverCarryTokenMaterial(t *testing.T) {
 		http.Error(w, `{"error":{"message":"(#200) Requires publish_video permission","code":200}}`, http.StatusForbidden)
 	})
 
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "super-secret-token", "")
+	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "super-secret-token", "", IngestOptions{})
 	if err == nil {
 		t.Fatal("IngestFor succeeded against a 403")
 	}
@@ -859,5 +1033,311 @@ func TestFacebookIsRegisteredAndGuidedAsASupportedPlatform(t *testing.T) {
 	}
 	if len(guide.Steps) < 5 {
 		t.Errorf("guide has %d steps; it needs the real ones", len(guide.Steps))
+	}
+}
+
+func TestFacebookResolvesTagWordsIntoContentTagIDs(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/search":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{
+				{"id": "6003", "name": "Cooking"},
+			}})
+		case r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Tags: []string{"cooking"}})
+	if err != nil {
+		t.Fatalf("UpdateLiveVideo: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/9")
+	if post == nil {
+		t.Fatalf("no edit; calls were %+v", *log)
+	}
+	if !strings.Contains(post.Query, "content_tags") || !strings.Contains(post.Query, "6003") {
+		t.Errorf("edit query %q carries no resolved tag id", post.Query)
+	}
+	if !slices.Contains(res.Applied, FieldTags) {
+		t.Errorf("applied = %v, want FieldTags", res.Applied)
+	}
+}
+
+func TestATagWordThatMatchesNothingIsNamedInAWarning(t *testing.T) {
+	// A tag that vanishes without comment is indistinguishable from one that
+	// worked, and the operator has no way to find out which happened.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/search":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{}})
+		case r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Title: "t", Tags: []string{"zzzznotathing"}})
+	if err != nil {
+		t.Fatalf("UpdateLiveVideo: %v", err)
+	}
+	joined := strings.Join(res.Warnings, " | ")
+	if !strings.Contains(joined, "zzzznotathing") {
+		t.Errorf("warnings %q do not name the tag that matched nothing", joined)
+	}
+}
+
+func TestARefusedTagSearchStillAppliesTheTitle(t *testing.T) {
+	// The tag lookup is an ads-surface endpoint and may not be reachable with
+	// publish_video. A 403 there must never cost the operator a title change
+	// seconds before air.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/search":
+			http.Error(w, `{"error":{"message":"(#10) permission"}}`, http.StatusForbidden)
+		case r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Title: "Tonight", Tags: []string{"cooking"}})
+	if err != nil {
+		t.Fatalf("a refused tag search failed the whole push: %v", err)
+	}
+	if !slices.Contains(res.Applied, FieldTitle) {
+		t.Errorf("applied = %v, want the title to have landed anyway", res.Applied)
+	}
+	if !slices.Contains(res.Skipped, FieldTags) {
+		t.Errorf("skipped = %v, want FieldTags", res.Skipped)
+	}
+}
+
+func TestFacebookSendsNoContentTagsWhenTheOperatorTypedNone(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/9" {
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+			return
+		}
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	_, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Title: "Only a title"})
+	if err != nil {
+		t.Fatalf("UpdateLiveVideo: %v", err)
+	}
+	if fbCall(*log, http.MethodGet, "/search") != nil {
+		t.Error("searched for tags nobody typed, on the path that runs seconds before air")
+	}
+	post := fbCall(*log, http.MethodPost, "/9")
+	if post != nil && strings.Contains(post.Query, "content_tags") {
+		t.Errorf("edit query %q sends empty content_tags", post.Query)
+	}
+}
+
+// ------------------------------------------------------------- privacy push
+
+func TestAConfirmedPrivacyChangeIsReportedAsApplied(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{
+				"id": "9", "privacy": map[string]any{"value": "ALL_FRIENDS"},
+			})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if !slices.Contains(res.Applied, FieldPrivacy) {
+		t.Errorf("applied = %v, want FieldPrivacy after Facebook confirmed the change", res.Applied)
+	}
+	// The create path pins the exact {"value":"..."} envelope and says why:
+	// Graph wants an object, and a bare value is a different, malformed
+	// request. This path sends the same fbPrivacyParam encoding and had no
+	// assertion of its own -- unlike the create path, nothing here inspected
+	// the POST it actually sent.
+	post := fbCall(*log, http.MethodPost, "/9")
+	if post == nil {
+		t.Fatalf("no POST to /9; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := q.Get("privacy"); got != `{"value":"ALL_FRIENDS"}` {
+		t.Errorf("update POST carries privacy %q, want the {\"value\":\"ALL_FRIENDS\"} object", got)
+	}
+}
+
+func TestAPrivacyFacebookAcceptedButDidNotApplyIsNotReportedAsApplied(t *testing.T) {
+	// THE CASE THIS TASK EXISTS FOR. Graph documents no update surface for
+	// LiveVideo, so a 200 means "request accepted", not "field changed". If the
+	// read-back still says EVERYONE, the operator must not be told their
+	// broadcast is now friends-only.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{
+				"id": "9", "privacy": map[string]any{"value": "EVERYONE"},
+			})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("reported a privacy change Facebook did not make; the operator believes " +
+			"the broadcast is friends-only and it is public")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, " | "), "EVERYONE") {
+		t.Errorf("warnings %v do not say what the privacy actually is", res.Warnings)
+	}
+}
+
+func TestAPrivacyReadBackThatOmitsTheFieldIsNotTreatedAsConfirmation(t *testing.T) {
+	// Whether privacy is even readable on a LiveVideo is unverified -- the node
+	// reference 404s. Absence must read as "not confirmed", never as agreement.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"id": "9"})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("treated a read-back with no privacy field as confirmation")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
+
+func TestAnUnreadablePrivacyConfirmationIsSkippedRatherThanTrusted(t *testing.T) {
+	// The fourth not-confirmed path, named in the method's own doc comment: "an
+	// unreadable response". A GET that fails outright is a different failure
+	// from one that succeeds but omits the field (tested above) -- both must
+	// land as Skipped, but only this one exercises getErr != nil rather than
+	// confirm.Privacy == nil. Until this test existed, that branch could be
+	// rewritten to report Applied unconditionally with the suite still green.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			http.Error(w, `{"error":{"message":"(#1) internal error"}}`, http.StatusInternalServerError)
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("reported a privacy change confirmed by a read-back that could not be read at all")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, " | "), "could not be confirmed") {
+		t.Errorf("warnings %v do not say the read-back itself failed", res.Warnings)
+	}
+}
+
+func TestARefusedPrivacyPushIsSkippedRatherThanAnError(t *testing.T) {
+	// The stored value was already applied when the broadcast was created, so a
+	// refusal here costs a convenience, not the setting.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"(#100) unsupported"}}`, http.StatusBadRequest)
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("a refused privacy push became an error: %v", err)
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
+
+func TestUpdateLiveVideoPrivacyRefusesAnUnknownValueRatherThanSendingIt(t *testing.T) {
+	// Entry guard, not a Graph round trip: an unknown value must never reach
+	// the wire at all. fbServer's 404-everything handler is the tripwire --
+	// if this guard were dropped, the request would hit it and the test would
+	// fail on the wrong assertion instead of silently passing.
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	_, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FacebookPrivacy("NOT_A_REAL_VALUE"))
+	if err == nil {
+		t.Fatal("UpdateLiveVideoPrivacy accepted a privacy value Facebook does not define")
+	}
+	if len(*log) != 0 {
+		t.Errorf("an invalid value still reached Facebook: %+v", *log)
+	}
+}
+
+func TestUpdateLiveVideoPrivacyRefusesAnEmptyLiveVideoID(t *testing.T) {
+	// Same shape: no broadcast id means there is nothing to address, and the
+	// method must say so rather than POSTing to "/".
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	_, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "", db.FBPrivacySelf)
+	if err == nil {
+		t.Fatal("UpdateLiveVideoPrivacy accepted an empty live video id")
+	}
+	if len(*log) != 0 {
+		t.Errorf("a request with no live video id still reached Facebook: %+v", *log)
+	}
+}
+
+func TestAPagePrivacyPushMakesNoRequestAtAll(t *testing.T) {
+	// A Page broadcast is public by nature. Sending a personal audience value is
+	// a request Facebook has no meaning for, and the operator is told why.
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "page-token",
+		"page:5000", "9", db.FBPrivacySelf)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if fbCall(*log, http.MethodPost, "/9") != nil {
+		t.Error("sent a personal privacy value to a Page broadcast")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
 	}
 }

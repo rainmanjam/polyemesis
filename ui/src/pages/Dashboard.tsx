@@ -237,6 +237,11 @@ function GoLiveComposer() {
 
   const categoryHint = (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
   const noDescription = (targets ?? []).filter((t) => !t.caps.fields.includes("description"));
+  // Same signal as noDescription/categoryHint above, not the broadcast-window
+  // fetch below: Facebook resolves tags through top-level Metadata.Tags and
+  // has no broadcast resource at all, so gating on broadcastAccounts would
+  // hide this control for every Facebook-only install.
+  const tagTargets = accepts("tags");
 
   // Locked when EVERY account that supports broadcast settings says so. With
   // two YouTube accounts and one still in "ready", the controls stay enabled --
@@ -253,8 +258,15 @@ function GoLiveComposer() {
   const push = async () => {
     setPushing(true);
     try {
+      // Split once, shared by both destinations below. An empty entry would
+      // make Facebook's resolver search for nothing, so a blank between two
+      // commas is dropped rather than sent.
+      const tagList =
+        tags.trim() === "" ? undefined : tags.split(",").map((t) => t.trim()).filter(Boolean);
       const broadcast = {
-        tags: tags.trim() === "" ? undefined : tags.split(",").map((t) => t.trim()).filter(Boolean),
+        // YouTube and Kick take tags through PushBroadcastSettings, which is
+        // keyed to a broadcast resource neither Facebook nor Twitch has.
+        tags: tagList,
         scheduledStart: scheduledStart.trim() === "" ? undefined : new Date(scheduledStart).toISOString(),
         // Omitted entirely when locked. Sending them would earn a 403 that
         // reads as though the whole push failed, when the title half of it
@@ -267,6 +279,10 @@ function GoLiveComposer() {
         title,
         description,
         category,
+        // Facebook resolves these through top-level Metadata.Tags rather than
+        // the broadcast resource above -- without this, the whole tag
+        // resolution path Facebook implements is unreachable.
+        tags: tagList,
         broadcast,
       });
       setJob(started);
@@ -370,6 +386,23 @@ function GoLiveComposer() {
               )}
             </div>
 
+            {tagTargets.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="golive-tags">Tags</Label>
+                <Input
+                  id="golive-tags"
+                  value={tags}
+                  placeholder="live, house, dj set"
+                  onChange={(e) => setTags(e.target.value)}
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  Comma separated. These REPLACE the existing tags rather than adding to them,
+                  because that is what each platform's API does. Applies to{" "}
+                  {tagTargets.map((t) => t.platform).join(", ")}.
+                </span>
+              </div>
+            )}
+
             {broadcastAccounts.length > 0 && (
               <div className="flex flex-col gap-2 rounded-md border border-border p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -379,32 +412,17 @@ function GoLiveComposer() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="golive-tags">Tags</Label>
-                    <Input
-                      id="golive-tags"
-                      value={tags}
-                      placeholder="live, house, dj set"
-                      onChange={(e) => setTags(e.target.value)}
-                    />
-                    <span className="text-[10px] text-muted-foreground">
-                      Comma separated. These REPLACE the video's existing tags rather than adding
-                      to them, because that is what the API does.
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="golive-start">Scheduled start</Label>
-                    <Input
-                      id="golive-start"
-                      type="datetime-local"
-                      value={scheduledStart}
-                      onChange={(e) => setScheduledStart(e.target.value)}
-                    />
-                    <span className="text-[10px] text-muted-foreground">
-                      Leave empty to keep the current one.
-                    </span>
-                  </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="golive-start">Scheduled start</Label>
+                  <Input
+                    id="golive-start"
+                    type="datetime-local"
+                    value={scheduledStart}
+                    onChange={(e) => setScheduledStart(e.target.value)}
+                  />
+                  <span className="text-[10px] text-muted-foreground">
+                    Leave empty to keep the current one.
+                  </span>
                 </div>
 
                 {contentDetailsLocked && (

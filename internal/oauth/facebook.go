@@ -207,6 +207,20 @@ type Broadcast struct {
 	Backups []Ingest `json:"-"`
 }
 
+// IngestOptions carries what a platform needs when the broadcast is CREATED,
+// which is not the same set the composer pushes afterwards.
+//
+// A struct rather than more parameters because the create-time surface is going
+// to grow: scheduling (event_params) and backup ingest both land here, and three
+// signature changes to one interface is three chances to miss a call site. The
+// zero value sends nothing, which is what every caller without a destination in
+// hand passes.
+type IngestOptions struct {
+	Privacy         db.FacebookPrivacy
+	Crosspost       []db.CrosspostTarget
+	DonateCharityID string
+}
+
 // TargetedProvider is the optional capability for a platform where one
 // connected login can publish to more than one destination. Discover it with
 // TargetsFor; never type-assert Provider at a call site, because "absent" is
@@ -222,8 +236,9 @@ type TargetedProvider interface {
 	// account. An empty targetRef means the default.
 	AccountFor(ctx context.Context, clientID, accessToken, targetRef string) (*Account, error)
 	// IngestFor creates (or fetches) the ingest for one target and returns the
-	// broadcast object behind it.
-	IngestFor(ctx context.Context, clientID, accessToken, targetRef string) (*Broadcast, error)
+	// broadcast object behind it. opts carries the create-time fields a stored
+	// destination may have chosen; its zero value sends none of them.
+	IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error)
 }
 
 // TargetsFor returns the multi-target capability for a platform, or false when
@@ -443,7 +458,7 @@ const fbLiveVideoFields = "id,status,title,stream_url,secure_stream_url," +
 // the resulting id, which is why IngestFor exists and why a caller that wants
 // to end the broadcast or push metadata to it should use that instead.
 func (f *Facebook) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
-	b, err := f.IngestFor(ctx, clientID, accessToken, "")
+	b, err := f.IngestFor(ctx, clientID, accessToken, "", IngestOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +468,7 @@ func (f *Facebook) Ingest(ctx context.Context, clientID, accessToken string) (*I
 
 // IngestFor creates a live_video on one target and splits its ingest into the
 // URL and stream key polyemesis stores separately.
-func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetRef string) (*Broadcast, error) {
+func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error) {
 	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
 	if err != nil {
 		return nil, err
@@ -465,9 +480,40 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	//
 	// overlay_url is deliberately absent: Graph removed it in v24.0 and sending
 	// it now is an error rather than a no-op.
+	params := url.Values{"status": {"LIVE_NOW"}}
+	// Every field below is sent ONLY when the operator chose it. Facebook treats
+	// a present-but-empty parameter as a value, so "leave it alone" has to mean
+	// an absent key rather than an empty one.
+	//
+	// Privacy is applied HERE, at create time, because Facebook documents
+	// LIVE_VIDEO__PRIVACY_REQUIRED -- "You need to set a privacy before going
+	// live" -- and this is the surface Meta actually describes. It can also be
+	// changed afterwards, through UpdateLiveVideoPrivacy, but that path exists
+	// despite Graph rather than because of it: the reference documents no
+	// Updating section for LiveVideo at all, so that method confirms its own
+	// write by reading the value back instead of trusting the POST's status.
+	//
+	// tgt.kind != fbKindPage is a second, independent condition, not a repeat of
+	// the first: a Page broadcast has no personal audience for a value like
+	// SELF to apply to, so an operator's chosen privacy is suppressed for every
+	// Page target regardless of what they picked. That suppression is silent —
+	// nothing here or in internal/api refuses or warns on the combination.
+	if opts.Privacy != db.FBPrivacyUnchanged && tgt.kind != fbKindPage {
+		params.Set("privacy", fbPrivacyParam(opts.Privacy))
+	}
+	if len(opts.Crosspost) > 0 {
+		enc, err := fbCrosspostParam(opts.Crosspost)
+		if err != nil {
+			return nil, err
+		}
+		params.Set("crossposting_actions", enc)
+	}
+	if opts.DonateCharityID != "" {
+		params.Set("donate_button_charity_id", opts.DonateCharityID)
+	}
+
 	var created fbLiveVideo
-	err = fbPost(ctx, tgt.token, "/"+tgt.node+"/live_videos",
-		url.Values{"status": {"LIVE_NOW"}}, &created)
+	err = fbPost(ctx, tgt.token, "/"+tgt.node+"/live_videos", params, &created)
 	if err != nil {
 		return nil, fbAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
 	}
@@ -512,6 +558,37 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 		}
 	}
 	return b, nil
+}
+
+// fbPrivacyParam is Graph's privacy object, which is a JSON document in a query
+// parameter rather than a bare value.
+func fbPrivacyParam(p db.FacebookPrivacy) string {
+	return `{"value":"` + string(p) + `"}`
+}
+
+// fbCrosspostParam encodes the crossposting changes Graph documents.
+//
+// The two actions differ by whether a post is published as the Page. Defaulting
+// to the quieter one is deliberate: a share nobody notices is recoverable, and a
+// post published as somebody else's Page is not.
+func fbCrosspostParam(targets []db.CrosspostTarget) (string, error) {
+	type action struct {
+		PageID string `json:"page_id"`
+		Action string `json:"action"`
+	}
+	out := make([]action, 0, len(targets))
+	for _, t := range targets {
+		a := "enable_crossposting"
+		if t.CreatePost {
+			a = "enable_crossposting_and_create_post"
+		}
+		out = append(out, action{PageID: t.PageID, Action: a})
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // publishScopes names the permissions the failed call actually needed, so the
@@ -604,8 +681,19 @@ func (f *Facebook) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
 		// No category: a Facebook live video has no field equivalent to a
 		// YouTube category or a Twitch game. Saying so here is what keeps it out
-		// of the failure list.
-		Fields: []MetadataField{FieldTitle, FieldDescription},
+		// of the failure list. Tags ARE accepted: content_tags takes Facebook's
+		// own ad-interest ids, resolved from operator-typed words by resolveTags.
+		//
+		// FieldPrivacy is deliberately absent, unlike YouTube and Twitch's
+		// compliance fields: this list describes what the composer's
+		// PushMetadata call can accept, oauth.Metadata carries no Privacy field
+		// for it to accept, and Facebook has no PushCompliance method for the
+		// composer to call either. Privacy is create-time-only -- see
+		// IngestOptions and the destination dialog's Audience control -- and the
+		// one method that CAN change it after the fact, UpdateLiveVideoPrivacy,
+		// has no caller yet. Advertising the field here would claim a composer
+		// control that does not exist.
+		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags},
 		// Both limits are left at zero — "no published limit". Meta documents no
 		// maximum for either field, and inventing one would reject a title the
 		// platform would have accepted, which is the restrictive-check mistake
@@ -635,7 +723,10 @@ func (f *Facebook) PushMetadata(ctx context.Context, clientID, accessToken, acco
 		res.Warnings = append(res.Warnings,
 			"Facebook Live has no category field; set the audience and content tags in Live Producer.")
 	}
-	if m.Title == "" && m.Description == "" {
+	// Tags alone are a reason to write. Without them in this condition a push
+	// carrying only tags returns here having done nothing, and the composer
+	// reports success for a request that never left.
+	if m.Title == "" && m.Description == "" && len(m.Tags) == 0 {
 		return res, nil
 	}
 
@@ -643,7 +734,7 @@ func (f *Facebook) PushMetadata(ctx context.Context, clientID, accessToken, acco
 	if err != nil {
 		return nil, err
 	}
-	if err := f.writeLiveVideo(ctx, tgt, lv.ID, m); err != nil {
+	if err := f.writeLiveVideo(ctx, tgt, lv.ID, m, res); err != nil {
 		return nil, err
 	}
 
@@ -677,10 +768,13 @@ func (f *Facebook) UpdateLiveVideo(ctx context.Context, clientID, accessToken, t
 		res.Warnings = append(res.Warnings,
 			"Facebook Live has no category field; set the audience and content tags in Live Producer.")
 	}
-	if m.Title == "" && m.Description == "" {
+	// Tags alone are a reason to write. Without them in this condition a push
+	// carrying only tags returns here having done nothing, and the composer
+	// reports success for a request that never left.
+	if m.Title == "" && m.Description == "" && len(m.Tags) == 0 {
 		return res, nil
 	}
-	if err := f.writeLiveVideo(ctx, tgt, liveVideoID, m); err != nil {
+	if err := f.writeLiveVideo(ctx, tgt, liveVideoID, m, res); err != nil {
 		return nil, err
 	}
 	if m.Title != "" {
@@ -693,7 +787,96 @@ func (f *Facebook) UpdateLiveVideo(ctx context.Context, clientID, accessToken, t
 	return res, nil
 }
 
-func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string, m Metadata) error {
+// fbPrivacyReadFields is what the read-back after a privacy push asks for.
+// Kept separate from fbLiveVideoFields, which serves the create/ingest path
+// and has never needed privacy on it: extending that constant would put a
+// field on every ingest read that only this confirmation step uses.
+const fbPrivacyReadFields = "id,privacy"
+
+// fbLiveVideoPrivacy is the shape of the read-back UpdateLiveVideoPrivacy
+// confirms against. Privacy is a pointer because its ABSENCE has to be
+// distinguishable from every named value: Graph documents no update surface
+// for LiveVideo at all, so a response that omits the field must read as "not
+// confirmed," never as silent agreement with whatever was asked for.
+type fbLiveVideoPrivacy struct {
+	ID      string `json:"id"`
+	Privacy *struct {
+		Value string `json:"value"`
+	} `json:"privacy"`
+}
+
+// UpdateLiveVideoPrivacy changes a broadcast's audience after it is already
+// live -- the convenience that avoids deleting the broadcast to redo the
+// value IngestFor already applied at create time.
+//
+// Graph documents no update surface for LiveVideo at all, so a 200 from the
+// POST proves Facebook accepted the request, not that the field changed.
+// Reporting Applied on that basis would tell an operator their broadcast is
+// friends-only while it is public, which on this field cannot be taken back
+// once someone has seen it. So the write is confirmed by reading the value
+// back, and Applied is reported ONLY when Facebook returns exactly what was
+// asked for. A different value, an absent field, an unreadable response, or
+// an outright refusal of the POST are all Skipped with a warning naming what
+// was actually seen -- Skipped rather than an error, because the value
+// stored at create time is already live and a failed push here costs a
+// convenience, not the setting.
+func (f *Facebook) UpdateLiveVideoPrivacy(ctx context.Context, clientID, accessToken, targetRef, liveVideoID string, p db.FacebookPrivacy) (*MetadataResult, error) {
+	if !db.ValidFacebookPrivacy(p) {
+		return nil, fmt.Errorf("unknown Facebook privacy %q", p)
+	}
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no Facebook live video id was recorded for this destination")
+	}
+	res := &MetadataResult{Target: liveVideoID}
+
+	// Read from the ref alone, before any request: a Page broadcast is public
+	// by nature and has no personal audience for a value like SELF to apply
+	// to, the same reasoning IngestFor uses to suppress privacy at create
+	// time. Resolving the full target here would spend a round trip on an
+	// answer this branch never uses.
+	if kind, _ := parseTargetRef(targetRef); kind == fbKindPage {
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings,
+			"Facebook Pages have no personal audience; this broadcast's privacy was not changed.")
+		return res, nil
+	}
+
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	if postErr := fbPost(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"privacy": {fbPrivacyParam(p)}}, nil); postErr != nil {
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings, "Facebook refused the privacy change: "+postErr.Error())
+		return res, nil
+	}
+
+	var confirm fbLiveVideoPrivacy
+	getErr := fbGet(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"fields": {fbPrivacyReadFields}}, &confirm)
+	switch {
+	case getErr != nil:
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings,
+			"Facebook accepted the privacy change but it could not be confirmed: "+getErr.Error())
+	case confirm.Privacy == nil:
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings,
+			"Facebook accepted the privacy change but the read-back carried no privacy value to confirm it")
+	case confirm.Privacy.Value == string(p):
+		res.Applied = append(res.Applied, FieldPrivacy)
+	default:
+		res.Skipped = append(res.Skipped, FieldPrivacy)
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"Facebook still reports this broadcast's privacy as %s, not the requested %s; the change was not confirmed",
+			confirm.Privacy.Value, p))
+	}
+	return res, nil
+}
+
+func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string, m Metadata, res *MetadataResult) error {
 	params := url.Values{}
 	// Only what the operator typed is sent. An empty field means "leave what is
 	// there", and posting an empty title would blank a live broadcast's title.
@@ -703,11 +886,63 @@ func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string,
 	if m.Description != "" {
 		params.Set("description", m.Description)
 	}
+
+	// Tag words become ids, and a failure here is REPORTED rather than fatal.
+	// /search?type=adinterest is an ads-surface endpoint that may not be
+	// reachable with publish_video -- unverified, because this repo has no live
+	// Facebook account to check it against -- and a title change seconds before
+	// air must not be lost to a tag lookup.
+	if len(m.Tags) > 0 {
+		ids, warns, err := f.resolveTags(ctx, tgt, m.Tags)
+		switch {
+		case err != nil:
+			res.Skipped = append(res.Skipped, FieldTags)
+			res.Warnings = append(res.Warnings,
+				"Facebook would not search for tags, so none were set: "+err.Error())
+		case len(ids) > 0:
+			b, mErr := json.Marshal(ids)
+			if mErr != nil {
+				return mErr
+			}
+			params.Set("content_tags", string(b))
+			res.Applied = append(res.Applied, FieldTags)
+		}
+		res.Warnings = append(res.Warnings, warns...)
+	}
+
 	err := fbPost(ctx, tgt.token, "/"+id, params, nil)
 	if err != nil {
 		return fbAdvice(err, "edit the Facebook broadcast", f.publishScopes(tgt.kind))
 	}
 	return nil
+}
+
+// resolveTags turns operator words into Facebook's ad-interest ids, returning
+// one warning per word that matched nothing.
+//
+// An unmatched word is a WARNING NAMING THE WORD, never a silent drop: a tag
+// that disappears without comment looks exactly like one that worked.
+func (f *Facebook) resolveTags(ctx context.Context, tgt *fbTarget, words []string) ([]string, []string, error) {
+	var ids, warns []string
+	for _, w := range words {
+		var found struct {
+			Data []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"data"`
+		}
+		err := fbGet(ctx, tgt.token, "/search",
+			url.Values{"type": {"adinterest"}, "q": {w}, "limit": {"1"}}, &found)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(found.Data) == 0 {
+			warns = append(warns, fmt.Sprintf("no Facebook interest matches %q, so it was not set as a tag", w))
+			continue
+		}
+		ids = append(ids, found.Data[0].ID)
+	}
+	return ids, warns, nil
 }
 
 // fbLiveRank orders a target's broadcasts: whatever is on air, then whatever is

@@ -114,9 +114,13 @@ type Destination struct {
 	// see it, what a viewer is about to be shown. Its zero value touches
 	// nothing -- see oauth.Compliance.
 	Compliance Compliance `json:"compliance"`
-	Position   int        `json:"position"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
+	// Facebook is create-time configuration for a Facebook destination. Empty
+	// for every other platform, and for a Facebook destination that has not set
+	// any of it.
+	Facebook  FacebookSettings `json:"facebook"`
+	Position  int              `json:"position"`
+	CreatedAt time.Time        `json:"createdAt"`
+	UpdatedAt time.Time        `json:"updatedAt"`
 }
 
 // ExpertArgsSet reports whether this destination has any hand-written
@@ -453,8 +457,11 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		// Defaulted to "{}" so a row written before the column existed decodes
 		// to a zero Compliance -- touch nothing -- rather than failing the scan.
 		complianceJSON = "{}"
-		created        int64
-		updated        int64
+		// Same reasoning as complianceJSON: a row written before this column
+		// existed must decode to a zero FacebookSettings, not fail the scan.
+		facebookJSON = "{}"
+		created      int64
+		updated      int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
 		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
@@ -463,7 +470,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
 		&d.Resilience.MinBackoffSeconds, &d.Resilience.MaxBackoffSeconds,
 		&d.Resilience.GiveUpAfter,
-		&d.Audio.Codec, &d.Audio.Mono, &complianceJSON,
+		&d.Audio.Codec, &d.Audio.Mono, &complianceJSON, &facebookJSON,
 		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -499,6 +506,11 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 			return nil, fmt.Errorf("destination %d has unreadable compliance metadata: %w", d.ID, err)
 		}
 	}
+	if facebookJSON != "" {
+		if err := json.Unmarshal([]byte(facebookJSON), &d.Facebook); err != nil {
+			return nil, fmt.Errorf("destination %d has unreadable Facebook settings: %w", d.ID, err)
+		}
+	}
 	if err := json.Unmarshal([]byte(profileRaw), &d.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", d.ID, err)
 	}
@@ -512,7 +524,7 @@ const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
-	au_codec, au_mono, compliance,
+	au_codec, au_mono, compliance, facebook,
 	position, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
@@ -642,6 +654,10 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	facebook, err := json.Marshal(dst.Facebook)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().Unix()
 
 	var maxPos sql.NullInt64
@@ -655,9 +671,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
-		 au_codec, au_mono, compliance,
+		 au_codec, au_mono, compliance, facebook,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
@@ -665,7 +681,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
-		dst.Audio.Codec, dst.Audio.Mono, string(compliance),
+		dst.Audio.Codec, dst.Audio.Mono, string(compliance), string(facebook),
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -697,6 +713,10 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	facebook, err := json.Marshal(dst.Facebook)
+	if err != nil {
+		return nil, err
+	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
 		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
@@ -704,7 +724,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
 		tr_rw_timeout_seconds=?,
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
-		au_codec=?, au_mono=?, compliance=?,
+		au_codec=?, au_mono=?, compliance=?, facebook=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
@@ -713,7 +733,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
-		dst.Audio.Codec, dst.Audio.Mono, string(compliance),
+		dst.Audio.Codec, dst.Audio.Mono, string(compliance), string(facebook),
 		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
@@ -859,6 +879,10 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		// Compliance rides as one JSON blob rather than four columns: it is a
 		// map plus two scalars, edited as a unit, and '{}' is "touch nothing".
 		{"compliance", `ALTER TABLE destinations ADD COLUMN compliance TEXT NOT NULL DEFAULT '{}'`},
+		// Facebook's create-time block, one JSON blob for the same reason
+		// compliance is one: a slice plus a scalar, edited as a unit, and '{}'
+		// is "send nothing".
+		{"facebook", `ALTER TABLE destinations ADD COLUMN facebook TEXT NOT NULL DEFAULT '{}'`},
 	}
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)

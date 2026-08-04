@@ -204,6 +204,10 @@ export interface Destination {
   /** Compliance metadata. Always present in a server response and empty for a
    *  destination that has not set any. */
   compliance?: Compliance;
+  /** Facebook create-time configuration: which Pages to crosspost to and which
+   *  charity's donate button to attach. Always present in a server response
+   *  and empty for a destination that has not set any. */
+  facebook?: FacebookSettings;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -1629,6 +1633,26 @@ export interface Compliance {
   madeForKids?: boolean;
   /** Twitch labels, id -> enabled. A key set to false actively CLEARS it. */
   labels?: Record<string, boolean>;
+  /** Facebook's audience for a live video. undefined leaves it alone. */
+  facebookPrivacy?: string;
+}
+
+/** One Page a Facebook broadcast crossposts to at create time, and whether it
+ *  also gets a post published as that Page rather than only being shared to.
+ *  pageId is the opaque numeric id Facebook's own console shows — there is no
+ *  lookup, so the editor cannot offer anything friendlier than that. */
+export interface CrosspostTarget {
+  pageId: string;
+  createPost?: boolean;
+}
+
+/** Facebook create-time-only settings: separate from Compliance because
+ *  neither field is an obligation the platform imposes — they are choices
+ *  that only apply at the moment the broadcast is created. See the DB layer's
+ *  db.FacebookSettings, which this mirrors field for field. */
+export interface FacebookSettings {
+  crosspost?: CrosspostTarget[];
+  donateCharityId?: string;
 }
 
 // ------------------------------------------------------------------- expert
