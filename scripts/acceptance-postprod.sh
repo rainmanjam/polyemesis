@@ -28,13 +28,17 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 # Shared teardown. See lib-cleanup.sh: killing the server alone orphans its
 # FFmpeg children, and they corrupt the NEXT run's relay ports.
 . "$SCRIPTS/lib-cleanup.sh"
+# A deadline of our own. See lib-watchdog.sh: the job ceiling cancels a hung
+# suite and prints nothing, so the suite has to give up first and say what it
+# was waiting for.
+. "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
-step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
+step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 
 # Deliberately narrow: pkill on the bare binary name would take out another
 # agent's or another operator's server on a different port.
@@ -42,10 +46,14 @@ cleanup() {
   pkill -f "acceptance-source"       2>/dev/null
   poly_cleanup "$PORT" "${WORK:-}"
 }
-trap cleanup EXIT
+trap 'poly_watchdog_disarm; cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+# Armed here rather than earlier: the watchdog is a separate process and
+# inherits this directory, which is where server.log will be written and where
+# its report goes looking for it.
+poly_watchdog_arm
 
 start_server() {
   "$BIN" -addr ":$PORT" -data ./data -log warn >> server.log 2>&1 &

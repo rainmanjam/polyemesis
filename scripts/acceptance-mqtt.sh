@@ -38,6 +38,10 @@ SECRET='acceptance-stream-key-do-not-publish'
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-cleanup.sh"
+# A deadline of our own. See lib-watchdog.sh: the job ceiling cancels a hung
+# suite and prints nothing, so the suite has to give up first and say what it
+# was waiting for.
+. "$SCRIPTS/lib-watchdog.sh"
 # Shared observation. See lib-observe.sh: the broker check used to assert a
 # cause it had never measured, having discarded docker's own account of it.
 # Issue #38.
@@ -51,19 +55,23 @@ pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
 note() { printf "  \033[36mNOTE\033[0m  %s\n" "$1"; }
-step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
+step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1
   poly_cleanup "$PORT" "${WORK:-}"
 }
-trap cleanup EXIT
+trap 'poly_watchdog_disarm; cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 command -v go >/dev/null || { echo "go is required to run the driver"; exit 1; }
 command -v docker >/dev/null || { echo "docker is required: the broker runs as a container so no host install is needed"; exit 1; }
 
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+# Armed here rather than earlier: the watchdog is a separate process and
+# inherits this directory, which is where server.log will be written and where
+# its report goes looking for it.
+poly_watchdog_arm
 
 # Run the driver from the repository root, not from $WORK.
 #

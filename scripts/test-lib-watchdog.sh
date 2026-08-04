@@ -167,8 +167,38 @@ step "7. Disarming removes the breadcrumb it created"
   && bad "the breadcrumb file survived a clean run -- disarming did not clean up" \
   || ok "the breadcrumb file is removed when the suite disarms"
 
+step "8. The process list matches on argv, not on the truncated COMM column"
+# This is a regression guard for a bug that shipped past its own review. The
+# first version matched the COMM column. Linux prints it in full, so CI was
+# green; macOS truncates it to sixteen characters, so a laptop run reported
+# "nothing of ours was still running" with four FFmpegs live on screen.
+#
+# The fixture is real `ps` output from both platforms, pasted rather than
+# generated, because the whole bug was a disagreement about the format.
+. "$SCRIPTS/lib-watchdog.sh"
+cat > "$WORK/ps.txt" <<'PSEOF'
+  PID     ELAPSED COMM             ARGS
+88943 00:12 /opt/homebrew/bi /opt/homebrew/bin/ffmpeg -hide_banner -i udp://127.0.0.1:21003
+88944 00:12 polyemesis       /Users/x/Documents/polyemesis/polyemesis -addr :8092 -data ./data
+88945 00:12 bash             /bin/bash /Users/x/Documents/polyemesis/scripts/acceptance-synth.sh
+  742 01:03 sshd             /usr/sbin/sshd -D
+PSEOF
+matched="$(poly__watchdog_match_procs < "$WORK/ps.txt")"
+printf '%s' "$matched" | grep -q "ffmpeg -hide_banner" \
+  && ok "an FFmpeg whose COMM was truncated by macOS is still found" \
+  || bad "the macOS-truncated COMM line was missed -- the report would say nothing is running"
+printf '%s' "$matched" | grep -q "polyemesis -addr" \
+  && ok "the engine is found" \
+  || bad "the engine was missed"
+printf '%s' "$matched" | grep -q "acceptance-synth.sh" \
+  && bad "the suite's own shell was reported as a live process (its path contains 'polyemesis')" \
+  || ok "the suite's own shell is not mistaken for one of its children"
+printf '%s' "$matched" | grep -q "sshd" \
+  && bad "an unrelated process was reported" \
+  || ok "unrelated processes are left out"
+
 total=$((pass + fail))
-EXPECTED_CHECKS=13
+EXPECTED_CHECKS=17
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

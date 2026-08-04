@@ -66,6 +66,29 @@ poly_step_record() {
   printf '%s %s\n' "$(date +%s)" "$1" > "$POLY_STEP_FILE"
 }
 
+# poly__watchdog_match_procs -- reads `ps -eo pid,etime,comm,args` on stdin and
+# prints the lines that are ours.
+#
+# MATCHED ON THE FIRST ARGV TOKEN, not on COMM and not on the whole line, and
+# both halves of that were learned the hard way.
+#
+# Not COMM: macOS truncates that column to sixteen characters, so
+# /opt/homebrew/bin/ffmpeg arrives as "/opt/homebrew/bi" and an anchored match
+# on it finds nothing. Linux does not truncate, so a COMM match works there --
+# meaning the first version of this passed CI while reporting "nothing of ours
+# was still running" on a laptop with four FFmpegs live in front of it. A
+# diagnostic that is confidently wrong is worse than none.
+#
+# Not the whole line either: a suite lives under a directory called polyemesis,
+# so a substring match reports the suite's own shell as a live process.
+#
+# Lines are truncated because an FFmpeg invocation is three hundred columns of
+# filter graph, and the point of this block is the four names above it.
+poly__watchdog_match_procs() {
+  awk '{ n = split($4, seg, "/")
+         if (seg[n] ~ /^(polyemesis|ffmpeg|mosquitto)$/) print substr($0, 1, 160) }'
+}
+
 # poly__watchdog_report <elapsed-secs> -- everything known at the moment the
 # deadline passed. Printed by the watchdog process, before it kills anything,
 # because a report that races the kill is a report that sometimes does not
@@ -90,23 +113,10 @@ poly__watchdog_report() {
   # and Linux disagree on the flags for a tree, and the names are what identify
   # the stage: a live ffmpeg means a publisher that never ended, a live
   # polyemesis with no ffmpeg means an engine waiting for one.
-  #
-  # Matched on the EXECUTABLE field, never on the full command line. A suite
-  # lives at scripts/acceptance-*.sh under a directory called polyemesis, so a
-  # command-line match reports the suite's own shell as a live process -- and
-  # its args are the entire script invocation, which buries the four lines that
-  # matter. Anchored with (^|/) because macOS prints comm as a full path and
-  # Linux prints a basename.
-  #
-  # Args kept, but truncated: "ffmpeg" alone does not say which stream stalled,
-  # and an untruncated FFmpeg invocation is three hundred columns of filter
-  # graph.
   printf '  live processes:\n'
   local procs
   # shellcheck disable=SC2009  # pgrep cannot print etime and args together portably
-  procs="$(ps -eo pid,etime,comm,args 2>/dev/null \
-    | awk '$3 ~ /(^|\/)(polyemesis|ffmpeg|mosquitto)$/ { print substr($0, 1, 160) }' \
-    | head -12)"
+  procs="$(ps -eo pid,etime,comm,args 2>/dev/null | poly__watchdog_match_procs | head -12)"
   if [ -n "$procs" ]; then
     printf '%s\n' "$procs" | sed 's/^/    /'
   else
@@ -115,9 +125,14 @@ poly__watchdog_report() {
 
   # server.log is the conventional name across every suite. Absent is a real
   # answer -- it means the hang happened before the server was started.
+  #
+  # Truncated per line for the same reason the process list is: the engine logs
+  # every FFmpeg it starts at DEBUG, argv and all, so twenty-five untruncated
+  # lines is several thousand columns and pushes the step name off the reader's
+  # screen. Measured on a real firing before this was added.
   printf '  server.log tail:\n'
   if [ -f server.log ]; then
-    tail -n "$POLY_WATCHDOG_LOG_LINES" server.log | sed 's/^/    /'
+    tail -n "$POLY_WATCHDOG_LOG_LINES" server.log | cut -c1-200 | sed 's/^/    /'
   else
     printf '    (no server.log in %s -- the server was never started here)\n' "$PWD"
   fi

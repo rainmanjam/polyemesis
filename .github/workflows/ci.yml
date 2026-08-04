@@ -103,6 +103,13 @@ jobs:
       # printed conclusion. The negative case is the one under test.
       - run: ./scripts/test-lib-observe.sh
 
+      # The acceptance suites' own deadline, which fires below this workflow's
+      # timeout-minutes so a hung suite reports instead of being cancelled.
+      # Tested here for the reason above and one that is specific to it: the
+      # watchdog is a background process holding the suite's stdout, so a bug
+      # in it does not merely fail to report -- it becomes the hang.
+      - run: ./scripts/test-lib-watchdog.sh
+
       # The acceptance suites' shared teardown. Same argument as the guard
       # above, and a sharper one: this teardown was silently leaking the ingest
       # port on every run, which made acceptance-failover fail 10 times out of
