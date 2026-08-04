@@ -550,10 +550,21 @@ func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
 		s.preannounceOnce(context.Background(), now.Add(time.Duration(7*week)*24*time.Hour))
 	}
 
-	got, _ := store.GetDestination(d.ID)
-	if got.Facebook.BroadcastID == "" {
-		t.Fatalf("%d NON-consecutive failures discarded the broadcast; a "+
-			"destination that recovers between failures must never accumulate "+
-			"its way to a verdict", staleBroadcastAfter)
+	// Asserted on the CREATE COUNT, not on the marker still being set.
+	//
+	// The marker cannot see this: if the count did accumulate, the marker is
+	// cleared and the very next sweep -- a successful one -- creates a fresh
+	// broadcast and puts an id straight back. Measured: the mutation that
+	// removes the reset left the marker assertion green. A second create is
+	// the thing that actually happened, and the thing that would orphan an
+	// event page in production.
+	if len(rec.creates) != 1 {
+		t.Fatalf("created %d broadcasts; %d NON-consecutive failures discarded the "+
+			"first one, so a destination that recovers between failures "+
+			"accumulated its way to a verdict", len(rec.creates), staleBroadcastAfter)
+	}
+	if got, _ := store.GetDestination(d.ID); got.Facebook.BroadcastID == "" {
+		t.Error("the broadcast marker was discarded despite the failures never " +
+			"being consecutive")
 	}
 }
