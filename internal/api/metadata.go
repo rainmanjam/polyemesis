@@ -354,11 +354,27 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	metadataRegistry.add(job)
 
+	// The snapshot is taken BEFORE the workers start, and that order is the
+	// whole guarantee this endpoint makes.
+	//
+	// Taken afterwards, a worker can finish before the snapshot is read, and
+	// the 202 then reports a state the composer never asked for -- "returns
+	// immediately with everything pending" becomes "returns immediately with
+	// whatever happened to be true by then". It is a narrow window and it is
+	// not theoretical: a push with no developer credentials configured fails
+	// without a network call at all, so the worker can be done in microseconds.
+	// CI caught it as a one-in-many failure reading `twitch started as "error",
+	// want pending`.
+	//
+	// snapshot copies the results slice under the job's lock, so a copy taken
+	// before any goroutine exists cannot be mutated afterwards. This closes the
+	// window rather than narrowing it.
+	snap, _ := metadataRegistry.snapshot(job.ID)
+
 	// Detached from the request context on purpose: the response returns in
 	// milliseconds and would otherwise cancel the very work it just started.
 	go s.runMetadataPush(job.ID, meta, req.Broadcast, targets)
 
-	snap, _ := metadataRegistry.snapshot(job.ID)
 	writeJSON(w, http.StatusAccepted, snap)
 }
 
