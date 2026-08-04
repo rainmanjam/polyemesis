@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +60,16 @@ type metadataTarget struct {
 	Platform    db.Platform        `json:"platform"`
 	AccountName string             `json:"accountName"`
 	Caps        oauth.MetadataCaps `json:"caps"`
+
+	// Compliance is the obligation metadata resolved from this account's
+	// destinations -- see complianceByAccount. Zero when no destination on this
+	// account set any, which means "leave it alone" rather than "clear it".
+	Compliance db.Compliance `json:"compliance,omitempty"`
+	// StreamKey comes from the destination the compliance was resolved from,
+	// because Facebook recovers its live video id from the key rather than from
+	// anything the account knows. Never serialised: this response reaches a
+	// browser, and a stream key in it is a credential in a page.
+	StreamKey string `json:"-"`
 }
 
 // metadataOutcome is one account's result.
@@ -154,7 +166,10 @@ func (j *metadataJobs) latest() (metadataJob, bool) {
 // handleMetadataOverview answers "what can I push to, and what happened last
 // time" in one read, so the composer renders complete on first paint.
 func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) {
-	targets, err := s.metadataTargets()
+	// Conflicts are ignored here on purpose: this endpoint reports what CAN be
+	// pushed to, and a disagreement between two destinations does not remove an
+	// account from that list. The push itself is where it has to be refused.
+	targets, _, err := s.metadataTargets()
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -167,27 +182,53 @@ func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) 
 }
 
 // metadataTargets lists connected accounts on platforms that implement the
-// capability. A platform that cannot do this is absent rather than present and
-// failing — see oauth.MetadataFor.
-func (s *Server) metadataTargets() ([]metadataTarget, error) {
+// capability, each carrying the compliance resolved from its destinations. A
+// platform that cannot do this is absent rather than present and failing — see
+// oauth.MetadataFor.
+//
+// The conflicts return is not advisory. Destinations on one account asking for
+// different compliance have no answer, so complianceByTarget withholds that
+// account and names the disagreeing destinations here; a caller that pushes
+// anyway sends one of them with nothing saying which. It is keyed by account so
+// a push can refuse over the accounts it addresses and no others.
+func (s *Server) metadataTargets() ([]metadataTarget, map[int64][]string, error) {
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	dests, err := s.store.ListDestinations()
+	if err != nil {
+		return nil, nil, err
+	}
+	flat := make([]db.Destination, 0, len(dests))
+	for _, d := range dests {
+		flat = append(flat, *d)
+	}
+	compliance, conflicts := complianceByTarget(flat)
+
 	out := []metadataTarget{}
 	for _, a := range accts {
 		mp, ok := oauth.MetadataFor(a.Platform)
 		if !ok {
 			continue
 		}
+		// A conflicting account is withheld from the map however many
+		// destinations disagree, so this reads the zero Compliance -- "touch
+		// nothing" -- rather than any one destination's. That is a second line
+		// of defence, not the refusal: handlePushMetadata still has to check
+		// conflicts, because a push that quietly writes nothing looks exactly
+		// like a push that worked.
+		ac := compliance[a.ID]
 		out = append(out, metadataTarget{
 			AccountID:   a.ID,
 			Platform:    a.Platform,
 			AccountName: a.AccountName,
 			Caps:        mp.MetadataCaps(),
+			Compliance:  ac.Compliance,
+			StreamKey:   ac.StreamKey,
 		})
 	}
-	return out, nil
+	return out, conflicts, nil
 }
 
 // handlePushMetadata starts a push and returns 202 with every account pending.
@@ -231,7 +272,7 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targets, err := s.metadataTargets()
+	targets, conflicts, err := s.metadataTargets()
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -249,6 +290,24 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		}
 		targets = filtered
 	}
+
+	// Scoped to what this push addresses, and refused before the job exists,
+	// before a token is read, before anything leaves the process.
+	//
+	// Both halves matter. Refusing later would report "nothing was sent" while
+	// one destination's compliance was already on the wire; refusing over every
+	// account would block an operator with a disagreement between two
+	// destinations they did not select and may not be able to see from here.
+	// Collected in target order rather than map order so the message is stable.
+	var problems []string
+	for _, t := range targets {
+		problems = append(problems, conflicts[t.AccountID]...)
+	}
+	if len(problems) > 0 {
+		writeError(w, http.StatusBadRequest, strings.Join(problems, " "))
+		return
+	}
+
 	if len(targets) == 0 {
 		writeError(w, http.StatusPreconditionFailed,
 			"no connected account can receive stream metadata. Connect a YouTube or Twitch "+
@@ -323,7 +382,9 @@ type broadcastWindowRow struct {
 // disables nothing -- the write still happens and the 403 is still the
 // authority.
 func (s *Server) handleBroadcastWindow(w http.ResponseWriter, r *http.Request) {
-	targets, err := s.metadataTargets()
+	// Conflicts are not this endpoint's business either: what is still editable
+	// on a broadcast does not depend on which compliance values were stored.
+	targets, _, err := s.metadataTargets()
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -443,6 +504,141 @@ func fieldList(fields []oauth.MetadataField) string {
 	return strings.Join(parts, ", ")
 }
 
+// accountCompliance is one account's resolved compliance, and the destination
+// it came from so a message can name it.
+type accountCompliance struct {
+	Compliance  db.Compliance
+	StreamKey   string
+	Destination string
+}
+
+// complianceByAccount resolves per-destination compliance onto the accounts a
+// push actually addresses, and reports disagreements rather than resolving
+// them.
+//
+// The mismatch is real and not incidental: compliance is stored per
+// DESTINATION, a push is per ACCOUNT, and a compliance write targets whatever
+// the token owns -- YouTube's takes no account reference at all. So two
+// destinations on one account with different values are asking one broadcast to
+// be two things, and picking one would discard a COPPA declaration with nothing
+// anywhere saying so.
+//
+// Destinations with no account are skipped: a hand-typed key has no token to
+// push with. Destinations with empty compliance contribute nothing and never
+// conflict, because "not set" is not a disagreement with anything.
+func complianceByAccount(dests []db.Destination) (map[int64]accountCompliance, []string) {
+	sorted := append([]db.Destination(nil), dests...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	// first is the anchor every later destination on that account is compared
+	// against, and poisoned is what disagreement sets. Both are separate from
+	// the result on purpose. An earlier version derived "have I seen this
+	// account?" from the result map and removed the entry on conflict, so with
+	// three disagreeing destinations the third found no entry, read as the
+	// first one seen, and re-inserted -- leaving the account present carrying
+	// the LAST destination's settings, which is precisely the resolved-anyway
+	// outcome the removal exists to prevent. Deciding membership from state the
+	// conflict handling never touches makes that shape unrepresentable.
+	first := map[int64]accountCompliance{}
+	poisoned := map[int64]bool{}
+	var conflicts []string
+	for _, d := range sorted {
+		if d.AccountID == nil || d.Compliance.Empty() {
+			continue
+		}
+		id := *d.AccountID
+		anchor, seen := first[id]
+		if !seen {
+			first[id] = accountCompliance{
+				Compliance: d.Compliance, StreamKey: d.StreamKey, Destination: d.Name,
+			}
+			continue
+		}
+		if reflect.DeepEqual(anchor.Compliance, d.Compliance) {
+			continue
+		}
+		// One message per DISAGREEING destination, not one per account. An
+		// operator told only about the first pair fixes it, pushes again, and
+		// is refused over the third -- round the loop once per destination.
+		conflicts = append(conflicts, fmt.Sprintf(
+			"%q and %q share one connected account but ask for different compliance "+
+				"settings, and the platform has only one broadcast to apply them to. "+
+				"Make them match, or point one at a different account.",
+			anchor.Destination, d.Name))
+		poisoned[id] = true
+	}
+
+	out := map[int64]accountCompliance{}
+	for id, ac := range first {
+		if !poisoned[id] {
+			out[id] = ac
+		}
+	}
+	return out, conflicts
+}
+
+// complianceFields names the fields a stored compliance actually asked for, so
+// a failed write reports only what the operator set. Naming all three would
+// tell someone who never touched COPPA that their COPPA declaration was
+// skipped, which is a fault report for a field they do not use.
+func complianceFields(c db.Compliance) []oauth.MetadataField {
+	var out []oauth.MetadataField
+	// FacebookPrivacy joins FieldPrivacy: both are "who may see this", and the
+	// composer has one row for it.
+	if c.Privacy != db.PrivacyUnchanged || c.FacebookPrivacy != db.FBPrivacyUnchanged {
+		out = append(out, oauth.FieldPrivacy)
+	}
+	if c.MadeForKids != nil {
+		out = append(out, oauth.FieldMadeForKids)
+	}
+	if len(c.Labels) > 0 {
+		out = append(out, oauth.FieldLabels)
+	}
+	return out
+}
+
+// complianceByTarget is complianceByAccount with the answer kept addressable:
+// the same resolution, plus the conflicts keyed by the account they are about.
+//
+// It exists because a conflict has to be refused to the operator who can act on
+// it and to nobody else. A flat list of messages cannot say which account each
+// one belongs to, so a push aimed at one account would be blocked by a
+// disagreement between two destinations it never mentioned — possibly ones the
+// operator cannot even see from where they are standing.
+//
+// Grouping first and resolving per group is the same computation, not a second
+// one: complianceByAccount already partitions by account internally and only
+// ever compares destinations that share one, so restricting its input to a
+// single account's destinations yields that account's identical entry and
+// identical messages. The name sort that orders those messages is likewise
+// unaffected, because sorting the whole list and then grouping gives each group
+// the same order as grouping and then sorting.
+func complianceByTarget(dests []db.Destination) (map[int64]accountCompliance, map[int64][]string) {
+	byAccount := map[int64][]db.Destination{}
+	for _, d := range dests {
+		if d.AccountID == nil {
+			continue
+		}
+		byAccount[*d.AccountID] = append(byAccount[*d.AccountID], d)
+	}
+
+	out := map[int64]accountCompliance{}
+	conflicts := map[int64][]string{}
+	for id, group := range byAccount {
+		resolved, msgs := complianceByAccount(group)
+		// Absent on conflict, which is complianceByAccount's own guarantee: a
+		// poisoned account is withheld rather than resolved to any one of the
+		// destinations that disagreed, however many of them there were.
+		if ac, ok := resolved[id]; ok {
+			out[id] = ac
+		}
+		if len(msgs) > 0 {
+			conflicts[id] = msgs
+		}
+	}
+	return out, conflicts
+}
+
 // ------------------------------------------------------------------- worker
 
 // runMetadataPush pushes to every target concurrently. Concurrency is the
@@ -543,12 +739,17 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	// "unsupported" for every operator who tries.
 	if !bc.Empty() {
 		if bp, ok := pusher.(broadcastPusher); ok {
-			bres, err := bp.PushBroadcastSettings(ctx, creds.ClientID, acct.AccessToken, bc)
+			bres, err := s.pushBroadcastFn(ctx, bp, creds.ClientID, acct.AccessToken, bc)
 			switch {
 			case err != nil:
 				// Reported, not fatal. The metadata write above may already
 				// have landed, and failing the whole row would send the
 				// operator back to redo work that took.
+				//
+				// Recorded on out, which is what makes the append at the end of
+				// this function load-bearing rather than decorative: it was an
+				// assignment, and it threw this away between recording it and
+				// showing it.
 				out.Warnings = append(out.Warnings, err.Error())
 				out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{oauth.FieldContentDetails})
 			case bres != nil:
@@ -569,6 +770,53 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 		}
 	}
 
+	// The compliance write: the operator's stored privacy, COPPA declaration and
+	// content labels. This is the call the whole feature was missing -- the
+	// capability existed and was tested for a full release while nothing
+	// invoked it, so the settings were editable and unsendable at the same time.
+	//
+	// ComplianceFor rather than a type assertion, and absence rather than an
+	// error: Kick has no compliance API, and a red row for a field the platform
+	// does not have teaches the operator to ignore red rows. Absent is still
+	// SAID, though -- see the else below.
+	if !t.Compliance.Empty() {
+		if cp, ok := oauth.ComplianceFor(t.Platform); ok {
+			cres, err := s.pushComplianceFn(ctx, cp, creds.ClientID, acct.AccessToken,
+				oauth.ComplianceTarget{AccountRef: acct.AccountRef, StreamKey: t.StreamKey},
+				t.Compliance)
+			switch {
+			case err != nil:
+				// Reported, not fatal, for the same reason the broadcast half is:
+				// the metadata write above may already have landed, and failing
+				// the whole row would send the operator back to redo work that
+				// took. Merged into res so it survives the assignments below.
+				res.Warnings = append(res.Warnings, err.Error())
+				res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
+				s.log.Warn("compliance push failed", "platform", t.Platform,
+					"account", t.AccountName, "err", err)
+			case cres != nil:
+				res.Applied = append(res.Applied, cres.Applied...)
+				res.Skipped = append(res.Skipped, cres.Skipped...)
+				res.Warnings = append(res.Warnings, cres.Warnings...)
+				if res.Target == "" {
+					res.Target = cres.Target
+				}
+			}
+		} else {
+			// Skipped with a reason, not failed. The platform genuinely has
+			// nowhere to put this, so attempting it would be a lie and colouring
+			// the row red would train the operator to ignore the colour -- but
+			// staying silent reproduces in miniature the exact defect this whole
+			// feature exists to end: a stored setting that goes nowhere and says
+			// nothing, leaving the operator expecting a declaration that will
+			// never be made.
+			res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"%s has no compliance API, so the compliance settings stored for this "+
+					"account were not sent.", t.Platform))
+		}
+	}
+
 	out.Applied = res.Applied
 	if out.Applied == nil {
 		out.Applied = []oauth.MetadataField{}
@@ -583,7 +831,10 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 		out.Target = t.AccountName
 	}
 	out.Category = res.Category
-	out.Warnings = res.Warnings
+	// Appended, never assigned. An assignment here discarded every warning the
+	// branches above had already recorded on out, which is how a failed
+	// broadcast write became a row that mentioned nothing at all.
+	out.Warnings = append(out.Warnings, res.Warnings...)
 
 	switch {
 	case len(out.Applied) == 0:

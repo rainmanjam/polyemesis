@@ -2,12 +2,22 @@ package oauth
 
 import (
 	"context"
-	"github.com/rainmanjam/polyemesis/internal/db"
+	"net/http"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 func ptrBool(v bool) *bool { return &v }
+
+// facebookKeyForLiveVideo builds a stream key in the shape FacebookLiveVideoID
+// actually parses: the live video id followed by the query string a real
+// ingest URL carries. See TestFacebookLiveVideoIDIsRecoverableFromTheStoredStreamKey.
+func facebookKeyForLiveVideo(id string) string {
+	return id + "?s_bl=1&s_psm=1"
+}
 
 // The trap this whole file exists for.
 //
@@ -21,7 +31,7 @@ func TestAStatusWriteAlwaysCarriesPrivacyStatus(t *testing.T) {
 	ytStub(t, &log, ytOneUpcoming)
 
 	y := &YouTube{}
-	if _, err := y.PushCompliance(context.Background(), "cid", "tok",
+	if _, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{},
 		db.Compliance{Privacy: db.PrivacyUnlisted}); err != nil {
 		t.Fatalf("PushCompliance: %v", err)
 	}
@@ -54,7 +64,7 @@ func TestAnEmptyComplianceBlockWritesNothing(t *testing.T) {
 	ytStub(t, &log, ytOneUpcoming)
 
 	y := &YouTube{}
-	res, err := y.PushCompliance(context.Background(), "cid", "tok", db.Compliance{})
+	res, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{}, db.Compliance{})
 	if err != nil {
 		t.Fatalf("PushCompliance: %v", err)
 	}
@@ -78,7 +88,7 @@ func TestMadeForKidsGoesThroughVideosNotLiveBroadcasts(t *testing.T) {
 		ytStub(t, &log, ytOneUpcoming)
 
 		y := &YouTube{}
-		if _, err := y.PushCompliance(context.Background(), "cid", "tok",
+		if _, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{},
 			db.Compliance{MadeForKids: ptrBool(want)}); err != nil {
 			t.Fatalf("PushCompliance: %v", err)
 		}
@@ -173,5 +183,164 @@ func TestUnknownPrivacyIsRefused(t *testing.T) {
 		if p := (db.Compliance{Privacy: v}).Problems(); len(p) != 0 {
 			t.Errorf("%s is offered and refused: %v", v, p)
 		}
+	}
+}
+
+func TestComplianceForFindsOnlyThePlatformsThatHaveOne(t *testing.T) {
+	// Kick has no compliance surface. It must be ABSENT rather than present
+	// and refusing, so the caller handles "this platform does not do this"
+	// once instead of at every call site.
+	for _, p := range []db.Platform{db.PlatformYouTube, db.PlatformTwitch, db.PlatformFacebook} {
+		if _, ok := ComplianceFor(p); !ok {
+			t.Errorf("ComplianceFor(%s) found nothing; its stored compliance can never be sent", p)
+		}
+	}
+	if _, ok := ComplianceFor(db.PlatformKick); ok {
+		t.Error("ComplianceFor(kick) claims a capability Kick does not have")
+	}
+}
+
+// TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath proves two things,
+// not one: that the write (POST) and the read-back (GET) BOTH happen, and
+// that Applied is decided by what the read-back says, not by the POST's bare
+// 200. A version that POSTs, GETs, and ignores the response would satisfy a
+// test that only counted requests; a version that fabricates Applied without
+// calling UpdateLiveVideoPrivacy at all would satisfy a test that only
+// checked res.Applied. Asserting both closes both gaps.
+func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
+	// Graph documents no update surface for LiveVideo, so the only honest
+	// report is one the platform confirmed. This must not grow a second,
+	// unconfirmed path just because it is reached from somewhere new.
+	t.Run("the read-back confirms the value", func(t *testing.T) {
+		log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/9":
+				writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+			case r.Method == http.MethodGet && r.URL.Path == "/9":
+				writeJSONBody(t, w, http.StatusOK, map[string]any{
+					"id": "9", "privacy": map[string]any{"value": "SELF"},
+				})
+			default:
+				http.Error(w, "{}", http.StatusNotFound)
+			}
+		})
+		cp, ok := ComplianceFor(db.PlatformFacebook)
+		if !ok {
+			t.Fatal("Facebook has no compliance capability")
+		}
+		res, err := cp.PushCompliance(context.Background(), "cid", "user-token",
+			ComplianceTarget{AccountRef: "user:1000", StreamKey: facebookKeyForLiveVideo("9")},
+			db.Compliance{FacebookPrivacy: db.FBPrivacySelf})
+		if err != nil {
+			t.Fatalf("PushCompliance: %v", err)
+		}
+		if !slices.Contains(res.Applied, FieldPrivacy) {
+			t.Errorf("applied = %v, want FieldPrivacy after a confirmed read-back", res.Applied)
+		}
+		if fbCall(*log, http.MethodPost, "/9") == nil {
+			t.Error("no POST to /9 happened, so nothing was ever written")
+		}
+		get := fbCall(*log, http.MethodGet, "/9")
+		if get == nil {
+			t.Error("no GET to /9 happened, so nothing confirmed the write")
+		} else if !strings.Contains(get.Query, "privacy") {
+			t.Errorf("the read-back did not ask for the privacy field: query = %q", get.Query)
+		}
+	})
+
+	// The POST alone accepting the request proves nothing on a field Graph
+	// documents no update surface for. Facebook can 200 the write and still
+	// report the old value on read -- and when it does, that has to come back
+	// as Skipped, never as a success the POST's status code did not earn.
+	t.Run("a read-back that disagrees is not applied", func(t *testing.T) {
+		log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/9":
+				writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+			case r.Method == http.MethodGet && r.URL.Path == "/9":
+				writeJSONBody(t, w, http.StatusOK, map[string]any{
+					"id": "9", "privacy": map[string]any{"value": "EVERYONE"},
+				})
+			default:
+				http.Error(w, "{}", http.StatusNotFound)
+			}
+		})
+		cp, ok := ComplianceFor(db.PlatformFacebook)
+		if !ok {
+			t.Fatal("Facebook has no compliance capability")
+		}
+		res, err := cp.PushCompliance(context.Background(), "cid", "user-token",
+			ComplianceTarget{AccountRef: "user:1000", StreamKey: facebookKeyForLiveVideo("9")},
+			db.Compliance{FacebookPrivacy: db.FBPrivacySelf})
+		if err != nil {
+			t.Fatalf("PushCompliance: %v", err)
+		}
+		if slices.Contains(res.Applied, FieldPrivacy) {
+			t.Errorf("applied = %v; a read-back reporting a different value must not be Applied", res.Applied)
+		}
+		if !slices.Contains(res.Skipped, FieldPrivacy) {
+			t.Errorf("skipped = %v, want FieldPrivacy when the read-back disagrees with the request", res.Skipped)
+		}
+		if fbCall(*log, http.MethodPost, "/9") == nil {
+			t.Error("no POST to /9 happened")
+		}
+		if fbCall(*log, http.MethodGet, "/9") == nil {
+			t.Error("no GET to /9 happened, so nothing could have disagreed")
+		}
+	})
+}
+
+// TestAnEmptyComplianceSendsNothingAtAll uses a REAL, recoverable stream key,
+// so the c.FacebookPrivacy check is the only thing standing between the call
+// and the network. A target with no stream key would let the id-recovery
+// guard in PushCompliance mask a missing check on the compliance value
+// itself -- see TestFacebookComplianceSkipsWhenNoBroadcastIdIsRecorded for
+// that guard's own test.
+func TestAnEmptyComplianceSendsNothingAtAll(t *testing.T) {
+	// A destination that has never been given a compliance setting must produce
+	// exactly the API calls it produced before this existed.
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+	cp, _ := ComplianceFor(db.PlatformFacebook)
+	if _, err := cp.PushCompliance(context.Background(), "cid", "user-token",
+		ComplianceTarget{AccountRef: "user:1000", StreamKey: facebookKeyForLiveVideo("9")},
+		db.Compliance{}); err != nil {
+		t.Fatalf("PushCompliance: %v", err)
+	}
+	if len(*log) != 0 {
+		t.Errorf("an empty compliance made %d requests: %+v", len(*log), *log)
+	}
+}
+
+// TestFacebookComplianceSkipsWhenNoBroadcastIdIsRecorded covers the guard
+// TestAnEmptyComplianceSendsNothingAtAll's old fixture was accidentally
+// exercising instead of the one it named: a stream key that FacebookLiveVideoID
+// cannot parse. A destination whose key was typed by hand legitimately has no
+// Facebook broadcast id, so this must report Skipped with a reason, never an
+// error, and it must not touch the network at all -- there is nothing to
+// address.
+func TestFacebookComplianceSkipsWhenNoBroadcastIdIsRecorded(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+	cp, ok := ComplianceFor(db.PlatformFacebook)
+	if !ok {
+		t.Fatal("Facebook has no compliance capability")
+	}
+	res, err := cp.PushCompliance(context.Background(), "cid", "user-token",
+		ComplianceTarget{AccountRef: "user:1000", StreamKey: "hand-typed-not-a-facebook-key"},
+		db.Compliance{FacebookPrivacy: db.FBPrivacySelf})
+	if err != nil {
+		t.Fatalf("PushCompliance: %v", err)
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy when no broadcast id can be recovered", res.Skipped)
+	}
+	if len(res.Warnings) == 0 {
+		t.Error("no warning named why the privacy change was skipped")
+	}
+	if len(*log) != 0 {
+		t.Errorf("no recoverable broadcast id means no request at all: %+v", *log)
 	}
 }

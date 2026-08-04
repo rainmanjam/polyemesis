@@ -1,6 +1,6 @@
 # Per-destination settings and platform metadata
 
-**Status: Parts A–D SHIPPED**, 2026-07-29, except the two items named under
+**Status: Parts A–D SHIPPED**, 2026-07-29, except the one item named under
 [What remains](#what-remains). The original estimate was ~14–19 days.
 **Dependencies: none.** The SDK audit says hand-roll everything, and nothing
 since has changed that.
@@ -10,6 +10,13 @@ Verified against the tree rather than against the PR titles: `ExpertArgs`,
 codec choice for Part B, `DestResilience.GiveUpAfter`/`MinBackoffSeconds` reaching
 `engine.go` for Part C, and `MetadataCaps` on all four providers plus
 `PushCompliance` for Part D.
+
+**That check confirmed the functions existed, not that anything called them.**
+`PushCompliance` passed exactly this verification for a full release while no
+caller anywhere invoked it — see [PLATFORMS.md](../PLATFORMS.md#compliance-metadata)
+for the push that now exists. "Verified against the tree" should mean grepping
+for a caller, not just a definition; the next person to write that phrase
+should check which one they did.
 
 Grounded in the platforms' own API references and in probe builds, then handed
 to an adversarial reviewer. **Two of the ideas that motivated this document did
@@ -134,13 +141,13 @@ checking on its own merits, separately from this work.
 
 ## What remains
 
-**Two** items from the parts below are not built — but not the two this section
-used to name, and they are not the same kind of work. Both are named here rather
-than left for somebody to discover by grepping for a field that does not exist.
+**Two** items from the parts below are not built, and neither is the one this
+section used to name. Both are named here rather than left for somebody to
+discover by grepping for a field that does not exist.
 
 | Item | Part | Why it is still open |
 |---|---|---|
-| **Facebook's metadata surface** | D | Facebook advertises `title` and `description` only, against the largest documented write surface of any platform here. Deliberately deferred as its own feature, not half-built. Includes scheduling, which is `event_params` and bounded to seven days out |
+| **Facebook's remaining metadata surface** | D | Facebook now sends `title`, `description` and `tags` on the composer push, `privacy`, `crossposting_actions` and `donate_button_charity_id` when the broadcast is created, and `privacy` again post-create through the compliance push. Still missing: `enable_backup_ingest`, `stop_on_delete_stream`, spatial audio, 360 projection, and `event_params` scheduling — which is bounded to seven days out and collides with weekly schedules. Deferred as their own features, not half-built |
 | **Frame-accurate go-live** | — | Not metadata, and not Part D. `inband_go_live` swaps the ingest URL and requires the encoder to inject an AMF0 `onGoLive` packet at a chosen frame — FFmpeg's RTMP muxer has no flag for it. See [Facebook and Kick](#facebook-and-kick). Judge it on its own merits; it inherited Part D's estimate by being listed in the same sentence as a set of create-time fields |
 
 **Staggered go-live was listed here and should not have been.** It shipped in
@@ -158,6 +165,15 @@ code against code — `db.Settings` against `types.ts`, `scheduler.Action` again
 the dropdown — and no guard can check a sentence claiming a feature does not
 exist. The only defence is the one that found it: look at what the work would
 touch before deciding how to do it.
+
+**And it happened again, in miniature, two days later.** The docs pass for the
+Facebook metadata work corrected `../PLATFORMS.md` and left this table saying
+Facebook sent "title and description only" — because that task was deliberately
+scoped to one file to avoid colliding with the pull request fixing the paragraph
+above. Avoiding the conflict is what created the staleness. The rule that keeps
+surviving contact is the one that task's own brief carried and its scope then
+prevented: read every document that describes the thing, not the one you are
+editing.
 
 Also deferred as a separate feature: **per-destination stored broadcast
 defaults**, so a destination remembers its own title and category rather than the
@@ -239,7 +255,7 @@ The platforms document far more, and some are not optional in the legal sense.
 
 | Field | Platform | Why it is not a nicety |
 |---|---|---|
-| `selfDeclaredMadeForKids` | YouTube | COPPA. Currently unsettable |
+| `selfDeclaredMadeForKids` | YouTube | COPPA declaration. Editable and stored for a full release before anything sent it; now pushed — see [PLATFORMS.md](../PLATFORMS.md#compliance-metadata) |
 | `content_classification_labels` | Twitch | Twitch *requires* labels for mature games, sexual themes, drugs, gambling, violence |
 | `privacyStatus` | YouTube | Going live publicly by accident is unrecoverable |
 
@@ -349,5 +365,7 @@ no thumbnail, no scheduling.
 ## See also
 
 - [ROADMAP](README.md)
-- [../PLATFORMS.md](../PLATFORMS.md) — needs the Kick correction
+- [../PLATFORMS.md](../PLATFORMS.md) — the Kick correction landed; see its
+  [Compliance metadata](../PLATFORMS.md#compliance-metadata) section for where
+  Part D's compliance fields actually go now
 - [../DEPENDENCIES.md](../DEPENDENCIES.md) — the bar the SDKs were measured against
