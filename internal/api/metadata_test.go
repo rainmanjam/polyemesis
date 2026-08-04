@@ -502,11 +502,18 @@ func TestAComplianceConflictIsRefusedBeforeAnythingIsSent(t *testing.T) {
 	}
 }
 
-// TestAKickTargetGetsNoComplianceAttemptAndNoError is the absence half of
-// oauth.ComplianceFor: Kick has no compliance surface at all, so a Kick account
-// must be skipped rather than attempted-and-failed. An operator whose Kick row
-// turns red for a field Kick does not have learns to ignore the colour.
-func TestAKickTargetGetsNoComplianceAttemptAndNoError(t *testing.T) {
+// TestAKickTargetIsSkippedOutLoudRatherThanSilently is the absence half of
+// oauth.ComplianceFor, and it pins BOTH obligations at once.
+//
+// Kick has no compliance surface, so the push must not attempt one and must not
+// fail the row: an operator whose Kick row turns red for a field Kick does not
+// have learns to ignore the colour. But silence is not the alternative. A
+// stored setting that goes nowhere and says nothing is the defect this entire
+// branch exists to end, and it would be reproduced here in miniature. Skipped
+// with a plain reason is the composer's existing way to say "asked for, not
+// applicable" — which is why this asserts the state is NOT an error as
+// deliberately as it asserts the reason is present.
+func TestAKickTargetIsSkippedOutLoudRatherThanSilently(t *testing.T) {
 	s, h, store := testServer(t, config.Config{})
 	sign := login(t, h)
 
@@ -540,9 +547,189 @@ func TestAKickTargetGetsNoComplianceAttemptAndNoError(t *testing.T) {
 	if len(job.Results) != 1 {
 		t.Fatalf("results = %+v, want one row", job.Results)
 	}
-	if job.Results[0].State != metaOK {
-		t.Errorf("state = %q (%s), want ok: a platform without a compliance API is not a failure",
-			job.Results[0].State, job.Results[0].Message)
+	res := job.Results[0]
+	if res.State == metaError {
+		t.Errorf("state = %q (%s), want anything but an error: a platform without a "+
+			"compliance API is not a failure", res.State, res.Message)
+	}
+	skipped := map[oauth.MetadataField]bool{}
+	for _, f := range res.Skipped {
+		skipped[f] = true
+	}
+	if !skipped[oauth.FieldPrivacy] {
+		t.Errorf("skipped = %v, want the privacy this destination stored: the operator is "+
+			"otherwise left expecting a setting that will never be sent", res.Skipped)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, " "), "no compliance API") {
+		t.Errorf("warnings = %v, want one saying Kick has no compliance API, so the "+
+			"operator can stop expecting the setting to arrive", res.Warnings)
+	}
+}
+
+// TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess is a
+// pre-existing bug's guard, not this feature's.
+//
+// pushOne recorded a failed PushBroadcastSettings on out.Warnings and then, ten
+// lines later, ASSIGNED out.Warnings from the metadata result — throwing the
+// record away between writing it and showing it. An operator whose DVR toggle
+// failed while the title landed was told nothing at all. The two halves have to
+// be able to disagree, which is the whole reason this row reports fields rather
+// than a boolean.
+//
+// Mutation: put back `out.Warnings = res.Warnings`.
+func TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	s.pushBroadcastFn = func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
+		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error) {
+		return nil, errors.New("youtube said no: the broadcast is already live")
+	}
+
+	dvr := false
+	job := pushAndSettle(t, h, sign, map[string]any{
+		"title":     "Live tonight",
+		"broadcast": map[string]any{"enableDvr": dvr},
+	})
+	if len(job.Results) != 1 {
+		t.Fatalf("results = %+v, want one row", job.Results)
+	}
+	res := job.Results[0]
+	if !strings.Contains(strings.Join(res.Warnings, " "), "already live") {
+		t.Errorf("warnings = %v, want the broadcast failure's own reason: it was recorded "+
+			"and then discarded before the operator could see it", res.Warnings)
+	}
+	// And the half that worked still reads as having worked.
+	if len(res.Applied) == 0 {
+		t.Errorf("applied = %v, want the title that landed: a failed broadcast write must "+
+			"not erase a metadata write that succeeded", res.Applied)
+	}
+}
+
+// TestAConflictOnAnUnselectedAccountDoesNotBlockThePush is the other direction
+// of the refusal, and it is the one that makes the refusal usable.
+//
+// Compliance conflicts are resolved per account. An operator pushing to one
+// account must not be stopped by two destinations disagreeing on a DIFFERENT
+// account — they did not select it, they may not be able to see it from the
+// composer, and the refusal would name destinations that have nothing to do
+// with what they asked for. The conflicting account is still refused when it is
+// the one selected; TestAComplianceConflictIsRefusedBeforeAnythingIsSent covers
+// that direction over the unfiltered push.
+//
+// Mutation: refuse whenever any conflict exists anywhere.
+func TestAConflictOnAnUnselectedAccountDoesNotBlockThePush(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	clean := connectAccount(t, store, s.box, db.PlatformYouTube, "clean")
+	messy := connectAccount(t, store, s.box, db.PlatformTwitch, "messy")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	for _, d := range []*db.Destination{
+		{Name: "tidy", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://a.example/live", StreamKey: "sk-tidy", AccountID: &clean,
+			Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		// Two destinations that disagree, on the account this push never names.
+		{Name: "argue-one", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+			URL: "rtmp://b.example/live", StreamKey: "sk-1", AccountID: &messy,
+			Compliance: db.Compliance{Labels: map[string]bool{"DrugsIntoxication": true}}},
+		{Name: "argue-two", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+			URL: "rtmp://c.example/live", StreamKey: "sk-2", AccountID: &messy,
+			Compliance: db.Compliance{Labels: map[string]bool{"Gambling": true}}},
+	} {
+		if _, err := store.CreateDestination(d); err != nil {
+			t.Fatalf("create %s: %v", d.Name, err)
+		}
+	}
+
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	var pushedFor db.Compliance
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		pushedFor = c
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldPrivacy}}, nil
+	}
+
+	job := pushAndSettle(t, h, sign, map[string]any{
+		"title":      "Live tonight",
+		"accountIds": []int64{clean},
+	})
+	if len(job.Results) != 1 || job.Results[0].AccountID != clean {
+		t.Fatalf("results = %+v, want only the selected account", job.Results)
+	}
+	// The selected account's own compliance still went, unaffected by a
+	// disagreement somewhere else entirely.
+	if pushedFor.Privacy != db.PrivacyPrivate {
+		t.Errorf("compliance pushed = %+v, want the selected account's private setting", pushedFor)
+	}
+}
+
+// TestAConflictOnTheSelectedAccountStillRefuses is the pair to the test above:
+// narrowing a push must not become a way to slip past the refusal. If scoping
+// the check to the selected accounts also let a selected conflict through, the
+// operator would get exactly the silent one-of-two-declarations write the
+// refusal exists to prevent, just by ticking one box.
+func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	clean := connectAccount(t, store, s.box, db.PlatformYouTube, "clean")
+	messy := connectAccount(t, store, s.box, db.PlatformTwitch, "messy")
+	for _, d := range []*db.Destination{
+		{Name: "tidy", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://a.example/live", StreamKey: "sk-tidy", AccountID: &clean,
+			Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "argue-one", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+			URL: "rtmp://b.example/live", StreamKey: "sk-1", AccountID: &messy,
+			Compliance: db.Compliance{Labels: map[string]bool{"DrugsIntoxication": true}}},
+		{Name: "argue-two", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+			URL: "rtmp://c.example/live", StreamKey: "sk-2", AccountID: &messy,
+			Compliance: db.Compliance{Labels: map[string]bool{"Gambling": true}}},
+	} {
+		if _, err := store.CreateDestination(d); err != nil {
+			t.Fatalf("create %s: %v", d.Name, err)
+		}
+	}
+
+	calls := make(chan string, 8)
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		calls <- "metadata"
+		return &oauth.MetadataResult{}, nil
+	}
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		calls <- "compliance"
+		return &oauth.MetadataResult{}, nil
+	}
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/metadata/push", map[string]any{
+		"title":      "Live tonight",
+		"accountIds": []int64{messy},
+	})
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "argue-one") || !strings.Contains(w.Body.String(), "argue-two") {
+		t.Errorf("the refusal does not name both conflicting destinations: %s", w.Body.String())
+	}
+	select {
+	case which := <-calls:
+		t.Fatalf("a %s request was made for a push that was refused", which)
+	case <-time.After(500 * time.Millisecond):
 	}
 }
 

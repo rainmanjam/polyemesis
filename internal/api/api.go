@@ -134,6 +134,16 @@ type Server struct {
 	// Defaults to calling the pusher directly; only a test ever replaces it.
 	pushComplianceFn func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
 		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error)
+
+	// pushBroadcastFn is the last of them, and it exists because a warning was
+	// being thrown away: pushOne recorded a failed PushBroadcastSettings and
+	// then overwrote the record before anyone saw it, so an operator whose DVR
+	// toggle failed was told nothing. Proving that fix needs a broadcast push
+	// that fails without a network call, and internal/oauth's YouTube base URL
+	// is unexported, so this is the only place the failure can be produced.
+	// Defaults to calling the pusher directly; only a test ever replaces it.
+	pushBroadcastFn func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
+		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error)
 }
 
 // Options configures the server.
@@ -214,6 +224,11 @@ func New(o Options) *Server {
 	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
 		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
 		return pusher.PushCompliance(ctx, clientID, accessToken, tgt, c)
+	}
+	// And once more for the broadcast settings.
+	s.pushBroadcastFn = func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
+		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error) {
+		return pusher.PushBroadcastSettings(ctx, clientID, accessToken, bs)
 	}
 	return s
 }

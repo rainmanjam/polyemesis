@@ -189,8 +189,9 @@ func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) 
 // The conflicts return is not advisory. Two destinations on one account asking
 // for different compliance have no answer, so complianceByAccount deletes that
 // account from the map and names both destinations here; a caller that pushes
-// anyway sends one of them with nothing saying which.
-func (s *Server) metadataTargets() ([]metadataTarget, []string, error) {
+// anyway sends one of them with nothing saying which. It is keyed by account so
+// a push can refuse over the accounts it addresses and no others.
+func (s *Server) metadataTargets() ([]metadataTarget, map[int64][]string, error) {
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
 		return nil, nil, err
@@ -203,7 +204,7 @@ func (s *Server) metadataTargets() ([]metadataTarget, []string, error) {
 	for _, d := range dests {
 		flat = append(flat, *d)
 	}
-	compliance, conflicts := complianceByAccount(flat)
+	compliance, conflicts := complianceByTarget(flat)
 
 	out := []metadataTarget{}
 	for _, a := range accts {
@@ -275,13 +276,6 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	// Before the job exists, before a token is read, before anything leaves the
-	// process. A conflict refused later would be a refusal reported to the
-	// operator while one destination's compliance was already on the wire.
-	if len(conflicts) > 0 {
-		writeError(w, http.StatusBadRequest, strings.Join(conflicts, " "))
-		return
-	}
 	if len(req.AccountIDs) > 0 {
 		want := map[int64]bool{}
 		for _, id := range req.AccountIDs {
@@ -295,6 +289,24 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		}
 		targets = filtered
 	}
+
+	// Scoped to what this push addresses, and refused before the job exists,
+	// before a token is read, before anything leaves the process.
+	//
+	// Both halves matter. Refusing later would report "nothing was sent" while
+	// one destination's compliance was already on the wire; refusing over every
+	// account would block an operator with a disagreement between two
+	// destinations they did not select and may not be able to see from here.
+	// Collected in target order rather than map order so the message is stable.
+	var problems []string
+	for _, t := range targets {
+		problems = append(problems, conflicts[t.AccountID]...)
+	}
+	if len(problems) > 0 {
+		writeError(w, http.StatusBadRequest, strings.Join(problems, " "))
+		return
+	}
+
 	if len(targets) == 0 {
 		writeError(w, http.StatusPreconditionFailed,
 			"no connected account can receive stream metadata. Connect a YouTube or Twitch "+
@@ -563,6 +575,47 @@ func complianceFields(c db.Compliance) []oauth.MetadataField {
 	return out
 }
 
+// complianceByTarget is complianceByAccount with the answer kept addressable:
+// the same resolution, plus the conflicts keyed by the account they are about.
+//
+// It exists because a conflict has to be refused to the operator who can act on
+// it and to nobody else. A flat list of messages cannot say which account each
+// one belongs to, so a push aimed at one account would be blocked by a
+// disagreement between two destinations it never mentioned — possibly ones the
+// operator cannot even see from where they are standing.
+//
+// Grouping first and resolving per group is the same computation, not a second
+// one: complianceByAccount already partitions by account internally and only
+// ever compares destinations that share one, so restricting its input to a
+// single account's destinations yields that account's identical entry and
+// identical messages. The name sort that orders those messages is likewise
+// unaffected, because sorting the whole list and then grouping gives each group
+// the same order as grouping and then sorting.
+func complianceByTarget(dests []db.Destination) (map[int64]accountCompliance, map[int64][]string) {
+	byAccount := map[int64][]db.Destination{}
+	for _, d := range dests {
+		if d.AccountID == nil {
+			continue
+		}
+		byAccount[*d.AccountID] = append(byAccount[*d.AccountID], d)
+	}
+
+	out := map[int64]accountCompliance{}
+	conflicts := map[int64][]string{}
+	for id, group := range byAccount {
+		resolved, msgs := complianceByAccount(group)
+		// Absent on conflict, which is complianceByAccount's own guarantee: the
+		// entry is DELETED rather than resolved to the first destination seen.
+		if ac, ok := resolved[id]; ok {
+			out[id] = ac
+		}
+		if len(msgs) > 0 {
+			conflicts[id] = msgs
+		}
+	}
+	return out, conflicts
+}
+
 // ------------------------------------------------------------------- worker
 
 // runMetadataPush pushes to every target concurrently. Concurrency is the
@@ -663,13 +716,17 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	// "unsupported" for every operator who tries.
 	if !bc.Empty() {
 		if bp, ok := pusher.(broadcastPusher); ok {
-			bres, err := bp.PushBroadcastSettings(ctx, creds.ClientID, acct.AccessToken, bc)
+			bres, err := s.pushBroadcastFn(ctx, bp, creds.ClientID, acct.AccessToken, bc)
 			switch {
 			case err != nil:
 				// Reported, not fatal. The metadata write above may already
 				// have landed, and failing the whole row would send the
 				// operator back to redo work that took.
-				out.Warnings = append(out.Warnings, err.Error())
+				//
+				// Into res, not out: the assignments at the end of this function
+				// used to overwrite out.Warnings wholesale, which threw this
+				// away between recording it and showing it.
+				res.Warnings = append(res.Warnings, err.Error())
 				out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{oauth.FieldContentDetails})
 			case bres != nil:
 				res.Applied = append(res.Applied, bres.Applied...)
@@ -696,7 +753,8 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	//
 	// ComplianceFor rather than a type assertion, and absence rather than an
 	// error: Kick has no compliance API, and a red row for a field the platform
-	// does not have teaches the operator to ignore red rows.
+	// does not have teaches the operator to ignore red rows. Absent is still
+	// SAID, though -- see the else below.
 	if !t.Compliance.Empty() {
 		if cp, ok := oauth.ComplianceFor(t.Platform); ok {
 			cres, err := s.pushComplianceFn(ctx, cp, creds.ClientID, acct.AccessToken,
@@ -720,6 +778,18 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 					res.Target = cres.Target
 				}
 			}
+		} else {
+			// Skipped with a reason, not failed. The platform genuinely has
+			// nowhere to put this, so attempting it would be a lie and colouring
+			// the row red would train the operator to ignore the colour -- but
+			// staying silent reproduces in miniature the exact defect this whole
+			// feature exists to end: a stored setting that goes nowhere and says
+			// nothing, leaving the operator expecting a declaration that will
+			// never be made.
+			res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"%s has no compliance API, so the compliance settings stored for this "+
+					"account were not sent.", t.Platform))
 		}
 	}
 
@@ -737,7 +807,10 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 		out.Target = t.AccountName
 	}
 	out.Category = res.Category
-	out.Warnings = res.Warnings
+	// Appended, never assigned. An assignment here discarded every warning the
+	// branches above had already recorded on out, which is how a failed
+	// broadcast write became a row that mentioned nothing at all.
+	out.Warnings = append(out.Warnings, res.Warnings...)
 
 	switch {
 	case len(out.Applied) == 0:
