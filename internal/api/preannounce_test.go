@@ -28,17 +28,22 @@ type announced struct {
 	reschedules []time.Time
 	key         string
 	broadcastID string
+	backups     []oauth.Ingest
 	err         error
 }
 
 func stubAnnounce(s *Server, rec *announced) {
 	s.ingestForFn = func(ctx context.Context, p oauth.Provider, clientID string,
-		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Ingest, string, error) {
+		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
 		rec.creates = append(rec.creates, opts)
 		if rec.err != nil {
-			return nil, "", rec.err
+			return nil, rec.err
 		}
-		return &oauth.Ingest{URL: "rtmps://live.example/rtmp", Key: rec.key}, rec.broadcastID, nil
+		return &oauth.Broadcast{
+			ID:      rec.broadcastID,
+			Ingest:  oauth.Ingest{URL: "rtmps://live.example/rtmp", Key: rec.key},
+			Backups: rec.backups,
+		}, nil
 	}
 	s.rescheduleFn = func(ctx context.Context, acct *db.PlatformAccount,
 		broadcastID string, at time.Time) error {

@@ -168,7 +168,7 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 		return
 	}
 
-	ing, broadcastID, err := s.ingestForFn(cctx, provider, creds.ClientID, acct,
+	b, err := s.ingestForFn(cctx, provider, creds.ClientID, acct,
 		ingestOptionsFor(d, at))
 	if err != nil {
 		// Logged and dropped. The schedule and the go-live path are unaffected;
@@ -187,12 +187,12 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 	// THE INVARIANT. The key the pre-created broadcast returned has to be the
 	// one the encoder publishes to, or the event page people were notified
 	// about stays empty beside a live stream.
-	d.StreamKey = ing.Key
-	d.Facebook.BroadcastID = broadcastID
+	d.StreamKey = b.Ingest.Key
+	d.Facebook.BroadcastID = b.ID
 	d.Facebook.ScheduledFor = at
 	s.saveAnnouncement(d)
 	s.log.Info("pre-announced a Facebook broadcast",
-		"destination", d.Name, "at", at, "broadcast", broadcastID)
+		"destination", d.Name, "at", at, "broadcast", b.ID)
 }
 
 func (s *Server) saveAnnouncement(d *db.Destination) {

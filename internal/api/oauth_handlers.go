@@ -391,7 +391,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ing, broadcastID, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
+	b, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
 	if err != nil {
 		// A platform that publishes no key endpoint is not a transport
 		// failure, and 502 invites a retry that can never succeed. The
@@ -405,12 +405,12 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	}
 	// Facebook's key IS the broadcast, so this is where a running chat adapter
 	// finds out which live video to read comments from.
-	if broadcastID != "" {
-		s.setFacebookBroadcast(acct.AccountRef, broadcastID)
+	if b.ID != "" {
+		s.setFacebookBroadcast(acct.AccountRef, b.ID)
 	}
 
-	dest.URL = ing.URL
-	dest.StreamKey = ing.Key
+	dest.URL = b.Ingest.URL
+	dest.StreamKey = b.Ingest.Key
 	dest.Kind = db.DestRTMP
 	updated, err := s.store.UpdateDestination(dest)
 	if err != nil {
@@ -456,20 +456,20 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 // returns the broadcast id, which is the handle the chat adapter needs and which
 // Provider.Ingest discards. Every other platform has no targets and falls
 // through to Ingest unchanged.
-func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Ingest, string, error) {
+//
+// Returns the whole Broadcast rather than the pieces, because the pieces kept
+// growing: first the ingest, then the broadcast id, and now the BACKUP ingest,
+// which was being parsed by internal/oauth and discarded right here. A platform
+// with no broadcast object gets a synthetic one so every caller reads one shape.
+func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
 	if tp, ok := oauth.TargetsFor(acct.Platform); ok {
-		b, err := tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
-		if err != nil {
-			return nil, "", err
-		}
-		ing := b.Ingest
-		return &ing, b.ID, nil
+		return tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 	}
 	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return ing, "", nil
+	return &oauth.Broadcast{Ingest: *ing}, nil
 }
 
 // tokenFor loads an account and refreshes its access token if it is expired or

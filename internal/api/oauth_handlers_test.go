@@ -97,10 +97,10 @@ func TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider(t *tes
 	// stub returns, so what it returns has no bearing on what this test checks.
 	stubErr := errors.New("stub: no real ingest in this test")
 	s.ingestForFn = func(ctx context.Context, provider oauth.Provider, clientID string,
-		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Ingest, string, error) {
+		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
 		called = true
 		captured = opts
-		return nil, "", stubErr
+		return nil, stubErr
 	}
 
 	r := jsonRequest(t, http.MethodPost,

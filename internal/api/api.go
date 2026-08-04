@@ -112,7 +112,7 @@ type Server struct {
 	// internal/oauth's graph base is unexported and Providers() has no
 	// injection point, so there is no way to observe this from outside the
 	// process. Defaults to the real method; only a test ever replaces it.
-	ingestForFn func(context.Context, oauth.Provider, string, *db.PlatformAccount, oauth.IngestOptions) (*oauth.Ingest, string, error)
+	ingestForFn func(context.Context, oauth.Provider, string, *db.PlatformAccount, oauth.IngestOptions) (*oauth.Broadcast, error)
 
 	// pushMetadataFn is ingestForFn's counterpart one handler over: the seam
 	// that makes pushOne's call to a resolved provider's PushMetadata
