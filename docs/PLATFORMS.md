@@ -63,6 +63,35 @@ measured in days. Start it before you need it. Facebook also issues a fresh
 ingest and key per broadcast, so connecting the account is what creates the
 broadcast — there is no permanent key to reuse.
 
+A destination's saved settings go out on that same create call: the chosen
+audience becomes `privacy`, a saved Crosspost list becomes
+`crossposting_actions` (each Page in it carries whether to only share the
+broadcast or also publish a post as that Page), and a saved charity id becomes
+`donate_button_charity_id`. **Privacy is applied once, at that moment.**
+Meta's Graph reference documents no way to update a live broadcast's audience,
+crossposting or donate button at all, so changing any of the three afterward
+has no effect on the broadcast already running — the only way to apply a
+changed value is what "Refresh key" already does above: end the broadcast and
+start a new one under the new settings. (The provider does carry an internal
+path that attempts a live privacy change anyway, and reports it applied only
+once a follow-up read confirms Facebook's value actually changed rather than
+trusting the write's 200 — but nothing in polyemesis today calls it, so treat
+privacy as create-time-only until that changes.)
+
+**A Page broadcast is public regardless of what audience is chosen.** Facebook
+has no personal audience for a Page, so `privacy` is left off the create call
+entirely whenever the target is a Page — the setting applies to profile
+broadcasts only, and the omission is silent.
+
+Pushing metadata (title, description) can now also carry tags. `content_tags`
+is resolved from the words an operator types, one Graph search per word
+against `/search?type=adinterest`. That is an ads-surface endpoint, not the
+`publish_video` surface the rest of this integration runs on, and whether
+`publish_video` can reach it is **unverified** — this repo has no live
+Facebook account to test it against. If Facebook refuses the lookup, tags are
+reported as skipped rather than failing the push; the title and description
+still land.
+
 **Kick — fully automated, and it took a correction to get there.** Kick's
 OAuth 2.1 flow (PKCE, which Kick requires) gets you chat both ways, deleting a
 chat message, title, category and tag push, viewer counts — **and the stream
