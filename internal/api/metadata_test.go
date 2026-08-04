@@ -502,6 +502,85 @@ func TestAComplianceConflictIsRefusedBeforeAnythingIsSent(t *testing.T) {
 	}
 }
 
+// TestAnUnconfirmedComplianceWriteReachesTheOperatorWithoutAnError guards the
+// failure channel that carries NO error, which for Facebook is the only one it
+// has.
+//
+// Every one of Facebook's four PushCompliance failure modes — a Page target, no
+// recoverable broadcast id, a refused POST, a read-back that disagrees or
+// cannot be read — returns `MetadataResult{Skipped, Warnings}` with a nil
+// error. YouTube reports a failed selfDeclaredMadeForKids the same way, and
+// Twitch reports a stale label row the same way. The err != nil arm next door
+// has a test; this arm had none, so dropping the two appends below left the
+// suite green and turned every one of those into an invisible success. An
+// operator would be told their privacy change landed when Facebook never
+// confirmed it — the exact failure this branch exists to end, one arm to the
+// right.
+//
+// Mutations: drop `res.Skipped = append(res.Skipped, cres.Skipped...)`, drop
+// `res.Warnings = append(res.Warnings, cres.Warnings...)`, or both.
+func TestAnUnconfirmedComplianceWriteReachesTheOperatorWithoutAnError(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformFacebook, "ada")
+	if err := store.PutPlatformCreds(s.box, db.PlatformFacebook, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "page", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://ingest.example/app", StreamKey: "sk-live-1", AccountID: &acctID,
+		Compliance: db.Compliance{FacebookPrivacy: db.FBPrivacySelf},
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	// Exactly the shape Facebook returns when the read-back does not confirm:
+	// no error, a skipped field, and the reason.
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{
+			Skipped:  []oauth.MetadataField{oauth.FieldPrivacy},
+			Warnings: []string{"privacy: Facebook did not confirm the change"},
+			// The metadata half named no target, so the compliance result's is
+			// what the row has to fall back to; without it the row names the
+			// account and the operator cannot tell which broadcast was touched.
+			Target: "Tonight's broadcast",
+		}, nil
+	}
+
+	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	if len(job.Results) != 1 {
+		t.Fatalf("results = %+v, want one row", job.Results)
+	}
+	res := job.Results[0]
+	if !strings.Contains(strings.Join(res.Warnings, " "), "did not confirm") {
+		t.Errorf("warnings = %v, want the provider's unconfirmed-write reason: a privacy "+
+			"change Facebook never confirmed must not be shown as one that landed", res.Warnings)
+	}
+	skipped := false
+	for _, f := range res.Skipped {
+		if f == oauth.FieldPrivacy {
+			skipped = true
+		}
+	}
+	if !skipped {
+		t.Errorf("skipped = %v, want privacy: the field the provider refused to confirm is "+
+			"the one the operator has to be told about", res.Skipped)
+	}
+	if res.State != metaPartial {
+		t.Errorf("state = %q, want partial: the title landed and the privacy did not, and "+
+			"reading this row as a clean success is the whole defect", res.State)
+	}
+	if res.Target != "Tonight's broadcast" {
+		t.Errorf("target = %q, want the broadcast the compliance result named: falling back "+
+			"to the account name leaves the operator guessing which broadcast moved", res.Target)
+	}
+}
+
 // TestAKickTargetIsSkippedOutLoudRatherThanSilently is the absence half of
 // oauth.ComplianceFor, and it pins BOTH obligations at once.
 //
@@ -563,6 +642,136 @@ func TestAKickTargetIsSkippedOutLoudRatherThanSilently(t *testing.T) {
 	if !strings.Contains(strings.Join(res.Warnings, " "), "no compliance API") {
 		t.Errorf("warnings = %v, want one saying Kick has no compliance API, so the "+
 			"operator can stop expecting the setting to arrive", res.Warnings)
+	}
+}
+
+// TestAnAccountWithNoStoredComplianceIsLeftEntirelyAlone holds the spec's
+// "empty means leave alone, everywhere" at the one layer that decides it.
+//
+// Nothing guarded `if !t.Compliance.Empty()`: replacing it with `if true` left
+// the suite green while every push to a Kick account emitted a warning about
+// compliance settings the operator never made, and YouTube, Twitch and Facebook
+// each took a pointless PushCompliance call, saved from the network only by
+// their own inner guards. A yellow row on every push for a setting that does
+// not exist is how an operator learns to stop reading the rows.
+//
+// Kick is the target precisely because it has no compliance API: if the guard
+// goes, this is the account that produces a visible complaint rather than a
+// silent no-op.
+func TestAnAccountWithNoStoredComplianceIsLeftEntirelyAlone(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformKick, "kicker")
+	if err := store.PutPlatformCreds(s.box, db.PlatformKick, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	// A destination with a stream key and no compliance at all: the ordinary
+	// case, and the one that must stay quiet.
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "kick", Kind: db.DestRTMP, Platform: db.PlatformKick,
+		URL: "rtmp://k.example/live", StreamKey: "sk-kick", AccountID: &acctID,
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	attempted := false
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		attempted = true
+		return &oauth.MetadataResult{}, nil
+	}
+
+	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	if attempted {
+		t.Error("a compliance write was attempted for an account with no compliance stored")
+	}
+	if len(job.Results) != 1 {
+		t.Fatalf("results = %+v, want one row", job.Results)
+	}
+	res := job.Results[0]
+	if res.State != metaOK {
+		t.Errorf("state = %q (%s), want ok: nothing was asked for and nothing went wrong",
+			res.State, res.Message)
+	}
+	if strings.Contains(strings.Join(res.Warnings, " "), "compliance") {
+		t.Errorf("warnings = %v mention compliance for an account that has none stored; "+
+			"an operator warned about a setting they never made stops reading the warnings",
+			res.Warnings)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("skipped = %v, want nothing: no compliance field was asked for", res.Skipped)
+	}
+}
+
+// TestTwoAccountsPushComplianceConcurrently closes a coverage gap rather than a
+// defect. runMetadataPush fans out one goroutine per target and the compliance
+// write now sits inside it, but every other compliance test settles exactly one
+// row, so CI's -race never watched two PushCompliance calls in flight. Each
+// target carries its own db.Compliance, whose Labels map came from its own
+// destination and is only ever read, so there is nothing shared to corrupt —
+// this is the test that would notice if that stopped being true.
+func TestTwoAccountsPushComplianceConcurrently(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	yt := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	tw := connectAccount(t, store, s.box, db.PlatformTwitch, "dj")
+	for _, p := range []db.Platform{db.PlatformYouTube, db.PlatformTwitch} {
+		if err := store.PutPlatformCreds(s.box, p, "cid", "topsecret"); err != nil {
+			t.Fatalf("creds %s: %v", p, err)
+		}
+	}
+	for _, d := range []*db.Destination{
+		{Name: "yt", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://a.example/live", StreamKey: "sk-yt", AccountID: &yt,
+			Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "tw", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+			URL: "rtmp://b.example/live", StreamKey: "sk-tw", AccountID: &tw,
+			Compliance: db.Compliance{Labels: map[string]bool{"Gambling": true}}},
+	} {
+		if _, err := store.CreateDestination(d); err != nil {
+			t.Fatalf("create %s: %v", d.Name, err)
+		}
+	}
+
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	// Buffered per call, and the goroutines are released together, so the two
+	// pushes genuinely overlap rather than queueing behind each other.
+	start := make(chan struct{})
+	seen := make(chan db.Compliance, 4)
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		<-start
+		seen <- c
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldPrivacy}}, nil
+	}
+	close(start)
+
+	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	if len(job.Results) != 2 {
+		t.Fatalf("results = %+v, want one row per account", job.Results)
+	}
+	close(seen)
+	got := map[db.PrivacyStatus]bool{}
+	labels := 0
+	for c := range seen {
+		if c.Privacy != db.PrivacyUnchanged {
+			got[c.Privacy] = true
+		}
+		if len(c.Labels) > 0 {
+			labels++
+		}
+	}
+	// Each account's own settings, not one account's applied twice.
+	if !got[db.PrivacyPrivate] || labels != 1 {
+		t.Errorf("concurrent pushes sent privacy=%v and %d label sets, want each account's "+
+			"own compliance exactly once", got, labels)
 	}
 }
 
@@ -718,6 +927,12 @@ func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 		{Name: "squabble-two", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
 			URL: "rtmp://e.example/live", StreamKey: "sk-4", AccountID: &alsoMessy,
 			Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+		// A third disagreeing destination on that same account, so this account
+		// alone produces two conflict messages. Reporting only the first per
+		// account would otherwise be invisible here.
+		{Name: "squabble-three", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://f.example/live", StreamKey: "sk-5", AccountID: &alsoMessy,
+			Compliance: db.Compliance{Privacy: db.PrivacyUnlisted}},
 	} {
 		if _, err := store.CreateDestination(d); err != nil {
 			t.Fatalf("create %s: %v", d.Name, err)
@@ -744,7 +959,7 @@ func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body %s)", w.Code, w.Body.String())
 	}
-	for _, name := range []string{"argue-one", "argue-two", "squabble-one", "squabble-two"} {
+	for _, name := range []string{"argue-one", "argue-two", "squabble-one", "squabble-two", "squabble-three"} {
 		if !strings.Contains(w.Body.String(), name) {
 			t.Errorf("the refusal never names %q, so fixing what it does report still leaves "+
 				"the push refused: %s", name, w.Body.String())
@@ -1071,6 +1286,116 @@ func TestComplianceByTargetKeepsAConflictingAccountOutOfTheResolvedMap(t *testin
 	}
 }
 
+// TestThreeDisagreeingDestinationsAreAllWithheldAndAllNamed is the case two
+// destinations could never show.
+//
+// The original loop asked the RESULT map whether it had seen this account, and
+// removed the entry on conflict. With three disagreeing destinations the third
+// therefore found nothing, read as the first one seen, and re-inserted: the
+// account came back present, carrying the LAST destination's settings, with one
+// conflict message naming only the first two. Present-and-resolved-anyway is
+// exactly the "looks handled" outcome the removal exists to prevent, and the
+// messier three-destination configuration is the likelier one to hit it.
+func TestThreeDisagreeingDestinationsAreAllWithheldAndAllNamed(t *testing.T) {
+	acct := int64(7)
+	got, conflicts := complianceByTarget([]db.Destination{
+		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyUnlisted}},
+	})
+
+	if ac, ok := got[acct]; ok {
+		t.Errorf("the account is present carrying %q's settings despite three destinations "+
+			"disagreeing; a caller reading the map would apply one of them", ac.Destination)
+	}
+	// Every disagreeing destination, not just the first pair. An operator told
+	// only about a-vs-b fixes it, pushes, and is refused over c.
+	joined := strings.Join(conflicts[acct], " ")
+	for _, name := range []string{`"a"`, `"b"`, `"c"`} {
+		if !strings.Contains(joined, name) {
+			t.Errorf("destination %s is never named in %v, so fixing what is reported still "+
+				"leaves the push refused", name, conflicts[acct])
+		}
+	}
+}
+
+// TestAgreementWithTheAnchorIsNotAConflictAcrossThreeDestinations is the guard
+// against overcorrecting the above: comparing each destination against the one
+// BEFORE it rather than against the first would call a-a-b two conflicts, or
+// a-b-b one plus a spurious second.
+func TestAgreementWithTheAnchorIsNotAConflictAcrossThreeDestinations(t *testing.T) {
+	acct := int64(7)
+	got, conflicts := complianceByTarget([]db.Destination{
+		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+	})
+	if len(conflicts[acct]) != 0 {
+		t.Errorf("three destinations that all agree were reported as conflicting: %v",
+			conflicts[acct])
+	}
+	if got[acct].Compliance.Privacy != db.PrivacyPrivate {
+		t.Errorf("resolved privacy = %q, want private", got[acct].Compliance.Privacy)
+	}
+}
+
+// TestComplianceByAccountDoesNotReorderItsCallersSlice guards the defensive
+// copy. The function sorts by name to make its messages deterministic; doing
+// that in place would reorder a slice the caller still owns, which is the kind
+// of side effect that is invisible until something downstream depends on store
+// order.
+func TestComplianceByAccountDoesNotReorderItsCallersSlice(t *testing.T) {
+	acct := int64(7)
+	dests := []db.Destination{
+		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+	}
+	complianceByAccount(dests)
+	for i, want := range []string{"c", "a", "b"} {
+		if dests[i].Name != want {
+			t.Fatalf("the caller's slice was reordered to %q...; complianceByAccount sorted "+
+				"in place", dests[i].Name)
+		}
+	}
+}
+
+// TestComplianceFieldsNamesOnlyWhatWasSet pins the mapping a failed or skipped
+// compliance write reports through. Its call sites are guarded elsewhere; what
+// they cannot see is a single clause going missing, and the FacebookPrivacy one
+// in particular — a Facebook-only failure would then name no skipped field at
+// all, which combined with an unconfirmed write is the whole of Facebook's
+// failure reporting gone.
+func TestComplianceFieldsNamesOnlyWhatWasSet(t *testing.T) {
+	kids := false
+	tests := []struct {
+		name string
+		in   db.Compliance
+		want []oauth.MetadataField
+	}{
+		{"nothing set", db.Compliance{}, nil},
+		{"youtube privacy", db.Compliance{Privacy: db.PrivacyPrivate},
+			[]oauth.MetadataField{oauth.FieldPrivacy}},
+		{"facebook privacy is privacy too", db.Compliance{FacebookPrivacy: db.FBPrivacySelf},
+			[]oauth.MetadataField{oauth.FieldPrivacy}},
+		{"an explicit false is still a declaration", db.Compliance{MadeForKids: &kids},
+			[]oauth.MetadataField{oauth.FieldMadeForKids}},
+		{"twitch labels", db.Compliance{Labels: map[string]bool{"Gambling": true}},
+			[]oauth.MetadataField{oauth.FieldLabels}},
+		{"all of it", db.Compliance{
+			Privacy: db.PrivacyPrivate, MadeForKids: &kids,
+			Labels: map[string]bool{"Gambling": true}, FacebookPrivacy: db.FBPrivacySelf},
+			[]oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids, oauth.FieldLabels}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := complianceFields(tc.in); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("complianceFields(%+v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConflictNamesDestinationsInSortedOrderNotStoreOrder(t *testing.T) {
 	// Store order is c, a, b -- deliberately not sorted. Without the sort,
 	// the first pair compared is (c, a), and the conflict message would name
@@ -1084,8 +1409,17 @@ func TestConflictNamesDestinationsInSortedOrderNotStoreOrder(t *testing.T) {
 		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
 		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
 	})
-	if len(conflicts) != 1 {
-		t.Fatalf("got %d conflicts, want 1: %v", len(conflicts), conflicts)
+	//
+	// Two messages, not one: "a" is the anchor and both "b" and "c" disagree
+	// with it, so both are named. This assertion used to demand exactly one,
+	// which quietly codified a bug -- the loop compared "c" against a map entry
+	// that the "b" conflict had already removed, so "c" read as the first
+	// destination seen and was never reported at all. What this test is about
+	// is the ORDER, so it checks the first message opens with the sorted pair
+	// and leaves the count to
+	// TestThreeDisagreeingDestinationsAreAllWithheldAndAllNamed.
+	if len(conflicts) == 0 {
+		t.Fatal("three destinations, two of them disagreeing with the first, produced no conflict")
 	}
 	if !strings.HasPrefix(conflicts[0], `"a" and "b"`) {
 		t.Errorf("conflict = %q, want it to open with %q (sorted order), not store order", conflicts[0], `"a" and "b"`)

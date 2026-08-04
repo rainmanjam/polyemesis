@@ -186,9 +186,9 @@ func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) 
 // platform that cannot do this is absent rather than present and failing — see
 // oauth.MetadataFor.
 //
-// The conflicts return is not advisory. Two destinations on one account asking
-// for different compliance have no answer, so complianceByAccount deletes that
-// account from the map and names both destinations here; a caller that pushes
+// The conflicts return is not advisory. Destinations on one account asking for
+// different compliance have no answer, so complianceByTarget withholds that
+// account and names the disagreeing destinations here; a caller that pushes
 // anyway sends one of them with nothing saying which. It is keyed by account so
 // a push can refuse over the accounts it addresses and no others.
 func (s *Server) metadataTargets() ([]metadataTarget, map[int64][]string, error) {
@@ -212,11 +212,12 @@ func (s *Server) metadataTargets() ([]metadataTarget, map[int64][]string, error)
 		if !ok {
 			continue
 		}
-		// A conflicting account is absent from the map, so this reads the zero
-		// Compliance -- "touch nothing" -- rather than the first destination's.
-		// That is a second line of defence, not the refusal: handlePushMetadata
-		// still has to check conflicts, because a push that quietly writes
-		// nothing looks exactly like a push that worked.
+		// A conflicting account is withheld from the map however many
+		// destinations disagree, so this reads the zero Compliance -- "touch
+		// nothing" -- rather than any one destination's. That is a second line
+		// of defence, not the refusal: handlePushMetadata still has to check
+		// conflicts, because a push that quietly writes nothing looks exactly
+		// like a push that worked.
 		ac := compliance[a.ID]
 		out = append(out, metadataTarget{
 			AccountID:   a.ID,
@@ -529,27 +530,48 @@ func complianceByAccount(dests []db.Destination) (map[int64]accountCompliance, [
 	sorted := append([]db.Destination(nil), dests...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
-	out := map[int64]accountCompliance{}
+	// first is the anchor every later destination on that account is compared
+	// against, and poisoned is what disagreement sets. Both are separate from
+	// the result on purpose. An earlier version derived "have I seen this
+	// account?" from the result map and removed the entry on conflict, so with
+	// three disagreeing destinations the third found no entry, read as the
+	// first one seen, and re-inserted -- leaving the account present carrying
+	// the LAST destination's settings, which is precisely the resolved-anyway
+	// outcome the removal exists to prevent. Deciding membership from state the
+	// conflict handling never touches makes that shape unrepresentable.
+	first := map[int64]accountCompliance{}
+	poisoned := map[int64]bool{}
 	var conflicts []string
 	for _, d := range sorted {
 		if d.AccountID == nil || d.Compliance.Empty() {
 			continue
 		}
 		id := *d.AccountID
-		prev, seen := out[id]
+		anchor, seen := first[id]
 		if !seen {
-			out[id] = accountCompliance{
+			first[id] = accountCompliance{
 				Compliance: d.Compliance, StreamKey: d.StreamKey, Destination: d.Name,
 			}
 			continue
 		}
-		if !reflect.DeepEqual(prev.Compliance, d.Compliance) {
-			conflicts = append(conflicts, fmt.Sprintf(
-				"%q and %q share one connected account but ask for different compliance "+
-					"settings, and the platform has only one broadcast to apply them to. "+
-					"Make them match, or point one at a different account.",
-				prev.Destination, d.Name))
-			delete(out, id)
+		if reflect.DeepEqual(anchor.Compliance, d.Compliance) {
+			continue
+		}
+		// One message per DISAGREEING destination, not one per account. An
+		// operator told only about the first pair fixes it, pushes again, and
+		// is refused over the third -- round the loop once per destination.
+		conflicts = append(conflicts, fmt.Sprintf(
+			"%q and %q share one connected account but ask for different compliance "+
+				"settings, and the platform has only one broadcast to apply them to. "+
+				"Make them match, or point one at a different account.",
+			anchor.Destination, d.Name))
+		poisoned[id] = true
+	}
+
+	out := map[int64]accountCompliance{}
+	for id, ac := range first {
+		if !poisoned[id] {
+			out[id] = ac
 		}
 	}
 	return out, conflicts
@@ -604,8 +626,9 @@ func complianceByTarget(dests []db.Destination) (map[int64]accountCompliance, ma
 	conflicts := map[int64][]string{}
 	for id, group := range byAccount {
 		resolved, msgs := complianceByAccount(group)
-		// Absent on conflict, which is complianceByAccount's own guarantee: the
-		// entry is DELETED rather than resolved to the first destination seen.
+		// Absent on conflict, which is complianceByAccount's own guarantee: a
+		// poisoned account is withheld rather than resolved to any one of the
+		// destinations that disagreed, however many of them there were.
 		if ac, ok := resolved[id]; ok {
 			out[id] = ac
 		}

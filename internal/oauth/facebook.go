@@ -687,11 +687,16 @@ func (f *Facebook) MetadataCaps() MetadataCaps {
 		// FieldPrivacy is deliberately absent, unlike YouTube and Twitch's
 		// compliance fields: this list describes what the composer's
 		// PushMetadata call can accept, and oauth.Metadata carries no Privacy
-		// field for it to accept. Privacy is pushed through PushCompliance
-		// instead -- see compliance.go -- a separate capability on purpose, so a
-		// field that must never be sent by accident is never reachable through
-		// the everyday metadata control. Advertising it here would claim a
-		// composer control that does not exist.
+		// field for it to accept. Advertising it here would claim a composer
+		// control that does not exist.
+		//
+		// It is NOT absent because privacy cannot move. Privacy travels through
+		// PushCompliance -- Facebook's own is below in this file -- which an
+		// ordinary composer push now calls, so pressing Push re-applies the
+		// privacy stored on the destination to a live broadcast. The separation
+		// is about which surface the operator sets the field on: it is a
+		// destination setting rather than a composer field, so it changes when
+		// they change it there, and not by being typed into the composer.
 		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags},
 		// Both limits are left at zero — "no published limit". Meta documents no
 		// maximum for either field, and inventing one would reject a title the
