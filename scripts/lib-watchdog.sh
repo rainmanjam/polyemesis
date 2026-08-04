@@ -158,9 +158,18 @@ poly_watchdog_arm() {
 
 # poly_watchdog_disarm -- stop the deadline. Call from the suite's EXIT trap.
 #
-# Not optional. A background child keeps the step's stdout pipe open, and a CI
-# step does not end until that pipe closes -- so a watchdog left running would
-# cause the exact hang it exists to report.
+# WHAT THIS IS AND IS NOT FOR. A first draft of this comment claimed disarming
+# was mandatory, on the grounds that a surviving background child holds the
+# step's stdout open and a CI step does not end until that pipe closes. A
+# mutation that made this function a no-op did not turn a single check red,
+# which is how the claim was found to be false: the watchdog checks that its
+# suite is still alive every POLY_WATCHDOG_TICK and exits on its own when it
+# is not. Undisarmed, it costs a tick -- two seconds -- not a hang.
+#
+# So this exists for the two things it does buy: the tick is not spent, and the
+# breadcrumb file is removed rather than left in the temp directory of every CI
+# runner and every maintainer's laptop. The second is what the guard watches,
+# because it is the one an assertion can see without timing anything.
 poly_watchdog_disarm() {
   [ -n "$poly__watchdog_pid" ] || return 0
   kill "$poly__watchdog_pid" 2>/dev/null

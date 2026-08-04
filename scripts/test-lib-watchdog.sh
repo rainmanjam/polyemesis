@@ -36,12 +36,16 @@ step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
 #
 # The deadline is one second and the tick is a fraction of one, because these
 # tests assert on WHAT is reported, never on how long it took to report it.
+# POLY_STEP_FILE is set to a known path rather than left to mktemp, so case 7
+# can assert the breadcrumb was cleaned up. The acceptance suites leave it
+# unset and get a temp file; the mechanism under test is the same either way.
 make_suite() {
   local path="$1" body="$2"
   cat > "$path" <<EOF
 #!/usr/bin/env bash
 set -uo pipefail
 . "$SCRIPTS/lib-watchdog.sh"
+POLY_STEP_FILE="$path.step"
 POLY_WATCHDOG_TICK=0.2
 step()    { printf '\n%s\n' "\$1"; poly_step_record "\$1"; }
 cleanup() { poly_watchdog_disarm; printf 'TRAP_RAN\n'; }
@@ -153,8 +157,18 @@ grep -q "TRAP_RAN" "$WORK/hang.out" \
   && ok "the EXIT trap ran after the watchdog fired" \
   || bad "the watchdog killed the suite before its teardown -- ports would leak to the next suite"
 
+step "7. Disarming removes the breadcrumb it created"
+# This check exists because the previous one does NOT cover disarming. A
+# mutation making poly_watchdog_disarm a no-op left all twelve earlier checks
+# green: the watchdog notices its suite has gone and exits on its own within a
+# tick, so nothing about the pipe or the exit code moves. What does move is the
+# leftover file, on every runner and every laptop, once per suite.
+[ -f "$WORK/quick.sh.step" ] \
+  && bad "the breadcrumb file survived a clean run -- disarming did not clean up" \
+  || ok "the breadcrumb file is removed when the suite disarms"
+
 total=$((pass + fail))
-EXPECTED_CHECKS=12
+EXPECTED_CHECKS=13
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
