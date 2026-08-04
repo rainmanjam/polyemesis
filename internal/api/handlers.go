@@ -1013,6 +1013,54 @@ func (s *Server) refuseIfSilent(w http.ResponseWriter, profile routing.Profile) 
 	return false
 }
 
+// dropUnsendableSettings zeroes the platform-specific settings a destination
+// cannot act on, and returns one line per thing it dropped.
+//
+// WHY IT CLEARS RATHER THAN REFUSES. A destination could reach this state
+// through the dialog: picking YouTube, declaring COPPA, then switching the
+// preset to Kick left the declaration in the form state, hidden -- the
+// compliance panel renders only for the three platforms that have one -- and
+// save() sent it anyway. So rows already carry compliance their platform will
+// never transmit, and a 400 would make every one of them uneditable: there is
+// no control in the dialog to clear a field it does not show.
+//
+// The reason this matters beyond tidiness is REACTIVATION. Compliance stored
+// against a Kick destination is inert, because ComplianceFor(kick) is absent
+// and the push skips it. Point that same destination back at YouTube and the
+// declaration is live again -- a legal statement about who a programme is for,
+// sent on behalf of an operator who last saw it in a form they abandoned.
+//
+// Clearing is therefore the repair, and the warning is what keeps it from
+// being a silent one. Nothing here refuses a write.
+func dropUnsendableSettings(row *db.Destination) []string {
+	var warnings []string
+
+	// Discovered through ComplianceFor, never a list of platform names: the
+	// capability is what decides whether a value can be sent, and a second copy
+	// of that knowledge here would be the copy that goes stale.
+	if _, ok := oauth.ComplianceFor(row.Platform); !ok && !row.Compliance.Empty() {
+		row.Compliance = db.Compliance{}
+		warnings = append(warnings, fmt.Sprintf(
+			"Compliance settings were removed: %s has no compliance surface, so a "+
+				"privacy or COPPA declaration stored here would never be sent — and "+
+				"would apply again if this destination were pointed back at a platform "+
+				"that has one.", row.Platform))
+	}
+
+	// The same shape, one platform wide. Crossposting and the donate button are
+	// arguments to Facebook's live-video create call and mean nothing anywhere
+	// else, so a destination that is not Facebook cannot act on them either.
+	if row.Platform != db.PlatformFacebook && !row.Facebook.Empty() {
+		row.Facebook = db.FacebookSettings{}
+		warnings = append(warnings, fmt.Sprintf(
+			"Facebook crossposting and donate settings were removed: they are "+
+				"arguments to Facebook's broadcast create call and %s does not have one.",
+			row.Platform))
+	}
+
+	return warnings
+}
+
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
 	var row db.Destination
 	if !decodeJSON(w, r, &row) {
@@ -1025,6 +1073,8 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	if s.refuseIfSilent(w, row.Profile) {
 		return
 	}
+	// Before the write, so what is stored is what the response describes.
+	warnings := dropUnsendableSettings(&row)
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -1033,7 +1083,11 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	if err := s.eng().Reconcile(); err != nil {
 		s.log.Warn("reconcile after destination create", "err", err)
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"destination": created})
+	resp := map[string]any{"destination": created}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
@@ -1063,6 +1117,14 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	existing.ExtraOutputArgs = saved.OutputArgs
 	existing.ExpertAckReencode = saved.AckReencode
 
+	// Deliberately AFTER the decode-over-existing above, because that is the
+	// path that produces the state worth catching: a body carrying nothing but
+	// {"platform":"kick"} leaves the stored compliance untouched, so the row
+	// ends up on a platform that cannot send what it is holding without the
+	// client ever mentioning compliance. Checking the request body instead of
+	// the merged row would see nothing at all.
+	warnings := dropUnsendableSettings(existing)
+
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -1077,6 +1139,9 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	resp := map[string]any{"destination": updated}
 	if c, err := routing.Compile(updated.Profile, s.eng().Source()); err == nil {
 		resp["routing"] = c
+	}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
