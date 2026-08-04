@@ -69,7 +69,19 @@ jobs:
       # test suite asserts on real filter-graph behaviour rather than on
       # strings. Without FFmpeg present those tests do not fail — they skip,
       # which is worse, because the run goes green having checked nothing.
+      # WHY A STEP TIMEOUT, when the job already has one.
+      #
+      # For the same reason the go test timeout below is kept under it: whichever
+      # ceiling fires first decides how much you learn. A job timeout kills the
+      # runner and reports "cancelled" with no indication of which step was
+      # stuck -- and on 2026-08-04 an acceptance job spent its entire 20 minutes
+      # inside THIS step, never ran its suite, and looked exactly like the
+      # stream-waiting hangs issue #38 tracks. It was apt.
+      #
+      # Six minutes is far past a normal install (~30s) and far short of the
+      # job budget, so it fires only on a genuinely stuck mirror.
       - name: Install FFmpeg
+        timeout-minutes: 6
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ffmpeg
@@ -159,7 +171,9 @@ jobs:
       # the measurement tests SKIP rather than fail, and the run goes green
       # having checked nothing. A cross-platform job that skipped every test
       # that touches FFmpeg would be the most misleading kind of green.
+      # Same reasoning as the go job's install step.
       - name: Install FFmpeg (Linux)
+        timeout-minutes: 6
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Install FFmpeg (macOS)
@@ -500,6 +514,9 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Install FFmpeg
+        # See the note on the go job's install step: a hung apt must fail with its
+        # own name attached rather than eating this job's whole 20 minutes.
+        timeout-minutes: 6
         run: |
           sudo apt-get update -qq
           # lsof as well: three suites read the engine's relay port out of it
