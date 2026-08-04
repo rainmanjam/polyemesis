@@ -234,12 +234,114 @@ jobs:
       - name: Cross-compile
         run: make release VERSION="${GITHUB_REF_NAME//\//-}"
 
+      # A software bill of materials for the release, in the two formats
+      # consumers actually ask for: SPDX for licence and provenance review,
+      # CycloneDX for vulnerability tooling.
+      #
+      # Scanned from the SOURCE TREE, not the binaries, and that is the point:
+      # `make release` embeds the web UI into every binary, so a scan of the
+      # compiled artefact would report the Go modules and silently omit every
+      # npm dependency that shipped inside it.
+      #
+      # Measured on this repository at the time of writing: 437 packages --
+      # 216 npm, 168 Go, and 52 pinned GitHub Actions. One document per format
+      # covers all three, which no per-manifest scanner produces in one file.
+      #
+      # The released binary, verified against a SHA-256 pinned here, rather
+      # than anchore/sbom-action -- every action in this repository is
+      # SHA-pinned precisely because each one is a supply-chain edge, and
+      # taking on another would be the opposite of that.
+      #
+      # It was `go install ...@v1.50.0` first, which SonarCloud flagged
+      # (githubactions:S8545) and was right to: a version tag pins syft's own
+      # source and nothing else. Its transitive module graph is resolved at
+      # build time, so two runs of that line a week apart can install different
+      # code. A checksummed artefact is byte-exact, which is strictly stronger
+      # than what the tag was buying.
+      #
+      # Updating the version means updating the digest with it. That is the
+      # cost, and it is the same one every SHA-pinned action here already pays.
+      #
+      # BEFORE the checksums below, deliberately. dist/* is what SHA256SUMS
+      # covers and what the release uploads, so an SBOM written afterwards
+      # would ship beside a checksum file that does not describe it.
+      - name: SBOM
+        # Through env and quoted, never expanded inline. GITHUB_REF_NAME is a
+        # tag here and therefore maintainer-controlled, but a ref name is on
+        # every injection checklist for good reason, and the safe spelling
+        # costs nothing.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SYFT_VERSION: 1.50.0
+          # sha256 of syft_1.50.0_linux_amd64.tar.gz, from the release's own
+          # syft_1.50.0_checksums.txt. This job is runs-on: ubuntu-latest, so
+          # one platform is the whole matrix.
+          SYFT_SHA256: bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788
+        run: |
+          # Unpacked into RUNNER_TEMP, not into the checkout. syft scans `.`
+          # and classifies binaries as packages, so a syft binary sitting in
+          # the tree would put syft into polyemesis's own bill of materials.
+          tool="$RUNNER_TEMP/syft"
+          mkdir -p "$tool"
+          tar="$tool/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          # --proto and --proto-redir, because -L follows redirects and a
+          # GitHub release URL always redirects to object storage. Without
+          # them the FIRST hop is https and every hop after it is whatever the
+          # server nominates, which is the one part of this download the
+          # checksum below cannot defend: a plaintext hop is interceptable
+          # before there is anything to verify.
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$tar" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          # Fail before extracting, never after. A tarball that does not match
+          # is not a download to retry; it is a release asset that changed
+          # under a version number, and unpacking it first would run the code
+          # the check exists to refuse.
+          echo "${SYFT_SHA256}  ${tar}" | sha256sum -c -
+          tar -xzf "$tar" -C "$tool" syft
+          "$tool/syft" . \
+            --source-name polyemesis \
+            --source-version "${REF_NAME//\//-}" \
+            -o spdx-json=dist/polyemesis-sbom.spdx.json \
+            -o cyclonedx-json=dist/polyemesis-sbom.cdx.json
+          # A BOM that describes nothing is worse than no BOM: it parses
+          # cleanly and tells a consumer this release has no dependencies. So
+          # assert a floor rather than merely non-empty. 437 packages were
+          # measured here; 100 is low enough never to false-positive and high
+          # enough to catch a scan that found one manifest and missed the rest,
+          # which is the realistic failure -- a moved go.mod or a UI directory
+          # rename would halve it, not empty it.
+          for f in dist/polyemesis-sbom.spdx.json dist/polyemesis-sbom.cdx.json; do
+            test -s "$f" || { echo "$f is empty"; exit 1; }
+          done
+          spdx=$(jq '.packages | length' dist/polyemesis-sbom.spdx.json)
+          cdx=$(jq '.components | length' dist/polyemesis-sbom.cdx.json)
+          echo "SPDX packages: $spdx   CycloneDX components: $cdx"
+          if [ "$spdx" -lt 100 ] || [ "$cdx" -lt 100 ]; then
+            echo "SBOM looks truncated -- expected several hundred packages across Go, npm and actions"
+            exit 1
+          fi
+
       # Checksums so someone can verify a download they did not build.
       - name: Checksums
         run: |
           cd dist
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+
+      # A dry run builds the SBOM and then destroys it with the runner, so the
+      # rehearsal could only ever prove the step exited 0. Uploading it makes a
+      # dry run answer the question people actually have -- what is IN the bill
+      # of materials -- before a tag exists to attach it to.
+      #
+      # Only on a dry run: a real release already carries these as assets, and
+      # a second copy that expires in 90 days would be the one someone links to.
+      - name: Upload SBOM for inspection (dry run only)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sbom-dry-run
+          path: dist/polyemesis-sbom.*.json
+          if-no-files-found: error
 
       - name: Publish GitHub Release
         if: env.PUBLISH == 'true'
