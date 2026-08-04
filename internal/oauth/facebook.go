@@ -686,13 +686,12 @@ func (f *Facebook) MetadataCaps() MetadataCaps {
 		//
 		// FieldPrivacy is deliberately absent, unlike YouTube and Twitch's
 		// compliance fields: this list describes what the composer's
-		// PushMetadata call can accept, oauth.Metadata carries no Privacy field
-		// for it to accept, and Facebook has no PushCompliance method for the
-		// composer to call either. Privacy is create-time-only -- see
-		// IngestOptions and the destination dialog's Audience control -- and the
-		// one method that CAN change it after the fact, UpdateLiveVideoPrivacy,
-		// has no caller yet. Advertising the field here would claim a composer
-		// control that does not exist.
+		// PushMetadata call can accept, and oauth.Metadata carries no Privacy
+		// field for it to accept. Privacy is pushed through PushCompliance
+		// instead -- see compliance.go -- a separate capability on purpose, so a
+		// field that must never be sent by accident is never reachable through
+		// the everyday metadata control. Advertising it here would claim a
+		// composer control that does not exist.
 		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags},
 		// Both limits are left at zero — "no published limit". Meta documents no
 		// maximum for either field, and inventing one would reject a title the
@@ -874,6 +873,31 @@ func (f *Facebook) UpdateLiveVideoPrivacy(ctx context.Context, clientID, accessT
 			confirm.Privacy.Value, p))
 	}
 	return res, nil
+}
+
+// PushCompliance writes Facebook's privacy audience to a broadcast already
+// live.
+//
+// This is the only compliance field Facebook has, and it goes through the
+// confirmed path -- UpdateLiveVideoPrivacy -- rather than a second, unconfirmed
+// one: Graph documents no update surface for LiveVideo at all, so a claim of
+// Applied that was not read back would tell an operator their broadcast is
+// friends-only while it is public.
+func (f *Facebook) PushCompliance(ctx context.Context, clientID, accessToken string, tgt ComplianceTarget, c db.Compliance) (*MetadataResult, error) {
+	if c.FacebookPrivacy == db.FBPrivacyUnchanged {
+		return &MetadataResult{}, nil
+	}
+	id := FacebookLiveVideoID(tgt.StreamKey)
+	if id == "" {
+		// Never an error: a destination whose stream key was typed by hand, or
+		// has not gone live since this existed, legitimately has no Facebook
+		// broadcast id recorded.
+		return &MetadataResult{
+			Skipped:  []MetadataField{FieldPrivacy},
+			Warnings: []string{"this destination has no Facebook broadcast recorded, so its privacy could not be changed"},
+		}, nil
+	}
+	return f.UpdateLiveVideoPrivacy(ctx, clientID, accessToken, tgt.AccountRef, id, c.FacebookPrivacy)
 }
 
 func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string, m Metadata, res *MetadataResult) error {

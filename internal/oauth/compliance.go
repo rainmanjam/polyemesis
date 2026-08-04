@@ -38,6 +38,44 @@ func twitchLabelPayload(labels map[string]bool) []map[string]any {
 	return out
 }
 
+// ComplianceTarget is what a compliance write needs BESIDES the token, which
+// differs per platform -- which is why this is a struct rather than three more
+// parameters that two of the three implementations would ignore.
+type ComplianceTarget struct {
+	// AccountRef is the channel id recorded when the account was connected.
+	// Twitch needs it. YouTube ignores it, because the Live Streaming API
+	// scopes every call to the authenticated channel.
+	AccountRef string
+	// StreamKey is the DESTINATION's, and only Facebook uses it: its live
+	// video id is recoverable from the stored key, and privacy belongs to that
+	// broadcast rather than to the account.
+	StreamKey string
+}
+
+// CompliancePusher writes the obligation metadata -- the fields db.Compliance
+// documents as "not a nicety".
+//
+// A capability rather than a method on every provider, for the reason
+// MetadataPusher is one: Kick has no compliance surface at all, and a stub
+// whose only behaviour is to refuse is worse than an absence a caller handles
+// once.
+type CompliancePusher interface {
+	Provider
+	PushCompliance(ctx context.Context, clientID, accessToken string,
+		tgt ComplianceTarget, c db.Compliance) (*MetadataResult, error)
+}
+
+// ComplianceFor returns the capability, or false when a platform has none.
+// Discover it here; never type-assert at a call site.
+func ComplianceFor(p db.Platform) (CompliancePusher, bool) {
+	pr, ok := Providers()[p]
+	if !ok {
+		return nil, false
+	}
+	cp, ok := pr.(CompliancePusher)
+	return cp, ok
+}
+
 // PushCompliance writes YouTube's privacy status and COPPA declaration.
 //
 // Two calls, to two different endpoints, because YouTube puts them in two
@@ -49,7 +87,10 @@ func twitchLabelPayload(labels map[string]bool) []map[string]any {
 //     exists it has to go through videos.update against the broadcast id.
 //     Anyone who assumes symmetry here writes a call that returns 200 and
 //     changes nothing.
-func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken string, c db.Compliance) (*MetadataResult, error) {
+//
+// tgt is unused: the Live Streaming API scopes every call to the token's own
+// channel, so there is nothing in it for YouTube to address.
+func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken string, tgt ComplianceTarget, c db.Compliance) (*MetadataResult, error) {
 	if c.Empty() {
 		return &MetadataResult{}, nil
 	}
@@ -97,11 +138,11 @@ func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken stri
 }
 
 // PushCompliance writes Twitch's content classification labels.
-func (t *Twitch) PushCompliance(ctx context.Context, clientID, accessToken, accountRef string, c db.Compliance) (*MetadataResult, error) {
+func (t *Twitch) PushCompliance(ctx context.Context, clientID, accessToken string, tgt ComplianceTarget, c db.Compliance) (*MetadataResult, error) {
 	if len(c.Labels) == 0 {
 		return &MetadataResult{}, nil
 	}
-	if accountRef == "" {
+	if tgt.AccountRef == "" {
 		return nil, fmt.Errorf("this Twitch account has no broadcaster id recorded; reconnect it in Settings → Platforms")
 	}
 	payload := twitchLabelPayload(c.Labels)
@@ -112,7 +153,7 @@ func (t *Twitch) PushCompliance(ctx context.Context, clientID, accessToken, acco
 	}
 
 	body := map[string]any{"content_classification_labels": payload}
-	endpoint := twitchHelixBase + "/channels?broadcaster_id=" + url.QueryEscape(accountRef)
+	endpoint := twitchHelixBase + "/channels?broadcaster_id=" + url.QueryEscape(tgt.AccountRef)
 	if err := requestJSON(ctx, http.MethodPatch, endpoint, accessToken, body,
 		helixHeaders(clientID), nil); err != nil {
 		return nil, scopeAdvice(err, db.PlatformTwitch, t.MetadataCaps().Scope)
