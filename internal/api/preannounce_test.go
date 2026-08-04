@@ -158,6 +158,15 @@ func TestASecondSweepForTheSameOccurrenceCreatesNothing(t *testing.T) {
 		t.Fatalf("created %d broadcasts across two sweeps, want 1. At a 5-minute "+
 			"tick this is a new public Facebook event every 5 minutes.", len(rec.creates))
 	}
+	// The creates count ALONE does not catch this. Once a broadcast exists the
+	// sweep takes the reschedule branch, so removing the AnnouncedFor skip
+	// leaves creates at 1 and quietly re-POSTs the same start time to Facebook
+	// every five minutes forever. Measured: that mutation did not turn this
+	// test red until this assertion was added.
+	if len(rec.reschedules) != 0 {
+		t.Fatalf("rescheduled %d times for an occurrence already announced, want 0",
+			len(rec.reschedules))
+	}
 }
 
 // Empty DestinationIDs means every destination, and it is the commonest shape.
