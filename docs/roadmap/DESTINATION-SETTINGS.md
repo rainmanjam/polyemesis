@@ -320,8 +320,17 @@ That kills "clamp" outright. Silently moving a broadcast's start time is the
 worst option available, and it was only ever needed for a case that does not
 exist.
 
-So: **refuse a `once` schedule more than seven days out, at save time, with a
-message naming the limit.** Daily and weekly need no special handling at all.
+So: **warn on a `once` schedule more than seven days out, at save time, naming
+the limit.** Daily and weekly need no special handling at all.
+
+**This said "refuse" until the design was written, and two things changed it.**
+The schedule works either way — what the bound limits is the pre-announced event
+page, not the go-live path — so refusing a working configuration buys nothing.
+And the check cannot be made consistently: `Schedule.DestinationIDs` is empty for
+"every destination", which is what "start the show" usually means, so a
+save-time refusal cannot tell whether a Facebook destination is involved and
+would be silently stricter for schedules that name their targets than for those
+that do not.
 
 And refusing costs less than it sounds, because **the schedule still works**.
 What is bounded is only the pre-announced Facebook broadcast — a discovery
