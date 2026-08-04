@@ -141,20 +141,39 @@ checking on its own merits, separately from this work.
 
 ## What remains
 
-One item from the parts below is not built. It is named here rather than left
-for somebody to discover by grepping for a field that does not exist.
-
-**Staggered go-live shipped; this table used to list it here as still open,
-which stopped being true.** `DestinationSettings.StaggerMS` (see
-`internal/db/settings.go`) spaces out the first connection of destinations
-brought up in the same reconcile sweep — `internal/engine/engine.go`'s
-`startDestinations` applies it per destination started, not per reconnect — and
-is set per install under `Settings → Destinations`. 0, the default, is off,
-which is what every install did before the setting existed.
+**Two** items from the parts below are not built, and neither is the one this
+section used to name. Both are named here rather than left for somebody to
+discover by grepping for a field that does not exist.
 
 | Item | Part | Why it is still open |
 |---|---|---|
-| **Facebook's full metadata surface** | D | Facebook now sends `title`, `description` and `tags` on the composer push, plus `privacy`, `crossposting_actions` and `donate_button_charity_id` at create time, plus `privacy` again post-create through the compliance push. Still missing: `enable_backup_ingest`, `stop_on_delete_stream`, spatial audio, 360 projection, frame-accurate `inband_go_live`, and `event_params` scheduling — deliberately deferred as their own features, not half-built |
+| **Facebook's remaining metadata surface** | D | Facebook now sends `title`, `description` and `tags` on the composer push, `privacy`, `crossposting_actions` and `donate_button_charity_id` when the broadcast is created, and `privacy` again post-create through the compliance push. Still missing: `enable_backup_ingest`, `stop_on_delete_stream`, spatial audio, 360 projection, and `event_params` scheduling — which is bounded to seven days out and collides with weekly schedules. Deferred as their own features, not half-built |
+| **Frame-accurate go-live** | — | Not metadata, and not Part D. `inband_go_live` swaps the ingest URL and requires the encoder to inject an AMF0 `onGoLive` packet at a chosen frame — FFmpeg's RTMP muxer has no flag for it. See [Facebook and Kick](#facebook-and-kick). Judge it on its own merits; it inherited Part D's estimate by being listed in the same sentence as a set of create-time fields |
+
+**Staggered go-live was listed here and should not have been.** It shipped in
+`0c5a08d` on 2026-07-29, in the same commit as the other two Part C items and
+named in that commit's own subject line. The next day `80c512c` — a
+documentation pass titled *"say what shipped"* — introduced the claim that it
+was still open, in three places at once: this table, the Part C heading and the
+Part C table. Every reader after that trusted the roadmap over the code, which
+is what a roadmap is for and exactly why a wrong one is expensive: the next
+person to pick this up would have designed and built a feature that already
+existed.
+
+Nothing automated could have caught it. The drift guards in this repo compare
+code against code — `db.Settings` against `types.ts`, `scheduler.Action` against
+the dropdown — and no guard can check a sentence claiming a feature does not
+exist. The only defence is the one that found it: look at what the work would
+touch before deciding how to do it.
+
+**And it happened again, in miniature, two days later.** The docs pass for the
+Facebook metadata work corrected `../PLATFORMS.md` and left this table saying
+Facebook sent "title and description only" — because that task was deliberately
+scoped to one file to avoid colliding with the pull request fixing the paragraph
+above. Avoiding the conflict is what created the staleness. The rule that keeps
+surviving contact is the one that task's own brief carried and its scope then
+prevented: read every document that describes the thing, not the one you are
+editing.
 
 Also deferred as a separate feature: **per-destination stored broadcast
 defaults**, so a destination remembers its own title and category rather than the
@@ -225,7 +244,7 @@ change to the matrix, and that is a different feature.
 |---|---|---|
 | Per-destination reconnect policy | One global `reconnectDelayMaxSeconds`, and it was for **pull ingest**, not destinations | `DestResilience.MinBackoffSeconds`/`MaxBackoffSeconds`, per destination |
 | Give-up threshold plus alert | Retried indefinitely; a destination retrying forever looked identical to one that works | `GiveUpAfter`, counted on **consecutive** failures so a destination that reconnects hourly for a week never accumulates its way to the limit |
-| Staggered go-live | All destinations connect at once, spiking CPU and upstream | `DestinationSettings.StaggerMS`, spacing the first connection of destinations started in the same reconcile sweep; 0 is off, and a reconnect is never delayed |
+| Staggered go-live | All destinations connect at once, spiking CPU and upstream | `Destinations.StaggerMS`, install-wide, 0 to disable and capped at 5 s. Counted per process actually started, so a sweep that starts one destination beside seven healthy ones does not make it wait seven slots — and it never delays a RECONNECT, because a destination that drops at 3 am has to come back immediately rather than queue behind processes that are fine |
 
 ## Part D — Metadata (~7–12 days, and the real gap)
 
@@ -273,10 +292,55 @@ which polyemesis can set.
 
 ### Facebook and Kick
 
-Facebook's surface is the largest — `content_tags`, `enable_backup_ingest`,
-`stop_on_delete_stream`, crossposting, audience targeting, spatial audio, 360
-projection, and a frame-accurate `inband_go_live`. `planned_start_time` is gone;
-scheduling now goes through `event_params`. `overlay_url` is confirmed removed.
+Facebook's surface is the largest. Re-verified against the v26.0 reference on
+2026-08-03, and the list holds — `content_tags`, `enable_backup_ingest`,
+`stop_on_delete_stream`, crossposting via `crossposting_actions` on the Page
+edge, audience targeting, spatial audio, and 360 (`is_spherical`, `projection`,
+`stereoscopic_mode`, `encoding_settings`, and the fisheye fields).
+`overlay_url` is confirmed removed for v24.0+.
+
+**Two of the things this sentence used to list are not metadata, and saying so
+is the point of this paragraph.** Both were named inline with the create-time
+fields, which is what made Part D's estimate look like one piece of work.
+
+**Scheduling is not a field.** `planned_start_time` is gone; a scheduled
+broadcast is `POST /<ID>/live_videos?status=SCHEDULED_UNPUBLISHED&event_params=
+<UNIX_TS>`, rescheduled with `POST /<LIVE_VIDEO_ID>?event_params=<UNIX_TS>`.
+**Facebook accepts a start time at most seven days out.** That bound is not
+ours to widen, and it collides with what this repo now ships: a weekly schedule
+(`internal/scheduler`, roadmap item 5C) can name a time further away than
+Facebook will take, so whatever builds this has to decide what happens then —
+refuse it, clamp it, or create the broadcast late. There is also an eligibility
+gate that has nothing to do with our code: the account must be 60+ days old and
+the Page or professional profile needs 100+ followers.
+
+**`inband_go_live` is ingest work, not metadata.** It is a nested field modifier
+on a GET whose side effect reconfigures the broadcast and returns **a different
+ingest URL**:
+
+```http
+GET /<LIVE_VIDEO_ID>?fields=secure_stream_url.inband_go_live(require_inband_signal)
+```
+
+Create with `status=PREVIEW`, issue that GET, discard the URL you were given at
+creation, stream to the new one. The broadcast becomes visible only once the
+status is `LIVE` **and** the encoder emits a go-live message inside the RTMP
+stream: an AMF0 packet (type `0x12`) carrying the string `onGoLive` and an ECMA
+array whose single pair is `timestamp` → the timestamp of the first publicly
+visible frame.
+
+So it means re-pointing a running FFmpeg output at a replacement URL and
+injecting a hand-built AMF0 packet at a chosen frame, which FFmpeg's RTMP muxer
+has no flag for. Different layer, different risk, and it should be judged on its
+own rather than inheriting a metadata estimate.
+
+It is also the one field here that the Graph API **reference** does not document
+at all — it appears in none of the User, Page or Group `live_videos` parameter
+tables, only in the [Broadcasting
+guide](https://developers.facebook.com/docs/live-video-api/guides/streaming/)
+under "Frame-Accurate Go-Live". Meta's own `LiveVideo` node reference currently
+404s. Verifying it meant reading the guide, not the reference, which is why it
+survived this long as a one-word claim.
 
 **Kick's entire metadata surface is three fields** — `stream_title`,
 `category_id`, `custom_tags` — via `PATCH /public/v1/channels`. No description,
