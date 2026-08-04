@@ -308,7 +308,19 @@ func TestARetractedMessageLeavesTheHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitFor(t, "the retraction to apply", func() bool { return len(h.History(0)) == 2 })
+	// Waited on the RETRACTION COUNTER, not on the history length, and the
+	// difference is a test that failed about one run in fifteen on main.
+	//
+	// History passes THROUGH length 2 on its way to the answer: keep-1 and gone
+	// are delivered before keep-2 is, so a poll landing in that gap sees the
+	// length it was told to wait for and returns with [keep-1 gone] -- which is
+	// verbatim the reported failure. The observable did not distinguish "not
+	// finished yet" from "finished".
+	//
+	// retracted is incremented inside the same critical section that rebuilds
+	// the history, and both History and Stats take that lock, so this becomes
+	// true at exactly the moment the history is correct and never before.
+	waitFor(t, "the retraction to apply", func() bool { return h.Stats().Retracted == 1 })
 
 	var ids []string
 	for _, m := range h.History(0) {
@@ -345,8 +357,13 @@ func TestRetractingAUserClearsOnlyThatAuthor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitFor(t, "the timeout to apply", func() bool { return len(h.History(0)) == 2 })
-	time.Sleep(20 * time.Millisecond)
+	// The counter again, not the length, and for the same reason as the test
+	// above: history is [a1 b1] on its way to [a1 a2], so a poll waiting for
+	// length 2 can land on the pair that still holds the timed-out author.
+	// A 20ms sleep used to sit here covering that gap, which is what kept this
+	// one from failing as often as its neighbour rather than what made it
+	// correct.
+	waitFor(t, "the timeout to apply", func() bool { return h.Stats().Retracted == 2 })
 
 	for _, m := range h.History(0) {
 		if m.Author.ID == "99" {
@@ -379,7 +396,15 @@ func TestRetractingAnEmptyUserClearsTheRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitFor(t, "the room to clear", func() bool { return len(h.History(0)) == 0 })
+	// NOT len(History) == 0, which is true before the adapter has delivered
+	// anything at all -- the room starts empty. That wait could return on the
+	// first poll and the test would pass whether or not the retraction ever
+	// happened, which is a worse failure than a flake: it is a guard that
+	// cannot go red.
+	waitFor(t, "the room to clear", func() bool { return h.Stats().Retracted == 2 })
+	if n := len(h.History(0)); n != 0 {
+		t.Fatalf("history holds %d message(s); an empty author id clears the room", n)
+	}
 }
 
 // A retraction naming a message from a DIFFERENT platform must not touch ours.
