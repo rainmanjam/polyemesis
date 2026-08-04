@@ -975,6 +975,109 @@ git commit -m "feat(facebook): tag words become content tags, and say so when th
 
 ---
 
+### Task 4b: An operator can actually type the tags
+
+**Added after Task 4 shipped**, because Task 4 built the whole resolution path
+and left it unreachable: the composer's push body is `{title, description,
+category, broadcast}` and there is no tags input anywhere. `Metadata.Tags` can
+only ever be empty in production.
+
+That is roadmap item 0's class exactly — a feature no operator can reach — and
+it is a planning omission, not an implementer's: the spec puts tags in the
+composer and the plan's File Structure never listed the composer.
+
+**Note why nothing caught it.** `MetaField` already carried `"tags"` from an
+earlier unrelated task, so `TestUITypesCanNameEveryMetadataField` passed
+throughout. That guard proves the UI can NAME a field arriving in a push
+RESULT; it says nothing about whether an operator can SET one. Same asymmetry
+`internal/scheduler/action_drift_test.go` documents for schedule actions.
+
+**Files:**
+- Modify: `ui/src/pages/Dashboard.tsx` (the composer state, the input, and the
+  push body around `metaFetch<MetaJob>("/metadata/push", …)`)
+- Test: `internal/oauth/facebook_test.go` or a sibling drift test
+
+**Interfaces:**
+- Consumes: `Metadata.Tags []string` from Task 4.
+- Produces: nothing Go-side.
+
+- [ ] **Step 1: Write the failing guard**
+
+A drift guard in the shape `internal/scheduler/action_drift_test.go` established
+— read that file first, including its limitation note, and copy the reasoning
+rather than only the code:
+
+```go
+// The composer must be able to SEND tags, not merely render them back.
+//
+// TestUITypesCanNameEveryMetadataField walks the field NAMES a push result can
+// carry, and MetaField already listed "tags" before anything could set one --
+// so that guard was green while the feature was unreachable. Naming a field in
+// a result and offering an operator a way to fill it are different claims, and
+// only the second one is what makes a feature exist.
+//
+// Matches the push body specifically, not the file: "tags" appears in
+// Dashboard.tsx for unrelated reasons, so a whole-file search would pass on a
+// composer that still cannot send them.
+func TestTheComposerCanSendFacebookTags(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "pages", "Dashboard.tsx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	src := string(raw)
+	body := strings.Index(src, `metaFetch<MetaJob>("/metadata/push"`)
+	if body < 0 {
+		t.Fatal("cannot find the metadata push call in Dashboard.tsx; this guard " +
+			"is no longer looking where the push body lives, so it asserts nothing")
+	}
+	window := src[body:min(body+400, len(src))]
+	if !strings.Contains(window, "tags") {
+		t.Error("the composer's push body carries no tags field, so Metadata.Tags " +
+			"is always empty in production and every line of tag resolution is " +
+			"unreachable. Add it to the body and give the operator an input.")
+	}
+}
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `go test ./internal/oauth/ -run TestTheComposerCanSendFacebookTags -v`
+Expected: FAIL naming the missing tags field.
+
+- [ ] **Step 3: Add the input and send it**
+
+In `ui/src/pages/Dashboard.tsx`: a `tags` state beside `title`/`description`/
+`category`, an input in the same group as those three, and `tags` in the push
+body. Split the typed value on commas, trim each, and drop empties — the server
+trims too, but sending `["", "cooking"]` would make the resolver search for
+nothing.
+
+Gate the input on the same capability signal the other fields use, so it appears
+only where the platform accepts tags. Read how `category` decides to render
+before choosing the mechanism.
+
+- [ ] **Step 4: Run the guard and the UI gates**
+
+Run: `go test ./internal/oauth/ -run TestTheComposerCanSendFacebookTags -v`,
+then `cd ui && npx tsc --noEmit && npx oxlint`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/src/pages/Dashboard.tsx internal/oauth/
+git commit -m "feat(ui): the operator can type the tags Facebook resolves"
+```
+
+- [ ] **Step 6: Prove the guard can fail**
+
+Remove `tags` from the push body only, leaving the input in place → the guard
+must fail. That is the mutation that matters: an input the operator can type
+into whose value never leaves the browser is the same unreachable feature with
+a better disguise.
+
+---
+
 ### Task 5: Best-effort privacy on the push
 
 **Files:**
