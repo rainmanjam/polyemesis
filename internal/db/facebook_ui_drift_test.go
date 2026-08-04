@@ -102,11 +102,15 @@ func TestTheCardShowsTheBackupFeedsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read %s: %v", path, err)
 	}
-	if !strings.Contains(string(raw), "dest.backupProcess") {
+	// The whole CONDITION, not just the field name. Matching "dest.backupProcess"
+	// alone is satisfied by the reference inside the block, so replacing the
+	// guard with `{false && (` left it green -- measured. A guard that survives
+	// the render being switched off is not watching the render.
+	if !strings.Contains(string(raw), "{dest.backupProcess && (") {
 		t.Error("the card does not render the backup feed's state, so a backup " +
 			"that has been dead for an hour looks identical to a healthy one.")
 	}
-	if !strings.Contains(string(raw), "dest.backupError") {
+	if !strings.Contains(string(raw), "{dest.backupError && (") {
 		t.Error("the card does not render why a requested backup is missing, so " +
 			"an operator who enabled redundancy and did not get it is never told.")
 	}
