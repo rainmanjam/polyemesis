@@ -1275,6 +1275,110 @@ git commit -m "feat(facebook): privacy can be changed, and only claimed when con
 
 ---
 
+### Task 5b: An operator can actually choose the privacy
+
+**Added after Task 5 shipped**, for the same reason Task 4b was: the whole
+privacy path is built and nothing can reach it. `facebookPrivacy` appears in
+`ui/src/lib/types.ts` and in **no UI component at all**. `DestinationDialog.tsx`
+renders the compliance block behind
+`platform === "youtube" || platform === "twitch"`, so a Facebook destination
+never shows it, and `Compliance.FacebookPrivacy` can only ever be empty.
+
+**Second unreachable feature in this sub-project, and the guard was green for
+both.** `TestUITypesCanNameEveryDestinationField` is satisfied by the field
+existing in `types.ts` — which is exactly the limitation
+`internal/scheduler/action_drift_test.go` documents: the type is what the code
+compiles against, the control is what a human can click, and only the second
+makes a feature exist.
+
+**Files:**
+- Modify: `ui/src/components/DestinationDialog.tsx`
+- Test: `internal/db/compliance_drift_test.go` (new)
+
+**Interfaces:**
+- Consumes: `db.FacebookPrivacy` values from Task 1.
+- Produces: nothing Go-side beyond the guard.
+
+- [ ] **Step 1: Write the failing guard**
+
+New file `internal/db/compliance_drift_test.go`, in the shape
+`internal/scheduler/action_drift_test.go` established — read that file first,
+including its limitation note:
+
+```go
+// Every Facebook privacy value must be offered by the destination editor.
+//
+// This exists because the feature shipped unreachable once already: the whole
+// create-time and push path was built while facebookPrivacy appeared only in
+// types.ts, and TestUITypesCanNameEveryDestinationField was green throughout
+// because naming a field is all it asks for. Declaring a type is what the code
+// compiles against; a SelectItem is what a human can click.
+//
+// It matches `<SelectItem value="...">` rather than searching the file, because
+// these values appear in types.ts and in comments for unrelated reasons, and a
+// whole-file search would pass on an editor that still offered nothing.
+func TestEveryFacebookPrivacyIsOfferedByTheDestinationEditor(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "components", "DestinationDialog.tsx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	src := string(raw)
+	for _, p := range FacebookPrivacies {
+		option := `<SelectItem value="` + string(p) + `">`
+		if !strings.Contains(src, option) {
+			t.Errorf("no %s in DestinationDialog.tsx. A privacy an operator cannot "+
+				"choose is a setting that can only ever be empty, and every line of "+
+				"Facebook privacy handling behind it is unreachable.", option)
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `go test ./internal/db/ -run TestEveryFacebookPrivacyIsOffered -v`
+Expected: FAIL, naming all four missing options.
+
+- [ ] **Step 3: Add the control**
+
+In `DestinationDialog.tsx`, extend the compliance block's gate to include
+`"facebook"`, and add a Facebook visibility `Select` in the same shape as the
+YouTube one, with `unset` first meaning "leave it as it is" and then the four
+values **least exposure first**: `SELF`, `ALL_FRIENDS`, `FRIENDS_OF_FRIENDS`,
+`EVERYONE`. Label them in the operator's words — "Only me", "Friends",
+"Friends of friends", "Public" — while the `value` attributes carry Facebook's
+own strings, which is what the guard and the server both read.
+
+The hint text must say the two things an operator cannot discover by looking:
+this is applied when the broadcast is CREATED, so changing it later applies to
+the next one; and **a Page broadcast is public regardless** — Facebook has no
+personal audience for a Page, so this setting applies to profile broadcasts
+only.
+
+The existing block's copy is the model for tone: it explains what "unset" means
+and why leaving it alone is the safe default.
+
+- [ ] **Step 4: Run the guard and the UI gates**
+
+Run: `go test ./internal/db/ -run TestEveryFacebookPrivacyIsOffered -v`, then
+`cd ui && npx tsc --noEmit && npx oxlint`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/src/components/DestinationDialog.tsx internal/db/compliance_drift_test.go
+git commit -m "feat(ui): the operator can choose a Facebook destination's audience"
+```
+
+- [ ] **Step 6: Prove the guard can fail**
+
+Delete the `FRIENDS_OF_FRIENDS` option only, leaving the other three → the guard
+must fail naming that one. Removing a single value is the realistic regression;
+removing the whole control is the one nobody makes.
+
+---
+
 ### Task 6: Say what changed, where an operator meets it
 
 **Files:**
