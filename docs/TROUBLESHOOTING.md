@@ -68,35 +68,43 @@ pgrep -af ffmpeg
 5. **Are you on macOS with a bare `:port`?** See directly below — this one looks
    exactly like a firewall and is not one.
 
-### macOS: an IPv4 publisher times out and nothing is logged
+### macOS: an IPv4 publisher times out and nothing is logged — FIXED
 
-The distinguishing symptom is the **silence**. Every refusal polyemesis makes is
-typed and logged, so a publisher that fails with an `I/O error` while the server
-log says nothing at all did not reach the handshake — no refusal was made,
-because no connection was ever offered.
+**This no longer happens.** It is kept here because the symptom was distinctive
+and someone running an older build will still meet it.
 
-On macOS a bare `:6000` accepts **IPv6 publishers only**. The datagrams from an
-IPv4 caller do arrive — a plain listener on the same address receives them — but
-the SRT handshake never completes. Measured against gosrt v0.11.0 on GitHub's
-hosted runners, so this is not one machine's firewall:
+The distinguishing symptom was the **silence**. Every refusal polyemesis makes is
+typed and logged, so a publisher failing with an `I/O error` while the server log
+said nothing at all had not reached the handshake — no refusal was made, because
+no connection was ever offered.
 
-| Listen address | Caller | Linux | macOS |
+On macOS a bare `:6000` accepted **IPv6 publishers only**. Datagrams from an IPv4
+caller arrived — a plain listener on the same address received them — but the SRT
+handshake never completed:
+
+| Listen address | Caller | Linux | macOS (before the fix) |
 |---|---|---|---|
 | `:6000` | IPv4 | ok | **times out** |
 | `:6000` | IPv6 | ok | ok |
 | `0.0.0.0:6000` | IPv4 | ok | ok |
 | `127.0.0.1:6000` | IPv4 | ok | ok |
 
-**The fix is to bind `0.0.0.0:6000`**, or to publish over IPv6. The server prints
-this warning at startup on macOS when the address is a bare `:port`, so it is
-worth scrolling back to the first few lines of the log.
+The cause is upstream, in `datarhei/gosrt`: a reply to a v4-mapped peer goes out
+through `golang.org/x/net`'s `ipv4.PacketConn` carrying an IPv4 control message
+on an `AF_INET6` socket, Darwin rejects that combination with
+`sendmsg: invalid argument`, and `packetConn.writeToFrom` has no error return —
+so the failure is discarded. Reported as
+[datarhei/gosrt#148](https://github.com/datarhei/gosrt/issues/148).
 
-**Linux is unaffected in every case**, which is what the container images and
-every documented deployment run. The default is deliberately not changed to
-`0.0.0.0`: that binds IPv4 only, which would silently drop IPv6 publishers on the
-platform that actually ships, to fix one where the problem is a development
-inconvenience. Tracked in [issue #28](https://github.com/rainmanjam/polyemesis/issues/28);
-the underlying behaviour is upstream in `datarhei/gosrt`, not in polyemesis.
+**polyemesis no longer takes that path.** gosrt chooses its network from the
+address it is given — an empty host becomes a dual-stack `udp`, a v4 literal
+becomes `udp4`, a v6 literal becomes `udp6` — and only the first is affected. So
+a wildcard address now binds `0.0.0.0` and `::` as two separate listeners, which
+between them accept both families on every platform. Two sockets can share the
+port because Go sets `IPV6_V6ONLY` on the `udp6` network.
+
+If one family cannot be bound — a host with IPv6 disabled, say — the other still
+serves and the reason is logged. Only losing both is fatal.
 
 ### The publisher is refused
 
