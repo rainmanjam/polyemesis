@@ -122,17 +122,29 @@ func TestUpdatingADestinationKeepsItsBackupEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDestination: %v", err)
 	}
+	// The endpoint is CHANGED, not just carried. Asserting that an unrelated
+	// edit leaves it intact cannot catch a broken UPDATE: the row still holds
+	// whatever the INSERT put there, which is the right answer for the wrong
+	// reason. Measured -- a mutation dropping backup_url from the UPDATE left
+	// that version of this test green.
 	created.Name = "renamed"
+	created.BackupURL = "rtmps://backup2.example/rtmp"
+	created.BackupStreamKey = "rotated-backup-key"
+	created.Facebook.BackupIngest = false
 	if _, err := d.UpdateDestination(created); err != nil {
 		t.Fatalf("UpdateDestination: %v", err)
 	}
 	got, _ := d.GetDestination(created.ID)
-	if got.BackupURL == "" || got.BackupStreamKey == "" {
-		t.Fatalf("an unrelated edit erased the backup endpoint: %q / %q",
-			got.BackupURL, got.BackupStreamKey)
+	if got.BackupURL != "rtmps://backup2.example/rtmp" {
+		t.Errorf("BackupURL = %q, want the updated value; the UPDATE does not carry it",
+			got.BackupURL)
 	}
-	if !got.Facebook.BackupIngest {
-		t.Error("an unrelated edit cleared the toggle")
+	if got.BackupStreamKey != "rotated-backup-key" {
+		t.Errorf("BackupStreamKey = %q, want the rotated key; a key rotation would "+
+			"be accepted and silently discarded", got.BackupStreamKey)
+	}
+	if got.Facebook.BackupIngest {
+		t.Error("turning the toggle off did not persist")
 	}
 }
 
