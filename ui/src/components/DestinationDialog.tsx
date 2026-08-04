@@ -1118,7 +1118,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           </div>
 
-          {(platform === "youtube" || platform === "twitch") && (
+          {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
               <p className="text-xs font-medium">Compliance</p>
               <span className="text-[10px] text-muted-foreground">
@@ -1217,6 +1217,39 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     Twitch requires these for mature games, sexual themes, drugs, gambling and
                     graphic violence. "Mature game" is not here because Twitch derives it from the
                     category and refuses to let anything set it.
+                  </span>
+                </div>
+              )}
+
+              {platform === "facebook" && (
+                <div className="flex flex-col gap-1">
+                  <Label>Audience</Label>
+                  <Select
+                    value={compliance.facebookPrivacy || "unset"}
+                    onValueChange={(v) =>
+                      setCompliance({
+                        ...compliance,
+                        facebookPrivacy: v === "unset" ? "" : v,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unset">Leave as it is on Facebook</SelectItem>
+                      <SelectItem value="SELF">Only me</SelectItem>
+                      <SelectItem value="ALL_FRIENDS">Friends</SelectItem>
+                      <SelectItem value="FRIENDS_OF_FRIENDS">Friends of friends</SelectItem>
+                      <SelectItem value="EVERYONE">Public</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-[10px] text-muted-foreground">
+                    Applied when the broadcast is CREATED, not while it airs &mdash; changing this
+                    afterwards takes effect on the next broadcast, not the current one. It also
+                    only applies to a profile broadcast: a Page has no personal audience for
+                    Facebook to restrict to, so a Page broadcast is public regardless of what you
+                    pick here.
                   </span>
                 </div>
               )}
