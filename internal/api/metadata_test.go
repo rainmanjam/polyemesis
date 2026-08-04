@@ -1492,3 +1492,75 @@ func TestADestinationWithNoAccountIsIgnored(t *testing.T) {
 		t.Errorf("got conflicts %v, want none: a destination with no account has nothing to conflict with", conflicts)
 	}
 }
+
+// A push carrying nothing typed, against a destination that carries stored
+// compliance, is accepted rather than refused.
+//
+// The gate used to answer "is there anything to do" before the targets were
+// known, so it could only see the composer. Once compliance started being
+// pushed that answer went wrong in the worst direction: an operator correcting a
+// COPPA declaration -- a legal obligation, set on the destination and not
+// expressible in the composer at all -- was told to enter a title first, and the
+// 400 said nothing would happen while something would.
+//
+// Mutation: restore `if meta.Empty() && req.Broadcast.Empty()` ahead of target
+// resolution, or drop the `!anyCompliance(targets)` clause. Either makes this
+// fail with a 400.
+func TestACompliancePushNeedsNothingTypedInTheComposer(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	kids := true
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://a.example/live", StreamKey: "sk-live-1", AccountID: &acctID,
+		Compliance: db.Compliance{MadeForKids: &kids},
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	called := false
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		called = true
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldMadeForKids}}, nil
+	}
+
+	// Deliberately empty: no title, no description, no category, no broadcast.
+	pushAndSettle(t, h, sign, map[string]any{})
+	if !called {
+		t.Fatal("an empty composer refused a push whose whole purpose was applying a " +
+			"stored COPPA declaration; the operator has no other way to send it")
+	}
+}
+
+// And the refusal still happens when there is genuinely nothing to do, so the
+// clause above did not simply open the gate.
+//
+// Mutation: make anyCompliance always return true. This then fails.
+func TestAnEmptyComposerWithNoStoredComplianceIsStillRefused(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://a.example/live", StreamKey: "sk-live-1", AccountID: &acctID,
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/metadata/push", map[string]any{})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: a push with nothing typed and nothing stored "+
+			"has no work to do and should say so (body %s)", w.Code, w.Body.String())
+	}
+}
