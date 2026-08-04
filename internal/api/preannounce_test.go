@@ -457,3 +457,114 @@ func TestTheScheduledPathAsksForBackupIngestWhenEnabled(t *testing.T) {
 			"never asked for a backup endpoint")
 	}
 }
+
+// Issue #82: an operator deleted the scheduled video on Facebook, so the
+// reschedule refuses forever and the event page never comes back.
+//
+// Solved by COUNTING rather than by reading the error. Telling "deleted" from
+// "network blip" needs Graph's error codes for a deleted LiveVideo, and Graph
+// documents no update surface for LiveVideo at all -- so there is nothing
+// authoritative to match. Guessing wrong one way orphans a live event page;
+// wrong the other way creates a duplicate people are also subscribed to.
+func TestABroadcastThatWillNotMoveIsEventuallyReplaced(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	now := time.Now()
+	seedStartSchedule(t, store, scheduler.KindWeekly, now.Add(24*time.Hour), d.ID)
+
+	// First sweep creates it.
+	s.preannounceOnce(context.Background(), now)
+	if got, _ := store.GetDestination(d.ID); got.Facebook.BroadcastID != "777" {
+		t.Fatalf("setup: no broadcast was created")
+	}
+
+	// Now every reschedule refuses, as a deleted video does.
+	rec.err = errors.New("(#100) Object does not exist")
+	for i := 1; i <= staleBroadcastAfter; i++ {
+		s.preannounceOnce(context.Background(), now.Add(time.Duration(7*i)*24*time.Hour))
+	}
+
+	got, _ := store.GetDestination(d.ID)
+	if got.Facebook.BroadcastID != "" {
+		t.Fatalf("after %d consecutive refusals the marker still names a broadcast "+
+			"that will not move, so no fresh event page is ever created",
+			staleBroadcastAfter)
+	}
+	if !got.Facebook.ScheduledFor.IsZero() {
+		t.Error("the occurrence marker survived, so the next sweep would treat " +
+			"this occurrence as already announced")
+	}
+}
+
+// The half that stops the cure being worse than the disease. ONE failure must
+// never clear the marker: a transient error would then orphan a perfectly good
+// event page and create a duplicate beside it.
+func TestASingleFailedRescheduleChangesNothing(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	now := time.Now()
+	seedStartSchedule(t, store, scheduler.KindWeekly, now.Add(24*time.Hour), d.ID)
+	s.preannounceOnce(context.Background(), now)
+
+	rec.err = errors.New("dial tcp: i/o timeout")
+	s.preannounceOnce(context.Background(), now.Add(8*24*time.Hour))
+
+	got, _ := store.GetDestination(d.ID)
+	if got.Facebook.BroadcastID != "777" {
+		t.Fatal("one transient failure discarded the broadcast; the next sweep " +
+			"would create a second event page and orphan a live one")
+	}
+}
+
+// And the counter must be CONSECUTIVE, not cumulative -- the same distinction
+// DestResilience.GiveUpAfter draws. A destination that fails once, recovers,
+// and fails again must never accumulate its way to a verdict.
+func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	now := time.Now()
+	seedStartSchedule(t, store, scheduler.KindWeekly, now.Add(24*time.Hour), d.ID)
+	s.preannounceOnce(context.Background(), now)
+
+	// Fail, recover, fail again -- staleBroadcastAfter failures in total, but
+	// never that many in a row.
+	week := 0
+	for i := 0; i < staleBroadcastAfter; i++ {
+		rec.err = errors.New("transient")
+		week++
+		s.preannounceOnce(context.Background(), now.Add(time.Duration(7*week)*24*time.Hour))
+		rec.err = nil
+		week++
+		s.preannounceOnce(context.Background(), now.Add(time.Duration(7*week)*24*time.Hour))
+	}
+
+	// Asserted on the CREATE COUNT, not on the marker still being set.
+	//
+	// The marker cannot see this: if the count did accumulate, the marker is
+	// cleared and the very next sweep -- a successful one -- creates a fresh
+	// broadcast and puts an id straight back. Measured: the mutation that
+	// removes the reset left the marker assertion green. A second create is
+	// the thing that actually happened, and the thing that would orphan an
+	// event page in production.
+	if len(rec.creates) != 1 {
+		t.Fatalf("created %d broadcasts; %d NON-consecutive failures discarded the "+
+			"first one, so a destination that recovers between failures "+
+			"accumulated its way to a verdict", len(rec.creates), staleBroadcastAfter)
+	}
+	if got, _ := store.GetDestination(d.ID); got.Facebook.BroadcastID == "" {
+		t.Error("the broadcast marker was discarded despite the failures never " +
+			"being consecutive")
+	}
+}

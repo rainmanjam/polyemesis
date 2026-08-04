@@ -155,6 +155,14 @@ type Server struct {
 	// subscribed to, which nothing anywhere would report.
 	// Defaults to the real call; only a test ever replaces it.
 	rescheduleFn func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error
+
+	// preannounceMu guards rescheduleFails, which the pre-announce sweep
+	// mutates and nothing else reads.
+	preannounceMu sync.Mutex
+	// rescheduleFails counts CONSECUTIVE failed reschedules per destination.
+	// In memory on purpose: a restart resetting the count only means the sweep
+	// is more patient, which is the safe direction.
+	rescheduleFails map[int64]int
 }
 
 // Options configures the server.

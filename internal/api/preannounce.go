@@ -147,8 +147,10 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 		if err := s.rescheduleFn(cctx, acct, d.Facebook.BroadcastID, at); err != nil {
 			s.log.Warn("pre-announce: could not move the broadcast",
 				"destination", d.Name, "err", err)
+			s.noteRescheduleFailure(d)
 			return
 		}
+		s.clearRescheduleFailures(d.ID)
 		d.Facebook.ScheduledFor = at
 		s.saveAnnouncement(d)
 		s.log.Info("moved a scheduled Facebook broadcast",
@@ -201,6 +203,65 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 	s.saveAnnouncement(d)
 	s.log.Info("pre-announced a Facebook broadcast",
 		"destination", d.Name, "at", at, "broadcast", b.ID)
+}
+
+// staleBroadcastAfter is how many CONSECUTIVE failed reschedules mean the
+// broadcast is gone rather than unreachable.
+//
+// Consecutive, not cumulative -- the same distinction DestResilience.GiveUpAfter
+// draws and for the same reason: a destination that fails once an hour for a
+// week must never accumulate its way to a verdict.
+//
+// Three, against a five-minute sweep, is fifteen minutes of consistent refusal.
+// A network blip does not last that; a deleted video refuses forever.
+const staleBroadcastAfter = 3
+
+// noteRescheduleFailure counts a refusal and, past the threshold, concludes the
+// broadcast no longer exists.
+//
+// WHY COUNTING RATHER THAN READING THE ERROR. Issue #82 stalled on telling
+// "deleted" from "network blip", which needs Graph's error codes for a deleted
+// LiveVideo -- and Graph documents no update surface for LiveVideo at all, so
+// there is nothing authoritative to match against. Guessing a code wrong in one
+// direction orphans a live event page; wrong in the other, it creates a
+// duplicate one that people are also subscribed to.
+//
+// Counting needs no such guess. It asks a question the answer to which is
+// observable: has this failed EVERY time for long enough that "temporarily
+// unreachable" has stopped being a credible explanation.
+func (s *Server) noteRescheduleFailure(d *db.Destination) {
+	s.preannounceMu.Lock()
+	if s.rescheduleFails == nil {
+		s.rescheduleFails = map[int64]int{}
+	}
+	s.rescheduleFails[d.ID]++
+	n := s.rescheduleFails[d.ID]
+	s.preannounceMu.Unlock()
+
+	if n < staleBroadcastAfter {
+		return
+	}
+
+	// Clear the marker, not the destination. The next sweep sees no broadcast
+	// and creates a fresh one, which restores the event page. The stream was
+	// never at risk: it publishes to the stored key either way, and a key that
+	// has also stopped working is handled by the operator pressing Refresh key.
+	s.log.Warn("pre-announce: giving up on a scheduled broadcast that will not move; "+
+		"a fresh one will be created",
+		"destination", d.Name, "broadcast", d.Facebook.BroadcastID,
+		"consecutiveFailures", n)
+	d.Facebook.BroadcastID = ""
+	d.Facebook.ScheduledFor = time.Time{}
+	s.saveAnnouncement(d)
+	s.clearRescheduleFailures(d.ID)
+}
+
+// clearRescheduleFailures resets the count. Called on every success, which is
+// what makes the threshold mean "consecutive".
+func (s *Server) clearRescheduleFailures(id int64) {
+	s.preannounceMu.Lock()
+	delete(s.rescheduleFails, id)
+	s.preannounceMu.Unlock()
 }
 
 func (s *Server) saveAnnouncement(d *db.Destination) {
