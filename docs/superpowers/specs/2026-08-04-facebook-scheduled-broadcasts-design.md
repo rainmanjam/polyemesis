@@ -93,6 +93,24 @@ Once per sweep, for each enabled `ActionStart` schedule:
 4. For each that is Facebook, has a connected account, and has not already been
    pre-announced **for this occurrence**: create the broadcast.
 
+### A schedule that names nothing pre-announces everything it would start
+
+Step 3 is not a formality, because `DestinationIDs` is empty for "every
+destination" and that is the commonest shape — "start the show" usually names
+nothing. So a schedule with no targets and three Facebook destinations publishes
+three event pages.
+
+**That is deliberate, and it is not quite the no-op it looks like.** No broadcast
+is created that would not have existed anyway; what changes is *when it becomes
+visible*. A `LIVE_NOW` broadcast is invisible until bytes arrive.
+`SCHEDULED_UNPUBLISHED` is a public event page from the moment it is created —
+days early, by design, since being visible in advance is the entire feature.
+
+The alternative considered was pre-announcing only explicitly-named
+destinations, on the grounds that publishing something public should be a
+deliberate act. Rejected because it would switch the feature off for exactly the
+schedules people write.
+
 Creation calls the existing `IngestFor` with a widened `IngestOptions`. That
 struct's own comment already anticipates this:
 
@@ -143,8 +161,15 @@ Two consequences worth stating rather than discovering:
 
 - **A key written ahead of time is a key that can go stale.** If the operator
   deletes the scheduled video on Facebook, the stored key points at nothing.
-  The go-live path must treat a rejected pre-created key as "create a fresh
-  one", not as a failure — otherwise a cancelled event page breaks the stream.
+  The go-live path treats a rejected pre-created key as "create a fresh one" and
+  **says so** — the stream goes live, and the operator is told that the page
+  people were notified about is gone.
+
+  Failing loudly instead was considered and rejected: it would let a deleted
+  Facebook post take a stream off the air, which turns an optional discovery
+  feature into a single point of failure for going live. Recreating *silently*
+  was rejected for the opposite reason — the operator would never learn that
+  what was announced and what is live had diverged.
 - **Rescheduling is a real case.** Moving a schedule changes the occurrence, so
   the marker no longer matches and the sweep would create a *second* broadcast.
   When a destination already holds a pre-created broadcast for a different
@@ -178,6 +203,9 @@ Every guard proven able to fail by a named one-line mutation.
 | A non-Facebook destination on the same schedule is untouched | The rule must not widen |
 | A `once` schedule beyond seven days warns and still saves | The decision this design took against the roadmap |
 | A Graph failure leaves the schedule and the go-live path unaffected | Best-effort has to be provably best-effort |
+| A schedule with NO explicit destinations pre-announces every Facebook one it would start | Empty means all, and it is the commonest shape; a rule that quietly skipped it would switch the feature off for most installs |
+| A rejected pre-created key produces a live stream AND a warning | Both halves. Live-but-silent and warned-but-dead are each half a pass |
+| The destination card links to the scheduled broadcast when one exists | Watches the RENDERED link, not the stored field. A field that exists and is never rendered is the defect this repo has shipped twice |
 
 The last row and the fifth are the two to write first: they are the ones whose
 absence would let this feature break streaming rather than merely fail to
@@ -191,5 +219,16 @@ pre-announce.
   What is out is any attempt to pre-announce *beyond* the bound.
 - **`enable_backup_ingest`, `stop_on_delete_stream`, spatial audio, 360.** Part
   F, ingest-shaped.
-- **Surfacing the event page URL in the UI.** Worth having; not needed for the
-  broadcast to exist.
+
+## The event page has to be findable
+
+Creating a public page on an operator's behalf and giving them no way to reach
+it is half a feature. The destination card carries a link to the scheduled
+broadcast whenever one exists.
+
+No new API work: the create response already returns the id, and
+`FacebookLiveVideoID` already recovers it from the stored key. This is a stored
+field and an anchor.
+
+It also makes the stale-key case legible. When the link 404s, the operator can
+see for themselves what the warning is talking about.
