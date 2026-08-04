@@ -28,6 +28,7 @@
 |---|---|
 | `internal/oauth/facebook.go` | `IngestOptions.ScheduledFor`; the `SCHEDULED_UNPUBLISHED` branch in `IngestFor`; `RescheduleBroadcast` |
 | `internal/db/facebook.go` | `FacebookSettings.ScheduledFor` and `.BroadcastID` — the marker and the link target |
+| `internal/api/api.go` | `rescheduleFn`, a fifth test seam beside the four that exist, because `fbGraphBase` is private to `internal/oauth` |
 | `internal/api/preannounce.go` | **New.** The sweep: schedules → occurrences → destinations → create or reschedule |
 | `internal/api/preannounce_test.go` | **New.** Its guards |
 | `internal/api/oauth_handlers.go` | `ingestOptionsFor` carries `ScheduledFor`; go-live falls back when a pre-created key is rejected |
@@ -52,57 +53,65 @@
 
 Add to `internal/oauth/facebook_test.go`. Follow the existing table tests there for how a fake Graph server is stood up — reuse the same helper the neighbouring `IngestFor` tests use rather than writing a new one.
 
+Uses the helpers already in this file — `fbServer`, `graphStub`, `fbLiveResponse`, `fbCall` — rather than any new fixture. `fbGraphBase` is **already a `var`** and `fbServer` already redirects it; do not add a second mechanism.
+
+`fbReq.Query` is a raw query string, so parse it with `url.ParseQuery` before asserting.
+
 ```go
 // A scheduled broadcast is a DIFFERENT status, not LIVE_NOW plus a field.
-// Asserted on the request Facebook actually receives, because a test that
-// only checks IngestFor returned no error would pass with the status
-// unchanged.
+// Asserted on the request Facebook actually receives: a test that only checked
+// IngestFor returned no error would pass with the status unchanged.
 func TestAScheduledBroadcastIsCreatedUnpublishedWithItsStartTime(t *testing.T) {
-	var got url.Values
-	srv := fbTestServer(t, func(r *http.Request) any {
-		got = r.URL.Query()
-		return map[string]any{"id": "555", "stream_url": "rtmps://x.example/rtmp/key-abc"}
-	})
-	defer srv.Close()
+	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
 
 	at := time.Unix(1800000000, 0)
-	f := &Facebook{}
-	if _, err := f.IngestFor(context.Background(), "cid", "tok", "page:1",
+	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
 		IngestOptions{ScheduledFor: at}); err != nil {
 		t.Fatalf("IngestFor: %v", err)
 	}
 
-	if s := got.Get("status"); s != "SCHEDULED_UNPUBLISHED" {
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create call; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if s := q.Get("status"); s != "SCHEDULED_UNPUBLISHED" {
 		t.Errorf("status = %q, want SCHEDULED_UNPUBLISHED", s)
 	}
-	if ep := got.Get("event_params"); ep != "1800000000" {
+	if ep := q.Get("event_params"); ep != "1800000000" {
 		t.Errorf("event_params = %q, want the unix start time 1800000000", ep)
 	}
 }
 
-// The zero value is the whole existing world. Every caller that has one
-// passes IngestOptions{} today, and a scheduled create for them would be a
-// broadcast that never goes live.
+// The zero value is the whole existing world. Every current caller passes
+// IngestOptions{}, and turning those into scheduled creates would produce
+// broadcasts that never go live.
 func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T) {
-	var got url.Values
-	srv := fbTestServer(t, func(r *http.Request) any {
-		got = r.URL.Query()
-		return map[string]any{"id": "555", "stream_url": "rtmps://x.example/rtmp/key-abc"}
-	})
-	defer srv.Close()
+	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
 
-	f := &Facebook{}
-	if _, err := f.IngestFor(context.Background(), "cid", "tok", "page:1",
+	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
 		IngestOptions{}); err != nil {
 		t.Fatalf("IngestFor: %v", err)
 	}
 
-	if s := got.Get("status"); s != "LIVE_NOW" {
+	post := fbCall(*log, http.MethodPost, "/me/live_videos")
+	if post == nil {
+		t.Fatalf("no create call; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if s := q.Get("status"); s != "LIVE_NOW" {
 		t.Errorf("status = %q, want LIVE_NOW", s)
 	}
 	// ABSENT, not empty. Facebook reads a present-but-empty parameter as a
-	// value, so this must assert on the key not existing at all.
-	if _, ok := got["event_params"]; ok {
+	// value, so this asserts the key does not exist at all -- the same
+	// "empty means leave alone" rule the rest of this file runs on.
+	if _, ok := q["event_params"]; ok {
 		t.Error("event_params was sent for an unscheduled broadcast")
 	}
 }
@@ -205,32 +214,53 @@ If a mutation does not fire, **check the edit actually applied** before concludi
 
 - [ ] **Step 1: Write the failing test**
 
-```go
-// Moving a show must MOVE its broadcast. Creating a second one would leave
-// the first as an orphaned event page that people are still subscribed to.
-func TestReschedulingPostsTheNewStartTimeToTheBroadcastItself(t *testing.T) {
-	var path string
-	var got url.Values
-	srv := fbTestServer(t, func(r *http.Request) any {
-		path, got = r.URL.Path, r.URL.Query()
-		return map[string]any{"success": true}
-	})
-	defer srv.Close()
+`graphStub` only answers `/me`, `/me/accounts` and the two `live_videos` edges, so this test needs its own handler for the node path. Keep using `fbServer` for the request log and the `fbGraphBase` redirect.
 
-	f := &Facebook{}
+```go
+// Moving a show must MOVE its broadcast. Creating a second one would leave the
+// first as an orphaned event page people are still subscribed to.
+func TestReschedulingPostsTheNewStartTimeToTheBroadcastItself(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
 	at := time.Unix(1800000123, 0)
-	if err := f.RescheduleBroadcast(context.Background(), "tok", "555", at); err != nil {
+	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "page-token", "777", at); err != nil {
 		t.Fatalf("RescheduleBroadcast: %v", err)
 	}
 
-	// The broadcast node, NOT the /live_videos edge. Posting to the edge
-	// creates a broadcast; posting to the node edits one, and the difference
-	// between them is the orphan this test exists to prevent.
-	if !strings.HasSuffix(path, "/555") {
-		t.Errorf("posted to %q, want the live video node /555", path)
+	// The broadcast NODE, not the /live_videos edge. The edge creates a
+	// broadcast; the node edits one. That difference is the orphaned event
+	// page this test exists to prevent, so it is asserted on the path rather
+	// than on the call merely having happened.
+	post := fbCall(*log, http.MethodPost, "/777")
+	if post == nil {
+		t.Fatalf("no POST to the live video node; calls were %+v", *log)
 	}
-	if ep := got.Get("event_params"); ep != "1800000123" {
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if ep := q.Get("event_params"); ep != "1800000123" {
 		t.Errorf("event_params = %q, want 1800000123", ep)
+	}
+	if post.Auth != "Bearer page-token" {
+		t.Errorf("Authorization = %q, want the token it was given", post.Auth)
+	}
+}
+
+// An empty id must not become a POST to "/", which Graph answers in a way that
+// looks like success.
+func TestReschedulingWithNoBroadcastIdIsRefusedBeforeAnyCall(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
+	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "tok", "", time.Unix(1, 0)); err == nil {
+		t.Error("rescheduling with no broadcast id succeeded")
+	}
+	if len(*log) != 0 {
+		t.Errorf("it called Graph anyway: %+v", *log)
 	}
 }
 ```
@@ -425,20 +455,22 @@ This is the task with the most surface. Read the whole of it before starting.
 - Consumes: `oauth.IngestOptions.ScheduledFor` (Task 1), `(*Facebook).RescheduleBroadcast` (Task 2), `db.FacebookSettings.AnnouncedFor` (Task 3).
 - Produces: `func (s *Server) PreannounceLoop(ctx context.Context)`, `func (s *Server) preannounceOnce(ctx context.Context, now time.Time)` (no return — it logs and moves on, because nothing may fail on its account), `func scheduleTargets(sc scheduler.Schedule, destID int64) bool`, and the constant `facebookScheduleHorizon`. Tasks 6 uses the last two.
 
-Existing signatures you will need, verified against the tree:
+Existing signatures, read off the tree rather than remembered. **Three of these were wrong in an earlier draft of this plan; use these, and still check before you type.**
 
 ```go
 scheduler.Next(s scheduler.Schedule, now time.Time) (time.Time, bool)
-scheduler.ActionStart          // Schedule.Action == this
-s.store.Schedules() ([]scheduler.Schedule, error)   // via db; check the exact store method name
+scheduler.ActionStart                                  // Schedule.Action == this
 s.store.ListDestinations() ([]db.Destination, error)
-s.tokenFor(ctx, accountID int64) (string, error)    // returns a fresh access token
-oauth.TargetsFor(platform db.Platform) (TargetedProvider, bool)
-oauth.FacebookLiveVideoID(streamKey string) string
-ingestOptionsFor(dest *db.Destination) oauth.IngestOptions
+s.tokenFor(ctx, accountID int64) (*db.PlatformAccount, error)  // the ACCOUNT, with a fresh token — NOT a token string
+s.store.GetPlatformAccount(s.box, id int64) (*db.PlatformAccount, error)  // takes the secrets box
+s.ingestForFn(ctx, provider oauth.Provider, clientID string, acct *db.PlatformAccount,
+    opts oauth.IngestOptions) (*oauth.Ingest, string, error)   // ingest AND the broadcast id
+oauth.Ingest{URL, Key string}
 ```
 
-Confirm each against the tree before you use it. If a store method has a different name, use the real one — do not add a wrapper.
+**The sweep goes through `s.ingestForFn`, not through `IngestFor` directly.** `fbGraphBase` is package-private to `internal/oauth`, so an `internal/api` test cannot stub Graph — but `ingestForFn` is one of four existing seams on `Server` that exist precisely for this, and it already returns the broadcast id the marker needs. Use it. See `internal/api/metadata_test.go:386` for how a test replaces a seam.
+
+Find the schedule-reading method the API already uses by looking at `internal/api/automation.go`'s list handler; do not add a wrapper.
 
 - [ ] **Step 1: Widen `ingestOptionsFor`**
 
@@ -485,7 +517,239 @@ git commit -m "refactor(api): ingestOptionsFor takes the occurrence rather than 
 
 - [ ] **Step 4: Write the failing sweep tests**
 
-Create `internal/api/preannounce_test.go`. Use `renditionServer(t, defaultTools())` for the fixture — **`testServer` leaves the engine nil and `refuseIfSilent` panics on it**, which is a trap that has already cost one debugging round.
+Create `internal/api/preannounce_test.go`.
+
+**Use `testServer(t, config.Config{})`.** It returns `(*Server, http.Handler, *db.DB)` and you need the `*Server` to replace the seams. Its nil engine is fine here precisely because these tests call `s.preannounceOnce` directly rather than through a handler — nothing reaches `refuseIfSilent`. (The engine-backed `renditionServer` is what handler tests need; this is not one.)
+
+The shared fixture, written once at the top of the file:
+
+```go
+// announced is what the seams recorded, so each test asserts on what the
+// sweep DID rather than on it having run.
+type announced struct {
+	creates     []oauth.IngestOptions
+	reschedules []time.Time
+	key         string
+	broadcastID string
+	err         error
+}
+
+// stubAnnounce replaces both seams. Returning a distinct key per call is what
+// lets a test prove the destination got THIS broadcast's key rather than one
+// it already had.
+func stubAnnounce(s *Server, rec *announced) {
+	s.ingestForFn = func(ctx context.Context, p oauth.Provider, clientID string,
+		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Ingest, string, error) {
+		rec.creates = append(rec.creates, opts)
+		if rec.err != nil {
+			return nil, "", rec.err
+		}
+		return &oauth.Ingest{URL: "rtmps://x/rtmp", Key: rec.key}, rec.broadcastID, nil
+	}
+	s.rescheduleFn = func(ctx context.Context, acct *db.PlatformAccount,
+		broadcastID string, at time.Time) error {
+		rec.reschedules = append(rec.reschedules, at)
+		return rec.err
+	}
+}
+
+// seedFacebookDestination stores a Facebook destination with a connected
+// account, which is the minimum the sweep will act on.
+func seedFacebookDestination(t *testing.T, store *db.DB) *db.Destination {
+	t.Helper()
+	// Create a platform account first and attach its id; follow whatever
+	// helper the existing account tests use rather than writing rows by hand.
+	// Return the stored destination.
+	panic("write this against the existing account/destination helpers")
+}
+
+// seedStartSchedule stores an enabled ActionStart schedule. destIDs may be
+// empty, which is the "every destination" case tested below.
+func seedStartSchedule(t *testing.T, store *db.DB, kind scheduler.Kind, at time.Time, destIDs ...int64) {
+	t.Helper()
+	panic("write this against the existing schedule store helpers")
+}
+```
+
+Replace both `panic` bodies with the real helpers before writing the tests — they are marked so an unfinished fixture fails loudly instead of silently seeding nothing.
+
+The tests:
+
+```go
+func TestASchedulesNextOccurrenceGetsAnEventPage(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedFacebookDestination(t, store)
+	at := time.Now().Add(3 * 24 * time.Hour).Truncate(time.Second)
+	seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates) != 1 {
+		t.Fatalf("created %d broadcasts, want 1", len(rec.creates))
+	}
+	// Asserted on the OPTION, because that is what carries the schedule into
+	// the Graph call. A create that happened with a zero ScheduledFor is a
+	// LIVE_NOW broadcast and no event page at all.
+	if !rec.creates[0].ScheduledFor.Equal(at) {
+		t.Errorf("ScheduledFor = %v, want the occurrence %v", rec.creates[0].ScheduledFor, at)
+	}
+	got, err := store.GetDestination(d.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if got.Facebook.BroadcastID != "777" {
+		t.Errorf("BroadcastID = %q, want 777", got.Facebook.BroadcastID)
+	}
+	if !got.Facebook.ScheduledFor.Equal(at) {
+		t.Errorf("marker = %v, want %v", got.Facebook.ScheduledFor, at)
+	}
+}
+
+// THE INVARIANT. If the stored key is not the pre-created broadcast's key,
+// the event page people were notified about stays empty while the stream goes
+// somewhere else.
+func TestThePreCreatedKeyIsWrittenToTheDestination(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedFacebookDestination(t, store)
+	at := time.Now().Add(2 * 24 * time.Hour)
+	seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	got, _ := store.GetDestination(d.ID)
+	if got.StreamKey != "key-from-the-broadcast" {
+		t.Fatalf("StreamKey = %q, want the pre-created broadcast's key. The "+
+			"encoder would publish somewhere the announced event page is not.",
+			got.StreamKey)
+	}
+}
+
+// The case a boolean marker gets wrong.
+func TestASecondSweepForTheSameOccurrenceCreatesNothing(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedFacebookDestination(t, store)
+	at := time.Now().Add(2 * 24 * time.Hour)
+	seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates) != 1 {
+		t.Fatalf("created %d broadcasts across two sweeps, want 1. At a "+
+			"5-minute tick this is a new Facebook event every 5 minutes.",
+			len(rec.creates))
+	}
+}
+
+// And the case a boolean gets wrong in the other direction: next week needs
+// its own broadcast.
+func TestTheNextOccurrenceIsRescheduledRatherThanDuplicated(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedFacebookDestination(t, store)
+	week1 := time.Now().Add(24 * time.Hour)
+	seedStartSchedule(t, store, scheduler.KindWeekly, week1, d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+	// Sweep again a week later: Next() now returns a different occurrence, so
+	// the marker no longer matches.
+	s.preannounceOnce(context.Background(), time.Now().Add(7*24*time.Hour))
+
+	if len(rec.creates) != 1 {
+		t.Errorf("created %d broadcasts, want 1 — the second occurrence must "+
+			"MOVE the first, not orphan it", len(rec.creates))
+	}
+	if len(rec.reschedules) != 1 {
+		t.Errorf("rescheduled %d times, want 1", len(rec.reschedules))
+	}
+}
+
+// Empty DestinationIDs means every destination, and it is the commonest shape.
+func TestAScheduleThatNamesNoDestinationsStillAnnouncesTheFacebookOnes(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	seedFacebookDestination(t, store)
+	at := time.Now().Add(2 * 24 * time.Hour)
+	seedStartSchedule(t, store, scheduler.KindOnce, at) // no destination ids
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates) != 1 {
+		t.Fatalf("created %d broadcasts, want 1. \"Start the show\" usually "+
+			"names no destinations, so a rule that skipped this shape would "+
+			"switch the feature off for most installs.", len(rec.creates))
+	}
+}
+
+func TestAnOccurrenceBeyondSevenDaysIsNotAnnounced(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedFacebookDestination(t, store)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(23*24*time.Hour), d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates) != 0 {
+		t.Fatalf("created %d broadcasts beyond Facebook's seven-day bound, want 0",
+			len(rec.creates))
+	}
+}
+
+// Best-effort has to be provably best-effort, and the marker must not be
+// written for a broadcast that does not exist.
+func TestAGraphFailureLeavesTheDestinationUntouched(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777", err: errors.New("graph said no")}
+	stubAnnounce(s, rec)
+
+	d := seedFacebookDestination(t, store)
+	before := d.StreamKey
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	got, _ := store.GetDestination(d.ID)
+	if got.StreamKey != before {
+		t.Errorf("StreamKey changed to %q on a failed create", got.StreamKey)
+	}
+	if got.Facebook.BroadcastID != "" || !got.Facebook.ScheduledFor.IsZero() {
+		t.Error("the marker was written for a broadcast that was never created; " +
+			"every later sweep for this occurrence would now be skipped")
+	}
+}
+
+func TestANonFacebookDestinationOnTheSameScheduleIsUntouched(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	// A Twitch destination and no Facebook one at all.
+	seedTwitchDestination(t, store) // follow seedFacebookDestination's shape
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour))
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates) != 0 {
+		t.Fatalf("created %d broadcasts for a non-Facebook destination, want 0",
+			len(rec.creates))
+	}
+}
+```
 
 ```go
 // The sweep creates a broadcast for a Facebook destination whose next
@@ -664,21 +928,20 @@ func scheduleTargets(sc scheduler.Schedule, destID int64) bool {
 ```go
 // announceOne creates the broadcast, or moves an existing one.
 //
-// Every failure path returns without touching the destination. A half-written
+// Every failure path returns WITHOUT touching the destination. A half-written
 // marker -- a ScheduledFor recorded for a broadcast that was not created --
 // would suppress every later attempt for that occurrence, which is worse than
 // having no event page at all.
 func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Time) {
-	acct, err := s.store.GetPlatformAccount(*d.AccountID)
-	if err != nil {
-		return
-	}
-	tok, err := s.tokenFor(ctx, acct.ID)
+	// tokenFor returns the ACCOUNT with a refreshed token on it, not a token
+	// string. It also does the refresh, which is why it is used here rather
+	// than GetPlatformAccount.
+	acct, err := s.tokenFor(ctx, *d.AccountID)
 	if err != nil {
 		s.log.Warn("pre-announce: no usable token", "destination", d.Name, "err", err)
 		return
 	}
-	tp, ok := oauth.TargetsFor(acct.Platform)
+	provider, ok := oauth.Providers()[acct.Platform]
 	if !ok {
 		return
 	}
@@ -686,27 +949,24 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// A broadcast already exists for a DIFFERENT occurrence: the schedule
-	// moved. Move the broadcast rather than creating a second one, which
-	// would leave the first as an event page people are still subscribed to.
+	// A broadcast already exists for a DIFFERENT occurrence -- the schedule
+	// moved. Move the broadcast rather than creating a second one, which would
+	// leave the first as an event page people are still subscribed to.
 	if d.Facebook.BroadcastID != "" {
-		fb, isFB := tp.(*oauth.Facebook)
-		if isFB {
-			if err := fb.RescheduleBroadcast(cctx, tok, d.Facebook.BroadcastID, at); err != nil {
-				s.log.Warn("pre-announce: could not move the broadcast",
-					"destination", d.Name, "err", err)
-				return
-			}
-			d.Facebook.ScheduledFor = at
-			s.saveAnnouncement(d)
+		if err := s.rescheduleFn(cctx, acct, d.Facebook.BroadcastID, at); err != nil {
+			s.log.Warn("pre-announce: could not move the broadcast",
+				"destination", d.Name, "err", err)
 			return
 		}
+		d.Facebook.ScheduledFor = at
+		s.saveAnnouncement(d)
+		return
 	}
 
-	b, err := tp.IngestFor(cctx, s.facebookClientID(), tok, acct.AccountRef,
-		ingestOptionsFor(d, at))
+	ing, broadcastID, err := s.ingestForFn(cctx, provider, s.oauthClientID(acct.Platform),
+		acct, ingestOptionsFor(d, at))
 	if err != nil {
-		// Logged, not returned anywhere. The schedule and the go-live path are
+		// Logged and dropped. The schedule and the go-live path are
 		// unaffected; the next sweep tries again.
 		s.log.Warn("pre-announce: could not create the broadcast",
 			"destination", d.Name, "err", err)
@@ -716,12 +976,12 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 	// THE INVARIANT. The key the pre-created broadcast returned has to be the
 	// one the encoder publishes to, or the event page people were notified
 	// about stays empty beside a live stream.
-	d.StreamKey = b.Ingest.Key
-	d.Facebook.BroadcastID = b.ID
+	d.StreamKey = ing.Key
+	d.Facebook.BroadcastID = broadcastID
 	d.Facebook.ScheduledFor = at
 	s.saveAnnouncement(d)
 	s.log.Info("pre-announced a Facebook broadcast",
-		"destination", d.Name, "at", at, "broadcast", b.ID)
+		"destination", d.Name, "at", at, "broadcast", broadcastID)
 }
 
 func (s *Server) saveAnnouncement(d *db.Destination) {
@@ -732,9 +992,28 @@ func (s *Server) saveAnnouncement(d *db.Destination) {
 }
 ```
 
-`s.facebookClientID()` stands for however this Server already obtains the Facebook client id for `IngestFor` — find it at the existing call site in `ingestFor` and use the same expression. Do not invent a new accessor.
+`s.oauthClientID(platform)` stands for however this Server already obtains a platform's client id — find the expression at the existing `s.ingestForFn` / `ingestFor` call site in `oauth_handlers.go` and use exactly that. Do not add an accessor.
 
-`b.Ingest.Key` stands for wherever `*oauth.Broadcast` carries the key. Check the struct and use the real field.
+**Add the reschedule seam** in `internal/api/api.go`, beside the four that are already there, and default it in `New` the way `s.ingestForFn = s.ingestFor` is defaulted at line 217:
+
+```go
+	// rescheduleFn is the fifth of these seams, and it exists for the same
+	// reason as ingestForFn: fbGraphBase is private to internal/oauth, so an
+	// api-package test cannot stub Graph. Without a seam the only way to test
+	// that a moved schedule MOVES its broadcast rather than creating a second
+	// one would be not to test it.
+	rescheduleFn func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error
+```
+
+```go
+	s.rescheduleFn = func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error {
+		fb, ok := oauth.Providers()[acct.Platform].(*oauth.Facebook)
+		if !ok {
+			return fmt.Errorf("%s cannot reschedule a broadcast", acct.Platform)
+		}
+		return fb.RescheduleBroadcast(ctx, acct.AccessToken, broadcastID, at)
+	}
+```
 
 - [ ] **Step 7: Run to verify they pass**
 
@@ -774,7 +1053,8 @@ git commit -m "feat(api): pre-announce a scheduled Facebook broadcast"
 | `scheduleTargets` returns `false` for empty `DestinationIDs` | `TestAScheduleThatNamesNoDestinationsStillAnnouncesTheFacebookOnes` red |
 | drop the `d.Facebook.AnnouncedFor(at)` skip | `TestASecondSweepForTheSameOccurrenceCreatesNothing` red |
 | compare `at.Sub(now) > 30*24*time.Hour` instead of the horizon | `TestAnOccurrenceBeyondSevenDaysIsNotAnnounced` red |
-| delete `d.StreamKey = b.Ingest.Key` | `TestThePreCreatedKeyIsWrittenToTheDestination` red |
+| delete `d.StreamKey = ing.Key` | `TestThePreCreatedKeyIsWrittenToTheDestination` red |
+| skip the reschedule branch and always create | `TestTheNextOccurrenceIsRescheduledRatherThanDuplicated` red |
 | set the marker before the create call rather than after | `TestAGraphFailureLeavesTheDestinationUntouched` red |
 | drop the `d.Platform != db.PlatformFacebook` skip | `TestANonFacebookDestinationOnTheSameScheduleIsUntouched` red |
 
@@ -1064,23 +1344,36 @@ Recorded because a plan that hides its own gaps is worse than one that names
 them, and both were found by checking this document against the spec rather
 than by trusting it.
 
-### Some test bodies are specified, not written
+### Tasks 5 and 6 still describe their test bodies rather than giving them
 
-Tasks 4, 5 and 6 list each test's name, its purpose and its assertions, but
-several bodies are described rather than given as code. The writing-plans
-standard calls that a plan failure, and it is one.
+Tasks 1, 2, 3, 4 and 7 now carry real code, written against helpers read off the
+tree. Tasks 5 and 6 do not: their tests are named, their purpose is stated and
+their assertions are listed, but the bodies are prose.
 
-The reason is real rather than laziness: those bodies depend on a Graph stub
-that does not exist yet (`fbGraphBase` may need to become a `var` to be
-stubbable) and on fixture helpers whose exact names have to be read off the
-existing Facebook tests. Code written speculatively here would be rewritten by
-the implementer anyway, and a plan that supplies *wrong* code is worse than one
-that supplies none.
+Both depend on handler fixtures — the refresh-key path and the schedule
+handlers — whose exact request shapes have to be read from their existing
+tests. Code invented here would be rewritten, and a plan that supplies *wrong*
+code is worse than one that supplies none.
 
-**What the implementer must not do:** invent an assertion. Every test in those
-tasks has its assertions written out in the surrounding prose and in the
-mutation table — the mutation table is the contract. If a test cannot be made
-to fail against its named mutation, the test is wrong, not the mutation.
+**What the implementer must not do:** invent an assertion. Each of those tests
+has its assertions in the surrounding prose and in the mutation table, and
+**the mutation table is the contract**. If a test cannot be made to fail
+against its named mutation, the test is wrong, not the mutation.
+
+### Corrections this grounding pass already made
+
+Recorded because they are the kind of error that survives into code:
+
+- `s.tokenFor` returns `*db.PlatformAccount`, **not** a token string. An earlier
+  draft passed it as one.
+- `s.store.GetPlatformAccount` takes the secrets box as its first argument.
+- `fbGraphBase` is private to `internal/oauth`, so an `internal/api` test
+  **cannot** stub Graph. The sweep therefore goes through the existing
+  `ingestForFn` seam, and a fifth seam is added for the reschedule. An earlier
+  draft called `IngestFor` directly and would have produced a task that could
+  not be tested at all.
+- `fbGraphBase` is already a `var` and `fbServer` already redirects it; the
+  earlier note about needing to change it was wrong.
 
 ### The eligibility gate is under-handled
 
