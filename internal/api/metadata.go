@@ -195,10 +195,17 @@ func (s *Server) metadataTargets() ([]metadataTarget, error) {
 // dashboard's request open for the length of the slowest of them.
 func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Title       string  `json:"title"`
-		Description string  `json:"description"`
-		Category    string  `json:"category"`
-		AccountIDs  []int64 `json:"accountIds"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Category    string `json:"category"`
+		// Tags are words, resolved by whichever provider's PushMetadata knows
+		// how to turn them into that platform's own id space -- Facebook's
+		// content_tags, for one. Distinct from Broadcast.Tags below: that one
+		// travels through PushBroadcastSettings, which only YouTube and Kick
+		// implement, so a provider with no broadcast resource -- Facebook --
+		// would never see a tag typed into that field.
+		Tags       []string `json:"tags,omitempty"`
+		AccountIDs []int64  `json:"accountIds"`
 		// Broadcast is the YouTube-only settings that live on a different
 		// resource: tags, the scheduled start, and the contentDetails toggles.
 		// Every field is a pointer, so an omitted one means "leave it alone"
@@ -213,6 +220,7 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		Title:       req.Title,
 		Description: req.Description,
 		Category:    req.Category,
+		Tags:        req.Tags,
 	}.Trimmed()
 	// Either half is enough to be worth pushing. A broadcast-only push is a
 	// real thing an operator does -- turning the DVR off before going live
