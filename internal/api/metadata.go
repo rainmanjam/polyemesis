@@ -60,6 +60,16 @@ type metadataTarget struct {
 	Platform    db.Platform        `json:"platform"`
 	AccountName string             `json:"accountName"`
 	Caps        oauth.MetadataCaps `json:"caps"`
+
+	// Compliance is the obligation metadata resolved from this account's
+	// destinations -- see complianceByAccount. Zero when no destination on this
+	// account set any, which means "leave it alone" rather than "clear it".
+	Compliance db.Compliance `json:"compliance,omitempty"`
+	// StreamKey comes from the destination the compliance was resolved from,
+	// because Facebook recovers its live video id from the key rather than from
+	// anything the account knows. Never serialised: this response reaches a
+	// browser, and a stream key in it is a credential in a page.
+	StreamKey string `json:"-"`
 }
 
 // metadataOutcome is one account's result.
@@ -156,7 +166,10 @@ func (j *metadataJobs) latest() (metadataJob, bool) {
 // handleMetadataOverview answers "what can I push to, and what happened last
 // time" in one read, so the composer renders complete on first paint.
 func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) {
-	targets, err := s.metadataTargets()
+	// Conflicts are ignored here on purpose: this endpoint reports what CAN be
+	// pushed to, and a disagreement between two destinations does not remove an
+	// account from that list. The push itself is where it has to be refused.
+	targets, _, err := s.metadataTargets()
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -169,27 +182,51 @@ func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) 
 }
 
 // metadataTargets lists connected accounts on platforms that implement the
-// capability. A platform that cannot do this is absent rather than present and
-// failing — see oauth.MetadataFor.
-func (s *Server) metadataTargets() ([]metadataTarget, error) {
+// capability, each carrying the compliance resolved from its destinations. A
+// platform that cannot do this is absent rather than present and failing — see
+// oauth.MetadataFor.
+//
+// The conflicts return is not advisory. Two destinations on one account asking
+// for different compliance have no answer, so complianceByAccount deletes that
+// account from the map and names both destinations here; a caller that pushes
+// anyway sends one of them with nothing saying which.
+func (s *Server) metadataTargets() ([]metadataTarget, []string, error) {
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	dests, err := s.store.ListDestinations()
+	if err != nil {
+		return nil, nil, err
+	}
+	flat := make([]db.Destination, 0, len(dests))
+	for _, d := range dests {
+		flat = append(flat, *d)
+	}
+	compliance, conflicts := complianceByAccount(flat)
+
 	out := []metadataTarget{}
 	for _, a := range accts {
 		mp, ok := oauth.MetadataFor(a.Platform)
 		if !ok {
 			continue
 		}
+		// A conflicting account is absent from the map, so this reads the zero
+		// Compliance -- "touch nothing" -- rather than the first destination's.
+		// That is a second line of defence, not the refusal: handlePushMetadata
+		// still has to check conflicts, because a push that quietly writes
+		// nothing looks exactly like a push that worked.
+		ac := compliance[a.ID]
 		out = append(out, metadataTarget{
 			AccountID:   a.ID,
 			Platform:    a.Platform,
 			AccountName: a.AccountName,
 			Caps:        mp.MetadataCaps(),
+			Compliance:  ac.Compliance,
+			StreamKey:   ac.StreamKey,
 		})
 	}
-	return out, nil
+	return out, conflicts, nil
 }
 
 // handlePushMetadata starts a push and returns 202 with every account pending.
@@ -233,9 +270,16 @@ func (s *Server) handlePushMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targets, err := s.metadataTargets()
+	targets, conflicts, err := s.metadataTargets()
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	// Before the job exists, before a token is read, before anything leaves the
+	// process. A conflict refused later would be a refusal reported to the
+	// operator while one destination's compliance was already on the wire.
+	if len(conflicts) > 0 {
+		writeError(w, http.StatusBadRequest, strings.Join(conflicts, " "))
 		return
 	}
 	if len(req.AccountIDs) > 0 {
@@ -325,7 +369,9 @@ type broadcastWindowRow struct {
 // disables nothing -- the write still happens and the 403 is still the
 // authority.
 func (s *Server) handleBroadcastWindow(w http.ResponseWriter, r *http.Request) {
-	targets, err := s.metadataTargets()
+	// Conflicts are not this endpoint's business either: what is still editable
+	// on a broadcast does not depend on which compliance values were stored.
+	targets, _, err := s.metadataTargets()
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -497,6 +543,26 @@ func complianceByAccount(dests []db.Destination) (map[int64]accountCompliance, [
 	return out, conflicts
 }
 
+// complianceFields names the fields a stored compliance actually asked for, so
+// a failed write reports only what the operator set. Naming all three would
+// tell someone who never touched COPPA that their COPPA declaration was
+// skipped, which is a fault report for a field they do not use.
+func complianceFields(c db.Compliance) []oauth.MetadataField {
+	var out []oauth.MetadataField
+	// FacebookPrivacy joins FieldPrivacy: both are "who may see this", and the
+	// composer has one row for it.
+	if c.Privacy != db.PrivacyUnchanged || c.FacebookPrivacy != db.FBPrivacyUnchanged {
+		out = append(out, oauth.FieldPrivacy)
+	}
+	if c.MadeForKids != nil {
+		out = append(out, oauth.FieldMadeForKids)
+	}
+	if len(c.Labels) > 0 {
+		out = append(out, oauth.FieldLabels)
+	}
+	return out
+}
+
 // ------------------------------------------------------------------- worker
 
 // runMetadataPush pushes to every target concurrently. Concurrency is the
@@ -620,6 +686,40 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 			out.Skipped = mergeFields(out.Skipped, []oauth.MetadataField{
 				oauth.FieldScheduledStart, oauth.FieldContentDetails, oauth.FieldTags,
 			})
+		}
+	}
+
+	// The compliance write: the operator's stored privacy, COPPA declaration and
+	// content labels. This is the call the whole feature was missing -- the
+	// capability existed and was tested for a full release while nothing
+	// invoked it, so the settings were editable and unsendable at the same time.
+	//
+	// ComplianceFor rather than a type assertion, and absence rather than an
+	// error: Kick has no compliance API, and a red row for a field the platform
+	// does not have teaches the operator to ignore red rows.
+	if !t.Compliance.Empty() {
+		if cp, ok := oauth.ComplianceFor(t.Platform); ok {
+			cres, err := s.pushComplianceFn(ctx, cp, creds.ClientID, acct.AccessToken,
+				oauth.ComplianceTarget{AccountRef: acct.AccountRef, StreamKey: t.StreamKey},
+				t.Compliance)
+			switch {
+			case err != nil:
+				// Reported, not fatal, for the same reason the broadcast half is:
+				// the metadata write above may already have landed, and failing
+				// the whole row would send the operator back to redo work that
+				// took. Merged into res so it survives the assignments below.
+				res.Warnings = append(res.Warnings, err.Error())
+				res.Skipped = append(res.Skipped, complianceFields(t.Compliance)...)
+				s.log.Warn("compliance push failed", "platform", t.Platform,
+					"account", t.AccountName, "err", err)
+			case cres != nil:
+				res.Applied = append(res.Applied, cres.Applied...)
+				res.Skipped = append(res.Skipped, cres.Skipped...)
+				res.Warnings = append(res.Warnings, cres.Warnings...)
+				if res.Target == "" {
+					res.Target = cres.Target
+				}
+			}
 		}
 	}
 

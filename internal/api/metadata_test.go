@@ -335,6 +335,216 @@ func TestPushMetadataCarriesTagsToThePusher(t *testing.T) {
 	}
 }
 
+// TestAPushSendsTheStoredComplianceToTheProvider is THE GUARD THIS PLAN EXISTS
+// FOR.
+//
+// oauth.PushCompliance was implemented, unit-tested and documented as shipped,
+// and no caller ever invoked it: a YouTube COPPA declaration and a Twitch label
+// set could be stored, edited and validated without once reaching a platform.
+// Every test of the capability in isolation stayed green through all of it,
+// which is precisely why this one drives the real HTTP handler instead. It
+// fails the moment the push stops CALLING the capability, whatever the
+// capability itself still does.
+//
+// Mutation to run against it: delete the ComplianceFor branch from pushOne.
+// pushComplianceFn is the seam -- the same shape as pushMetadataFn beside it --
+// because oauth.CompliancePusher is satisfied only by real providers whose
+// HTTP base is unexported, so this is the last observable point before the
+// request leaves the process.
+func TestAPushSendsTheStoredComplianceToTheProvider(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	kids := true
+	stored := db.Compliance{Privacy: db.PrivacyPrivate, MadeForKids: &kids}
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://a.example/live", StreamKey: "sk-live-1", AccountID: &acctID,
+		Compliance: stored,
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	// The metadata half is stubbed only so the row can settle without a network
+	// call; nothing about it is under test here.
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+
+	var (
+		called       bool
+		gotCompl     db.Compliance
+		gotTarget    oauth.ComplianceTarget
+		gotClientID  string
+		gotAccessTok string
+	)
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		called = true
+		gotCompl, gotTarget, gotClientID, gotAccessTok = c, tgt, clientID, accessToken
+		return &oauth.MetadataResult{
+			Applied: []oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids},
+		}, nil
+	}
+
+	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	if !called {
+		t.Fatal("the push never called PushCompliance: the operator's stored privacy and " +
+			"COPPA declaration were saved, validated, and never sent anywhere")
+	}
+	if !reflect.DeepEqual(gotCompl, stored) {
+		t.Errorf("compliance passed to the provider = %+v, want the stored %+v", gotCompl, stored)
+	}
+	// AccountRef is what Twitch addresses its write with and StreamKey is what
+	// Facebook recovers its live video id from, so a target assembled from the
+	// wrong halves reaches the wrong channel or broadcast.
+	want := oauth.ComplianceTarget{AccountRef: "chan-ref", StreamKey: "sk-live-1"}
+	if gotTarget != want {
+		t.Errorf("ComplianceTarget = %+v, want %+v", gotTarget, want)
+	}
+	if gotClientID != "cid" || gotAccessTok != "at" {
+		t.Errorf("credentials = (%q, %q), want the account's own (\"cid\", \"at\")", gotClientID, gotAccessTok)
+	}
+
+	if len(job.Results) != 1 {
+		t.Fatalf("results = %+v, want one row", job.Results)
+	}
+	// The compliance result has to reach the row the composer renders. Applied
+	// fields that the provider reported but the outcome dropped would tell the
+	// operator their COPPA declaration did not land when it did.
+	applied := map[oauth.MetadataField]bool{}
+	for _, f := range job.Results[0].Applied {
+		applied[f] = true
+	}
+	for _, f := range []oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids} {
+		if !applied[f] {
+			t.Errorf("%q is missing from the reported result %v, so a compliance field that "+
+				"was applied is invisible to the operator", f, job.Results[0].Applied)
+		}
+	}
+}
+
+// TestAComplianceConflictIsRefusedBeforeAnythingIsSent pins the ORDER, not the
+// status code.
+//
+// Two destinations on one account asking for different compliance is a refusal
+// because the platform has one broadcast to apply them to. A refusal that
+// arrives after the job has already started is not a refusal: the operator is
+// told nothing was sent while one destination's declaration is already on its
+// way. So this asserts that no provider call happened and no job was created,
+// and treats the 400 as the least interesting half.
+func TestAComplianceConflictIsRefusedBeforeAnythingIsSent(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	for _, d := range []*db.Destination{
+		{Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://a.example/live", StreamKey: "sk-main", AccountID: &acctID,
+			Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
+		{Name: "backup", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://b.example/live", StreamKey: "sk-backup", AccountID: &acctID,
+			Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
+	} {
+		if _, err := store.CreateDestination(d); err != nil {
+			t.Fatalf("create %s: %v", d.Name, err)
+		}
+	}
+
+	// A channel rather than a bool: these seams are called from the push's own
+	// goroutines, so a plain variable read after a 400 would be a data race as
+	// well as a flaky assertion.
+	calls := make(chan string, 8)
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		calls <- "metadata"
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		calls <- "compliance"
+		return &oauth.MetadataResult{}, nil
+	}
+
+	before, _ := metadataRegistry.latest()
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/metadata/push", map[string]string{"title": "Live tonight"})
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", w.Code, w.Body.String())
+	}
+	// Both names, for the same reason complianceByAccount reports both: a
+	// conflict the operator cannot locate is barely better than silence.
+	if !strings.Contains(w.Body.String(), "main") || !strings.Contains(w.Body.String(), "backup") {
+		t.Errorf("the refusal does not name both destinations: %s", w.Body.String())
+	}
+
+	// Deterministic half: a job added to the registry means work was started
+	// for a request that was then answered 400.
+	if after, ok := metadataRegistry.latest(); ok && after.ID != before.ID {
+		t.Error("a push job was created before the conflict was refused, so the refusal " +
+			"came after the work it claims to have prevented")
+	}
+	// Direct half: nothing may have left the process.
+	select {
+	case which := <-calls:
+		t.Fatalf("a %s request was made for a push that was refused; the operator was told "+
+			"nothing was sent while one destination's compliance was already on the wire", which)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// TestAKickTargetGetsNoComplianceAttemptAndNoError is the absence half of
+// oauth.ComplianceFor: Kick has no compliance surface at all, so a Kick account
+// must be skipped rather than attempted-and-failed. An operator whose Kick row
+// turns red for a field Kick does not have learns to ignore the colour.
+func TestAKickTargetGetsNoComplianceAttemptAndNoError(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformKick, "kicker")
+	if err := store.PutPlatformCreds(s.box, db.PlatformKick, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "kick", Kind: db.DestRTMP, Platform: db.PlatformKick,
+		URL: "rtmp://k.example/live", StreamKey: "sk-kick", AccountID: &acctID,
+		Compliance: db.Compliance{Privacy: db.PrivacyPrivate},
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	attempted := false
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		attempted = true
+		return &oauth.MetadataResult{}, nil
+	}
+
+	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	if attempted {
+		t.Error("a compliance write was attempted against Kick, which has no compliance API; " +
+			"ComplianceFor's absence is being ignored at the call site")
+	}
+	if len(job.Results) != 1 {
+		t.Fatalf("results = %+v, want one row", job.Results)
+	}
+	if job.Results[0].State != metaOK {
+		t.Errorf("state = %q (%s), want ok: a platform without a compliance API is not a failure",
+			job.Results[0].State, job.Results[0].Message)
+	}
+}
+
 func TestPushMetadataRefusesAnOverlongTitlePerPlatformLimit(t *testing.T) {
 	s, h, store := testServer(t, config.Config{})
 	sign := login(t, h)

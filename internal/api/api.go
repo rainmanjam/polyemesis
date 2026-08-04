@@ -122,6 +122,18 @@ type Server struct {
 	// whole suite green. Defaults to calling the pusher directly; only a test
 	// ever replaces it.
 	pushMetadataFn func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error)
+
+	// pushComplianceFn is the third of these, and the one with the worst
+	// precedent behind it: oauth.PushCompliance was written, unit-tested and
+	// documented as shipped while no caller anywhere invoked it, so a stored
+	// COPPA declaration and a Twitch label set never once reached a platform
+	// and every test stayed green. A test of the capability cannot see that;
+	// only a test of the CALL can, and oauth.CompliancePusher is implemented
+	// solely by real providers whose HTTP base is unexported, so this field is
+	// the last observable point before the request leaves the process.
+	// Defaults to calling the pusher directly; only a test ever replaces it.
+	pushComplianceFn func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error)
 }
 
 // Options configures the server.
@@ -197,6 +209,11 @@ func New(o Options) *Server {
 	// one test that replaces it to observe what pushOne passed.
 	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
 		return pusher.PushMetadata(ctx, clientID, accessToken, accountRef, m)
+	}
+	// And the same again for the compliance write.
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		return pusher.PushCompliance(ctx, clientID, accessToken, tgt, c)
 	}
 	return s
 }
