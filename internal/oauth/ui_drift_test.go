@@ -82,8 +82,12 @@ func TestEveryMetadataFieldIsAdvertisedBySomePlatform(t *testing.T) {
 	}
 	// The compliance fields are pushed through PushCompliance rather than
 	// through MetadataCaps, so they are legitimately absent from every caps
-	// list while still being real. Named individually rather than skipped as a
-	// group, so adding a fourth compliance field has to be a decision.
+	// list while still being real. PushCompliance is called from
+	// internal/api/metadata.go's pushOne, alongside the ordinary metadata
+	// push, for every account whose resolved destination has compliance
+	// stored -- not from anywhere in this package. Named individually rather
+	// than skipped as a group, so adding a fourth compliance field has to be
+	// a decision.
 	viaCompliance := map[MetadataField]bool{
 		FieldPrivacy: true, FieldMadeForKids: true, FieldLabels: true,
 	}

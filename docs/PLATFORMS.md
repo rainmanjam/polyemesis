@@ -14,6 +14,7 @@ supports sign-in.
 - [The four that need a sentence each](#the-four-that-need-a-sentence-each)
 - [Connecting an account](#connecting-an-account)
 - [Multiple accounts](#multiple-accounts)
+- [Compliance metadata](#compliance-metadata)
 
 ---
 
@@ -67,16 +68,20 @@ A destination's saved settings go out on that same create call: the chosen
 audience becomes `privacy`, a saved Crosspost list becomes
 `crossposting_actions` (each Page in it carries whether to only share the
 broadcast or also publish a post as that Page), and a saved charity id becomes
-`donate_button_charity_id`. **Privacy is applied once, at that moment.**
-Meta's Graph reference documents no way to update a live broadcast's audience,
-crossposting or donate button at all, so changing any of the three afterward
-has no effect on the broadcast already running — the only way to apply a
-changed value is what "Refresh key" already does above: end the broadcast and
-start a new one under the new settings. (The provider does carry an internal
-path that attempts a live privacy change anyway, and reports it applied only
-once a follow-up read confirms Facebook's value actually changed rather than
-trusting the write's 200 — but nothing in polyemesis today calls it, so treat
-privacy as create-time-only until that changes.)
+`donate_button_charity_id`. **Crossposting and the donate button are applied
+once, at that moment, and stay that way.** Meta's Graph reference documents no
+way to update either on a live broadcast, so changing one afterward has no
+effect on the broadcast already running — the only way to apply a changed
+value is what "Refresh key" already does above: end the broadcast and start a
+new one under the new settings.
+
+**Privacy is the exception: it can also be changed after the broadcast is
+live**, through the compliance push described under [Compliance
+metadata](#compliance-metadata) below. Graph documents no update surface for a
+live video at all, so a 200 from that write proves Facebook accepted the
+request, not that the value changed — the change is reported applied only once
+a follow-up read confirms Facebook's own value actually matches what was sent,
+never on the write's 200 alone.
 
 **A Page broadcast is public regardless of what audience is chosen.** Facebook
 has no personal audience for a Page, so `privacy` is left off the create call
@@ -272,6 +277,51 @@ connected account becomes its own destination with its own routing profile.
 Tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
 `secret.key` in the data directory, and refreshed automatically. No stream key,
 client secret or token is ever returned by an API or written to a log.
+
+---
+
+## Compliance metadata
+
+YouTube's COPPA self-declaration and privacy status, and Twitch's content
+classification labels, are things the platform's own terms require declared
+accurately — not stylistic fields. They have been storable and editable in the
+destination editor for a while. **This is the first release that sends them
+anywhere.**
+
+They ride along on the same metadata push as title and description — the one
+the composer's "Push metadata" button already starts — rather than needing a
+separate action. Any destination that has a privacy status, a COPPA
+declaration or a content label saved sends it on the very next push after
+upgrading, whether or not that push actually changes the title or description.
+**Nothing was opt-in about this before, and nothing is opt-in now**: a
+destination configured months ago, carrying a setting nobody currently
+remembers choosing, starts declaring it the next time anyone pushes metadata
+to that account. If what is currently stored on each destination matters to
+you, check it before the first push after upgrading.
+
+Coverage by platform:
+
+- **YouTube** — `privacyStatus` and `selfDeclaredMadeForKids`.
+- **Twitch** — `content_classification_labels`.
+- **Facebook** — the broadcast's audience, through the same read-back-confirmed
+  path described in the Facebook section above.
+- **Kick has no compliance API at all.** A Kick destination with compliance
+  stored is reported **skipped, with a reason**, on every push — not silently
+  dropped, and not treated as a failure — until the setting is cleared on that
+  destination.
+
+**Compliance is stored per destination; the platform account that receives it
+is shared.** A push targets an account, and a connected account can be the
+destination for more than one entry in the destination list. If two
+destinations sharing one connected account disagree — different privacy,
+different COPPA declaration, different labels — the push is refused before
+anything is sent, naming both destinations so it is clear which two disagree.
+Identical compliance on two destinations sharing an account is not a conflict.
+The refusal considers only the accounts the push in question actually
+addresses: a disagreement sitting on an account you did not select does not
+block the push you asked for, but if the account you did select is one of the
+two that disagree, the whole push — every account in it, not just that one —
+does not go out.
 
 ---
 

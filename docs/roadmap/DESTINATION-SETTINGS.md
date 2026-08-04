@@ -1,6 +1,6 @@
 # Per-destination settings and platform metadata
 
-**Status: Parts A–D SHIPPED**, 2026-07-29, except the two items named under
+**Status: Parts A–D SHIPPED**, 2026-07-29, except the one item named under
 [What remains](#what-remains). The original estimate was ~14–19 days.
 **Dependencies: none.** The SDK audit says hand-roll everything, and nothing
 since has changed that.
@@ -10,6 +10,13 @@ Verified against the tree rather than against the PR titles: `ExpertArgs`,
 codec choice for Part B, `DestResilience.GiveUpAfter`/`MinBackoffSeconds` reaching
 `engine.go` for Part C, and `MetadataCaps` on all four providers plus
 `PushCompliance` for Part D.
+
+**That check confirmed the functions existed, not that anything called them.**
+`PushCompliance` passed exactly this verification for a full release while no
+caller anywhere invoked it — see [PLATFORMS.md](../PLATFORMS.md#compliance-metadata)
+for the push that now exists. "Verified against the tree" should mean grepping
+for a caller, not just a definition; the next person to write that phrase
+should check which one they did.
 
 Grounded in the platforms' own API references and in probe builds, then handed
 to an adversarial reviewer. **Two of the ideas that motivated this document did
@@ -134,13 +141,20 @@ checking on its own merits, separately from this work.
 
 ## What remains
 
-Two items from the parts below are not built. Both are named here rather than
-left for somebody to discover by grepping for a field that does not exist.
+One item from the parts below is not built. It is named here rather than left
+for somebody to discover by grepping for a field that does not exist.
+
+**Staggered go-live shipped; this table used to list it here as still open,
+which stopped being true.** `DestinationSettings.StaggerMS` (see
+`internal/db/settings.go`) spaces out the first connection of destinations
+brought up in the same reconcile sweep — `internal/engine/engine.go`'s
+`startDestinations` applies it per destination started, not per reconnect — and
+is set per install under `Settings → Destinations`. 0, the default, is off,
+which is what every install did before the setting existed.
 
 | Item | Part | Why it is still open |
 |---|---|---|
-| **Staggered go-live** | C | Destinations still all connect at once. The other two Part C items shipped; this one is scheduling rather than policy, and it wants a decision about whether the spacing is per-destination or one global ramp |
-| **Facebook's full metadata surface** | D | Facebook advertises `title` and `description` only. It has the largest write surface of any platform here — deliberately deferred as its own feature, not half-built |
+| **Facebook's full metadata surface** | D | Facebook now sends `title`, `description` and `tags` on the composer push, plus `privacy`, `crossposting_actions` and `donate_button_charity_id` at create time, plus `privacy` again post-create through the compliance push. Still missing: `enable_backup_ingest`, `stop_on_delete_stream`, spatial audio, 360 projection, frame-accurate `inband_go_live`, and `event_params` scheduling — deliberately deferred as their own features, not half-built |
 
 Also deferred as a separate feature: **per-destination stored broadcast
 defaults**, so a destination remembers its own title and category rather than the
@@ -205,13 +219,13 @@ mix**, not a re-route: the routing matrix still produces `OutL`/`OutR` and
 `-ac 1` sums them. Wiring individual tracks to a single channel would be a
 change to the matrix, and that is a different feature.
 
-## Part C — Resilience (SHIPPED, except staggered go-live)
+## Part C — Resilience (SHIPPED)
 
 | Setting | Was | Now |
 |---|---|---|
 | Per-destination reconnect policy | One global `reconnectDelayMaxSeconds`, and it was for **pull ingest**, not destinations | `DestResilience.MinBackoffSeconds`/`MaxBackoffSeconds`, per destination |
 | Give-up threshold plus alert | Retried indefinitely; a destination retrying forever looked identical to one that works | `GiveUpAfter`, counted on **consecutive** failures so a destination that reconnects hourly for a week never accumulates its way to the limit |
-| Staggered go-live | All destinations connect at once, spiking CPU and upstream | **Still open** — see [What remains](#what-remains) |
+| Staggered go-live | All destinations connect at once, spiking CPU and upstream | `DestinationSettings.StaggerMS`, spacing the first connection of destinations started in the same reconcile sweep; 0 is off, and a reconnect is never delayed |
 
 ## Part D — Metadata (~7–12 days, and the real gap)
 
@@ -222,7 +236,7 @@ The platforms document far more, and some are not optional in the legal sense.
 
 | Field | Platform | Why it is not a nicety |
 |---|---|---|
-| `selfDeclaredMadeForKids` | YouTube | COPPA. Currently unsettable |
+| `selfDeclaredMadeForKids` | YouTube | COPPA declaration. Editable and stored for a full release before anything sent it; now pushed — see [PLATFORMS.md](../PLATFORMS.md#compliance-metadata) |
 | `content_classification_labels` | Twitch | Twitch *requires* labels for mature games, sexual themes, drugs, gambling, violence |
 | `privacyStatus` | YouTube | Going live publicly by accident is unrecoverable |
 
@@ -287,5 +301,7 @@ no thumbnail, no scheduling.
 ## See also
 
 - [ROADMAP](README.md)
-- [../PLATFORMS.md](../PLATFORMS.md) — needs the Kick correction
+- [../PLATFORMS.md](../PLATFORMS.md) — the Kick correction landed; see its
+  [Compliance metadata](../PLATFORMS.md#compliance-metadata) section for where
+  Part D's compliance fields actually go now
 - [../DEPENDENCIES.md](../DEPENDENCIES.md) — the bar the SDKs were measured against
