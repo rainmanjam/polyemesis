@@ -836,6 +836,32 @@ type fbLiveVideoPrivacy struct {
 	} `json:"privacy"`
 }
 
+// RescheduleBroadcast moves an already-created scheduled broadcast to a new
+// start time.
+//
+// POSTs to the live video NODE, not to the /live_videos edge. The edge creates
+// a broadcast; the node edits one. Getting that wrong leaves the original event
+// page in place with people subscribed to a show that will not happen there --
+// which is worse than not moving it, because nothing anywhere says the old page
+// is dead.
+//
+// Facebook's seven-day bound applies here exactly as it does at create, and is
+// the caller's to enforce for the same reason: only the caller knows the
+// occurrence.
+func (f *Facebook) RescheduleBroadcast(ctx context.Context, accessToken, liveVideoID string, at time.Time) error {
+	// Refused before any call. An empty id would make this a POST to "/", which
+	// Graph answers in a way that reads as success.
+	if liveVideoID == "" {
+		return fmt.Errorf("reschedule: no live video id")
+	}
+	params := url.Values{"event_params": {strconv.FormatInt(at.Unix(), 10)}}
+	var out struct{}
+	if err := fbPost(ctx, accessToken, "/"+liveVideoID, params, &out); err != nil {
+		return fbAdvice(err, "reschedule a Facebook broadcast", nil)
+	}
+	return nil
+}
+
 // UpdateLiveVideoPrivacy changes a broadcast's audience after it is already
 // live -- the convenience that avoids deleting the broadcast to redo the
 // value IngestFor already applied at create time.

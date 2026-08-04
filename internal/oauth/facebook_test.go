@@ -1400,3 +1400,50 @@ func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T)
 		t.Error("event_params was sent for an unscheduled broadcast")
 	}
 }
+
+// Moving a show must MOVE its broadcast. Creating a second one would leave the
+// first as an orphaned event page people are still subscribed to.
+func TestReschedulingPostsTheNewStartTimeToTheBroadcastItself(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
+	at := time.Unix(1800000123, 0)
+	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "page-token", "777", at); err != nil {
+		t.Fatalf("RescheduleBroadcast: %v", err)
+	}
+
+	// The broadcast NODE, not the /live_videos edge. The edge creates a
+	// broadcast; the node edits one. That difference is the orphaned event page
+	// this test exists to prevent, so it is asserted on the path rather than on
+	// the call merely having happened.
+	post := fbCall(*log, http.MethodPost, "/777")
+	if post == nil {
+		t.Fatalf("no POST to the live video node; calls were %+v", *log)
+	}
+	q, err := url.ParseQuery(post.Query)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", post.Query, err)
+	}
+	if ep := q.Get("event_params"); ep != "1800000123" {
+		t.Errorf("event_params = %q, want 1800000123", ep)
+	}
+	if post.Auth != "Bearer page-token" {
+		t.Errorf("Authorization = %q, want the token it was given", post.Auth)
+	}
+}
+
+// An empty id must not become a POST to "/", which Graph answers in a way that
+// looks like success.
+func TestReschedulingWithNoBroadcastIdIsRefusedBeforeAnyCall(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
+	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "tok", "", time.Unix(1, 0)); err == nil {
+		t.Error("rescheduling with no broadcast id succeeded")
+	}
+	if len(*log) != 0 {
+		t.Errorf("it called Graph anyway: %+v", *log)
+	}
+}
