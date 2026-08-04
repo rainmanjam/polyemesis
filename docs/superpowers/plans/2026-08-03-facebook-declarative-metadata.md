@@ -1078,63 +1078,128 @@ a better disguise.
 
 ---
 
-### Task 5: Best-effort privacy on the push
+### Task 5: Privacy on the push, confirmed rather than assumed
 
 **Files:**
-- Modify: `internal/oauth/facebook.go` (`MetadataCaps`, the push path)
+- Modify: `internal/oauth/facebook.go` (`MetadataCaps`, a new privacy method)
+- Modify: `internal/db/compliance.go` (the `FacebookPrivacy` field comment)
 - Test: `internal/oauth/facebook_test.go`
 
 **Interfaces:**
-- Consumes: `db.FacebookPrivacy` (Task 1), the push path (Task 4).
+- Consumes: `db.FacebookPrivacy` (Task 1).
 - Produces: `(*Facebook).UpdateLiveVideoPrivacy(ctx context.Context, clientID,
   accessToken, targetRef, liveVideoID string, p db.FacebookPrivacy) (*MetadataResult, error)`,
   and `MetadataCaps().Fields` gains `FieldPrivacy`.
 
-**Why this task exists:** privacy is applied at create, which means an operator
-who changes it afterwards is editing a value that has already been used. The push
-is the convenience that lets them change it without deleting the broadcast. It is
-**never an error** when refused — the stored value is the guarantee.
+**Why this task is shaped the way it is.** Privacy is applied when the broadcast
+is created, so an operator who changes it afterwards is editing a value that has
+already been used. A push is the convenience that avoids deleting the broadcast
+— but Graph documents no update surface for `LiveVideo` at all, so a POST that
+returns 200 proves the request was accepted, NOT that the field changed.
 
-**A deviation from the spec, decided while planning:** the spec says a Page
-destination reports privacy as unsupported "up front through `MetadataCaps`".
-`MetadataCaps()` takes no target, so it cannot vary by Page versus profile
-without widening an interface every provider implements. Instead the Page case is
-reported at push time as `Skipped` with a warning. Record this in the report.
+Reporting `Applied` from an HTTP status would therefore tell an operator their
+broadcast is friends-only while it is public. **So the write is confirmed by
+reading it back**, and anything short of a confirmed change is `Skipped`.
+
+**Two comments to correct, both now false:**
+- `internal/db/compliance.go` — the `FacebookPrivacy` field comment says "There
+  is no metadata-push path for it". This task adds one. Rewrite it to say
+  privacy is applied at create for non-Page targets and may additionally be
+  pushed with a read-back confirmation.
+- Anything in `facebook.go` claiming the push path handles only title,
+  description and tags.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```go
-func TestFacebookPushAttemptsThePrivacyAndReportsIt(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/9" {
+func TestAConfirmedPrivacyChangeIsReportedAsApplied(t *testing.T) {
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
-			return
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{
+				"id": "9", "privacy": map[string]any{"value": "ALL_FRIENDS"},
+			})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
 		}
-		http.Error(w, "{}", http.StatusNotFound)
 	})
 	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FBPrivacyFriends)
 	if err != nil {
 		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
 	}
-	post := fbCall(*log, http.MethodPost, "/9")
-	if post == nil || !strings.Contains(post.Query, "ALL_FRIENDS") {
-		t.Fatalf("privacy never reached the edit; calls were %+v", *log)
-	}
 	if !slices.Contains(res.Applied, FieldPrivacy) {
-		t.Errorf("applied = %v, want FieldPrivacy", res.Applied)
+		t.Errorf("applied = %v, want FieldPrivacy after Facebook confirmed the change", res.Applied)
+	}
+}
+
+func TestAPrivacyFacebookAccePTedButDidNotApplyIsNotReportedAsApplied(t *testing.T) {
+	// THE CASE THIS TASK EXISTS FOR. Graph documents no update surface for
+	// LiveVideo, so a 200 means "request accepted", not "field changed". If the
+	// read-back still says EVERYONE, the operator must not be told their
+	// broadcast is now friends-only.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{
+				"id": "9", "privacy": map[string]any{"value": "EVERYONE"},
+			})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("reported a privacy change Facebook did not make; the operator believes " +
+			"the broadcast is friends-only and it is public")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, " | "), "EVERYONE") {
+		t.Errorf("warnings %v do not say what the privacy actually is", res.Warnings)
+	}
+}
+
+func TestAPrivacyReadBackThatOmitsTheFieldIsNotTreatedAsConfirmation(t *testing.T) {
+	// Whether privacy is even readable on a LiveVideo is unverified -- the node
+	// reference 404s. Absence must read as "not confirmed", never as agreement.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"id": "9"})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+		"user:1000", "9", db.FBPrivacyFriends)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if slices.Contains(res.Applied, FieldPrivacy) {
+		t.Fatal("treated a read-back with no privacy field as confirmation")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
 	}
 }
 
 func TestARefusedPrivacyPushIsSkippedRatherThanAnError(t *testing.T) {
-	// The stored value was already applied when the broadcast was created. A
+	// The stored value was already applied when the broadcast was created, so a
 	// refusal here costs a convenience, not the setting.
 	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/9" {
-			http.Error(w, `{"error":{"message":"(#100) unsupported"}}`, http.StatusBadRequest)
-			return
-		}
-		http.Error(w, "{}", http.StatusNotFound)
+		http.Error(w, `{"error":{"message":"(#100) unsupported"}}`, http.StatusBadRequest)
 	})
 	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FBPrivacyFriends)
@@ -1145,46 +1210,68 @@ func TestARefusedPrivacyPushIsSkippedRatherThanAnError(t *testing.T) {
 		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
 	}
 }
+
+func TestAPagePrivacyPushMakesNoRequestAtAll(t *testing.T) {
+	// A Page broadcast is public by nature. Sending a personal audience value is
+	// a request Facebook has no meaning for, and the operator is told why.
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "page-token",
+		"page:5000", "9", db.FBPrivacySelf)
+	if err != nil {
+		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
+	}
+	if fbCall(*log, http.MethodPost, "/9") != nil {
+		t.Error("sent a personal privacy value to a Page broadcast")
+	}
+	if !slices.Contains(res.Skipped, FieldPrivacy) {
+		t.Errorf("skipped = %v, want FieldPrivacy", res.Skipped)
+	}
+}
 ```
 
-- [ ] **Step 2: Run and watch fail**
+The Page test needs a target ref the resolver treats as a Page — read
+`resolveTarget` and `TestFacebookIngestPublishesToTheChosenTarget` and use the
+form they use, rather than the `page:5000` written above if that is not it.
 
-Run: `go test ./internal/oauth/ -run 'PrivacyPush|AttemptsThePrivacy' -v`
-Expected: FAIL — undefined method.
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `go test ./internal/oauth/ -run 'Privacy' -v`
+Expected: FAIL — `UpdateLiveVideoPrivacy` undefined.
 
 - [ ] **Step 3: Implement**
 
-Add `FieldPrivacy` to `MetadataCaps().Fields`, and a method that posts
-`privacy={"value":"..."}` to `/<id>`, recording `Applied` on success and
-`Skipped` plus the platform's own message on failure. Return an error only when
-the caller gave a value `db.ValidFacebookPrivacy` rejects.
+Add `FieldPrivacy` to `MetadataCaps().Fields`. Then the method: refuse a value
+`db.ValidFacebookPrivacy` rejects with an error; for a Page target record
+`Skipped` plus the warning and make no request; otherwise POST
+`privacy={"value":"..."}` to `/<id>`, then GET `/<id>?fields=privacy` and report
+`Applied` ONLY when the value comes back equal to what was asked for. Anything
+else — a different value, an absent field, an unreadable response — is `Skipped`
+with a warning saying what was actually seen.
 
-For a Page target, skip the call entirely and record:
+- [ ] **Step 4: Correct the two comments named above.**
 
-```go
-		res.Skipped = append(res.Skipped, FieldPrivacy)
-		res.Warnings = append(res.Warnings,
-			"a Page broadcast is public to everyone; privacy applies to profile broadcasts only")
-```
-
-- [ ] **Step 4: Run the tests, then the package**
+- [ ] **Step 5: Run the tests, then the package**
 
 Run: `go test ./internal/oauth/`
-Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add internal/oauth/facebook.go internal/oauth/facebook_test.go
-git commit -m "feat(facebook): privacy can be changed without recreating the broadcast"
+git add internal/oauth/facebook.go internal/oauth/facebook_test.go internal/db/compliance.go
+git commit -m "feat(facebook): privacy can be changed, and only claimed when confirmed"
 ```
 
-- [ ] **Step 6: Prove each guard can fail**
+- [ ] **Step 7: Prove each guard can fail**
 
-1. Return the post error instead of recording `Skipped` →
+1. Report `Applied` from the POST status without reading back →
+   `TestAPrivacyFacebookAccePTedButDidNotApplyIsNotReportedAsApplied` must fail.
+2. Treat an absent privacy field in the read-back as confirmation →
+   `TestAPrivacyReadBackThatOmitsTheFieldIsNotTreatedAsConfirmation` must fail.
+3. Return the POST error instead of recording `Skipped` →
    `TestARefusedPrivacyPushIsSkippedRatherThanAnError` must fail.
-2. Stop appending `FieldPrivacy` to `Applied` →
-   `TestFacebookPushAttemptsThePrivacyAndReportsIt` must fail.
+4. Delete the Page branch → `TestAPagePrivacyPushMakesNoRequestAtAll` must fail.
 
 ---
 
