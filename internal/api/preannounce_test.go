@@ -378,3 +378,24 @@ func TestADistantScheduleWithNoFacebookDestinationIsNotWarnedAbout(t *testing.T)
 		t.Fatalf("warned about a schedule with no Facebook destination: %v", view.Warnings)
 	}
 }
+
+// A stop schedule has no event page to be missing, so warning about one would
+// be nonsense. This exists because the Action check is the only condition left
+// guarding that after the redundant Kind test was removed.
+func TestADistantStopScheduleIsNotWarnedAbout(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	seedDestination(t, s, store, db.PlatformFacebook, "fb")
+
+	var view scheduleView
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "far off stop", "action": "stop", "kind": "once",
+		"runAt": time.Now().Add(23 * 24 * time.Hour).Format(time.RFC3339),
+		"tz":    "UTC", "enabled": true,
+	}, http.StatusCreated), &view)
+
+	if len(view.Warnings) != 0 {
+		t.Fatalf("warned about a STOP schedule, which never creates an event "+
+			"page to be missing: %v", view.Warnings)
+	}
+}

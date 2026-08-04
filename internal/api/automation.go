@@ -249,7 +249,12 @@ type scheduleView struct {
 // destination is involved, and a Facebook destination created tomorrow would
 // change the answer.
 func (s *Server) scheduleWarnings(sc scheduler.Schedule, now time.Time) []string {
-	if sc.Kind != scheduler.KindOnce || sc.Action != scheduler.ActionStart {
+	// No test on Kind, deliberately, and this is the second place that
+	// correction has paid off. A `sc.Kind != KindOnce` guard was written here
+	// first and a mutation removing it turned nothing red -- because the
+	// horizon check below already excludes daily and weekly by construction.
+	// It was dead code that read as load-bearing, which is worse than no code.
+	if sc.Action != scheduler.ActionStart {
 		return nil
 	}
 	at, ok := scheduler.Next(sc, now)
