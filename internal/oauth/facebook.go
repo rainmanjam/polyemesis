@@ -678,8 +678,9 @@ func (f *Facebook) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
 		// No category: a Facebook live video has no field equivalent to a
 		// YouTube category or a Twitch game. Saying so here is what keeps it out
-		// of the failure list.
-		Fields: []MetadataField{FieldTitle, FieldDescription},
+		// of the failure list. Tags ARE accepted: content_tags takes Facebook's
+		// own ad-interest ids, resolved from operator-typed words by resolveTags.
+		Fields: []MetadataField{FieldTitle, FieldDescription, FieldTags},
 		// Both limits are left at zero — "no published limit". Meta documents no
 		// maximum for either field, and inventing one would reject a title the
 		// platform would have accepted, which is the restrictive-check mistake
@@ -709,7 +710,10 @@ func (f *Facebook) PushMetadata(ctx context.Context, clientID, accessToken, acco
 		res.Warnings = append(res.Warnings,
 			"Facebook Live has no category field; set the audience and content tags in Live Producer.")
 	}
-	if m.Title == "" && m.Description == "" {
+	// Tags alone are a reason to write. Without them in this condition a push
+	// carrying only tags returns here having done nothing, and the composer
+	// reports success for a request that never left.
+	if m.Title == "" && m.Description == "" && len(m.Tags) == 0 {
 		return res, nil
 	}
 
@@ -717,7 +721,7 @@ func (f *Facebook) PushMetadata(ctx context.Context, clientID, accessToken, acco
 	if err != nil {
 		return nil, err
 	}
-	if err := f.writeLiveVideo(ctx, tgt, lv.ID, m); err != nil {
+	if err := f.writeLiveVideo(ctx, tgt, lv.ID, m, res); err != nil {
 		return nil, err
 	}
 
@@ -751,10 +755,13 @@ func (f *Facebook) UpdateLiveVideo(ctx context.Context, clientID, accessToken, t
 		res.Warnings = append(res.Warnings,
 			"Facebook Live has no category field; set the audience and content tags in Live Producer.")
 	}
-	if m.Title == "" && m.Description == "" {
+	// Tags alone are a reason to write. Without them in this condition a push
+	// carrying only tags returns here having done nothing, and the composer
+	// reports success for a request that never left.
+	if m.Title == "" && m.Description == "" && len(m.Tags) == 0 {
 		return res, nil
 	}
-	if err := f.writeLiveVideo(ctx, tgt, liveVideoID, m); err != nil {
+	if err := f.writeLiveVideo(ctx, tgt, liveVideoID, m, res); err != nil {
 		return nil, err
 	}
 	if m.Title != "" {
@@ -767,7 +774,7 @@ func (f *Facebook) UpdateLiveVideo(ctx context.Context, clientID, accessToken, t
 	return res, nil
 }
 
-func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string, m Metadata) error {
+func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string, m Metadata, res *MetadataResult) error {
 	params := url.Values{}
 	// Only what the operator typed is sent. An empty field means "leave what is
 	// there", and posting an empty title would blank a live broadcast's title.
@@ -777,11 +784,63 @@ func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string,
 	if m.Description != "" {
 		params.Set("description", m.Description)
 	}
+
+	// Tag words become ids, and a failure here is REPORTED rather than fatal.
+	// /search?type=adinterest is an ads-surface endpoint that may not be
+	// reachable with publish_video -- unverified, because this repo has no live
+	// Facebook account to check it against -- and a title change seconds before
+	// air must not be lost to a tag lookup.
+	if len(m.Tags) > 0 {
+		ids, warns, err := f.resolveTags(ctx, tgt, m.Tags)
+		switch {
+		case err != nil:
+			res.Skipped = append(res.Skipped, FieldTags)
+			res.Warnings = append(res.Warnings,
+				"Facebook would not search for tags, so none were set: "+err.Error())
+		case len(ids) > 0:
+			b, mErr := json.Marshal(ids)
+			if mErr != nil {
+				return mErr
+			}
+			params.Set("content_tags", string(b))
+			res.Applied = append(res.Applied, FieldTags)
+		}
+		res.Warnings = append(res.Warnings, warns...)
+	}
+
 	err := fbPost(ctx, tgt.token, "/"+id, params, nil)
 	if err != nil {
 		return fbAdvice(err, "edit the Facebook broadcast", f.publishScopes(tgt.kind))
 	}
 	return nil
+}
+
+// resolveTags turns operator words into Facebook's ad-interest ids, returning
+// one warning per word that matched nothing.
+//
+// An unmatched word is a WARNING NAMING THE WORD, never a silent drop: a tag
+// that disappears without comment looks exactly like one that worked.
+func (f *Facebook) resolveTags(ctx context.Context, tgt *fbTarget, words []string) ([]string, []string, error) {
+	var ids, warns []string
+	for _, w := range words {
+		var found struct {
+			Data []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"data"`
+		}
+		err := fbGet(ctx, tgt.token, "/search",
+			url.Values{"type": {"adinterest"}, "q": {w}, "limit": {"1"}}, &found)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(found.Data) == 0 {
+			warns = append(warns, fmt.Sprintf("no Facebook interest matches %q, so it was not set as a tag", w))
+			continue
+		}
+		ids = append(ids, found.Data[0].ID)
+	}
+	return ids, warns, nil
 }
 
 // fbLiveRank orders a target's broadcasts: whatever is on air, then whatever is

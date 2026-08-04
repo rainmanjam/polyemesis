@@ -71,22 +71,37 @@ type Metadata struct {
 	// numeric id every platform actually wants is something only that
 	// platform's own console can tell you.
 	Category string `json:"category"`
+	// Tags are words, not ids. Facebook's content_tags wants numeric
+	// ad-interest ids, and the adapter resolves them the same way Category is
+	// resolved -- because the id a platform actually wants is something only
+	// that platform's own console can tell you.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // Empty reports whether there is nothing to push.
 func (m Metadata) Empty() bool {
 	return strings.TrimSpace(m.Title) == "" &&
 		strings.TrimSpace(m.Description) == "" &&
-		strings.TrimSpace(m.Category) == ""
+		strings.TrimSpace(m.Category) == "" &&
+		len(m.Tags) == 0
 }
 
 // Trimmed returns a copy with surrounding whitespace removed, which is what a
-// paste from a script document invariably carries.
+// paste from a script document invariably carries. Tags that trim to nothing
+// are dropped outright rather than kept as blanks: an empty word is not a tag
+// anyone typed.
 func (m Metadata) Trimmed() Metadata {
+	var tags []string
+	for _, t := range m.Tags {
+		if t = strings.TrimSpace(t); t != "" {
+			tags = append(tags, t)
+		}
+	}
 	return Metadata{
 		Title:       strings.TrimSpace(m.Title),
 		Description: strings.TrimSpace(m.Description),
 		Category:    strings.TrimSpace(m.Category),
+		Tags:        tags,
 	}
 }
 

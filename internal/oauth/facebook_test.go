@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1032,5 +1033,108 @@ func TestFacebookIsRegisteredAndGuidedAsASupportedPlatform(t *testing.T) {
 	}
 	if len(guide.Steps) < 5 {
 		t.Errorf("guide has %d steps; it needs the real ones", len(guide.Steps))
+	}
+}
+
+func TestFacebookResolvesTagWordsIntoContentTagIDs(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/search":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{
+				{"id": "6003", "name": "Cooking"},
+			}})
+		case r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Tags: []string{"cooking"}})
+	if err != nil {
+		t.Fatalf("UpdateLiveVideo: %v", err)
+	}
+	post := fbCall(*log, http.MethodPost, "/9")
+	if post == nil {
+		t.Fatalf("no edit; calls were %+v", *log)
+	}
+	if !strings.Contains(post.Query, "content_tags") || !strings.Contains(post.Query, "6003") {
+		t.Errorf("edit query %q carries no resolved tag id", post.Query)
+	}
+	if !slices.Contains(res.Applied, FieldTags) {
+		t.Errorf("applied = %v, want FieldTags", res.Applied)
+	}
+}
+
+func TestATagWordThatMatchesNothingIsNamedInAWarning(t *testing.T) {
+	// A tag that vanishes without comment is indistinguishable from one that
+	// worked, and the operator has no way to find out which happened.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/search":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{}})
+		case r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Title: "t", Tags: []string{"zzzznotathing"}})
+	if err != nil {
+		t.Fatalf("UpdateLiveVideo: %v", err)
+	}
+	joined := strings.Join(res.Warnings, " | ")
+	if !strings.Contains(joined, "zzzznotathing") {
+		t.Errorf("warnings %q do not name the tag that matched nothing", joined)
+	}
+}
+
+func TestARefusedTagSearchStillAppliesTheTitle(t *testing.T) {
+	// The tag lookup is an ads-surface endpoint and may not be reachable with
+	// publish_video. A 403 there must never cost the operator a title change
+	// seconds before air.
+	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/search":
+			http.Error(w, `{"error":{"message":"(#10) permission"}}`, http.StatusForbidden)
+		case r.URL.Path == "/9":
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+		default:
+			http.Error(w, "{}", http.StatusNotFound)
+		}
+	})
+	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Title: "Tonight", Tags: []string{"cooking"}})
+	if err != nil {
+		t.Fatalf("a refused tag search failed the whole push: %v", err)
+	}
+	if !slices.Contains(res.Applied, FieldTitle) {
+		t.Errorf("applied = %v, want the title to have landed anyway", res.Applied)
+	}
+	if !slices.Contains(res.Skipped, FieldTags) {
+		t.Errorf("skipped = %v, want FieldTags", res.Skipped)
+	}
+}
+
+func TestFacebookSendsNoContentTagsWhenTheOperatorTypedNone(t *testing.T) {
+	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/9" {
+			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+			return
+		}
+		http.Error(w, "{}", http.StatusNotFound)
+	})
+	_, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+		Metadata{Title: "Only a title"})
+	if err != nil {
+		t.Fatalf("UpdateLiveVideo: %v", err)
+	}
+	if fbCall(*log, http.MethodGet, "/search") != nil {
+		t.Error("searched for tags nobody typed, on the path that runs seconds before air")
+	}
+	post := fbCall(*log, http.MethodPost, "/9")
+	if post != nil && strings.Contains(post.Query, "content_tags") {
+		t.Errorf("edit query %q sends empty content_tags", post.Query)
 	}
 }
