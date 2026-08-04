@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -144,6 +145,16 @@ type Server struct {
 	// Defaults to calling the pusher directly; only a test ever replaces it.
 	pushBroadcastFn func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
 		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error)
+
+	// rescheduleFn is the fifth of these, and it exists for the same reason as
+	// ingestForFn says out loud: internal/oauth's graph base is unexported, so
+	// nothing in this package can observe a Graph call from outside the
+	// process. Without it, "a moved schedule MOVES its broadcast rather than
+	// creating a second one" would be untestable -- and the failure it guards
+	// against is an orphaned public event page that people are still
+	// subscribed to, which nothing anywhere would report.
+	// Defaults to the real call; only a test ever replaces it.
+	rescheduleFn func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error
 }
 
 // Options configures the server.
@@ -215,6 +226,22 @@ func New(o Options) *Server {
 	// The real implementation, always, except in the one test that replaces it
 	// to observe what handleRefreshKey passed.
 	s.ingestForFn = s.ingestFor
+	// And the reschedule, which only Facebook has. A platform without one is
+	// an error rather than a silent no-op: nothing calls this except the
+	// pre-announce sweep, and the sweep only calls it for a destination it has
+	// already established is Facebook, so reaching here on another platform
+	// means the caller is wrong.
+	s.rescheduleFn = func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error {
+		p, err := oauth.Get(acct.Platform)
+		if err != nil {
+			return err
+		}
+		fb, ok := p.(*oauth.Facebook)
+		if !ok {
+			return fmt.Errorf("%s cannot reschedule a broadcast", acct.Platform)
+		}
+		return fb.RescheduleBroadcast(ctx, acct.AccessToken, broadcastID, at)
+	}
 	// Same reasoning, one handler over: the real call, always, except in the
 	// one test that replaces it to observe what pushOne passed.
 	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {

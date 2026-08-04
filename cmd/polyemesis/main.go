@@ -287,6 +287,11 @@ func run(h *hooks) error {
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
 	go srv.RefreshLoop(ctx)
+	// Pre-announces scheduled Facebook broadcasts, so a show on a schedule has
+	// an event page before it starts. Best-effort by construction: it runs
+	// ahead of the stream and nothing downstream waits on it, so a failure
+	// here never delays or blocks a go-live.
+	go srv.PreannounceLoop(ctx)
 
 	// After the API, because the adapters refresh their tokens through it.
 	// Nothing here fails the start: a platform that will not connect is a line
