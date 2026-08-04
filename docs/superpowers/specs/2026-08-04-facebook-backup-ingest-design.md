@@ -5,9 +5,14 @@ to Facebook's backup ingest endpoint, so a dropped primary connection does not
 drop the broadcast.
 
 **Why:** a live broadcast has no second take. Every other resilience control in
-polyemesis — backoff, give-up, mux queues — makes *reconnecting* better. None of
-them helps during the seconds it takes, and for a live audience those seconds
-are the whole problem.
+polyemesis — backoff, give-up, mux queues — makes *reconnecting* better. None
+helps during the seconds it takes, and for a live audience those seconds are the
+whole problem.
+
+> **This document was rewritten after an adversarial review.** The first draft's
+> headline claim was wrong, and four of its eight test rows would have passed
+> against a broken feature. Both are recorded below rather than quietly fixed,
+> because the corrections are the useful part.
 
 ## The finding that started it
 
@@ -21,161 +26,228 @@ are the whole problem.
 Backups []Ingest `json:"-"`
 ```
 
-They are parsed out of **every** Facebook create response and thrown away.
-`ingestFor` returns `b.Ingest` and `b.ID` and drops the rest, so the backup
-URLs never leave `internal/oauth`. The comment is honest that nothing consumes
-them — this is a gap, not a lie — but it means the platform half already works.
+Parsed out of **every** Facebook create response and thrown away: `ingestFor`
+returns `b.Ingest` and `b.ID` and drops the rest. The comment is honest that
+nothing consumes them, so this is a gap rather than a lie — but it means the
+platform half already works.
 
-## Why 10F is four features and this is one of them
-
-Recorded because the decomposition is the decision, and one part of it was
-verified rather than assumed.
+## Why 10F is four features and this is one
 
 | Piece | Needs | Status |
 |---|---|---|
-| **Backup ingest, end to end** | a second output plus failover | **this spec** |
+| **Backup ingest, end to end** | a second output plus reconciliation | **this spec** |
 | `stop_on_delete_stream` | one create-time boolean | trivial, deferred |
-| 360 / spatial audio | create-time params | cheap, and unverifiable without VR hardware |
-| Frame-accurate go-live | an in-process RTMP relay | blocked, see below |
+| 360 / spatial audio | create-time params | cheap, unverifiable without VR hardware |
+| Frame-accurate go-live | an in-process RTMP relay | blocked |
 
-**Frame-accurate go-live cannot be done with FFmpeg, and this was checked.**
-It needs an AMF0 data message (`onGoLive`) emitted at a chosen frame. The FLV
-muxer's flags only ever *suppress* metadata:
+**Frame-accurate go-live cannot be done with FFmpeg, and this was checked.** It
+needs an AMF0 `onGoLive` message at a chosen frame. The FLV muxer's flags only
+ever *suppress* metadata (`no_metadata`, `no_sequence_end`,
+`no_duration_filesize`, `add_keyframe_index`). The near-miss is `-rtmp_conn`,
+documented as *"Append arbitrary AMF data to the Connect message"* — **Connect
+message only**, handshake time, not frame N. Its own spec.
 
+## The correction that changed the promise
+
+**The first draft claimed: "turning redundancy on must not interrupt the thing
+it protects." For Facebook, that is not achievable, and the reason is
+structural.**
+
+- A backup URL only exists on a broadcast created with it. `Facebook.IngestFor`
+  **creates a new `live_video` on every call** — there is no way to ask an
+  existing broadcast for a backup endpoint it was not created with.
+- Getting one therefore means a key refresh, which replaces `StreamKey`.
+- `Destination.Target()` is `URL + "/" + StreamKey`, and `Target()` is the first
+  element of `destSpec`.
+- So the primary's restart hash changes, and the primary cycles. Necessarily.
+
+**The feature is therefore "enable this before you go live", and the UI must say
+so.** Promising seamlessness and delivering a reconnect is worse than saying
+plainly that enabling redundancy costs one reconnect now.
+
+What survives from the original reasoning is the other direction, and it still
+matters: turning backup **off**, and every unrelated reconcile, must not touch
+the primary. That is why the toggle stays out of `destSpec` — but that alone is
+not enough, see below.
+
+## Absence from `destSpec` is necessary and not sufficient
+
+Leaving the toggle out of the hash stops it cycling the primary. It does **not**
+make it take effect: nothing would ever read it.
+
+Resilience works because `startDestinations` explicitly calls `applyDestPolicy`
+on an already-running process. The backup needs the same treatment and more —
+its own desired state, its own signature, and its own reconciliation step:
+
+```go
+// backupSpec is the backup process's own restart hash. Separate from destSpec
+// so the two cycle independently: a rotated backup key must restart ONLY the
+// backup, and nothing about the backup may ever restart the primary.
+func backupSpec(row *db.Destination, compiled routing.Result, upstream string) string
 ```
--flvflags   no_metadata | no_sequence_end | no_duration_filesize | add_keyframe_index
+
+It must cover: whether backup is enabled, the backup URL and key, the upstream
+hub, the compiled routing result, transport tuning, and audio settings —
+everything that appears on the backup's command line. A signature missing any
+of those reproduces the bug `destSpec`'s own comment warns about: a stored
+setting that never reaches the running process.
+
+## The bug a naive implementation would ship
+
+**`Hub.Subscribe` replaces by name.** It is a map assignment:
+
+```go
+h.subs[name] = &subscriber{name: name, addr: &net.UDPAddr{IP: ip, Port: port}}
 ```
 
-There is no option to emit a custom data message mid-stream. The near-miss that
-will mislead the next person is `-rtmp_conn`, documented as *"Append arbitrary
-AMF data to the Connect message"* — **Connect message only**, i.e. handshake
-time, not a packet at frame N. Doing it properly means putting a Go RTMP relay
-in the path of every Facebook broadcast, which is a large risk for a niche
-capability and belongs in its own spec.
+and `startDest` hard-codes `subName := fmt.Sprintf("dest:%d", row.ID)`.
 
-## The design
+So "call `startDest` twice" registers the backup under the primary's name,
+**replacing it**. Both processes are alive, both have correct and distinct
+Facebook targets, both look healthy on the card — and the primary receives no
+packets at all.
 
-**A second supervised process.** A backup-enabled destination gets a second
-FFmpeg, subscribed to the same relay hub, publishing to the backup URL.
-
-One FFmpeg with two outputs was rejected. It is cheaper — one audio encode
-rather than two — but both outputs share a process, so a crash takes down the
-redundancy along with the thing it was protecting. The supervisor already
-restarts processes independently, which is exactly the property this feature
-needs, and using it is what makes the redundancy real rather than nominal.
-
-**Off by default, per destination.** It doubles upload bandwidth for that
-destination, and an operator on a thin or metered uplink must choose that
-deliberately. No existing install changes behaviour on upgrade — the same rule
-the compliance work followed.
-
-## The decision this design turns on
-
-**Turning redundancy on must not interrupt the thing it protects.**
-
-`destSpec` hashes everything that requires a restart, and its own comment says
-why that matters:
-
-> a setting that is stored and never reaches the running process is the failure
-> this repo keeps paying for
-
-The obvious move is therefore to add the backup toggle to that hash. **That
-would be wrong.** The hash governs the PRIMARY process, so toggling backup on
-would cycle the primary — dropping the operator's live connection in order to
-add a spare. An operator reaching for redundancy mid-broadcast is the person
-least able to afford a reconnect.
-
-`destSpec` already records the precedent, about resilience:
-
-> The reasoning that first put it here was right about the danger and wrong
-> about the remedy: the remedy was to deliver it, not to drop the operator's
-> connection in order to deliver it.
-
-So the backup toggle is **absent from `destSpec`**, exactly like resilience. The
-backup process is started and stopped on its own, and the primary never notices.
+Subscriber names must be role-qualified: `dest:<id>` and `dest:<id>:backup`.
+This is called out here because every obvious test passes while it is broken.
 
 ## Storage
 
-Two fields on `db.Destination`, beside `URL` and `StreamKey`:
+**The toggle goes on `db.FacebookSettings`, not `DestResilience`.**
+
+The first draft put it on `DestResilience`. That is wrong twice: that type means
+supervisor backoff and give-up, and its `Active()` reports
+`MinBackoffSeconds > 0 || MaxBackoffSeconds > 0 || GiveUpAfter > 0` — a new
+boolean would be invisible to it. `FacebookSettings` is already documented as
+"per-destination Facebook configuration applied when the broadcast is CREATED",
+which is exactly what `enable_backup_ingest` is.
 
 ```go
-// BackupURL and BackupStreamKey are the platform's secondary ingest, stored
-// when the broadcast was created. Empty when the platform offered none.
+// BackupIngest asks Facebook to provision a secondary ingest endpoint at
+// create time, and publishes a redundant feed to it. Off by default: it
+// doubles this destination's upload bandwidth and its audio encoding cost.
+BackupIngest bool `json:"backupIngest,omitempty"`
+```
+
+**The endpoint itself goes on `db.Destination`**, beside `URL` and `StreamKey`,
+because the engine consumes it and should not have to know which platform a
+destination is:
+
+```go
 BackupURL       string `json:"backupUrl,omitempty"`
 BackupStreamKey string `json:"backupStreamKey,omitempty"`
 ```
 
-On `db.Destination` rather than in `FacebookSettings`, because a backup ingest
-endpoint is not a Facebook idea — a custom RTMP destination with a redundant
-endpoint means the same thing — and because the engine reads it, which should
-not require the engine to know which platform a destination is.
+**Persistence is not free.** Destination reads use an explicit column list and
+scan order; create and update are explicit SQL. This needs a migration,
+`destColumns`, the scan, the insert, the update, and a round-trip test. Missing
+any one produces a toggle that is accepted and a backup URL that disappears on
+reload — which is the same class of defect as a stored COPPA declaration that
+never left the database.
 
-The toggle goes on `DestResilience`, which is where "how this destination
-survives trouble" already lives:
+## Both creation paths must store the backups
+
+`ingestFor` returns `(*oauth.Ingest, string, error)` and drops the rest. It
+widens to carry the backups, and **both** callers store them:
+
+- `handleRefreshKey` — the manual path.
+- `preannounceOnce`/`announceOne` — the scheduled path added by 10E, which today
+  persists only the primary key and the broadcast id.
+
+A refresh-key-only implementation silently loses backup ingest for every
+scheduled broadcast, which is the shape this repository keeps finding: the
+feature works on the path someone tested and not on the one they forgot.
+
+## Where the backup process lives
+
+`destination` holds one `proc *supervisor.Process`, and `DestStatus` exposes one
+`Process`. There is nowhere to keep a backup's process, its port, its
+subscription, its error or its failed state.
+
+So this needs model work, not just another `supervisor.Process`:
 
 ```go
-// BackupIngest publishes a second, redundant feed to the platform's backup
-// endpoint. Off by default: it doubles this destination's upload bandwidth.
-BackupIngest bool `json:"backupIngest,omitempty"`
+type destination struct {
+    // ... existing fields
+    backup     *supervisor.Process
+    backupPort int
+    backupSub  string
+    backupSpec string
+    backupErr  string
+}
 ```
 
-## What has to stop discarding the backups
+and a `BackupProcess *supervisor.Status` on `DestStatus`. "The card shows the
+backup's state" and "give-up applies independently" both depend on this
+existing; the first draft asserted them without it.
 
-`ingestFor` returns `(*oauth.Ingest, string, error)`. The backups are on the
-`*oauth.Broadcast` it throws away. It widens to carry them, and
-`handleRefreshKey` stores them.
+## What isolation actually buys, stated honestly
 
-`enable_backup_ingest` is sent at create when the toggle is on.
+The first draft said "a dead backup never affects the primary". **That is
+overstated.** Process supervision does isolate a crash — the backup exiting
+never calls `Stop` on the primary — but the two share:
+
+- **The hub's single fanout goroutine and socket.** One per hub, for all
+  consumers.
+- **The port allocator: 500 ports, `[21000, 21500)`, shared across every source
+  engine.** Every backup-enabled destination consumes one more. Exhaustion must
+  degrade the **backup** and never the primary, which means the backup asks for
+  its port last and treats failure as "no backup today", not as an error on the
+  destination.
+- **CPU, memory, file descriptors and uplink.** A second FFmpeg decodes, filters
+  and re-encodes audio again, and uploads a second copy.
+
+So the honest claim is: **a backup that crashes, stalls or is refused by Facebook
+cannot take the primary down.** A backup that saturates the machine or the uplink
+can degrade it, exactly as any other second output would.
+
+## The two feeds are redundant, not identical
+
+Each process is an independent UDP receiver with its own kernel and FFmpeg
+queues, and `RelayInputURL` deliberately treats overflow as nonfatal loss. The
+hub fans packets out serially, so both see the same order — but under pressure
+they can lose *different* packets and then encode audio independently.
+
+This is redundancy against a lost connection. It is **not** a frame-identical
+mirror, and nothing here should imply Facebook can cut between them invisibly.
 
 ## An uncertainty this design must survive
 
-**It is not established whether `enable_backup_ingest` is REQUIRED before
-Facebook returns secondary URLs, or merely requests more of them.** Our own test
-fixture returns `stream_secondary_urls` unconditionally, but a fixture is not
+It is **not established** whether `enable_backup_ingest` is required before
+Facebook returns secondary URLs, or merely requests more of them. Our own test
+fixture returns `stream_secondary_urls` unconditionally, and a fixture is not
 evidence about Meta.
 
-So the design must not assume either: when the toggle is on and the create
-response carries no backup URL, the destination stores none and **the operator
-is told the platform offered no backup endpoint**. A toggle that silently does
-nothing is the failure this project keeps finding, most recently a COPPA
-declaration that reached the database and stopped.
-
-## Failure behaviour
-
-**The backup never fails the primary.** It is a second supervised process; if it
-cannot start, or dies and cannot be restarted, the primary is untouched and the
-destination stays live. Anything else would make a redundancy feature into a new
-way to lose a broadcast.
-
-**Both are reported, separately.** The card shows the backup's state beside the
-primary's. A backup that has been dead for an hour while the card shows a
-healthy destination is worse than no backup, because the operator believes they
-have one.
-
-**Give-up applies to each independently.** A backup endpoint that refuses
-forever must reach `failed` and say so, rather than retrying invisibly.
+So: toggle on, no backup URL in the response → store none and **tell the
+operator the platform offered no backup endpoint**, through the response's
+`warnings` array, the same channel destination writes already use. A log line is
+not enough; a toggle that silently does nothing is the failure this project
+keeps finding.
 
 ## Testing
 
-Every guard proven able to fail by a named one-line mutation.
+Every guard proven able to fail by a named one-line mutation. **Four rows from
+the first draft were removed for passing against a broken feature**; each
+replacement says what it watches instead.
 
-| Case | Why it matters |
+| Case | What makes it able to fail |
 |---|---|
-| A backup-enabled destination starts TWO processes, publishing to different URLs | The feature; asserted on the second process's target, not on a count |
-| The second publishes to the BACKUP url, not the primary | Two feeds to one endpoint is not redundancy, and would look identical on a count |
-| Toggling backup on does NOT restart the primary | The decision this design turns on |
-| Toggling backup off stops the backup and leaves the primary running | The same claim in the other direction |
-| A backup that dies does not stop the primary | Redundancy must not become a way to lose a broadcast |
-| `enable_backup_ingest` is sent only when the toggle is on | Empty means leave alone, as everywhere else here |
-| A create response with no backup URL stores none and warns | The uncertainty above; a toggle that silently does nothing is the failure mode this repo keeps hitting |
-| A destination with the toggle off starts exactly one process | The rule must not widen |
+| Both processes receive relay packets, under DISTINCT subscriber names | The replace-by-name bug: asserting "two processes, two URLs" passes while the primary is starved. Asserts on the hub's subscriber set, not on process count |
+| A rotated backup key restarts ONLY the backup | Watches the primary's PID across the change. "Toggle does not restart primary" alone passes when the toggle is ignored entirely |
+| Enabling backup starts a backup process AND the card reports it | Pairs the effect with its report. Either alone passes while the other is missing |
+| Disabling it stops the process, unsubscribes the hub, and releases the port | Leak-shaped: stopping the process alone leaves a stale subscriber and a held port, and nothing else would notice until the pool ran out |
+| A backup that exits does not stop the primary, and the primary's PID is unchanged | Asserts on the primary rather than on the destination still being "up" |
+| Port exhaustion refuses the BACKUP and leaves the primary running | The failure mode the shared 500-port pool creates |
+| `enable_backup_ingest` is sent only when the toggle is on, and the returned backups are STORED | The send and the store together; the send alone passes while `ingestFor` discards them |
+| The SCHEDULED path stores backups too | The path a refresh-key-only implementation forgets |
+| A response with no backup URL stores none and returns a warning | Asserts on the response's `warnings`, not on a log line |
+| A destination with the toggle off starts exactly one process and holds one port | The rule must not widen |
 
 ## Out
 
 - **Automatic failover between primary and backup.** Facebook decides which feed
   it takes; polyemesis publishes both. Choosing for it would need to know what
   Facebook is currently ingesting, which no endpoint reports.
-- **Backup ingest for platforms other than Facebook.** The storage is general on
-  purpose, but nothing else offers one today and inventing a UI for a field no
-  platform populates is how unreachable settings appear.
+- **Backup ingest for other platforms.** The storage is general on purpose, but
+  nothing else offers one today, and a UI for a field no platform populates is
+  how unreachable settings appear.
 - **The other three parts of 10F**, per the table above.
