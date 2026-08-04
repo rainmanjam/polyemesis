@@ -159,17 +159,20 @@ go-live path finds a key already present and uses it. Facebook flips
 
 Two consequences worth stating rather than discovering:
 
-- **A key written ahead of time is a key that can go stale.** If the operator
-  deletes the scheduled video on Facebook, the stored key points at nothing.
-  The go-live path treats a rejected pre-created key as "create a fresh one" and
-  **says so** — the stream goes live, and the operator is told that the page
-  people were notified about is gone.
+- **A key written ahead of time is a key that can go stale**, and this is
+  NOT SOLVED — see issue #82. This design said the go-live path should treat a
+  rejected pre-created key as "create a fresh one". Implementing it showed
+  there is no such path: `handleRefreshKey` is a manual action that already
+  always creates a fresh broadcast, and the engine publishes to the stored key
+  without ever calling Graph, so nothing in the go-live sequence can observe a
+  rejection. FFmpeg simply fails to connect.
 
-  Failing loudly instead was considered and rejected: it would let a deleted
-  Facebook post take a stream off the air, which turns an optional discovery
-  feature into a single point of failure for going live. Recreating *silently*
-  was rejected for the opposite reason — the operator would never learn that
-  what was announced and what is live had diverged.
+  The obvious substitute — clear the marker whenever a reschedule fails — is
+  worse than the problem: a transient network error would clear it too, and the
+  next sweep would create a second broadcast while the first stays up as a
+  public page people are subscribed to. Telling the two apart needs Graph error
+  codes for a deleted `LiveVideo`, and this document already records that Graph
+  documents no update surface for `LiveVideo` at all.
 - **Rescheduling is a real case.** Moving a schedule changes the occurrence, so
   the marker no longer matches and the sweep would create a *second* broadcast.
   When a destination already holds a pre-created broadcast for a different
