@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
@@ -542,6 +543,98 @@ func TestAKickTargetGetsNoComplianceAttemptAndNoError(t *testing.T) {
 	if job.Results[0].State != metaOK {
 		t.Errorf("state = %q (%s), want ok: a platform without a compliance API is not a failure",
 			job.Results[0].State, job.Results[0].Message)
+	}
+}
+
+// TestAFailedComplianceWriteIsReportedRatherThanSwallowed was written because
+// the mutation that removes the error branch's whole body left the suite green:
+// a compliance write that failed would have been indistinguishable from one
+// that succeeded, which is the same silence this branch exists to end, one
+// layer in. It also pins the failure as PARTIAL rather than fatal -- the title
+// above it may already have landed, and failing the row would send the operator
+// back to redo work that took.
+func TestAFailedComplianceWriteIsReportedRatherThanSwallowed(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+	kids := true
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://a.example/live", StreamKey: "sk-live-1", AccountID: &acctID,
+		Compliance: db.Compliance{Privacy: db.PrivacyPrivate, MadeForKids: &kids},
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
+		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
+	}
+	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
+		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
+		return nil, errors.New("youtube said no: insufficient scope")
+	}
+
+	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	if len(job.Results) != 1 {
+		t.Fatalf("results = %+v, want one row", job.Results)
+	}
+	res := job.Results[0]
+	if !strings.Contains(strings.Join(res.Warnings, " "), "insufficient scope") {
+		t.Errorf("warnings = %v, want the provider's own reason: a compliance write that "+
+			"failed must not read like one that worked", res.Warnings)
+	}
+	skipped := map[oauth.MetadataField]bool{}
+	for _, f := range res.Skipped {
+		skipped[f] = true
+	}
+	// Only what the operator actually set. Naming contentLabels here would
+	// report a fault in a Twitch field this YouTube destination never touched.
+	for _, f := range []oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids} {
+		if !skipped[f] {
+			t.Errorf("%q is missing from skipped %v, so the operator is not told which "+
+				"declaration failed to land", f, res.Skipped)
+		}
+	}
+	if skipped[oauth.FieldLabels] {
+		t.Errorf("skipped = %v names contentLabels, which this destination never set", res.Skipped)
+	}
+	if res.State != metaPartial {
+		t.Errorf("state = %q, want partial: the title landed and the compliance did not, "+
+			"and collapsing that to either extreme loses the half that matters", res.State)
+	}
+}
+
+// TestTheOverviewNeverSerialisesAStreamKey guards the `json:"-"` on
+// metadataTarget.StreamKey. The field is on the target only so the compliance
+// push can reach Facebook's live video id; the same struct is the body of an
+// endpoint the dashboard renders, and a stream key in that response is a
+// credential handed to every script on the page. Dropping the tag is a
+// one-character change that nothing else notices.
+func TestTheOverviewNeverSerialisesAStreamKey(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://a.example/live", StreamKey: "sk-live-secret", AccountID: &acctID,
+		Compliance: db.Compliance{Privacy: db.PrivacyPrivate},
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/metadata", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "sk-live-secret") {
+		t.Errorf("the metadata overview leaked a stream key into a browser response: %s", w.Body.String())
 	}
 }
 
