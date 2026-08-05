@@ -8,6 +8,12 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-05
+
+A minor bump rather than a patch, and deliberately: `facebook.backupIngest`
+became `backupIngestWanted` with no compatibility alias, which breaks any client
+that *writes* that field. Everything else here is a fix.
+
 An adversarial audit of the 0.2.0 release, and the fixes for everything it
 found. The full record, with a numbered finding behind every change below, is
 [docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md](docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md).
@@ -728,6 +734,7 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rainmanjam/polyemesis/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rainmanjam/polyemesis/releases/tag/v0.1.0
