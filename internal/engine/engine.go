@@ -1921,7 +1921,13 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// until some unrelated reconcile happened to restart the destination,
 		// which is the worst of both worlds: the operator is told it applied
 		// and the process is still running the old command line.
-		row.ExtraInputArgs, row.ExtraOutputArgs,
+		//
+		// The PARSED argv, not the operator's text. destArgs puts these through
+		// expertArgv -> ffmpeg.SplitArgs, so hashing the raw string restarted a
+		// live destination for a byte-identical command line whenever somebody
+		// reformatted the whitespace -- or re-saved a value SplitArgs refuses
+		// and expertArgv therefore drops.
+		expertArgvSig(row.ExtraInputArgs), expertArgvSig(row.ExtraOutputArgs),
 		// Transport tuning, for exactly the same reason. Every one of these
 		// changes the command line, and a setting that is stored and never
 		// reaches the running process is the failure this repo keeps paying
@@ -2204,13 +2210,36 @@ func backupSpecOf(row *db.Destination, compiled routing.Result, upstream string)
 		compiled.FilterComplex, strconv.Itoa(row.AudioBitrate),
 		strconv.Itoa(row.Profile.SampleRate), upstream,
 		strconv.Itoa(compiled.VideoDelayMS),
-		row.ExtraInputArgs, row.ExtraOutputArgs,
+		expertArgvSig(row.ExtraInputArgs), expertArgvSig(row.ExtraOutputArgs),
 		strconv.FormatBool(row.Transport.NoDurationFilesize),
 		strconv.Itoa(row.Transport.MuxQueuePackets),
 		strconv.Itoa(row.Transport.MuxQueueBytes),
 		strconv.Itoa(row.Transport.RWTimeoutSeconds),
 		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
 	})
+}
+
+// expertArgvSig renders hand-written expert arguments the way the command line
+// will actually receive them, for the restart hashes.
+//
+// It is expertArgv without the logging. A hash is computed for every
+// destination on every reconcile, twice over -- primary and backup -- so
+// warning here would put three copies of the same line in the log every pass,
+// about a value the operator can already see reported in the editor.
+//
+// Unparseable text renders as nothing, matching what expertArgv hands the argv
+// builder. That is the second half of the bug this fixes: re-saving a value
+// SplitArgs refuses used to change the hash and cycle a live destination to
+// deliver a command line identical to the one already running.
+func expertArgvSig(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	argv, err := ffmpeg.SplitArgs(raw)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%q", argv)
 }
 
 func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
