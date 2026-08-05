@@ -263,8 +263,23 @@ func TestTheCardLinksToTheScheduledBroadcast(t *testing.T) {
 // the state is rendered INSIDE the block it names, so it now bounds itself the
 // same way its neighbours have been taught to.
 //
-// MUTATION, run against a committed tree: `{false && dest.backupProcess && (`
-// -- head gone, block unfindable, fails.
+// MUTATIONS, run against a committed tree and confirmed to compile:
+// `{state === "running" && dest.backupProcess && (` and
+// `{dest.backupError && false && (` -- head gone, block unfindable, both fail.
+//
+// The first is not the `&& false` shape its neighbours use, and the reason is
+// worth recording. `{false && dest.backupProcess && (` and
+// `{dest.backupProcess && false && (` BOTH fail to compile: TypeScript drops
+// the narrowing once a branch is statically false, so `dest.backupProcess.state`
+// two lines down becomes TS18049 and `npm run build` rejects the mutation
+// before any guard is consulted. A mutation CI would refuse proves nothing
+// about a guard.
+//
+// So this one uses the shape the audit says actually happens instead: a control
+// moved behind a new condition. `state` is already in scope, and gating the
+// backup's state on the primary being live is a plausible edit and a real
+// regression -- a backup that died while the primary was offline is exactly the
+// case the operator needs to see.
 func TestTheCardShowsTheBackupFeedsState(t *testing.T) {
 	src := readUI(t, "components", "DestinationCard.tsx")
 
