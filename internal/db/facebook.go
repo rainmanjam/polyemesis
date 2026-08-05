@@ -19,20 +19,23 @@ type FacebookSettings struct {
 	Crosspost []CrosspostTarget `json:"crosspost,omitempty"`
 	// DonateCharityID adds a donate button for one charity.
 	DonateCharityID string `json:"donateCharityId,omitempty"`
-	// BackupIngest asks Facebook to provision a secondary ingest endpoint at
-	// create time, and publishes a redundant feed to it so a dropped
-	// connection does not drop the broadcast.
+	// BackupIngest USED TO LIVE HERE and is now Destination.BackupIngestWanted.
+	// A tombstone rather than nothing, because the field name survives in the
+	// stored JSON of every install that had it -- MigrateDestinationExpertArgs
+	// reads `$.backupIngest` out of this blob exactly once, on the pass that
+	// adds the column -- and somebody will find it there and come looking.
 	//
-	// Off by default: it doubles this destination's upload bandwidth and its
-	// audio encoding cost, which an operator on a thin or metered uplink has
-	// to choose deliberately.
+	// It gates BackupURL and BackupStreamKey, two columns that are on
+	// Destination and not in here for a reason their own comment states: the
+	// ENGINE consumes them, and the engine should not have to know which
+	// platform a destination is. Leaving the bool behind meant the engine's
+	// gate on those two went through this struct, and no second platform could
+	// reach redundancy however it was configured.
 	//
-	// TURNING IT ON COSTS ONE RECONNECT, and that is unavoidable rather than
-	// sloppy. A backup endpoint exists only on a broadcast created with it,
-	// and IngestFor creates a new live_video on every call -- so obtaining one
-	// replaces the primary stream key, which is part of Target(), which is in
-	// destSpec. Enable it before going live.
-	BackupIngest bool `json:"backupIngest,omitempty"`
+	// Facebook's create-time enable_backup_ingest parameter is unaffected and
+	// still named for the platform -- see oauth.IngestOptions.BackupIngest.
+	// That one is a fact about Facebook's API; this was the operator's intent.
+
 	// Announcements is one marker per SHOW, not one per destination.
 	//
 	// One destination is reached by every start schedule that names it -- and a
@@ -301,10 +304,15 @@ type CrosspostTarget struct {
 
 // Empty reports whether there is nothing to send.
 func (f FacebookSettings) Empty() bool {
-	// BackupIngest counts, unlike the announcement markers above. Empty asks
-	// "is there anything to SEND at create time", and this is a create-time
-	// parameter -- whereas an announcement is bookkeeping. Without it
-	// dropUnsendableSettings would read a backup-enabled destination as having
-	// nothing configured.
-	return len(f.Crosspost) == 0 && f.DonateCharityID == "" && !f.BackupIngest
+	// The backup intent used to be a third clause here, because it was a
+	// create-time parameter stored in this struct and dropUnsendableSettings
+	// would otherwise have read a backup-enabled destination as unconfigured.
+	// It is no longer in this struct, and it must not be reintroduced through
+	// this method: it is not a Facebook setting, so a destination that switches
+	// platform keeps it -- which is the whole point. What still belongs here is
+	// what Facebook's create call and nothing else can act on.
+	//
+	// The announcement markers stay excluded for the older reason: Empty asks
+	// "is there anything to SEND at create time", and a marker is bookkeeping.
+	return len(f.Crosspost) == 0 && f.DonateCharityID == ""
 }

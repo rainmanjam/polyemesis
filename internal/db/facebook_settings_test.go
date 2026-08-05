@@ -130,7 +130,7 @@ func TestUpdatingADestinationKeepsItsBackupEndpoint(t *testing.T) {
 		Name: "fb", Kind: "rtmp", Platform: PlatformFacebook,
 		URL: "rtmps://live.example/rtmp", StreamKey: "k",
 		BackupURL: "rtmps://backup.example/rtmp", BackupStreamKey: "bk",
-		Facebook: FacebookSettings{BackupIngest: true},
+		BackupIngestWanted: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateDestination: %v", err)
@@ -143,7 +143,7 @@ func TestUpdatingADestinationKeepsItsBackupEndpoint(t *testing.T) {
 	created.Name = "renamed"
 	created.BackupURL = "rtmps://backup2.example/rtmp"
 	created.BackupStreamKey = "rotated-backup-key"
-	created.Facebook.BackupIngest = false
+	created.BackupIngestWanted = false
 	if _, err := d.UpdateDestination(created); err != nil {
 		t.Fatalf("UpdateDestination: %v", err)
 	}
@@ -156,8 +156,9 @@ func TestUpdatingADestinationKeepsItsBackupEndpoint(t *testing.T) {
 		t.Errorf("BackupStreamKey = %q, want the rotated key; a key rotation would "+
 			"be accepted and silently discarded", got.BackupStreamKey)
 	}
-	if got.Facebook.BackupIngest {
-		t.Error("turning the toggle off did not persist")
+	if got.BackupIngestWanted {
+		t.Error("turning the intent off did not persist, so an operator who " +
+			"switched redundancy off keeps paying for it")
 	}
 }
 
@@ -345,11 +346,39 @@ func TestThePerShowMarkersSurviveTheDatabase(t *testing.T) {
 	}
 }
 
-// Unlike the announcement marker, BackupIngest IS a create-time parameter, so
-// it must count as a setting to send. Otherwise dropUnsendableSettings would
-// treat a backup-enabled destination as empty.
-func TestTheBackupToggleCountsAsASettingToSend(t *testing.T) {
-	if (FacebookSettings{BackupIngest: true}).Empty() {
-		t.Error("a destination asking for backup ingest reads as having nothing to send")
+// The backup intent used to be a third clause in Empty, and this test used to
+// require it. Both were right while the bool lived in FacebookSettings: Empty
+// gates dropUnsendableSettings, which zeroes the whole struct on a destination
+// that is not Facebook, so a backup-enabled row reading as empty would have
+// lost the setting on any other platform.
+//
+// Inverted now, and it is the same guard turned around. The intent is on the
+// destination, dropUnsendableSettings never touches it, and a destination
+// pointed at Twitch KEEPS its redundancy -- which is the entire point of moving
+// it. Reintroducing the clause would put a platform-neutral field back under a
+// platform's eraser.
+func TestTheBackupIntentIsNotAFacebookSettingToBeDropped(t *testing.T) {
+	if !(FacebookSettings{}).Empty() {
+		t.Fatal("a zero FacebookSettings does not read as empty")
+	}
+
+	d := testDB(t)
+	created, err := d.CreateDestination(&Destination{
+		Name: "was fb", Kind: "rtmp", Platform: PlatformTwitch,
+		URL: "rtmp://live.example/app", StreamKey: "k",
+		BackupURL: "rtmp://backup.example/app", BackupStreamKey: "bk",
+		BackupIngestWanted: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	if !created.Facebook.Empty() {
+		t.Error("a destination whose only backup setting is the top-level intent " +
+			"reads as having Facebook parameters to send, so dropUnsendableSettings " +
+			"would warn about clearing something nobody set")
+	}
+	got, _ := d.GetDestination(created.ID)
+	if !got.BackupIngestWanted {
+		t.Error("the intent did not survive on a non-Facebook destination")
 	}
 }

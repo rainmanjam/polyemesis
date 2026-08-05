@@ -304,15 +304,20 @@ func TestTheCardShowsTheBackupFeedsState(t *testing.T) {
 // never offers is the unreachable-feature shape this repo keeps finding.
 //
 // MUTATION, run against a committed tree: `{false && platform === "facebook" && (`
-// -- fails. `backupIngest: e.target.checked` is still written in the disabled
-// block, so the previous whole-file search passed.
+// -- fails. `setBackupIngestWanted(e.target.checked)` is still written in the
+// disabled block, so the previous whole-file search passed.
+//
+// The setter is TOP-LEVEL, not `setFacebook({ ...facebook, backupIngest })`.
+// That is the JSON contract this rename establishes: the intent rides on the
+// destination beside the endpoint it gates, and a guard still spelling the old
+// shape would be a guard requiring the defect.
 func TestTheDialogOffersTheBackupIngestToggle(t *testing.T) {
 	src := readUI(t, "components", "DestinationDialog.tsx")
 	block := jsxBlockUnder(t, src, facebookBlockHead, "DestinationDialog.tsx")
 
-	if !strings.Contains(block, "backupIngest: e.target.checked") {
+	if !strings.Contains(block, "setBackupIngestWanted(e.target.checked)") {
 		t.Error("the destination dialog has no control inside the Facebook block that " +
-			"SETS backupIngest, so the backup feed can never be turned on from the UI.")
+			"SETS backupIngestWanted, so the backup feed can never be turned on from the UI.")
 	}
 	// That the two cost sentences are RENDERED, by key. That they still SAY
 	// what they have to say is TestTheFacebookCopyLivesInTheCatalogue's job:

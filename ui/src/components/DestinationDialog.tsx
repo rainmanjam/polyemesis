@@ -580,6 +580,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // from compliance -- neither is an obligation, both only apply at the moment
   // the broadcast is created. Empty means "send neither".
   const [facebook, setFacebook] = useState<FacebookSettings>({});
+  // "Publish a redundant feed for this destination." Top-level rather than part
+  // of `facebook` because neither the endpoint it gates nor the engine that
+  // reads it is platform-specific — see db.Destination.BackupIngestWanted. The
+  // control is still rendered inside the Facebook box because Facebook is the
+  // only platform that hands out a backup endpoint today.
+  const [backupIngestWanted, setBackupIngestWanted] = useState(false);
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -611,6 +617,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setAudio(destination.audio ?? {});
       setCompliance(destination.compliance ?? {});
       setFacebook(destination.facebook ?? {});
+      setBackupIngestWanted(destination.backupIngestWanted ?? false);
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -621,6 +628,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setAudio({});
       setCompliance({});
       setFacebook({});
+      setBackupIngestWanted(false);
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -739,6 +747,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         audio,
         compliance,
         facebook,
+        backupIngestWanted,
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //
@@ -1359,7 +1368,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   id="fb-backup-ingest"
                   type="checkbox"
                   className="mt-0.5"
-                  checked={facebook.backupIngest ?? false}
+                  checked={backupIngestWanted}
                   // The bare boolean, never `checked || undefined`. The PUT is
                   // decoded OVER the stored row, so a key JSON.stringify omits
                   // is a key the server leaves exactly as it was: unchecking
@@ -1367,9 +1376,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   // and the dialog said it had saved while the backup feed kept
                   // running at double the upload the help text below warns
                   // about. `false` has to travel for "off" to mean anything.
-                  onChange={(e) =>
-                    setFacebook({ ...facebook, backupIngest: e.target.checked })
-                  }
+                  //
+                  // A top-level setter, not part of `facebook`: the intent now
+                  // lives on the destination beside the endpoint it gates, so
+                  // any platform that offers a backup endpoint can use the same
+                  // field and the same engine path. Rendered here because
+                  // Facebook is the only one that offers one today.
+                  onChange={(e) => setBackupIngestWanted(e.target.checked)}
                 />
                 <div className="flex flex-col gap-0.5">
                   <Label htmlFor="fb-backup-ingest">{t("dest.fbBackupLabel")}</Label>
