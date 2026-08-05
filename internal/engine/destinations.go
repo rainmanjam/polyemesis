@@ -300,25 +300,40 @@ func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result,
 	}
 }
 
-// destArgvSig renders everything on one output's command line into a single
-// deterministic string, for the restart hashes.
+// destArgvSig renders one output's command line into a single deterministic
+// string, for the restart hashes.
 //
-// %#v rather than a hand-written field list, and that IS the fix: a field added
-// to ffmpeg.DestSpec now reaches the argv and both hashes with no third edit to
-// forget. The lists it replaces had already drifted -- AudioOutLabel was on the
-// command line and in neither of them, latent only because it currently
-// co-varies with FilterComplex.
+// THE COMMAND LINE ITSELF, not a description of it. A restart is only ever
+// justified by the argv changing, so the signature is taken from the argv the
+// destination would be spawned with. There is no list to keep in step with
+// anything: a field added to ffmpeg.DestSpec moves this hash if and only if
+// DestinationArgs reads it.
 //
-// It errs towards restarting: a field added to DestSpec that somehow did not
-// change the argv would cycle a destination once. That is the safe direction.
-// The direction this replaces was two feeds silently diverging.
+// This replaces `%#v` over the spec, which was the previous step away from two
+// hand-written field lists. It fixed the direction that silently diverges -- a
+// field on the command line and in neither hash -- but it reintroduced B5 in the
+// other direction, the one B5 was raised about. B5 was expert arguments whose
+// whitespace moved the hash without moving the argv; the unified hash brought
+// the same defect back through DestSpec fields the builder does not read:
+//
+//   - CopyVideo is never read by DestinationArgs at all. `-c:v copy` is
+//     unconditional. It is documented as "always true in v1 and here to make the
+//     guarantee explicit and testable", and both construction sites hardcode
+//     true -- so the live cost was latent, but the class was not.
+//   - Audio.Codec only reaches the argv where FFmpeg can honour it. Opus is
+//     refused on RTMP, which cannot carry it, so choosing Opus on an RTMP
+//     destination changed the hash, dropped a live connection to the platform,
+//     and spawned the identical command line.
+//
+// Both fall out for free now, and so does the next one, because "does this
+// change the command" is answered by building the command.
 //
 // RelayURL is cleared first. It is the allocated port, which is new on every
 // start, so hashing it would make every destination's signature differ from
 // itself and nothing would ever be left running.
 func destArgvSig(s ffmpeg.DestSpec) string {
 	s.RelayURL = ""
-	return fmt.Sprintf("%#v", s)
+	return hashStrings(ffmpeg.DestinationArgs(s))
 }
 
 // audioCodecOf maps the stored codec name onto the FFmpeg encoder name. An
