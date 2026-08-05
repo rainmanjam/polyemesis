@@ -119,12 +119,20 @@ func TestAOneOffScheduleAcceptsADate(t *testing.T) {
 	}
 }
 
+// The 404s are asserted with their BODIES, not by their status alone. CI's Go
+// job never builds the UI, so the SPA fallback answers an unrouted /api/v1/...
+// path with 404 "UI not built." -- measured: with all three
+// r.Get/r.Put/r.Delete("/schedules/{id}") registrations commented out and
+// internal/web/dist/index.html moved aside, the status-only version of this test
+// passed. mustJSONError is the note on why.
+//
+// Mutation: comment out `r.Get("/schedules/{id}", s.handleGetSchedule)`.
 func TestScheduleRoutesRejectAnUnknownID(t *testing.T) {
 	h, _, sign := sourceServer(t)
-	send(t, h, sign, http.MethodGet, "/api/v1/schedules/99999", nil, http.StatusNotFound)
-	send(t, h, sign, http.MethodDelete, "/api/v1/schedules/99999", nil, http.StatusNotFound)
-	send(t, h, sign, http.MethodPut, "/api/v1/schedules/99999", dailySchedule(), http.StatusNotFound)
-	send(t, h, sign, http.MethodGet, "/api/v1/schedules/abc", nil, http.StatusBadRequest)
+	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/schedules/99999", nil, http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodDelete, "/api/v1/schedules/99999", nil, http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodPut, "/api/v1/schedules/99999", dailySchedule(), http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/schedules/abc", nil, http.StatusBadRequest)
 }
 
 func TestScheduleRunsIsReadableBeforeAnythingHasRun(t *testing.T) {

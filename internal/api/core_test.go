@@ -228,11 +228,16 @@ func TestReorderingDestinationsPersists(t *testing.T) {
 	}
 }
 
+// Bodies, not statuses alone: the SPA fallback answers an unrouted /api/v1/...
+// path with its own 404 whenever the UI has not been built, which is how CI's Go
+// job runs. See mustJSONError.
+//
+// Mutation: comment out `r.Delete("/destinations/{id}", s.handleDeleteDestination)`.
 func TestDestinationRoutesRejectAnUnknownID(t *testing.T) {
 	h, _, sign := sourceServer(t)
-	send(t, h, sign, http.MethodGet, "/api/v1/destinations/99999", nil, http.StatusNotFound)
-	send(t, h, sign, http.MethodDelete, "/api/v1/destinations/99999", nil, http.StatusNotFound)
-	send(t, h, sign, http.MethodGet, "/api/v1/destinations/abc", nil, http.StatusBadRequest)
+	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/destinations/99999", nil, http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodDelete, "/api/v1/destinations/99999", nil, http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/destinations/abc", nil, http.StatusBadRequest)
 }
 
 func TestSwitchSourceIsRefusedWhenFailoverIsOff(t *testing.T) {
