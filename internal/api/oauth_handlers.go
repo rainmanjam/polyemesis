@@ -91,11 +91,7 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 	// console when they paste these; refusing to save a credential they are
 	// three clicks from making valid is obstructive rather than protective.
 	//
-	// The one platform call in this package that does NOT go through
-	// s.providers, because oauth.Set has no twin for it: CheckCredentialsFor
-	// resolves its own provider and always reaches the real platform. Nothing
-	// here can stub it, which is why no test in this package drives it.
-	check := oauth.CheckCredentialsFor(r.Context(), platform, req.ClientID, req.ClientSecret)
+	check := s.providers.CheckCredentialsFor(r.Context(), platform, req.ClientID, req.ClientSecret)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"platform":  platform,
 		"hasSecret": true,
@@ -119,7 +115,7 @@ func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK,
-		oauth.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret))
+		s.providers.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret))
 }
 
 func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {

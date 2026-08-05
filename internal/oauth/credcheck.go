@@ -97,11 +97,22 @@ var unverifiableProviders = map[db.Platform]string{
 }
 
 // CheckCredentialsFor dispatches to the provider, or reports honestly that no
-// check was possible.
+// check was possible. It resolves against the PRODUCTION provider set.
+//
+// A caller that holds its own Set must use Set.CheckCredentialsFor instead.
+// Mixing the two is the partially-redirected provider endpoints.go opens by
+// warning about: internal/api aimed its whole Set at a stub and this call still
+// dialled the real platform, which no test caught because the only platform
+// exercised was YouTube, whose check is local and never opens a socket.
 func CheckCredentialsFor(ctx context.Context, p db.Platform, clientID, clientSecret string) CheckResult {
+	return Set{}.CheckCredentialsFor(ctx, p, clientID, clientSecret)
+}
+
+// CheckCredentialsFor is the Set-resolved twin, and the one internal/api uses.
+func (s Set) CheckCredentialsFor(ctx context.Context, p db.Platform, clientID, clientSecret string) CheckResult {
 	res := CheckResult{Platform: p}
 
-	provider, err := Get(p)
+	provider, err := s.Get(p)
 	if err != nil {
 		res.State, res.Method, res.Detail = CheckRejected, MethodFormat, err.Error()
 		return res
