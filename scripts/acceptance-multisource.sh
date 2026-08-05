@@ -128,11 +128,18 @@ fi
 # The bracket keeps the pattern from matching the `sh -c` that carries it --
 # without it this counts its own command line and never reads zero.
 INGESTS=$(inctr 'ps -o args | grep -c "mode=lis[t]ener"' | tr -d ' ')
-if [ "${INGESTS:-0}" -eq 0 ] 2>/dev/null; then
-  ok "no FFmpeg SRT listener competing with the one-port server"
-else
-  bad "$INGESTS FFmpeg SRT listener(s) running; they cannot all hold port 6000"
-fi
+# Zero is this check's PASSING value, so `${INGESTS:-0}` defaulted to the pass:
+# a docker exec that produced nothing -- container gone, daemon busy, `ps`
+# missing from the image -- read as "no competing listener". Three outcomes,
+# not two. The count has to have been TAKEN before its value means anything.
+case "$INGESTS" in
+  ''|*[!0-9]*)
+    bad "could not count ingest listeners in the container (ps returned '$INGESTS')" ;;
+  0)
+    ok "no FFmpeg SRT listener competing with the one-port server" ;;
+  *)
+    bad "$INGESTS FFmpeg SRT listener(s) running; they cannot all hold port 6000" ;;
+esac
 
 step "3. A destination on each source"
 # Source 1 is the one the migration created from the existing ingest.
