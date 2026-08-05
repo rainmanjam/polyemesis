@@ -262,6 +262,58 @@ destinations reading it — and nothing else. A rendition is replaced rather tha
 adjusted, because FFmpeg cannot change its output resolution mid-run and the
 destinations copying its video have to be restarted onto the new stream anyway.
 
+### A destination's second output, and the hash it does NOT share
+
+A destination with backup ingest enabled runs **two** supervised FFmpegs on one
+relay hub — the primary and a redundant feed to the platform's secondary
+endpoint. Both subscribe to that hub, and the subscriber name carries the role:
+
+    dest:<id>          the primary
+    dest:<id>:backup   the redundant feed
+
+That is not tidiness. `relay.Hub.Subscribe` is a map assignment keyed by the
+name, so two outputs registered under one name means the second **replaces** the
+first — and the replaced FFmpeg keeps running, keeps a correct command line, and
+keeps a healthy card while receiving no packets at all. Nothing about the
+process, its target, or the destination's status reveals it.
+
+**The backup carries its own signature**, `backupSpecOf`, deliberately not
+derived from `destSpec`. The two must cycle independently: a rotated backup key
+restarts only the backup, and nothing about the backup may ever restart the
+primary. The toggle is likewise absent from `destSpec` — putting it there would
+mean *enabling redundancy interrupts the stream it protects*, which is the same
+mistake `destSpec`'s own comment records about resilience.
+
+Absence from that hash stops the harm; it does not deliver the setting. A
+separate reconciliation step, run for already-running destinations as well as
+newly started ones, is what makes the toggle take effect at all.
+
+The backup asks for its relay port **last**, and a refusal costs only the
+redundancy — 500 ports are shared across every source engine, so exhaustion is a
+real state, and it must cost the spare rather than the broadcast.
+
+### The pre-announce sweep
+
+A background loop in `internal/api`, beside the token refresh, asks
+`scheduler.Next()` for each enabled start schedule's next occurrence and creates
+a Facebook broadcast for any destination whose occurrence is inside Facebook's
+seven-day window.
+
+**Deliberately not in `internal/scheduler`.** That package opens by promising it
+never causes side effects itself — *"there is exactly one way a destination
+comes up"* — and a Graph API call inside it would break that. It reads schedules
+through the helpers that package already exports, so no date arithmetic is
+reimplemented.
+
+The invariant it turns on: the key the pre-created broadcast returns is written
+to the destination, so the encoder publishes to the broadcast that was
+announced. Otherwise the event page people were notified about stays empty
+beside a live stream.
+
+Nothing in this loop may fail a schedule or a go-live. It runs ahead of the
+stream and nothing downstream waits on it, so a Graph error is logged and
+retried on the next sweep.
+
 ### Deleting, and backwards compatibility
 
 `destinations.rendition_id` is `ON DELETE SET NULL`, not `CASCADE`: deleting a

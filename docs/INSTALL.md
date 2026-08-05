@@ -87,7 +87,7 @@ flags and running the result on Apple Silicon:
 $ codesign -dv polyemesis-darwin-arm64
 CodeDirectory v=20400 ... flags=0x20002(adhoc,linker-signed)
 $ ./polyemesis-darwin-arm64 -version
-polyemesis v0.1.0
+polyemesis v0.2.0
 ```
 
 What is *not* signed is a Developer ID, so the binary is not notarized.
