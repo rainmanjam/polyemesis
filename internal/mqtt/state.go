@@ -12,8 +12,12 @@ import "time"
 // alerts payloads. A struct that grew a field later would leak it to every
 // subscriber on the broker, retained, with no way to know it had happened.
 //
-// A whitelist cannot grow a field by accident. TestPayloadsCarryNoSecrets holds
-// the line by construction rather than by review.
+// A whitelist cannot grow a field by accident. TestPayloadsCarryOnlyApprovedFields
+// holds that line by construction rather than by review: a field added to any
+// struct below fails it until someone lists the field deliberately, in
+// state_test.go, next to the reasoning for why it is safe to publish.
+// TestNoPayloadFieldIsNamedLikeACredential is the other half, and catches a
+// field that was listed deliberately and should not have been.
 
 // Availability is the value published on the status topic. It is a bare string
 // rather than JSON so a Home Assistant availability template needs no
