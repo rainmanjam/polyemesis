@@ -78,9 +78,34 @@ type Target struct {
 	Backup bool
 }
 
-// Key identifies a target uniquely. A source has at most two -- its primary and
-// its failover backup -- and they must not share a token list.
-func (t Target) Key() (int64, bool) { return t.SourceID, t.Backup }
+// PublisherKey is a publisher slot on this listener: one per (source, role).
+//
+// A source has at most two -- its primary and its failover backup -- and they
+// are two independent sessions, not two contenders for one. They carry
+// deliberately different payloads into deliberately different sinks
+// (eng.Hub() vs eng.BackupHub()) and exist in order to run at the same time,
+// so every gate here -- admission, takeover, store, delete, Publishing -- keys
+// on the role as well as the source id. Keying on the source id alone makes
+// the standby and the primary evict each other, which is the failover feature
+// failing in the one situation it was built for.
+type PublisherKey struct {
+	SourceID int64
+	Backup   bool
+}
+
+// Key identifies a target's publisher slot uniquely.
+func (t Target) Key() PublisherKey {
+	return PublisherKey{SourceID: t.SourceID, Backup: t.Backup}
+}
+
+// role names a slot for an operator. Without it a log line saying an encoder
+// disconnected cannot say which encoder, and the two are the whole point.
+func role(backup bool) string {
+	if backup {
+		return "backup"
+	}
+	return "primary"
+}
 
 // Lookup resolves a publish token to its target.
 //
@@ -100,14 +125,17 @@ type Server struct {
 	srvs []*srt.Server
 
 	mu   sync.Mutex
-	live map[int64]*session // by source id
+	live map[PublisherKey]*session // by (source id, role)
 
 	started atomic.Bool
 }
 
 // session is one established publisher.
 type session struct {
-	sourceID int64
+	// key is the slot this session occupies, role included. A session is
+	// identified by (source, role) and never by source alone: the primary and
+	// the backup for one source are two sessions that coexist.
+	key      PublisherKey
 	peer     string
 	streamID string
 	conn     srt.Conn
@@ -138,7 +166,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		log:    log.With("component", "srt-ingest"),
 		addr:   addr,
 		lookup: lookup,
-		live:   map[int64]*session{},
+		live:   map[PublisherKey]*session{},
 	}
 }
 
@@ -239,7 +267,7 @@ func (s *Server) Stop() {
 	for _, sess := range s.live {
 		sessions = append(sessions, sess)
 	}
-	s.live = map[int64]*session{}
+	s.live = map[PublisherKey]*session{}
 	s.mu.Unlock()
 	for _, sess := range sessions {
 		_ = sess.conn.Close()
@@ -285,15 +313,18 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		return srt.REJECT
 	}
 
-	// Takeover, or refusal. Only a genuinely live incumbent blocks a newcomer.
+	// Takeover, or refusal. Only a genuinely live incumbent in THIS publisher's
+	// own slot blocks it. A source's primary and its standby hold separate
+	// slots, so a live primary must never be the reason a backup is refused.
 	s.mu.Lock()
-	incumbent, busy := s.live[target.SourceID]
+	incumbent, busy := s.live[target.Key()]
 	stillLive := busy && incumbent.fresh(time.Now())
 	s.mu.Unlock()
 	if stillLive {
 		req.SetRejectionReason(srt.REJ_RESOURCE)
 		s.log.Warn("srt publish refused: source already publishing",
-			"peer", peer, "source", target.Name, "incumbent", incumbent.peer)
+			"peer", peer, "source", target.Name, "role", role(target.Backup),
+			"incumbent", incumbent.peer)
 		return srt.REJECT
 	}
 
@@ -344,35 +375,40 @@ func (s *Server) handlePublish(conn srt.Conn) {
 	}
 
 	sess := &session{
-		sourceID: target.SourceID,
+		key:      target.Key(),
 		peer:     peer,
 		streamID: conn.StreamId(),
 		conn:     conn,
 		started:  time.Now(),
 	}
 
-	// Displace a stale incumbent. handleConnect already established that any
-	// incumbent is stale, but it is re-checked under the lock because the two
-	// run on different goroutines and the incumbent may have recovered.
+	// Displace a stale incumbent -- the incumbent of this publisher's OWN slot.
+	// A quiet primary is never grounds for closing the standby's connection,
+	// nor the other way round: the two feeds are independent, and evicting one
+	// because the other went quiet takes a working encoder off the air.
+	// handleConnect already established that any incumbent is stale, but it is
+	// re-checked under the lock because the two run on different goroutines and
+	// the incumbent may have recovered.
 	s.mu.Lock()
-	if old, busy := s.live[target.SourceID]; busy {
+	if old, busy := s.live[target.Key()]; busy {
 		if old.fresh(time.Now()) {
 			s.mu.Unlock()
 			s.log.Warn("srt publish dropped: incumbent recovered before takeover",
-				"peer", peer, "source", target.Name)
+				"peer", peer, "source", target.Name, "role", role(target.Backup))
 			_ = conn.Close()
 			return
 		}
 		old.evicted.Store(true)
 		s.log.Info("srt publisher taken over: the previous connection had gone quiet",
-			"source", target.Name, "was", old.peer, "now", peer,
+			"source", target.Name, "role", role(target.Backup), "was", old.peer, "now", peer,
 			"quietFor", time.Since(time.Unix(0, old.lastData.Load())).Round(time.Millisecond))
 		_ = old.conn.Close()
 	}
-	s.live[target.SourceID] = sess
+	s.live[target.Key()] = sess
 	s.mu.Unlock()
 
-	s.log.Info("srt publisher connected", "source", target.Name, "peer", peer)
+	s.log.Info("srt publisher connected",
+		"source", target.Name, "role", role(target.Backup), "peer", peer)
 
 	buf := make([]byte, 2048)
 	for {
@@ -391,13 +427,14 @@ func (s *Server) handlePublish(conn srt.Conn) {
 	}
 
 	s.mu.Lock()
-	if cur, ok := s.live[target.SourceID]; ok && cur == sess {
-		delete(s.live, target.SourceID)
+	if cur, ok := s.live[target.Key()]; ok && cur == sess {
+		delete(s.live, target.Key())
 	}
 	s.mu.Unlock()
 
 	if !sess.evicted.Load() {
-		s.log.Info("srt publisher disconnected", "source", target.Name, "peer", peer,
+		s.log.Info("srt publisher disconnected",
+			"source", target.Name, "role", role(target.Backup), "peer", peer,
 			"ranFor", time.Since(sess.started).Round(time.Second),
 			"bytes", sess.bytes.Load())
 	}
@@ -410,7 +447,11 @@ func (s *Server) handlePublish(conn srt.Conn) {
 // it breaking up" is a question about one encoder's uplink and not about the
 // server.
 type LinkStats struct {
-	SourceID   int64     `json:"sourceId"`
+	SourceID int64 `json:"sourceId"`
+	// Backup says which of a source's two publishers this is. One source can
+	// report two links at once, and "the uplink is breaking up" is a question
+	// about one encoder; without this a reader cannot tell which.
+	Backup     bool      `json:"backup"`
 	Peer       string    `json:"peer"`
 	Since      time.Time `json:"since"`
 	Bytes      uint64    `json:"bytes"`
@@ -433,7 +474,8 @@ func (s *Server) Stats() []LinkStats {
 		var st srt.Statistics
 		sess.conn.Stats(&st)
 		out = append(out, LinkStats{
-			SourceID:   sess.sourceID,
+			SourceID:   sess.key.SourceID,
+			Backup:     sess.key.Backup,
 			Peer:       sess.peer,
 			Since:      sess.started,
 			Bytes:      sess.bytes.Load(),
@@ -445,11 +487,25 @@ func (s *Server) Stats() []LinkStats {
 	return out
 }
 
-// Publishing reports whether a source currently has a live publisher.
+// Publishing reports whether a source currently has a live publisher in EITHER
+// role.
+//
+// A source with a standby has two slots, so "is this source publishing" has two
+// answers and no single one of them is the honest summary. Bytes are arriving
+// for this source if either encoder is up, which is what a caller asking about
+// the source -- rather than about an encoder -- means. A caller that needs to
+// know which encoder wants PublishingRole, or Stats, which now reports both
+// links separately.
 func (s *Server) Publishing(sourceID int64) bool {
+	return s.PublishingRole(sourceID, false) || s.PublishingRole(sourceID, true)
+}
+
+// PublishingRole reports whether one particular publisher -- a source's primary
+// or its failover standby -- is currently live.
+func (s *Server) PublishingRole(sourceID int64, backup bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess, ok := s.live[sourceID]
+	sess, ok := s.live[PublisherKey{SourceID: sourceID, Backup: backup}]
 	return ok && sess.fresh(time.Now())
 }
 
