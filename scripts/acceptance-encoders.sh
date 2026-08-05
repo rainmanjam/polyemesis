@@ -213,15 +213,27 @@ else
   # The assertion that holds on every machine and is the actual fix: nothing is
   # ever withheld silently. "Unavailable" with no reason is what sent the user
   # live on an encoder that could not run.
+  #
+  # Counted, because `for e in $(fact "$R" ALL_ENCODERS)` runs zero times when
+  # that key is absent -- a renamed fact, a driver that stopped emitting it --
+  # and `fact` answers a missing key with an empty string. Zero iterations
+  # leaves $unexplained empty, which is this check's PASSING state: it would
+  # report that every unusable encoder explains itself, having examined none.
+  n_enc=0
   unexplained=""
   for e in $(fact "$R" ALL_ENCODERS); do
+    n_enc=$((n_enc + 1))
     if [ "$(fact "$R" "${e}_WORKS")" = "false" ] && [ -z "$(fact "$R" "${e}_REASON")" ]; then
       unexplained="$unexplained $e"
     fi
   done
-  [ -z "$unexplained" ] \
-    && ok "every unusable encoder says why it is unusable" \
-    || bad "reported unusable with no reason:$unexplained"
+  if [ "$n_enc" -lt 1 ]; then
+    bad "the driver reported no encoder list at all; this assertion had nothing to examine"
+  elif [ -z "$unexplained" ]; then
+    ok "every unusable encoder says why it is unusable ($n_enc examined)"
+  else
+    bad "reported unusable with no reason:$unexplained"
+  fi
 
   # This box is Apple Silicon with no discrete GPU. Every other vendor's
   # encoder must come back unusable AND explained.
@@ -371,13 +383,24 @@ else
   # Nothing was demonstrated, so nothing may be withheld. Reporting the probe's
   # own failure as the encoders' failure would take away every encoder on the
   # box, software included, and refuse renditions that encode perfectly well.
+  #
+  # Same zero-iteration hazard as the ALL_ENCODERS loop in step 1, and worse
+  # here: an empty list means the driver offered no encoders at all, which is
+  # precisely the outcome this check exists to refuse -- and it would have been
+  # reported as "every encoder is still offered".
+  n_enc=0
   withheld=""
   for e in $(fact "$B" ALL_ENCODERS); do
+    n_enc=$((n_enc + 1))
     [ "$(fact "$B" "${e}_WORKS")" = "false" ] && withheld="$withheld $e"
   done
-  [ -z "$withheld" ] \
-    && ok "every encoder is still offered when nothing could be measured" \
-    || bad "withheld on a measurement that never happened:$withheld"
+  if [ "$n_enc" -lt 1 ]; then
+    bad "no encoder was offered at all; that is the withholding this check refuses, not the absence of it"
+  elif [ -z "$withheld" ]; then
+    ok "every encoder is still offered when nothing could be measured ($n_enc offered)"
+  else
+    bad "withheld on a measurement that never happened:$withheld"
+  fi
 
   [ "$(fact "$B" TESTED)" = "false" ] \
     && ok "and the UI is told those verdicts are unmeasured" \
