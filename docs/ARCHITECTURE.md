@@ -296,8 +296,21 @@ real state, and it must cost the spare rather than the broadcast.
 
 A background loop in `internal/api`, beside the token refresh, asks
 `scheduler.Next()` for each enabled start schedule's next occurrence and creates
-a Facebook broadcast for any destination whose occurrence is inside Facebook's
-seven-day window.
+a broadcast for any destination whose occurrence is inside that platform's
+scheduling window.
+
+**Capability-driven, not Facebook-specific.** The loop resolves
+`oauth.ScheduledBroadcaster` for the destination's platform and asks it for its
+own `ScheduleHorizon()`; a platform that has no such capability is simply
+absent, handled once. Facebook is the only implementer today and its horizon is
+seven days, but neither fact is written into the sweep. The window used to be a
+constant in `internal/api` inside a loop already gated on the platform, which is
+the same defect as a type assertion wearing a different hat.
+
+It never touches a destination that is currently **enabled**: creating a
+broadcast issues a new stream key, and that key is inside the engine's restart
+hash. Skipping costs the event page for a show whose destination was left
+enabled between broadcasts; the alternative costs a live stream.
 
 **Deliberately not in `internal/scheduler`.** That package opens by promising it
 never causes side effects itself — *"there is exactly one way a destination

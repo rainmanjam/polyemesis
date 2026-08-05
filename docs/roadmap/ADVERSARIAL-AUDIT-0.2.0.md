@@ -4,8 +4,27 @@
 real change between `v0.1.0` and `v0.2.0` — 9.4k non-test Go, 13.3k test Go,
 1.9k UI, 3.2k CI and scripts, across 214 files.
 
-Nothing here is filed. This document is the ranked list; deciding what becomes
-an issue is a separate step.
+> **STATUS — read this before any finding below.**
+>
+> **Every finding in sections A–F is FIXED**, on the branch this document ships
+> in. Sections A–D are written in the **present tense against the v0.2.0 tag**,
+> because that is the tree they were found in and rewriting them into the past
+> would destroy the evidence — a finding is only checkable against the code that
+> had it.
+>
+> So statements like *"`stopBackup` is reachable from exactly two places, and
+> neither is on the shutdown path"* (A1) or *"`api.go` does
+> `p.(*oauth.Facebook)`"* (D4) are **true of v0.2.0 and false of this branch**.
+> Read them as "was", and read the `file:line` citations as anchored to the
+> v0.2.0 tag: several of those files have since been split, restructured or
+> renamed, so following a line number into the current tree can land on
+> unrelated code.
+>
+> Sections E, F and G are different: they record defects found *while* fixing,
+> *in* the fixes, and *by the final review*, and each carries its own resolution
+> inline.
+>
+> Nothing here is filed as an issue. This document is the record.
 
 ## Method
 
@@ -403,7 +422,7 @@ because YouTube's check is format-only and the seeded secret is never consulted.
 
 - **The SRT dual-family probe is opt-in.** `wildcard_probe_test.go` skips unless
   `POLYEMESIS_SRT_PROBE=1`, so the real-socket proof of the #28 fix does not run
-  in CI. The unit-level `TestAWildcardBindsBothFamilies` does run.
+  in CI. The unit-level `TestAWildcardBindsBothFamiliesExplicitly` does run.
 - **A 100 ms negative wait.** `hooks/dispatch_test.go:212` proves a
   non-subscribed event was *not* delivered by sleeping. A delayed delivery after
   the sleep leaves it green.

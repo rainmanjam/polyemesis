@@ -224,7 +224,7 @@ func (s *Server) Start() error {
 //
 // Two sockets on one port is not a conflict: Go sets IPV6_V6ONLY for the
 // "udp6" network, so the pair coexists. Measured on darwin before this was
-// written, and pinned by TestAWildcardBindsBothFamilies.
+// written, and pinned by TestAWildcardBindsBothFamiliesExplicitly.
 //
 // An explicit host is left exactly alone -- it already picks a concrete family
 // and was never the failing shape.

@@ -185,12 +185,32 @@ so an availability template needs no `value_template`.
 
 **No URL, stream key, token, passphrase or password appears on any topic.**
 
+Two mechanisms, and the second exists because the first was not enough.
+
 The payloads are built from a fixed whitelist of fields rather than by
 marshalling a database row, and a test fails if anyone adds a field to one of
-them. That is deliberate belt-and-braces: MQTT has no equivalent of the URL
-masking polyemesis already applies to webhook alerts, and a retained message
-outlives the process that sent it — a leak here would be published to every
-subscriber on the broker and stay there.
+them. That stops a *new* field smuggling a credential out.
+
+**It does not stop an approved field carrying one, and one did.** `ingestError`
+is FFmpeg's own text, and FFmpeg prints the whole publish URL — stream key
+included — when a destination refuses it. The field was on the whitelist, the
+guard passed, and the key went to the broker **retained**: readable by every
+subscriber with no session, and outliving the process that sent it. The
+whitelist test had even exempted the field by name, on the reasoning that an
+error is not a URL.
+
+So free-text fields are now masked **where the line is captured**, in
+`internal/supervisor`, before anything can copy them. `alerts.RedactURL` — the
+same masking applied to webhook alerts — is what does it, so there is one
+definition rather than a second one that can drift.
+
+The rule the two give together: a field reaches a topic only if it is on the
+whitelist, and any field that can carry operator-authored or tool-authored text
+arrives already masked.
+
+**Upgrading from 0.2.0 or earlier:** clear your retained topics. Upgrading stops
+new keys being published; it cannot unpublish what your broker is already
+holding.
 
 A destination contributes its name, platform and error. Nothing else.
 

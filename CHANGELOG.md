@@ -8,6 +8,95 @@ its first tagged release.
 
 ## [Unreleased]
 
+An adversarial audit of the 0.2.0 release, and the fixes for everything it
+found. The full record, with a numbered finding behind every change below, is
+[docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md](docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md).
+
+### Security
+
+- **A stream key could reach your MQTT broker as a retained message.** FFmpeg
+  prints the whole publish URL when a destination refuses it, that line became
+  the process's last error, and the last error was published to MQTT as
+  `ingestError` — **retained**, so it outlived the process and was readable by
+  every subscriber on the broker with no session at all.
+
+  **If you run the MQTT integration, clear your retained topics after
+  upgrading.** Upgrading stops new keys being published; it cannot unpublish
+  what a broker is already holding.
+
+  The same bytes were also returned unmasked by `GET /processes` and its logs
+  endpoint, and written to `process.log` on disk — both behind authentication,
+  so no privilege boundary was crossed there, but a log file is the artifact
+  people attach to bug reports. All of it is now masked where the line is
+  captured. Expert mode still shows the real command deliberately: it exists so
+  an operator can approve the command that will actually run.
+
+### Changed
+
+- **BREAKING, for API clients only:** the destination field
+  `facebook.backupIngest` has moved to a top-level `backupIngestWanted`. It was
+  inside a platform-named block while the engine that reads it is
+  platform-neutral, which meant no platform but Facebook could ever have a
+  redundant feed.
+
+  Stored rows migrate on first open — **there is no compatibility alias**, so a
+  script that *writes* `facebook.backupIngest` stops having any effect. One that
+  only reads a destination is unaffected apart from the new name. See
+  [docs/API.md](docs/API.md).
+
+- Enabling or disabling backup ingest from the destination dialog now works.
+  Unchecking it previously sent nothing, and the server kept the stored `true` —
+  so the toggle was one-way and the second feed kept running at double the
+  upload.
+
+- A YouTube made-for-kids declaration can now be withdrawn. Setting it back to
+  "leave as it is on YouTube" previously sent nothing and the stored value
+  survived.
+
+### Fixed
+
+- **A deleted source could leave an FFmpeg publishing forever.** Shutting an
+  engine down stopped a destination's primary process and not its backup, and
+  the backup restarts itself by design — so it kept publishing to the platform,
+  invisible to the process list, holding its relay port, until the daemon
+  itself was restarted.
+- **A standby SRT encoder and the primary evicted each other.** Both were keyed
+  by source alone, so whichever connected first held the slot and the other was
+  refused; if the primary went quiet for three seconds the standby took over,
+  and the recovering primary was then the one refused. Redundant ingest did not
+  work in the situation it exists for.
+- Two schedules starting the same Facebook destination no longer move one
+  broadcast back and forth between their times every five minutes. Each show
+  gets its own event page.
+- The pre-announce sweep no longer reverts an operator edit that lands while it
+  is talking to Facebook, and no longer changes the stream key of a destination
+  that is currently live.
+- A backup feed now appears in the process list, so its command line and logs
+  are reachable — which is what you need at the moment redundancy breaks.
+- A reconnect-policy change now reaches a destination's backup as well as its
+  primary, and revives one that had already given up under a stricter limit.
+- Editing an expert argument's whitespace, or changing a setting that does not
+  alter the command line, no longer drops a live connection.
+- A destination nobody has touched is no longer reported as retuned on every
+  reconcile.
+- The hooks card and the playlist editor are translated. Creating a webhook
+  twice by double-clicking, which produced two hooks and showed one signing
+  secret, is fixed.
+
+### Internal
+
+- Concurrent reconciles are serialized. Two could previously start the same
+  destination, leaving one FFmpeg running that received no packets and that
+  nothing could stop.
+- Providers gained one injection point for their HTTP base. The previous
+  mechanism redirected one call in thirteen while looking like it redirected
+  all of them, and two other providers hard-coded past their own.
+- Six guards that could not fail were rewritten, and the classes they belonged
+  to were swept across the codebase — route tests that assert only a status
+  code (the embedded UI answers an unrouted API path, so they pass with the
+  route deleted), and source-text assertions that survive their block being
+  switched off.
+
 ## [0.2.0] — 2026-08-04
 
 ### Added

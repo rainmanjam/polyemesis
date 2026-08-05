@@ -178,7 +178,11 @@ func send(t *testing.T, h http.Handler, sign func(*http.Request), method, path s
 //
 //   - with internal/web/dist/index.html present, as it is after `make ui`: 200
 //     and the SPA bundle. So a 200-only assertion passes with its route deleted
-//     on a developer's machine -- measured, on TestDeliveriesRouteExists.
+//     on a developer's machine -- measured, on the test then called
+//     TestDeliveriesRouteExists, since rewritten and renamed to
+//     TestDeliveriesRouteReturnsTheAttemptsItMade. The measurement was against
+//     the old status-only version; the name is given so the record can be
+//     traced, not re-run.
 //   - with it absent, as in CI, whose Go job never builds the UI: 404 and
 //     "UI not built.". So a 404-only assertion passes with its route deleted in
 //     CI -- measured, on TestScheduleRoutesRejectAnUnknownID.

@@ -400,9 +400,13 @@ func (p *Process) CommandString() string {
 func (p *Process) Start() {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
-	// Mutation that proves the retired half: delete this line and
-	// TestStopBeforeStartRetiresTheProcess fails, and so does the engine's
-	// TestAReconcileThatPublishesIntoAShutdownStartsNothing.
+	// Mutation that proves the retired half: delete the `p.retired ||` clause
+	// below. TestStopBeforeStartRetiresTheProcessForEver fails, and so does the
+	// engine's TestAReconcileThatPublishesIntoAShutdownStartsNothing.
+	//
+	// The clause, NOT the line. Deleting the whole `if` leaves a dangling
+	// `return` and does not compile, and a mutation that does not build proves
+	// nothing at all.
 	if p.retired || p.running {
 		return
 	}
