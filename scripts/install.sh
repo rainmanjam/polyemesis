@@ -517,6 +517,13 @@ install_docker_mode() {
     printf '    stop_grace_period: 30s\n'
     printf 'volumes:\n'
     printf '  polyemesis-data:\n'
+    # Compose prefixes volumes with the project name unless the volume pins its
+    # own, so this becomes `polyemesis_polyemesis-data` while update.sh,
+    # uninstall.sh and the summary below all say `polyemesis-data`. The mismatch
+    # is silent in the one place it costs the database: `docker volume rm` errors
+    # on a name that does not exist, but `docker run -v` creates it, so the
+    # backup in update.sh succeeds and archives an empty directory.
+    printf '    name: polyemesis-data\n'
   } > "$INSTALL_DIR/docker-compose.yml"
 
   info "pulling ${IMAGE}:latest"
@@ -674,8 +681,30 @@ set -euo pipefail
 cd "$INSTALL_DIR"
 stamp="\$(date +%F-%H%M)"
 echo "backing up to $INSTALL_DIR/backup-\${stamp}.tar.gz"
+
+# \`docker run -v\` CREATES a missing volume rather than failing, so a wrong or
+# renamed volume backs up an empty directory, exits 0, and the upgrade below
+# proceeds with no way back. Refuse to continue unless the volume already exists.
+docker volume inspect polyemesis-data >/dev/null 2>&1 || {
+  echo "ERROR: no docker volume named 'polyemesis-data'." >&2
+  echo "Refusing to upgrade: the backup would be empty and migrations do not roll back." >&2
+  echo "Volumes on this host:" >&2
+  docker volume ls >&2
+  exit 1
+}
+
 docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
   tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
+
+# A backup that exists but holds nothing is worse than no backup, because it
+# reads as success. tar always writes the './' entry, so anything under two
+# entries means the volume was empty.
+entries="\$(tar tzf "$INSTALL_DIR/backup-\${stamp}.tar.gz" | wc -l)"
+if [ "\$entries" -lt 2 ]; then
+  echo "ERROR: backup archive is empty (\${entries} entries). Refusing to upgrade." >&2
+  exit 1
+fi
+echo "backup verified: \${entries} entries"
 $COMPOSE_CMD pull
 $COMPOSE_CMD up -d
 echo "updated. Watch the first minute: $COMPOSE_CMD logs -f"
