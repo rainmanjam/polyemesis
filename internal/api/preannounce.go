@@ -211,9 +211,11 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 		// nothing here can see, and creating a second live_video would put two
 		// event pages in front of the same subscribers. Left for the operator,
 		// said once rather than every sweep, and cleared with the occurrence.
-		s.log.Warn("pre-announce: a broadcast create was recorded as started and "+
-			"never finished; not creating a second one for the same show",
-			"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence)
+		if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
+			s.log.Warn("pre-announce: a broadcast create was recorded as started and "+
+				"never finished; not creating a second one for the same show",
+				"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence)
+		}
 		return
 	}
 
@@ -255,17 +257,18 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 			cur.Facebook.Forget(sc.ID, "")
 			return true
 		})
-		// Logged and dropped. The schedule and the go-live path are unaffected;
-		// the next sweep tries again.
-		//
-		// This is also where an ineligible account lands -- Facebook requires
-		// 60 days and 100 followers to schedule, and refuses otherwise. That is
-		// a fact about the account rather than a fault in the run, and it will
-		// repeat every sweep. See the note in the plan: suppressing a repeated
-		// identical refusal needs somewhere to remember it, which is not built.
-		s.noteAnnounceFailure(d.ID, sc.ID)
-		s.log.Warn("pre-announce: could not create the broadcast",
-			"destination", d.Name, "schedule", sc.Name, "err", err)
+		// Logged ONCE PER RUN OF FAILURES, not once per sweep. This is where an
+		// ineligible account lands -- Facebook requires 60 days and 100
+		// followers to schedule, and refuses otherwise -- and that is a fact
+		// about the account rather than a fault in the run: it cannot resolve
+		// without the operator, and at a five-minute tick the honest report of
+		// it was 288 identical warnings a day. The count clears on the next
+		// success, so a failure after a working sweep is reported again.
+		if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
+			s.log.Warn("pre-announce: could not create the broadcast; further identical "+
+				"failures for this show will not be logged until one succeeds",
+				"destination", d.Name, "schedule", sc.Name, "err", err)
+		}
 		return
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
@@ -364,7 +367,8 @@ func announceFailKey(destID, scheduleID int64) int64 {
 }
 
 // noteAnnounceFailure counts one consecutive failure for this show and returns
-// the running total.
+// the running total. One is the first of a run, which is the only one worth
+// logging.
 func (s *Server) noteAnnounceFailure(destID, scheduleID int64) int {
 	s.preannounceMu.Lock()
 	defer s.preannounceMu.Unlock()
@@ -377,7 +381,8 @@ func (s *Server) noteAnnounceFailure(destID, scheduleID int64) int {
 }
 
 // clearAnnounceFailures resets the count. Called on every success, which is
-// what makes the threshold mean "consecutive".
+// what makes the threshold mean "consecutive" and what makes a warning that
+// stopped and started again get reported.
 func (s *Server) clearAnnounceFailures(destID, scheduleID int64) {
 	s.preannounceMu.Lock()
 	delete(s.rescheduleFails, announceFailKey(destID, scheduleID))

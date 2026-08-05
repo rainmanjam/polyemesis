@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -835,5 +837,47 @@ func TestADestinationThatGoesLiveDuringTheGraphCallKeepsItsKey(t *testing.T) {
 	if got.StreamKey != "original-key" {
 		t.Errorf("StreamKey = %q -- the destination went live during the Graph call "+
 			"and the sweep changed the key it is publishing to", got.StreamKey)
+	}
+}
+
+// B7. An ineligible account -- Facebook requires 60 days and 100 followers to
+// schedule -- refuses forever, and the refusal was logged every sweep: 288
+// identical warnings a day per destination for a condition that cannot resolve
+// without the operator.
+//
+// Mutation: in preannounce.go, change `if s.noteAnnounceFailure(d.ID, sc.ID) == 1`
+// on the create-failure path to `if true`. Observed: red, 3 warnings.
+func TestAnIdenticalRefusalIsLoggedOncePerRunOfFailures(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777", err: errors.New("(#100) ineligible")}
+	stubAnnounce(s, rec)
+
+	var logs bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&logs, nil))
+
+	first := seedDestination(t, s, store, db.PlatformFacebook, "fb-one")
+	second := seedDestination(t, s, store, db.PlatformFacebook, "fb-two")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour))
+
+	for range 3 {
+		s.preannounceOnce(context.Background(), time.Now())
+	}
+	if len(rec.creates) != 6 {
+		t.Fatalf("attempted %d creates across three sweeps of two destinations, "+
+			"want 6 -- suppressing the LOG must not suppress the retry", len(rec.creates))
+	}
+
+	warnings := strings.Count(logs.String(), "could not create the broadcast")
+	if warnings != 2 {
+		t.Fatalf("logged the same refusal %d times, want one per destination (2). "+
+			"At a five-minute tick every extra line is 288 a day: %s", warnings, logs.String())
+	}
+	// One line each, not one line for whichever destination lost the race: the
+	// suppression is per show, not global.
+	for _, name := range []string{first.Name, second.Name} {
+		if !strings.Contains(logs.String(), name) {
+			t.Errorf("%s's refusal was never reported at all", name)
+		}
 	}
 }
