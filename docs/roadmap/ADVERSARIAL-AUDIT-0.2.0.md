@@ -761,6 +761,87 @@ comment explaining why it was needed. The clip half never got one. A refusal
 test needs a partner proving the thing it refuses is otherwise reachable, or it
 is indistinguishable from a missing feature.
 
+## F. Found by reviewing the remediation
+
+The fixes were themselves reviewed adversarially, by a reader told to attack the
+claims rather than re-find the bugs. It found four defects in our own work. They
+are recorded because "the fix was wrong" is the failure mode this whole exercise
+is about, and three of the four are the *same shape* as the findings they fixed.
+
+### F1. The A8 fix left the publication-to-`Start` window open
+
+[A8](#a8-a-reconcile-racing-shutdown-creates-an-orphan) was closed by checking
+`e.stopped` under `e.mu` before publishing. That is not enough, because `Start()`
+happens *after* publication and after the unlock:
+
+1. a reconcile publishes into `e.dests` — `stopped` is false, the guard passes —
+   and unlocks;
+2. `Stop` sets `stopped`, copies the map and tears the destination down. **A
+   `Process.Stop` on a process that was never started is a silent no-op**, so
+   nothing stops — but the hub subscription is removed and the relay port goes
+   back to the allocator;
+3. the reconcile resumes and calls `Start()`.
+
+The child now runs untracked after shutdown, on a port that will be reissued
+underneath it. Reachable through `Manager.Sync` removing a source while another
+`Manager.Reconcile` still holds that engine pointer.
+
+**Why the new tests missed it:** every one of them starts from an
+already-stopped engine. They exercise the guard and never the window — the same
+lesson as [E6](#e6-a-stream-key-reached-the-mqtt-broker-as-a-retained-message),
+which is that a guard sees only the observable it watches.
+
+Fixed at the class rather than the instance: a terminal "retired" latch on
+`supervisor.Process`, so a `Stop` arriving before `Start` makes every later
+`Start` a no-op for every caller, not just this one.
+
+### F2. The marker ceiling evicted the show nearest to going out
+
+`Announce` sorted markers by occurrence and kept the tail, so the entry the
+ceiling dropped was the **soonest**. Dropping a marker whose `live_video` still
+exists is not lost bookkeeping: the next sweep finds nothing for that schedule,
+creates a second event page, and evicts another marker to fit it. People are
+already subscribed to the first. It thrashes — one orphaned event page per sweep
+— and it starts with the broadcast about to go out.
+
+Choosing the furthest-out victim instead would only pick a quieter one; any
+eviction of a live marker has that shape. The ceiling now applies to **intents**
+only — markers with no broadcast id, where losing one costs a retry, which is
+what happens without a marker anyway.
+
+Note the original code's comment *admitted* this cost ("costs a duplicate event
+page for the show nearest in time — worth stating rather than pretending the
+ceiling is free"). Stating a cost honestly is not the same as it being
+acceptable, and a comment is not a justification.
+
+### F3. A create racing go-live strands an intent forever
+
+The sweep records an empty intent, the destination is enabled during the Graph
+call, the create succeeds, and the completion correctly refuses to change the
+live key — but leaves the intent behind. Every later sweep then finds
+`held && BroadcastID == ""` and returns without retrying, and the marker is never
+aged out because ageing happens only in `Announce`, which that branch never
+reaches.
+
+### F4. Overlapping sweeps can both create the same broadcast
+
+`preannounceOnce` has no mutex and no conditional claim. Production starts one
+loop, so this is latent rather than live — but `PreannounceLoop` is exported and
+the state machine is not safe against overlap on its own.
+
+### F5. The "every spec field reaches argv" guard proved the opposite
+
+`dest_spec_derived_test.go` mutates `ffmpeg.DestSpec` fields and checks only
+`destArgvSig` — it never checks the field reaches `DestinationArgs`. And
+`DestSpec.CopyVideo` is *already* ignored by `DestinationArgs` while still moving
+the signature, so toggling it restarts a live destination for a change that does
+not alter the command line.
+
+That is [B5](#b5-reformatting-an-expert-argument-drops-a-live-connection)'s exact
+defect, reintroduced through the hash that unified
+[D1](#d1-two-hand-maintained-restart-hashes-over-one-shared-argv-builder). The
+guard written to protect the unification is the one that hid it.
+
 ## Refuted
 
 **"The pre-announce token refresh can block indefinitely."** The ordering half is
