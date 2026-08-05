@@ -823,11 +823,54 @@ live key — but leaves the intent behind. Every later sweep then finds
 aged out because ageing happens only in `Announce`, which that branch never
 reaches.
 
+**Resolved as two cases, because they are not the same problem.**
+
+*Race lost, id in hand.* When the completion write is declined, the broadcast id
+is known for the only moment it ever will be. The intent is unwound and the id
+goes into the warning so an operator can remove the orphan — this codebase has no
+delete for a `live_video`. It is deliberately **not** written into the marker: a
+marker naming that broadcast claims a show whose key the encoder does not publish
+to — an empty event page beside a live stream, recorded as success — and the next
+occurrence would *move* that broadcast rather than create a usable one, so the
+wrong key would follow the show for ever.
+
+*Process died between the two writes, no id.* Nothing can recover one. Finding it
+would mean asking Graph which scheduled broadcasts the target holds and matching
+on start time, which adopts a stranger's broadcast as readily as ours. So the
+intent ages out after `staleBroadcastAfter` consecutive sweeps. **Harm accepted:
+if the lost create did reach Facebook, the retry makes a second event page.** The
+alternative is the show having none, which is certain rather than possible — and
+a duplicate is visible on the operator's own Page, while a stranded marker is
+visible nowhere. [F2](#f2-the-marker-ceiling-evicted-the-show-nearest-to-going-out)
+makes the same trade in the same words.
+
+Ageing is **counted, not wall-clocked**, and the reason generalises past this
+feature: a timestamp would have to live in the marker, and a new field is absent
+on every row an upgrade finds — which reads as infinitely old and would age every
+existing intent at once, on the first sweep after the upgrade.
+
 ### F4. Overlapping sweeps can both create the same broadcast
 
 `preannounceOnce` has no mutex and no conditional claim. Production starts one
 loop, so this is latent rather than live — but `PreannounceLoop` is exported and
 the state machine is not safe against overlap on its own.
+
+**Resolved as a conditional claim rather than a mutex.** `UpdateAnnouncement`
+already re-reads the row inside its own transaction, so declining a row that
+already holds a marker for this schedule makes the intent write a compare-and-set.
+The loser creates nothing and is not counted as a failure.
+
+A mutex was the obvious answer and the wrong one: it guards one process where a
+daemon can be started twice, and it would sit *outside* the transaction it is
+supposed to be protecting.
+
+Worth recording from the guard, because it is the same shape as everything else
+here: the first version gated the blocking create with `sync.Once`, and `Do` makes
+every later caller **wait** for the first call to return — so both creates stalled
+until the HTTP client's timeout, both failed, and the test went red for a reason
+that had nothing to do with the defect. A red run proves no more than a green one
+if it is red for the wrong reason. A plain flag under a mutex lets the second
+caller through, which is what turns a hang into a real failure.
 
 ### F5. The "every spec field reaches argv" guard proved the opposite
 
@@ -841,6 +884,24 @@ That is [B5](#b5-reformatting-an-expert-argument-drops-a-live-connection)'s exac
 defect, reintroduced through the hash that unified
 [D1](#d1-two-hand-maintained-restart-hashes-over-one-shared-argv-builder). The
 guard written to protect the unification is the one that hid it.
+
+**Asserting the rule instead of the premise found four instances, not one** —
+ten field/kind pairs. Besides `CopyVideo`: Opus on RTMP, `Transport.NoDurationFilesize`
+on SRT, file and audio destinations, and `VideoDelayMS` on audio. The last three
+are reachable by an operator today, and each one drops a live connection to
+deliver a change that alters no command line.
+
+The fix is structural rather than a list of exceptions: `destArgvSig` is now
+`hashStrings(ffmpeg.DestinationArgs(s))` with `RelayURL` cleared, so **the
+signature IS the command line** and all four fall out at once. A future field
+that does not reach the argv cannot move it.
+
+One more can't-fail guard surfaced inside the fix: the reflective field-bumper
+set every field to a generic `"-changed"`, which for the two enumeration fields
+— `Audio.Codec` and `Kind` — the argv builder did not recognise, so those pairs
+compared a spec against itself and passed vacuously. The bumper now gives them
+values the builder knows, and the test counts how many pairs moved the argv at
+all, so a silent return to zero fails.
 
 ## Refuted
 
