@@ -248,6 +248,31 @@ underneath it would look healthy and send nothing. `upstreamHub` refuses to
 start a destination whose rendition is not up, and records why, so the card says
 "rendition failed to start: …" instead of showing green and silence.
 
+**One reconcile at a time, for the whole of it.** `Reconcile` holds
+`Engine.reconcileMu` end to end. The per-tier locks are dropped and retaken a
+dozen times inside — which is what keeps `Status()` answerable while children
+are being spawned — and that is exactly what leaves two concurrent reconciles
+free to interleave. The callers are genuinely concurrent: five HTTP handlers,
+the scheduler's actuator, and `observeLoop`.
+
+Without it, two reconciles could both observe a destination as missing and both
+start it. `relay.Hub.Subscribe` is a map assignment on a deterministic name, so
+the second replaced the first: the first FFmpeg kept running against a port the
+hub no longer sent to, its `*destination` was overwritten, and nothing would
+ever stop it or release its port. It is the outermost lock in the package;
+nothing holding `mu`, `selMu` or `previewMu` calls `Reconcile`, which is what
+keeps the boundary from being a deadlock.
+
+**A process that has been stopped can never start again.** `Stop` latches
+`retired` on the supervisor process whether or not anything was running, and
+`Start` honours it for ever after. Publication and `Start()` cannot be one
+atomic step — the lock is dropped between them — so without the latch a
+reconcile already in flight during shutdown could publish, have `Stop` tear the
+destination down (a no-op on a process not yet started, while its subscription
+and port were released), and then start a child nothing could see or stop, on a
+port already reissued. `Restart` is deliberately NOT terminal: cycling is not
+retiring.
+
 ### What restarts what
 
 `renditionSig` hashes everything the encode's command line depends on —
@@ -531,7 +556,10 @@ internal/
   routing/     profile.go (model+validation) · filtergraph.go · presets.go
   relay/       UDP fan-out hub, port allocator, TS continuity/loss measurement
   supervisor/  process lifecycle, pgid kill, backoff, -progress parser, log ring,
-               rotating file sink for logs that must outlive the process
+               rotating file sink for logs that must outlive the process.
+               Stop is terminal (see `retired`), and every line leaving a
+               process is masked at capture: FFmpeg prints the whole publish
+               URL, stream key included, when an endpoint refuses it
   stats/       ring buffers (30 min bitrate), host CPU/RAM
   metrics/     Prometheus text exposition, rendered from the engine's status
   auth/        bcrypt, JWT cookie, CSRF double-submit, API tokens, login throttle
@@ -544,7 +572,10 @@ internal/
   recording/   segment index, retention sweeper (max GB / max age), free-space guard
   events/      in-process pub/sub the WebSocket fans out
   engine/      the orchestrator: owns ingest+relay+recorder+preview+meters,
-               plus the rendition tier and the destinations that consume it
+               plus the rendition tier and the destinations that consume it.
+               engine.go is the tiers and their shared state; destinations.go
+               is the destination seam — planning, the restart signatures, and
+               the primary/backup pair
   api/         chi router, REST handlers, WebSocket hub
   web/         go:embed ui/dist + SPA fallback
 
