@@ -87,7 +87,28 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg
           ffmpeg -hide_banner -version | head -1
 
-      - run: gofmt -l ./cmd ./internal | tee /tmp/fmt && test ! -s /tmp/fmt
+      # The gate is "gofmt named no files", and it has to rest on gofmt having
+      # RUN. It used to be `gofmt -l ./cmd ./internal | tee /tmp/fmt && test !
+      # -s /tmp/fmt`, and the default shell for a `run:` block is `bash -e {0}`
+      # -- no pipefail, unlike an explicit `shell: bash`. So the pipeline's
+      # status was tee's, gofmt's was discarded, and a gofmt that died on a
+      # parse error wrote nothing to /tmp/fmt and left `test ! -s` to report
+      # the tree as correctly formatted. Every way of failing to check produced
+      # the same green as checking and finding nothing.
+      #
+      # A command substitution under set -e instead: gofmt's own exit status
+      # now fails the step, and the emptiness of its output is a separate
+      # question asked afterwards.
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "gofmt: clean"
       - run: go build ./...
       - run: go vet ./...
       # -race because the engine reconciles from several goroutines and a data
