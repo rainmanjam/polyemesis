@@ -570,6 +570,197 @@ literal it describes.
 
 ---
 
+## Found during remediation
+
+Two defects that the audit missed and that fixing it turned up. Recorded here
+because "what the audit did not see" is the part of an audit worth keeping.
+
+### E1. Facebook's per-instance Graph base redirects 1 call in ~40
+
+`internal/oauth/facebook.go` carries two base-URL mechanisms covering different
+surfaces. `fbGraphBase` (package var) is what `fbGet` and `fbPost` use, and
+those two carry all 12 Graph call sites. `f.graphBase` (unexported field) feeds
+`f.graphEndpoint()`, which has **exactly one caller** — the credential-check
+token endpoint.
+
+So `&Facebook{graphBase: srv.URL}` — the pattern `credcheck_providers_test.go`
+uses, and the one that *looks* like the provider's test seam — leaves
+`IngestFor`, `RescheduleBroadcast` and `PushMetadata` pointed at the real
+graph.facebook.com. Meanwhile `facebook_test.go` redirects by mutating the
+package var globally under `t.Cleanup`, which makes those tests order-dependent
+and non-parallelizable.
+
+This is the actual root of [D5](#d5-five-function-pointer-seams-on-server-up-from-zero-with-one-root-cause):
+the seam that exists is not merely unexported, it is *misleading*, and the five
+closures in `internal/api` were added around a mechanism that would not have
+worked anyway.
+
+### E2. A source card picks whichever uplink it finds first
+
+Fixing [A2](#a2-a-standby-srt-encoder-and-the-primary-evict-each-other) made two
+live links per source reachable, and exposed that `internal/api/sources.go` took
+the first `SRTLinks()` entry matching the source id. `SRTLinks` is built by
+ranging a map, so a source with a primary and a standby could report the
+primary's bitrate on one refresh and the standby's on the next with nothing
+having changed.
+
+Fixed by naming the decision: `linkForCard` prefers the primary and falls back
+to the standby, because an operator whose primary has dropped is reading that
+card precisely because the standby is carrying the show.
+
+### E3. A COPPA declaration could be made but never taken back
+
+Auditing the rest of the destination dialog's payload for
+[B1](#b1-facebook-backup-ingest-cannot-be-turned-off)'s shape found one more.
+`compliance.madeForKids` sent `undefined` for "Leave as it is on YouTube", which
+`JSON.stringify` omits, which the decode-over-existing PUT preserves. So an
+operator could declare a destination made-for-kids and had no way to withdraw
+it.
+
+`db.Compliance.MadeForKids` is a `*bool` for exactly this reason — three states,
+not two. The UI was collapsing them to two. Fixed by sending explicit `null`.
+
+Everything else in that payload was checked and travels correctly: `privacy` and
+`facebookPrivacy` send `""`, `crosspost` sends `[]`, `accountId` and
+`renditionId` send `null`, and the transport, resilience and audio numbers send
+`0`.
+
+### E4. The Facebook drift guards make their own copy untranslatable
+
+`internal/db/facebook_ui_drift_test.go` asserts the English substrings
+`"Crosspost to Pages"`, `"upload bandwidth"` and `"reconnects the stream"`
+against `DestinationDialog.tsx`'s **source text**. Each appears exactly once, in
+the rendered JSX.
+
+So moving that copy into `en.json` — which is what fixing the untranslated-strings
+item requires — turns both guards red, and the only way to keep them green would
+be to leave the phrases behind in a comment. That is gaming the guard rather than
+satisfying it, so the Facebook block stayed English while the rest of the new UI
+copy was translated into all fifteen locales.
+
+The guards and the change want the same thing. The guards need to assert against
+`en.json` instead of against the component, which is the same fix
+[C3](#c3-four-ui-drift-guards-survive-their-block-being-switched-off) needs for a
+different reason — a guard that reads rendered source text is measuring the wrong
+artifact twice over.
+
+### E5. YouTube and Twitch bypassed their own base variables entirely
+
+Grounding [E1](#e1-facebooks-per-instance-graph-base-redirects-1-call-in-40)
+turned up the same defect in two more providers, and in a worse form than
+Facebook's. `ytAPIBase` and `twitchHelixBase` both carry the comment *"a var so
+tests can point the whole provider at a stub"* — and `YouTube.Account`,
+`YouTube.Ingest`, `Twitch.Account` and `Twitch.Ingest` hard-code the full
+`https://www.googleapis.com/youtube/v3/...` and `https://api.twitch.tv/helix/...`
+URLs inline, bypassing the var. `Twitch.AuthURL` hard-codes `id.twitch.tv`, and
+Twitch's `tokenURL` field redirected the token endpoint only.
+
+So the mechanism documented as the way to stub these providers did not stub the
+account and ingest paths — the two that matter most for going live.
+
+Fixed together with E1 rather than separately: leaving these in place would have
+made the new `WithBaseURL` a fresh trap of exactly the kind being removed.
+
+The guard is `TestAStubbedProviderReachesNoRealHost`, which enumerates **38
+entry points across four providers** and installs a transport that *refuses*
+non-stub hosts — so an escape is a named test failure rather than a silent real
+request to the platform. It enumerates rather than samples precisely because
+sampling is how E1 survived. A second guard reads the source and self-fails if
+it ever matches zero lines.
+
+### E6. A stream key reached the MQTT broker as a RETAINED message
+
+This one corrects the audit's own security verdict, and it is the most serious
+thing the exercise found.
+
+Fixing [B6](#b6-ffmpeg-argv-and-raw-stderr-are-returned-unredacted-and-now-carry-the-backup-key)
+turned up a third instance of the same bytes. `supervisor.runOnce` joins the last
+three stderr lines classified `error`/`fatal` into the process's exit error,
+which becomes `Status.LastError`. `Error opening output rtmps://host/app/<key>:
+Connection refused` is exactly that shape.
+
+That field is serialised by `GET /processes`, copied onto the dashboard snapshot,
+**and copied into `SourceState.IngestError`, which is published to MQTT
+retained.**
+
+A retained topic outlives the process that produced it and is readable by every
+subscriber on the broker **behind no session at all**. So unlike B6 — which the
+audit correctly graded as crossing no privilege boundary — this one does. The
+"no unauthenticated exposure" line in [Verified clean](#verified-clean) was true
+of the route table and false of the product.
+
+Worse, `internal/mqtt/state_test.go` had explicitly *exempted* `ingestError` from
+its credential-name ban, on the reasoning that *"an error is FFmpeg's, and
+neither is a URL"*. That reasoning is false, and the exemption is what let the
+field through the guard that existed to catch exactly this.
+
+Fixed by masking in `Status()`, which closes all three consumers at once, and by
+correcting the test comment to say the field is safe *because the value is
+masked at source* rather than because it cannot carry a URL.
+
+**And that fix was itself incomplete**, which an adversarial review of the
+remediation caught. Masking in `Logs()` covered the reader that prompted it and
+missed the other two copies `appendLog` fans out: `LogSink` is a `FileSink` in
+production, so an unmasked line became a **permanent** one in `process.log` —
+the artifact people attach to bug reports, which the database beside it never
+is — and `OnLog` feeds the console's live log panel over the WebSocket. Now
+masked at construction, the single point every copy is made from. Guards were
+added for the sink and the callback specifically, because the original guard
+asserted on `Logs()` and could not see either.
+
+The lesson is the audit's own, one level up: **the observable a guard watches
+decides whether it can fail at all** — and a guard on the reader cannot see the
+writers.
+
+### E7. Two smaller items from the same thread
+
+**`internal/api/expert.go` is a fourth egress of the same bytes** — it returns
+the raw argv and its own locally-quoted command string to the client without
+redaction. Unlike the other three this is arguably the point of the endpoint:
+expert mode exists so an operator can see and edit the real command. It needs a
+deliberate decision recorded rather than being left to look like an oversight.
+
+**`.dockerignore` has no `.claude` rule.** While the stale worktree existed,
+278 MB of duplicate checkout was being sent into every Docker build context.
+Moot once the worktree went, and it would happen again with the next one.
+
+### E8. The SPA fallback defeats status-only route tests BOTH ways
+
+[C2](#c2-the-deliveries-route-guard-passes-with-the-route-deleted) said a route
+test asserting only `200` is testing the SPA fallback. That was half of it.
+
+`web.Handler` answers an unrouted `/api/v1/...` path two different ways:
+
+- with `internal/web/dist/index.html` present (after `make ui`) — **200 and the
+  SPA bundle**, which is what the audit measured;
+- **without it, which is how CI runs `go test`** — `http.Error(…, 404)`.
+
+So a test asserting only `404` *also* passes with its route deleted, and that is
+the configuration the test suite actually runs in. Measured: with all three
+`/schedules/{id}` registrations commented out and `index.html` moved aside, the
+old 404 assertion stayed green.
+
+Fixed with a `mustJSONError` helper that additionally requires a JSON body with
+an `error` field — neither fallback can produce one — applied across schedules,
+alert rules, renditions, destinations, expert overrides, the stem download and
+the media delete, each mutation observed to fail.
+
+One nuance worth keeping: removing a single **method** from a path that keeps
+its others yields chi's 405, which a status assertion *does* catch. The hole
+opens only when a whole pattern goes.
+
+### E9. Confinement tests that pass by refusing everything
+
+Same sweep, different shape. `TestClipDownloadRefusesAnythingOutsideTheClipDirectory`
+and its delete twin assert only that a canary did **not** come back — which is
+also true when the route does not exist. Measured: with
+`r.Get("/clips/{name}/download")` commented out, both stayed green.
+
+The stem half of the same file already had a positive counterpart, with a
+comment explaining why it was needed. The clip half never got one. A refusal
+test needs a partner proving the thing it refuses is otherwise reachable, or it
+is indistinguishable from a missing feature.
+
 ## Refuted
 
 **"The pre-announce token refresh can block indefinitely."** The ordering half is
