@@ -903,6 +903,59 @@ compared a spec against itself and passed vacuously. The bumper now gives them
 values the builder knows, and the test counts how many pairs moved the argv at
 all, so a silent return to zero fails.
 
+## G. Found by the final review, after everything else was green
+
+The whole branch was reviewed once more before merge, by a reader told to decide
+merge-readiness. It said **do not merge**, and it was right twice.
+
+### G1. The migration was not atomic
+
+The backfill runs only when that pass created the column. An error — or a crash
+— between the `ALTER` committing and the `UPDATE` running left a database where
+the column exists, the guard is false for ever after, and every operator who had
+backup ingest on had silently lost it. Nothing reports that; they find out when
+a primary drops and the second feed was never started.
+
+Both now run in one transaction, which SQLite's DDL supports.
+
+The existence checks stay deliberately **outside** it, and the reason is worth
+keeping: `columnExists` queries `d.sql`, and `db.go` sets
+`SetMaxOpenConns(1)` — so a read issued while the transaction holds the one
+connection waits for a connection that transaction will not release until it
+commits. It would not fail. It would hang on startup, for ever.
+
+**And that is what the first named mutation for the new guard did.** Moving the
+`ALTER`s back out of the transaction — the obvious mutation — deadlocks rather
+than failing, so it never reaches an assertion and proves less than a green run.
+The record now names the one that was observed to fail (turning the deferred
+`Rollback` into a `Commit`) and states why the obvious one is wrong, because the
+next person will reach for the obvious one.
+
+### G2. The credential check still dialled the real platform
+
+Both credential handlers validated the platform through `s.providers` and then
+called the **package-level** `oauth.CheckCredentialsFor`, which resolves its own
+provider against production hosts. A server built with
+`oauth.NewSet(oauth.WithBaseURL(stub))` therefore had a partially redirected
+provider set — everything stubbed except this — which is precisely the state
+[E1](#e1-facebooks-per-instance-graph-base-redirects-1-call-in-40) was about.
+
+It survived the seam removal because the only credential-check test used
+YouTube, whose check is format-only and never opens a socket. The new guard uses
+Twitch, which really does POST to a token endpoint.
+
+### G3. Writing G2's guard reproduced E8 on the author
+
+The first version of that guard used a wrong route path. `send(...)` asserts a
+status code, the SPA fallback answered `200`, and the test passed its status
+assertion and then found no calls on the stub.
+
+That is [E8](#e8-the-spa-fallback-defeats-status-only-route-tests-both-ways)
+exactly, committed by the person who wrote E8 up, an hour later. It is recorded
+because it is the strongest available evidence that the finding is not a
+theoretical one: knowing about this class does not protect you from it. Only
+asserting on something the fallback cannot produce does.
+
 ## Refuted
 
 **"The pre-announce token refresh can block indefinitely."** The ordering half is
