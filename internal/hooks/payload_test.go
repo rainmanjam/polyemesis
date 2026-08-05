@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,10 +20,26 @@ const plantedKey = "live_9999_PLANTEDSTREAMKEY"
 // FFmpeg STDERR lines -- and an FFmpeg failing to publish prints the whole
 // rtmps:// URL, stream key included. Anything that reaches an envelope has to
 // go through the same redaction the alert path applies centrally.
-func TestNoStreamKeyReachesAnEnvelope(t *testing.T) {
+//
+// The bytes asserted on are the ones a Doer received, not ones this test built.
+// The previous version constructed its envelope with
+// `Reason: ev.redacted().Reason, Error: ev.redacted().Error` -- it called the
+// redactor, then asserted the redactor had redacted. It could not fail, because
+// no part of the delivery path was involved: redaction lives in
+// Dispatcher.Publish, and the test never called it.
+//
+// Mutation: dispatch.go, `d.intake <- ev.redacted()` -> `d.intake <- ev`.
+// Observed FAIL ("carried a stream key to the wire") on a committed tree; the
+// old version stayed green through the same mutation.
+func TestNoStreamKeyReachesTheWire(t *testing.T) {
 	dirty := "rtmps://live.twitch.tv/app/" + plantedKey + ": Connection refused"
 
-	for _, ev := range []Event{
+	// Every free-text field redacted() touches, so a field dropped from it is a
+	// failure here rather than a silent regression: Reason, Error, Source.Name
+	// and Destination.Name. An operator naming a source after its ingest URL is
+	// not hypothetical -- the destination dialog offers exactly that as a
+	// default.
+	events := []Event{
 		{Trigger: TriggerIngestDisconnected, Source: SourceRef{ID: 1, Name: "Main"}, Error: dirty},
 		{Trigger: TriggerIngestDisconnected, Source: SourceRef{ID: 1, Name: "Main"}, Reason: dirty},
 		{
@@ -31,24 +48,62 @@ func TestNoStreamKeyReachesAnEnvelope(t *testing.T) {
 			Destination: &DestinationRef{ID: 3, Name: "Twitch", Platform: "twitch"},
 			Error:       dirty,
 		},
-	} {
-		env := Envelope{
-			SpecVersion: SpecVersion, ID: "d1", Sequence: 1,
-			Trigger: ev.Trigger, At: time.Unix(0, 0).UTC(),
-			Source: ev.Source, Destination: ev.Destination,
-			Reason: ev.redacted().Reason, Error: ev.redacted().Error,
+		{Trigger: TriggerIngestPublished, Source: SourceRef{ID: 1, Name: dirty}},
+		{
+			Trigger:     TriggerDestinationUp,
+			Source:      SourceRef{ID: 1, Name: "Main"},
+			Destination: &DestinationRef{ID: 3, Name: dirty, Platform: "twitch"},
+		},
+	}
+
+	rec := &recorder{}
+	d := NewDispatcher(testLogger(t), SourceFunc(func() ([]Hook, error) { return oneHook(), nil }),
+		WithDoer(rec), WithReloadInterval(10*time.Millisecond))
+	runDispatcher(t, d)
+	waitFor(t, func() bool { return d.HasHooks() })
+
+	for _, ev := range events {
+		d.Publish(ev)
+	}
+	waitFor(t, func() bool { return len(rec.seen()) == len(events) })
+
+	for i, body := range rec.seen() {
+		if strings.Contains(body, plantedKey) {
+			t.Fatalf("delivery %d (%s) carried a stream key to the wire:\n%s",
+				i, events[i].Trigger, body)
 		}
-		body, err := Encode(env)
-		if err != nil {
-			t.Fatal(err)
+		if !strings.Contains(body, alerts.Mask) {
+			t.Errorf("delivery %d (%s) dropped the free text entirely instead of "+
+				"masking it; the receiver needs to know something went wrong:\n%s",
+				i, events[i].Trigger, body)
 		}
-		if strings.Contains(string(body), plantedKey) {
-			t.Fatalf("%s carried a stream key to the wire:\n%s", ev.Trigger, body)
-		}
-		if !strings.Contains(string(body), alerts.Mask) {
-			t.Errorf("%s dropped the error entirely instead of masking it; the "+
-				"receiver needs to know something went wrong:\n%s", ev.Trigger, body)
-		}
+	}
+}
+
+// The synthetic delivery the test button sends goes out over the same wire, and
+// takes the hook straight from the request body rather than from the queue --
+// so it does not pass through Publish and is not covered by the test above.
+//
+// Mutation: none available in production code today; env is built from
+// constants, and this pins that. If a future Test() ever echoes operator input
+// into Reason, this is what makes it go through alerts.Redact first.
+func TestTheTestDeliveryCarriesNoFreeTextFromTheHook(t *testing.T) {
+	rec := &recorder{}
+	d := NewDispatcher(testLogger(t), SourceFunc(func() ([]Hook, error) { return nil, nil }),
+		WithDoer(rec))
+	h := Hook{
+		ID: 1, Name: "rtmps://live.twitch.tv/app/" + plantedKey, Enabled: true,
+		URL: "https://example.com/h", Secret: "s",
+	}.Normalized()
+	if _, err := d.Test(context.Background(), h, TriggerIngestPublished); err != nil {
+		t.Fatalf("test delivery: %v", err)
+	}
+	seen := rec.seen()
+	if len(seen) != 1 {
+		t.Fatalf("sent %d test deliveries, want 1", len(seen))
+	}
+	if strings.Contains(seen[0], plantedKey) {
+		t.Fatalf("the test delivery carried the hook's own free text:\n%s", seen[0])
 	}
 }
 
