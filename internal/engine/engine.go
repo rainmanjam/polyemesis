@@ -2240,6 +2240,21 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	})
 
 	e.mu.Lock()
+	// Shutdown may have run since this reconcile started; publishing under the
+	// same lock Stop collects destinations with is what keeps a late start from
+	// becoming an FFmpeg still publishing to a platform, holding a relay port,
+	// that nothing can find or stop. The identical guard startRendition carries,
+	// for the identical reason -- this was the one start path in the file
+	// without it.
+	//
+	// nil rather than an error: an error makes startDestinations record a broken
+	// destination in the map this has just declined to write to.
+	if e.stopped {
+		e.mu.Unlock()
+		hub.Unsubscribe(subName)
+		e.alloc.Release(port)
+		return nil
+	}
 	e.dests[row.ID] = &destination{
 		row: row, proc: proc, port: port, subName: subName,
 		compiled: compiled, hub: hub, spec: spec,
@@ -2343,11 +2358,23 @@ func (e *Engine) startBackup(d *destination, compiled routing.Result, spec strin
 		LogSink:     logSink{e},
 	})
 
+	e.mu.Lock()
+	// The same guard the primary and every other start path carries. A backup
+	// spawned after shutdown is the worst orphan in the file: it is built with
+	// AutoRestart, so it does not exit -- it reconnects to the platform's backup
+	// ingest for ever, from a process that is in no map and on no page.
+	if e.stopped {
+		e.mu.Unlock()
+		hub.Unsubscribe(sub)
+		e.alloc.Release(port)
+		return
+	}
 	d.backup = proc
 	d.backupPort = port
 	d.backupSub = sub
 	d.backupSpec = spec
 	d.backupErr = ""
+	e.mu.Unlock()
 
 	proc.Start()
 	e.log.Info("backup ingest started", "dest", d.row.Name)
