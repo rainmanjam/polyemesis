@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,7 +179,10 @@ func TestFacebookCrosspostAndDonateAreOfferedByTheDestinationEditor(t *testing.T
 	src := readUI(t, "components", "DestinationDialog.tsx")
 	block := jsxBlockUnder(t, src, facebookBlockHead, "DestinationDialog.tsx")
 
-	if !strings.Contains(block, `<Label>Crosspost to Pages</Label>`) {
+	// The key, not the English. Where the WORDS live is a separate question,
+	// asked against the catalogue by TestTheFacebookCopyLivesInTheCatalogue --
+	// and asking it here is what kept this block untranslated.
+	if !strings.Contains(block, `{t("dest.fbCrosspostLabel")}`) {
 		t.Error("no crosspost control inside the Facebook block in DestinationDialog.tsx. " +
 			"A crosspost list an operator cannot build is a field that can only ever be " +
 			"empty, and every line of Facebook crossposting behind it is unreachable.")
@@ -310,11 +314,80 @@ func TestTheDialogOffersTheBackupIngestToggle(t *testing.T) {
 		t.Error("the destination dialog has no control inside the Facebook block that " +
 			"SETS backupIngest, so the backup feed can never be turned on from the UI.")
 	}
-	// The two costs are not guessable and an operator who learns about them
-	// afterwards has already paid one of them.
-	if !strings.Contains(block, "upload bandwidth") ||
-		!strings.Contains(block, "reconnects the stream") {
-		t.Error("the toggle does not state its costs: it doubles upload bandwidth " +
-			"and reconnects the stream once when enabled.")
+	// That the two cost sentences are RENDERED, by key. That they still SAY
+	// what they have to say is TestTheFacebookCopyLivesInTheCatalogue's job:
+	// the words moved to en.json so they could be translated, and a guard that
+	// reads English out of a component is a guard that forbids translating it.
+	if !strings.Contains(block, `{t("dest.fbBackupCost")}`) ||
+		!strings.Contains(block, `{t("dest.fbBackupReconnect")}`) {
+		t.Error("the toggle does not render its two cost sentences. They are not " +
+			"guessable and an operator who learns about them afterwards has already " +
+			"paid one of them.")
+	}
+}
+
+// The copy the Facebook block renders has to live where it can be translated.
+//
+// The guards above used to assert the English strings "Crosspost to Pages",
+// "upload bandwidth" and "reconnects the stream" against DestinationDialog.tsx.
+// That made the copy untranslatable by construction: moving it into en.json --
+// which is what finishing the fifteen locales required -- turned them red, and
+// the only way to keep them green was to leave the phrases behind in a comment.
+// So the Facebook block stayed English while everything around it was
+// translated, and the guards and the change wanted the same thing the whole
+// time.
+//
+// The two questions are separate and are now asked separately. Whether the
+// control RENDERS is a question about the component, asked above by bounding
+// the block and matching the key. Whether the copy EXISTS and says what it has
+// to say is a question about the catalogue, and this is where it is asked.
+//
+// Note what does NOT need a guard: that a key the component asks for exists at
+// all. lib/i18n.ts defines TranslationKey as `keyof typeof en`, so `t("typo")`
+// is a compile error and `npm run build` catches it. Types cannot see the
+// VALUE, which is the half that carries the warning, so that is the half left
+// here.
+//
+// Whether the other fourteen locales carry these keys, and carry them non-empty,
+// is internal/web/i18n_drift_test.go's job and is not repeated here.
+//
+// MUTATION, run against a committed tree: change en.json's "dest.fbBackupCost"
+// to "Uses more bandwidth." -- fails here. The number is the whole point of the
+// sentence: an operator told a backup "uses more bandwidth" will not plan for
+// twice the upload, and will find out during a broadcast.
+func TestTheFacebookCopyLivesInTheCatalogue(t *testing.T) {
+	var en map[string]string
+	if err := json.Unmarshal([]byte(readUI(t, "lib", "i18n", "en.json")), &en); err != nil {
+		t.Fatalf("en.json is not a flat string map: %v", err)
+	}
+
+	for _, want := range []struct {
+		key, phrase, why string
+	}{
+		{
+			"dest.fbCrosspostLabel", "Crosspost to Pages",
+			"the crosspost list has no heading, so an operator meets a bare row of " +
+				"inputs with no statement of what they do",
+		},
+		{
+			"dest.fbBackupCost", "upload bandwidth",
+			"the backup toggle no longer states that it doubles the destination's " +
+				"upload, which is a cost paid before anyone notices it went unmentioned",
+		},
+		{
+			"dest.fbBackupReconnect", "reconnects the stream",
+			"the backup toggle no longer states that enabling it reconnects the " +
+				"stream once, so an operator learns it by watching a live broadcast drop",
+		},
+	} {
+		got, ok := en[want.key]
+		if !ok {
+			t.Errorf("en.json has no %q. %s.", want.key, want.why)
+			continue
+		}
+		if !strings.Contains(got, want.phrase) {
+			t.Errorf("en.json %q is %q, which no longer says %q. %s.",
+				want.key, got, want.phrase, want.why)
+		}
 	}
 }

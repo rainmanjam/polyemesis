@@ -118,5 +118,20 @@
   "playlist.choose": "选择一个上传文件",
   "playlist.chooseAria": "选择要添加的上传文件",
   "playlist.noUploads": "没有可用的上传文件",
-  "playlist.hint": "在 Media 中上传。若此播放列表引用的条目之后丢失了对应文件，它会在上方显示为需要处理，而不是在下一次故障切换取用时悄然失败。"
+  "playlist.hint": "在 Media 中上传。若此播放列表引用的条目之后丢失了对应文件，它会在上方显示为需要处理，而不是在下一次故障切换取用时悄然失败。",
+  "dest.fbBoxTitle": "Facebook 转发与捐款按钮",
+  "dest.fbBoxIntro": "与“受众”在同一次创建调用中发送，因此适用同一条规则：在直播开始时应用一次，若为空则完全不作改动。",
+  "dest.fbBackupLabel": "发布备用推流",
+  "dest.fbBackupHelp": "将此推流的第二份副本发送到 Facebook 的备用接收地址，这样连接断开也不会中断直播。",
+  "dest.fbBackupCost": "会使此目标的上行带宽翻倍。",
+  "dest.fbBackupReconnect": "开启会让推流重新连接一次——因此请在开播前启用。",
+  "dest.fbCrosspostLabel": "转发到主页",
+  "dest.fbCrosspostPageId": "主页 ID",
+  "dest.fbCrosspostAlsoPost": "同时发帖",
+  "dest.fbCrosspostRemove": "移除此主页",
+  "dest.fbCrosspostAdd": "添加主页",
+  "dest.fbCrosspostHelp": "来自 Facebook 自家控制台的数字主页 ID（主页设置，或以主页身份登录时的 graph.facebook.com/me/accounts）——这里没有搜索功能，所以请粘贴 id，而不是名称或网址。“同时发帖”会以该主页的身份发布，而不只是把直播分享给它；不开启时，只会发生较低调的分享。",
+  "dest.fbDonateLabel": "捐款按钮的慈善机构 ID",
+  "dest.fbDonatePlaceholder": "慈善机构 ID",
+  "dest.fbDonateHelp": "这同样是 Facebook 募捐控制台里的一个不透明 id，而不是可供搜索的机构名称。留空则完全不附加捐款按钮。"
 }

@@ -118,5 +118,20 @@
   "playlist.choose": "Choose an upload",
   "playlist.chooseAria": "Choose an upload to add",
   "playlist.noUploads": "No uploads available",
-  "playlist.hint": "Uploaded in Media. An item this playlist names that later loses its upload shows as needing attention above, rather than failing silently the next time failover reaches it."
+  "playlist.hint": "Uploaded in Media. An item this playlist names that later loses its upload shows as needing attention above, rather than failing silently the next time failover reaches it.",
+  "dest.fbBoxTitle": "Facebook crossposting & donate button",
+  "dest.fbBoxIntro": "Sent on the same create call as Audience, so the same rule applies: applied once when the broadcast starts, and left alone entirely if empty.",
+  "dest.fbBackupLabel": "Publish a backup feed",
+  "dest.fbBackupHelp": "Sends a second copy of this stream to Facebook’s backup ingest, so a dropped connection does not drop the broadcast.",
+  "dest.fbBackupCost": "Doubles this destination’s upload bandwidth.",
+  "dest.fbBackupReconnect": "Turning it on reconnects the stream once — so enable it before you go live.",
+  "dest.fbCrosspostLabel": "Crosspost to Pages",
+  "dest.fbCrosspostPageId": "Page ID",
+  "dest.fbCrosspostAlsoPost": "Also post",
+  "dest.fbCrosspostRemove": "Remove this Page",
+  "dest.fbCrosspostAdd": "Add Page",
+  "dest.fbCrosspostHelp": "The numeric Page ID from Facebook’s own console (Page settings, or graph.facebook.com/me/accounts while signed in as the Page) — there is no lookup here, so paste the id rather than a name or URL. “Also post” publishes as that Page rather than only sharing the broadcast to it; left off, only the quieter share happens.",
+  "dest.fbDonateLabel": "Donate button charity ID",
+  "dest.fbDonatePlaceholder": "Charity ID",
+  "dest.fbDonateHelp": "Also an opaque id from Facebook’s fundraisers console, not a charity name to search for. Leave blank to attach no donate button at all."
 }

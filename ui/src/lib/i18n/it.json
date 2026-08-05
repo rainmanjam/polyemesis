@@ -118,5 +118,20 @@
   "playlist.choose": "Scegli un caricamento",
   "playlist.chooseAria": "Scegli un caricamento da aggiungere",
   "playlist.noUploads": "Nessun caricamento disponibile",
-  "playlist.hint": "Caricati in Media. Un elemento nominato da questa playlist che poi perde il suo file compare sopra come da controllare, invece di fallire in silenzio la prossima volta che il failover lo raggiunge."
+  "playlist.hint": "Caricati in Media. Un elemento nominato da questa playlist che poi perde il suo file compare sopra come da controllare, invece di fallire in silenzio la prossima volta che il failover lo raggiunge.",
+  "dest.fbBoxTitle": "Pubblicazione incrociata e pulsante di donazione di Facebook",
+  "dest.fbBoxIntro": "Inviato nella stessa chiamata di creazione del Pubblico, quindi vale la stessa regola: applicato una volta quando la diretta inizia, e lasciato del tutto intatto se vuoto.",
+  "dest.fbBackupLabel": "Pubblica un feed di riserva",
+  "dest.fbBackupHelp": "Invia una seconda copia di questo stream all’ingresso di riserva di Facebook, così una connessione caduta non fa cadere la diretta.",
+  "dest.fbBackupCost": "Raddoppia la banda in upload di questa destinazione.",
+  "dest.fbBackupReconnect": "Attivarlo riconnette lo stream una volta — quindi abilitalo prima di andare in diretta.",
+  "dest.fbCrosspostLabel": "Pubblicazione incrociata sulle Pagine",
+  "dest.fbCrosspostPageId": "ID della Pagina",
+  "dest.fbCrosspostAlsoPost": "Pubblica anche",
+  "dest.fbCrosspostRemove": "Rimuovi questa Pagina",
+  "dest.fbCrosspostAdd": "Aggiungi Pagina",
+  "dest.fbCrosspostHelp": "L’ID numerico della Pagina dalla console di Facebook (impostazioni della Pagina, oppure graph.facebook.com/me/accounts mentre sei connesso come Pagina) — qui non c’è alcuna ricerca, quindi incolla l’id anziché un nome o un URL. «Pubblica anche» pubblica come quella Pagina invece di limitarsi a condividere con essa la diretta; se disattivato, avviene solo la condivisione più discreta.",
+  "dest.fbDonateLabel": "ID dell’ente del pulsante di donazione",
+  "dest.fbDonatePlaceholder": "ID dell’ente",
+  "dest.fbDonateHelp": "Anche questo è un id opaco dalla console delle raccolte fondi di Facebook, non un nome di ente da cercare. Lascialo vuoto per non allegare alcun pulsante di donazione."
 }

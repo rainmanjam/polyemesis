@@ -118,5 +118,20 @@
   "playlist.choose": "Upload auswählen",
   "playlist.chooseAria": "Upload zum Hinzufügen auswählen",
   "playlist.noUploads": "Keine Uploads verfügbar",
-  "playlist.hint": "Hochgeladen unter Media. Ein Eintrag dieser Playlist, dessen Upload später verloren geht, wird oben als aufmerksamkeitsbedürftig angezeigt, statt beim nächsten Failover stillschweigend zu scheitern."
+  "playlist.hint": "Hochgeladen unter Media. Ein Eintrag dieser Playlist, dessen Upload später verloren geht, wird oben als aufmerksamkeitsbedürftig angezeigt, statt beim nächsten Failover stillschweigend zu scheitern.",
+  "dest.fbBoxTitle": "Crossposting und Spendenbutton für Facebook",
+  "dest.fbBoxIntro": "Wird mit demselben Erstellungsaufruf wie die Zielgruppe gesendet, es gilt also dieselbe Regel: einmalig angewendet, wenn die Übertragung startet, und vollständig unangetastet gelassen, wenn leer.",
+  "dest.fbBackupLabel": "Backup-Feed veröffentlichen",
+  "dest.fbBackupHelp": "Sendet eine zweite Kopie dieses Streams an Facebooks Backup-Ingest, damit eine abgebrochene Verbindung nicht die Übertragung abbricht.",
+  "dest.fbBackupCost": "Verdoppelt die Upload-Bandbreite dieses Ziels.",
+  "dest.fbBackupReconnect": "Beim Einschalten verbindet sich der Stream einmal neu – aktivieren Sie es also, bevor Sie live gehen.",
+  "dest.fbCrosspostLabel": "Crossposting auf Seiten",
+  "dest.fbCrosspostPageId": "Seiten-ID",
+  "dest.fbCrosspostAlsoPost": "Auch posten",
+  "dest.fbCrosspostRemove": "Diese Seite entfernen",
+  "dest.fbCrosspostAdd": "Seite hinzufügen",
+  "dest.fbCrosspostHelp": "Die numerische Seiten-ID aus Facebooks eigener Konsole (Seiteneinstellungen oder graph.facebook.com/me/accounts, während Sie als Seite angemeldet sind) – hier gibt es keine Suche, fügen Sie also die ID ein und nicht einen Namen oder eine URL. „Auch posten“ veröffentlicht als diese Seite, statt die Übertragung nur mit ihr zu teilen; ausgeschaltet passiert nur das leisere Teilen.",
+  "dest.fbDonateLabel": "Spenden-Button: Organisations-ID",
+  "dest.fbDonatePlaceholder": "Organisations-ID",
+  "dest.fbDonateHelp": "Ebenfalls eine undurchsichtige ID aus Facebooks Spendenaktions-Konsole, kein Name einer Organisation zum Suchen. Leer lassen, um gar keinen Spendenbutton anzuhängen."
 }

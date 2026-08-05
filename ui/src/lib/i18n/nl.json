@@ -118,5 +118,20 @@
   "playlist.choose": "Kies een upload",
   "playlist.chooseAria": "Kies een upload om toe te voegen",
   "playlist.noUploads": "Geen uploads beschikbaar",
-  "playlist.hint": "Geüpload bij Media. Een item dat deze afspeellijst noemt en later zijn upload kwijtraakt, verschijnt hierboven als aandacht vragend in plaats van stil te falen zodra de failover het weer nodig heeft."
+  "playlist.hint": "Geüpload bij Media. Een item dat deze afspeellijst noemt en later zijn upload kwijtraakt, verschijnt hierboven als aandacht vragend in plaats van stil te falen zodra de failover het weer nodig heeft.",
+  "dest.fbBoxTitle": "Cross-posten en donatieknop van Facebook",
+  "dest.fbBoxIntro": "Wordt in dezelfde aanmaak-aanroep verstuurd als Publiek, dus dezelfde regel geldt: eenmalig toegepast wanneer de uitzending start, en volledig met rust gelaten als het leeg is.",
+  "dest.fbBackupLabel": "Een reservefeed publiceren",
+  "dest.fbBackupHelp": "Stuurt een tweede kopie van deze stream naar Facebooks reserve-ingest, zodat een weggevallen verbinding de uitzending niet meesleurt.",
+  "dest.fbBackupCost": "Verdubbelt de uploadbandbreedte van deze bestemming.",
+  "dest.fbBackupReconnect": "Inschakelen verbindt de stream één keer opnieuw — schakel het dus in voordat je live gaat.",
+  "dest.fbCrosspostLabel": "Cross-posten naar Pagina’s",
+  "dest.fbCrosspostPageId": "Pagina-ID",
+  "dest.fbCrosspostAlsoPost": "Ook plaatsen",
+  "dest.fbCrosspostRemove": "Deze Pagina verwijderen",
+  "dest.fbCrosspostAdd": "Pagina toevoegen",
+  "dest.fbCrosspostHelp": "De numerieke Pagina-ID uit Facebooks eigen console (Pagina-instellingen, of graph.facebook.com/me/accounts terwijl je als de Pagina bent ingelogd) — er is hier geen zoekfunctie, plak dus de id in plaats van een naam of URL. ‘Ook plaatsen’ publiceert als die Pagina in plaats van de uitzending er alleen mee te delen; uitgeschakeld gebeurt alleen het stillere delen.",
+  "dest.fbDonateLabel": "Goede doel-ID voor de donatieknop",
+  "dest.fbDonatePlaceholder": "Goede doel-ID",
+  "dest.fbDonateHelp": "Ook een ondoorzichtige id uit Facebooks console voor inzamelingsacties, geen naam van een goed doel om op te zoeken. Laat leeg om helemaal geen donatieknop toe te voegen."
 }

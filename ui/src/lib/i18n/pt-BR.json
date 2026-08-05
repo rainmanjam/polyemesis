@@ -118,5 +118,20 @@
   "playlist.choose": "Escolha um upload",
   "playlist.chooseAria": "Escolha um upload para adicionar",
   "playlist.noUploads": "Nenhum upload disponível",
-  "playlist.hint": "Enviados em Media. Um item nomeado por esta playlist que depois perca seu upload aparece acima como precisando de atenção, em vez de falhar em silêncio na próxima vez que o failover chegar nele."
+  "playlist.hint": "Enviados em Media. Um item nomeado por esta playlist que depois perca seu upload aparece acima como precisando de atenção, em vez de falhar em silêncio na próxima vez que o failover chegar nele.",
+  "dest.fbBoxTitle": "Publicação cruzada e botão de doação do Facebook",
+  "dest.fbBoxIntro": "Enviado na mesma chamada de criação que Público, então vale a mesma regra: aplicado uma vez quando a transmissão começa, e deixado totalmente intacto se estiver vazio.",
+  "dest.fbBackupLabel": "Publicar um feed reserva",
+  "dest.fbBackupHelp": "Envia uma segunda cópia desta transmissão para a entrada reserva do Facebook, para que uma conexão perdida não derrube a transmissão.",
+  "dest.fbBackupCost": "Dobra a largura de banda de upload deste destino.",
+  "dest.fbBackupReconnect": "Ativar isso reconecta a transmissão uma vez — então ative antes de entrar ao vivo.",
+  "dest.fbCrosspostLabel": "Publicação cruzada em Páginas",
+  "dest.fbCrosspostPageId": "ID da Página",
+  "dest.fbCrosspostAlsoPost": "Publicar também",
+  "dest.fbCrosspostRemove": "Remover esta Página",
+  "dest.fbCrosspostAdd": "Adicionar Página",
+  "dest.fbCrosspostHelp": "O ID numérico da Página no próprio console do Facebook (configurações da Página, ou graph.facebook.com/me/accounts conectado como a Página) — não há busca aqui, então cole o id em vez de um nome ou URL. “Publicar também” publica como aquela Página em vez de apenas compartilhar a transmissão com ela; desligado, acontece só o compartilhamento mais discreto.",
+  "dest.fbDonateLabel": "ID da instituição do botão de doação",
+  "dest.fbDonatePlaceholder": "ID da instituição",
+  "dest.fbDonateHelp": "Também é um id opaco do console de arrecadações do Facebook, não um nome de instituição para pesquisar. Deixe em branco para não anexar botão de doação algum."
 }

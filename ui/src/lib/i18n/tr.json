@@ -118,5 +118,20 @@
   "playlist.choose": "Bir yükleme seçin",
   "playlist.chooseAria": "Eklemek için bir yükleme seçin",
   "playlist.noUploads": "Kullanılabilir yükleme yok",
-  "playlist.hint": "Media bölümünden yüklenir. Bu çalma listesinin adlandırdığı bir öğe sonradan yüklemesini kaybederse, yük devretme ona bir sonraki ulaştığında sessizce başarısız olmak yerine yukarıda ilgi gerektiren olarak görünür."
+  "playlist.hint": "Media bölümünden yüklenir. Bu çalma listesinin adlandırdığı bir öğe sonradan yüklemesini kaybederse, yük devretme ona bir sonraki ulaştığında sessizce başarısız olmak yerine yukarıda ilgi gerektiren olarak görünür.",
+  "dest.fbBoxTitle": "Facebook çapraz paylaşımı ve bağış düğmesi",
+  "dest.fbBoxIntro": "Kitle ile aynı oluşturma çağrısında gönderilir, dolayısıyla aynı kural geçerlidir: yayın başladığında bir kez uygulanır ve boşsa tamamen dokunulmadan bırakılır.",
+  "dest.fbBackupLabel": "Yedek yayın gönder",
+  "dest.fbBackupHelp": "Bu yayının ikinci bir kopyasını Facebook’un yedek girişine gönderir, böylece kopan bir bağlantı yayını düşürmez.",
+  "dest.fbBackupCost": "Bu hedefin yükleme bant genişliğini iki katına çıkarır.",
+  "dest.fbBackupReconnect": "Açmak yayını bir kez yeniden bağlar — bu yüzden canlıya çıkmadan önce etkinleştirin.",
+  "dest.fbCrosspostLabel": "Sayfalara çapraz paylaşım",
+  "dest.fbCrosspostPageId": "Sayfa kimliği",
+  "dest.fbCrosspostAlsoPost": "Ayrıca paylaş",
+  "dest.fbCrosspostRemove": "Bu Sayfayı kaldır",
+  "dest.fbCrosspostAdd": "Sayfa ekle",
+  "dest.fbCrosspostHelp": "Facebook’un kendi konsolundaki sayısal Sayfa kimliği (Sayfa ayarları veya Sayfa olarak oturum açmışken graph.facebook.com/me/accounts) — burada arama yoktur, bu yüzden ad veya URL yerine kimliği yapıştırın. “Ayrıca paylaş”, yayını yalnızca o Sayfayla paylaşmak yerine o Sayfa olarak yayınlar; kapalıyken yalnızca sessiz paylaşım gerçekleşir.",
+  "dest.fbDonateLabel": "Bağış düğmesi hayır kurumu kimliği",
+  "dest.fbDonatePlaceholder": "Hayır kurumu kimliği",
+  "dest.fbDonateHelp": "Bu da Facebook’un bağış kampanyası konsolundan gelen anlaşılmaz bir kimliktir, aranacak bir kurum adı değil. Hiç bağış düğmesi eklenmemesi için boş bırakın."
 }

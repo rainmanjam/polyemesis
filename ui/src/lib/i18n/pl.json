@@ -118,5 +118,20 @@
   "playlist.choose": "Wybierz plik",
   "playlist.chooseAria": "Wybierz plik do dodania",
   "playlist.noUploads": "Brak dostępnych plików",
-  "playlist.hint": "Wgrywane w Media. Pozycja wskazana przez tę playlistę, która później straci swój plik, pojawi się powyżej jako wymagająca uwagi, zamiast po cichu zawieść przy następnym przełączeniu awaryjnym."
+  "playlist.hint": "Wgrywane w Media. Pozycja wskazana przez tę playlistę, która później straci swój plik, pojawi się powyżej jako wymagająca uwagi, zamiast po cichu zawieść przy następnym przełączeniu awaryjnym.",
+  "dest.fbBoxTitle": "Publikowanie krzyżowe i przycisk darowizny na Facebooku",
+  "dest.fbBoxIntro": "Wysyłane tym samym wywołaniem tworzenia co Odbiorcy, więc obowiązuje ta sama zasada: stosowane raz, gdy transmisja się rozpoczyna, i całkowicie pomijane, gdy jest puste.",
+  "dest.fbBackupLabel": "Publikuj strumień zapasowy",
+  "dest.fbBackupHelp": "Wysyła drugą kopię tego strumienia do zapasowego wejścia Facebooka, aby zerwane połączenie nie zerwało transmisji.",
+  "dest.fbBackupCost": "Podwaja przepustowość wysyłania tego celu.",
+  "dest.fbBackupReconnect": "Włączenie tej opcji raz ponownie łączy strumień — włącz ją więc, zanim wejdziesz na żywo.",
+  "dest.fbCrosspostLabel": "Publikowanie krzyżowe na Stronach",
+  "dest.fbCrosspostPageId": "ID Strony",
+  "dest.fbCrosspostAlsoPost": "Opublikuj także",
+  "dest.fbCrosspostRemove": "Usuń tę Stronę",
+  "dest.fbCrosspostAdd": "Dodaj Stronę",
+  "dest.fbCrosspostHelp": "Numeryczne ID Strony z konsoli samego Facebooka (ustawienia Strony lub graph.facebook.com/me/accounts, gdy jesteś zalogowany jako Strona) — nie ma tu wyszukiwania, więc wklej id, a nie nazwę czy adres URL. „Opublikuj także” publikuje jako ta Strona, zamiast tylko udostępnić jej transmisję; wyłączone, dzieje się wyłącznie ciche udostępnienie.",
+  "dest.fbDonateLabel": "ID organizacji dla przycisku darowizny",
+  "dest.fbDonatePlaceholder": "ID organizacji",
+  "dest.fbDonateHelp": "To również nieprzejrzyste id z konsoli zbiórek Facebooka, a nie nazwa organizacji do wyszukania. Zostaw puste, aby nie dołączać żadnego przycisku darowizny."
 }

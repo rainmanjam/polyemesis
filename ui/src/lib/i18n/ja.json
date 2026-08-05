@@ -118,5 +118,20 @@
   "playlist.choose": "アップロードを選択",
   "playlist.chooseAria": "追加するアップロードを選択",
   "playlist.noUploads": "利用できるアップロードがありません",
-  "playlist.hint": "Media でアップロードします。このプレイリストが指す項目が後でアップロードを失った場合、次のフェイルオーバーで黙って失敗するのではなく、上に「要確認」として表示されます。"
+  "playlist.hint": "Media でアップロードします。このプレイリストが指す項目が後でアップロードを失った場合、次のフェイルオーバーで黙って失敗するのではなく、上に「要確認」として表示されます。",
+  "dest.fbBoxTitle": "Facebook のクロス投稿と寄付ボタン",
+  "dest.fbBoxIntro": "「視聴者」と同じ作成呼び出しで送信されるため、同じ規則が適用されます。配信開始時に一度だけ適用され、空の場合はまったく手を触れません。",
+  "dest.fbBackupLabel": "バックアップ配信を公開する",
+  "dest.fbBackupHelp": "このストリームの 2 つ目のコピーを Facebook のバックアップ受信先へ送るため、接続が切れても配信は切れません。",
+  "dest.fbBackupCost": "この配信先のアップロード帯域が 2 倍になります。",
+  "dest.fbBackupReconnect": "オンにするとストリームが一度再接続されます。ライブ開始前に有効にしてください。",
+  "dest.fbCrosspostLabel": "ページへのクロス投稿",
+  "dest.fbCrosspostPageId": "ページ ID",
+  "dest.fbCrosspostAlsoPost": "投稿も行う",
+  "dest.fbCrosspostRemove": "このページを削除",
+  "dest.fbCrosspostAdd": "ページを追加",
+  "dest.fbCrosspostHelp": "Facebook 自身のコンソールにある数値のページ ID（ページの設定、またはページとしてログインした状態での graph.facebook.com/me/accounts）です。ここに検索はないので、名前や URL ではなく id を貼り付けてください。「投稿も行う」は、配信をそのページに共有するだけでなく、そのページとして投稿します。オフのままなら、控えめな共有だけが行われます。",
+  "dest.fbDonateLabel": "寄付ボタンの慈善団体 ID",
+  "dest.fbDonatePlaceholder": "慈善団体 ID",
+  "dest.fbDonateHelp": "これも Facebook の募金コンソールから得られる不透明な id であり、検索するための団体名ではありません。寄付ボタンをまったく付けない場合は空欄のままにしてください。"
 }

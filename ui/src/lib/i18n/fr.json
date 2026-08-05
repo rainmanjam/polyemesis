@@ -118,5 +118,20 @@
   "playlist.choose": "Choisir un fichier",
   "playlist.chooseAria": "Choisir un fichier à ajouter",
   "playlist.noUploads": "Aucun fichier disponible",
-  "playlist.hint": "Envoyés dans Media. Un élément nommé par cette playlist qui perd ensuite son fichier apparaît ci-dessus comme nécessitant une action, au lieu d’échouer en silence au prochain basculement."
+  "playlist.hint": "Envoyés dans Media. Un élément nommé par cette playlist qui perd ensuite son fichier apparaît ci-dessus comme nécessitant une action, au lieu d’échouer en silence au prochain basculement.",
+  "dest.fbBoxTitle": "Publication croisée et bouton de don Facebook",
+  "dest.fbBoxIntro": "Envoyé lors du même appel de création que l’Audience, donc la même règle s’applique : appliqué une fois au démarrage de la diffusion, et laissé totalement intact si vide.",
+  "dest.fbBackupLabel": "Publier un flux de secours",
+  "dest.fbBackupHelp": "Envoie une seconde copie de ce flux vers l’entrée de secours de Facebook, afin qu’une connexion perdue n’interrompe pas la diffusion.",
+  "dest.fbBackupCost": "Double la bande passante d’envoi de cette destination.",
+  "dest.fbBackupReconnect": "L’activer reconnecte le flux une fois — activez-le donc avant de passer en direct.",
+  "dest.fbCrosspostLabel": "Publication croisée sur des Pages",
+  "dest.fbCrosspostPageId": "ID de la Page",
+  "dest.fbCrosspostAlsoPost": "Publier aussi",
+  "dest.fbCrosspostRemove": "Retirer cette Page",
+  "dest.fbCrosspostAdd": "Ajouter une Page",
+  "dest.fbCrosspostHelp": "L’ID numérique de la Page depuis la console de Facebook (paramètres de la Page, ou graph.facebook.com/me/accounts en étant connecté en tant que Page) — il n’y a pas de recherche ici, collez donc l’id plutôt qu’un nom ou une URL. « Publier aussi » publie en tant que cette Page au lieu de seulement lui partager la diffusion ; désactivé, seul le partage discret a lieu.",
+  "dest.fbDonateLabel": "ID de l’association du bouton de don",
+  "dest.fbDonatePlaceholder": "ID de l’association",
+  "dest.fbDonateHelp": "Également un id opaque issu de la console des collectes de Facebook, pas un nom d’association à rechercher. Laissez vide pour n’attacher aucun bouton de don."
 }

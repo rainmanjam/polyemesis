@@ -118,5 +118,20 @@
   "playlist.choose": "Pilih unggahan",
   "playlist.chooseAria": "Pilih unggahan untuk ditambahkan",
   "playlist.noUploads": "Tidak ada unggahan tersedia",
-  "playlist.hint": "Diunggah di Media. Item yang disebut playlist ini dan kemudian kehilangan unggahannya akan tampil di atas sebagai perlu perhatian, alih-alih gagal diam-diam saat failover berikutnya mencapainya."
+  "playlist.hint": "Diunggah di Media. Item yang disebut playlist ini dan kemudian kehilangan unggahannya akan tampil di atas sebagai perlu perhatian, alih-alih gagal diam-diam saat failover berikutnya mencapainya.",
+  "dest.fbBoxTitle": "Lintas-posting dan tombol donasi Facebook",
+  "dest.fbBoxIntro": "Dikirim pada panggilan pembuatan yang sama dengan Audiens, jadi aturan yang sama berlaku: diterapkan sekali saat siaran dimulai, dan dibiarkan sepenuhnya jika kosong.",
+  "dest.fbBackupLabel": "Terbitkan umpan cadangan",
+  "dest.fbBackupHelp": "Mengirim salinan kedua dari siaran ini ke ingest cadangan Facebook, sehingga koneksi yang putus tidak menjatuhkan siarannya.",
+  "dest.fbBackupCost": "Menggandakan bandwidth unggah tujuan ini.",
+  "dest.fbBackupReconnect": "Mengaktifkannya menyambungkan ulang siaran satu kali — jadi aktifkan sebelum Anda mulai siaran langsung.",
+  "dest.fbCrosspostLabel": "Lintas-posting ke Halaman",
+  "dest.fbCrosspostPageId": "ID Halaman",
+  "dest.fbCrosspostAlsoPost": "Posting juga",
+  "dest.fbCrosspostRemove": "Hapus Halaman ini",
+  "dest.fbCrosspostAdd": "Tambah Halaman",
+  "dest.fbCrosspostHelp": "ID Halaman numerik dari konsol Facebook sendiri (pengaturan Halaman, atau graph.facebook.com/me/accounts saat masuk sebagai Halaman) — tidak ada pencarian di sini, jadi tempelkan id-nya, bukan nama atau URL. “Posting juga” menerbitkan sebagai Halaman tersebut alih-alih hanya membagikan siaran kepadanya; jika dimatikan, hanya pembagian yang lebih senyap yang terjadi.",
+  "dest.fbDonateLabel": "ID lembaga amal tombol donasi",
+  "dest.fbDonatePlaceholder": "ID lembaga amal",
+  "dest.fbDonateHelp": "Ini juga id buram dari konsol penggalangan dana Facebook, bukan nama lembaga amal untuk dicari. Kosongkan agar tidak ada tombol donasi yang dilampirkan sama sekali."
 }

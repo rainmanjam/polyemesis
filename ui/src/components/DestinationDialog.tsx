@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { Switch } from "@/components/ui/switch";
 // The capability matrix this dialog renders inline. Data, not a component, and
 // shared with the settings page — see lib/capabilities.ts.
@@ -542,6 +543,10 @@ interface Props {
 
 export function DestinationDialog({ open, onOpenChange, destination, onSaved }: Props) {
   const editing = destination !== null;
+  // Only the Facebook create-time block reads this so far. The rest of the
+  // dialog is still English literals -- a mechanical follow-up, key by key,
+  // rather than something to do halfway in a commit about drift guards.
+  const t = useT();
 
   const [name, setName] = useState("");
   const [platform, setPlatform] = useState<Platform>("custom");
@@ -1342,11 +1347,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               box rather than folded into the amber one. See db.FacebookSettings. */}
           {platform === "facebook" && (
             <div className="flex flex-col gap-3 rounded-md border border-border p-2">
-              <p className="text-xs font-medium">Facebook crossposting &amp; donate button</p>
-              <span className="text-[10px] text-muted-foreground">
-                Sent on the same create call as Audience, so the same rule applies: applied once
-                when the broadcast starts, and left alone entirely if empty.
-              </span>
+              <p className="text-xs font-medium">{t("dest.fbBoxTitle")}</p>
+              <span className="text-[10px] text-muted-foreground">{t("dest.fbBoxIntro")}</span>
 
               {/* Both costs stated, because both are real and neither is
                   guessable. The reconnect is unavoidable rather than sloppy: a
@@ -1370,34 +1372,39 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   }
                 />
                 <div className="flex flex-col gap-0.5">
-                  <Label htmlFor="fb-backup-ingest">Publish a backup feed</Label>
+                  <Label htmlFor="fb-backup-ingest">{t("dest.fbBackupLabel")}</Label>
+                  {/* Three keys rather than one sentence with markup in it. The
+                      cost is the half that has to survive a skim, so it stays
+                      emphasised -- and a translator given a sentence fragment
+                      ending in a comma cannot reorder it into their own grammar,
+                      which is how emphasis markup usually ruins a catalogue. */}
                   <span className="text-[10px] text-muted-foreground">
-                    Sends a second copy of this stream to Facebook&rsquo;s backup ingest, so a
-                    dropped connection does not drop the broadcast.{" "}
-                    <strong>Doubles this destination&rsquo;s upload bandwidth</strong>, and turning
-                    it on reconnects the stream once &mdash; so enable it before you go live.
+                    {t("dest.fbBackupHelp")} <strong>{t("dest.fbBackupCost")}</strong>{" "}
+                    {t("dest.fbBackupReconnect")}
                   </span>
                 </div>
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label>Crosspost to Pages</Label>
-                {(facebook.crosspost ?? []).map((t, i) => (
+                <Label>{t("dest.fbCrosspostLabel")}</Label>
+                {/* `target`, not `t`: the translator is called inside this map
+                    and a one-letter row variable shadowed it. */}
+                {(facebook.crosspost ?? []).map((target, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <Input
-                      value={t.pageId}
+                      value={target.pageId}
                       onChange={(e) => {
                         const next = [...(facebook.crosspost ?? [])];
                         next[i] = { ...next[i], pageId: e.target.value };
                         setFacebook({ ...facebook, crosspost: next });
                       }}
-                      placeholder="Page ID"
+                      placeholder={t("dest.fbCrosspostPageId")}
                       className="flex-1 font-mono"
                     />
                     <div className="flex items-center gap-1.5">
                       <Switch
                         id={`dest-fb-crosspost-post-${i}`}
-                        checked={t.createPost ?? false}
+                        checked={target.createPost ?? false}
                         onCheckedChange={(v) => {
                           const next = [...(facebook.crosspost ?? [])];
                           next[i] = { ...next[i], createPost: v };
@@ -1405,14 +1412,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         }}
                       />
                       <Label htmlFor={`dest-fb-crosspost-post-${i}`} className="font-normal">
-                        Also post
+                        {t("dest.fbCrosspostAlsoPost")}
                       </Label>
                     </div>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label="Remove this Page"
+                      aria-label={t("dest.fbCrosspostRemove")}
                       onClick={() => {
                         const next = (facebook.crosspost ?? []).filter((_, j) => j !== i);
                         setFacebook({ ...facebook, crosspost: next });
@@ -1433,31 +1440,26 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     })
                   }
                 >
-                  <Plus className="size-3.5" /> Add Page
+                  <Plus className="size-3.5" /> {t("dest.fbCrosspostAdd")}
                 </Button>
                 <span className="text-[10px] text-muted-foreground">
-                  The numeric Page ID from Facebook's own console (Page settings, or
-                  graph.facebook.com/me/accounts while signed in as the Page) &mdash; there is no
-                  lookup here, so paste the id rather than a name or URL. "Also post" publishes as
-                  that Page rather than only sharing the broadcast to it; left off, only the
-                  quieter share happens.
+                  {t("dest.fbCrosspostHelp")}
                 </span>
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="dest-fb-donate">Donate button charity ID</Label>
+                <Label htmlFor="dest-fb-donate">{t("dest.fbDonateLabel")}</Label>
                 <Input
                   id="dest-fb-donate"
                   value={facebook.donateCharityId ?? ""}
                   onChange={(e) =>
                     setFacebook({ ...facebook, donateCharityId: e.target.value })
                   }
-                  placeholder="Charity ID"
+                  placeholder={t("dest.fbDonatePlaceholder")}
                   className="font-mono"
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  Also an opaque id from Facebook's fundraisers console, not a charity name to
-                  search for. Leave blank to attach no donate button at all.
+                  {t("dest.fbDonateHelp")}
                 </span>
               </div>
             </div>
