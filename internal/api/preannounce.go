@@ -18,9 +18,17 @@ package api
 // created the ordinary way. Every function below returns nothing for that
 // reason -- there is no caller that could act on a failure, and inventing one
 // would make an optional discovery feature able to stop a broadcast.
+//
+// WHAT IT WRITES, AND WHAT IT DELIBERATELY DOES NOT. Three columns: the primary
+// stream key, the backup endpoint, and the Facebook block that holds the
+// announcement markers. Every write goes through db.UpdateAnnouncement, which
+// re-reads the row inside its own transaction -- see the comment there for why
+// a full-row write from a pre-Graph snapshot is an operator's edits silently
+// reverted.
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -132,11 +140,12 @@ func scheduleTargets(sc scheduler.Schedule, destID int64) bool {
 // one's broadcast to its own occurrence, the next sweep moved it back, and
 // subscribers were notified of a time change every five minutes forever.
 //
-// Every failure path returns WITHOUT touching the destination. A half-written
-// marker -- an occurrence recorded for a broadcast that was not created --
-// would suppress every later attempt for that occurrence, which is worse than
-// having no event page at all: the sweep would go quiet and nothing would say
-// why.
+// No failure path leaves a marker that names a broadcast which does not exist:
+// that would suppress every later attempt for the occurrence, and the sweep
+// would go quiet with nothing saying why. The one thing a failure CAN leave is
+// a marker with no broadcast id, which is the opposite claim -- "a create was in
+// flight and its outcome is unknown" -- and exists so that a create Facebook
+// accepted but this process never recorded is not created a second time.
 func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.Destination, at, now time.Time) {
 	// tokenFor returns the ACCOUNT with a refreshed token on it, not a token
 	// string, and it does the refresh -- which is why it is used here rather
@@ -150,11 +159,13 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// This schedule already has a broadcast, for a DIFFERENT occurrence -- the
-	// schedule moved. Move the broadcast rather than creating a second one,
-	// which would leave the first as an event page people are still subscribed
-	// to for a show that will not happen there.
-	if prev, held := d.Facebook.AnnouncementFor(sc.ID); held && prev.BroadcastID != "" {
+	prev, held := d.Facebook.AnnouncementFor(sc.ID)
+	switch {
+	case held && prev.BroadcastID != "":
+		// This schedule already has a broadcast, for a DIFFERENT occurrence --
+		// the schedule moved. Move the broadcast rather than creating a second
+		// one, which would leave the first as an event page people are still
+		// subscribed to for a show that will not happen there.
 		if err := s.rescheduleFn(cctx, acct, prev.BroadcastID, at); err != nil {
 			s.log.Warn("pre-announce: could not move the broadcast",
 				"destination", d.Name, "schedule", sc.Name, "err", err)
@@ -162,11 +173,24 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 			return
 		}
 		s.clearAnnounceFailures(d.ID, sc.ID)
-		d.Facebook.Announce(sc.ID, at, prev.BroadcastID, now)
-		s.saveAnnouncement(d)
+		s.record(d, func(cur *db.Destination) bool {
+			cur.Facebook.Announce(sc.ID, at, prev.BroadcastID, now)
+			return true
+		})
 		s.log.Info("moved a scheduled Facebook broadcast",
 			"destination", d.Name, "schedule", sc.Name, "at", at,
 			"broadcast", prev.BroadcastID)
+		return
+
+	case held:
+		// A marker with no broadcast id: a create was in flight and its result
+		// never reached the database. Something may well exist on Facebook that
+		// nothing here can see, and creating a second live_video would put two
+		// event pages in front of the same subscribers. Left for the operator,
+		// said once rather than every sweep, and cleared with the occurrence.
+		s.log.Warn("pre-announce: a broadcast create was recorded as started and "+
+			"never finished; not creating a second one for the same show",
+			"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence)
 		return
 	}
 
@@ -182,9 +206,32 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 		return
 	}
 
+	// THE INTENT, BEFORE THE CALL. IngestFor creates a real public live_video,
+	// and until its id is stored there is no local record of it -- so a write
+	// that fails after the call leaves an event page nothing can find and the
+	// next sweep creates another one beside it. Recording the attempt first
+	// inverts that: the worst a failed write can now leave is a marker saying a
+	// create was started, which the branch above refuses to duplicate.
+	//
+	// A marker-only write, so it is allowed on a destination that went live
+	// since the sweep read it. If the write itself fails, nothing is created --
+	// strictly better than creating something nothing will remember.
+	if !s.record(d, func(cur *db.Destination) bool {
+		cur.Facebook.Announce(sc.ID, at, "", now)
+		return true
+	}) {
+		return
+	}
+
 	b, err := s.ingestForFn(cctx, provider, creds.ClientID, acct,
 		ingestOptionsFor(d, at))
 	if err != nil {
+		// The intent goes back: Graph refused, so the next sweep is free to try
+		// again -- which is the behaviour this whole file is built on.
+		s.record(d, func(cur *db.Destination) bool {
+			cur.Facebook.Forget(sc.ID, "")
+			return true
+		})
 		// Logged and dropped. The schedule and the go-live path are unaffected;
 		// the next sweep tries again.
 		//
@@ -193,26 +240,33 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 		// a fact about the account rather than a fault in the run, and it will
 		// repeat every sweep. See the note in the plan: suppressing a repeated
 		// identical refusal needs somewhere to remember it, which is not built.
+		s.noteAnnounceFailure(d.ID, sc.ID)
 		s.log.Warn("pre-announce: could not create the broadcast",
 			"destination", d.Name, "schedule", sc.Name, "err", err)
 		return
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
 
-	// THE INVARIANT. The key the pre-created broadcast returned has to be the
-	// one the encoder publishes to, or the event page people were notified
-	// about stays empty beside a live stream.
-	d.StreamKey = b.Ingest.Key
-	// The same store as handleRefreshKey, for the same reason: this path also
-	// creates the broadcast, and a refresh-key-only implementation would lose
-	// backup ingest for every pre-announced show.
-	d.BackupURL, d.BackupStreamKey = firstBackup(b)
-	if d.Facebook.BackupIngest && d.BackupURL == "" {
+	if backupURL, _ := firstBackup(b); d.Facebook.BackupIngest && backupURL == "" {
 		s.log.Warn("pre-announce: Facebook offered no backup ingest endpoint",
 			"destination", d.Name)
 	}
-	d.Facebook.Announce(sc.ID, at, b.ID, now)
-	s.saveAnnouncement(d)
+	ok := s.record(d, func(cur *db.Destination) bool {
+		// THE INVARIANT. The key the pre-created broadcast returned has to be
+		// the one the encoder publishes to, or the event page people were
+		// notified about stays empty beside a live stream.
+		//
+		cur.StreamKey = b.Ingest.Key
+		// The same store as handleRefreshKey, for the same reason: this path
+		// also creates the broadcast, and a refresh-key-only implementation
+		// would lose backup ingest for every pre-announced show.
+		cur.BackupURL, cur.BackupStreamKey = firstBackup(b)
+		cur.Facebook.Announce(sc.ID, at, b.ID, now)
+		return true
+	})
+	if !ok {
+		return
+	}
 	s.log.Info("pre-announced a Facebook broadcast",
 		"destination", d.Name, "schedule", sc.Name, "at", at, "broadcast", b.ID)
 }
@@ -256,8 +310,10 @@ func (s *Server) noteRescheduleFailure(d *db.Destination, sc scheduler.Schedule,
 		"a fresh one will be created",
 		"destination", d.Name, "schedule", sc.Name, "broadcast", prev.BroadcastID,
 		"consecutiveFailures", staleBroadcastAfter)
-	d.Facebook.Forget(sc.ID, prev.BroadcastID)
-	s.saveAnnouncement(d)
+	s.record(d, func(cur *db.Destination) bool {
+		cur.Facebook.Forget(sc.ID, prev.BroadcastID)
+		return true
+	})
 	s.clearAnnounceFailures(d.ID, sc.ID)
 }
 
@@ -298,9 +354,23 @@ func (s *Server) clearAnnounceFailures(destID, scheduleID int64) {
 	s.preannounceMu.Unlock()
 }
 
-func (s *Server) saveAnnouncement(d *db.Destination) {
-	if _, err := s.store.UpdateDestination(d); err != nil {
+// record applies apply to the destination AS IT STANDS NOW and writes back only
+// the columns this sweep owns. On success the caller's copy is refreshed, so
+// the next schedule in the same sweep decides against what the last one wrote
+// rather than against a snapshot taken before any of it happened.
+func (s *Server) record(d *db.Destination, apply func(*db.Destination) bool) bool {
+	updated, err := s.store.UpdateAnnouncement(d.ID, apply)
+	switch {
+	case errors.Is(err, db.ErrAnnouncementSkipped):
+		s.log.Warn("pre-announce: the destination went live while its event page was "+
+			"being created, so its stream key was left alone; the broadcast may "+
+			"need to be removed on Facebook", "destination", d.Name)
+		return false
+	case err != nil:
 		s.log.Warn("pre-announce: could not record the announcement",
 			"destination", d.Name, "err", err)
+		return false
 	}
+	*d = *updated
+	return true
 }

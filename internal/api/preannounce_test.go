@@ -645,3 +645,129 @@ func TestTwoStartSchedulesEachGetTheirOwnEventPage(t *testing.T) {
 		seen[a.BroadcastID] = true
 	}
 }
+
+// A6. The sweep reads every destination once, before any network I/O, and then
+// makes a Graph call that can take thirty seconds. An operator edit landing in
+// that window used to be reverted by the full-row write that followed -- and for
+// destinations late in a sweep the window is the whole sweep.
+//
+// Mutation: in preannounce.go, change record's call to
+// `s.store.UpdateAnnouncement(d.ID, func(cur *db.Destination) bool { *cur = *d; return apply(cur) })`,
+// which restores writing the pre-Graph snapshot. Observed: red -- the rename is
+// gone and the destination is called "fb" again.
+func TestAnOperatorEditDuringTheGraphCallSurvives(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
+
+	rec.duringCreate = func(*announced) {
+		row, err := store.GetDestination(d.ID)
+		if err != nil {
+			t.Errorf("read the destination mid-sweep: %v", err)
+			return
+		}
+		row.Name = "renamed by the operator"
+		row.AudioBitrate = 96
+		row.Facebook.DonateCharityID = "999"
+		if _, err := store.UpdateDestination(row); err != nil {
+			t.Errorf("operator edit mid-sweep: %v", err)
+		}
+	}
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	got, _ := store.GetDestination(d.ID)
+	if got.Name != "renamed by the operator" || got.AudioBitrate != 96 {
+		t.Errorf("the sweep reverted an operator edit: name %q, bitrate %d",
+			got.Name, got.AudioBitrate)
+	}
+	if got.Facebook.DonateCharityID != "999" {
+		t.Error("the sweep reverted a Facebook setting it does not own; the donate " +
+			"button the operator just configured is gone")
+	}
+	// And the announcement still landed. Preserving the edit by not writing at
+	// all would be the wrong cure.
+	if got.StreamKey != "key-from-the-broadcast" || got.Facebook.BroadcastID != "777" {
+		t.Errorf("the announcement was not recorded: key %q, broadcast %q",
+			got.StreamKey, got.Facebook.BroadcastID)
+	}
+}
+
+// A6, the other half. The broadcast is created on Facebook BEFORE anything is
+// stored, so a write that fails leaves a real public live_video with no local
+// record -- and the next sweep creates a second one beside it. The intent is
+// recorded first so that failure leaves evidence.
+//
+// Mutation: in preannounce.go, delete the record(...Announce(sc.ID, at, "",
+// now)) block above the ingestForFn call. Observed: red -- nothing is stored
+// when the create is made.
+func TestTheIntentIsRecordedBeforeTheBroadcastIsCreated(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	at := time.Now().Add(2 * 24 * time.Hour).Truncate(time.Second)
+	schedID := seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
+
+	var pending, announcedTooEarly bool
+	rec.duringCreate = func(*announced) {
+		row, err := store.GetDestination(d.ID)
+		if err != nil {
+			t.Errorf("read the destination mid-create: %v", err)
+			return
+		}
+		held, ok := row.Facebook.AnnouncementFor(schedID)
+		pending = ok && held.BroadcastID == ""
+		// And it must NOT read as announced: a marker claiming a broadcast that
+		// does not exist yet would suppress every later attempt.
+		announcedTooEarly = row.Facebook.AnnouncedFor(at)
+	}
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if !pending {
+		t.Error("nothing recorded the attempt before the live_video was created, so " +
+			"a failed write leaves an event page nothing here can find")
+	}
+	if announcedTooEarly {
+		t.Error("the attempt read as an announcement before the broadcast existed")
+	}
+}
+
+// And what that evidence is for: a create whose outcome never reached the
+// database must not be made a second time. Two event pages in front of the same
+// subscribers is worse than one nobody recorded.
+//
+// Mutation: in preannounce.go, delete the `case held:` arm from announceOne.
+// Observed: red -- a second broadcast is created for a show that may already
+// have one.
+func TestACreateWhoseOutcomeWasNeverRecordedIsNotMadeTwice(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	now := time.Now()
+	at := now.Add(2 * 24 * time.Hour).Truncate(time.Second)
+	schedID := seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
+
+	// The state a failed write leaves behind.
+	d.Facebook.Announce(schedID, at, "", now)
+	if _, err := store.UpdateDestination(d); err != nil {
+		t.Fatalf("seed the in-flight marker: %v", err)
+	}
+
+	s.preannounceOnce(context.Background(), now)
+
+	if len(rec.creates) != 0 {
+		t.Fatalf("created %d broadcasts for a show whose create was already in "+
+			"flight, want 0", len(rec.creates))
+	}
+}

@@ -760,6 +760,74 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	return d.GetDestination(dst.ID)
 }
 
+// ErrAnnouncementSkipped is what UpdateAnnouncement returns when the callback
+// declined the row it was shown. Not an error in the operational sense -- it is
+// the answer "the destination is no longer one this write may touch" -- so it
+// is a sentinel rather than a string a caller has to match on.
+var ErrAnnouncementSkipped = errors.New("announcement skipped")
+
+// UpdateAnnouncement writes ONLY the columns the pre-announce sweep owns: the
+// primary stream key, the backup endpoint, and the Facebook block that carries
+// the announcement markers.
+//
+// WHY NOT UpdateDestination. That one is a full-row unconditional
+// `UPDATE ... WHERE id=?` with no version column behind it, and the sweep holds
+// a destination across a Graph call that takes up to thirty seconds. Writing
+// the whole row back reverts every operator edit that landed in that window --
+// a rename, a routing change, the enable switch, a key refresh -- silently, and
+// for destinations late in a sweep the window is the whole sweep.
+//
+// So the row is READ AGAIN HERE, inside the transaction that writes it, and apply
+// is handed the row as it stands now rather than the caller's snapshot. That is
+// what makes the Facebook blob safe to rewrite: it also holds crossposting, the
+// donate charity and the backup toggle, none of which belong to this sweep.
+// Anything apply sets outside the four columns below is DISCARDED -- deliberately,
+// because a caller that could write any column would be UpdateDestination again.
+//
+// apply reports whether to go ahead. Returning false rolls back and returns
+// ErrAnnouncementSkipped, which is how the sweep refuses to rewrite the stream
+// key of a destination that went live while Facebook was being asked for one:
+// StreamKey is inside Target(), which is the first element of the engine's
+// restart hash, so changing it under a running FFmpeg cycles the live process at
+// a moment nobody chose.
+func (d *DB) UpdateAnnouncement(id int64, apply func(*Destination) bool) (*Destination, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	cur, err := scanDestination(tx.QueryRow(destByIDQuery, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !apply(cur) {
+		return nil, ErrAnnouncementSkipped
+	}
+	facebook, err := json.Marshal(cur.Facebook)
+	if err != nil {
+		return nil, err
+	}
+	res, err := tx.Exec(`UPDATE destinations SET
+		stream_key=?, backup_url=?, backup_stream_key=?, facebook=?, updated_at=?
+		WHERE id=?`,
+		cur.StreamKey, cur.BackupURL, cur.BackupStreamKey, string(facebook),
+		time.Now().Unix(), id)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return d.GetDestination(id)
+}
+
 // SetDestinationEnabled flips the run/stop intent without touching anything
 // else, so start/stop never risks rewriting a routing profile.
 func (d *DB) SetDestinationEnabled(id int64, enabled bool) error {
