@@ -1640,9 +1640,14 @@ export const TWITCH_LABELS = [
  *  viewer is about to be shown. Every zero value means "do not touch". */
 export interface Compliance {
   privacy?: PrivacyStatus;
-  /** COPPA self-declaration. undefined is "not said"; false is the real
-   *  declaration "this is not for children", and the two are different. */
-  madeForKids?: boolean;
+  /** COPPA self-declaration. false is the real declaration "this is not for
+   *  children", and is different from having said nothing.
+   *
+   *  Three states, and null is the one that carries: an update is decoded over
+   *  the stored row, so `undefined` is omitted from the body and leaves
+   *  whatever was already there. Going back to "not said" has to send an
+   *  explicit null, which db.Compliance.MadeForKids reads as nil. */
+  madeForKids?: boolean | null;
   /** Twitch labels, id -> enabled. A key set to false actively CLEARS it. */
   labels?: Record<string, boolean>;
   /** Facebook's audience for a live video. undefined leaves it alone. */

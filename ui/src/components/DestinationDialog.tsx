@@ -1199,16 +1199,23 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     <Label>Made for kids (COPPA)</Label>
                     <Select
                       value={
-                        compliance.madeForKids === undefined
+                        compliance.madeForKids === undefined ||
+                        compliance.madeForKids === null
                           ? "unset"
                           : compliance.madeForKids
                             ? "yes"
                             : "no"
                       }
+                      // null, not undefined, for the same reason the backup
+                      // toggle sends a bare boolean: undefined is omitted from
+                      // the body and the server decodes over the stored row, so
+                      // going back to "leave as it is" silently kept whichever
+                      // declaration was there. db.Compliance.MadeForKids is a
+                      // *bool precisely so that null is expressible.
                       onValueChange={(v) =>
                         setCompliance({
                           ...compliance,
-                          madeForKids: v === "unset" ? undefined : v === "yes",
+                          madeForKids: v === "unset" ? null : v === "yes",
                         })
                       }
                     >
@@ -1320,8 +1327,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   type="checkbox"
                   className="mt-0.5"
                   checked={facebook.backupIngest ?? false}
+                  // The bare boolean, never `checked || undefined`. The PUT is
+                  // decoded OVER the stored row, so a key JSON.stringify omits
+                  // is a key the server leaves exactly as it was: unchecking
+                  // the box used to send nothing, the stored `true` survived,
+                  // and the dialog said it had saved while the backup feed kept
+                  // running at double the upload the help text below warns
+                  // about. `false` has to travel for "off" to mean anything.
                   onChange={(e) =>
-                    setFacebook({ ...facebook, backupIngest: e.target.checked || undefined })
+                    setFacebook({ ...facebook, backupIngest: e.target.checked })
                   }
                 />
                 <div className="flex flex-col gap-0.5">
