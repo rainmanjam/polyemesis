@@ -126,7 +126,7 @@ func (d *DB) CreateUser(username, password string) (*User, error) {
 		return nil, ErrUserExists
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), d.passwordCost)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (d *DB) SetPassword(id int64, password string) error {
 	if len(password) < MinPasswordLength {
 		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), d.passwordCost)
 	if err != nil {
 		return err
 	}

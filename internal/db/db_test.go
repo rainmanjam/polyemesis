@@ -3,6 +3,7 @@ package db
 import (
 	"bytes"
 	"database/sql"
+	"golang.org/x/crypto/bcrypt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -15,7 +16,7 @@ import (
 
 func testDB(t *testing.T) *DB {
 	t.Helper()
-	d, err := Open(filepath.Join(t.TempDir(), "polyemesis.db"))
+	d, err := Open(filepath.Join(t.TempDir(), "polyemesis.db"), WithPasswordCost(bcrypt.MinCost))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
