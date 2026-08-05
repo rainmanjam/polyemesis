@@ -19,8 +19,12 @@ import (
 // in NEITHER hash -- latent only because it currently co-varies with
 // FilterComplex, which is exactly how this class stays hidden.
 //
-// Mutation: in destSpecFor, change `AudioOutLabel: compiled.OutLabel` to
-// `AudioOutLabel: "aout"`. Observed to fail on both hashes.
+// Mutation: in destArgvSig, replace `s.RelayURL = ""` with
+// `s = ffmpeg.DestSpec{Kind: s.Kind, Target: s.Target, FilterComplex: s.FilterComplex}`
+// -- the hand-written subset this replaced, which is what the old hashes were.
+// Observed to fail on both hashes. (A mutation inside destSpecFor cannot be
+// hash-only any more, which is the point of the change: it would move the
+// command line too, and the first assertion below says so.)
 func TestTheAudioOutLabelReachesBothRestartHashes(t *testing.T) {
 	row := backupRow()
 	// Same filter string, different output label. That is the pair the old
@@ -33,17 +37,18 @@ func TestTheAudioOutLabelReachesBothRestartHashes(t *testing.T) {
 	argvA := strings.Join(e.destArgs(row, a, "udp://127.0.0.1:1", row.Target()), " ")
 	argvB := strings.Join(e.destArgs(row, b, "udp://127.0.0.1:1", row.Target()), " ")
 	if argvA == argvB {
-		t.Fatal("the two output labels produce the same command line; the fixture " +
-			"is wrong, not the code")
+		t.Error("the graph's output label does not reach the command line at all; " +
+			"there is nothing here for a hash to predict")
 	}
 
-	if destSpec(row, a, "up") == destSpec(row, b, "up") {
-		t.Error("the primary's hash cannot see the graph's output label, so changing " +
-			"it is stored and never applied to the running process")
+	if (destSpec(row, a, "up") == destSpec(row, b, "up")) != (argvA == argvB) {
+		t.Error("the primary's hash disagrees with the argv about the graph's output " +
+			"label, so changing it is stored and never applied to the running process")
 	}
-	if backupSpecOf(row, a, "up") == backupSpecOf(row, b, "up") {
-		t.Error("the backup's hash cannot see the graph's output label, so the two " +
-			"feeds the platform receives would differ with nothing reporting it")
+	if (backupSpecOf(row, a, "up") == backupSpecOf(row, b, "up")) != (argvA == argvB) {
+		t.Error("the backup's hash disagrees with the argv about the graph's output " +
+			"label, so the two feeds the platform receives would differ with nothing " +
+			"reporting it")
 	}
 }
 
