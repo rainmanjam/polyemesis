@@ -64,6 +64,22 @@ func Handler() (http.Handler, error) {
 			return
 		}
 
+		// A request under /api that got this far matched no API route, and the
+		// SPA fallback is the wrong answer for it. Serving index.html there
+		// returns 200 and a page of HTML to a caller that asked for JSON: a
+		// client checking `res.ok` sees success, `JSON.parse` fails on the
+		// leading '<' with an error naming neither the endpoint nor the status,
+		// and a mistyped, removed or wrongly-versioned endpoint is
+		// indistinguishable from a working one. /api/v2/anything answered 200
+		// with the UI. Fail as JSON, with the status the caller expects.
+		if p == "api" || strings.HasPrefix(p, "api/") {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"no such endpoint"}` + "\n"))
+			return
+		}
+
 		// Unknown path: hand it to the SPA router rather than 404ing, so a
 		// deep link like /routing/3 works on refresh.
 		index, err := sub.Open("index.html")
