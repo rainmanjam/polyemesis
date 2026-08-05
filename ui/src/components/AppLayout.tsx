@@ -201,7 +201,21 @@ export function AppLayout({
             // state instead -- button role does support it, and it is the
             // control the state actually describes.
             className={cn(
-              "z-40 flex shrink-0 flex-col gap-0.5 border-r border-border bg-background p-2 transition-[width]",
+              // min-h-0 + overflow-y-auto: the nav owns its overflow, the way
+              // <main> below already does.
+              //
+              // Without them it was the one part of an h-dvh shell that could
+              // not be clipped. The links plus the mt-auto toggle are taller
+              // than the row on a short window, `overflow` defaulted to
+              // `visible`, and the toggle hung 14px below the fold -- which
+              // extended the DOCUMENT, so the browser drew a page scrollbar
+              // right next to the one <main> was already showing. Two bars, and
+              // the outer one scrolled 14px of nothing.
+              //
+              // Measured at 936x500: body scrollHeight 514 vs clientHeight 500,
+              // exactly the toggle's height. Above ~620px tall the nav fits and
+              // nothing here has any effect.
+              "z-40 flex min-h-0 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-background p-2 transition-[width]",
               navCollapsed ? "md:w-12" : "md:w-44",
               // The drawer is always full width: a collapsed rail behind a
               // hamburger would be an icon strip nobody asked for, and the
