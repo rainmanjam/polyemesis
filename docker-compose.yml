@@ -187,3 +187,13 @@ services:
 
 volumes:
   polyemesis-data:
+    # `name:` is not decoration. Without it Compose prefixes the volume with the
+    # project name -- `polyemesis_polyemesis-data` from this directory, something
+    # else from a directory named differently -- while every `docker run` example
+    # in the docs, the backup line in update.sh and the removal line in
+    # uninstall.sh all say `polyemesis-data`. The two halves then disagree, and
+    # they fail in opposite ways: `docker volume rm` errors loudly on the wrong
+    # name, but `docker run -v` CREATES the missing volume instead, so a backup
+    # taken against it exits 0 and writes an empty archive. Pinning the name is
+    # what keeps the docs and the running system talking about the same volume.
+    name: polyemesis-data

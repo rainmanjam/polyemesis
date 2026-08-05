@@ -17,10 +17,27 @@ systemctl start polyemesis
 
 # Docker
 docker compose down
+docker volume inspect polyemesis-data >/dev/null || exit 1   # see the warning below
 docker run --rm -v polyemesis-data:/data -v "$PWD:/backup" alpine \
   tar czf /backup/polyemesis-$(date +%F).tar.gz -C /data .
+tar tzf polyemesis-$(date +%F).tar.gz | wc -l                # more than 1 = real
 docker compose pull && docker compose up -d
 ```
+
+> **Check the volume name before you trust the backup.** `docker run -v` creates
+> a missing volume instead of failing, so backing up a name that does not exist
+> exits 0 and writes an empty archive — and the upgrade that follows cannot be
+> undone. Compose prefixes volumes with the project name unless the volume pins
+> its own; installs made before that pin was added carry
+> `polyemesis_polyemesis-data` rather than `polyemesis-data`. Run
+> `docker volume ls` and use the name you actually see. To adopt the pinned name
+> permanently, copy the old volume across once:
+>
+> ```sh
+> docker volume create polyemesis-data
+> docker run --rm -v polyemesis_polyemesis-data:/from -v polyemesis-data:/to \
+>   alpine sh -c 'cp -a /from/. /to/'
+> ```
 
 Watch the first minute of the log. Migrations report what they did; a failure
 there is much easier to deal with before you start streaming on it.
