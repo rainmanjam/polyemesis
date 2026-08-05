@@ -129,6 +129,29 @@ type Engine struct {
 	vaapiOnce sync.Once
 	vaapiDev  string
 
+	// reconcileMu serializes Reconcile end to end. It is NOT e.mu: e.mu is
+	// dropped and retaken a dozen times inside one reconcile so that Status()
+	// stays answerable while children are being spawned, which is exactly what
+	// leaves two concurrent reconciles free to interleave.
+	//
+	// The hazard is not theoretical. startDestinations checks e.dests[id] ==
+	// nil, unlocks, and only publishes at the end of startDest -- after
+	// Allocate() and hub.Subscribe(). Two reconciles can both see nil, and
+	// relay.Hub.SubscribeAddr is a bare map assignment on a deterministic name
+	// (see destSubName), so the second REPLACES the first: the first FFmpeg
+	// keeps running against a port the hub no longer sends to, its
+	// *destination is overwritten in e.dests, and nothing will ever stop it or
+	// release its port. The callers are genuinely concurrent -- five HTTP
+	// handlers, the scheduler's actuator, and observeLoop.
+	//
+	// Taken OUTSIDE every other lock this file has, and it is the only one held
+	// for the whole of a public method. Verified deadlock-free by the fact that
+	// nothing holding e.mu, selMu or previewMu calls Reconcile: SwitchSource
+	// holds selMu and does not, sweepPreview holds previewMu and does not, and
+	// onCaptionsDegraded -- the one callback that does -- explicitly hands it
+	// to a fresh goroutine rather than calling it inline.
+	reconcileMu sync.Mutex
+
 	mu       sync.RWMutex
 	ingest   *supervisor.Process
 	recorder *supervisor.Process
@@ -878,7 +901,15 @@ func (e *Engine) SourceName() string {
 
 // Reconcile makes the running processes match the database. It is safe to call
 // repeatedly and from any handler.
+//
+// One reconcile at a time, for the whole of it. See Engine.reconcileMu: the
+// per-tier locks are all dropped and retaken inside, so without this two
+// callers can both observe a destination as missing and both start it, and the
+// first of the two becomes an FFmpeg nothing can find or stop.
 func (e *Engine) Reconcile() error {
+	e.reconcileMu.Lock()
+	defer e.reconcileMu.Unlock()
+
 	settings, err := e.effectiveSettings()
 	if err != nil {
 		return err
