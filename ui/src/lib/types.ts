@@ -217,6 +217,12 @@ export interface Destination {
    *  Empty when the platform offered none. */
   backupUrl?: string;
   backupStreamKey?: string;
+  /** The operator's intent: publish a redundant feed for this destination.
+   *  Sits beside the endpoint it gates rather than under `facebook`, because
+   *  neither the engine nor the endpoint is platform-specific. Intent without
+   *  an endpoint is the normal state between switching this on and the next
+   *  broadcast being created; the card reports it and starts nothing. */
+  backupIngestWanted?: boolean;
   enabled: boolean;
   audioBitrate: number;
   profile: RoutingProfile;
@@ -1640,9 +1646,14 @@ export const TWITCH_LABELS = [
  *  viewer is about to be shown. Every zero value means "do not touch". */
 export interface Compliance {
   privacy?: PrivacyStatus;
-  /** COPPA self-declaration. undefined is "not said"; false is the real
-   *  declaration "this is not for children", and the two are different. */
-  madeForKids?: boolean;
+  /** COPPA self-declaration. false is the real declaration "this is not for
+   *  children", and is different from having said nothing.
+   *
+   *  Three states, and null is the one that carries: an update is decoded over
+   *  the stored row, so `undefined` is omitted from the body and leaves
+   *  whatever was already there. Going back to "not said" has to send an
+   *  explicit null, which db.Compliance.MadeForKids reads as nil. */
+  madeForKids?: boolean | null;
   /** Twitch labels, id -> enabled. A key set to false actively CLEARS it. */
   labels?: Record<string, boolean>;
   /** Facebook's audience for a live video. undefined leaves it alone. */
@@ -1672,11 +1683,6 @@ export interface FacebookSettings {
   scheduledFor?: string;
   /** The Facebook live video created for it — what the card links to. */
   broadcastId?: string;
-  /** Publishes a redundant feed to Facebook's backup ingest endpoint. Doubles
-   *  this destination's upload bandwidth; enabling it reconnects the stream
-   *  once, because a backup endpoint only exists on a broadcast created with
-   *  one. */
-  backupIngest?: boolean;
 }
 
 // ------------------------------------------------------------------- expert

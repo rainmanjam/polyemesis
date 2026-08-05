@@ -14,7 +14,6 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/clips"
-	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
@@ -258,20 +257,30 @@ func (s *Server) scheduleWarnings(sc scheduler.Schedule, now time.Time) []string
 		return nil
 	}
 	at, ok := scheduler.Next(sc, now)
-	if !ok || at.Sub(now) <= facebookScheduleHorizon {
+	if !ok {
 		return nil
 	}
 	dests, err := s.store.ListDestinations()
 	if err != nil {
 		return nil
 	}
+	// The bound comes from the destination's own provider, exactly as the
+	// pre-announce sweep reads it, so this warning and the sweep's decision to
+	// skip can never disagree. They used to share a facebookScheduleHorizon
+	// constant declared in preannounce.go and each repeat the platform name
+	// beside it, which is two copies of a fact neither file can check.
 	for _, d := range dests {
-		if d.Platform == db.PlatformFacebook && scheduleTargets(sc, d.ID) {
-			return []string{
-				"No Facebook event page will be created for this schedule. Facebook " +
-					"accepts a start time at most seven days ahead, and this fires later " +
-					"than that. The destination will still go live on time.",
-			}
+		if !scheduleTargets(sc, d.ID) {
+			continue
+		}
+		sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+		if !ok || at.Sub(now) <= sb.ScheduleHorizon() {
+			continue
+		}
+		return []string{
+			"No Facebook event page will be created for this schedule. Facebook " +
+				"accepts a start time at most seven days ahead, and this fires later " +
+				"than that. The destination will still go live on time.",
 		}
 	}
 	return nil

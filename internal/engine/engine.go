@@ -129,6 +129,29 @@ type Engine struct {
 	vaapiOnce sync.Once
 	vaapiDev  string
 
+	// reconcileMu serializes Reconcile end to end. It is NOT e.mu: e.mu is
+	// dropped and retaken a dozen times inside one reconcile so that Status()
+	// stays answerable while children are being spawned, which is exactly what
+	// leaves two concurrent reconciles free to interleave.
+	//
+	// The hazard is not theoretical. startDestinations checks e.dests[id] ==
+	// nil, unlocks, and only publishes at the end of startDest -- after
+	// Allocate() and hub.Subscribe(). Two reconciles can both see nil, and
+	// relay.Hub.SubscribeAddr is a bare map assignment on a deterministic name
+	// (see destSubName), so the second REPLACES the first: the first FFmpeg
+	// keeps running against a port the hub no longer sends to, its
+	// *destination is overwritten in e.dests, and nothing will ever stop it or
+	// release its port. The callers are genuinely concurrent -- five HTTP
+	// handlers, the scheduler's actuator, and observeLoop.
+	//
+	// Taken OUTSIDE every other lock this file has, and it is the only one held
+	// for the whole of a public method. Verified deadlock-free by the fact that
+	// nothing holding e.mu, selMu or previewMu calls Reconcile: SwitchSource
+	// holds selMu and does not, sweepPreview holds previewMu and does not, and
+	// onCaptionsDegraded -- the one callback that does -- explicitly hands it
+	// to a fresh goroutine rather than calling it inline.
+	reconcileMu sync.Mutex
+
 	mu       sync.RWMutex
 	ingest   *supervisor.Process
 	recorder *supervisor.Process
@@ -314,6 +337,17 @@ type Engine struct {
 	// stopped closes the door on a playlist request that arrives while the
 	// engine is shutting down, which would otherwise leave an orphan encoder.
 	stopped bool
+	// afterPublish, when set, runs in the window between a destination being
+	// published into e.dests and its process being started -- the gap e.stopped
+	// cannot close, because a Stop that lands inside it passes the guard and
+	// then tears down a process that has not started yet.
+	//
+	// A seam rather than a sleep: the window is a few instructions wide and no
+	// timing test could sit in it reliably. Set before anything concurrent
+	// exists and never written again, on the same basis decideFn above is safe.
+	// Nil in production, and the two reads are one nil check per destination
+	// start.
+	afterPublish func()
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -686,8 +720,22 @@ func (e *Engine) Stop() {
 		wg.Add(1)
 		go func() { defer wg.Done(); p.Stop(ctx) }()
 	}
+	// Through teardownDest rather than a second stop path, so there is exactly
+	// one definition of "take a destination down" -- and so the REDUNDANT
+	// output goes down with it.
+	//
+	// Stopping d.proc alone was worse than a leak. The backup is built with
+	// supervisor.Spec{AutoRestart: true}, so the orphan did not exit: it went on
+	// reconnecting to the platform's backup ingest for ever, from a process in
+	// no map and on no monitoring page, and its relay port -- one of the 500
+	// shared across every source engine -- was never released. Deleting a
+	// SOURCE reaches this same code (Manager.Sync deletes the engine and calls
+	// Stop) while the daemon keeps running, so an operator who deleted a source
+	// was still publishing to Facebook from something nothing could see.
 	for _, d := range dests {
-		stop(d.proc)
+		dest := d
+		wg.Add(1)
+		go func() { defer wg.Done(); e.teardownDest(dest) }()
 	}
 	for _, m := range monitors {
 		mon := m
@@ -878,7 +926,15 @@ func (e *Engine) SourceName() string {
 
 // Reconcile makes the running processes match the database. It is safe to call
 // repeatedly and from any handler.
+//
+// One reconcile at a time, for the whole of it. See Engine.reconcileMu: the
+// per-tier locks are all dropped and retaken inside, so without this two
+// callers can both observe a destination as missing and both start it, and the
+// first of the two becomes an FFmpeg nothing can find or stop.
 func (e *Engine) Reconcile() error {
+	e.reconcileMu.Lock()
+	defer e.reconcileMu.Unlock()
+
 	settings, err := e.effectiveSettings()
 	if err != nil {
 		return err
@@ -1492,21 +1548,6 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	proc.Start()
 }
 
-// destPlan is what one destination should look like after this reconcile.
-type destPlan struct {
-	row      *db.Destination
-	compiled routing.Result
-	spec     string
-	// upstream is the signature of what this destination reads. Carried on the
-	// plan because the BACKUP's hash needs it too, and recomputing it in a
-	// second place is how two hashes drift apart.
-	upstream string
-	// err is a reason not to run at all — a routing graph that will not
-	// compile, or an upstream rendition that is not there. Either way the
-	// destination is shown as broken rather than started against nothing.
-	err string
-}
-
 // reconcileOutputs brings the shared encodes and the destinations that consume
 // them into line with the database.
 //
@@ -1672,685 +1713,6 @@ func (e *Engine) playoutUpstream(id *int64) (playout.Upstream, error) {
 		Height:    r.row.Height,
 		VideoKbps: r.row.VideoBitrate,
 	}, nil
-}
-
-// planDestinations works out the desired state of every enabled destination,
-// including which upstream it reads and whether it can run at all.
-func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source, silenceSig string) map[int64]destPlan {
-	plans := map[int64]destPlan{}
-	for _, row := range rows {
-		if !row.Enabled {
-			continue
-		}
-		p := destPlan{row: row}
-
-		// The upstream's own signature rides in the destination's, so editing a
-		// rendition restarts exactly the destinations downstream of it and
-		// nothing else. A passthrough destination's upstream is the silence
-		// tier when there is one, which is why silenceSig is the seed rather
-		// than the empty string: switching synthesis on or off has to restart
-		// every destination, not just the ones on a rendition.
-		upstream := silenceSig
-		if row.RenditionID != nil {
-			sig, ok := wantRends[*row.RenditionID]
-			if !ok {
-				// The rendition was deleted between the two queries. Deleting
-				// one drops its destinations back to passthrough, so the
-				// reconcile that follows the delete sees a nil id and this
-				// destination comes straight back.
-				p.err = fmt.Sprintf("rendition %d is no longer available", *row.RenditionID)
-			}
-			upstream = sig
-		}
-
-		compiled, cerr := routing.Compile(row.Profile, src)
-		if cerr != nil {
-			p.err = cerr.Error()
-		} else {
-			p.compiled = compiled
-			p.spec = destSpec(row, compiled, upstream)
-			p.upstream = upstream
-		}
-		plans[row.ID] = p
-	}
-	return plans
-}
-
-// stopDestinations tears down every destination that is gone, newly disabled,
-// newly broken, or running with arguments that no longer match. Everything else
-// is left strictly alone — that is the guarantee that renaming a destination,
-// or editing a different one, never interrupts a live output.
-func (e *Engine) stopDestinations(plans map[int64]destPlan) {
-	e.mu.Lock()
-	var toStop []*destination
-	for id, d := range e.dests {
-		p, wanted := plans[id]
-		keep := wanted && d.proc != nil && p.err == "" && d.spec == p.spec
-		if !keep {
-			toStop = append(toStop, d)
-			delete(e.dests, id)
-		}
-	}
-	e.mu.Unlock()
-
-	for _, d := range toStop {
-		e.teardownDest(d)
-	}
-}
-
-// startDestinations starts everything the plan wants that is not already
-// running, once its rendition is up.
-func (e *Engine) startDestinations(plans map[int64]destPlan) {
-	ids := make([]int64, 0, len(plans))
-	for id := range plans {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-
-	// Spacing for destinations started in THIS sweep. Counted per actually-
-	// started process, not per id, so a reconcile that leaves seven running and
-	// starts one does not make that one wait seven slots for nothing.
-	stagger := time.Duration(e.Settings().Destinations.StaggerMS) * time.Millisecond
-	started := 0
-
-	for _, id := range ids {
-		p := plans[id]
-
-		e.mu.Lock()
-		if cur := e.dests[id]; cur != nil {
-			// Survived the stop phase, so it is running with the right
-			// arguments; refresh the row for cosmetic fields like the name.
-			//
-			// Replaced wholesale rather than mutated in place: Status hands out
-			// these pointers and then reads their fields after dropping the
-			// lock, which is only safe while a published destination never
-			// changes again.
-			next := *cur
-			next.row = p.row
-			e.dests[id] = &next
-			e.mu.Unlock()
-			// AFTER the unlock. SetPolicy itself is a memory write, but the
-			// revival path calls Restart, which blocks for up to stopTimeout.
-			// Holding e.mu across that would stall every Status() the dashboard
-			// asks for and every other tier's reconcile behind it.
-			e.applyDestPolicy(&next, p.row)
-			// The backup is reconciled here as well as on a fresh start,
-			// because its toggle is absent from destSpec -- so a destination
-			// that survived the stop phase is exactly the case nothing else
-			// would notice the setting changed.
-			e.reconcileBackup(&next, p.compiled, p.upstream)
-			continue
-		}
-		e.mu.Unlock()
-
-		if p.err != "" {
-			e.mu.Lock()
-			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: p.err}
-			e.mu.Unlock()
-			e.log.Warn("destination cannot run", "dest", p.row.Name, "err", p.err)
-			continue
-		}
-
-		hub, herr := e.upstreamHub(p.row)
-		if herr != nil {
-			e.mu.Lock()
-			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: herr.Error()}
-			e.mu.Unlock()
-			e.log.Warn("destination has no upstream", "dest", p.row.Name, "err", herr)
-			continue
-		}
-
-		if err := e.startDest(p.row, p.compiled, p.spec, hub, stagger*time.Duration(started)); err != nil {
-			e.log.Error("start destination", "dest", p.row.Name, "err", err)
-			e.mu.Lock()
-			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: err.Error()}
-			e.mu.Unlock()
-			continue
-		}
-		started++
-
-		// The backup rides alongside, after the primary is up. Reconciled
-		// through the same function the already-running branch uses, so there
-		// is one place that decides whether a redundant feed should exist.
-		e.mu.Lock()
-		d := e.dests[id]
-		e.mu.Unlock()
-		e.reconcileBackup(d, p.compiled, p.upstream)
-	}
-}
-
-// upstreamHub is the relay a destination reads: the ingest's when it is on
-// passthrough, its rendition's own otherwise.
-func (e *Engine) upstreamHub(row *db.Destination) (*relay.Hub, error) {
-	if row.RenditionID == nil {
-		if h := e.selectorHub(); h != nil {
-			// The silence tier is no longer this destination's problem: the
-			// selector's feed is what reads it, and a silence tier that is
-			// broken leaves the destination on a quiet hub rather than off the
-			// air. Holding the platform connection while nothing is arriving is
-			// the whole reason this tier exists.
-			return h, nil
-		}
-		if err := e.selectorProblem(); err != nil {
-			return nil, err
-		}
-		if err := e.silenceProblem(); err != nil {
-			return nil, err
-		}
-		return e.sourceHub(), nil
-	}
-	e.mu.RLock()
-	r := e.rends[*row.RenditionID]
-	e.mu.RUnlock()
-	if r == nil || r.hub == nil {
-		// Starting it anyway would give the user a destination that looks
-		// healthy and sends nothing.
-		reason := "is not running"
-		if r != nil && r.err != "" {
-			reason = "failed to start: " + r.err
-		}
-		return nil, fmt.Errorf("rendition %d %s", *row.RenditionID, reason)
-	}
-	return r.hub, nil
-}
-
-// destSpec hashes everything about a destination that requires a restart.
-//
-// upstream is its rendition's signature, empty for passthrough. Folding both it
-// and the rendition id in is what makes moving a destination between tiers, or
-// editing the tier it sits on, restart that destination and no other.
-func destSpec(row *db.Destination, compiled routing.Result, upstream string) string {
-	source := "passthrough"
-	if row.RenditionID != nil {
-		source = "rendition:" + strconv.FormatInt(*row.RenditionID, 10)
-	}
-	return hashStrings([]string{
-		row.Target(), string(row.Kind), compiled.FilterComplex,
-		strconv.Itoa(row.AudioBitrate), strconv.Itoa(row.Profile.SampleRate),
-		source, upstream,
-		// A negative delay leaves no trace in the filter string — it is carried
-		// on the video side instead — so without this, changing one would be
-		// saved and never applied.
-		strconv.Itoa(compiled.VideoDelayMS),
-		// Expert mode. Without these an edit would be saved and then do nothing
-		// until some unrelated reconcile happened to restart the destination,
-		// which is the worst of both worlds: the operator is told it applied
-		// and the process is still running the old command line.
-		row.ExtraInputArgs, row.ExtraOutputArgs,
-		// Transport tuning, for exactly the same reason. Every one of these
-		// changes the command line, and a setting that is stored and never
-		// reaches the running process is the failure this repo keeps paying
-		// for -- most recently r.Deinterlace on renditions.
-		strconv.FormatBool(row.Transport.NoDurationFilesize),
-		strconv.Itoa(row.Transport.MuxQueuePackets),
-		strconv.Itoa(row.Transport.MuxQueueBytes),
-		strconv.Itoa(row.Transport.RWTimeoutSeconds),
-		// Resilience is deliberately ABSENT. It is a property of the
-		// supervisor, not of the command line, and supervisor.SetPolicy now
-		// carries it into a process that is already running -- see
-		// applyDestPolicy. The reasoning that first put it here was right about
-		// the danger (a setting stored and never reaching the process it
-		// governs) and wrong about the remedy: the remedy was to deliver it,
-		// not to drop the operator's connection in order to deliver it.
-		// Audio encoding: both change the command line.
-		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
-	})
-}
-
-// audioCodecOf maps the stored codec name onto the FFmpeg encoder name. An
-// unrecognised value falls back to AAC rather than reaching the command line:
-// a destination row written by a newer build must still stream, and AAC is the
-// one codec every platform takes.
-func audioCodecOf(stored string) string {
-	if stored == db.DestAudioOpus {
-		return ffmpeg.AudioCodecOpus
-	}
-	return ffmpeg.AudioCodecAAC
-}
-
-// secondsOr converts a settings value in seconds to a Duration, returning the
-// fallback when the operator has not set one. Zero means "the supervisor's
-// default", never "no delay at all" -- a zero backoff would be a spin loop
-// against a platform that is refusing us.
-func secondsOr(v int, fallback time.Duration) time.Duration {
-	if v <= 0 {
-		return fallback
-	}
-	return time.Duration(v) * time.Second
-}
-
-// destPolicy is the reconnect policy for one destination row.
-//
-// The zero value must map to the zero Policy, not to an explicit 1s/30s: that
-// is what leaves supervisor.New's own defaults in place, which is what every
-// destination ran on before the policy was configurable.
-func destPolicy(row *db.Destination) supervisor.Policy {
-	return supervisor.Policy{
-		MinBackoff:  secondsOr(row.Resilience.MinBackoffSeconds, 0),
-		MaxBackoff:  secondsOr(row.Resilience.MaxBackoffSeconds, 0),
-		MaxRestarts: row.Resilience.GiveUpAfter,
-	}
-}
-
-// applyDestPolicy carries a changed reconnect policy into a destination that is
-// already running, and revives one that had given up under a stricter rule.
-//
-// The revival is the one place this work chooses a restart over a live apply,
-// and it is chosen deliberately. Raising GiveUpAfter on a destination that has
-// already exhausted the old limit and would otherwise sit in StateFailed for
-// ever is exactly the "stored, reported as applied, and does nothing" failure
-// this file is littered with warnings about. Lowering it is NOT retroactive: a
-// destination is not executed for exits it made under the old rules.
-//
-// Start() cannot do the revival -- supervise returns down the give-up path
-// without clearing p.running, so Start takes its idempotence early return.
-// Restart() is the only door, and its Stop returns immediately because the
-// supervise goroutine has already closed done.
-func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
-	if d == nil || d.proc == nil {
-		return
-	}
-	before := d.proc.Policy()
-	want := destPolicy(row)
-	if before == want {
-		return
-	}
-	d.proc.SetPolicy(want)
-	e.log.Info("destination reconnect policy retuned without a restart",
-		"dest", row.Name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
-		"giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", row.Name, reloadLive,
-		fmt.Sprintf("reconnect policy retuned to %s..%s, giving up after %d",
-			want.MinBackoff, want.MaxBackoff, want.MaxRestarts))
-
-	if d.proc.Status().State != supervisor.StateFailed || !moreForgiving(before, want) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-	defer cancel()
-	d.proc.Restart(ctx)
-	e.log.Info("destination revived: it had given up under the previous limit",
-		"dest", row.Name, "giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", row.Name, reloadRestart,
-		"it had given up under the previous limit and the new one is more forgiving")
-}
-
-// moreForgiving reports whether want allows more attempts than before.
-//
-// 0 means unlimited, so it is the MOST forgiving value rather than the least.
-// Compared as a plain number it sorts exactly the wrong way round, which would
-// revive a destination the operator had just told to give up sooner.
-func moreForgiving(before, want supervisor.Policy) bool {
-	if want.MaxRestarts == 0 {
-		return before.MaxRestarts != 0
-	}
-	if before.MaxRestarts == 0 {
-		return false
-	}
-	return want.MaxRestarts > before.MaxRestarts
-}
-
-// expertArgv parses a destination's hand-written arguments into an argv.
-//
-// A parse failure yields nothing rather than an error, and that is deliberate:
-// the API validates on the way in, so anything unparseable here got in before
-// the rules were what they are now. Dropping it starts the destination on its
-// generated command — the stream keeps running and the editor still shows the
-// operator the stored text with the reason it will not apply. Refusing to start
-// the destination would be the restrictive-direction failure this repo has
-// already paid for three times.
-func expertArgv(log *slog.Logger, row *db.Destination, raw, field string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	argv, err := ffmpeg.SplitArgs(raw)
-	if err != nil {
-		log.Warn("ignoring unparseable expert arguments",
-			"dest", row.Name, "field", field, "err", err)
-		return nil
-	}
-	return argv
-}
-
-// destWritesAFile reports whether a destination's target is a path on this
-// machine rather than a network endpoint, and therefore has to be confined to
-// the recordings directory before FFmpeg is handed it.
-//
-// An audio-only destination is either an Icecast mount or a bare filename; the
-// scheme is the only thing that tells them apart. Without this an audio file
-// target would be written relative to the process working directory, outside
-// the confinement every other file destination has.
-func destWritesAFile(row *db.Destination) bool {
-	switch row.Kind {
-	case db.DestFile:
-		return true
-	case db.DestAudio:
-		return !strings.Contains(row.URL, "://")
-	default:
-		return false
-	}
-}
-
-// destSubName is the relay subscription for one of a destination's outputs.
-//
-// THE ROLE IS PART OF THE NAME, ALWAYS, and that is not tidiness.
-// Hub.Subscribe is a map assignment keyed by this string:
-//
-//	h.subs[name] = &subscriber{...}
-//
-// so registering two outputs under one name REPLACES the first. The replaced
-// process keeps running, keeps a correct command line, and keeps a healthy
-// card -- and receives no packets at all. Nothing about the process, its
-// target URL, or the destination's status reveals it.
-//
-// The primary's name is unchanged (`dest:<id>`), so no existing subscription
-// moves; only new roles get a suffix.
-func destSubName(id int64, role string) string {
-	if role == "" {
-		return fmt.Sprintf("dest:%d", id)
-	}
-	return fmt.Sprintf("dest:%d:%s", id, role)
-}
-
-// destArgs is one output's FFmpeg command line.
-//
-// Shared by the primary and the backup so the two cannot drift: a redundant
-// feed encoded differently from the one it backs up is not redundancy, and the
-// difference would be invisible until somebody compared two argv strings on the
-// monitoring page.
-//
-// Only the relay it reads and the target it writes differ between them.
-func (e *Engine) destArgs(row *db.Destination, compiled routing.Result, relayURL, target string) []string {
-	return ffmpeg.DestinationArgs(ffmpeg.DestSpec{
-		Kind:          ffmpeg.DestKind(row.Kind),
-		Target:        target,
-		RelayURL:      relayURL,
-		FilterComplex: compiled.FilterComplex,
-		AudioOutLabel: compiled.OutLabel,
-		AudioBitrate:  row.AudioBitrate,
-		SampleRate:    row.Profile.SampleRate,
-		CopyVideo:     true,
-		// A negative routing delay pulls audio ahead of picture, which no
-		// audio filter can do, so the compiler hands the amount over here
-		// and the video is held back instead.
-		VideoDelayMS: compiled.VideoDelayMS,
-		// Expert mode. Spliced by DestinationArgs into the two positions
-		// FFmpeg binds options from, which are the same two the operator
-		// was shown in the confirm dialog.
-		ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
-		ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
-		// Muxer and socket tuning. Its zero value emits nothing, so a
-		// destination that has not opted in produces exactly the command
-		// it always did.
-		// Output audio encoding. Zero value is AAC stereo.
-		Audio: ffmpeg.AudioSpec{
-			Codec: audioCodecOf(row.Audio.Codec),
-			Mono:  row.Audio.Mono,
-		},
-		Transport: ffmpeg.TransportSpec{
-			NoDurationFilesize: row.Transport.NoDurationFilesize,
-			MuxQueuePackets:    row.Transport.MuxQueuePackets,
-			MuxQueueBytes:      row.Transport.MuxQueueBytes,
-			RWTimeoutSeconds:   row.Transport.RWTimeoutSeconds,
-		},
-	})
-}
-
-// destRoleBackup names the redundant output's subscription.
-const destRoleBackup = "backup"
-
-// wantsBackup reports whether this destination should be publishing a
-// redundant feed right now.
-//
-// Both halves are required. The toggle alone is intent; without an endpoint
-// there is nowhere to publish, which is the normal state between enabling the
-// setting and the next broadcast being created.
-func wantsBackup(row *db.Destination) bool {
-	return row.Facebook.BackupIngest && row.BackupURL != "" && row.Kind == db.DestRTMP
-}
-
-// backupTarget is the redundant output's URL, assembled the way Target() does.
-func backupTarget(row *db.Destination) string {
-	if row.BackupStreamKey == "" {
-		return row.BackupURL
-	}
-	return strings.TrimRight(row.BackupURL, "/") + "/" + row.BackupStreamKey
-}
-
-// backupSpecOf hashes everything on the BACKUP's command line.
-//
-// Deliberately not destSpec's value and deliberately not derived from it: they
-// share most inputs but must never share a verdict. Enabling backup already
-// costs one reconnect for an unavoidable reason -- a new broadcast means a new
-// primary key -- and it must not cost a second one for an avoidable reason.
-func backupSpecOf(row *db.Destination, compiled routing.Result, upstream string) string {
-	return hashStrings([]string{
-		strconv.FormatBool(wantsBackup(row)), backupTarget(row),
-		compiled.FilterComplex, strconv.Itoa(row.AudioBitrate),
-		strconv.Itoa(row.Profile.SampleRate), upstream,
-		strconv.Itoa(compiled.VideoDelayMS),
-		row.ExtraInputArgs, row.ExtraOutputArgs,
-		strconv.FormatBool(row.Transport.NoDurationFilesize),
-		strconv.Itoa(row.Transport.MuxQueuePackets),
-		strconv.Itoa(row.Transport.MuxQueueBytes),
-		strconv.Itoa(row.Transport.RWTimeoutSeconds),
-		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
-	})
-}
-
-func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
-	port, err := e.alloc.Allocate()
-	if err != nil {
-		return err
-	}
-	subName := destSubName(row.ID, "")
-	url := hub.Subscribe(subName, port)
-
-	target := row.Target()
-	writesAFile := destWritesAFile(row)
-	if writesAFile {
-		// File destinations are confined to the recordings directory; the
-		// path never comes straight from user input.
-		resolved, err := e.recman.ResolveForWrite(row.URL)
-		if err != nil {
-			e.hub.Unsubscribe(subName)
-			e.alloc.Release(port)
-			return err
-		}
-		target = resolved
-	}
-
-	buildArgs := func(out string) []string {
-		return e.destArgs(row, compiled, url, out)
-	}
-
-	// Only a file destination needs a fresh argv per spawn, and only because
-	// its output path cannot be reused. An RTMP or SRT target is reconnected
-	// to, not recreated, so rebuilding its command line every respawn would be
-	// churn with no benefit — and it would make the argv shown on the
-	// monitoring page differ from the one that has been running all along.
-	var nextArgs func() []string
-	if writesAFile {
-		nextArgs = func() []string {
-			out, err := e.recman.ResolveForWrite(row.URL)
-			if err != nil {
-				// Keep the last known-good path rather than refusing to start:
-				// the resolver only fails when the directory itself is
-				// unusable, and that is already reported by the recorder's own
-				// storage guard.
-				e.log.Error("destination: cannot pick an output filename",
-					"dest", row.Name, "err", err)
-				return buildArgs(target)
-			}
-			return buildArgs(out)
-		}
-	}
-
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name:        subName,
-		Kind:        "destination",
-		Bin:         e.tools.FFmpeg,
-		Args:        buildArgs(target),
-		NextArgs:    nextArgs,
-		AutoRestart: true,
-		// Per-destination reconnect policy. Zero values leave the supervisor's
-		// own defaults in place, which is what every destination ran on before
-		// this was configurable. The same three values are re-applied without a
-		// restart by applyDestPolicy when they change.
-		MinBackoff:  destPolicy(row).MinBackoff,
-		MaxBackoff:  destPolicy(row).MaxBackoff,
-		MaxRestarts: destPolicy(row).MaxRestarts,
-		// Spaced out so going live does not spawn every destination in the
-		// same tick. First spawn only -- a reconnect is never delayed.
-		StartDelay: startDelay,
-		OnLog:      e.onLog,
-		OnState:    e.onState,
-		LogSink:    logSink{e},
-	})
-
-	e.mu.Lock()
-	e.dests[row.ID] = &destination{
-		row: row, proc: proc, port: port, subName: subName,
-		compiled: compiled, hub: hub, spec: spec,
-	}
-	e.mu.Unlock()
-
-	proc.Start()
-	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
-		"tracks", compiled.Summary, "rendition", renditionLabel(row))
-	e.noteReload("destination", row.Name, reloadRestart, "started")
-	return nil
-}
-
-func (e *Engine) teardownDest(d *destination) {
-	if d == nil {
-		return
-	}
-	e.noteReload("destination", d.row.Name, reloadRestart,
-		"its command line changed, or it was disabled or removed")
-	if d.proc != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		d.proc.Stop(ctx)
-		cancel()
-	}
-	if d.subName != "" {
-		// Its own hub, which is not always the ingest's.
-		hub := d.hub
-		if hub == nil {
-			hub = e.hub
-		}
-		hub.Unsubscribe(d.subName)
-	}
-	if d.port != 0 {
-		e.alloc.Release(d.port)
-	}
-	e.stopBackup(d)
-}
-
-// reconcileBackup brings the redundant output into line with the row, without
-// ever consulting or touching the primary.
-//
-// Called for a destination that is already running as well as one just
-// started, because the toggle is deliberately ABSENT from destSpec: nothing
-// else would ever notice it changed. Absence from that hash stops the primary
-// cycling; this is what makes the setting take effect.
-func (e *Engine) reconcileBackup(d *destination, compiled routing.Result, upstream string) {
-	if d == nil || d.row == nil {
-		return
-	}
-	want := backupSpecOf(d.row, compiled, upstream)
-	if !wantsBackup(d.row) {
-		// Includes the toggle-on-but-no-endpoint case, which is a real state
-		// between enabling the setting and the next broadcast being created.
-		e.stopBackup(d)
-		d.backupErr = ""
-		if d.row.Facebook.BackupIngest && d.row.BackupURL == "" {
-			d.backupErr = "Facebook has not offered a backup ingest endpoint yet; " +
-				"it is provisioned when the broadcast is created"
-		}
-		return
-	}
-	if d.backup != nil && d.backupSpec == want {
-		return
-	}
-	e.stopBackup(d)
-	e.startBackup(d, compiled, want)
-}
-
-// startBackup spawns the redundant output.
-//
-// The port is asked for LAST and its refusal costs only the backup. There are
-// 500 relay ports shared across every source engine, so exhaustion is a real
-// state -- and it must cost the redundancy rather than the broadcast, which is
-// why this returns quietly with a reason instead of failing the destination.
-func (e *Engine) startBackup(d *destination, compiled routing.Result, spec string) {
-	hub := d.hub
-	if hub == nil {
-		hub = e.hub
-	}
-	port, err := e.alloc.Allocate()
-	if err != nil {
-		d.backupErr = "no relay port is free for the backup feed"
-		e.log.Warn("backup ingest has no relay port; the primary is unaffected",
-			"dest", d.row.Name, "err", err)
-		return
-	}
-	sub := destSubName(d.row.ID, destRoleBackup)
-	url := hub.Subscribe(sub, port)
-
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name:        sub,
-		Kind:        "destination",
-		Bin:         e.tools.FFmpeg,
-		Args:        e.destArgs(d.row, compiled, url, backupTarget(d.row)),
-		AutoRestart: true,
-		MinBackoff:  destPolicy(d.row).MinBackoff,
-		MaxBackoff:  destPolicy(d.row).MaxBackoff,
-		MaxRestarts: destPolicy(d.row).MaxRestarts,
-		OnLog:       e.onLog,
-		OnState:     e.onState,
-		LogSink:     logSink{e},
-	})
-
-	d.backup = proc
-	d.backupPort = port
-	d.backupSub = sub
-	d.backupSpec = spec
-	d.backupErr = ""
-
-	proc.Start()
-	e.log.Info("backup ingest started", "dest", d.row.Name)
-}
-
-// stopBackup tears down the redundant output and releases everything it held.
-//
-// Unsubscribing and releasing the port matter as much as stopping the process:
-// a stale subscriber keeps the hub writing datagrams into a socket nobody
-// reads, and a leaked port is one fewer of the 500 shared across every source
-// engine. Neither would be noticed until the pool ran out.
-func (e *Engine) stopBackup(d *destination) {
-	if d == nil {
-		return
-	}
-	if d.backup != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		d.backup.Stop(ctx)
-		cancel()
-		d.backup = nil
-	}
-	if d.backupSub != "" {
-		hub := d.hub
-		if hub == nil {
-			hub = e.hub
-		}
-		hub.Unsubscribe(d.backupSub)
-		d.backupSub = ""
-	}
-	if d.backupPort != 0 {
-		e.alloc.Release(d.backupPort)
-		d.backupPort = 0
-	}
-	d.backupSpec = ""
 }
 
 func renditionLabel(row *db.Destination) string {
@@ -6625,6 +5987,20 @@ func (e *Engine) Processes() []*supervisor.Process {
 	for _, d := range e.dests {
 		if d.proc != nil {
 			out = append(out, d.proc)
+		}
+		// The REDUNDANT output, which is not e.backup above -- that is the
+		// source-side backup-ingest tier, a different thing entirely.
+		//
+		// Both API consumers go through this function, so without it
+		// GET /processes/dest:<id>:backup/logs answered "no such process". The
+		// card shows the backup's state, so an operator could see that
+		// redundancy was broken and had no way to find out why, at the one
+		// moment those logs exist for. destArgs' own justification for existing
+		// is that a drifted backup argv "would be invisible until somebody
+		// compared two argv strings on the monitoring page" -- and the backup's
+		// argv was never on that page.
+		if d.backup != nil {
+			out = append(out, d.backup)
 		}
 	}
 	// Sorted, because a map of analysers would otherwise reshuffle the

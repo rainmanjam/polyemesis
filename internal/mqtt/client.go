@@ -152,7 +152,12 @@ func Connect(ctx context.Context, cfg Config, log *slog.Logger) (*Client, error)
 		// old bitrate replayed on reconnect is worse than no reading at all,
 		// because the next tick republishes ground truth anyway. So: use
 		// Publish, never PublishViaQueue, and no custom no-op queue is needed.
-		// TestClientNeverUsesTheQueuePath holds that line.
+		//
+		// TestClientNeverUsesTheQueuePath holds that line against the syntax
+		// tree, because there is nothing to observe at runtime: a queue that is
+		// never read and a queue that does not exist behave identically.
+		// TestPublishWithNoBrokerFailsRatherThanBuffering holds the behaviour
+		// choosing Publish buys.
 		OnConnectionUp: func(*autopaho.ConnectionManager, *paho.Connack) {
 			c.up.Store(true)
 			log.Info("mqtt connected", "broker", redactURL(u), "instance", topics.Instance())

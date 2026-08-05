@@ -169,6 +169,49 @@ func send(t *testing.T, h http.Handler, sign func(*http.Request), method, path s
 	return w.Body.Bytes()
 }
 
+// mustJSONError asserts a request produced the expected status AND a JSON body
+// carrying an error message -- that is, that a real handler answered.
+//
+// A status code alone proves nothing about a route. api.go registers the
+// embedded SPA as the root mux's NotFound handler, so an unrouted /api/v1/...
+// path is answered by web.Handler either way:
+//
+//   - with internal/web/dist/index.html present, as it is after `make ui`: 200
+//     and the SPA bundle. So a 200-only assertion passes with its route deleted
+//     on a developer's machine -- measured, on the test then called
+//     TestDeliveriesRouteExists, since rewritten and renamed to
+//     TestDeliveriesRouteReturnsTheAttemptsItMade. The measurement was against
+//     the old status-only version; the name is given so the record can be
+//     traced, not re-run.
+//   - with it absent, as in CI, whose Go job never builds the UI: 404 and
+//     "UI not built.". So a 404-only assertion passes with its route deleted in
+//     CI -- measured, on TestScheduleRoutesRejectAnUnknownID.
+//
+// Neither configuration can produce JSON with an "error" field, which is what
+// makes this the assertion to reach for whenever a test's only claim about a
+// route is the status it answered with.
+//
+// One nuance worth recording, because it decides how much a status is worth:
+// removing ONE method from a path that still has others registered gives chi's
+// own 405, which a status assertion does catch. The fallback is only reached
+// when the whole pattern goes -- a handler renamed, a Group deleted, a route
+// block moved and half-reconnected. That is the refactor this is written for.
+func mustJSONError(t *testing.T, h http.Handler, sign func(*http.Request), method, path string, body any, want int) string {
+	t.Helper()
+	raw := send(t, h, sign, method, path, body, want)
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("%s %s: %d, but the body is not JSON (%v) -- the SPA fallback "+
+			"answered instead of a handler: %.80s", method, path, want, err, raw)
+	}
+	msg, _ := out["error"].(string)
+	if msg == "" {
+		t.Fatalf("%s %s: %d with no error field; the operator is told a number "+
+			"and nothing else: %s", method, path, want, raw)
+	}
+	return msg
+}
+
 func decodeInto(t *testing.T, raw []byte, v any) {
 	t.Helper()
 	if err := json.Unmarshal(raw, v); err != nil {
@@ -345,6 +388,10 @@ func TestUpdateRenditionKeepsFieldsTheClientDidNotSend(t *testing.T) {
 	}
 }
 
+// Mutation: comment out any of the three r.Get/r.Put/r.Delete registrations for
+// "/renditions/{id}" in api.go. Observed FAIL in both UI configurations. The
+// status-only version passed with all three deleted whenever index.html was
+// absent, which is how CI runs.
 func TestMissingRenditionIsNotFound(t *testing.T) {
 	h, _, sign := renditionServer(t, defaultTools())
 
@@ -359,7 +406,7 @@ func TestMissingRenditionIsNotFound(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			send(t, h, sign, tt.method, "/api/v1/renditions/404", tt.body, http.StatusNotFound)
+			mustJSONError(t, h, sign, tt.method, "/api/v1/renditions/404", tt.body, http.StatusNotFound)
 		})
 	}
 }

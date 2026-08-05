@@ -1,8 +1,6 @@
 package api
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -59,13 +57,23 @@ func TestIngestOptionsForSendsNothingWhenTheDestinationChoseNothing(t *testing.T
 
 // TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider closes
 // the gap ingestOptionsFor's own test could not: that function being correct
-// proves nothing about whether handleRefreshKey still calls it. ingestForFn is
-// the seam that makes the call itself observable -- it drives the real HTTP
-// handler, through the real ingestOptionsFor(dest), and only replaces the
-// point where the mapped options would otherwise leave the process to reach
-// Facebook, which internal/oauth gives no other package a way to intercept.
+// proves nothing about whether handleRefreshKey still calls it.
+//
+// It drives the real HTTP handler, through the real ingestOptionsFor(dest),
+// into the real Facebook provider, and reads the Graph request that came out
+// the far side. It used to replace an ingestForFn closure on Server and assert
+// on the oauth.IngestOptions it captured, because internal/oauth's graph base
+// was unexported and there was nowhere else to stand. There is now:
+// oauth.WithBaseURL points the whole provider at this test's own server, so the
+// assertion is on what Facebook would have received rather than on what the
+// handler intended to send.
+//
+// Mutation to run against it: in ingestOptionsFor, replace
+// `Privacy: dest.Compliance.FacebookPrivacy` with
+// `Privacy: db.FBPrivacyEveryone` -- the most-exposing value Facebook offers.
+// Observed FAIL ("privacy = EVERYONE, want SELF").
 func TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	acctID := connectAccount(t, store, s.box, db.PlatformFacebook, "ada")
@@ -85,23 +93,13 @@ func TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider(t *tes
 		t.Fatalf("create destination: %v", err)
 	}
 
-	var (
-		called   bool
-		captured oauth.IngestOptions
-	)
-	// The stub returns an error rather than a fabricated success so the handler
-	// exits before s.eng().Reconcile() -- testServer leaves the engine manager
-	// nil because no other route here needs one, and a real one requires the
-	// same FFmpeg-and-listener machinery renditions_test.go stands up for a
-	// different feature entirely. Capture happens unconditionally, before the
-	// stub returns, so what it returns has no bearing on what this test checks.
-	stubErr := errors.New("stub: no real ingest in this test")
-	s.ingestForFn = func(ctx context.Context, provider oauth.Provider, clientID string,
-		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
-		called = true
-		captured = opts
-		return nil, stubErr
-	}
+	// Graph refuses the create so the handler exits before s.eng().Reconcile()
+	// -- testServer leaves the engine manager nil because no other route here
+	// needs one, and a real one requires the same FFmpeg-and-listener machinery
+	// renditions_test.go stands up for a different feature entirely. The
+	// request is recorded before the refusal is written, so what Graph answers
+	// has no bearing on what this test reads.
+	stub.setCreateErr("stub: no real ingest in this test")
 
 	r := jsonRequest(t, http.MethodPost,
 		"/api/v1/destinations/"+strconv.FormatInt(dest.ID, 10)+"/refresh-key", nil)
@@ -110,15 +108,30 @@ func TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider(t *tes
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 from the stub's error (body %s)", w.Code, w.Body.String())
 	}
-	if !called {
-		t.Fatal("ingestForFn was never invoked; refresh-key did not reach the seam at all")
+
+	create := stub.first(http.MethodPost, "/me/live_videos")
+	if create == nil {
+		t.Fatalf("no broadcast create reached Facebook; refresh-key made these calls instead: %v",
+			stub.calls())
 	}
-	want := oauth.IngestOptions{
-		Privacy:         db.FBPrivacySelf,
-		Crosspost:       []db.CrosspostTarget{{PageID: "1234", CreatePost: true}},
-		DonateCharityID: "999",
+	// Graph's own wire form for each stored choice. Asserting the encoded
+	// parameter rather than the oauth.IngestOptions struct is the point of the
+	// rewrite: a mapping that is correct and a provider that drops the field on
+	// the way out are different bugs, and only this catches the second.
+	for _, want := range []struct{ key, value string }{
+		{"status", "LIVE_NOW"},
+		{"privacy", `{"value":"SELF"}`},
+		{"crossposting_actions", `[{"page_id":"1234","action":"enable_crossposting_and_create_post"}]`},
+		{"donate_button_charity_id", "999"},
+	} {
+		if got := create.Query.Get(want.key); got != want.value {
+			t.Errorf("%s = %q, want %q (whole request %s)", want.key, got, want.value, create)
+		}
 	}
-	if !reflect.DeepEqual(captured, want) {
-		t.Errorf("IngestOptions passed to the provider = %+v, want %+v", captured, want)
+	// The destination never asked for backup ingest, and Facebook treats a
+	// present-but-empty parameter as a value, so "not chosen" has to mean an
+	// ABSENT key rather than an empty one.
+	if _, ok := create.Query["enable_backup_ingest"]; ok {
+		t.Errorf("enable_backup_ingest was sent for a destination that never asked for it: %s", create)
 	}
 }

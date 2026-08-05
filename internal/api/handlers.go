@@ -1032,13 +1032,18 @@ func (s *Server) refuseIfSilent(w http.ResponseWriter, profile routing.Profile) 
 //
 // Clearing is therefore the repair, and the warning is what keeps it from
 // being a silent one. Nothing here refuses a write.
-func dropUnsendableSettings(row *db.Destination) []string {
+func (s *Server) dropUnsendableSettings(row *db.Destination) []string {
 	var warnings []string
 
 	// Discovered through ComplianceFor, never a list of platform names: the
 	// capability is what decides whether a value can be sent, and a second copy
 	// of that knowledge here would be the copy that goes stale.
-	if _, ok := oauth.ComplianceFor(row.Platform); !ok && !row.Compliance.Empty() {
+	//
+	// A method on Server rather than a free function for one reason: the
+	// capability has to be resolved through the SAME provider set the push
+	// resolves it through, or a test can aim the push at a stub and leave this
+	// answering for production.
+	if _, ok := s.providers.ComplianceFor(row.Platform); !ok && !row.Compliance.Empty() {
 		row.Compliance = db.Compliance{}
 		warnings = append(warnings, fmt.Sprintf(
 			"Compliance settings were removed: %s has no compliance surface, so a "+
@@ -1074,7 +1079,7 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// Before the write, so what is stored is what the response describes.
-	warnings := dropUnsendableSettings(&row)
+	warnings := s.dropUnsendableSettings(&row)
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -1123,7 +1128,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// ends up on a platform that cannot send what it is holding without the
 	// client ever mentioning compliance. Checking the request body instead of
 	// the merged row would see nothing at all.
-	warnings := dropUnsendableSettings(existing)
+	warnings := s.dropUnsendableSettings(existing)
 
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
@@ -1415,14 +1420,35 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 
 // ---------------------------------------------------------------- processes
 
+// processSummary and processDetail are what these two endpoints say about a
+// process. They are named rather than inlined so that what leaves the API can
+// be asserted directly, without standing up an engine to own a process first --
+// which is why this was the one egress path where nobody noticed the redaction
+// policy was not being applied.
+//
+// Neither reads Args(). CommandString and Logs are the masked renderings;
+// Args() is the raw argv, and on a destination it carries the stream key and,
+// with backup ingest on, the backup key as well.
+func processSummary(p *supervisor.Process) map[string]any {
+	return map[string]any{
+		"status":  p.Status(),
+		"command": p.CommandString(),
+	}
+}
+
+func processDetail(name string, p *supervisor.Process) map[string]any {
+	return map[string]any{
+		"name":    name,
+		"command": p.CommandString(),
+		"lines":   p.Logs(),
+	}
+}
+
 func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 	procs := s.eng().Processes()
 	out := make([]map[string]any, 0, len(procs))
 	for _, p := range procs {
-		out = append(out, map[string]any{
-			"status":  p.Status(),
-			"command": p.CommandString(),
-		})
+		out = append(out, processSummary(p))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1440,11 +1466,7 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range s.eng().Processes() {
 		if p.Name() == name {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"name":    name,
-				"command": p.CommandString(),
-				"lines":   p.Logs(),
-			})
+			writeJSON(w, http.StatusOK, processDetail(name, p))
 			return
 		}
 	}

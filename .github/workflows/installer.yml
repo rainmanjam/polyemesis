@@ -36,6 +36,14 @@ jobs:
     name: flags and validation
     runs-on: ubuntu-latest
     container: ubuntu:24.04
+    # A ceiling, because GitHub's default is SIX HOURS. Measured at 9 to 17
+    # seconds: pull ubuntu:24.04, then run install.sh a handful of times with
+    # bad arguments. It installs no packages, which is what separates it from
+    # the two preflight jobs below and why it gets a third of their budget.
+    #
+    # Five leaves room for a slow-but-alive registry and none for one that
+    # accepts the connection and stops.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -77,6 +85,18 @@ jobs:
     name: "preflight: ${{ matrix.image }}"
     runs-on: ubuntu-latest
     container: ${{ matrix.image }}
+    # A ceiling, because GitHub's default is SIX HOURS -- and this job is the
+    # exact shape that consumed one. Its first step is `apt-get update` plus an
+    # FFmpeg install against a distribution mirror, which is what #92 caught
+    # eating an entire acceptance job in ci.yml and reporting only "cancelled".
+    # ci.yml answered that with a six-minute step timeout; here the install IS
+    # most of the job, so the bound belongs on the job.
+    #
+    # Measured at 37 to 81 seconds across the four images, the slowest being
+    # ubuntu:24.04. Fifteen is roughly eleven times that -- enough for a mirror
+    # that is degraded but serving, which is the case that must not go red, and
+    # far short of a mirror that has stopped answering.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -179,6 +199,13 @@ jobs:
     name: "preflight: ${{ matrix.image }}"
     runs-on: ubuntu-latest
     container: ${{ matrix.image }}
+    # Same reasoning and the same number as the preflight job above: a package
+    # manager talking to a distribution mirror is the failure mode, dnf here
+    # rather than apt. Measured at 21 to 43 seconds, so fifteen is more headroom
+    # again than it buys there -- deliberately the same figure, because the
+    # hazard is identical and two different numbers would invite the reader to
+    # look for a distinction that does not exist.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -190,10 +217,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Preflight names the right package for this family
+        # Through env rather than interpolated, for the reason the ci.yml jobs
+        # give: a `run:` block is a shell, and a matrix value is still a string
+        # arriving from outside it.
+        env:
+          IMAGE: ${{ matrix.image }}
         run: |
           out="$(bash scripts/install.sh --check --mode binary 2>&1 || true)"
           echo "$out" | grep -E '^\[|^     ' || true
-          case "${{ matrix.image }}" in
+          case "$IMAGE" in
             fedora*)
               # There is no `ffmpeg` package on Fedora at all.
               echo "$out" | grep -q "ffmpeg-free" \
@@ -201,4 +233,12 @@ jobs:
             rocky*)
               echo "$out" | grep -qi "RPM Fusion" \
                 || { echo "RHEL-family hint missing"; exit 1; } ;;
+            # A case with no default arm asserts nothing about an image it does
+            # not recognise, so adding almalinux:9 to the matrix above would
+            # have bought a green tick and no check. Adding a row has to mean
+            # deciding what hint that family should print.
+            *)
+              echo "no package-name assertion is written for $IMAGE"
+              echo "add an arm to this case, or drop the row from the matrix"
+              exit 1 ;;
           esac

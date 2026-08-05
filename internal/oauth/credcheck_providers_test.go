@@ -45,7 +45,7 @@ func TestTwitchCheckCredentials(t *testing.T) {
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			})
-			tw := &Twitch{tokenURL: srv.URL}
+			tw := NewTwitch(WithBaseURL(srv.URL))
 
 			err := tw.CheckCredentials(context.Background(), "id", "secret")
 			if tc.wantErr && err == nil {
@@ -69,7 +69,7 @@ func TestCheckCredentialsNeverEchoesTheSecret(t *testing.T) {
 		w.WriteHeader(403)
 		_, _ = w.Write([]byte(`{"message":"invalid client secret"}`))
 	})
-	tw := &Twitch{tokenURL: srv.URL}
+	tw := NewTwitch(WithBaseURL(srv.URL))
 
 	err := tw.CheckCredentials(context.Background(), "id", secret)
 	if err == nil {
@@ -105,7 +105,7 @@ func TestKickCheckCredentials(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"access_token":"a","expires_in":3600}`))
 		})
-		k := &Kick{idBase: srv.URL}
+		k := NewKick(WithBaseURL(srv.URL))
 		if err := k.CheckCredentials(context.Background(), "id", "secret"); err != nil {
 			t.Fatalf("rejected a valid pair: %v", err)
 		}
@@ -116,7 +116,7 @@ func TestKickCheckCredentials(t *testing.T) {
 			w.WriteHeader(401)
 			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
 		})
-		k := &Kick{idBase: srv.URL}
+		k := NewKick(WithBaseURL(srv.URL))
 		err := k.CheckCredentials(context.Background(), "id", "wrong")
 		if err == nil {
 			t.Fatal("accepted, want rejection")
@@ -136,7 +136,7 @@ func TestFacebookCheckCredentialsUsesGET(t *testing.T) {
 		method, path = r.Method, r.URL.Path
 		_, _ = w.Write([]byte(`{"access_token":"app-token"}`))
 	})
-	f := &Facebook{graphBase: srv.URL}
+	f := NewFacebook(WithBaseURL(srv.URL))
 
 	if err := f.CheckCredentials(context.Background(), "id", "secret"); err != nil {
 		t.Fatalf("rejected a valid pair: %v", err)

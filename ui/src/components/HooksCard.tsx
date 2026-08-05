@@ -27,15 +27,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { useT, type TranslationKey } from "@/lib/i18n";
 import type { Hook, HookDelivery, HookMeta, HookTestResult, HookTrigger } from "@/lib/types";
 
 /** Human labels for the wire names. The wire names are stored configuration and
- *  must never change; these are only what an operator reads. */
-const TRIGGER_LABELS: Record<string, string> = {
-  "ingest.published": "Stream started",
-  "ingest.disconnected": "Stream stopped",
-  "destination.up": "Destination live",
-  "destination.down": "Destination stopped",
+ *  must never change; these are only what an operator reads — so the map holds
+ *  a catalogue key and the render does the lookup, which keeps the vocabulary
+ *  and its fifteen translations from drifting apart. A trigger a future release
+ *  adds and this map does not name still renders: the wire name itself. */
+const TRIGGER_LABELS: Record<string, TranslationKey> = {
+  "ingest.published": "hooks.triggerIngestPublished",
+  "ingest.disconnected": "hooks.triggerIngestDisconnected",
+  "destination.up": "hooks.triggerDestinationUp",
+  "destination.down": "hooks.triggerDestinationDown",
 };
 
 const errText = (err: unknown, fallback: string) =>
@@ -50,10 +54,16 @@ const errText = (err: unknown, fallback: string) =>
  *  given. Same card, same table, same buttons — the difference is in what the
  *  product promises about delivery, not in how it looks. */
 export function HooksCard() {
+  const t = useT();
   const [hooks, setHooks] = useState<Hook[]>([]);
   const [meta, setMeta] = useState<HookMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Partial<Hook> | null>(null);
+  // In flight, same flag every other mutating dialog in this console carries.
+  // It matters more here than in most of them: a second create is not a
+  // duplicate row an operator can delete and forget, it is a second signing
+  // key that overwrites the first one on screen before anybody has copied it.
+  const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<HookTestResult | null>(null);
   // Kept outside the dialog: the key must survive closing it, because the
@@ -68,11 +78,11 @@ export function HooksCard() {
       setHooks(rows);
       setMeta(m);
     } catch (err) {
-      toast.error(errText(err, "Could not load webhooks."));
+      toast.error(errText(err, t("hooks.loadFailed")));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -83,7 +93,7 @@ export function HooksCard() {
       await api.hooks.update(h.id, { enabled });
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not change the hook."));
+      toast.error(errText(err, t("hooks.toggleFailed")));
     }
   };
 
@@ -92,10 +102,10 @@ export function HooksCard() {
   const remove = async (h: Hook) => {
     try {
       await api.hooks.remove(h.id);
-      toast.success("Webhook deleted.");
+      toast.success(t("hooks.deleted"));
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the hook."));
+      toast.error(errText(err, t("hooks.deleteFailed")));
     }
   };
 
@@ -109,7 +119,7 @@ export function HooksCard() {
     try {
       setTestResult(await api.hooks.test(h.id));
     } catch (err) {
-      toast.error(errText(err, "The endpoint did not accept the test delivery."));
+      toast.error(errText(err, t("hooks.testFailed")));
     } finally {
       setTesting(null);
     }
@@ -124,28 +134,31 @@ export function HooksCard() {
       setDeliveries(await api.hooks.deliveries(h.id));
       setOpenDeliveries(h.id);
     } catch (err) {
-      toast.error(errText(err, "Could not read recent deliveries."));
+      toast.error(errText(err, t("hooks.deliveriesFailed")));
     }
   };
 
   const save = async () => {
-    if (!draft) return;
+    if (!draft || busy) return;
+    setBusy(true);
     try {
       if (draft.id) {
         await api.hooks.update(draft.id, draft);
-        toast.success("Webhook updated.");
+        toast.success(t("hooks.updated"));
       } else {
         const created = await api.hooks.create({
           ...draft,
           url: draft.url ?? "",
         });
         setNewSecret(created.secret);
-        toast.success("Webhook created.");
+        toast.success(t("hooks.created"));
       }
       setDraft(null);
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not save the hook."));
+      toast.error(errText(err, t("hooks.saveFailed")));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -164,26 +177,24 @@ export function HooksCard() {
       <div className="space-y-3">
         <Card>
           <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Lifecycle webhooks</CardTitle>
+            <CardTitle>{t("hooks.title")}</CardTitle>
             <Button size="sm" onClick={() => setDraft({ enabled: true, triggers: [] })}>
-              <Plus /> New webhook
+              <Plus /> {t("hooks.new")}
             </Button>
           </CardHeader>
           <CardContent className="px-0 pb-0">
             {hooks.length === 0 ? (
               <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
-                No webhooks. Add one and polyemesis will POST a signed JSON body the moment the
-                stream starts or stops, or a destination goes up or down — one delivery per
-                transition, in order, for a script to act on.
+                {t("hooks.empty")}
               </div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Webhook</TableHead>
-                    <TableHead>Endpoint</TableHead>
-                    <TableHead>Subscribed to</TableHead>
-                    <TableHead className="text-center">On</TableHead>
+                    <TableHead>{t("hooks.colWebhook")}</TableHead>
+                    <TableHead>{t("hooks.colEndpoint")}</TableHead>
+                    <TableHead>{t("hooks.colTriggers")}</TableHead>
+                    <TableHead className="text-center">{t("hooks.colEnabled")}</TableHead>
                     <TableHead className="w-36" />
                   </TableRow>
                 </TableHeader>
@@ -192,9 +203,17 @@ export function HooksCard() {
                     <TableRow key={h.id}>
                       <TableCell>
                         <div className="text-[12px]">{h.name}</div>
+                        {/* One key per FORM rather than a stem plus an "s",
+                            which is the rule lib/i18n.ts states: substitution
+                            is {name} and nothing else, and a language whose
+                            plural does not work by suffixing cannot be served
+                            by concatenation. */}
                         <div className="text-[10px] text-muted-foreground">
-                          {h.hasSecret ? "signed" : "UNSIGNED"} · {h.maxAttempts} attempt
-                          {h.maxAttempts === 1 ? "" : "s"} · {h.timeoutSeconds}s timeout
+                          {t(h.hasSecret ? "hooks.signed" : "hooks.unsigned")} ·{" "}
+                          {t(h.maxAttempts === 1 ? "hooks.attemptsOne" : "hooks.attempts", {
+                            count: h.maxAttempts,
+                          })}{" "}
+                          · {t("hooks.timeout", { seconds: h.timeoutSeconds })}
                         </div>
                       </TableCell>
                       {/* The stored URL is never sent back; this is the mask,
@@ -204,11 +223,15 @@ export function HooksCard() {
                       </TableCell>
                       <TableCell>
                         {(h.triggers ?? []).length === 0 ? (
-                          <Badge variant="outline">everything</Badge>
+                          <Badge variant="outline">{t("hooks.allTriggers")}</Badge>
                         ) : (
                           <span className="text-[11px] text-muted-foreground">
-                            {(h.triggers ?? []).length} trigger
-                            {(h.triggers ?? []).length === 1 ? "" : "s"}
+                            {t(
+                              (h.triggers ?? []).length === 1
+                                ? "hooks.triggerCountOne"
+                                : "hooks.triggerCount",
+                              { count: (h.triggers ?? []).length },
+                            )}
                           </span>
                         )}
                       </TableCell>
@@ -216,7 +239,7 @@ export function HooksCard() {
                         <Switch
                           checked={h.enabled}
                           onCheckedChange={(v) => toggle(h, v)}
-                          aria-label={`Enable ${h.name}`}
+                          aria-label={t("hooks.enableAria", { name: h.name })}
                         />
                       </TableCell>
                       <TableCell>
@@ -225,8 +248,8 @@ export function HooksCard() {
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => showDeliveries(h)}
-                            aria-label="Recent deliveries"
-                            title="Recent deliveries"
+                            aria-label={t("hooks.deliveries")}
+                            title={t("hooks.deliveries")}
                           >
                             <Webhook />
                           </Button>
@@ -235,8 +258,8 @@ export function HooksCard() {
                             size="icon-sm"
                             onClick={() => test(h)}
                             disabled={testing === h.id}
-                            aria-label="Send test delivery"
-                            title="Send a test delivery now"
+                            aria-label={t("hooks.sendTest")}
+                            title={t("hooks.sendTestTitle")}
                           >
                             {testing === h.id ? <Loader2 className="animate-spin" /> : <Send />}
                           </Button>
@@ -244,7 +267,7 @@ export function HooksCard() {
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => setDraft(h)}
-                            aria-label="Edit"
+                            aria-label={t("common.edit")}
                           >
                             <Pencil />
                           </Button>
@@ -252,7 +275,7 @@ export function HooksCard() {
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => confirmDelete.ask(h)}
-                            aria-label="Delete"
+                            aria-label={t("common.delete")}
                             className="text-muted-foreground hover:text-down"
                           >
                             <Trash2 />
@@ -273,9 +296,7 @@ export function HooksCard() {
             regenerate. */}
         {newSecret && (
           <div className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-xs">
-            <p className="mb-1 font-medium text-warn">
-              Signing key — copy it now, it cannot be shown again
-            </p>
+            <p className="mb-1 font-medium text-warn">{t("hooks.secretTitle")}</p>
             <code className="block break-all font-mono text-[11px]">{newSecret}</code>
             <Button
               variant="ghost"
@@ -283,7 +304,7 @@ export function HooksCard() {
               className="mt-1"
               onClick={() => setNewSecret(null)}
             >
-              I have copied it
+              {t("hooks.secretCopied")}
             </Button>
           </div>
         )}
@@ -298,9 +319,13 @@ export function HooksCard() {
                   testResult.status >= 200 && testResult.status < 300 ? "live" : "down"
                 }
               >
-                HTTP {testResult.status || "no response"}
+                {t("hooks.httpStatus", {
+                  status: testResult.status || t("hooks.noResponse"),
+                })}
               </Badge>
-              <span className="text-muted-foreground">{testResult.durationMs} ms</span>
+              <span className="text-muted-foreground">
+                {t("hooks.durationMs", { ms: testResult.durationMs })}
+              </span>
             </div>
             <pre className="overflow-x-auto whitespace-pre-wrap font-mono">{testResult.body}</pre>
             <p className="break-all font-mono text-muted-foreground">
@@ -315,13 +340,11 @@ export function HooksCard() {
         {openDeliveries !== null && (
           <Card>
             <CardHeader>
-              <CardTitle>Recent deliveries</CardTitle>
+              <CardTitle>{t("hooks.deliveries")}</CardTitle>
             </CardHeader>
             <CardContent>
               {deliveries.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">
-                  Nothing delivered yet. Deliveries appear here as transitions happen.
-                </p>
+                <p className="text-[11px] text-muted-foreground">{t("hooks.noDeliveries")}</p>
               ) : (
                 <ul className="space-y-1 text-[11px]">
                   {deliveries.map((d) => (
@@ -329,7 +352,9 @@ export function HooksCard() {
                       <Badge variant={d.error ? "down" : "outline"}>{d.trigger}</Badge>
                       <span className="text-muted-foreground">#{d.sequence}</span>
                       <span className="text-muted-foreground">{d.status || "—"}</span>
-                      <span className="text-muted-foreground">{d.durationMs} ms</span>
+                      <span className="text-muted-foreground">
+                        {t("hooks.durationMs", { ms: d.durationMs })}
+                      </span>
                       {d.error && <span className="truncate text-down">{d.error}</span>}
                     </li>
                   ))}
@@ -342,19 +367,23 @@ export function HooksCard() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Delivery</CardTitle>
+          <CardTitle>{t("hooks.deliveryTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-2">
-          <Stat label="Sent" value={stats?.sent ?? 0} />
-          <Stat label="Failed" value={stats?.failed ?? 0} tone={stats?.failed ? "down" : "muted"} />
-          <Stat label="Endpoints" value={stats?.endpoints ?? 0} tone="muted" />
-          <Stat label="Queued" value={stats?.queued ?? 0} tone="muted" />
+          <Stat label={t("hooks.statSent")} value={stats?.sent ?? 0} />
           <Stat
-            label="Dropped"
+            label={t("hooks.statFailed")}
+            value={stats?.failed ?? 0}
+            tone={stats?.failed ? "down" : "muted"}
+          />
+          <Stat label={t("hooks.statEndpoints")} value={stats?.endpoints ?? 0} tone="muted" />
+          <Stat label={t("hooks.statQueued")} value={stats?.queued ?? 0} tone="muted" />
+          <Stat
+            label={t("hooks.statDropped")}
             value={stats?.dropped ?? 0}
             tone={stats?.dropped ? "warn" : "muted"}
           />
-          <Stat label="Retries" value={stats?.retries ?? 0} tone="muted" />
+          <Stat label={t("hooks.statRetries")} value={stats?.retries ?? 0} tone="muted" />
           {stats?.lastError && (
             <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-[10px] text-down">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -362,10 +391,14 @@ export function HooksCard() {
             </p>
           )}
           {meta && (
+            /* One sentence, one key. It used to wrap the header name in a
+               <code>, which meant three fragments a translator cannot reorder --
+               and the header name is monospace-looking on its own. */
             <p className="col-span-2 text-[10px] text-muted-foreground">
-              Payload {meta.specVersion}. Signature in{" "}
-              <code className="font-mono">{meta.headers.signature}</code>, over the timestamp and
-              body.
+              {t("hooks.payloadNote", {
+                version: meta.specVersion,
+                header: meta.headers.signature,
+              })}
             </p>
           )}
         </CardContent>
@@ -374,6 +407,7 @@ export function HooksCard() {
       <HookDialog
         draft={draft}
         meta={meta}
+        busy={busy}
         onChange={setDraft}
         onClose={() => setDraft(null)}
         onSave={save}
@@ -383,9 +417,9 @@ export function HooksCard() {
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
-        title="Delete this webhook?"
-        description="It stops delivering immediately. The endpoint is untouched, and you can recreate the hook — but its signing key cannot be recovered."
-        confirmLabel="Delete webhook"
+        title={t("hooks.deleteTitle")}
+        description={t("hooks.deleteBody")}
+        confirmLabel={t("hooks.deleteConfirm")}
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target);
         }}
@@ -424,16 +458,19 @@ function Stat({
 function HookDialog({
   draft,
   meta,
+  busy,
   onChange,
   onClose,
   onSave,
 }: {
   draft: Partial<Hook> | null;
   meta: HookMeta | null;
+  busy: boolean;
   onChange: (h: Partial<Hook>) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
+  const t = useT();
   if (!draft) return null;
   const editing = Boolean(draft.id);
   const triggers = draft.triggers ?? [];
@@ -441,7 +478,7 @@ function HookDialog({
   const toggleTrigger = (tr: HookTrigger, on: boolean) => {
     onChange({
       ...draft,
-      triggers: on ? [...triggers, tr] : triggers.filter((t) => t !== tr),
+      triggers: on ? [...triggers, tr] : triggers.filter((have) => have !== tr),
     });
   };
 
@@ -449,16 +486,13 @@ function HookDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit webhook" : "New webhook"}</DialogTitle>
-          <DialogDescription>
-            One signed POST per transition, in order. Unlike an alert, nothing is coalesced or
-            debounced — a script gets every edge.
-          </DialogDescription>
+          <DialogTitle>{t(editing ? "hooks.editTitle" : "hooks.newTitle")}</DialogTitle>
+          <DialogDescription>{t("hooks.dialogIntro")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label htmlFor="hook-name">Name</Label>
+            <Label htmlFor="hook-name">{t("hooks.name")}</Label>
             <Input
               id="hook-name"
               value={draft.name ?? ""}
@@ -467,7 +501,7 @@ function HookDialog({
           </div>
 
           <div className="space-y-1">
-            <Label htmlFor="hook-url">Endpoint URL</Label>
+            <Label htmlFor="hook-url">{t("hooks.url")}</Label>
             <Input
               id="hook-url"
               value={draft.url ?? ""}
@@ -475,15 +509,12 @@ function HookDialog({
               placeholder="https://ci.example.com/hooks/polyemesis"
             />
             {editing && (
-              <p className="text-[10px] text-muted-foreground">
-                The stored URL is never shown in full. Leave the masked value to keep it, or type a
-                new URL to replace it.
-              </p>
+              <p className="text-[10px] text-muted-foreground">{t("hooks.urlMasked")}</p>
             )}
           </div>
 
           <div className="space-y-1">
-            <Label>Triggers</Label>
+            <Label>{t("hooks.triggers")}</Label>
             <div className="grid grid-cols-2 gap-1">
               {(meta?.triggers ?? []).map((tr) => (
                 <label key={tr} className="flex items-center gap-1.5 text-[11px]">
@@ -491,18 +522,16 @@ function HookDialog({
                     checked={triggers.includes(tr)}
                     onCheckedChange={(v) => toggleTrigger(tr, Boolean(v))}
                   />
-                  {TRIGGER_LABELS[tr] ?? tr}
+                  {TRIGGER_LABELS[tr] ? t(TRIGGER_LABELS[tr]) : tr}
                 </label>
               ))}
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              None selected means every trigger, including ones added by a future release.
-            </p>
+            <p className="text-[10px] text-muted-foreground">{t("hooks.triggersNoneHint")}</p>
           </div>
 
           <div className="flex gap-3">
             <div className="space-y-1">
-              <Label htmlFor="hook-timeout">Timeout (s)</Label>
+              <Label htmlFor="hook-timeout">{t("hooks.timeoutLabel")}</Label>
               <Input
                 id="hook-timeout"
                 type="number"
@@ -514,7 +543,7 @@ function HookDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="hook-attempts">Attempts</Label>
+              <Label htmlFor="hook-attempts">{t("hooks.attemptsLabel")}</Label>
               <Input
                 id="hook-attempts"
                 type="number"
@@ -526,17 +555,22 @@ function HookDialog({
               />
             </div>
           </div>
-          <p className="text-[10px] text-muted-foreground">
-            Retries block this endpoint&rsquo;s own queue, because ordering is the promise. A 4xx is
-            never retried — an endpoint saying the request is wrong will say it again.
-          </p>
+          <p className="text-[10px] text-muted-foreground">{t("hooks.retriesHint")}</p>
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            {t("common.cancel")}
           </Button>
-          <Button onClick={onSave}>{editing ? "Save" : "Create"}</Button>
+          {/* Disabled while the request is in flight, the same shape as
+              DestinationDialog's footer. Two fast clicks on Create used to make
+              two hooks, and the UI shows one signing key -- the second -- so
+              the first receiver was left holding a hook it could never verify
+              a signature for, and the server cannot re-issue the key to fix it. */}
+          <Button onClick={onSave} disabled={busy}>
+            {busy && <Loader2 className="animate-spin" />}
+            {t(editing ? "common.save" : "hooks.create")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

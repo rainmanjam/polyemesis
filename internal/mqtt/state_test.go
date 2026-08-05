@@ -92,10 +92,20 @@ func TestNoPayloadFieldIsNamedLikeACredential(t *testing.T) {
 				if !strings.Contains(lower, b) {
 					continue
 				}
-				// ingestMode and ingestError are the two deliberate exceptions:
-				// a mode is `srt`/`rtmp`/`pull` and an error is FFmpeg's, and
-				// neither is a URL. Named explicitly so a future `ingestURL`
-				// does not inherit the exemption.
+				// ingestMode and ingestError are the two deliberate exceptions.
+				// A mode is `srt`/`rtmp`/`pull` and carries nothing.
+				//
+				// ingestError is exempt on different grounds, and the grounds
+				// this comment used to give were wrong: it said an FFmpeg error
+				// is not a URL. It routinely is -- what FFmpeg prints when a
+				// publish endpoint refuses it is the output URL, key and all,
+				// and supervisor.Status builds LastError from exactly those
+				// lines. The field is safe because that value is masked at
+				// source in supervisor.Status, not because of what FFmpeg
+				// happens to print.
+				//
+				// Named explicitly so a future `ingestURL` does not inherit
+				// the exemption.
 				if name == "ingestMode" || name == "ingestError" {
 					continue
 				}

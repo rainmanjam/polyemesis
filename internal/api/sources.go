@@ -81,13 +81,7 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 	}
 	if s.mgr != nil {
 		publishing = s.mgr.SharedIngestPublishing(src.ID)
-		for _, l := range s.mgr.SRTLinks() {
-			if l.SourceID == src.ID {
-				stat := l
-				link = &stat
-				break
-			}
-		}
+		link = linkForCard(s.mgr.SRTLinks(), src.ID)
 	}
 	return sourceView{
 		Publishing:    publishing,
@@ -98,6 +92,38 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 		TokenEnforced: tokenEnforced,
 		Running:       s.mgr != nil && s.mgr.Engine(src.ID) != nil,
 	}
+}
+
+// linkForCard picks the one uplink a source card should show.
+//
+// A source can have TWO live links since redundant ingest shipped: a primary
+// encoder, and a standby publishing to <token>.backup. Both carry the same
+// SourceID, so "the first one matching this id" stopped being a well-defined
+// answer -- it returns whichever the map happened to yield first, and it can
+// differ between two refreshes with nothing changed.
+//
+// The primary wins, because it is the feed that is on air and the card shows
+// one set of numbers.
+//
+// A backup is still better than nothing. An operator whose primary has dropped
+// is looking at this card precisely because the standby is carrying the show,
+// and a blank uplink panel at that moment is the least useful thing it could
+// do.
+func linkForCard(links []srtserver.LinkStats, sourceID int64) *srtserver.LinkStats {
+	var backup *srtserver.LinkStats
+	for _, l := range links {
+		if l.SourceID != sourceID {
+			continue
+		}
+		stat := l
+		if !stat.Backup {
+			return &stat
+		}
+		if backup == nil {
+			backup = &stat
+		}
+	}
+	return backup
 }
 
 // publishURLs is what the operator pastes into an encoder.

@@ -262,9 +262,12 @@ func firstNonEmpty(a, b string) string {
 
 // ------------------------------------------------------------------- YouTube
 
-// ytAPIBase is a var so tests can point the whole provider at a stub. Nothing
-// at runtime rewrites it.
-var ytAPIBase = "https://www.googleapis.com/youtube/v3"
+// ytAPIBase is the production YouTube Data API. It is a const: a test points a
+// provider at a stub with NewYouTube(WithBaseURL(...)), which redirects that
+// instance. It used to be a var whose comment claimed it pointed "the whole
+// provider" at a stub, and that claim was false -- Account and Ingest wrote
+// googleapis.com inline and ignored it.
+const ytAPIBase = "https://www.googleapis.com/youtube/v3"
 
 // ytCategoryRegion decides which localised category list we match names
 // against. YouTube's assignable categories are the same set worldwide; the
@@ -344,7 +347,7 @@ func (y *YouTube) liveBroadcast(ctx context.Context, accessToken string) (*ytBro
 		Items []ytBroadcast `json:"items"`
 	}
 	err := getJSON(ctx,
-		ytAPIBase+"/liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=all&broadcastType=all&maxResults=50",
+		y.apiEndpoint()+"/liveBroadcasts?part=id,snippet,status,contentDetails&broadcastStatus=all&broadcastType=all&maxResults=50",
 		accessToken, nil, &list)
 	if err != nil {
 		return nil, err
@@ -399,7 +402,7 @@ func (y *YouTube) PushMetadata(ctx context.Context, clientID, accessToken, accou
 		if b.Snippet.ScheduledStartTime != "" {
 			snip["scheduledStartTime"] = b.Snippet.ScheduledStartTime
 		}
-		err := requestJSON(ctx, http.MethodPut, ytAPIBase+"/liveBroadcasts?part=snippet",
+		err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=snippet",
 			accessToken, map[string]any{"id": b.ID, "snippet": snip}, nil, nil)
 		if err != nil {
 			return nil, scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
@@ -455,7 +458,7 @@ func (y *YouTube) setCategory(ctx context.Context, accessToken, videoID, name st
 			Snippet ytVideoSnippet `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx, ytAPIBase+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
+	err = getJSON(ctx, y.apiEndpoint()+"/videos?part=snippet&id="+url.QueryEscape(videoID), accessToken, nil, &current)
 	if err != nil {
 		return "", err
 	}
@@ -465,7 +468,7 @@ func (y *YouTube) setCategory(ctx context.Context, accessToken, videoID, name st
 	snip := current.Items[0].Snippet
 	snip.CategoryID = id
 
-	err = requestJSON(ctx, http.MethodPut, ytAPIBase+"/videos?part=snippet", accessToken,
+	err = requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=snippet", accessToken,
 		map[string]any{"id": videoID, "snippet": snip}, nil, nil)
 	if err != nil {
 		return "", scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
@@ -486,7 +489,7 @@ func (y *YouTube) categoryID(ctx context.Context, accessToken, name string) (id,
 			} `json:"snippet"`
 		} `json:"items"`
 	}
-	err = getJSON(ctx, ytAPIBase+"/videoCategories?part=snippet&regionCode="+ytCategoryRegion, accessToken, nil, &list)
+	err = getJSON(ctx, y.apiEndpoint()+"/videoCategories?part=snippet&regionCode="+ytCategoryRegion, accessToken, nil, &list)
 	if err != nil {
 		return "", "", err
 	}
@@ -518,7 +521,9 @@ func normaliseCategory(s string) string {
 
 // -------------------------------------------------------------------- Twitch
 
-var twitchHelixBase = "https://api.twitch.tv/helix"
+// twitchHelixBase is the production Helix API; see ytAPIBase above for why this
+// is a const. Reach it through (*Twitch).apiEndpoint, never directly.
+const twitchHelixBase = "https://api.twitch.tv/helix"
 
 func (t *Twitch) MetadataCaps() MetadataCaps {
 	return MetadataCaps{
@@ -567,7 +572,7 @@ func (t *Twitch) PushMetadata(ctx context.Context, clientID, accessToken, accoun
 		return res, nil
 	}
 	err := requestJSON(ctx, http.MethodPatch,
-		twitchHelixBase+"/channels?broadcaster_id="+url.QueryEscape(accountRef),
+		t.apiEndpoint()+"/channels?broadcaster_id="+url.QueryEscape(accountRef),
 		accessToken, body, helixHeaders(clientID), nil)
 	if err != nil {
 		return nil, scopeAdvice(err, db.PlatformTwitch, t.MetadataCaps().Scope)
@@ -595,7 +600,7 @@ func (t *Twitch) gameID(ctx context.Context, clientID, accessToken, name string)
 	var exact struct {
 		Data []twitchGame `json:"data"`
 	}
-	err = getJSON(ctx, twitchHelixBase+"/games?name="+url.QueryEscape(name),
+	err = getJSON(ctx, t.apiEndpoint()+"/games?name="+url.QueryEscape(name),
 		accessToken, helixHeaders(clientID), &exact)
 	if err != nil {
 		return "", "", err
@@ -607,7 +612,7 @@ func (t *Twitch) gameID(ctx context.Context, clientID, accessToken, name string)
 	var found struct {
 		Data []twitchGame `json:"data"`
 	}
-	err = getJSON(ctx, twitchHelixBase+"/search/categories?first=20&query="+url.QueryEscape(name),
+	err = getJSON(ctx, t.apiEndpoint()+"/search/categories?first=20&query="+url.QueryEscape(name),
 		accessToken, helixHeaders(clientID), &found)
 	if err != nil {
 		return "", "", err

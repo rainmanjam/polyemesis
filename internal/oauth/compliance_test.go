@@ -28,9 +28,7 @@ func facebookKeyForLiveVideo(id string) string {
 // public, and the operator finds out from the audience.
 func TestAStatusWriteAlwaysCarriesPrivacyStatus(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytOneUpcoming)
-
-	y := &YouTube{}
+	y, _ := ytStub(t, &log, ytOneUpcoming)
 	if _, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{},
 		db.Compliance{Privacy: db.PrivacyUnlisted}); err != nil {
 		t.Fatalf("PushCompliance: %v", err)
@@ -61,9 +59,7 @@ func TestAStatusWriteAlwaysCarriesPrivacyStatus(t *testing.T) {
 // before this existed.
 func TestAnEmptyComplianceBlockWritesNothing(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytOneUpcoming)
-
-	y := &YouTube{}
+	y, _ := ytStub(t, &log, ytOneUpcoming)
 	res, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{}, db.Compliance{})
 	if err != nil {
 		t.Fatalf("PushCompliance: %v", err)
@@ -85,9 +81,7 @@ func TestAnEmptyComplianceBlockWritesNothing(t *testing.T) {
 func TestMadeForKidsGoesThroughVideosNotLiveBroadcasts(t *testing.T) {
 	for _, want := range []bool{true, false} {
 		var log []capture
-		ytStub(t, &log, ytOneUpcoming)
-
-		y := &YouTube{}
+		y, _ := ytStub(t, &log, ytOneUpcoming)
 		if _, err := y.PushCompliance(context.Background(), "cid", "tok", ComplianceTarget{},
 			db.Compliance{MadeForKids: ptrBool(want)}); err != nil {
 			t.Fatalf("PushCompliance: %v", err)
@@ -212,7 +206,7 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 	// report is one the platform confirmed. This must not grow a second,
 	// unconfirmed path just because it is reached from somewhere new.
 	t.Run("the read-back confirms the value", func(t *testing.T) {
-		log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/9":
 				writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
@@ -224,7 +218,11 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 				http.Error(w, "{}", http.StatusNotFound)
 			}
 		})
-		cp, ok := ComplianceFor(db.PlatformFacebook)
+		// Resolved from a Set aimed at the stub, not the package-level
+		// ComplianceFor: that one resolves against the production providers, so
+		// this test used to depend on fbServer having rewritten a package var.
+		// It now proves the lookup and the redirection together.
+		cp, ok := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
 		if !ok {
 			t.Fatal("Facebook has no compliance capability")
 		}
@@ -253,7 +251,7 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 	// report the old value on read -- and when it does, that has to come back
 	// as Skipped, never as a success the POST's status code did not earn.
 	t.Run("a read-back that disagrees is not applied", func(t *testing.T) {
-		log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/9":
 				writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
@@ -265,7 +263,11 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 				http.Error(w, "{}", http.StatusNotFound)
 			}
 		})
-		cp, ok := ComplianceFor(db.PlatformFacebook)
+		// Resolved from a Set aimed at the stub, not the package-level
+		// ComplianceFor: that one resolves against the production providers, so
+		// this test used to depend on fbServer having rewritten a package var.
+		// It now proves the lookup and the redirection together.
+		cp, ok := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
 		if !ok {
 			t.Fatal("Facebook has no compliance capability")
 		}
@@ -299,10 +301,10 @@ func TestFacebookComplianceGoesThroughTheConfirmedPrivacyPath(t *testing.T) {
 func TestAnEmptyComplianceSendsNothingAtAll(t *testing.T) {
 	// A destination that has never been given a compliance setting must produce
 	// exactly the API calls it produced before this existed.
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
-	cp, _ := ComplianceFor(db.PlatformFacebook)
+	cp, _ := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
 	if _, err := cp.PushCompliance(context.Background(), "cid", "user-token",
 		ComplianceTarget{AccountRef: "user:1000", StreamKey: facebookKeyForLiveVideo("9")},
 		db.Compliance{}); err != nil {
@@ -321,10 +323,10 @@ func TestAnEmptyComplianceSendsNothingAtAll(t *testing.T) {
 // error, and it must not touch the network at all -- there is nothing to
 // address.
 func TestFacebookComplianceSkipsWhenNoBroadcastIdIsRecorded(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
-	cp, ok := ComplianceFor(db.PlatformFacebook)
+	cp, ok := NewSet(WithBaseURL(fb.api)).ComplianceFor(db.PlatformFacebook)
 	if !ok {
 		t.Fatal("Facebook has no compliance capability")
 	}

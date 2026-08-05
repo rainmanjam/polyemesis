@@ -1,17 +1,19 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
-
-	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 )
 
 // A hook endpoint holds two secrets where an alert rule holds one: the URL
@@ -147,10 +149,108 @@ func TestHooksMetaListsEveryTrigger(t *testing.T) {
 	}
 }
 
-func TestDeliveriesRouteExists(t *testing.T) {
+// countingDoer answers every delivery with 200 so a DeliveryRecord exists for
+// the route below to serve. A stub rather than a listener: the assertion is
+// about what the API returns, not about HTTP.
+type countingDoer struct{}
+
+func (countingDoer) Do(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("thanks")),
+		Header:     http.Header{},
+	}, nil
+}
+
+// The delivery log is the answer to "did my hook fire", so the route has to
+// return a hook's actual attempts.
+//
+// This asserted only http.StatusOK, under the name TestDeliveriesRouteExists.
+// api.go registers the embedded SPA as the root mux's NotFound handler, so an
+// unrouted /api/v1/... path is answered by web.Handler with index.html and a
+// 200 -- measured: commenting out `r.Get("/hooks/{id}/deliveries", ...)` left
+// the old test passing. An empty JSON array would not have been enough either:
+// that is exactly what the nil-dispatcher branch returns, so a route serving
+// nothing and a route serving no records were indistinguishable.
+//
+// Mutation: comment out `r.Get("/hooks/{id}/deliveries", s.handleHookDeliveries)`
+// in api.go. Observed FAIL on a committed tree, in both UI configurations --
+// with internal/web/dist/index.html present (the SPA answers 200 with HTML,
+// which does not decode) and with it absent, as CI runs (the fallback answers
+// 404 "UI not built").
+func TestDeliveriesRouteReturnsTheAttemptsItMade(t *testing.T) {
 	h, _, sign := sourceServer(t)
 	created := createHook(t, h, sign, map[string]any{"name": "deploy", "url": hookURL})
-	id := strconv.FormatInt(int64(created["id"].(float64)), 10)
+	id := int64(created["id"].(float64))
+	path := "/api/v1/hooks/" + strconv.FormatInt(id, 10) + "/deliveries"
 
-	send(t, h, sign, http.MethodGet, "/api/v1/hooks/"+id+"/deliveries", nil, http.StatusOK)
+	// A live dispatcher with one running worker, keyed to the hook that was just
+	// created, so Deliveries(id) has something real to report.
+	d := hooks.NewDispatcher(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		hooks.SourceFunc(func() ([]hooks.Hook, error) {
+			return []hooks.Hook{hooks.Hook{
+				ID: id, Name: "deploy", Enabled: true,
+				URL: "https://example.com/h", Secret: "s3cr3t",
+			}.Normalized()}, nil
+		}),
+		hooks.WithDoer(countingDoer{}),
+		hooks.WithReloadInterval(5*time.Millisecond),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go d.Run(ctx)
+	lastTestServer.hooks = d
+
+	d.Publish(hooks.Event{
+		Trigger: hooks.TriggerIngestPublished,
+		Source:  hooks.SourceRef{ID: 1, Name: "Main"},
+	})
+
+	// Polled through the ROUTE, so the wait is on what an operator would see.
+	var got []hooks.DeliveryRecord
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		r := jsonRequest(t, http.MethodGet, path, nil)
+		sign(r)
+		w := do(t, h, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: status %d, want 200: %.80s", path, w.Code, w.Body.String())
+		}
+		got = nil
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("GET %s did not return a JSON array (%v); the SPA fallback "+
+				"answered instead of the deliveries route: %.80s", path, err, w.Body.String())
+		}
+		if len(got) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if len(got) != 1 {
+		t.Fatalf("deliveries = %+v, want the one attempt that was made", got)
+	}
+	rec := got[0]
+	if rec.HookID != id {
+		t.Errorf("hookId = %d, want %d: the route served some other hook's log", rec.HookID, id)
+	}
+	if rec.Trigger != hooks.TriggerIngestPublished {
+		t.Errorf("trigger = %q, want ingest.published", rec.Trigger)
+	}
+	if rec.Status != http.StatusOK || rec.Attempts != 1 {
+		t.Errorf("status=%d attempts=%d, want 200 in one attempt", rec.Status, rec.Attempts)
+	}
+	if rec.ID == "" {
+		t.Error("no delivery id; the operator cannot match this row against their receiver's log")
+	}
+
+	// And a non-numeric id is a 400 from the handler -- a status neither the SPA
+	// nor the "UI not built" fallback can produce, so this pins the route in
+	// either configuration even if the log were empty.
+	var bad map[string]any
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/hooks/abc/deliveries", nil,
+		http.StatusBadRequest), &bad)
+	if _, ok := bad["error"]; !ok {
+		t.Errorf("no error field explaining the 400: %v", bad)
+	}
 }

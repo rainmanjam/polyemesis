@@ -1386,3 +1386,254 @@ func TestMigrateDestinationExpertArgsBackfillsFacebookOnAnUpgradedDatabase(t *te
 			"sending Facebook parameters nobody set", legacy.Facebook)
 	}
 }
+
+// THE SILENT HALF OF THE MIGRATION. backup_ingest_wanted arrives as
+// `INTEGER NOT NULL DEFAULT 0`, and 0 is the correct answer for a new row and
+// the wrong one for every install that already had redundancy switched on: the
+// intent used to live inside the facebook blob, as `{"backupIngest":true}`.
+// A bare ALTER answers "no" for all of them, wantsBackup goes false, and
+// nothing anywhere says so -- the operator finds out when a primary connection
+// drops and the second feed that was supposed to catch it was never started.
+//
+// So this builds the row in the shape it was actually written in, with the
+// column genuinely absent, and asks whether the intent came back. Same
+// technique as TestMigrateDestinationExpertArgsBackfillsFacebookOnAnUpgradedDatabase
+// above; the claim is about the UPDATE that follows the ALTER, which does not
+// run unless the column is missing when Open() is called.
+//
+// Mutation, run against a committed tree: in MigrateDestinationExpertArgs,
+// `UPDATE destinations SET backup_ingest_wanted = 1` -> `... = 0`, which is
+// exactly the bare-ALTER behaviour. Observed FAIL.
+func TestMigrateDestinationsCarriesBackupIntentOutOfTheFacebookBlob(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-backup-intent.db")
+
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	// Every column the release before this one had, including facebook and the
+	// two backup endpoint columns -- and NOT backup_ingest_wanted, which is the
+	// single column an upgrading install is missing.
+	if _, err := old.Exec(`CREATE TABLE destinations (
+		id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+		name                    TEXT    NOT NULL,
+		kind                    TEXT    NOT NULL,
+		platform                TEXT    NOT NULL DEFAULT '',
+		account_id              INTEGER,
+		url                     TEXT    NOT NULL DEFAULT '',
+		stream_key              TEXT    NOT NULL DEFAULT '',
+		enabled                 INTEGER NOT NULL DEFAULT 0,
+		audio_bitrate           INTEGER NOT NULL DEFAULT 160,
+		profile                 TEXT    NOT NULL,
+		rendition_id            INTEGER,
+		source_id               INTEGER,
+		extra_input_args        TEXT    NOT NULL DEFAULT '',
+		extra_output_args       TEXT    NOT NULL DEFAULT '',
+		expert_ack_reencode     INTEGER NOT NULL DEFAULT 0,
+		tr_no_duration_filesize INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_packets    INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_bytes      INTEGER NOT NULL DEFAULT 0,
+		tr_rw_timeout_seconds   INTEGER NOT NULL DEFAULT 0,
+		rs_min_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_max_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_give_up_after        INTEGER NOT NULL DEFAULT 0,
+		au_codec                TEXT    NOT NULL DEFAULT '',
+		au_mono                 INTEGER NOT NULL DEFAULT 0,
+		compliance              TEXT    NOT NULL DEFAULT '{}',
+		facebook                TEXT    NOT NULL DEFAULT '{}',
+		backup_url              TEXT    NOT NULL DEFAULT '',
+		backup_stream_key       TEXT    NOT NULL DEFAULT '',
+		position                INTEGER NOT NULL DEFAULT 0,
+		created_at              INTEGER NOT NULL,
+		updated_at              INTEGER NOT NULL
+	);
+	INSERT INTO destinations
+		(name, kind, platform, url, stream_key, enabled, audio_bitrate, profile,
+		 rendition_id, source_id, compliance, facebook, backup_url, backup_stream_key,
+		 position, created_at, updated_at)
+	VALUES ('Redundant FB', 'rtmp', 'facebook', 'rtmps://live-api.facebook.com:443/rtmp/', 'abc-123', 1, 160,
+		'{"mode":"simple","tracks":[{"track":0,"enabled":true,"gain":1}],"normalize":"auto","sampleRate":48000}',
+		NULL, NULL, '{}', '{"backupIngest":true}', 'rtmps://backup.example/rtmp', 'backup-key',
+		0, 1000, 1000),
+	       ('Ordinary FB', 'rtmp', 'facebook', 'rtmps://live-api.facebook.com:443/rtmp/', 'def-456', 1, 160,
+		'{"mode":"simple","tracks":[{"track":0,"enabled":true,"gain":1}],"normalize":"auto","sampleRate":48000}',
+		NULL, NULL, '{}', '{}', '', '',
+		1, 1000, 1000);`); err != nil {
+		t.Fatalf("build pre-backup-intent database: %v", err)
+	}
+	if _, err := old.Exec(`SELECT backup_ingest_wanted FROM destinations`); err == nil {
+		t.Fatal("backup_ingest_wanted already exists on the hand-built table; this test proves nothing")
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-backup-intent database: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	list, err := d.ListDestinations()
+	if err != nil {
+		t.Fatalf("ListDestinations after migration: %v", err)
+	}
+	byName := map[string]*Destination{}
+	for _, row := range list {
+		byName[row.Name] = row
+	}
+	redundant, ok := byName["Redundant FB"]
+	if !ok {
+		t.Fatalf("the pre-existing rows did not survive the migration: %d rows", len(list))
+	}
+	if !redundant.BackupIngestWanted {
+		t.Error("an install that had redundancy switched on came back with it OFF. " +
+			"Nothing reports this: the destination goes live with one feed, and the " +
+			"operator learns about it the first time the primary drops.")
+	}
+	// The other direction, so the backfill cannot pass by setting everything.
+	// A row that never asked for redundancy must not start paying for it --
+	// double the upload bandwidth, on an operator who did not choose it.
+	if ordinary := byName["Ordinary FB"]; ordinary == nil || ordinary.BackupIngestWanted {
+		t.Errorf("a destination that never asked for redundancy came back wanting it: %+v", ordinary)
+	}
+}
+
+// legacyDestinationsDB writes a destinations table in the shape the release
+// before backup_ingest_wanted actually had, with one row carrying the intent
+// inside the facebook blob. Shared by the two migration guards below so they
+// cannot drift apart on what "the previous release" means.
+func legacyDestinationsDB(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	if _, err := old.Exec(`CREATE TABLE destinations (
+		id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+		name                    TEXT    NOT NULL,
+		kind                    TEXT    NOT NULL,
+		platform                TEXT    NOT NULL DEFAULT '',
+		account_id              INTEGER,
+		url                     TEXT    NOT NULL DEFAULT '',
+		stream_key              TEXT    NOT NULL DEFAULT '',
+		enabled                 INTEGER NOT NULL DEFAULT 0,
+		audio_bitrate           INTEGER NOT NULL DEFAULT 160,
+		profile                 TEXT    NOT NULL,
+		rendition_id            INTEGER,
+		source_id               INTEGER,
+		extra_input_args        TEXT    NOT NULL DEFAULT '',
+		extra_output_args       TEXT    NOT NULL DEFAULT '',
+		expert_ack_reencode     INTEGER NOT NULL DEFAULT 0,
+		tr_no_duration_filesize INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_packets    INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_bytes      INTEGER NOT NULL DEFAULT 0,
+		tr_rw_timeout_seconds   INTEGER NOT NULL DEFAULT 0,
+		rs_min_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_max_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_give_up_after        INTEGER NOT NULL DEFAULT 0,
+		au_codec                TEXT    NOT NULL DEFAULT '',
+		au_mono                 INTEGER NOT NULL DEFAULT 0,
+		compliance              TEXT    NOT NULL DEFAULT '{}',
+		facebook                TEXT    NOT NULL DEFAULT '{}',
+		backup_url              TEXT    NOT NULL DEFAULT '',
+		backup_stream_key       TEXT    NOT NULL DEFAULT '',
+		position                INTEGER NOT NULL DEFAULT 0,
+		created_at              INTEGER NOT NULL,
+		updated_at              INTEGER NOT NULL
+	);
+	INSERT INTO destinations
+		(name, kind, platform, url, stream_key, enabled, audio_bitrate, profile,
+		 rendition_id, source_id, compliance, facebook, backup_url, backup_stream_key,
+		 position, created_at, updated_at)
+	VALUES ('Redundant FB', 'rtmp', 'facebook', 'rtmps://live-api.facebook.com:443/rtmp/', 'abc-123', 1, 160,
+		'{"mode":"simple","tracks":[{"track":0,"enabled":true,"gain":1}],"normalize":"auto","sampleRate":48000}',
+		NULL, NULL, '{}', '{"backupIngest":true}', 'rtmps://backup.example/rtmp', 'backup-key',
+		0, 1000, 1000);`); err != nil {
+		t.Fatalf("build legacy database: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+	return path
+}
+
+// The ALTER and its backfill are one transaction, and this is the case that
+// decides it.
+//
+// The backfill only runs when THIS pass created the column. So a crash -- or
+// any error -- between the ALTER committing and the UPDATE running would leave
+// a database where the column exists, the guard is false for ever after, and
+// every operator who had redundancy on has silently lost it. Nothing reports
+// that. They find out when a primary drops and the second feed that was
+// supposed to catch it was never started.
+//
+// Either both arrive or neither does, so the next open sees a state it
+// recognises and tries again.
+//
+// Mutation proving it can fail: in MigrateDestinationExpertArgs, change
+// `defer func() { _ = tx.Rollback() }()` to `defer func() { _ = tx.Commit() }()`,
+// so the error path commits the ALTER it was supposed to unwind. Measured:
+// FAIL, "the column survived a failed migration" -- and the retry guard below
+// fails with it.
+//
+// THE OBVIOUS MUTATION IS THE WRONG ONE, and it is worth writing down why.
+// Taking the ALTERs back out of the transaction -- `tx.Exec(c.ddl)` ->
+// `d.sql.Exec(c.ddl)` -- does not fail this test. It HANGS: db.go sets
+// SetMaxOpenConns(1), so a statement issued on d.sql while tx holds the one
+// connection waits for a connection tx will not release until it commits. That
+// is the same deadlock the comment above the existence checks warns about, and
+// a hanging test proves nothing at all -- it never reaches an assertion.
+func TestAFailedBackfillTakesTheColumnWithIt(t *testing.T) {
+	path := legacyDestinationsDB(t, "interrupted-migration.db")
+
+	orig := backupIntentBackfill
+	backupIntentBackfill = `UPDATE destinations SET backup_ingest_wanted = 1 WHERE no_such_column = 1`
+	t.Cleanup(func() { backupIntentBackfill = orig })
+
+	if d, err := Open(path); err == nil {
+		d.Close()
+		t.Fatal("Open reported success while its data migration failed")
+	}
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen raw sqlite: %v", err)
+	}
+	defer raw.Close()
+	if _, err := raw.Exec(`SELECT backup_ingest_wanted FROM destinations`); err == nil {
+		t.Error("the column survived a failed migration. The next open will see it, " +
+			"skip the backfill for ever, and every install that had redundancy on " +
+			"keeps a column that says it does not.")
+	}
+}
+
+// And the recovery the atomicity is FOR: the operator restarts, and the second
+// attempt completes. A rollback that left the database unopenable would be a
+// different bug wearing the same fix.
+func TestTheMigrationSucceedsOnTheAttemptAfterAFailedOne(t *testing.T) {
+	path := legacyDestinationsDB(t, "retried-migration.db")
+
+	orig := backupIntentBackfill
+	backupIntentBackfill = `UPDATE destinations SET backup_ingest_wanted = 1 WHERE no_such_column = 1`
+	if d, err := Open(path); err == nil {
+		d.Close()
+		t.Fatal("Open reported success while its data migration failed")
+	}
+	backupIntentBackfill = orig
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("the retry could not open the database the rollback left behind: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	list, err := d.ListDestinations()
+	if err != nil {
+		t.Fatalf("ListDestinations after the retried migration: %v", err)
+	}
+	if len(list) != 1 || !list[0].BackupIngestWanted {
+		t.Errorf("the retry did not carry the intent across: %+v", list)
+	}
+}

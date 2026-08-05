@@ -38,6 +38,15 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     permissions: {}
+    # A ceiling, because GitHub's default is SIX HOURS. One shell step that
+    # splits a comma-separated list into JSON, with no checkout and no network
+    # -- 2 to 6 seconds on every run. Five, matching ci.yml's container-suites,
+    # which is the same shape: a job that only decides what the next job does.
+    #
+    # measure below already carries 120, and a fan-out job with no ceiling in
+    # front of a bounded one is the wrong way round: nothing downstream of a
+    # stuck plan ever starts, so the whole matrix waits on it.
+    timeout-minutes: 5
     outputs:
       suites: ${{ steps.split.outputs.suites }}
     steps:
@@ -111,8 +120,24 @@ jobs:
           SUITE: ${{ matrix.suite }}
           RUNS: ${{ inputs.runs }}
         run: |
+          set -euo pipefail
           case "$SUITE" in acceptance*) ;; *) echo "refusing: $SUITE"; exit 1 ;; esac
-          case "$RUNS" in ''|*[!0-9]*) echo "runs must be a number"; exit 1 ;; esac
+
+          # A COUNT, not merely a string of digits. `''|*[!0-9]*` rejects "" and
+          # "abc" and accepts "0" -- and on GNU coreutils `seq 1 0` prints
+          # nothing, so the loop below ran zero times, `fail` stayed 0, and the
+          # summary published "0 failed / 0 runs" from a green job. A zero-run
+          # report is indistinguishable at a glance from a clean suite, which is
+          # the one reading this instrument must never produce.
+          #
+          # (BSD seq counts DOWN for `seq 1 0` and would have run once. The
+          # workflow is ubuntu-latest, so the coreutils behaviour is the one
+          # that decides -- but the guard is on the input, not on which seq.)
+          case "$RUNS" in ''|*[!0-9]*) echo "runs must be a whole number, got: '$RUNS'"; exit 1 ;; esac
+          [ "$RUNS" -ge 1 ] || { echo "runs must be at least 1, got: '$RUNS'"; exit 1; }
+          # An upper bound as well. Each repetition is minutes; the job's ceiling
+          # is 120, so a typo'd "500" buys a cancelled run with no report at all.
+          [ "$RUNS" -le 40 ] || { echo "runs must be 40 or fewer, got: '$RUNS'"; exit 1; }
           [ -x "./scripts/$SUITE.sh" ] || { echo "no such suite: $SUITE"; exit 1; }
 
           pass=0; fail=0
@@ -128,20 +153,43 @@ jobs:
             echo "  run $i: $rc ($(( $(date +%s) - start ))s)"
             # The last line of a failing run is usually the assertion that
             # broke, which is the thing worth reading in the summary.
-            [ "$rc" = FAIL ] && tail -3 "/tmp/${SUITE}-$i.log" | sed 's/^/      /'
+            if [ "$rc" = FAIL ]; then
+              tail -3 "/tmp/${SUITE}-$i.log" | sed 's/^/      /'
+            fi
           done
+
+          # THE SECOND LOCK, and deliberately not a re-reading of the input.
+          #
+          # The validation above is one edit away from being wrong again -- it
+          # already was. This counts the outcomes actually WRITTEN by the loop,
+          # so any future path to zero executions (a seq that emits nothing, a
+          # RUNS that survives a loosened case, a loop body that never runs)
+          # stops here rather than publishing. Nothing is appended to the step
+          # summary before this check: a run that measured nothing must leave no
+          # report at all, because the report is what gets read as the answer.
+          measured=$(grep -c . /tmp/outcomes.txt || true)
+          if [ "${measured:-0}" -lt 1 ]; then
+            echo "::error::no run was executed, so there is no rate to report"
+            echo "::error::refusing to publish '0 failed / 0 runs' -- that reads as a clean suite"
+            exit 1
+          fi
+          if [ "$measured" -ne "$RUNS" ] || [ "$((pass + fail))" -ne "$measured" ]; then
+            echo "::error::recorded $measured outcome(s) and $((pass + fail)) tallied for $RUNS requested run(s)"
+            echo "::error::the measurement is incomplete; refusing to publish a rate from it"
+            exit 1
+          fi
 
           {
             echo "### $SUITE"
             echo
-            echo "**$fail failed / $RUNS runs**, unchanged tree, same runner image."
+            echo "**$fail failed / $measured runs**, unchanged tree, same runner image."
             echo
             echo '| run | result | duration |'
             echo '|---|---|---|'
             awk -F'\t' '{printf "| %s | %s | %s |\n", $1, $2, $3}' /tmp/outcomes.txt
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "RESULT $SUITE: $fail/$RUNS failed"
+          echo "RESULT $SUITE: $fail/$measured failed"
 
       - name: Keep the logs
         if: always()

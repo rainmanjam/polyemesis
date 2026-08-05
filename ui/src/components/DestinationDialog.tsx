@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Check, ChevronsUpDown, ExternalLink, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import {
@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { Switch } from "@/components/ui/switch";
 // The capability matrix this dialog renders inline. Data, not a component, and
 // shared with the settings page — see lib/capabilities.ts.
@@ -542,6 +543,10 @@ interface Props {
 
 export function DestinationDialog({ open, onOpenChange, destination, onSaved }: Props) {
   const editing = destination !== null;
+  // Only the Facebook create-time block reads this so far. The rest of the
+  // dialog is still English literals -- a mechanical follow-up, key by key,
+  // rather than something to do halfway in a commit about drift guards.
+  const t = useT();
 
   const [name, setName] = useState("");
   const [platform, setPlatform] = useState<Platform>("custom");
@@ -551,6 +556,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [kind, setKind] = useState<DestKind>("rtmp");
   const [url, setUrl] = useState("");
   const [streamKey, setStreamKey] = useState("");
+  // The key as it was when this dialog opened, so save can tell "the operator
+  // did not touch this field" from "the field happens to be empty". Compared
+  // against the loaded value rather than against "", because a destination
+  // whose key has not been fetched yet legitimately holds "" and must still be
+  // able to send one. A ref rather than state: nothing renders from it, and a
+  // re-render must not reset it.
+  const loadedStreamKey = useRef("");
   const [bitrate, setBitrate] = useState(160);
   // Muxer and socket tuning. An empty object is "no opt-in", which is what
   // every destination that predates this carries, and what the server turns
@@ -568,6 +580,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // from compliance -- neither is an obligation, both only apply at the moment
   // the broadcast is created. Empty means "send neither".
   const [facebook, setFacebook] = useState<FacebookSettings>({});
+  // "Publish a redundant feed for this destination." Top-level rather than part
+  // of `facebook` because neither the endpoint it gates nor the engine that
+  // reads it is platform-specific — see db.Destination.BackupIngestWanted. The
+  // control is still rendered inside the Facebook box because Facebook is the
+  // only platform that hands out a backup endpoint today.
+  const [backupIngestWanted, setBackupIngestWanted] = useState(false);
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -592,12 +610,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setKind(destination.kind);
       setUrl(destination.url);
       setStreamKey(destination.streamKey);
+      loadedStreamKey.current = destination.streamKey;
       setBitrate(destination.audioBitrate);
       setTransport(destination.transport ?? {});
       setResilience(destination.resilience ?? {});
       setAudio(destination.audio ?? {});
       setCompliance(destination.compliance ?? {});
       setFacebook(destination.facebook ?? {});
+      setBackupIngestWanted(destination.backupIngestWanted ?? false);
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -608,12 +628,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setAudio({});
       setCompliance({});
       setFacebook({});
+      setBackupIngestWanted(false);
       setName("");
       setPlatform("custom");
       setPresetId("");
       setKind("rtmp");
       setUrl("");
       setStreamKey("");
+      loadedStreamKey.current = "";
       setBitrate(160);
       setAccountId("none");
       setRenditionId(PASSTHROUGH);
@@ -716,7 +738,6 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         kind,
         platform,
         url: url.trim(),
-        streamKey: streamKey.trim(),
         audioBitrate: bitrate,
         accountId: accountId === "none" ? null : Number(accountId),
         // null is passthrough: no encode, no process, straight off the ingest.
@@ -726,7 +747,31 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         audio,
         compliance,
         facebook,
+        backupIngestWanted,
       };
+      // The stream key travels ONLY when this dialog is what changed it.
+      //
+      // The omitted-key merge that made the backup toggle one-way is the right
+      // behaviour here, and it is load-bearing. internal/api/preannounce.go
+      // writes a NEW primary key every time it creates a Facebook broadcast,
+      // and states the invariant in its own words: the key the pre-created
+      // broadcast returned has to be the one the encoder publishes to, or the
+      // event page people were notified about stays empty beside a live stream.
+      //
+      // This dialog reads the key once, when it opens. An operator who opens
+      // it, waits through a five-minute sweep, renames the destination and
+      // saves was sending the key from before the sweep -- reverting a
+      // pre-announced broadcast to a key nothing publishes to, with nothing on
+      // screen saying so. Leaving the field out preserves whatever the row
+      // holds now.
+      //
+      // Untouched is `streamKey === loadedStreamKey.current`, not "empty" and
+      // not a trimmed comparison: an operator who types only whitespace has
+      // still touched the field, and a create has no loaded value to be equal
+      // to, so it always sends.
+      if (!editing || streamKey !== loadedStreamKey.current) {
+        payload.streamKey = streamKey.trim();
+      }
       // The server drops settings this platform cannot send and says which.
       // Surfaced rather than swallowed: the case that produces them is
       // configuring a destination for one platform and then switching it, so
@@ -1199,16 +1244,23 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     <Label>Made for kids (COPPA)</Label>
                     <Select
                       value={
-                        compliance.madeForKids === undefined
+                        compliance.madeForKids === undefined ||
+                        compliance.madeForKids === null
                           ? "unset"
                           : compliance.madeForKids
                             ? "yes"
                             : "no"
                       }
+                      // null, not undefined, for the same reason the backup
+                      // toggle sends a bare boolean: undefined is omitted from
+                      // the body and the server decodes over the stored row, so
+                      // going back to "leave as it is" silently kept whichever
+                      // declaration was there. db.Compliance.MadeForKids is a
+                      // *bool precisely so that null is expressible.
                       onValueChange={(v) =>
                         setCompliance({
                           ...compliance,
-                          madeForKids: v === "unset" ? undefined : v === "yes",
+                          madeForKids: v === "unset" ? null : v === "yes",
                         })
                       }
                     >
@@ -1304,11 +1356,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               box rather than folded into the amber one. See db.FacebookSettings. */}
           {platform === "facebook" && (
             <div className="flex flex-col gap-3 rounded-md border border-border p-2">
-              <p className="text-xs font-medium">Facebook crossposting &amp; donate button</p>
-              <span className="text-[10px] text-muted-foreground">
-                Sent on the same create call as Audience, so the same rule applies: applied once
-                when the broadcast starts, and left alone entirely if empty.
-              </span>
+              <p className="text-xs font-medium">{t("dest.fbBoxTitle")}</p>
+              <span className="text-[10px] text-muted-foreground">{t("dest.fbBoxIntro")}</span>
 
               {/* Both costs stated, because both are real and neither is
                   guessable. The reconnect is unavoidable rather than sloppy: a
@@ -1319,40 +1368,56 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   id="fb-backup-ingest"
                   type="checkbox"
                   className="mt-0.5"
-                  checked={facebook.backupIngest ?? false}
-                  onChange={(e) =>
-                    setFacebook({ ...facebook, backupIngest: e.target.checked || undefined })
-                  }
+                  checked={backupIngestWanted}
+                  // The bare boolean, never `checked || undefined`. The PUT is
+                  // decoded OVER the stored row, so a key JSON.stringify omits
+                  // is a key the server leaves exactly as it was: unchecking
+                  // the box used to send nothing, the stored `true` survived,
+                  // and the dialog said it had saved while the backup feed kept
+                  // running at double the upload the help text below warns
+                  // about. `false` has to travel for "off" to mean anything.
+                  //
+                  // A top-level setter, not part of `facebook`: the intent now
+                  // lives on the destination beside the endpoint it gates, so
+                  // any platform that offers a backup endpoint can use the same
+                  // field and the same engine path. Rendered here because
+                  // Facebook is the only one that offers one today.
+                  onChange={(e) => setBackupIngestWanted(e.target.checked)}
                 />
                 <div className="flex flex-col gap-0.5">
-                  <Label htmlFor="fb-backup-ingest">Publish a backup feed</Label>
+                  <Label htmlFor="fb-backup-ingest">{t("dest.fbBackupLabel")}</Label>
+                  {/* Three keys rather than one sentence with markup in it. The
+                      cost is the half that has to survive a skim, so it stays
+                      emphasised -- and a translator given a sentence fragment
+                      ending in a comma cannot reorder it into their own grammar,
+                      which is how emphasis markup usually ruins a catalogue. */}
                   <span className="text-[10px] text-muted-foreground">
-                    Sends a second copy of this stream to Facebook&rsquo;s backup ingest, so a
-                    dropped connection does not drop the broadcast.{" "}
-                    <strong>Doubles this destination&rsquo;s upload bandwidth</strong>, and turning
-                    it on reconnects the stream once &mdash; so enable it before you go live.
+                    {t("dest.fbBackupHelp")} <strong>{t("dest.fbBackupCost")}</strong>{" "}
+                    {t("dest.fbBackupReconnect")}
                   </span>
                 </div>
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label>Crosspost to Pages</Label>
-                {(facebook.crosspost ?? []).map((t, i) => (
+                <Label>{t("dest.fbCrosspostLabel")}</Label>
+                {/* `target`, not `t`: the translator is called inside this map
+                    and a one-letter row variable shadowed it. */}
+                {(facebook.crosspost ?? []).map((target, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <Input
-                      value={t.pageId}
+                      value={target.pageId}
                       onChange={(e) => {
                         const next = [...(facebook.crosspost ?? [])];
                         next[i] = { ...next[i], pageId: e.target.value };
                         setFacebook({ ...facebook, crosspost: next });
                       }}
-                      placeholder="Page ID"
+                      placeholder={t("dest.fbCrosspostPageId")}
                       className="flex-1 font-mono"
                     />
                     <div className="flex items-center gap-1.5">
                       <Switch
                         id={`dest-fb-crosspost-post-${i}`}
-                        checked={t.createPost ?? false}
+                        checked={target.createPost ?? false}
                         onCheckedChange={(v) => {
                           const next = [...(facebook.crosspost ?? [])];
                           next[i] = { ...next[i], createPost: v };
@@ -1360,14 +1425,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         }}
                       />
                       <Label htmlFor={`dest-fb-crosspost-post-${i}`} className="font-normal">
-                        Also post
+                        {t("dest.fbCrosspostAlsoPost")}
                       </Label>
                     </div>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label="Remove this Page"
+                      aria-label={t("dest.fbCrosspostRemove")}
                       onClick={() => {
                         const next = (facebook.crosspost ?? []).filter((_, j) => j !== i);
                         setFacebook({ ...facebook, crosspost: next });
@@ -1388,31 +1453,26 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     })
                   }
                 >
-                  <Plus className="size-3.5" /> Add Page
+                  <Plus className="size-3.5" /> {t("dest.fbCrosspostAdd")}
                 </Button>
                 <span className="text-[10px] text-muted-foreground">
-                  The numeric Page ID from Facebook's own console (Page settings, or
-                  graph.facebook.com/me/accounts while signed in as the Page) &mdash; there is no
-                  lookup here, so paste the id rather than a name or URL. "Also post" publishes as
-                  that Page rather than only sharing the broadcast to it; left off, only the
-                  quieter share happens.
+                  {t("dest.fbCrosspostHelp")}
                 </span>
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="dest-fb-donate">Donate button charity ID</Label>
+                <Label htmlFor="dest-fb-donate">{t("dest.fbDonateLabel")}</Label>
                 <Input
                   id="dest-fb-donate"
                   value={facebook.donateCharityId ?? ""}
                   onChange={(e) =>
                     setFacebook({ ...facebook, donateCharityId: e.target.value })
                   }
-                  placeholder="Charity ID"
+                  placeholder={t("dest.fbDonatePlaceholder")}
                   className="font-mono"
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  Also an opaque id from Facebook's fundraisers console, not a charity name to
-                  search for. Leave blank to attach no donate button at all.
+                  {t("dest.fbDonateHelp")}
                 </span>
               </div>
             </div>

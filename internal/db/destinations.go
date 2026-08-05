@@ -74,6 +74,22 @@ type Destination struct {
 	// destination is. Nothing but Facebook populates them today.
 	BackupURL       string `json:"backupUrl,omitempty"`
 	BackupStreamKey string `json:"backupStreamKey,omitempty"`
+	// BackupIngestWanted is the operator's intent: "publish a redundant feed
+	// for this destination". It sits here, beside the endpoint it gates, for
+	// the reason stated directly above -- it used to live in FacebookSettings,
+	// which made the engine's gate on two platform-neutral fields read a
+	// platform-named struct, and a second platform could not reach redundancy
+	// at all no matter what it stored.
+	//
+	// Named ...Wanted rather than BackupIngest because the pair is intent plus
+	// endpoint and wantsBackup needs BOTH: the name has to say which half this
+	// is. Intent alone is the normal state between enabling the setting and
+	// the next broadcast being created, and it is reported, not started.
+	//
+	// Facebook additionally passes it to its create call as
+	// enable_backup_ingest -- see oauth.IngestOptions.BackupIngest, which stays
+	// where it is because that one is a platform fact rather than the intent.
+	BackupIngestWanted bool `json:"backupIngestWanted,omitempty"`
 	// Enabled is user intent, not live state: "this should be running".
 	Enabled      bool            `json:"enabled"`
 	AudioBitrate int             `json:"audioBitrate"` // kbps
@@ -474,7 +490,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		updated      int64
 	)
 	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
-		&d.BackupURL, &d.BackupStreamKey,
+		&d.BackupURL, &d.BackupStreamKey, &d.BackupIngestWanted,
 		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
 		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
 		&d.Transport.NoDurationFilesize, &d.Transport.MuxQueuePackets,
@@ -531,7 +547,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 }
 
 const destColumns = `id, name, kind, platform, account_id, url, stream_key,
-	backup_url, backup_stream_key,
+	backup_url, backup_stream_key, backup_ingest_wanted,
 	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
@@ -680,15 +696,16 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
 		(name, kind, platform, account_id, url, stream_key, backup_url, backup_stream_key,
+		 backup_ingest_wanted,
 		 enabled, audio_bitrate, profile, rendition_id, source_id,
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 		 au_codec, au_mono, compliance, facebook,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.BackupURL, dst.BackupStreamKey,
+		dst.BackupURL, dst.BackupStreamKey, dst.BackupIngestWanted,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
@@ -733,7 +750,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	}
 	res, err := d.sql.Exec(`UPDATE destinations SET
 		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
-		backup_url=?, backup_stream_key=?,
+		backup_url=?, backup_stream_key=?, backup_ingest_wanted=?,
 		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
 		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
@@ -742,7 +759,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		au_codec=?, au_mono=?, compliance=?, facebook=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.BackupURL, dst.BackupStreamKey,
+		dst.BackupURL, dst.BackupStreamKey, dst.BackupIngestWanted,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
@@ -758,6 +775,74 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		return nil, ErrNotFound
 	}
 	return d.GetDestination(dst.ID)
+}
+
+// ErrAnnouncementSkipped is what UpdateAnnouncement returns when the callback
+// declined the row it was shown. Not an error in the operational sense -- it is
+// the answer "the destination is no longer one this write may touch" -- so it
+// is a sentinel rather than a string a caller has to match on.
+var ErrAnnouncementSkipped = errors.New("announcement skipped")
+
+// UpdateAnnouncement writes ONLY the columns the pre-announce sweep owns: the
+// primary stream key, the backup endpoint, and the Facebook block that carries
+// the announcement markers.
+//
+// WHY NOT UpdateDestination. That one is a full-row unconditional
+// `UPDATE ... WHERE id=?` with no version column behind it, and the sweep holds
+// a destination across a Graph call that takes up to thirty seconds. Writing
+// the whole row back reverts every operator edit that landed in that window --
+// a rename, a routing change, the enable switch, a key refresh -- silently, and
+// for destinations late in a sweep the window is the whole sweep.
+//
+// So the row is READ AGAIN HERE, inside the transaction that writes it, and apply
+// is handed the row as it stands now rather than the caller's snapshot. That is
+// what makes the Facebook blob safe to rewrite: it also holds crossposting, the
+// donate charity and the backup toggle, none of which belong to this sweep.
+// Anything apply sets outside the four columns below is DISCARDED -- deliberately,
+// because a caller that could write any column would be UpdateDestination again.
+//
+// apply reports whether to go ahead. Returning false rolls back and returns
+// ErrAnnouncementSkipped, which is how the sweep refuses to rewrite the stream
+// key of a destination that went live while Facebook was being asked for one:
+// StreamKey is inside Target(), which is the first element of the engine's
+// restart hash, so changing it under a running FFmpeg cycles the live process at
+// a moment nobody chose.
+func (d *DB) UpdateAnnouncement(id int64, apply func(*Destination) bool) (*Destination, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	cur, err := scanDestination(tx.QueryRow(destByIDQuery, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !apply(cur) {
+		return nil, ErrAnnouncementSkipped
+	}
+	facebook, err := json.Marshal(cur.Facebook)
+	if err != nil {
+		return nil, err
+	}
+	res, err := tx.Exec(`UPDATE destinations SET
+		stream_key=?, backup_url=?, backup_stream_key=?, facebook=?, updated_at=?
+		WHERE id=?`,
+		cur.StreamKey, cur.BackupURL, cur.BackupStreamKey, string(facebook),
+		time.Now().Unix(), id)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return d.GetDestination(id)
 }
 
 // SetDestinationEnabled flips the run/stop intent without touching anything
@@ -873,6 +958,17 @@ func (d *DB) DeleteDestination(id int64) error {
 // internal/db was owned by another workstream. It is drained and dropped here
 // rather than left in place, so there is exactly one answer to "what arguments
 // does this destination run with".
+// backupIntentBackfill carries the intent out of the facebook blob and into the
+// column promoted from it.
+//
+// A var rather than a literal for one reason: a test replaces it with a
+// statement that fails, which is the only way to prove the ALTER that precedes
+// it rolls back with it. Nothing at runtime rewrites it. The alternative was to
+// assert atomicity by reading the source, which asserts nothing.
+// See TestAFailedBackfillTakesTheColumnWithIt.
+var backupIntentBackfill = `UPDATE destinations SET backup_ingest_wanted = 1
+	WHERE json_valid(facebook) AND json_extract(facebook, '$.backupIngest') = 1`
+
 func (d *DB) MigrateDestinationExpertArgs() error {
 	columns := []struct{ name, ddl string }{
 		{"extra_input_args", `ALTER TABLE destinations ADD COLUMN extra_input_args TEXT NOT NULL DEFAULT ''`},
@@ -901,7 +997,25 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		{"facebook", `ALTER TABLE destinations ADD COLUMN facebook TEXT NOT NULL DEFAULT '{}'`},
 		{"backup_url", `ALTER TABLE destinations ADD COLUMN backup_url TEXT NOT NULL DEFAULT ''`},
 		{"backup_stream_key", `ALTER TABLE destinations ADD COLUMN backup_stream_key TEXT NOT NULL DEFAULT ''`},
+		// The operator's intent, promoted out of the facebook JSON blob to sit
+		// beside the endpoint it gates. 0 is "no redundancy", which is the
+		// right default for a NEW row and the WRONG one for an existing row
+		// that had it on -- see the backfill below.
+		{"backup_ingest_wanted", `ALTER TABLE destinations ADD COLUMN backup_ingest_wanted INTEGER NOT NULL DEFAULT 0`},
 	}
+	// added records the columns this pass created. columnExists is the only
+	// guard this function has and it is the right one: on every later open the
+	// column is already there, the ALTER is skipped, and so is anything keyed
+	// off `added`. That is what makes the data migration below one-shot rather
+	// than something that reasserts an old value over an operator's edit on
+	// every start.
+	// Every existence check happens BEFORE the transaction opens, and that is
+	// not stylistic. columnExists queries d.sql, and db.go sets
+	// SetMaxOpenConns(1) -- so a read issued while a transaction holds the one
+	// connection waits for a connection the transaction will not release until
+	// it commits. It would not fail; it would hang on startup, for ever.
+	added := make(map[string]bool, len(columns))
+	missing := make([]struct{ name, ddl string }, 0, len(columns))
 	for _, c := range columns {
 		has, err := columnExists(d.sql, "destinations", c.name)
 		if err != nil {
@@ -910,9 +1024,52 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		if has {
 			continue
 		}
-		if _, err := d.sql.Exec(c.ddl); err != nil {
+		missing = append(missing, c)
+		added[c.name] = true
+	}
+
+	// ONE TRANSACTION over the ALTERs and the data migration below them.
+	//
+	// SQLite's DDL is transactional, and this needs it. The backfill is guarded
+	// by "did THIS pass create the column", so a crash between the ALTER
+	// committing and the UPDATE running would leave a database where the column
+	// exists, the guard is false for ever after, and every operator who had
+	// backup ingest on has silently lost it -- invisible until the broadcast
+	// that was supposed to survive a dropped connection does not.
+	//
+	// Either the column and its data arrive together or neither does, and the
+	// next open tries again from a state it recognises.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("begin destinations migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, c := range missing {
+		if _, err := tx.Exec(c.ddl); err != nil {
 			return fmt.Errorf("add destinations.%s: %w", c.name, err)
 		}
+	}
+
+	// THE ALTER ALONE WOULD TURN REDUNDANCY OFF for every operator who had it
+	// on. Existing rows carry the intent inside the facebook blob, as
+	// `{"backupIngest":true}`, because that is where it lived before it was
+	// promoted; a column defaulting to 0 silently answers "no" for all of them,
+	// wantsBackup goes false, and nothing says so until a broadcast drops and
+	// the second feed that was supposed to catch it is not running.
+	//
+	// So the ALTER is only half the migration. json_valid guards the extract
+	// against a row whose blob was written before the column had its '{}'
+	// default; json_extract returns 1 for a JSON true, which is what the Go
+	// bool marshalled to.
+	if added["backup_ingest_wanted"] {
+		if _, err := tx.Exec(backupIntentBackfill); err != nil {
+			return fmt.Errorf("backfill destinations.backup_ingest_wanted: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit destinations migration: %w", err)
 	}
 
 	sidecar, err := tableExists(d.sql, "destination_expert_args")

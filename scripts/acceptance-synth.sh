@@ -50,8 +50,21 @@ ffmpeg -hide_banner -loglevel error \
   -f lavfi -i "testsrc2=size=640x360:rate=30" \
   -map 0:v -c:v libx264 -preset ultrafast -g 60 -pix_fmt yuv420p -b:v 1000k \
   -t 90 -y data/recordings/videoonly.ts 2>/dev/null
-tracks=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 data/recordings/videoonly.ts | grep -c . || true)
-if [ -s data/recordings/videoonly.ts ] && [ "$tracks" -eq 0 ]; then
+# Zero audio tracks is what this step wants to find, which makes "ffprobe could
+# not read the file" and "the file has no audio" the same answer through a
+# pipeline: a failed probe prints nothing, `grep -c .` says 0, and the check
+# passes on a source it never inspected. Probe first, judge second.
+if probe=$(ffprobe -v error -select_streams a -show_entries stream=index \
+             -of csv=p=0 data/recordings/videoonly.ts 2>/dev/null); then
+  tracks=$(printf '%s\n' "$probe" | grep -c . || true)
+else
+  tracks=unprobed
+fi
+if [ ! -s data/recordings/videoonly.ts ]; then
+  bad "the video-only source was not written at all"; exit 1
+elif [ "$tracks" = unprobed ]; then
+  bad "ffprobe could not read the source that was just built; that is not the same as it having no audio"; exit 1
+elif [ "$tracks" -eq 0 ]; then
   ok "built a source with zero audio tracks"
 else
   bad "could not build a video-only source (found $tracks audio tracks)"; exit 1

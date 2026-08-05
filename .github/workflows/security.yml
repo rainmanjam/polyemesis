@@ -37,18 +37,79 @@ jobs:
   # does not become a ticket nobody can action.
   govulncheck:
     runs-on: ubuntu-latest
+    # A ceiling, because GitHub's default is SIX HOURS -- and this workflow
+    # runs on every push and pull request, so it is the one most likely to be
+    # holding a runner that something else is queued behind.
+    #
+    # All four jobs here get ten, and the argument is the same one four times,
+    # so it is written once. Measured across 37 runs, the slowest job in this
+    # file is semgrep at 48 seconds and the rest are under half a minute. None
+    # of them has any work that legitimately grows: each is one fetch -- a
+    # module proxy, a registry index, a release tarball, a container image --
+    # followed by a scan of a tree this size. Ten is roughly twelve times the
+    # slowest thing ever observed here and thirty-six times the median, which
+    # leaves a cold cache and a bad network day comfortably green while still
+    # bounding a fetch that never returns.
+    #
+    # This job in particular has two network dependencies rather than one: the
+    # module proxy it builds govulncheck from, and vuln.go.dev, which it reads
+    # at run time.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      # Pinned, like the gitleaks binary and the semgrep engine below, and for
+      # the reason release.yml gives for pinning syft: SonarCloud flagged
+      # `go install syft@v1.50.0` under githubactions:S8545, because a version
+      # alone leaves the transitive graph to be resolved at build time. `@latest`
+      # is the same objection and worse -- it does not pin even the tool's own
+      # source, so two runs of this line a week apart can scan with different
+      # code, and a change in what the scanner reports would be indistinguishable
+      # from a change in what this repository depends on.
+      #
+      # syft is pinned by SHA-256 over a release tarball. That is not available
+      # here: golang.org/x/vuln publishes no release binaries, it is a module.
+      # The Go equivalent is what a version does for a module path -- every
+      # dependency resolved from that version's own go.mod and hash-checked
+      # against sum.golang.org. Verified rather than assumed: the pinned build
+      # is x/mod v0.38.0, x/sync v0.22.0, x/telemetry v0.0.0-20260708182218 and
+      # x/tools v0.48.0, each with an h1: hash, byte-identical across two
+      # resolutions from a cold module cache. That is the property S8545 asks
+      # for, obtained by the mechanism this ecosystem provides for it.
+      #
+      # Pinning the scanner does NOT pin what it knows. Exactly the distinction
+      # the semgrep job below draws between its engine and its rules: the
+      # vulnerability data is read from vuln.go.dev at run time and is no part
+      # of this binary. v1.6.0 was published on 2026-07-09 and already reports a
+      # database newer than itself.
       - name: govulncheck
+        env:
+          GOVULNCHECK_VERSION: v1.6.0
         run: |
-          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+          set -euo pipefail
+          # First, and the whole argument for the pin sits in its four lines of
+          # output: "Scanner: govulncheck@v1.6.0" directly above "DB updated:
+          # <date>". A reader who suspects the pin has staled the scan can settle
+          # it from the log instead of from this comment.
+          #
+          # Printed, not asserted. gitleaks a few jobs down asserts its version
+          # because a download can hand back something other than what the URL
+          # named; `go run pkg@vX` cannot, so an assertion there would be
+          # theatre. And a floor on the database DATE would be a different
+          # thing altogether -- a gate on a third party's publishing cadence,
+          # on the workflow that runs for every pull request. The failure it
+          # would catch is rare and the false red blocks every merge.
+          go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" -version
+          go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
 
   # JavaScript dependencies.
   npm-audit:
     runs-on: ubuntu-latest
+    # See the note on the govulncheck job for why ten, for all four jobs here.
+    # This one's single point of stall is the npm registry, during `npm ci`.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ui
@@ -87,6 +148,12 @@ jobs:
   # version assertion below is what makes the pin real rather than aspirational.
   gitleaks:
     runs-on: ubuntu-latest
+    # See the note on the govulncheck job for why ten, for all four jobs here.
+    # This one's are the release download below and the `fetch-depth: 0`
+    # checkout -- the full history, which is the only thing in this file that
+    # grows with the repository, and at seven to twelve seconds today it has a
+    # very long way to go.
+    timeout-minutes: 10
     env:
       GITLEAKS_VERSION: "8.30.1"
     steps:
@@ -181,6 +248,11 @@ jobs:
   # Static analysis.
   semgrep:
     runs-on: ubuntu-latest
+    # See the note on the govulncheck job for why ten, for all four jobs here.
+    # The slowest of the four at 29 to 48 seconds, and it has two stalls
+    # available to it rather than one: pulling the pinned engine image, and
+    # fetching the rules from the registry at scan time.
+    timeout-minutes: 10
     container:
       # Pinned, for the same reason gitleaks is pinned a few jobs up: an
       # untagged image is :latest, so the engine that decides whether this

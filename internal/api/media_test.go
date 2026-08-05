@@ -239,14 +239,23 @@ func TestDeleteMediaRemovesTheFile(t *testing.T) {
 	}
 }
 
+// The body is checked as well as the status. A 404 alone is also what the SPA
+// fallback answers for a path with no route left, whenever the UI has not been
+// built -- which is how CI's Go job runs. See mustJSONError in renditions_test.go.
 func TestDeleteMediaOnAMissingNameIs404(t *testing.T) {
 	h, _, auth := mediaServer(t)
 
 	r := httptest.NewRequest(http.MethodDelete, "/api/v1/media/never-existed.mp4", nil)
 	r.RemoteAddr = "203.0.113.5:44444"
 	auth(r)
-	if w := do(t, h, r); w.Code != http.StatusNotFound {
+	w := do(t, h, r)
+	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	var got apiError
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Error == "" {
+		t.Fatalf("404 carried no JSON error (%v); the SPA fallback answered "+
+			"instead of the delete route: %.80s", err, w.Body.String())
 	}
 }
 

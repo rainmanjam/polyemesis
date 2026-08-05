@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toneBadge } from "@/lib/signal";
+import { useT, type TranslationKey } from "@/lib/i18n";
 import type { MediaFile, PlaylistItem, PlaylistItemStatus, PlaylistStatus } from "@/lib/types";
 
 /* ===========================================================================
@@ -47,10 +48,13 @@ const STATE_TONE: Record<PlaylistItemStatus["state"], "live" | "warn" | "down"> 
   attention: "down",
 };
 
-const STATE_LABEL: Record<PlaylistItemStatus["state"], string> = {
-  ready: "Ready",
-  transcoding: "Transcoding",
-  attention: "Needs attention",
+// Catalogue keys rather than English, for the same reason stateLabelKey lives
+// in lib/i18n.ts: the vocabulary and its translations cannot drift apart if the
+// map holds the key and the render does the lookup.
+const STATE_LABEL: Record<PlaylistItemStatus["state"], TranslationKey> = {
+  ready: "playlist.stateReady",
+  transcoding: "playlist.stateTranscoding",
+  attention: "playlist.stateAttention",
 };
 
 // Slower than the live panes (Meters 2s, Clips 3s) and faster than the ones
@@ -62,6 +66,7 @@ const STATE_LABEL: Record<PlaylistItemStatus["state"], string> = {
 const POLL_MS = 5000;
 
 export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
+  const t = useT();
   const [uploads, setUploads] = useState<MediaFile[]>([]);
   const [status, setStatus] = useState<PlaylistStatus | null>(null);
   const [error, setError] = useState("");
@@ -164,7 +169,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
 
   return (
     <div className="flex flex-col gap-2">
-      <Label>Playlist</Label>
+      <Label>{t("playlist.title")}</Label>
 
       {error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
@@ -173,9 +178,9 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
       )}
 
       {items.length === 0 ? (
-        <div className="text-xs text-muted-foreground">Nothing queued yet.</div>
+        <div className="text-xs text-muted-foreground">{t("playlist.empty")}</div>
       ) : (
-        <ol className="flex flex-col gap-1" aria-label="Playlist items">
+        <ol className="flex flex-col gap-1" aria-label={t("playlist.itemsAria")}>
           {items.map((item, index) => {
             const st = statusFor(index, item.upload);
             // Unmatched is deliberately its own case rather than folded into
@@ -186,7 +191,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
             // label until the save lands and the next refresh finds the
             // endpoint naming it, not until the operator reloads the page.
             const tone = st ? STATE_TONE[st.state] : undefined;
-            const label = st ? STATE_LABEL[st.state] : "Not saved yet";
+            const label = t(st ? STATE_LABEL[st.state] : "playlist.stateUnsaved");
             return (
               <li
                 key={`${item.upload}-${index}`}
@@ -200,7 +205,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
                   </div>
                   {st?.state === "attention" && (
                     <div className="mt-0.5 text-[11px] text-down">
-                      {st.detail ?? "This upload can no longer be found."}
+                      {st.detail ?? t("playlist.missingUpload")}
                     </div>
                   )}
                 </div>
@@ -209,7 +214,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
                     size="icon-sm"
                     variant="ghost"
                     disabled={index === 0}
-                    aria-label={`Move ${item.upload} up`}
+                    aria-label={t("playlist.moveUp", { name: item.upload })}
                     onClick={() => move(index, -1)}
                   >
                     <ArrowUp className="size-3.5" />
@@ -218,7 +223,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
                     size="icon-sm"
                     variant="ghost"
                     disabled={index === items.length - 1}
-                    aria-label={`Move ${item.upload} down`}
+                    aria-label={t("playlist.moveDown", { name: item.upload })}
                     onClick={() => move(index, 1)}
                   >
                     <ArrowDown className="size-3.5" />
@@ -226,7 +231,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    aria-label={`Remove ${item.upload}`}
+                    aria-label={t("playlist.remove", { name: item.upload })}
                     onClick={() => remove(index)}
                   >
                     <X className="size-3.5" />
@@ -240,9 +245,9 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
 
       <div className="flex items-center gap-2">
         <Select value={picked} onValueChange={setPicked}>
-          <SelectTrigger className="flex-1" aria-label="Choose an upload to add">
+          <SelectTrigger className="flex-1" aria-label={t("playlist.chooseAria")}>
             <SelectValue
-              placeholder={available.length ? "Choose an upload" : "No uploads available"}
+              placeholder={t(available.length ? "playlist.choose" : "playlist.noUploads")}
             />
           </SelectTrigger>
           <SelectContent>
@@ -254,14 +259,15 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
           </SelectContent>
         </Select>
         <Button size="sm" variant="outline" disabled={!picked} onClick={add}>
-          <Plus className="size-3.5" /> Add
+          <Plus className="size-3.5" /> {t("common.add")}
         </Button>
       </div>
-      <span className="text-[10px] text-muted-foreground">
-        Uploaded in <em>Media</em>. An item this playlist names that later loses its upload shows
-        as needing attention above, rather than failing silently the next time failover reaches
-        it.
-      </span>
+      {/* One key, not a sentence split around an <em>. The emphasis on "Media"
+          is worth less than a sentence a translator can reorder into their own
+          grammar -- and "Media" stays untranslated inside it deliberately,
+          because it names the card an operator is being sent to look for, which
+          still reads "Media" on screen. */}
+      <span className="text-[10px] text-muted-foreground">{t("playlist.hint")}</span>
     </div>
   );
 }

@@ -592,9 +592,13 @@ func TestExpertArgsSurviveAReadAndAreClearedByDelete(t *testing.T) {
 	}
 }
 
+// Mutation: comment out `r.Get("/destinations/{id}/expert", s.handleGetExpert)`.
+// The status-only version passed with the route gone whenever the UI had not
+// been built, because the SPA fallback 404s too. See mustJSONError.
 func TestExpertRejectsAnUnknownDestination(t *testing.T) {
 	h, _, sign := renditionServer(t, defaultTools())
-	send(t, h, sign, http.MethodGet, "/api/v1/destinations/999/expert", nil, http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/destinations/999/expert", nil,
+		http.StatusNotFound)
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }

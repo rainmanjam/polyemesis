@@ -9,6 +9,12 @@ internal/web/dist/
 /data/
 .git/
 .playwright-mcp/
+# Agent scratch, and worktrees in particular. A git worktree under here is a
+# SECOND FULL CHECKOUT of this repository -- one that lived here long enough to
+# put 278 MB of duplicate tree into every build context, and to make `find` and
+# `grep` return internal/engine/engine.go twice. The directory is already in
+# .gitignore, which keeps it out of commits and does nothing about the context.
+.claude/
 *.db
 *.db-wal
 *.db-shm

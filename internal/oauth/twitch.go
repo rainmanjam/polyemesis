@@ -11,20 +11,32 @@ import (
 
 // Twitch implements Twitch OAuth plus the Helix stream-key lookup.
 type Twitch struct {
-	// tokenURL overrides Twitch's token endpoint. Empty in production; set by
-	// tests so a credential check can be exercised without reaching id.twitch.tv.
-	tokenURL string
+	// endpoints carries the base URLs; zero value is production. This replaced
+	// a tokenURL field that redirected the token endpoint alone, which meant a
+	// test that set it still sent Account, Ingest and every Helix metadata call
+	// to the real api.twitch.tv. See endpoints.go.
+	endpoints
 }
 
-// twitchTokenURL is the real endpoint, and the default when tokenURL is unset.
-const twitchTokenURL = "https://id.twitch.tv/oauth2/token"
+// twitchIDBase is where consent is granted and tokens are minted;
+// twitchHelixBase (metadata.go) is the data API.
+//
+// Named for the HOST, as every other base in this package is -- kickIDBase for
+// id.kick.com, ytConsentBase for accounts.google.com, fbDialogBase,
+// twitchHelixBase. It was twitchAuthBase, the one name here describing a role
+// rather than a hostname, and "Auth" beside a string literal is what a secret
+// scanner is built to notice: SonarCloud read it as a hard-coded credential
+// (go:S6418) and failed the quality gate on a public URL. The name was the
+// outlier; the value never was.
+const twitchIDBase = "https://id.twitch.tv"
 
-func (t *Twitch) tokenEndpoint() string {
-	if t.tokenURL != "" {
-		return t.tokenURL
-	}
-	return twitchTokenURL
-}
+func (t *Twitch) tokenEndpoint() string { return t.authBase(twitchIDBase) + "/oauth2/token" }
+
+// apiEndpoint is the Helix base for THIS provider. Account and Ingest used to
+// write https://api.twitch.tv/helix inline while PushMetadata and
+// PushCompliance went through the twitchHelixBase var -- the same split-base
+// defect Facebook had, one provider over.
+func (t *Twitch) apiEndpoint() string { return t.apiBase(twitchHelixBase) }
 
 func (t *Twitch) Platform() db.Platform { return db.PlatformTwitch }
 
@@ -100,7 +112,7 @@ func (t *Twitch) AuthURL(clientID, redirectURI, state, _ string) string {
 	// reuses the browser's logged-in account, so connecting a second channel is
 	// impossible.
 	q.Set("force_verify", "true")
-	return "https://id.twitch.tv/oauth2/authorize?" + q.Encode()
+	return t.authBase(twitchIDBase) + "/oauth2/authorize?" + q.Encode()
 }
 
 func (t *Twitch) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, _ string) (*Token, error) {
@@ -143,7 +155,7 @@ func (t *Twitch) Account(ctx context.Context, clientID, accessToken string) (*Ac
 			DisplayName string `json:"display_name"`
 		} `json:"data"`
 	}
-	if err := getJSON(ctx, "https://api.twitch.tv/helix/users", accessToken, helixHeaders(clientID), &out); err != nil {
+	if err := getJSON(ctx, t.apiEndpoint()+"/users", accessToken, helixHeaders(clientID), &out); err != nil {
 		return nil, err
 	}
 	if len(out.Data) == 0 {
@@ -173,7 +185,7 @@ func (t *Twitch) Ingest(ctx context.Context, clientID, accessToken string) (*Ing
 		} `json:"data"`
 	}
 	err = getJSON(ctx,
-		"https://api.twitch.tv/helix/streams/key?broadcaster_id="+url.QueryEscape(acct.Ref),
+		t.apiEndpoint()+"/streams/key?broadcaster_id="+url.QueryEscape(acct.Ref),
 		accessToken, helixHeaders(clientID), &out)
 	if err != nil {
 		return nil, err

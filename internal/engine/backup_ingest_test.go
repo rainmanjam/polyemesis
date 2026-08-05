@@ -12,7 +12,7 @@ func backupRow() *db.Destination {
 		ID: 7, Name: "fb", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
 		URL: "rtmps://live.example/rtmp", StreamKey: "primary-key",
 		BackupURL: "rtmps://backup.example/rtmp", BackupStreamKey: "backup-key",
-		Facebook: db.FacebookSettings{BackupIngest: true},
+		BackupIngestWanted: true,
 	}
 }
 
@@ -28,7 +28,7 @@ func TestABackupNeedsBothTheToggleAndAnEndpoint(t *testing.T) {
 	}{
 		{"toggle and endpoint", func(*db.Destination) {}, true},
 		{"toggle without an endpoint", func(r *db.Destination) { r.BackupURL = "" }, false},
-		{"endpoint without the toggle", func(r *db.Destination) { r.Facebook.BackupIngest = false }, false},
+		{"endpoint without the toggle", func(r *db.Destination) { r.BackupIngestWanted = false }, false},
 		{"not an rtmp destination", func(r *db.Destination) { r.Kind = db.DestFile }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,6 +38,46 @@ func TestABackupNeedsBothTheToggleAndAnEndpoint(t *testing.T) {
 				t.Errorf("wantsBackup = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// THE CLAIM THE WHOLE CHANGE IS FOR. A destination that is not Facebook, with
+// an endpoint and the intent set, gets a redundant feed.
+//
+// This was unreachable rather than merely untested. wantsBackup read
+// row.Facebook.BackupIngest, which is false on a Twitch row however the row was
+// configured -- so the engine's gate on BackupURL and BackupStreamKey, two
+// columns whose own comment says the engine must not have to know which
+// platform a destination is, went through a Facebook-named struct. Nothing but
+// Facebook populates the endpoint today; the point is that the engine no longer
+// has an opinion about that, so the next platform to fill it in needs no engine
+// change at all.
+//
+// Mutation, run against a committed tree: in wantsBackup,
+//
+//	return row.BackupIngestWanted && row.BackupURL != "" && row.Kind == db.DestRTMP
+//
+// ->
+//
+//	return row.Platform == db.PlatformFacebook && row.BackupIngestWanted && row.BackupURL != "" && row.Kind == db.DestRTMP
+//
+// which restores the defect exactly -- the engine deciding redundancy by
+// platform. Observed FAIL here, with TestABackupNeedsBothTheToggleAndAnEndpoint
+// still green above it, which is why that one alone was never enough.
+func TestABackupDoesNotRequireTheDestinationToBeFacebook(t *testing.T) {
+	twitch := &db.Destination{
+		ID: 9, Name: "twitch", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+		URL: "rtmp://live.example/app", StreamKey: "primary-key",
+		BackupURL: "rtmp://backup.example/app", BackupStreamKey: "backup-key",
+		BackupIngestWanted: true,
+	}
+	if !wantsBackup(twitch) {
+		t.Error("a non-Facebook RTMP destination with the intent set and an " +
+			"endpoint stored does not get a redundant feed, so the engine is " +
+			"still deciding redundancy by platform")
+	}
+	if got := backupTarget(twitch); got != "rtmp://backup.example/app/backup-key" {
+		t.Errorf("backupTarget = %q, want the backup URL and key joined", got)
 	}
 }
 
@@ -82,7 +122,7 @@ func TestTogglingBackupDoesNotMoveThePrimarysHash(t *testing.T) {
 
 	on := backupRow()
 	off := backupRow()
-	off.Facebook.BackupIngest = false
+	off.BackupIngestWanted = false
 
 	if destSpec(on, compiled, "up") != destSpec(off, compiled, "up") {
 		t.Error("toggling backup changed the primary's hash; enabling redundancy " +

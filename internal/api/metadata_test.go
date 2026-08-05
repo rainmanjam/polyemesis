@@ -1,12 +1,11 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -298,12 +297,18 @@ func TestPushMetadataReportsPerPlatformRatherThanOneBoolean(t *testing.T) {
 // review found: `Tags: req.Tags` in handlePushMetadata's oauth.Metadata
 // literal was deletable with the entire suite green, because nothing proved
 // the composer's tags survive the trip from the request to the call that
-// actually leaves the process. pushMetadataFn is that trip's seam, the same
-// shape as ingestForFn one handler over -- oauth.MetadataPusher is a real
-// provider (embeds Provider, has no injection point of its own), so this
-// captures the argument one line before it would reach one.
+// actually leaves the process.
+//
+// It used to replace a pushMetadataFn closure and read the oauth.Metadata that
+// arrived. It now runs the real Facebook provider against a stub Graph API and
+// reads the content_tags parameter of the POST it made -- which is one step
+// further along the same trip, and covers resolveTags turning each word into an
+// interest id as well as the words getting that far.
+//
+// Mutation: delete `Tags: req.Tags` from handlePushMetadata's oauth.Metadata
+// literal. Observed FAIL ("no /search lookup was made for the composer's tags").
 func TestPushMetadataCarriesTagsToThePusher(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	connectAccount(t, store, s.box, db.PlatformFacebook, "ada")
@@ -311,25 +316,34 @@ func TestPushMetadataCarriesTagsToThePusher(t *testing.T) {
 		t.Fatalf("creds: %v", err)
 	}
 
-	var (
-		called   bool
-		captured oauth.Metadata
-	)
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		called = true
-		captured = m
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle, oauth.FieldTags}}, nil
-	}
-
 	job := pushAndSettle(t, h, sign, map[string]any{
 		"title": "Live tonight",
 		"tags":  []string{"cooking", "live"},
 	})
-	if !called {
-		t.Fatal("pushMetadataFn was never invoked; the push did not reach the seam at all")
+
+	// One ad-interest lookup per word, which is where a tag that never left the
+	// composer stops being visible at all.
+	var looked []string
+	for _, c := range stub.calls() {
+		if c.Path == "/search" {
+			looked = append(looked, c.Query.Get("q"))
+		}
 	}
-	if !reflect.DeepEqual(captured.Tags, []string{"cooking", "live"}) {
-		t.Errorf("Tags passed to the pusher = %v, want [cooking live]", captured.Tags)
+	if !reflect.DeepEqual(looked, []string{"cooking", "live"}) {
+		t.Fatalf("Facebook was asked to resolve %v, want [cooking live]: no /search lookup "+
+			"was made for the composer's tags, so they never reached the provider", looked)
+	}
+	// And the resolved ids reached the write. A lookup that happens and a
+	// content_tags parameter that is dropped afterwards are different bugs.
+	write := stub.first(http.MethodPost, "/"+stub.fbLiveID)
+	if write == nil {
+		t.Fatalf("no live video edit reached Facebook; the push made %v", stub.calls())
+	}
+	if got := write.Query.Get("content_tags"); got != `["interest-cooking","interest-live"]` {
+		t.Errorf("content_tags = %q, want the two resolved interest ids", got)
+	}
+	if got := write.Query.Get("title"); got != "Live tonight" {
+		t.Errorf("title = %q, want the composer's own", got)
 	}
 	if len(job.Results) != 1 || job.Results[0].State != metaOK {
 		t.Fatalf("job results = %+v, want one ok result", job.Results)
@@ -347,84 +361,101 @@ func TestPushMetadataCarriesTagsToThePusher(t *testing.T) {
 // fails the moment the push stops CALLING the capability, whatever the
 // capability itself still does.
 //
-// Mutation to run against it: delete the ComplianceFor branch from pushOne.
-// pushComplianceFn is the seam -- the same shape as pushMetadataFn beside it --
-// because oauth.CompliancePusher is satisfied only by real providers whose
-// HTTP base is unexported, so this is the last observable point before the
-// request leaves the process.
+// Both accounts are here because a ComplianceTarget assembled from the wrong
+// halves reaches the wrong place, and the two halves are observable on
+// different platforms: Twitch addresses its write with AccountRef, and every
+// call carries the account's own bearer token. YouTube's two endpoints are the
+// COPPA half -- privacyStatus and selfDeclaredMadeForKids live on two different
+// resources, and anyone who assumes symmetry writes a call that returns 200 and
+// changes nothing.
+//
+// Mutation: delete the ComplianceFor branch from pushOne. Observed FAIL ("no
+// privacy write reached YouTube").
 func TestAPushSendsTheStoredComplianceToTheProvider(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
-	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
-	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "topsecret"); err != nil {
-		t.Fatalf("creds: %v", err)
+	ytID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	twID := connectAccount(t, store, s.box, db.PlatformTwitch, "dj")
+	for _, p := range []db.Platform{db.PlatformYouTube, db.PlatformTwitch} {
+		if err := store.PutPlatformCreds(s.box, p, "cid", "topsecret"); err != nil {
+			t.Fatalf("creds %s: %v", p, err)
+		}
 	}
 	kids := true
-	stored := db.Compliance{Privacy: db.PrivacyPrivate, MadeForKids: &kids}
-	if _, err := store.CreateDestination(&db.Destination{
-		Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
-		URL: "rtmp://a.example/live", StreamKey: "sk-live-1", AccountID: &acctID,
-		Compliance: stored,
-	}); err != nil {
-		t.Fatalf("create destination: %v", err)
-	}
-
-	// The metadata half is stubbed only so the row can settle without a network
-	// call; nothing about it is under test here.
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-
-	var (
-		called       bool
-		gotCompl     db.Compliance
-		gotTarget    oauth.ComplianceTarget
-		gotClientID  string
-		gotAccessTok string
-	)
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		called = true
-		gotCompl, gotTarget, gotClientID, gotAccessTok = c, tgt, clientID, accessToken
-		return &oauth.MetadataResult{
-			Applied: []oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids},
-		}, nil
+	for _, d := range []*db.Destination{
+		{Name: "main", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+			URL: "rtmp://a.example/live", StreamKey: "sk-live-1", AccountID: &ytID,
+			Compliance: db.Compliance{Privacy: db.PrivacyPrivate, MadeForKids: &kids}},
+		{Name: "twitch", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+			URL: "rtmp://b.example/live", StreamKey: "sk-live-2", AccountID: &twID,
+			Compliance: db.Compliance{Labels: map[string]bool{"Gambling": true}}},
+	} {
+		if _, err := store.CreateDestination(d); err != nil {
+			t.Fatalf("create %s: %v", d.Name, err)
+		}
 	}
 
 	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
-	if !called {
-		t.Fatal("the push never called PushCompliance: the operator's stored privacy and " +
-			"COPPA declaration were saved, validated, and never sent anywhere")
+
+	// privacyStatus is on the BROADCAST, part=status.
+	privacy := stubCallWith(stub, http.MethodPut, "/liveBroadcasts", "part", "status")
+	if privacy == nil {
+		t.Fatalf("no privacy write reached YouTube: the operator's stored privacy and "+
+			"COPPA declaration were saved, validated, and never sent anywhere. "+
+			"The push made %v", stub.calls())
 	}
-	if !reflect.DeepEqual(gotCompl, stored) {
-		t.Errorf("compliance passed to the provider = %+v, want the stored %+v", gotCompl, stored)
+	if got := nestedString(privacy.Body, "status", "privacyStatus"); got != "private" {
+		t.Errorf("privacyStatus = %q, want the stored \"private\" (body %+v)", got, privacy.Body)
 	}
-	// AccountRef is what Twitch addresses its write with and StreamKey is what
-	// Facebook recovers its live video id from, so a target assembled from the
-	// wrong halves reaches the wrong channel or broadcast.
-	want := oauth.ComplianceTarget{AccountRef: "chan-ref", StreamKey: "sk-live-1"}
-	if gotTarget != want {
-		t.Errorf("ComplianceTarget = %+v, want %+v", gotTarget, want)
+	// selfDeclaredMadeForKids is absent from liveBroadcasts.update's settable
+	// list, so it has to go through videos.update against the same id. A push
+	// that sent it to the broadcast would get a 200 and change nothing.
+	kidsCall := stubCallWith(stub, http.MethodPut, "/videos", "part", "status")
+	if kidsCall == nil {
+		t.Fatalf("no made-for-kids write reached YouTube; the push made %v", stub.calls())
 	}
-	if gotClientID != "cid" || gotAccessTok != "at" {
-		t.Errorf("credentials = (%q, %q), want the account's own (\"cid\", \"at\")", gotClientID, gotAccessTok)
+	if got := nestedAny(kidsCall.Body, "status", "selfDeclaredMadeForKids"); got != true {
+		t.Errorf("selfDeclaredMadeForKids = %v, want the stored true (body %+v)", got, kidsCall.Body)
+	}
+	// The account's own token, on the account's own write.
+	if privacy.Auth != "Bearer at" {
+		t.Errorf("the privacy write carried %q, want the account's own bearer token", privacy.Auth)
 	}
 
-	if len(job.Results) != 1 {
-		t.Fatalf("results = %+v, want one row", job.Results)
+	// And Twitch's half: AccountRef is what addresses the write, so a target
+	// assembled from the wrong halves reaches the wrong channel.
+	var labels *stubCall
+	for _, c := range stub.matching(http.MethodPatch, "/channels") {
+		if c.Body["content_classification_labels"] != nil {
+			found := c
+			labels = &found
+		}
+	}
+	if labels == nil {
+		t.Fatalf("no label write reached Twitch at all; the push made %v", stub.calls())
+	}
+	if got := labels.Query.Get("broadcaster_id"); got != "dj-ref" {
+		t.Errorf("the label write addressed broadcaster_id=%q, want the account's own ref: "+
+			"a ComplianceTarget assembled from the wrong halves reaches the wrong channel", got)
+	}
+
+	if len(job.Results) != 2 {
+		t.Fatalf("results = %+v, want one row per account", job.Results)
 	}
 	// The compliance result has to reach the row the composer renders. Applied
 	// fields that the provider reported but the outcome dropped would tell the
 	// operator their COPPA declaration did not land when it did.
 	applied := map[oauth.MetadataField]bool{}
-	for _, f := range job.Results[0].Applied {
-		applied[f] = true
+	for _, row := range job.Results {
+		for _, f := range row.Applied {
+			applied[f] = true
+		}
 	}
-	for _, f := range []oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids} {
+	for _, f := range []oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids, oauth.FieldLabels} {
 		if !applied[f] {
-			t.Errorf("%q is missing from the reported result %v, so a compliance field that "+
-				"was applied is invisible to the operator", f, job.Results[0].Applied)
+			t.Errorf("%q is missing from the reported results %+v, so a compliance field that "+
+				"was applied is invisible to the operator", f, job.Results)
 		}
 	}
 }
@@ -438,8 +469,14 @@ func TestAPushSendsTheStoredComplianceToTheProvider(t *testing.T) {
 // told nothing was sent while one destination's declaration is already on its
 // way. So this asserts that no provider call happened and no job was created,
 // and treats the 400 as the least interesting half.
+//
+// Mutations: move the `if len(problems) > 0` refusal to AFTER
+// `go s.runMetadataPush(...)`. Observed FAIL, on both halves -- "a push job was
+// created before the conflict was refused" and a liveBroadcasts.update on the
+// wire for a request answered 400. Or delete the refusal outright: observed
+// FAIL ("status = 202, want 400").
 func TestAComplianceConflictIsRefusedBeforeAnythingIsSent(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
@@ -457,20 +494,6 @@ func TestAComplianceConflictIsRefusedBeforeAnythingIsSent(t *testing.T) {
 		if _, err := store.CreateDestination(d); err != nil {
 			t.Fatalf("create %s: %v", d.Name, err)
 		}
-	}
-
-	// A channel rather than a bool: these seams are called from the push's own
-	// goroutines, so a plain variable read after a 400 would be a data race as
-	// well as a flaky assertion.
-	calls := make(chan string, 8)
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		calls <- "metadata"
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		calls <- "compliance"
-		return &oauth.MetadataResult{}, nil
 	}
 
 	before, _ := metadataRegistry.latest()
@@ -493,12 +516,15 @@ func TestAComplianceConflictIsRefusedBeforeAnythingIsSent(t *testing.T) {
 		t.Error("a push job was created before the conflict was refused, so the refusal " +
 			"came after the work it claims to have prevented")
 	}
-	// Direct half: nothing may have left the process.
-	select {
-	case which := <-calls:
-		t.Fatalf("a %s request was made for a push that was refused; the operator was told "+
-			"nothing was sent while one destination's compliance was already on the wire", which)
-	case <-time.After(500 * time.Millisecond):
+	// Direct half: nothing may have left the process. The stub records every
+	// request any provider makes, so this is now a question about the wire
+	// rather than about a closure that stood in for it, and the wait is what
+	// makes it an assertion rather than a race -- a push that started would
+	// have reached YouTube well inside it.
+	time.Sleep(500 * time.Millisecond)
+	if made := stub.calls(); len(made) != 0 {
+		t.Fatalf("%v was sent for a push that was refused; the operator was told "+
+			"nothing was sent while one destination's compliance was already on the wire", made)
 	}
 }
 
@@ -517,47 +543,47 @@ func TestAComplianceConflictIsRefusedBeforeAnythingIsSent(t *testing.T) {
 // confirmed it — the exact failure this branch exists to end, one arm to the
 // right.
 //
-// Mutations: drop `res.Skipped = append(res.Skipped, cres.Skipped...)`, drop
-// `res.Warnings = append(res.Warnings, cres.Warnings...)`, or both.
+// Mutation: drop `res.Skipped = append(res.Skipped, cres.Skipped...)` and
+// `res.Warnings = append(res.Warnings, cres.Warnings...)` from pushOne's
+// `case cres != nil`. Observed FAIL ("warnings = []", "skipped = []",
+// "state = ok, want partial").
 func TestAnUnconfirmedComplianceWriteReachesTheOperatorWithoutAnError(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	acctID := connectAccount(t, store, s.box, db.PlatformFacebook, "ada")
 	if err := store.PutPlatformCreds(s.box, db.PlatformFacebook, "cid", "topsecret"); err != nil {
 		t.Fatalf("creds: %v", err)
 	}
+	// A NUMERIC stream key, because Facebook's key IS the live video id and
+	// ComplianceTarget.StreamKey is the only place PushCompliance can recover
+	// it from. A target assembled from the wrong halves lands on no broadcast
+	// at all, and this is where that shows.
 	if _, err := store.CreateDestination(&db.Destination{
 		Name: "page", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
-		URL: "rtmps://ingest.example/app", StreamKey: "sk-live-1", AccountID: &acctID,
+		URL: "rtmps://ingest.example/app", StreamKey: "1234567890", AccountID: &acctID,
 		Compliance: db.Compliance{FacebookPrivacy: db.FBPrivacySelf},
 	}); err != nil {
 		t.Fatalf("create destination: %v", err)
 	}
 
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	// Exactly the shape Facebook returns when the read-back does not confirm:
-	// no error, a skipped field, and the reason.
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{
-			Skipped:  []oauth.MetadataField{oauth.FieldPrivacy},
-			Warnings: []string{"privacy: Facebook did not confirm the change"},
-			// The metadata half named no target, so the compliance result's is
-			// what the row has to fall back to; without it the row names the
-			// account and the operator cannot tell which broadcast was touched.
-			Target: "Tonight's broadcast",
-		}, nil
+	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+
+	// The write went to the broadcast the stream key names. Graph accepts it
+	// and the read-back disagrees, which is the whole failure channel: no
+	// error, a skipped field and the reason.
+	if wrote := stub.first(http.MethodPost, "/1234567890"); wrote == nil {
+		t.Fatalf("no privacy write reached the live video the stream key names; "+
+			"the push made %v", stub.calls())
+	} else if got := wrote.Query.Get("privacy"); got != `{"value":"SELF"}` {
+		t.Errorf("privacy = %q, want the destination's stored SELF", got)
 	}
 
-	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
 	if len(job.Results) != 1 {
 		t.Fatalf("results = %+v, want one row", job.Results)
 	}
 	res := job.Results[0]
-	if !strings.Contains(strings.Join(res.Warnings, " "), "did not confirm") {
+	if !strings.Contains(strings.Join(res.Warnings, " "), "not confirmed") {
 		t.Errorf("warnings = %v, want the provider's unconfirmed-write reason: a privacy "+
 			"change Facebook never confirmed must not be shown as one that landed", res.Warnings)
 	}
@@ -575,9 +601,13 @@ func TestAnUnconfirmedComplianceWriteReachesTheOperatorWithoutAnError(t *testing
 		t.Errorf("state = %q, want partial: the title landed and the privacy did not, and "+
 			"reading this row as a clean success is the whole defect", res.State)
 	}
-	if res.Target != "Tonight's broadcast" {
-		t.Errorf("target = %q, want the broadcast the compliance result named: falling back "+
-			"to the account name leaves the operator guessing which broadcast moved", res.Target)
+	// And the row names the broadcast rather than the account, so the operator
+	// can tell which one was touched. The compliance result's own Target is
+	// covered by TestACompliancePushNeedsNothingTypedInTheComposer, which is
+	// the push where the metadata half names nothing at all.
+	if res.Target == "ada" {
+		t.Errorf("target = %q -- falling back to the account name leaves the operator "+
+			"guessing which broadcast moved", res.Target)
 	}
 }
 
@@ -592,8 +622,12 @@ func TestAnUnconfirmedComplianceWriteReachesTheOperatorWithoutAnError(t *testing
 // with a plain reason is the composer's existing way to say "asked for, not
 // applicable" — which is why this asserts the state is NOT an error as
 // deliberately as it asserts the reason is present.
+//
+// Mutation: delete the two appends from pushOne's else branch -- the Skipped
+// fields and the "has no compliance API" warning. Observed FAIL ("skipped = []",
+// "warnings = []").
 func TestAKickTargetIsSkippedOutLoudRatherThanSilently(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	acctID := connectAccount(t, store, s.box, db.PlatformKick, "kicker")
@@ -608,20 +642,17 @@ func TestAKickTargetIsSkippedOutLoudRatherThanSilently(t *testing.T) {
 		t.Fatalf("create destination: %v", err)
 	}
 
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	attempted := false
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		attempted = true
-		return &oauth.MetadataResult{}, nil
-	}
-
 	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
-	if attempted {
-		t.Error("a compliance write was attempted against Kick, which has no compliance API; " +
-			"ComplianceFor's absence is being ignored at the call site")
+
+	// Kick's own title write and nothing else. ComplianceFor answers false for
+	// Kick, so a second request here would mean the call site resolved
+	// compliance through some other platform's provider and wrote the
+	// operator's declaration somewhere it does not belong.
+	for _, c := range stub.calls() {
+		if c.Path != "/public/v1/channels" {
+			t.Errorf("%v was sent for a Kick account, which has no compliance API; "+
+				"ComplianceFor's absence is being ignored at the call site", c)
+		}
 	}
 	if len(job.Results) != 1 {
 		t.Fatalf("results = %+v, want one row", job.Results)
@@ -658,8 +689,12 @@ func TestAKickTargetIsSkippedOutLoudRatherThanSilently(t *testing.T) {
 // Kick is the target precisely because it has no compliance API: if the guard
 // goes, this is the account that produces a visible complaint rather than a
 // silent no-op.
+//
+// Mutation: replace `if !t.Compliance.Empty()` in pushOne with `if true`.
+// Observed FAIL ("state = partial, want ok" and a warning about compliance
+// settings this account never stored).
 func TestAnAccountWithNoStoredComplianceIsLeftEntirelyAlone(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	acctID := connectAccount(t, store, s.box, db.PlatformKick, "kicker")
@@ -675,19 +710,12 @@ func TestAnAccountWithNoStoredComplianceIsLeftEntirelyAlone(t *testing.T) {
 		t.Fatalf("create destination: %v", err)
 	}
 
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	attempted := false
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		attempted = true
-		return &oauth.MetadataResult{}, nil
-	}
-
 	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
-	if attempted {
-		t.Error("a compliance write was attempted for an account with no compliance stored")
+
+	for _, c := range stub.calls() {
+		if c.Path != "/public/v1/channels" {
+			t.Errorf("%v was sent for an account with no compliance stored", c)
+		}
 	}
 	if len(job.Results) != 1 {
 		t.Fatalf("results = %+v, want one row", job.Results)
@@ -714,8 +742,23 @@ func TestAnAccountWithNoStoredComplianceIsLeftEntirelyAlone(t *testing.T) {
 // target carries its own db.Compliance, whose Labels map came from its own
 // destination and is only ever read, so there is nothing shared to corrupt —
 // this is the test that would notice if that stopped being true.
+//
+// The overlap has to be MEASURED, which is what this used to miss. It built a
+// `start` channel and closed it before the push began, so both stubs ran
+// straight through and two sequential workers satisfied every assertion —
+// removing `go` from runMetadataPush's fan-out left it green, and the -race
+// coverage it claimed did not exist. It now records the peak number of stubs in
+// flight and asserts it reached two.
+//
+// The rendezvous is bounded rather than a bare barrier: a sequential fan-out
+// would block on an unbounded one forever, and a test that hangs reports
+// nothing. The wait is only ever paid by a run that is already failing.
+//
+// Mutation: drop the `go` from `go func(i int, t metadataTarget)` in
+// runMetadataPush. Observed FAIL ("compliance pushes never overlapped: peak 1
+// in flight").
 func TestTwoAccountsPushComplianceConcurrently(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	yt := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
@@ -738,40 +781,80 @@ func TestTwoAccountsPushComplianceConcurrently(t *testing.T) {
 		}
 	}
 
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	// Buffered per call, and the goroutines are released together, so the two
-	// pushes genuinely overlap rather than queueing behind each other.
-	start := make(chan struct{})
-	seen := make(chan db.Compliance, 4)
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		<-start
-		seen <- c
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldPrivacy}}, nil
-	}
-	close(start)
+	// Each compliance request announces itself, then waits for the other to
+	// arrive. Both are only released once both are inside the stub, which is
+	// what makes the overlap real instead of assumed -- and `peak` is the
+	// measurement, so a sequential fan-out is a failure with a number in it
+	// rather than a hang.
+	//
+	// The predicate has to tell a compliance write from a metadata one:
+	// Twitch's two writes are both PATCH /channels, and only the compliance
+	// one carries content_classification_labels.
+	const targets = 2
+	var (
+		mu       sync.Mutex
+		inFlight int
+		peak     int
+	)
+	both := make(chan struct{})
+	var once sync.Once
+	stub.setOnCall(func(c stubCall) {
+		isCompliance := (c.Path == "/liveBroadcasts" && c.Query.Get("part") == "status") ||
+			(c.Path == "/channels" && c.Body["content_classification_labels"] != nil)
+		if !isCompliance {
+			return
+		}
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		arrived := inFlight
+		mu.Unlock()
+
+		if arrived == targets {
+			once.Do(func() { close(both) })
+		}
+		select {
+		case <-both:
+		case <-time.After(2 * time.Second):
+			// Only reachable when the pushes are serialised; the assertion on
+			// peak below is what reports it. Two of these have to fit inside
+			// pushAndSettle's own 10s deadline, or the failure comes back as
+			// "the push never finished" instead of naming the missing overlap.
+		}
+
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+	})
 
 	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	mu.Lock()
+	gotPeak := peak
+	mu.Unlock()
+	if gotPeak != targets {
+		t.Fatalf("compliance pushes never overlapped: peak %d in flight, want %d. "+
+			"The point of this test is to give -race two PushCompliance calls at "+
+			"once; with a serialised fan-out it watches nothing.", gotPeak, targets)
+	}
 	if len(job.Results) != 2 {
 		t.Fatalf("results = %+v, want one row per account", job.Results)
 	}
-	close(seen)
-	got := map[db.PrivacyStatus]bool{}
+	// Each account's own settings, not one account's applied twice.
+	privacy := stubCallWith(stub, http.MethodPut, "/liveBroadcasts", "part", "status")
+	if privacy == nil || nestedString(privacy.Body, "status", "privacyStatus") != "private" {
+		t.Errorf("YouTube did not receive its own stored privacy: %+v", privacy)
+	}
 	labels := 0
-	for c := range seen {
-		if c.Privacy != db.PrivacyUnchanged {
-			got[c.Privacy] = true
-		}
-		if len(c.Labels) > 0 {
+	for _, c := range stub.matching(http.MethodPatch, "/channels") {
+		if c.Body["content_classification_labels"] != nil {
 			labels++
 		}
 	}
-	// Each account's own settings, not one account's applied twice.
-	if !got[db.PrivacyPrivate] || labels != 1 {
-		t.Errorf("concurrent pushes sent privacy=%v and %d label sets, want each account's "+
-			"own compliance exactly once", got, labels)
+	if labels != 1 {
+		t.Errorf("%d label writes reached Twitch, want exactly the one account that "+
+			"stored labels", labels)
 	}
 }
 
@@ -785,9 +868,10 @@ func TestTwoAccountsPushComplianceConcurrently(t *testing.T) {
 // be able to disagree, which is the whole reason this row reports fields rather
 // than a boolean.
 //
-// Mutation: put back `out.Warnings = res.Warnings`.
+// Mutation: put back `out.Warnings = res.Warnings` in place of the append.
+// Observed FAIL ("warnings = [], want the broadcast failure's own reason").
 func TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
@@ -795,15 +879,16 @@ func TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess(t *testing.T)
 		t.Fatalf("creds: %v", err)
 	}
 
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	var gotSettings oauth.BroadcastSettings
-	s.pushBroadcastFn = func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
-		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error) {
-		gotSettings = bs
-		return nil, errors.New("youtube said no: the broadcast is already live")
-	}
+	// Only the broadcast write fails. The title write goes to the same path
+	// with a different `part`, so refusing by path alone would fail both and
+	// prove nothing about the two halves disagreeing.
+	stub.setReject(func(c stubCall) string {
+		if c.Method == http.MethodPut && c.Path == "/liveBroadcasts" &&
+			strings.Contains(c.Query.Get("part"), "contentDetails") {
+			return "youtube said no: the broadcast is already live"
+		}
+		return ""
+	})
 
 	dvr := false
 	job := pushAndSettle(t, h, sign, map[string]any{
@@ -823,13 +908,17 @@ func TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess(t *testing.T)
 		t.Errorf("applied = %v, want the title that landed: a failed broadcast write must "+
 			"not erase a metadata write that succeeded", res.Applied)
 	}
-	// The operator's own settings have to be what reaches the pusher. Sending a
-	// zero BroadcastSettings here would be the composer-tags defect again: the
-	// call is made, the row reports a result, and the toggle the operator
+	// The operator's own settings have to be what reaches the platform. Sending
+	// a zero BroadcastSettings here would be the composer-tags defect again:
+	// the call is made, the row reports a result, and the toggle the operator
 	// actually moved was never in the request.
-	if gotSettings.EnableDvr == nil || *gotSettings.EnableDvr {
-		t.Errorf("BroadcastSettings passed to the pusher = %+v, want the explicit "+
-			"enableDvr:false the operator sent", gotSettings)
+	write := stubCallWith(stub, http.MethodPut, "/liveBroadcasts", "part", "snippet,contentDetails")
+	if write == nil {
+		t.Fatalf("no broadcast write reached YouTube at all; the push made %v", stub.calls())
+	}
+	if got := nestedAny(write.Body, "contentDetails", "enableDvr"); got != false {
+		t.Errorf("enableDvr = %v, want the explicit false the operator sent (body %+v)",
+			got, write.Body)
 	}
 }
 
@@ -844,9 +933,11 @@ func TestABroadcastFailureIsStillReportedAlongsideAMetadataSuccess(t *testing.T)
 // the one selected; TestAComplianceConflictIsRefusedBeforeAnythingIsSent covers
 // that direction over the unfiltered push.
 //
-// Mutation: refuse whenever any conflict exists anywhere.
+// Mutation: range over `conflicts` instead of over `targets` when collecting
+// problems, which refuses whenever any conflict exists anywhere. Observed FAIL
+// ("push: status 400" naming two destinations this push never addressed).
 func TestAConflictOnAnUnselectedAccountDoesNotBlockThePush(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	clean := connectAccount(t, store, s.box, db.PlatformYouTube, "clean")
@@ -871,16 +962,6 @@ func TestAConflictOnAnUnselectedAccountDoesNotBlockThePush(t *testing.T) {
 		}
 	}
 
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	var pushedFor db.Compliance
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		pushedFor = c
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldPrivacy}}, nil
-	}
-
 	job := pushAndSettle(t, h, sign, map[string]any{
 		"title":      "Live tonight",
 		"accountIds": []int64{clean},
@@ -890,8 +971,14 @@ func TestAConflictOnAnUnselectedAccountDoesNotBlockThePush(t *testing.T) {
 	}
 	// The selected account's own compliance still went, unaffected by a
 	// disagreement somewhere else entirely.
-	if pushedFor.Privacy != db.PrivacyPrivate {
-		t.Errorf("compliance pushed = %+v, want the selected account's private setting", pushedFor)
+	privacy := stubCallWith(stub, http.MethodPut, "/liveBroadcasts", "part", "status")
+	if privacy == nil || nestedString(privacy.Body, "status", "privacyStatus") != "private" {
+		t.Errorf("the selected account's private setting never reached YouTube; "+
+			"the push made %v", stub.calls())
+	}
+	// And nothing was sent for the account that was not selected.
+	if n := len(stub.matching(http.MethodPatch, "/channels")); n != 0 {
+		t.Errorf("%d writes reached the Twitch account this push never named", n)
 	}
 }
 
@@ -904,8 +991,17 @@ func TestAConflictOnAnUnselectedAccountDoesNotBlockThePush(t *testing.T) {
 // Two conflicting accounts are selected, not one, because a refusal that stops
 // at the first problem sends the operator round the loop again for the second.
 // Every conflict, for every account addressed.
+//
+// Mutation: delete the `if len(problems) > 0` refusal from handlePushMetadata.
+// Observed FAIL ("status = 202, want 400").
+//
+// Note what the wire assertion below can and cannot see here: this test seeds
+// no developer credentials, so pushOne fails at GetPlatformCreds before any
+// provider is reached. The stub is the belt to the 400's braces, not the guard
+// itself -- TestAComplianceConflictIsRefusedBeforeAnythingIsSent is the one
+// that proves nothing left the process, and it does seed them.
 func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	clean := connectAccount(t, store, s.box, db.PlatformYouTube, "clean")
@@ -939,17 +1035,6 @@ func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 		}
 	}
 
-	calls := make(chan string, 8)
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		calls <- "metadata"
-		return &oauth.MetadataResult{}, nil
-	}
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		calls <- "compliance"
-		return &oauth.MetadataResult{}, nil
-	}
-
 	r := jsonRequest(t, http.MethodPost, "/api/v1/metadata/push", map[string]any{
 		"title":      "Live tonight",
 		"accountIds": []int64{messy, alsoMessy},
@@ -965,10 +1050,9 @@ func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 				"the push refused: %s", name, w.Body.String())
 		}
 	}
-	select {
-	case which := <-calls:
-		t.Fatalf("a %s request was made for a push that was refused", which)
-	case <-time.After(500 * time.Millisecond):
+	time.Sleep(500 * time.Millisecond)
+	if made := stub.calls(); len(made) != 0 {
+		t.Fatalf("%v was sent for a push that was refused", made)
 	}
 }
 
@@ -979,8 +1063,12 @@ func TestAConflictOnTheSelectedAccountStillRefuses(t *testing.T) {
 // layer in. It also pins the failure as PARTIAL rather than fatal -- the title
 // above it may already have landed, and failing the row would send the operator
 // back to redo work that took.
+//
+// Mutation: delete the body of pushOne's `case err != nil` on the compliance
+// write. Observed FAIL ("warnings = []", both declarations missing from
+// skipped, "state = ok, want partial").
 func TestAFailedComplianceWriteIsReportedRatherThanSwallowed(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
@@ -996,13 +1084,15 @@ func TestAFailedComplianceWriteIsReportedRatherThanSwallowed(t *testing.T) {
 		t.Fatalf("create destination: %v", err)
 	}
 
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
-	}
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		return nil, errors.New("youtube said no: insufficient scope")
-	}
+	// The privacy write alone refuses. The title write is the same path with a
+	// different `part`, and it has to keep working: the point of the row being
+	// PARTIAL is that one half landed and the other did not.
+	stub.setReject(func(c stubCall) string {
+		if c.Method == http.MethodPut && c.Path == "/liveBroadcasts" && c.Query.Get("part") == "status" {
+			return "youtube said no: insufficient scope"
+		}
+		return ""
+	})
 
 	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
 	if len(job.Results) != 1 {
@@ -1222,277 +1312,6 @@ func TestMergeFieldsUnionsWithoutDuplicating(t *testing.T) {
 	}
 }
 
-func TestTwoDestinationsOnOneAccountWithDifferentComplianceAreRefused(t *testing.T) {
-	acct := int64(7)
-	got, conflicts := complianceByAccount([]db.Destination{
-		{Name: "main", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "backup", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-	})
-	if len(conflicts) == 0 {
-		t.Fatal("two destinations asked one broadcast to be two things and it was allowed; " +
-			"one of the operator's declarations would be discarded with nothing saying so")
-	}
-	// BOTH names, because "there is a conflict" the operator cannot locate is
-	// barely better than the silence this replaces.
-	if !strings.Contains(conflicts[0], "main") || !strings.Contains(conflicts[0], "backup") {
-		t.Errorf("conflict %q does not name both destinations", conflicts[0])
-	}
-	// A refusal that still hands the account a value is not a refusal: the
-	// caller has no way to tell "refused" from "resolved to the first one
-	// seen" unless the absence of the entry IS the signal.
-	if _, ok := got[acct]; ok {
-		t.Errorf("account %d is still present in the result despite being reported as a conflict; "+
-			"a caller that reads the map without checking conflicts would silently apply it", acct)
-	}
-}
-
-// TestComplianceByTargetKeepsAConflictingAccountOutOfTheResolvedMap is the
-// second line of defence, tested as such.
-//
-// handlePushMetadata refuses a conflict outright, so this can never be reached
-// through the handler and no call-site guard can see it — which is exactly why
-// it needs its own. The delete is what makes reading the map without checking
-// conflicts fail safe: a caller that skipped the check would otherwise push the
-// first destination's settings while reporting the push refused, which looks
-// handled and is worse than no detection at all.
-func TestComplianceByTargetKeepsAConflictingAccountOutOfTheResolvedMap(t *testing.T) {
-	messy, tidy := int64(7), int64(9)
-	got, conflicts := complianceByTarget([]db.Destination{
-		{Name: "main", AccountID: &messy, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "backup", AccountID: &messy, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-		{Name: "elsewhere", AccountID: &tidy, Compliance: db.Compliance{Privacy: db.PrivacyUnlisted}},
-	})
-
-	if _, ok := got[messy]; ok {
-		t.Errorf("the conflicting account is still in the resolved map as %+v; a caller that "+
-			"read it without checking conflicts would silently apply one of two "+
-			"declarations", got[messy])
-	}
-	if len(conflicts[messy]) == 0 {
-		t.Error("the conflict was not reported against the account it is about, so a push " +
-			"cannot tell whose problem it is")
-	} else if !strings.Contains(conflicts[messy][0], "main") ||
-		!strings.Contains(conflicts[messy][0], "backup") {
-		t.Errorf("conflict %q does not name both destinations", conflicts[messy][0])
-	}
-
-	// The account that never disagreed is untouched by its neighbour's problem.
-	if got[tidy].Compliance.Privacy != db.PrivacyUnlisted {
-		t.Errorf("resolved privacy for the innocent account = %q, want unlisted",
-			got[tidy].Compliance.Privacy)
-	}
-	if len(conflicts[tidy]) != 0 {
-		t.Errorf("the innocent account was reported as conflicting: %v", conflicts[tidy])
-	}
-}
-
-// TestThreeDisagreeingDestinationsAreAllWithheldAndAllNamed is the case two
-// destinations could never show.
-//
-// The original loop asked the RESULT map whether it had seen this account, and
-// removed the entry on conflict. With three disagreeing destinations the third
-// therefore found nothing, read as the first one seen, and re-inserted: the
-// account came back present, carrying the LAST destination's settings, with one
-// conflict message naming only the first two. Present-and-resolved-anyway is
-// exactly the "looks handled" outcome the removal exists to prevent, and the
-// messier three-destination configuration is the likelier one to hit it.
-func TestThreeDisagreeingDestinationsAreAllWithheldAndAllNamed(t *testing.T) {
-	acct := int64(7)
-	got, conflicts := complianceByTarget([]db.Destination{
-		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyUnlisted}},
-	})
-
-	if ac, ok := got[acct]; ok {
-		t.Errorf("the account is present carrying %q's settings despite three destinations "+
-			"disagreeing; a caller reading the map would apply one of them", ac.Destination)
-	}
-	// Every disagreeing destination, not just the first pair. An operator told
-	// only about a-vs-b fixes it, pushes, and is refused over c.
-	joined := strings.Join(conflicts[acct], " ")
-	for _, name := range []string{`"a"`, `"b"`, `"c"`} {
-		if !strings.Contains(joined, name) {
-			t.Errorf("destination %s is never named in %v, so fixing what is reported still "+
-				"leaves the push refused", name, conflicts[acct])
-		}
-	}
-}
-
-// TestEveryDestinationIsComparedAgainstTheFirstNotItsNeighbour is the guard
-// against overcorrecting the above, and against a subtler shape: comparing each
-// destination against the one BEFORE it rather than against the first.
-//
-// Agreement first — three destinations that all agree are ordinary, not three
-// conflicts. Then the distinguishing case: with a, a, c the anchor is "a", so
-// the message must name "a" and "c". A previous-neighbour comparison would name
-// "b" and "c" instead, blaming a destination that agreed with everything and
-// leaving the operator editing the wrong row. An all-agreeing fixture cannot
-// tell those two implementations apart, which is why this one does not use one.
-func TestEveryDestinationIsComparedAgainstTheFirstNotItsNeighbour(t *testing.T) {
-	acct := int64(7)
-
-	got, conflicts := complianceByTarget([]db.Destination{
-		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-	})
-	if len(conflicts[acct]) != 0 {
-		t.Errorf("three destinations that all agree were reported as conflicting: %v",
-			conflicts[acct])
-	}
-	if got[acct].Compliance.Privacy != db.PrivacyPrivate {
-		t.Errorf("resolved privacy = %q, want private", got[acct].Compliance.Privacy)
-	}
-
-	_, conflicts = complianceByTarget([]db.Destination{
-		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-	})
-	if len(conflicts[acct]) != 1 {
-		t.Fatalf("got %d conflicts, want exactly one: only %q disagrees with the anchor",
-			len(conflicts[acct]), "c")
-	}
-	if !strings.HasPrefix(conflicts[acct][0], `"a" and "c"`) {
-		t.Errorf("conflict = %q, want it to open with %q: the disagreement is with the first "+
-			"destination, and naming %q blames one that agreed with everything",
-			conflicts[acct][0], `"a" and "c"`, "b")
-	}
-}
-
-// TestComplianceByAccountDoesNotReorderItsCallersSlice guards the defensive
-// copy. The function sorts by name to make its messages deterministic; doing
-// that in place would reorder a slice the caller still owns, which is the kind
-// of side effect that is invisible until something downstream depends on store
-// order.
-func TestComplianceByAccountDoesNotReorderItsCallersSlice(t *testing.T) {
-	acct := int64(7)
-	dests := []db.Destination{
-		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-	}
-	complianceByAccount(dests)
-	for i, want := range []string{"c", "a", "b"} {
-		if dests[i].Name != want {
-			t.Fatalf("the caller's slice was reordered to %q...; complianceByAccount sorted "+
-				"in place", dests[i].Name)
-		}
-	}
-}
-
-// TestComplianceFieldsNamesOnlyWhatWasSet pins the mapping a failed or skipped
-// compliance write reports through. Its call sites are guarded elsewhere; what
-// they cannot see is a single clause going missing, and the FacebookPrivacy one
-// in particular — a Facebook-only failure would then name no skipped field at
-// all, which combined with an unconfirmed write is the whole of Facebook's
-// failure reporting gone.
-func TestComplianceFieldsNamesOnlyWhatWasSet(t *testing.T) {
-	kids := false
-	tests := []struct {
-		name string
-		in   db.Compliance
-		want []oauth.MetadataField
-	}{
-		{"nothing set", db.Compliance{}, nil},
-		{"youtube privacy", db.Compliance{Privacy: db.PrivacyPrivate},
-			[]oauth.MetadataField{oauth.FieldPrivacy}},
-		{"facebook privacy is privacy too", db.Compliance{FacebookPrivacy: db.FBPrivacySelf},
-			[]oauth.MetadataField{oauth.FieldPrivacy}},
-		{"an explicit false is still a declaration", db.Compliance{MadeForKids: &kids},
-			[]oauth.MetadataField{oauth.FieldMadeForKids}},
-		{"twitch labels", db.Compliance{Labels: map[string]bool{"Gambling": true}},
-			[]oauth.MetadataField{oauth.FieldLabels}},
-		{"all of it", db.Compliance{
-			Privacy: db.PrivacyPrivate, MadeForKids: &kids,
-			Labels: map[string]bool{"Gambling": true}, FacebookPrivacy: db.FBPrivacySelf},
-			[]oauth.MetadataField{oauth.FieldPrivacy, oauth.FieldMadeForKids, oauth.FieldLabels}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := complianceFields(tc.in); !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("complianceFields(%+v) = %v, want %v", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestConflictNamesDestinationsInSortedOrderNotStoreOrder(t *testing.T) {
-	// Store order is c, a, b -- deliberately not sorted. Without the sort,
-	// the first pair compared is (c, a), and the conflict message would name
-	// "c" and "a". The function must sort by name first, so the pair actually
-	// compared is (a, b) and the message names "a" before "b". Using c/a/b
-	// rather than something subtler makes the difference unmistakable: the
-	// two possible messages don't share a first name.
-	acct := int64(7)
-	_, conflicts := complianceByAccount([]db.Destination{
-		{Name: "c", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-		{Name: "a", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "b", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPublic}},
-	})
-	//
-	// Two messages, not one: "a" is the anchor and both "b" and "c" disagree
-	// with it, so both are named. This assertion used to demand exactly one,
-	// which quietly codified a bug -- the loop compared "c" against a map entry
-	// that the "b" conflict had already removed, so "c" read as the first
-	// destination seen and was never reported at all. What this test is about
-	// is the ORDER, so it checks the first message opens with the sorted pair
-	// and leaves the count to
-	// TestThreeDisagreeingDestinationsAreAllWithheldAndAllNamed.
-	if len(conflicts) == 0 {
-		t.Fatal("three destinations, two of them disagreeing with the first, produced no conflict")
-	}
-	if !strings.HasPrefix(conflicts[0], `"a" and "b"`) {
-		t.Errorf("conflict = %q, want it to open with %q (sorted order), not store order", conflicts[0], `"a" and "b"`)
-	}
-}
-
-func TestTwoDestinationsAgreeingIsNotAConflict(t *testing.T) {
-	// The rule refuses disagreement, not duplication. An install with a primary
-	// and a backup destination on one account is ordinary.
-	acct := int64(7)
-	got, conflicts := complianceByAccount([]db.Destination{
-		{Name: "main", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "backup", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-	})
-	if len(conflicts) != 0 {
-		t.Fatalf("identical compliance was refused: %v", conflicts)
-	}
-	if got[acct].Compliance.Privacy != db.PrivacyPrivate {
-		t.Errorf("resolved privacy = %q, want private", got[acct].Compliance.Privacy)
-	}
-}
-
-func TestADestinationWithNoComplianceContributesNothing(t *testing.T) {
-	acct := int64(7)
-	got, conflicts := complianceByAccount([]db.Destination{
-		{Name: "configured", AccountID: &acct, Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-		{Name: "untouched", AccountID: &acct},
-	})
-	if len(conflicts) != 0 {
-		t.Fatalf("an empty compliance was treated as disagreement: %v", conflicts)
-	}
-	if got[acct].Compliance.Privacy != db.PrivacyPrivate {
-		t.Errorf("resolved privacy = %q, want the configured one", got[acct].Compliance.Privacy)
-	}
-}
-
-func TestADestinationWithNoAccountIsIgnored(t *testing.T) {
-	// A hand-typed destination has no token to push with, so it must
-	// contribute nothing to the resolved map and raise no conflict --
-	// there is no account for it to conflict over.
-	got, conflicts := complianceByAccount([]db.Destination{
-		{Name: "manual", Compliance: db.Compliance{Privacy: db.PrivacyPrivate}},
-	})
-	if len(got) != 0 {
-		t.Errorf("got %v, want no account to receive an unowned destination's compliance", got)
-	}
-	if len(conflicts) != 0 {
-		t.Errorf("got conflicts %v, want none: a destination with no account has nothing to conflict with", conflicts)
-	}
-}
-
 // A push carrying nothing typed, against a destination that carries stored
 // compliance, is accepted rather than refused.
 //
@@ -1507,7 +1326,7 @@ func TestADestinationWithNoAccountIsIgnored(t *testing.T) {
 // resolution, or drop the `!anyCompliance(targets)` clause. Either makes this
 // fail with a 400.
 func TestACompliancePushNeedsNothingTypedInTheComposer(t *testing.T) {
-	s, h, store := testServer(t, config.Config{})
+	s, h, store, stub := stubbedServer(t, config.Config{})
 	sign := login(t, h)
 
 	acctID := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
@@ -1523,18 +1342,22 @@ func TestACompliancePushNeedsNothingTypedInTheComposer(t *testing.T) {
 		t.Fatalf("create destination: %v", err)
 	}
 
-	called := false
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		called = true
-		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldMadeForKids}}, nil
-	}
-
 	// Deliberately empty: no title, no description, no category, no broadcast.
-	pushAndSettle(t, h, sign, map[string]any{})
-	if !called {
-		t.Fatal("an empty composer refused a push whose whole purpose was applying a " +
-			"stored COPPA declaration; the operator has no other way to send it")
+	job := pushAndSettle(t, h, sign, map[string]any{})
+	if stubCallWith(stub, http.MethodPut, "/videos", "part", "status") == nil {
+		t.Fatalf("an empty composer refused a push whose whole purpose was applying a "+
+			"stored COPPA declaration; the operator has no other way to send it. "+
+			"The push made %v", stub.calls())
+	}
+	// This is the one push where the metadata half names nothing, so the row's
+	// target can only have come from the compliance result. Without that
+	// fallback the row names the account and the operator cannot tell which
+	// broadcast the declaration landed on.
+	if len(job.Results) != 1 {
+		t.Fatalf("results = %+v, want one row", job.Results)
+	}
+	if job.Results[0].Target != "Tonight's broadcast" {
+		t.Errorf("target = %q, want the broadcast the compliance result named", job.Results[0].Target)
 	}
 }
 

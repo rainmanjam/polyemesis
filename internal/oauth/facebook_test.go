@@ -25,8 +25,14 @@ type fbReq struct {
 	Auth   string
 }
 
-// fbServer points the provider at a stub Graph API and returns the request log.
-func fbServer(t *testing.T, h http.HandlerFunc) *[]fbReq {
+// fbServer returns a provider pointed at a stub Graph API, plus the request log.
+//
+// It returns the provider rather than redirecting the package: it used to
+// assign fbGraphBase under a t.Cleanup restore, which made every test in this
+// file order-dependent under -count=N and impossible to mark parallel. The
+// provider it hands back is the ONLY one a caller should use -- a bare
+// &Facebook{} still talks to graph.facebook.com, which is the whole point.
+func fbServer(t *testing.T, h http.HandlerFunc) (*Facebook, *[]fbReq) {
 	t.Helper()
 	log := &[]fbReq{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,11 +43,7 @@ func fbServer(t *testing.T, h http.HandlerFunc) *[]fbReq {
 		h(w, r)
 	}))
 	t.Cleanup(srv.Close)
-
-	orig := fbGraphBase
-	fbGraphBase = srv.URL
-	t.Cleanup(func() { fbGraphBase = orig })
-	return log
+	return NewFacebook(WithBaseURL(srv.URL)), log
 }
 
 func fbCall(log []fbReq, method, path string) *fbReq {
@@ -290,10 +292,9 @@ func TestFacebookIngestPublishesToTheChosenTarget(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			log := fbServer(t, graphStub(t, fbLiveResponse("777")))
-			f := &Facebook{}
+			fb, log := fbServer(t, graphStub(t, fbLiveResponse("777")))
 
-			b, err := f.IngestFor(context.Background(), "cid", "user-token", tc.ref, IngestOptions{})
+			b, err := fb.IngestFor(context.Background(), "cid", "user-token", tc.ref, IngestOptions{})
 			if err != nil {
 				t.Fatalf("IngestFor(%q): %v", tc.ref, err)
 			}
@@ -344,8 +345,8 @@ func TestFacebookIngestPublishesToTheChosenTarget(t *testing.T) {
 func TestFacebookProviderIngestUsesTheProfileAndHidesTheBroadcastID(t *testing.T) {
 	// Provider.Ingest has nowhere to put the live video id, so it is the
 	// convenience path; anything that needs the id calls IngestFor.
-	log := fbServer(t, graphStub(t, fbLiveResponse("31337")))
-	ing, err := (&Facebook{}).Ingest(context.Background(), "cid", "user-token")
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("31337")))
+	ing, err := fb.Ingest(context.Background(), "cid", "user-token")
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
@@ -360,8 +361,8 @@ func TestFacebookProviderIngestUsesTheProfileAndHidesTheBroadcastID(t *testing.T
 func TestFacebookRefusesAPageItCannotSeeRatherThanFallingBackToTheProfile(t *testing.T) {
 	// Publishing a business broadcast to someone's personal timeline because we
 	// could not read the Page list would be worse than refusing.
-	log := fbServer(t, graphStub(t, fbLiveResponse("1")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:999", IngestOptions{})
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("1")))
+	_, err := fb.IngestFor(context.Background(), "cid", "user-token", "page:999", IngestOptions{})
 	if err == nil {
 		t.Fatal("IngestFor(page:999) succeeded for a Page this login does not manage")
 	}
@@ -376,7 +377,7 @@ func TestFacebookRefusesAPageItCannotSeeRatherThanFallingBackToTheProfile(t *tes
 func TestFacebookIngestReadsBackTheLiveVideoWhenTheCreateOmitsIt(t *testing.T) {
 	// Belt and braces: if the create response carries no ingest, one read fills
 	// it in rather than failing a broadcast that already exists.
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/me/live_videos":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"id": "808"})
@@ -387,7 +388,7 @@ func TestFacebookIngestReadsBackTheLiveVideoWhenTheCreateOmitsIt(t *testing.T) {
 		}
 	})
 
-	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "", IngestOptions{})
+	b, err := fb.IngestFor(context.Background(), "cid", "user-token", "", IngestOptions{})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
 	}
@@ -400,8 +401,8 @@ func TestFacebookIngestReadsBackTheLiveVideoWhenTheCreateOmitsIt(t *testing.T) {
 }
 
 func TestFacebookSendsTheStoredPrivacyWhenTheBroadcastIsCreated(t *testing.T) {
-	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000",
 		IngestOptions{Privacy: db.FBPrivacySelf})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
@@ -429,8 +430,8 @@ func TestFacebookSendsNoPrivacyParameterWhenNoneWasChosen(t *testing.T) {
 	// key presence in the parsed query rather than a raw substring, so a future
 	// field that also happens to contain "privacy" cannot make this pass for the
 	// wrong reason.
-	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000",
 		IngestOptions{})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
@@ -452,8 +453,8 @@ func TestAPageBroadcastCarriesNoPersonalAudienceValue(t *testing.T) {
 	// The one thing standing between an operator's SELF choice and a public
 	// Page broadcast is tgt.kind != fbKindPage. A Page has no personal
 	// audience for Facebook to apply the value to.
-	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "page:555",
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := fb.IngestFor(context.Background(), "cid", "user-token", "page:555",
 		IngestOptions{Privacy: db.FBPrivacySelf})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
@@ -473,8 +474,8 @@ func TestAPageBroadcastCarriesNoPersonalAudienceValue(t *testing.T) {
 }
 
 func TestFacebookCrosspostingCarriesTheActionEachPageAskedFor(t *testing.T) {
-	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000",
 		IngestOptions{Crosspost: []db.CrosspostTarget{
 			{PageID: "1234", CreatePost: true},
 			{PageID: "5678"},
@@ -506,8 +507,8 @@ func TestFacebookCrosspostingCarriesTheActionEachPageAskedFor(t *testing.T) {
 }
 
 func TestFacebookSendsNoCrosspostingOrDonateWhenNoneIsStored(t *testing.T) {
-	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000",
 		IngestOptions{})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
@@ -531,8 +532,8 @@ func TestFacebookSendsNoCrosspostingOrDonateWhenNoneIsStored(t *testing.T) {
 func TestFacebookDonateButtonReachesTheCreateWhenStored(t *testing.T) {
 	// The mirror of the absence test above: absence was covered, presence was
 	// not, and a stored charity id could have been silently dropped forever.
-	log := fbServer(t, graphStub(t, fbLiveResponse("77")))
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("77")))
+	_, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000",
 		IngestOptions{DonateCharityID: "999"})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)
@@ -554,7 +555,7 @@ func TestARefusedCreateFailsTheKeyFetchRatherThanReturningAKey(t *testing.T) {
 	// A broadcast created with the wrong privacy is the unrecoverable case this
 	// whole sub-project exists for. Handing back a stream key for one is worse
 	// than handing back an error: the operator streams to it.
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/live_videos") {
 			http.Error(w, `{"error":{"message":"(#100) Invalid privacy setting"}}`,
 				http.StatusBadRequest)
@@ -562,7 +563,7 @@ func TestARefusedCreateFailsTheKeyFetchRatherThanReturningAKey(t *testing.T) {
 		}
 		http.Error(w, "{}", http.StatusNotFound)
 	})
-	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "user:1000",
+	b, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000",
 		IngestOptions{Privacy: db.FBPrivacySelf})
 	if err == nil {
 		t.Fatalf("a refused create returned a broadcast %+v instead of an error", b)
@@ -587,8 +588,8 @@ func TestFacebookAccountNamesTheTargetItConnected(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fbServer(t, graphStub(t, fbLiveResponse("1")))
-			acct, err := (&Facebook{}).AccountFor(context.Background(), "cid", "user-token", tc.ref)
+			fb, _ := fbServer(t, graphStub(t, fbLiveResponse("1")))
+			acct, err := fb.AccountFor(context.Background(), "cid", "user-token", tc.ref)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("AccountFor(%q) = %+v, want an error", tc.ref, acct)
@@ -640,7 +641,7 @@ func TestFacebookTargetsOffersEveryPageAndSurvivesHavingNone(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+			fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/me":
 					writeJSONBody(t, w, http.StatusOK, map[string]any{"id": "1000", "name": "Ada Lovelace"})
@@ -651,7 +652,7 @@ func TestFacebookTargetsOffersEveryPageAndSurvivesHavingNone(t *testing.T) {
 				}
 			})
 
-			got, err := (&Facebook{}).Targets(context.Background(), "cid", "user-token")
+			got, err := fb.Targets(context.Background(), "cid", "user-token")
 			if err != nil {
 				t.Fatalf("Targets: %v", err)
 			}
@@ -693,7 +694,7 @@ func TestFacebookIsDiscoverableAsATargetedProviderAndOthersAreNot(t *testing.T) 
 // --------------------------------------------------------------- metadata
 
 func TestFacebookPushMetadataEditsTheBroadcastThatIsOnAir(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/me/live_videos":
 			// Newest first, and the finished VOD must never be the one edited.
@@ -709,7 +710,7 @@ func TestFacebookPushMetadataEditsTheBroadcastThatIsOnAir(t *testing.T) {
 		}
 	})
 
-	res, err := (&Facebook{}).PushMetadata(context.Background(), "cid", "user-token", "user:1000",
+	res, err := fb.PushMetadata(context.Background(), "cid", "user-token", "user:1000",
 		Metadata{Title: "Tonight's show", Description: "  with guests  ", Category: "Gaming"})
 	if err != nil {
 		t.Fatalf("PushMetadata: %v", err)
@@ -739,7 +740,7 @@ func TestFacebookPushMetadataEditsTheBroadcastThatIsOnAir(t *testing.T) {
 }
 
 func TestFacebookMetadataNeverBlanksAFieldTheOperatorLeftEmpty(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/9" {
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 			return
@@ -747,7 +748,7 @@ func TestFacebookMetadataNeverBlanksAFieldTheOperatorLeftEmpty(t *testing.T) {
 		http.Error(w, "{}", http.StatusNotFound)
 	})
 
-	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+	res, err := fb.UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
 		Metadata{Title: "Only the title"})
 	if err != nil {
 		t.Fatalf("UpdateLiveVideo: %v", err)
@@ -765,7 +766,7 @@ func TestFacebookMetadataNeverBlanksAFieldTheOperatorLeftEmpty(t *testing.T) {
 }
 
 func TestFacebookMetadataSaysSoWhenThereIsNoBroadcastToEdit(t *testing.T) {
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/me/live_videos" {
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{
 				{"id": "3", "status": "VOD", "title": "Last week"},
@@ -775,7 +776,7 @@ func TestFacebookMetadataSaysSoWhenThereIsNoBroadcastToEdit(t *testing.T) {
 		http.Error(w, "{}", http.StatusNotFound)
 	})
 
-	_, err := (&Facebook{}).PushMetadata(context.Background(), "cid", "user-token", "", Metadata{Title: "x"})
+	_, err := fb.PushMetadata(context.Background(), "cid", "user-token", "", Metadata{Title: "x"})
 	if err == nil {
 		t.Fatal("PushMetadata edited something when only a finished VOD existed")
 	}
@@ -888,11 +889,11 @@ func TestFacebookErrorsBecomeAdviceTheOperatorCanAct(t *testing.T) {
 func TestFacebookErrorsNeverCarryTokenMaterial(t *testing.T) {
 	// Graph accepts ?access_token=, and using it would put the token into every
 	// error string and every log line. The header is what keeps it out.
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"(#200) Requires publish_video permission","code":200}}`, http.StatusForbidden)
 	})
 
-	_, err := (&Facebook{}).IngestFor(context.Background(), "cid", "super-secret-token", "", IngestOptions{})
+	_, err := fb.IngestFor(context.Background(), "cid", "super-secret-token", "", IngestOptions{})
 	if err == nil {
 		t.Fatal("IngestFor succeeded against a 403")
 	}
@@ -965,7 +966,7 @@ func TestFacebookTokensRefreshThroughTheLongLivedExchange(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var form map[string]string
-			fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+			fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 				if err := r.ParseForm(); err != nil {
 					t.Errorf("parse form: %v", err)
 				}
@@ -978,7 +979,7 @@ func TestFacebookTokensRefreshThroughTheLongLivedExchange(t *testing.T) {
 				})
 			})
 
-			tok, err := tc.run(&Facebook{})
+			tok, err := tc.run(fb)
 			if err != nil {
 				t.Fatalf("token call: %v", err)
 			}
@@ -1038,7 +1039,7 @@ func TestFacebookIsRegisteredAndGuidedAsASupportedPlatform(t *testing.T) {
 }
 
 func TestFacebookResolvesTagWordsIntoContentTagIDs(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/search":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{
@@ -1050,7 +1051,7 @@ func TestFacebookResolvesTagWordsIntoContentTagIDs(t *testing.T) {
 			http.Error(w, "{}", http.StatusNotFound)
 		}
 	})
-	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+	res, err := fb.UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
 		Metadata{Tags: []string{"cooking"}})
 	if err != nil {
 		t.Fatalf("UpdateLiveVideo: %v", err)
@@ -1070,7 +1071,7 @@ func TestFacebookResolvesTagWordsIntoContentTagIDs(t *testing.T) {
 func TestATagWordThatMatchesNothingIsNamedInAWarning(t *testing.T) {
 	// A tag that vanishes without comment is indistinguishable from one that
 	// worked, and the operator has no way to find out which happened.
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/search":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"data": []map[string]any{}})
@@ -1080,7 +1081,7 @@ func TestATagWordThatMatchesNothingIsNamedInAWarning(t *testing.T) {
 			http.Error(w, "{}", http.StatusNotFound)
 		}
 	})
-	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+	res, err := fb.UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
 		Metadata{Title: "t", Tags: []string{"zzzznotathing"}})
 	if err != nil {
 		t.Fatalf("UpdateLiveVideo: %v", err)
@@ -1095,7 +1096,7 @@ func TestARefusedTagSearchStillAppliesTheTitle(t *testing.T) {
 	// The tag lookup is an ads-surface endpoint and may not be reachable with
 	// publish_video. A 403 there must never cost the operator a title change
 	// seconds before air.
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/search":
 			http.Error(w, `{"error":{"message":"(#10) permission"}}`, http.StatusForbidden)
@@ -1105,7 +1106,7 @@ func TestARefusedTagSearchStillAppliesTheTitle(t *testing.T) {
 			http.Error(w, "{}", http.StatusNotFound)
 		}
 	})
-	res, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+	res, err := fb.UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
 		Metadata{Title: "Tonight", Tags: []string{"cooking"}})
 	if err != nil {
 		t.Fatalf("a refused tag search failed the whole push: %v", err)
@@ -1119,14 +1120,14 @@ func TestARefusedTagSearchStillAppliesTheTitle(t *testing.T) {
 }
 
 func TestFacebookSendsNoContentTagsWhenTheOperatorTypedNone(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/9" {
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 			return
 		}
 		http.Error(w, "{}", http.StatusNotFound)
 	})
-	_, err := (&Facebook{}).UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
+	_, err := fb.UpdateLiveVideo(context.Background(), "cid", "user-token", "user:1000", "9",
 		Metadata{Title: "Only a title"})
 	if err != nil {
 		t.Fatalf("UpdateLiveVideo: %v", err)
@@ -1143,7 +1144,7 @@ func TestFacebookSendsNoContentTagsWhenTheOperatorTypedNone(t *testing.T) {
 // ------------------------------------------------------------- privacy push
 
 func TestAConfirmedPrivacyChangeIsReportedAsApplied(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/9":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
@@ -1155,7 +1156,7 @@ func TestAConfirmedPrivacyChangeIsReportedAsApplied(t *testing.T) {
 			http.Error(w, "{}", http.StatusNotFound)
 		}
 	})
-	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+	res, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FBPrivacyFriends)
 	if err != nil {
 		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
@@ -1186,7 +1187,7 @@ func TestAPrivacyFacebookAcceptedButDidNotApplyIsNotReportedAsApplied(t *testing
 	// LiveVideo, so a 200 means "request accepted", not "field changed". If the
 	// read-back still says EVERYONE, the operator must not be told their
 	// broadcast is now friends-only.
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/9":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
@@ -1198,7 +1199,7 @@ func TestAPrivacyFacebookAcceptedButDidNotApplyIsNotReportedAsApplied(t *testing
 			http.Error(w, "{}", http.StatusNotFound)
 		}
 	})
-	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+	res, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FBPrivacyFriends)
 	if err != nil {
 		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
@@ -1218,7 +1219,7 @@ func TestAPrivacyFacebookAcceptedButDidNotApplyIsNotReportedAsApplied(t *testing
 func TestAPrivacyReadBackThatOmitsTheFieldIsNotTreatedAsConfirmation(t *testing.T) {
 	// Whether privacy is even readable on a LiveVideo is unverified -- the node
 	// reference 404s. Absence must read as "not confirmed", never as agreement.
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/9":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
@@ -1228,7 +1229,7 @@ func TestAPrivacyReadBackThatOmitsTheFieldIsNotTreatedAsConfirmation(t *testing.
 			http.Error(w, "{}", http.StatusNotFound)
 		}
 	})
-	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+	res, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FBPrivacyFriends)
 	if err != nil {
 		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
@@ -1248,7 +1249,7 @@ func TestAnUnreadablePrivacyConfirmationIsSkippedRatherThanTrusted(t *testing.T)
 	// land as Skipped, but only this one exercises getErr != nil rather than
 	// confirm.Privacy == nil. Until this test existed, that branch could be
 	// rewritten to report Applied unconditionally with the suite still green.
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/9":
 			writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
@@ -1258,7 +1259,7 @@ func TestAnUnreadablePrivacyConfirmationIsSkippedRatherThanTrusted(t *testing.T)
 			http.Error(w, "{}", http.StatusNotFound)
 		}
 	})
-	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+	res, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FBPrivacyFriends)
 	if err != nil {
 		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
@@ -1277,10 +1278,10 @@ func TestAnUnreadablePrivacyConfirmationIsSkippedRatherThanTrusted(t *testing.T)
 func TestARefusedPrivacyPushIsSkippedRatherThanAnError(t *testing.T) {
 	// The stored value was already applied when the broadcast was created, so a
 	// refusal here costs a convenience, not the setting.
-	fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"(#100) unsupported"}}`, http.StatusBadRequest)
 	})
-	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+	res, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FBPrivacyFriends)
 	if err != nil {
 		t.Fatalf("a refused privacy push became an error: %v", err)
@@ -1295,10 +1296,10 @@ func TestUpdateLiveVideoPrivacyRefusesAnUnknownValueRatherThanSendingIt(t *testi
 	// the wire at all. fbServer's 404-everything handler is the tripwire --
 	// if this guard were dropped, the request would hit it and the test would
 	// fail on the wrong assertion instead of silently passing.
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "{}", http.StatusNotFound)
 	})
-	_, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+	_, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "9", db.FacebookPrivacy("NOT_A_REAL_VALUE"))
 	if err == nil {
 		t.Fatal("UpdateLiveVideoPrivacy accepted a privacy value Facebook does not define")
@@ -1311,10 +1312,10 @@ func TestUpdateLiveVideoPrivacyRefusesAnUnknownValueRatherThanSendingIt(t *testi
 func TestUpdateLiveVideoPrivacyRefusesAnEmptyLiveVideoID(t *testing.T) {
 	// Same shape: no broadcast id means there is nothing to address, and the
 	// method must say so rather than POSTing to "/".
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "{}", http.StatusNotFound)
 	})
-	_, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
+	_, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "user-token",
 		"user:1000", "", db.FBPrivacySelf)
 	if err == nil {
 		t.Fatal("UpdateLiveVideoPrivacy accepted an empty live video id")
@@ -1327,10 +1328,10 @@ func TestUpdateLiveVideoPrivacyRefusesAnEmptyLiveVideoID(t *testing.T) {
 func TestAPagePrivacyPushMakesNoRequestAtAll(t *testing.T) {
 	// A Page broadcast is public by nature. Sending a personal audience value is
 	// a request Facebook has no meaning for, and the operator is told why.
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
-	res, err := (&Facebook{}).UpdateLiveVideoPrivacy(context.Background(), "cid", "page-token",
+	res, err := fb.UpdateLiveVideoPrivacy(context.Background(), "cid", "page-token",
 		"page:5000", "9", db.FBPrivacySelf)
 	if err != nil {
 		t.Fatalf("UpdateLiveVideoPrivacy: %v", err)
@@ -1347,10 +1348,10 @@ func TestAPagePrivacyPushMakesNoRequestAtAll(t *testing.T) {
 // Asserted on the request Facebook actually receives: a test that only checked
 // IngestFor returned no error would pass with the status unchanged.
 func TestAScheduledBroadcastIsCreatedUnpublishedWithItsStartTime(t *testing.T) {
-	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("777")))
 
 	at := time.Unix(1800000000, 0)
-	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+	if _, err := fb.IngestFor(context.Background(), "cid", "user-token", "",
 		IngestOptions{ScheduledFor: at}); err != nil {
 		t.Fatalf("IngestFor: %v", err)
 	}
@@ -1375,9 +1376,9 @@ func TestAScheduledBroadcastIsCreatedUnpublishedWithItsStartTime(t *testing.T) {
 // IngestOptions{}, and turning those into scheduled creates would produce
 // broadcasts that never go live.
 func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T) {
-	log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+	fb, log := fbServer(t, graphStub(t, fbLiveResponse("777")))
 
-	if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+	if _, err := fb.IngestFor(context.Background(), "cid", "user-token", "",
 		IngestOptions{}); err != nil {
 		t.Fatalf("IngestFor: %v", err)
 	}
@@ -1401,15 +1402,113 @@ func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T)
 	}
 }
 
+// The capability must be DISCOVERABLE on Facebook and ABSENT everywhere else,
+// and the second half is the half that matters. A guard that only checked that
+// Facebook is found would pass with the absent branch broken -- and a lookup
+// that answers "yes" for YouTube hands the caller a nil ScheduledBroadcaster
+// that panics on the first call, which is strictly worse than the concrete
+// type assertion this interface replaced.
+//
+// MUTATION M1 (absent branch), internal/oauth/facebook.go, in
+// ScheduledBroadcastsFor: `return sb, ok` -> `return sb, true`.
+// Observed: FAIL -- youtube, twitch and kick all reported the capability.
+//
+// MUTATION M2 (found branch), same function: `pr, ok := Providers()[p]` ->
+// `pr, ok := Providers()[db.PlatformTwitch]`.
+// Observed: FAIL -- facebook reported no capability, while every absent case
+// stayed green. M1 leaves this half green and M2 leaves the other half green,
+// which is why both halves are here.
+func TestOnlyFacebookIsDiscoverableAsAScheduledBroadcaster(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform db.Platform
+		want     bool
+	}{
+		{"facebook creates the broadcast ahead of the show", db.PlatformFacebook, true},
+		{"youtube has no pre-announce path here yet", db.PlatformYouTube, false},
+		{"twitch has no broadcast object to schedule", db.PlatformTwitch, false},
+		{"kick has no broadcast object to schedule", db.PlatformKick, false},
+		{"an unknown platform is absent rather than an error", db.Platform("mystery"), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sb, ok := ScheduledBroadcastsFor(tc.platform)
+			if ok != tc.want {
+				t.Fatalf("ScheduledBroadcastsFor(%s) = %v, want %v", tc.platform, ok, tc.want)
+			}
+			// A false that still hands back a non-nil interface is the same
+			// trap from the other side: the caller's `if !ok` is the only
+			// thing standing between it and a call on a provider that cannot
+			// take it.
+			if !ok && sb != nil {
+				t.Errorf("ScheduledBroadcastsFor(%s) reported absent but returned %T", tc.platform, sb)
+			}
+			if ok && sb == nil {
+				t.Errorf("ScheduledBroadcastsFor(%s) reported present and returned nil", tc.platform)
+			}
+		})
+	}
+}
+
+// The bound belongs to the PLATFORM, so it is read from the capability rather
+// than written out at the call site. internal/api's facebookScheduleHorizon is
+// this same seven days spelled out behind a platform-name gate; this is the
+// value that replaces it.
+//
+// MUTATION M3, internal/oauth/facebook.go:
+// `func (f *Facebook) ScheduleHorizon() time.Duration { return 7 * 24 * time.Hour }`
+// -> `... { return 30 * 24 * time.Hour }`.
+// Observed: FAIL -- horizon = 720h0m0s, want 168h0m0s.
+func TestTheScheduledBroadcastCapabilityCarriesFacebooksOwnSevenDayBound(t *testing.T) {
+	sb, ok := ScheduledBroadcastsFor(db.PlatformFacebook)
+	if !ok {
+		t.Fatal("Facebook has no scheduled-broadcast capability")
+	}
+	if got := sb.ScheduleHorizon(); got != 7*24*time.Hour {
+		t.Errorf("horizon = %v, want %v -- Facebook refuses an event_params "+
+			"further out than seven days, and widening it here turns a refusal "+
+			"the caller could have avoided into a generic Graph error", got, 7*24*time.Hour)
+	}
+}
+
+// Resolved from a Set aimed at the stub, not from the package-level lookup: the
+// package one resolves against the production providers, so a caller that
+// reaches this capability through it is holding a provider pointed at
+// graph.facebook.com while the rest of its test is stubbed. This proves the Set
+// twin exists AND that it redirects.
+//
+// MUTATION M4, internal/oauth/endpoints.go, in Set.ScheduledBroadcastsFor:
+// `pr, ok := s.All()[p]` -> `pr, ok := Providers()[p]`.
+// Observed: FAIL, and the failure names the bug out loud -- the reschedule went
+// to the real graph.facebook.com and came back "Invalid OAuth access token -
+// Cannot parse access token", which is a live host answering a stubbed test.
+func TestASetsScheduledBroadcasterIsTheOneItWasAimedAt(t *testing.T) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
+	sb, ok := NewSet(WithBaseURL(fb.api)).ScheduledBroadcastsFor(db.PlatformFacebook)
+	if !ok {
+		t.Fatal("a Set has no scheduled-broadcast capability for Facebook")
+	}
+	if err := sb.RescheduleBroadcast(context.Background(), "tok", "555",
+		time.Unix(1800000123, 0)); err != nil {
+		t.Fatalf("RescheduleBroadcast through the set: %v", err)
+	}
+	if fbCall(*log, http.MethodPost, "/555") == nil {
+		t.Fatalf("no POST reached the stub; calls were %+v", *log)
+	}
+}
+
 // Moving a show must MOVE its broadcast. Creating a second one would leave the
 // first as an orphaned event page people are still subscribed to.
 func TestReschedulingPostsTheNewStartTimeToTheBroadcastItself(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
 
 	at := time.Unix(1800000123, 0)
-	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "page-token", "777", at); err != nil {
+	if err := fb.RescheduleBroadcast(context.Background(), "page-token", "777", at); err != nil {
 		t.Fatalf("RescheduleBroadcast: %v", err)
 	}
 
@@ -1436,11 +1535,11 @@ func TestReschedulingPostsTheNewStartTimeToTheBroadcastItself(t *testing.T) {
 // An empty id must not become a POST to "/", which Graph answers in a way that
 // looks like success.
 func TestReschedulingWithNoBroadcastIdIsRefusedBeforeAnyCall(t *testing.T) {
-	log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
 	})
 
-	if err := (&Facebook{}).RescheduleBroadcast(context.Background(), "tok", "", time.Unix(1, 0)); err == nil {
+	if err := fb.RescheduleBroadcast(context.Background(), "tok", "", time.Unix(1, 0)); err == nil {
 		t.Error("rescheduling with no broadcast id succeeded")
 	}
 	if len(*log) != 0 {
@@ -1460,8 +1559,8 @@ func TestBackupIngestIsRequestedOnlyWhenTheDestinationAsksForIt(t *testing.T) {
 		{"not asked for", false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			log := fbServer(t, graphStub(t, fbLiveResponse("777")))
-			if _, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+			fb, log := fbServer(t, graphStub(t, fbLiveResponse("777")))
+			if _, err := fb.IngestFor(context.Background(), "cid", "user-token", "",
 				IngestOptions{BackupIngest: tc.on}); err != nil {
 				t.Fatalf("IngestFor: %v", err)
 			}
@@ -1491,8 +1590,8 @@ func TestBackupIngestIsRequestedOnlyWhenTheDestinationAsksForIt(t *testing.T) {
 // IngestFor itself hands them back, split into URL and key, so the layer that
 // stores them has something to store.
 func TestTheCreateResponsesBackupEndpointsReachTheCaller(t *testing.T) {
-	fbServer(t, graphStub(t, fbLiveResponse("777")))
-	b, err := (&Facebook{}).IngestFor(context.Background(), "cid", "user-token", "",
+	fb, _ := fbServer(t, graphStub(t, fbLiveResponse("777")))
+	b, err := fb.IngestFor(context.Background(), "cid", "user-token", "",
 		IngestOptions{BackupIngest: true})
 	if err != nil {
 		t.Fatalf("IngestFor: %v", err)

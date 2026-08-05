@@ -67,6 +67,19 @@ jobs:
     permissions:
       contents: read # checkout only; this job never writes to the repository
       packages: write # ghcr.io, via GITHUB_TOKEN
+    # A ceiling, because GitHub's default is SIX HOURS. Measured over eight
+    # runs at 2.8 to 6.7 minutes, and the spread is the point: three image
+    # variants, built multi-arch under QEMU and pushed to two registries, so
+    # every leg is either an emulated compile or a network transfer and both
+    # are variable by nature.
+    #
+    # Forty-five, the same figure ci.yml gives its container job for
+    # comparable Docker work. Generous on purpose: this is the job that
+    # publishes, and a ceiling that fires part-way through leaves half a
+    # release on Docker Hub and GHCR. The cost of cutting it too fine is paid
+    # in tags someone has to go and delete; the cost of forty-five is a stuck
+    # push held for forty-five minutes instead of six hours.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -211,6 +224,20 @@ jobs:
       # Creates the GitHub Release and uploads the assets. No packages: write —
       # this job pushes no images.
       contents: write
+    # A ceiling, because GitHub's default is SIX HOURS. Measured over eight
+    # runs at 2.8 to 3.4 minutes and tightly clustered, because the work is
+    # deterministic: cross-compile every target, scan the source tree for the
+    # SBOM, checksum, upload.
+    #
+    # Twenty-five, matching ci.yml's cross job, which cross-compiles the same
+    # targets. This is that plus the SBOM and the release upload, so the same
+    # figure is already the looser of the two readings of it.
+    #
+    # What actually hangs here is not the compiling. It is the syft download
+    # below, whose curl has no --max-time, and the release upload at the end.
+    # Both are one connection to one host that can be accepted and then left
+    # open.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7

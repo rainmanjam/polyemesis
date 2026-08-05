@@ -174,15 +174,20 @@ func TestAlertRuleCRUDRoundTrip(t *testing.T) {
 	send(t, h, sign, http.MethodGet, "/api/v1/alerts/rules/"+id, nil, http.StatusNotFound)
 }
 
+// Asserted with the bodies, not the statuses alone: the SPA fallback answers an
+// unrouted /api/v1/... path with a 404 of its own whenever the UI has not been
+// built, which is how CI's Go job runs. See mustJSONError.
+//
+// Mutation: comment out `r.Get("/alerts/rules/{id}", s.handleGetAlertRule)`.
 func TestAlertRuleRoutesRejectAnUnknownID(t *testing.T) {
 	h, _, sign := sourceServer(t)
-	send(t, h, sign, http.MethodGet, "/api/v1/alerts/rules/99999", nil, http.StatusNotFound)
-	send(t, h, sign, http.MethodDelete, "/api/v1/alerts/rules/99999", nil, http.StatusNotFound)
-	send(t, h, sign, http.MethodPut, "/api/v1/alerts/rules/99999",
+	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/alerts/rules/99999", nil, http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodDelete, "/api/v1/alerts/rules/99999", nil, http.StatusNotFound)
+	mustJSONError(t, h, sign, http.MethodPut, "/api/v1/alerts/rules/99999",
 		map[string]any{"name": "x", "url": testWebhook}, http.StatusNotFound)
 	// A non-numeric id is a bad request, not a 404: the route matched, the
 	// argument did not parse.
-	send(t, h, sign, http.MethodGet, "/api/v1/alerts/rules/abc", nil, http.StatusBadRequest)
+	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/alerts/rules/abc", nil, http.StatusBadRequest)
 }
 
 func TestAlertsMetaListsWhatARuleCanSubscribeTo(t *testing.T) {

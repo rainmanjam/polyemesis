@@ -39,30 +39,36 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
-// fbGraphBase and fbDialogBase are vars so tests can point the provider at a
-// stub. Nothing at runtime rewrites them.
+// fbGraphBase and fbDialogBase are Facebook's production hosts. They are
+// constants rather than vars because nothing -- runtime or test -- rewrites
+// them any more: a test redirects a provider with NewFacebook(WithBaseURL(...)),
+// which is per-instance. They were vars, and facebook_test.go assigned to them
+// under a t.Cleanup restore, which is what made these tests order-dependent
+// under -count=N and impossible to run in parallel.
 //
 // The version is pinned rather than left off: an unversioned Graph call follows
 // whatever Meta has made current, and a broadcast that starts working
 // differently on a Tuesday is not a failure mode worth having. v24.0 is also
 // the first version that removed overlay_url, which we deliberately never send.
-var (
+const (
 	fbGraphBase  = "https://graph.facebook.com/v24.0"
 	fbDialogBase = "https://www.facebook.com/v24.0/dialog/oauth"
 )
 
 // Facebook implements Facebook Login plus the Live Video API.
 type Facebook struct {
-	// graphBase overrides https://graph.facebook.com/v24.0. Empty in production.
-	graphBase string
+	// endpoints carries the base URLs. Zero value is production; see
+	// endpoints.go for why this replaced both an unexported graphBase field
+	// and a package var, and what went wrong while there were two of them.
+	endpoints
 }
 
-func (f *Facebook) graphEndpoint() string {
-	if f.graphBase != "" {
-		return f.graphBase
-	}
-	return fbGraphBase
-}
+// graphEndpoint is where every Graph call goes. It is a method on *Facebook,
+// not a package-level string, because fbGet and fbPost are the only two
+// functions that build a Graph URL and both must honour THIS provider's base --
+// the previous split, where graphEndpoint covered the credential check and a
+// package var covered the other twelve call sites, is the defect this fixes.
+func (f *Facebook) graphEndpoint() string { return f.apiBase(fbGraphBase) }
 
 func (f *Facebook) Platform() db.Platform { return db.PlatformFacebook }
 
@@ -113,11 +119,13 @@ func (f *Facebook) AuthURL(clientID, redirectURI, state, _ string) string {
 	// user who declined publish_video the first time is bounced straight back
 	// with the same partial grant and no chance to fix it.
 	q.Set("auth_type", "rerequest")
-	return fbDialogBase + "?" + q.Encode()
+	return f.authBase(fbDialogBase) + "?" + q.Encode()
 }
 
-// fbTokenURL is where both the code exchange and the long-lived upgrade go.
-func fbTokenURL() string { return fbGraphBase + "/oauth/access_token" }
+// tokenURL is where both the code exchange and the long-lived upgrade go. It
+// was a free function reading the package var, which meant a provider aimed at
+// a stub still exchanged codes against the real graph.facebook.com.
+func (f *Facebook) tokenURL() string { return f.authBase(fbGraphBase) + "/oauth/access_token" }
 
 // Exchange trades the code for a short-lived user token.
 //
@@ -129,7 +137,7 @@ func fbTokenURL() string { return fbGraphBase + "/oauth/access_token" }
 // instead would make sign-in depend on a second network call that, if it
 // failed, would fail a sign-in that had already succeeded.
 func (f *Facebook) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, _ string) (*Token, error) {
-	tok, err := postForm(ctx, fbTokenURL(), url.Values{
+	tok, err := postForm(ctx, f.tokenURL(), url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"redirect_uri":  {redirectURI},
@@ -154,7 +162,7 @@ func (f *Facebook) Exchange(ctx context.Context, clientID, clientSecret, redirec
 // while the current token is still valid; once it has expired the only cure is
 // reconnecting, which is what the 190 branch of fbAdvice tells the operator.
 func (f *Facebook) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
-	tok, err := postForm(ctx, fbTokenURL(), url.Values{
+	tok, err := postForm(ctx, f.tokenURL(), url.Values{
 		"grant_type":        {"fb_exchange_token"},
 		"client_id":         {clientID},
 		"client_secret":     {clientSecret},
@@ -338,7 +346,7 @@ type fbPage struct {
 
 func (f *Facebook) me(ctx context.Context, accessToken string) (*fbUser, error) {
 	var out fbUser
-	if err := fbGet(ctx, accessToken, "/me", url.Values{"fields": {"id,name"}}, &out); err != nil {
+	if err := f.get(ctx, accessToken, "/me", url.Values{"fields": {"id,name"}}, &out); err != nil {
 		return nil, fbAdvice(err, "read the Facebook profile", f.Scopes())
 	}
 	if out.ID == "" {
@@ -353,7 +361,7 @@ func (f *Facebook) pages(ctx context.Context, accessToken string) ([]fbPage, err
 	var out struct {
 		Data []fbPage `json:"data"`
 	}
-	err := fbGet(ctx, accessToken, "/me/accounts",
+	err := f.get(ctx, accessToken, "/me/accounts",
 		url.Values{"fields": {"id,name,category,access_token"}, "limit": {"100"}}, &out)
 	if err != nil {
 		return nil, fbAdvice(err, "list Facebook Pages", []string{"pages_show_list"})
@@ -561,7 +569,7 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	}
 
 	var created fbLiveVideo
-	err = fbPost(ctx, tgt.token, "/"+tgt.node+"/live_videos", params, &created)
+	err = f.post(ctx, tgt.token, "/"+tgt.node+"/live_videos", params, &created)
 	if err != nil {
 		return nil, fbAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
 	}
@@ -574,7 +582,7 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	// fatal because whatever we already have may well be enough.
 	if created.SecureStreamURL == "" || len(created.SecureStreamSecond) == 0 {
 		var full fbLiveVideo
-		if err := fbGet(ctx, tgt.token, "/"+created.ID,
+		if err := f.get(ctx, tgt.token, "/"+created.ID,
 			url.Values{"fields": {fbLiveVideoFields}}, &full); err == nil {
 			mergeLiveVideo(&created, full)
 		}
@@ -857,6 +865,84 @@ type fbLiveVideoPrivacy struct {
 	} `json:"privacy"`
 }
 
+// ------------------------------------------------- scheduled broadcasts
+
+// ScheduledBroadcaster is the optional capability for a platform that can
+// create a broadcast BEFORE the show and move it afterwards -- what gives a
+// scheduled show an event page people can subscribe to. Discover it with
+// ScheduledBroadcastsFor; never type-assert Provider at a call site, because
+// "absent" is the answer for every other platform and has to be handled once.
+//
+// It exists because that rule was being broken in the plainest possible way.
+// internal/api reached RescheduleBroadcast with a CONCRETE-type assertion --
+// `fb, ok := p.(*oauth.Facebook)` -- on a method that was on no interface at
+// all, so the one place that knew a platform could not do this was an `ok`
+// check against a struct pointer. A second platform with a schedulable
+// broadcast would have had to be added to that assertion by hand, and the
+// compiler would not have said a word.
+//
+// It lives in this file for the same reason TargetedProvider does: Facebook is
+// the only platform that has ever had it. If a second one appears, both belong
+// in oauth.go next to Provider. Nothing here is stubbed onto YouTube, Twitch or
+// Kick -- the value of the interface is that ABSENT is a supported answer,
+// handled once by the caller, not that every provider grows a method that
+// returns an error.
+//
+// CREATING the scheduled broadcast is deliberately NOT on this interface. That
+// is TargetedProvider.IngestFor with IngestOptions.ScheduledFor set, and has
+// been since that field was added. A Create method here would be a second
+// mechanism for one concept, which is exactly how endpoints.go records the
+// graphBase seam growing up beside WithBaseURL and covering one endpoint out of
+// thirteen. What is here is the pair a caller cannot get any other way: the
+// bound it has to respect, and the move.
+type ScheduledBroadcaster interface {
+	Provider
+	// ScheduleHorizon is how far ahead of now this platform will accept a
+	// start time. A caller must refuse an occurrence beyond it rather than
+	// send it, because the platform's refusal arrives as a generic Graph
+	// error that reads like every other one.
+	//
+	// A method rather than a constant at the call site because it is a fact
+	// about the PLATFORM. internal/api spells Facebook's seven days out as
+	// facebookScheduleHorizon in preannounce.go, inside a loop already gated
+	// on `d.Platform != db.PlatformFacebook` -- which is the same defect as
+	// the type assertion wearing a different hat. Read here, a caller enforces
+	// "this platform's bound" without knowing which platform it is holding.
+	ScheduleHorizon() time.Duration
+	// RescheduleBroadcast moves an already-created broadcast to a new start
+	// time. broadcastID is the id the create returned and the caller stored;
+	// an empty one is an error rather than a no-op, because a platform can
+	// answer a write to no object in a way that reads as success.
+	RescheduleBroadcast(ctx context.Context, accessToken, broadcastID string, at time.Time) error
+}
+
+// ScheduledBroadcastsFor returns the pre-announce capability for a platform, or
+// false when that platform has none. Mirrors TargetsFor and MetadataFor, both
+// in shape and in what false means: it covers "this platform cannot schedule"
+// and "there is no provider for this platform at all", because neither caller
+// does anything different about them.
+//
+// Named for the thing rather than shortened to SchedulesFor because the only
+// caller holds a scheduler.Schedule in the same function, and two unrelated
+// senses of "schedule" one line apart is how a reader loses the thread.
+func ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
+	pr, ok := Providers()[p]
+	if !ok {
+		return nil, false
+	}
+	sb, ok := pr.(ScheduledBroadcaster)
+	return sb, ok
+}
+
+// ScheduleHorizon is Facebook's own bound, and it is not ours to widen: Graph
+// refuses a live_video whose event_params is more than seven days out, at
+// create and at reschedule alike.
+//
+// It constrains far less than it looks like it does. The next occurrence of a
+// daily schedule is at most a day away and of a weekly one at most seven days,
+// by definition -- only a one-shot schedule can be set beyond this.
+func (f *Facebook) ScheduleHorizon() time.Duration { return 7 * 24 * time.Hour }
+
 // RescheduleBroadcast moves an already-created scheduled broadcast to a new
 // start time.
 //
@@ -877,7 +963,7 @@ func (f *Facebook) RescheduleBroadcast(ctx context.Context, accessToken, liveVid
 	}
 	params := url.Values{"event_params": {strconv.FormatInt(at.Unix(), 10)}}
 	var out struct{}
-	if err := fbPost(ctx, accessToken, "/"+liveVideoID, params, &out); err != nil {
+	if err := f.post(ctx, accessToken, "/"+liveVideoID, params, &out); err != nil {
 		return fbAdvice(err, "reschedule a Facebook broadcast", nil)
 	}
 	return nil
@@ -924,7 +1010,7 @@ func (f *Facebook) UpdateLiveVideoPrivacy(ctx context.Context, clientID, accessT
 		return nil, err
 	}
 
-	if postErr := fbPost(ctx, tgt.token, "/"+liveVideoID,
+	if postErr := f.post(ctx, tgt.token, "/"+liveVideoID,
 		url.Values{"privacy": {fbPrivacyParam(p)}}, nil); postErr != nil {
 		res.Skipped = append(res.Skipped, FieldPrivacy)
 		res.Warnings = append(res.Warnings, "Facebook refused the privacy change: "+postErr.Error())
@@ -932,7 +1018,7 @@ func (f *Facebook) UpdateLiveVideoPrivacy(ctx context.Context, clientID, accessT
 	}
 
 	var confirm fbLiveVideoPrivacy
-	getErr := fbGet(ctx, tgt.token, "/"+liveVideoID,
+	getErr := f.get(ctx, tgt.token, "/"+liveVideoID,
 		url.Values{"fields": {fbPrivacyReadFields}}, &confirm)
 	switch {
 	case getErr != nil:
@@ -1013,7 +1099,7 @@ func (f *Facebook) writeLiveVideo(ctx context.Context, tgt *fbTarget, id string,
 		res.Warnings = append(res.Warnings, warns...)
 	}
 
-	err := fbPost(ctx, tgt.token, "/"+id, params, nil)
+	err := f.post(ctx, tgt.token, "/"+id, params, nil)
 	if err != nil {
 		return fbAdvice(err, "edit the Facebook broadcast", f.publishScopes(tgt.kind))
 	}
@@ -1034,7 +1120,7 @@ func (f *Facebook) resolveTags(ctx context.Context, tgt *fbTarget, words []strin
 				Name string `json:"name"`
 			} `json:"data"`
 		}
-		err := fbGet(ctx, tgt.token, "/search",
+		err := f.get(ctx, tgt.token, "/search",
 			url.Values{"type": {"adinterest"}, "q": {w}, "limit": {"1"}}, &found)
 		if err != nil {
 			return nil, nil, err
@@ -1070,7 +1156,7 @@ func (f *Facebook) currentLiveVideo(ctx context.Context, tgt *fbTarget) (*fbLive
 	var list struct {
 		Data []fbLiveVideo `json:"data"`
 	}
-	err := fbGet(ctx, tgt.token, "/"+tgt.node+"/live_videos",
+	err := f.get(ctx, tgt.token, "/"+tgt.node+"/live_videos",
 		url.Values{"fields": {"id,status,title"}, "limit": {"25"}}, &list)
 	if err != nil {
 		return nil, fbAdvice(err, "list Facebook broadcasts", f.publishScopes(tgt.kind))
@@ -1098,23 +1184,30 @@ func (f *Facebook) currentLiveVideo(ctx context.Context, tgt *fbTarget) (*fbLive
 
 // --------------------------------------------------------------- transport
 
-// fbGet and fbPost keep the access token in the Authorization header rather
-// than in Graph's ?access_token= parameter. Graph accepts both, and the header
-// is the one that keeps a token out of the endpoint string that statusError
-// carries into every error message and log line.
-func fbGet(ctx context.Context, accessToken, path string, q url.Values, out any) error {
-	endpoint := fbGraphBase + path
+// get and post keep the access token in the Authorization header rather than in
+// Graph's ?access_token= parameter. Graph accepts both, and the header is the
+// one that keeps a token out of the endpoint string that statusError carries
+// into every error message and log line.
+//
+// They are methods on *Facebook rather than free functions, and that is not a
+// style preference. As free functions they read the fbGraphBase package var,
+// which meant the provider's own graphBase field -- the thing that looked like
+// its test seam -- redirected the credential check and nothing else. Every
+// caller was already a *Facebook method, so the receiver costs nothing and
+// makes it impossible to add a Graph call that ignores the instance's base.
+func (f *Facebook) get(ctx context.Context, accessToken, path string, q url.Values, out any) error {
+	endpoint := f.graphEndpoint() + path
 	if len(q) > 0 {
 		endpoint += "?" + q.Encode()
 	}
 	return requestJSON(ctx, http.MethodGet, endpoint, accessToken, nil, nil, out)
 }
 
-// fbPost sends its parameters in the query string, which is the form Meta's own
+// post sends its parameters in the query string, which is the form Meta's own
 // documentation uses for these edges (POST /me/live_videos?status=LIVE_NOW),
 // rather than as a JSON body.
-func fbPost(ctx context.Context, accessToken, path string, params url.Values, out any) error {
-	endpoint := fbGraphBase + path
+func (f *Facebook) post(ctx context.Context, accessToken, path string, params url.Values, out any) error {
+	endpoint := f.graphEndpoint() + path
 	if len(params) > 0 {
 		endpoint += "?" + params.Encode()
 	}

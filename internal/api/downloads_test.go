@@ -141,9 +141,22 @@ func TestStemDownloadIsA404WhenTheFileIsGone(t *testing.T) {
 	// A well-formed name for a stem that retention already removed. This is the
 	// ordinary case, and it must not be a 500: the recordings page links stems
 	// it listed a moment ago, and a sweep in between is expected.
+	//
+	// Asserted with the body, not the status alone: the SPA fallback answers an
+	// unrouted /api/v1/... path with its own 404 whenever the UI has not been
+	// built, which is how CI's Go job runs. See mustJSONError.
+	//
+	// Mutation: comment out
+	// `r.Get("/recordings/stems/{name}/download", s.handleDownloadStem)`.
 	h, _, sign := sourceServer(t)
-	send(t, h, sign, http.MethodGet,
+	msg := mustJSONError(t, h, sign, http.MethodGet,
 		"/api/v1/recordings/stems/rec-20240115-143000-mic.flac/download", nil, http.StatusNotFound)
+	// serveFileDownload's own message, not the router's: the name passed the
+	// shape check and the confinement, and the file simply was not there.
+	if !strings.Contains(msg, "missing from disk") {
+		t.Errorf("404 said %q, want the reason the file could not be served: a "+
+			"well-formed name that got as far as the open and found nothing", msg)
+	}
 }
 
 func TestStemListIsEmptyRatherThanNullOnAFreshInstall(t *testing.T) {
@@ -153,6 +166,62 @@ func TestStemListIsEmptyRatherThanNullOnAFreshInstall(t *testing.T) {
 	raw := send(t, h, sign, http.MethodGet, "/api/v1/recordings/stems", nil, http.StatusOK)
 	if strings.Contains(string(raw), "null") {
 		t.Errorf("stems list returned null: %s", raw)
+	}
+}
+
+// writeClip puts a file where the production resolver says a clip of that name
+// lives, so a positive test cannot end up writing into a directory the route
+// never reads from.
+func writeClip(t *testing.T, s *Server, name, body string) string {
+	t.Helper()
+	path, err := s.eng().ClipPath(name)
+	if err != nil {
+		t.Fatalf("ClipPath(%q): %v", name, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// The positive case the two clip confinement tests below depend on.
+//
+// Without it they pass by refusing everything, and because mustNotLeak asserts
+// on the body rather than the status they pass with the route deleted outright
+// -- measured: with `r.Get("/clips/{name}/download", s.handleDownloadClip)`
+// commented out, both refusal tests stayed green. The stem half of this file
+// already had its positive case, with a comment saying why; the clip half never
+// got one.
+//
+// Mutation: comment out `r.Get("/clips/{name}/download", s.handleDownloadClip)`.
+func TestClipDownloadServesAClipInsideTheClipDirectory(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	s := serverUnderTest(t, h)
+	writeClip(t, s, "clip-20240115-143000.ts", "CLIPBYTES")
+
+	body := send(t, h, sign, http.MethodGet,
+		"/api/v1/clips/clip-20240115-143000.ts/download", nil, http.StatusOK)
+	if string(body) != "CLIPBYTES" {
+		t.Errorf("served %q, want the clip's contents", body)
+	}
+}
+
+// And the same for delete, for the same reason: a route that deletes nothing
+// satisfies TestClipDeleteRefusesAnythingOutsideTheClipDirectory perfectly.
+//
+// Mutation: comment out `r.Delete("/clips/{name}", s.handleDeleteClip)`.
+func TestClipDeleteRemovesAClipInsideTheClipDirectory(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	s := serverUnderTest(t, h)
+	path := writeClip(t, s, "clip-20240115-143001.ts", "CLIPBYTES")
+
+	send(t, h, sign, http.MethodDelete, "/api/v1/clips/clip-20240115-143001.ts", nil, http.StatusOK)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the clip is still on disk (%v); a delete route that removes "+
+			"nothing passes the traversal test below without doing its job", err)
 	}
 }
 

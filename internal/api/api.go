@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -56,6 +55,31 @@ type Server struct {
 	bus      *events.Broker
 	sessions *auth.Manager
 	logins   *auth.Throttle
+	// providers is the OAuth provider set every handler resolves through, and
+	// it replaced five function-pointer fields on this struct.
+	//
+	// Those fields -- ingestForFn, pushMetadataFn, pushComplianceFn,
+	// pushBroadcastFn and rescheduleFn -- all existed for one reason, which
+	// each of their comments stated: internal/oauth resolved a provider through
+	// package-level functions against production hosts, so no test in THIS
+	// package could aim a provider anywhere it controlled, and the last
+	// observable point before a request left the process was a closure wrapped
+	// around the call. Four of the five received the pusher as a parameter,
+	// which made that closure a stand-in for an interface value the test could
+	// have supplied outright if it had been able to build one.
+	//
+	// oauth.Set is that missing injection point. The zero value resolves to the
+	// platforms' real hosts, so a server built with no Providers -- which is
+	// every server in production -- behaves exactly as it did; a test hands in
+	// oauth.NewSet(oauth.WithBaseURL(srv.URL)) and every call this package makes
+	// lands on its own httptest server instead.
+	//
+	// Resolve EVERY capability through this field, never through the
+	// package-level oauth.Get/MetadataFor/ComplianceFor/TargetsFor. A handler
+	// that mixes the two holds a stubbed provider and a production one at the
+	// same time, which is the partially-redirected provider internal/oauth's
+	// endpoints.go opens by warning about.
+	providers oauth.Set
 	// tls is the same Provider the listener is serving from, so the status
 	// card describes the certificate actually in use rather than re-deriving
 	// one — a second Provider in selfsigned mode would rewrite the material
@@ -103,66 +127,32 @@ type Server struct {
 	// hot enough for the coarse scope to matter.
 	settingsMu sync.Mutex
 
-	// ingestForFn is the seam that makes the line below observable.
-	//
-	// It exists for exactly one reason, and the reason is worth the field: the
-	// call at handleRefreshKey is where a destination's stored privacy becomes
-	// what Facebook is told, and without a seam it can be changed to pass
-	// nothing at all with the whole suite green -- measured, not supposed.
-	// internal/oauth's graph base is unexported and Providers() has no
-	// injection point, so there is no way to observe this from outside the
-	// process. Defaults to the real method; only a test ever replaces it.
-	ingestForFn func(context.Context, oauth.Provider, string, *db.PlatformAccount, oauth.IngestOptions) (*oauth.Broadcast, error)
-
-	// pushMetadataFn is ingestForFn's counterpart one handler over: the seam
-	// that makes pushOne's call to a resolved provider's PushMetadata
-	// observable. Composer tags are the reason it exists -- req.Tags reaching
-	// oauth.Metadata is guarded, and a provider's own PushMetadata resolving
-	// tags is guarded, but nothing proved this call in between still passes
-	// them through, and deleting the Tags field from the literal above left the
-	// whole suite green. Defaults to calling the pusher directly; only a test
-	// ever replaces it.
-	pushMetadataFn func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error)
-
-	// pushComplianceFn is the third of these, and the one with the worst
-	// precedent behind it: oauth.PushCompliance was written, unit-tested and
-	// documented as shipped while no caller anywhere invoked it, so a stored
-	// COPPA declaration and a Twitch label set never once reached a platform
-	// and every test stayed green. A test of the capability cannot see that;
-	// only a test of the CALL can, and oauth.CompliancePusher is implemented
-	// solely by real providers whose HTTP base is unexported, so this field is
-	// the last observable point before the request leaves the process.
-	// Defaults to calling the pusher directly; only a test ever replaces it.
-	pushComplianceFn func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error)
-
-	// pushBroadcastFn is the last of them, and it exists because a warning was
-	// being thrown away: pushOne recorded a failed PushBroadcastSettings and
-	// then overwrote the record before anyone saw it, so an operator whose DVR
-	// toggle failed was told nothing. Proving that fix needs a broadcast push
-	// that fails without a network call, and internal/oauth's YouTube base URL
-	// is unexported, so this is the only place the failure can be produced.
-	// Defaults to calling the pusher directly; only a test ever replaces it.
-	pushBroadcastFn func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
-		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error)
-
-	// rescheduleFn is the fifth of these, and it exists for the same reason as
-	// ingestForFn says out loud: internal/oauth's graph base is unexported, so
-	// nothing in this package can observe a Graph call from outside the
-	// process. Without it, "a moved schedule MOVES its broadcast rather than
-	// creating a second one" would be untestable -- and the failure it guards
-	// against is an orphaned public event page that people are still
-	// subscribed to, which nothing anywhere would report.
-	// Defaults to the real call; only a test ever replaces it.
-	rescheduleFn func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error
-
-	// preannounceMu guards rescheduleFails, which the pre-announce sweep
-	// mutates and nothing else reads.
+	// preannounceMu guards announceFails, which the pre-announce sweep mutates
+	// and nothing else reads.
 	preannounceMu sync.Mutex
-	// rescheduleFails counts CONSECUTIVE failed reschedules per destination.
+	// announceFails counts CONSECUTIVE failures per SHOW -- creates as well as
+	// reschedules, which is why it is no longer named for one of them.
+	//
+	// Keyed per (destination, schedule) rather than per destination, because a
+	// destination now holds one broadcast per schedule: a per-destination count
+	// would let one schedule's create fail three times and trip the give-up on
+	// ANOTHER schedule's perfectly good broadcast, orphaning its event page.
+	//
+	// A named struct key rather than the two ids packed into an int64. The
+	// packing was safe for any id below 2^31 and it was still the wrong shape:
+	// a key that has to be encoded and decoded is one a reader has to verify,
+	// and Go compares struct keys natively.
+	//
 	// In memory on purpose: a restart resetting the count only means the sweep
 	// is more patient, which is the safe direction.
-	rescheduleFails map[int64]int
+	announceFails map[showKey]int
+}
+
+// showKey identifies one scheduled show: a destination, and the schedule that
+// puts a broadcast on it.
+type showKey struct {
+	DestinationID int64
+	ScheduleID    int64
 }
 
 // Options configures the server.
@@ -196,6 +186,16 @@ type Options struct {
 
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
+
+	// Providers is the OAuth provider set every handler resolves through.
+	//
+	// Optional, and the zero value is what production passes: an unset Set
+	// answers with the platforms' real hosts. It is here so a test can hand in
+	// oauth.NewSet(oauth.WithBaseURL(srv.URL)) and have every platform call
+	// this package makes land on its own stub -- which is the whole reason the
+	// five function-pointer fields on Server no longer exist. See Server's own
+	// providers field.
+	Providers oauth.Set
 }
 
 // New creates the server.
@@ -203,6 +203,7 @@ func New(o Options) *Server {
 	s := &Server{
 		log:       o.Log,
 		cfg:       o.Config,
+		providers: o.Providers,
 		store:     o.DB,
 		box:       o.Secrets,
 		mgr:       o.Engine,
@@ -230,40 +231,6 @@ func New(o Options) *Server {
 			// request, with no window in which a revoked token still works.
 			o.DB.TokenEpoch,
 		),
-	}
-	// The real implementation, always, except in the one test that replaces it
-	// to observe what handleRefreshKey passed.
-	s.ingestForFn = s.ingestFor
-	// And the reschedule, which only Facebook has. A platform without one is
-	// an error rather than a silent no-op: nothing calls this except the
-	// pre-announce sweep, and the sweep only calls it for a destination it has
-	// already established is Facebook, so reaching here on another platform
-	// means the caller is wrong.
-	s.rescheduleFn = func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error {
-		p, err := oauth.Get(acct.Platform)
-		if err != nil {
-			return err
-		}
-		fb, ok := p.(*oauth.Facebook)
-		if !ok {
-			return fmt.Errorf("%s cannot reschedule a broadcast", acct.Platform)
-		}
-		return fb.RescheduleBroadcast(ctx, acct.AccessToken, broadcastID, at)
-	}
-	// Same reasoning, one handler over: the real call, always, except in the
-	// one test that replaces it to observe what pushOne passed.
-	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
-		return pusher.PushMetadata(ctx, clientID, accessToken, accountRef, m)
-	}
-	// And the same again for the compliance write.
-	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
-		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		return pusher.PushCompliance(ctx, clientID, accessToken, tgt, c)
-	}
-	// And once more for the broadcast settings.
-	s.pushBroadcastFn = func(ctx context.Context, pusher broadcastPusher, clientID, accessToken string,
-		bs oauth.BroadcastSettings) (*oauth.MetadataResult, error) {
-		return pusher.PushBroadcastSettings(ctx, clientID, accessToken, bs)
 	}
 	return s
 }
