@@ -139,13 +139,14 @@ func TestReconcilingTheBackupPublishesAReplacementRatherThanMutatingIt(t *testin
 	e.reconcileBackup(prev.row.ID, prev, routing.Result{FilterComplex: "anull", OutLabel: "a"}, "up")
 
 	next := e.dests[prev.row.ID]
-	if next.backup == nil {
-		t.Fatal("no backup was started at all; the fixture is wrong, not the code")
-	}
 	if next == prev {
 		t.Fatal("the backup was reconciled into the same pointer Status is already " +
 			"holding; every field it writes is a read of unsynchronised memory")
 	}
+	// Ordered before the fixture check on purpose. Under the mutation the
+	// backup lands on prev instead of next, so a `next.backup == nil` fatal
+	// first would report this as a broken fixture rather than as the write
+	// through a published pointer that it is.
 	// Spelled out one field at a time rather than through a table of `any`: a
 	// nil *supervisor.Process in an interface is not a nil interface, so a
 	// table would have compared the one field that matters most against the
@@ -161,5 +162,8 @@ func TestReconcilingTheBackupPublishesAReplacementRatherThanMutatingIt(t *testin
 	}
 	if prev.backupSpec != "" {
 		t.Errorf("the published destination's backupSpec changed to %q", prev.backupSpec)
+	}
+	if next.backup == nil && prev.backup == nil {
+		t.Fatal("no backup was started anywhere; the fixture is wrong, not the code")
 	}
 }
