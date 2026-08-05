@@ -512,7 +512,7 @@ func TestTheScheduledPathStoresTheBackupEndpointToo(t *testing.T) {
 	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
-	d.Facebook.BackupIngest = true
+	d.BackupIngestWanted = true
 	if _, err := store.UpdateDestination(d); err != nil {
 		t.Fatalf("enable backup: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestTheScheduledPathAsksForBackupIngestWhenEnabled(t *testing.T) {
 	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
-	d.Facebook.BackupIngest = true
+	d.BackupIngestWanted = true
 	if _, err := store.UpdateDestination(d); err != nil {
 		t.Fatalf("enable backup: %v", err)
 	}

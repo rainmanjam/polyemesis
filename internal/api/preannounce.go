@@ -369,7 +369,7 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
 
-	if backupURL, _ := firstBackup(b); d.Facebook.BackupIngest && backupURL == "" {
+	if backupURL, _ := firstBackup(b); d.BackupIngestWanted && backupURL == "" {
 		s.log.Warn("pre-announce: Facebook offered no backup ingest endpoint",
 			"destination", d.Name)
 	}

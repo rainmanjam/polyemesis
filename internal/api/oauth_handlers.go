@@ -422,7 +422,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	// belongs to a broadcast that no longer exists.
 	dest.BackupURL, dest.BackupStreamKey = firstBackup(b)
 	var warnings []string
-	if dest.Facebook.BackupIngest && dest.BackupURL == "" {
+	if dest.BackupIngestWanted && dest.BackupURL == "" {
 		warnings = append(warnings,
 			"Facebook did not offer a backup ingest endpoint for this broadcast, so "+
 				"no redundant feed will be published. The destination is otherwise "+
@@ -477,7 +477,10 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 		Crosspost:       dest.Facebook.Crosspost,
 		DonateCharityID: dest.Facebook.DonateCharityID,
 		ScheduledFor:    scheduledFor,
-		BackupIngest:    dest.Facebook.BackupIngest,
+		// The intent is read off the destination; the option it fills is
+		// Facebook's own enable_backup_ingest, which is a platform fact and
+		// stays named for the platform. Only the READ moved.
+		BackupIngest: dest.BackupIngestWanted,
 	}
 }
 
