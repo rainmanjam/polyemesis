@@ -709,8 +709,22 @@ func (e *Engine) Stop() {
 		wg.Add(1)
 		go func() { defer wg.Done(); p.Stop(ctx) }()
 	}
+	// Through teardownDest rather than a second stop path, so there is exactly
+	// one definition of "take a destination down" -- and so the REDUNDANT
+	// output goes down with it.
+	//
+	// Stopping d.proc alone was worse than a leak. The backup is built with
+	// supervisor.Spec{AutoRestart: true}, so the orphan did not exit: it went on
+	// reconnecting to the platform's backup ingest for ever, from a process in
+	// no map and on no monitoring page, and its relay port -- one of the 500
+	// shared across every source engine -- was never released. Deleting a
+	// SOURCE reaches this same code (Manager.Sync deletes the engine and calls
+	// Stop) while the daemon keeps running, so an operator who deleted a source
+	// was still publishing to Facebook from something nothing could see.
 	for _, d := range dests {
-		stop(d.proc)
+		dest := d
+		wg.Add(1)
+		go func() { defer wg.Done(); e.teardownDest(dest) }()
 	}
 	for _, m := range monitors {
 		mon := m
