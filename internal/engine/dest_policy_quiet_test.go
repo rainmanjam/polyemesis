@@ -24,9 +24,17 @@ import (
 // Asserts on the NOTES rather than on the log, because the note is the thing
 // the operator sees and the log is not addressed to them.
 //
-// Mutation proving it can fail: in retunePolicy, change
-// `before := p.Policy().Normalised()` back to `before := p.Policy()`.
-// Measured: FAIL, 2 notes.
+// Mutation proving it can fail: in retunePolicy, delete the line
+// `want = want.Normalised()`. Measured: FAIL, 2 notes, both reading
+// "reconnect policy retuned to 0s..0s, giving up after 0" -- the defect and
+// its doubling, verbatim.
+//
+// It has to be the WANT side. Deleting `.Normalised()` from `before` alone
+// leaves this green, because supervisor.New already normalised the process's
+// own policy when it built it -- so `before` is the filled-in value either
+// way. Only the row-derived side carries the raw zeroes. A guard is worth
+// exactly the mutation that was actually observed to break it, and the first
+// mutation recorded here was the wrong one.
 func TestAnUnconfiguredDestinationIsNotReportedAsRetuned(t *testing.T) {
 	e := &Engine{log: testLogger()}
 	rec := newReloadRecorder()
