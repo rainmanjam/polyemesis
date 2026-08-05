@@ -846,7 +846,8 @@ func TestADestinationThatGoesLiveDuringTheGraphCallKeepsItsKey(t *testing.T) {
 // without the operator.
 //
 // Mutation: in preannounce.go, change `if s.noteAnnounceFailure(d.ID, sc.ID) == 1`
-// on the create-failure path to `if true`. Observed: red, 3 warnings.
+// on the create-failure path to `>= 1`, which is the suppression switched off.
+// Observed: red, 6 warnings for the 2 the two destinations are owed.
 func TestAnIdenticalRefusalIsLoggedOncePerRunOfFailures(t *testing.T) {
 	s, _, store := testServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777", err: errors.New("(#100) ineligible")}
