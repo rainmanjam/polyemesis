@@ -1572,9 +1572,19 @@ func legacyDestinationsDB(t *testing.T, name string) string {
 // Either both arrive or neither does, so the next open sees a state it
 // recognises and tries again.
 //
-// Mutation proving it can fail: in MigrateDestinationExpertArgs, take the
-// ALTERs back out of the transaction -- `tx.Exec(c.ddl)` -> `d.sql.Exec(c.ddl)`.
-// Measured: FAIL, "the column survived a failed migration".
+// Mutation proving it can fail: in MigrateDestinationExpertArgs, change
+// `defer func() { _ = tx.Rollback() }()` to `defer func() { _ = tx.Commit() }()`,
+// so the error path commits the ALTER it was supposed to unwind. Measured:
+// FAIL, "the column survived a failed migration" -- and the retry guard below
+// fails with it.
+//
+// THE OBVIOUS MUTATION IS THE WRONG ONE, and it is worth writing down why.
+// Taking the ALTERs back out of the transaction -- `tx.Exec(c.ddl)` ->
+// `d.sql.Exec(c.ddl)` -- does not fail this test. It HANGS: db.go sets
+// SetMaxOpenConns(1), so a statement issued on d.sql while tx holds the one
+// connection waits for a connection tx will not release until it commits. That
+// is the same deadlock the comment above the existence checks warns about, and
+// a hanging test proves nothing at all -- it never reaches an assertion.
 func TestAFailedBackfillTakesTheColumnWithIt(t *testing.T) {
 	path := legacyDestinationsDB(t, "interrupted-migration.db")
 
