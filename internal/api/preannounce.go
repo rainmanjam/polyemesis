@@ -24,7 +24,8 @@ package api
 // announcement markers. Every write goes through db.UpdateAnnouncement, which
 // re-reads the row inside its own transaction -- see the comment there for why
 // a full-row write from a pre-Graph snapshot is an operator's edits silently
-// reverted.
+// reverted. And it never touches a destination that is currently ENABLED,
+// because the stream key it writes is inside the engine's restart hash.
 
 import (
 	"context"
@@ -100,6 +101,28 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			// No connected account means no token and no target, so there is
 			// nothing to create the broadcast against.
 			if d.AccountID == nil {
+				continue
+			}
+			// AN ENABLED DESTINATION IS OUT OF SCOPE, and this is the whole
+			// A5 fix rather than half of one.
+			//
+			// Creating a broadcast issues a NEW primary stream key, and that
+			// key is inside Target(), which is the first element of destSpec --
+			// the engine's restart hash. Writing it under a running FFmpeg
+			// leaves the process publishing to the old key until some unrelated
+			// reconcile happens to notice the spec changed, and then cycles a
+			// LIVE destination at a moment the operator did not choose and
+			// cannot connect to anything they did.
+			//
+			// Skipping costs the event page for a show whose destination was
+			// left enabled between broadcasts; the alternative costs a live
+			// stream. The ordinary shape -- the scheduler flips enabled at go
+			// live -- is unaffected, because the destination is disabled while
+			// the show is still ahead of it.
+			if d.Enabled {
+				s.log.Debug("pre-announce: skipping a destination that is already enabled; "+
+					"a new broadcast would replace the stream key it is publishing to",
+					"destination", d.Name, "schedule", sc.Name)
 				continue
 			}
 			if d.Facebook.AnnouncedFor(at) {
@@ -256,6 +279,13 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 		// the one the encoder publishes to, or the event page people were
 		// notified about stays empty beside a live stream.
 		//
+		// Which is also why this is the one write that refuses a live
+		// destination: applying the key would cycle the running process, and
+		// NOT applying it while recording the broadcast would leave the
+		// invariant broken with a marker saying everything went fine.
+		if cur.Enabled {
+			return false
+		}
 		cur.StreamKey = b.Ingest.Key
 		// The same store as handleRefreshKey, for the same reason: this path
 		// also creates the broadcast, and a refresh-key-only implementation

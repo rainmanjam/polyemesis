@@ -773,3 +773,67 @@ func TestACreateWhoseOutcomeWasNeverRecordedIsNotMadeTwice(t *testing.T) {
 			"flight, want 0", len(rec.creates))
 	}
 }
+
+// A5. Creating a broadcast issues a NEW stream key, and StreamKey is inside
+// Target(), which is the first element of destSpec -- the engine's restart hash.
+// Writing it under a running FFmpeg leaves the process publishing to the old key
+// until some unrelated reconcile notices, and then cycles a LIVE destination.
+//
+// Mutation: in preannounce.go, delete the `if d.Enabled { continue }` block from
+// preannounceOnce. Observed: red -- a broadcast is created and the live
+// destination's key is replaced.
+func TestAnAlreadyLiveDestinationIsLeftAlone(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	d.Enabled = true
+	if _, err := store.UpdateDestination(d); err != nil {
+		t.Fatalf("enable the destination: %v", err)
+	}
+	seedCreds(t, s, store, db.PlatformFacebook)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates) != 0 {
+		t.Fatalf("created %d broadcasts for a destination that is already live, want 0",
+			len(rec.creates))
+	}
+	got, _ := store.GetDestination(d.ID)
+	if got.StreamKey != "original-key" {
+		t.Errorf("StreamKey = %q -- the running FFmpeg is publishing to a key that "+
+			"is no longer stored", got.StreamKey)
+	}
+}
+
+// The same rule at the write, for the destination that goes live WHILE Facebook
+// is being asked for a broadcast. The sweep decided against a snapshot taken
+// before the call; the write is the last moment the answer can still change.
+//
+// Mutation: in preannounce.go, delete `if cur.Enabled { return false }` from the
+// completion callback. Observed: red -- the live destination's key is replaced.
+func TestADestinationThatGoesLiveDuringTheGraphCallKeepsItsKey(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
+
+	rec.duringCreate = func(*announced) {
+		if err := store.SetDestinationEnabled(d.ID, true); err != nil {
+			t.Errorf("go live mid-sweep: %v", err)
+		}
+	}
+
+	s.preannounceOnce(context.Background(), time.Now())
+
+	got, _ := store.GetDestination(d.ID)
+	if got.StreamKey != "original-key" {
+		t.Errorf("StreamKey = %q -- the destination went live during the Graph call "+
+			"and the sweep changed the key it is publishing to", got.StreamKey)
+	}
+}
