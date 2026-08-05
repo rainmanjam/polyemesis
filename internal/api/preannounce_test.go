@@ -1006,3 +1006,145 @@ func TestTheLoopSweepsBeforeItsFirstTick(t *testing.T) {
 			"inside the last five minutes before a show misses it")
 	}
 }
+
+// F3. The A5 write guard is right to refuse a live destination its new key --
+// TestADestinationThatGoesLiveDuringTheGraphCallKeepsItsKey above is that rule --
+// but refusing used to stop there, and what it left behind was the INTENT the
+// sweep records before the Graph call. Every later sweep read that intent as "a
+// create is in flight", returned, and never retried; the marker was never aged
+// out either, because ageing happens in Announce and that arm never reaches it.
+// One lost race disabled pre-announce for the schedule permanently and silently.
+//
+// So the guard is not "the key survives" -- that already had a test. It is that
+// the SCHEDULE still works afterwards.
+//
+// Mutation: in announceOne, in the completion write's ErrAnnouncementSkipped
+// arm, replace `cur.Facebook.Forget(sc.ID, "")` with `_ = cur`. Observed: red --
+// "the raced create left an intent behind", and the second sweep creates nothing.
+func TestAScheduleStillWorksAfterACreateRacedGoLive(t *testing.T) {
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	rec := &announced{key: "key-from-the-broadcast", ids: []string{"orphaned", "usable"}}
+	stubAnnounce(stub, rec)
+
+	var logs bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&logs, nil))
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	at := time.Now().Add(2 * 24 * time.Hour).Truncate(time.Second)
+	schedID := seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
+
+	// The race itself: enabled between the sweep's read and its write, so the
+	// create succeeds against a destination that is live by the time it lands.
+	rec.onCreate(func() {
+		if err := store.SetDestinationEnabled(d.ID, true); err != nil {
+			t.Errorf("go live mid-sweep: %v", err)
+		}
+	})
+	s.preannounceOnce(context.Background(), time.Now())
+
+	row, err := store.GetDestination(d.ID)
+	if err != nil {
+		t.Fatalf("read the destination back: %v", err)
+	}
+	if held, ok := row.Facebook.AnnouncementFor(schedID); ok {
+		t.Fatalf("the raced create left an intent behind (%+v); every later sweep reads "+
+			"it as a create in flight and this show never gets an event page again", held)
+	}
+	// A5 still holds: the running FFmpeg keeps the key it is publishing to.
+	if row.StreamKey != "original-key" {
+		t.Errorf("StreamKey = %q -- the sweep changed the key a live destination is "+
+			"publishing to", row.StreamKey)
+	}
+	// The broadcast really was created and its id is now nowhere but the log.
+	// That line is the operator's only handle on it, so it is part of the fix.
+	if !strings.Contains(logs.String(), "orphaned") {
+		t.Errorf("the orphaned broadcast's id was never reported, so nothing in the "+
+			"system or on the operator's screen names the event page to remove: %s",
+			logs.String())
+	}
+
+	// The show comes back down -- which is the ordinary shape, the scheduler
+	// having stopped it -- and the next sweep must announce normally.
+	rec.onCreate(func() {})
+	if err := store.SetDestinationEnabled(d.ID, false); err != nil {
+		t.Fatalf("bring the destination back down: %v", err)
+	}
+	s.preannounceOnce(context.Background(), time.Now())
+
+	if len(rec.creates()) != 2 {
+		t.Fatalf("made %d creates in total, want 2 -- the sweep after the race never "+
+			"tried again", len(rec.creates()))
+	}
+	row, err = store.GetDestination(d.ID)
+	if err != nil {
+		t.Fatalf("read the destination back: %v", err)
+	}
+	held, ok := row.Facebook.AnnouncementFor(schedID)
+	if !ok || held.BroadcastID != "usable" {
+		t.Fatalf("marker = %+v (held=%v), want the second broadcast -- the schedule "+
+			"did not recover", held, ok)
+	}
+	if row.StreamKey != "key-from-the-broadcast" {
+		t.Errorf("StreamKey = %q -- the recovered broadcast's key never reached the "+
+			"destination, so its event page stays empty", row.StreamKey)
+	}
+}
+
+// The other way an intent is stranded: the process dies between the intent write
+// and the completion write, so nothing is left holding the broadcast id. Nothing
+// can resolve that marker, and refusing to retry it for ever is not caution --
+// it is a guaranteed missing event page for every occurrence of the show.
+//
+// The harm accepted here is stated in announceOne: if that create did reach
+// Facebook there will now be two event pages. A possible duplicate the operator
+// can see beats a certain absence nobody can.
+//
+// Mutation: in announceOne's `case held:` arm, replace `cur.Facebook.Forget(sc.ID, "")`
+// with `_ = cur`. Observed: red -- the intent survives all four sweeps and no
+// broadcast is ever created.
+func TestAnIntentNothingCanResolveIsEventuallyRetried(t *testing.T) {
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "fresh"}
+	stubAnnounce(stub, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	now := time.Now()
+	at := now.Add(2 * 24 * time.Hour).Truncate(time.Second)
+	schedID := seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
+
+	// The state a crash between the two writes leaves behind.
+	d.Facebook.Announce(schedID, at, "", now)
+	if _, err := store.UpdateDestination(d); err != nil {
+		t.Fatalf("seed the stranded intent: %v", err)
+	}
+
+	// Up to the threshold the intent is still honoured: a create bounded by a
+	// 30-second timeout could genuinely still be in flight, and duplicating an
+	// event page is the thing this marker exists to prevent.
+	for range staleBroadcastAfter - 1 {
+		s.preannounceOnce(context.Background(), now)
+	}
+	if len(rec.creates()) != 0 {
+		t.Fatalf("created %d broadcasts while a create could still have been in "+
+			"flight, want 0", len(rec.creates()))
+	}
+
+	// The sweep that concludes it never will be.
+	s.preannounceOnce(context.Background(), now)
+	row, err := store.GetDestination(d.ID)
+	if err != nil {
+		t.Fatalf("read the destination back: %v", err)
+	}
+	if held, ok := row.Facebook.AnnouncementFor(schedID); ok {
+		t.Fatalf("after %d sweeps the intent is still there (%+v), so this show is "+
+			"never announced again", staleBroadcastAfter, held)
+	}
+
+	s.preannounceOnce(context.Background(), now)
+	if len(rec.creates()) != 1 {
+		t.Fatalf("made %d creates after the intent was given up on, want 1",
+			len(rec.creates()))
+	}
+}

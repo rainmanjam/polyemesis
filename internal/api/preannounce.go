@@ -187,6 +187,12 @@ func scheduleTargets(sc scheduler.Schedule, destID int64) bool {
 // a marker with no broadcast id, which is the opposite claim -- "a create was in
 // flight and its outcome is unknown" -- and exists so that a create Facebook
 // accepted but this process never recorded is not created a second time.
+//
+// AND EVERY SUCH MARKER IS EITHER RESOLVED OR AGED OUT. An intent that nothing
+// can resolve is not a cautious state to sit in: it suppresses this show and
+// every later occurrence of it, for ever, with no error anywhere. Both ways out
+// are below -- the one that knows the broadcast id unwinds with it in the log,
+// and the one that does not gives up after staleBroadcastAfter sweeps.
 // sb is the platform's pre-announce capability, resolved by the sweep and
 // passed in rather than looked up again: this function creates the broadcast
 // through it AND moves it through it, and two lookups is how one of them ends
@@ -232,13 +238,58 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 		// A marker with no broadcast id: a create was in flight and its result
 		// never reached the database. Something may well exist on Facebook that
 		// nothing here can see, and creating a second live_video would put two
-		// event pages in front of the same subscribers. Left for the operator,
-		// said once rather than every sweep, and cleared with the occurrence.
-		if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
+		// event pages in front of the same subscribers. Said once rather than
+		// every sweep.
+		//
+		// BUT NOT FOR EVER, AND THAT WAS THE BUG. This arm used to return here
+		// unconditionally -- and it is the one arm that never calls Announce,
+		// which is where markers are aged. So an intent nothing could resolve
+		// disabled pre-announce for this show permanently: every later sweep
+		// found it, returned, and the show it was recorded for went out with no
+		// event page at all. That is the single outcome this whole file exists
+		// to prevent, and one lost write was enough to cause it.
+		//
+		// COUNTED RATHER THAN TIMED, the same shape as staleBroadcastAfter
+		// below and asking the same kind of question: has this been unresolved
+		// for long enough that "a create is in flight" has stopped being a
+		// credible explanation. A create is bounded by the 30-second timeout
+		// above and a sweep is five minutes apart, so three consecutive sweeps
+		// means no caller is still inside one. Counting also needs nothing
+		// persisted: a wall clock would have to live in the marker, and a field
+		// added there is absent on every row an upgrade finds, which reads as
+		// "infinitely old" and ages every existing intent at once.
+		n := s.noteAnnounceFailure(d.ID, sc.ID)
+		if n == 1 {
 			s.log.Warn("pre-announce: a broadcast create was recorded as started and "+
-				"never finished; not creating a second one for the same show",
+				"never finished; not creating a second one for the same show yet",
 				"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence)
 		}
+		if n < staleBroadcastAfter {
+			return
+		}
+		// WHICH HARM THIS CHOOSES, plainly. If that create did reach Facebook,
+		// forgetting the intent means the next sweep makes a SECOND event page
+		// beside a first one nothing here can name. The alternative is the show
+		// having none, which is certain rather than possible -- and a duplicate
+		// is visible to the operator on their own Page, while a stranded marker
+		// is visible nowhere. capIntents already makes this trade for the same
+		// reason: losing an intent costs a retry.
+		//
+		// Recovering the first one instead would need Graph to be asked what
+		// scheduled live_videos this target already has, matched back to an
+		// occurrence. That is a capability internal/oauth does not expose, and
+		// inventing a match on start time would adopt somebody else's broadcast
+		// as readily as our own.
+		s.log.Warn("pre-announce: giving up on a create that was never confirmed; a fresh "+
+			"broadcast will be made for this show, and if the first create did reach "+
+			"Facebook there will be two event pages to tidy up",
+			"destination", d.Name, "schedule", sc.Name, "at", prev.Occurrence,
+			"consecutiveSweeps", staleBroadcastAfter)
+		s.record(d, func(cur *db.Destination) bool {
+			cur.Facebook.Forget(sc.ID, "")
+			return true
+		})
+		s.clearAnnounceFailures(d.ID, sc.ID)
 		return
 	}
 
@@ -296,7 +347,7 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 		s.log.Warn("pre-announce: Facebook offered no backup ingest endpoint",
 			"destination", d.Name)
 	}
-	ok := s.record(d, func(cur *db.Destination) bool {
+	switch err := s.recordErr(d, func(cur *db.Destination) bool {
 		// THE INVARIANT. The key the pre-created broadcast returned has to be
 		// the one the encoder publishes to, or the event page people were
 		// notified about stays empty beside a live stream.
@@ -315,8 +366,41 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 		cur.BackupURL, cur.BackupStreamKey = firstBackup(b)
 		cur.Facebook.Announce(sc.ID, at, b.ID, now)
 		return true
-	})
-	if !ok {
+	}); {
+	case errors.Is(err, db.ErrAnnouncementSkipped):
+		// THE RACE THIS UNWINDS. The destination was disabled when the sweep
+		// read it and live by the time Facebook answered, so the write above
+		// correctly refused to touch the key a running FFmpeg is publishing to.
+		// It used to stop there -- and what it left behind was the intent, which
+		// the `case held:` arm reads as "a create is in flight" and refuses to
+		// retry. One lost race and pre-announce was off for this show for ever.
+		//
+		// So the intent goes back, exactly as it does when Graph refuses. The
+		// difference is that here the broadcast REALLY WAS CREATED, and the id
+		// is in hand for the only moment it will ever be: it goes in the log,
+		// because that is the only place it can go that does not lie.
+		//
+		// It cannot go in the marker. A marker naming this broadcast would claim
+		// a show whose key the encoder does not publish to -- an event page that
+		// stays empty beside a live stream, which is the very failure
+		// pre-announce exists to prevent, recorded as a success. Worse, the next
+		// occurrence would MOVE this broadcast rather than create a usable one,
+		// so the wrong key would follow the show for ever.
+		//
+		// Deleting it on Facebook would be better than either. internal/oauth
+		// exposes no delete for a live_video, so the operator does it, and the
+		// warning gives them the id to do it with.
+		s.log.Warn("pre-announce: the destination went live while its event page was being "+
+			"created, so its stream key was left alone and the broadcast named here is "+
+			"an orphan -- remove it on Facebook. The show's marker is cleared, so a "+
+			"usable broadcast is made on the next sweep that finds the destination down",
+			"destination", d.Name, "schedule", sc.Name, "broadcast", b.ID)
+		s.record(d, func(cur *db.Destination) bool {
+			cur.Facebook.Forget(sc.ID, "")
+			return true
+		})
+		return
+	case err != nil:
 		return
 	}
 	s.log.Info("pre-announced a Facebook broadcast",
@@ -408,18 +492,29 @@ func (s *Server) clearAnnounceFailures(destID, scheduleID int64) {
 // the next schedule in the same sweep decides against what the last one wrote
 // rather than against a snapshot taken before any of it happened.
 func (s *Server) record(d *db.Destination, apply func(*db.Destination) bool) bool {
+	return s.recordErr(d, apply) == nil
+}
+
+// recordErr is record for the two writes whose apply can decline, which need to
+// tell "the row said no" apart from "the write failed".
+//
+// It logs nothing for ErrAnnouncementSkipped on purpose. A declined write is a
+// decision the CALLER made inside the transaction, and only the caller knows
+// what it means: the intent write refusing means another sweep owns this show,
+// the completion write refusing means a live destination and an orphaned
+// broadcast. One shared line for both said neither, and the one that mattered
+// was missing the broadcast id -- the only thing the operator could have acted
+// on.
+func (s *Server) recordErr(d *db.Destination, apply func(*db.Destination) bool) error {
 	updated, err := s.store.UpdateAnnouncement(d.ID, apply)
 	switch {
 	case errors.Is(err, db.ErrAnnouncementSkipped):
-		s.log.Warn("pre-announce: the destination went live while its event page was "+
-			"being created, so its stream key was left alone; the broadcast may "+
-			"need to be removed on Facebook", "destination", d.Name)
-		return false
+		return err
 	case err != nil:
 		s.log.Warn("pre-announce: could not record the announcement",
 			"destination", d.Name, "err", err)
-		return false
+		return err
 	}
 	*d = *updated
-	return true
+	return nil
 }
