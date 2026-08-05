@@ -164,13 +164,20 @@ error — the write succeeded, and this says what it did:
 
 The cases that produce one today are a destination carrying settings its
 platform cannot send (see [PLATFORMS.md](PLATFORMS.md#compliance-metadata)), and
-a Facebook destination that asked for backup ingest and was not offered an
-endpoint.
+a destination that asked for backup ingest and was not offered an endpoint.
 
 **Destination fields added in 0.2.0:** `backupUrl` and `backupStreamKey` — the
 platform's secondary ingest, stored when the broadcast was created and empty
-when it offered none — plus `facebook.backupIngest`, `facebook.scheduledFor`
-and `facebook.broadcastId`.
+when it offered none — `backupIngestWanted`, the operator's request for a
+redundant feed, plus `facebook.scheduledFor` and `facebook.broadcastId`.
+
+`backupIngestWanted` is top-level and NOT under `facebook`, which is a change
+from earlier 0.2.0 pre-releases: it was `facebook.backupIngest`, and anything
+scripting this endpoint against that name must be updated. There is no
+compatibility alias, deliberately — the endpoint it gates was never
+platform-scoped, and a field readable under two names is the ambiguity the move
+exists to remove. Stored rows are migrated on first open; only clients that
+write the field are affected.
 
 **Status fields added in 0.2.0:** a destination's live status carries
 `backupProcess` (the redundant feed's own process state, absent when there is
