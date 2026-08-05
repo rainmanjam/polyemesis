@@ -13,11 +13,16 @@ import (
 // expertArgv therefore drops, changed the hash and dropped a live platform
 // connection to deliver a byte-identical command line.
 //
-// The argv is compared as well as the hash, so the test cannot pass by both
-// sides being wrong in the same direction.
+// Two separate claims, because they can fail separately. First: reformatting
+// must not change the COMMAND LINE, which is a property of ffmpeg.SplitArgs.
+// Second: the hash must agree with the command line, which is the property that
+// was broken -- the hash said "restart" about an argv that had not moved.
 //
-// Mutation: in expertArgvSig, replace the body with `return raw`. Observed to
-// fail on both the primary's and the backup's hash for every reformatting.
+// Mutation: in destSpecFor, change
+// `ExtraInputArgs: expertArgv(log, row, row.ExtraInputArgs, "input")` to
+// `ExtraInputArgs: []string{row.ExtraInputArgs}`, which is the pre-parse text
+// the hashes used to carry. Observed to fail: every reformatting case reports a
+// changed command line.
 func TestReformattingAnExpertArgumentDoesNotRestartTheDestination(t *testing.T) {
 	compiled := routing.Result{FilterComplex: "anull", OutLabel: "a"}
 	e := &Engine{log: testLogger()}
@@ -44,17 +49,19 @@ func TestReformattingAnExpertArgumentDoesNotRestartTheDestination(t *testing.T) 
 				e.destArgs(before, compiled, "udp://127.0.0.1:1", before.Target()),
 				e.destArgs(after, compiled, "udp://127.0.0.1:1", after.Target()))
 			if sameArgv == tc.wantSig {
-				t.Fatalf("the two command lines are same=%v, which contradicts the case; "+
-					"the fixture is wrong, not the code", sameArgv)
+				t.Errorf("the command line changed=%v for %q -> %q, want changed=%v",
+					!sameArgv, tc.before, tc.after, tc.wantSig)
 			}
 
 			sameSpec := destSpec(before, compiled, "up") == destSpec(after, compiled, "up")
 			sameBackup := backupSpecOf(before, compiled, "up") == backupSpecOf(after, compiled, "up")
-			if sameSpec == tc.wantSig {
+			if sameSpec != sameArgv {
 				t.Errorf("destSpec same=%v for command lines that are same=%v: the hash "+
-					"disagrees with the argv it exists to predict", sameSpec, sameArgv)
+					"disagrees with the argv it exists to predict, so the destination is "+
+					"torn down and rebuilt to deliver the command it is already running",
+					sameSpec, sameArgv)
 			}
-			if sameBackup == tc.wantSig {
+			if sameBackup != sameArgv {
 				t.Errorf("backupSpecOf same=%v for command lines that are same=%v",
 					sameBackup, sameArgv)
 			}
@@ -67,8 +74,10 @@ func TestReformattingAnExpertArgumentDoesNotRestartTheDestination(t *testing.T) 
 // move the hash either, or the operator's stream is dropped to deliver a change
 // that was never applied.
 //
-// Mutation: in expertArgvSig, replace the body with `return raw`. Observed to
-// fail.
+// Mutation: in destSpecFor, change
+// `ExtraInputArgs: expertArgv(log, row, row.ExtraInputArgs, "input")` to
+// `ExtraInputArgs: []string{row.ExtraInputArgs}`. Observed to fail on both
+// hashes and on the command line.
 func TestUnparseableExpertArgumentsDoNotMoveTheHash(t *testing.T) {
 	compiled := routing.Result{FilterComplex: "anull", OutLabel: "a"}
 	unterminated := `-metadata title="never closed`
@@ -79,6 +88,13 @@ func TestUnparseableExpertArgumentsDoNotMoveTheHash(t *testing.T) {
 	clean := backupRow()
 	broken := backupRow()
 	broken.ExtraInputArgs = unterminated
+
+	e := &Engine{log: testLogger()}
+	if !equalArgs(
+		e.destArgs(clean, compiled, "udp://127.0.0.1:1", clean.Target()),
+		e.destArgs(broken, compiled, "udp://127.0.0.1:1", broken.Target())) {
+		t.Error("text the parser refuses reached the command line")
+	}
 
 	if destSpec(clean, compiled, "up") != destSpec(broken, compiled, "up") {
 		t.Error("storing unparseable expert arguments restarted the primary to deliver " +

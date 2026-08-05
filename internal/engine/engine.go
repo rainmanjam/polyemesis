@@ -1910,42 +1910,95 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		source = "rendition:" + strconv.FormatInt(*row.RenditionID, 10)
 	}
 	return hashStrings([]string{
-		row.Target(), string(row.Kind), compiled.FilterComplex,
-		strconv.Itoa(row.AudioBitrate), strconv.Itoa(row.Profile.SampleRate),
-		source, upstream,
-		// A negative delay leaves no trace in the filter string — it is carried
-		// on the video side instead — so without this, changing one would be
-		// saved and never applied.
-		strconv.Itoa(compiled.VideoDelayMS),
-		// Expert mode. Without these an edit would be saved and then do nothing
-		// until some unrelated reconcile happened to restart the destination,
-		// which is the worst of both worlds: the operator is told it applied
-		// and the process is still running the old command line.
+		// Everything that reaches the argv, taken from the argv builder's own
+		// input rather than listed again by hand. See destArgvSig.
 		//
-		// The PARSED argv, not the operator's text. destArgs puts these through
-		// expertArgv -> ffmpeg.SplitArgs, so hashing the raw string restarted a
-		// live destination for a byte-identical command line whenever somebody
-		// reformatted the whitespace -- or re-saved a value SplitArgs refuses
-		// and expertArgv therefore drops.
-		expertArgvSig(row.ExtraInputArgs), expertArgvSig(row.ExtraOutputArgs),
-		// Transport tuning, for exactly the same reason. Every one of these
-		// changes the command line, and a setting that is stored and never
-		// reaches the running process is the failure this repo keeps paying
-		// for -- most recently r.Deinterlace on renditions.
-		strconv.FormatBool(row.Transport.NoDurationFilesize),
-		strconv.Itoa(row.Transport.MuxQueuePackets),
-		strconv.Itoa(row.Transport.MuxQueueBytes),
-		strconv.Itoa(row.Transport.RWTimeoutSeconds),
-		// Resilience is deliberately ABSENT. It is a property of the
-		// supervisor, not of the command line, and supervisor.SetPolicy now
-		// carries it into a process that is already running -- see
-		// applyDestPolicy. The reasoning that first put it here was right about
-		// the danger (a setting stored and never reaching the process it
-		// governs) and wrong about the remedy: the remedy was to deliver it,
-		// not to drop the operator's connection in order to deliver it.
-		// Audio encoding: both change the command line.
-		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
+		// Resilience is deliberately ABSENT, and stays absent for free: it is a
+		// property of the supervisor, not of the command line, so it is not a
+		// field of ffmpeg.DestSpec at all. supervisor.SetPolicy carries it into
+		// a process that is already running -- see applyDestPolicy. The
+		// reasoning that first put it in this hash was right about the danger (a
+		// setting stored and never reaching the process it governs) and wrong
+		// about the remedy: the remedy was to deliver it, not to drop the
+		// operator's connection in order to deliver it.
+		destArgvSig(destSpecFor(nil, row, compiled, "", row.Target())),
+		// Not on the command line, and both required. Which tier a destination
+		// reads is what makes moving it between tiers, or editing the tier it
+		// sits on, restart that destination and no other.
+		source, upstream,
 	})
+}
+
+// destSpecFor is one output's ffmpeg.DestSpec: the single description of what
+// goes on its command line.
+//
+// THE ONE PLACE. destArgs renders it, destSpec and backupSpecOf hash it. Before
+// this, the two hashes were hand-written lists over the same inputs sitting 264
+// lines apart, so adding a field to ffmpeg.DestSpec needed three edits and
+// missing the third was silent and asymmetric -- the primary picked the setting
+// up, the backup kept the old command line, and the two feeds the platform
+// received differed with nothing reporting it. compiled.OutLabel had already
+// gone missing from both.
+//
+// log may be nil, and is on the hashing paths: they build this purely to hash
+// it, twice per destination per reconcile, and expertArgv's warning about
+// unparseable text would otherwise be printed three times a pass about a value
+// the editor already reports.
+func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result, relayURL, target string) ffmpeg.DestSpec {
+	return ffmpeg.DestSpec{
+		Kind:          ffmpeg.DestKind(row.Kind),
+		Target:        target,
+		RelayURL:      relayURL,
+		FilterComplex: compiled.FilterComplex,
+		AudioOutLabel: compiled.OutLabel,
+		AudioBitrate:  row.AudioBitrate,
+		SampleRate:    row.Profile.SampleRate,
+		CopyVideo:     true,
+		// A negative routing delay pulls audio ahead of picture, which no
+		// audio filter can do, so the compiler hands the amount over here
+		// and the video is held back instead.
+		VideoDelayMS: compiled.VideoDelayMS,
+		// Expert mode. Spliced by DestinationArgs into the two positions
+		// FFmpeg binds options from, which are the same two the operator
+		// was shown in the confirm dialog.
+		ExtraInputArgs:  expertArgv(log, row, row.ExtraInputArgs, "input"),
+		ExtraOutputArgs: expertArgv(log, row, row.ExtraOutputArgs, "output"),
+		// Output audio encoding. Zero value is AAC stereo.
+		Audio: ffmpeg.AudioSpec{
+			Codec: audioCodecOf(row.Audio.Codec),
+			Mono:  row.Audio.Mono,
+		},
+		// Muxer and socket tuning. Its zero value emits nothing, so a
+		// destination that has not opted in produces exactly the command
+		// it always did.
+		Transport: ffmpeg.TransportSpec{
+			NoDurationFilesize: row.Transport.NoDurationFilesize,
+			MuxQueuePackets:    row.Transport.MuxQueuePackets,
+			MuxQueueBytes:      row.Transport.MuxQueueBytes,
+			RWTimeoutSeconds:   row.Transport.RWTimeoutSeconds,
+		},
+	}
+}
+
+// destArgvSig renders everything on one output's command line into a single
+// deterministic string, for the restart hashes.
+//
+// %#v rather than a hand-written field list, and that IS the fix: a field added
+// to ffmpeg.DestSpec now reaches the argv and both hashes with no third edit to
+// forget. The lists it replaces had already drifted -- AudioOutLabel was on the
+// command line and in neither of them, latent only because it currently
+// co-varies with FilterComplex.
+//
+// It errs towards restarting: a field added to DestSpec that somehow did not
+// change the argv would cycle a destination once. That is the safe direction.
+// The direction this replaces was two feeds silently diverging.
+//
+// RelayURL is cleared first. It is the allocated port, which is new on every
+// start, so hashing it would make every destination's signature differ from
+// itself and nothing would ever be left running.
+func destArgvSig(s ffmpeg.DestSpec) string {
+	s.RelayURL = ""
+	return fmt.Sprintf("%#v", s)
 }
 
 // audioCodecOf maps the stored codec name onto the FFmpeg encoder name. An
@@ -2086,8 +2139,14 @@ func expertArgv(log *slog.Logger, row *db.Destination, raw, field string) []stri
 	}
 	argv, err := ffmpeg.SplitArgs(raw)
 	if err != nil {
-		log.Warn("ignoring unparseable expert arguments",
-			"dest", row.Name, "field", field, "err", err)
+		// A nil log is the restart-hash path -- see destSpecFor. It builds the
+		// same spec purely to hash it, twice per destination per reconcile, and
+		// this line would be printed three times a pass about a value the
+		// editor already shows the operator with the reason it will not apply.
+		if log != nil {
+			log.Warn("ignoring unparseable expert arguments",
+				"dest", row.Name, "field", field, "err", err)
+		}
 		return nil
 	}
 	return argv
@@ -2142,39 +2201,7 @@ func destSubName(id int64, role string) string {
 //
 // Only the relay it reads and the target it writes differ between them.
 func (e *Engine) destArgs(row *db.Destination, compiled routing.Result, relayURL, target string) []string {
-	return ffmpeg.DestinationArgs(ffmpeg.DestSpec{
-		Kind:          ffmpeg.DestKind(row.Kind),
-		Target:        target,
-		RelayURL:      relayURL,
-		FilterComplex: compiled.FilterComplex,
-		AudioOutLabel: compiled.OutLabel,
-		AudioBitrate:  row.AudioBitrate,
-		SampleRate:    row.Profile.SampleRate,
-		CopyVideo:     true,
-		// A negative routing delay pulls audio ahead of picture, which no
-		// audio filter can do, so the compiler hands the amount over here
-		// and the video is held back instead.
-		VideoDelayMS: compiled.VideoDelayMS,
-		// Expert mode. Spliced by DestinationArgs into the two positions
-		// FFmpeg binds options from, which are the same two the operator
-		// was shown in the confirm dialog.
-		ExtraInputArgs:  expertArgv(e.log, row, row.ExtraInputArgs, "input"),
-		ExtraOutputArgs: expertArgv(e.log, row, row.ExtraOutputArgs, "output"),
-		// Muxer and socket tuning. Its zero value emits nothing, so a
-		// destination that has not opted in produces exactly the command
-		// it always did.
-		// Output audio encoding. Zero value is AAC stereo.
-		Audio: ffmpeg.AudioSpec{
-			Codec: audioCodecOf(row.Audio.Codec),
-			Mono:  row.Audio.Mono,
-		},
-		Transport: ffmpeg.TransportSpec{
-			NoDurationFilesize: row.Transport.NoDurationFilesize,
-			MuxQueuePackets:    row.Transport.MuxQueuePackets,
-			MuxQueueBytes:      row.Transport.MuxQueueBytes,
-			RWTimeoutSeconds:   row.Transport.RWTimeoutSeconds,
-		},
-	})
+	return ffmpeg.DestinationArgs(destSpecFor(e.log, row, compiled, relayURL, target))
 }
 
 // destRoleBackup names the redundant output's subscription.
@@ -2200,46 +2227,22 @@ func backupTarget(row *db.Destination) string {
 
 // backupSpecOf hashes everything on the BACKUP's command line.
 //
-// Deliberately not destSpec's value and deliberately not derived from it: they
-// share most inputs but must never share a verdict. Enabling backup already
-// costs one reconnect for an unavoidable reason -- a new broadcast means a new
-// primary key -- and it must not cost a second one for an avoidable reason.
+// SAME INPUTS, SEPARATE VERDICT, and the distinction is the whole design. The
+// two share one description of the command line -- destSpecFor, with the
+// backup's target substituted -- because a redundant feed encoded differently
+// from the one it backs up is not redundancy. They must never share a hash:
+// enabling backup already costs one reconnect for an unavoidable reason (a new
+// broadcast means a new primary key), and it must not cost a second one for an
+// avoidable one.
+//
+// So the toggle is here and absent from destSpec, and nothing about the backup
+// can move the primary's number.
 func backupSpecOf(row *db.Destination, compiled routing.Result, upstream string) string {
 	return hashStrings([]string{
-		strconv.FormatBool(wantsBackup(row)), backupTarget(row),
-		compiled.FilterComplex, strconv.Itoa(row.AudioBitrate),
-		strconv.Itoa(row.Profile.SampleRate), upstream,
-		strconv.Itoa(compiled.VideoDelayMS),
-		expertArgvSig(row.ExtraInputArgs), expertArgvSig(row.ExtraOutputArgs),
-		strconv.FormatBool(row.Transport.NoDurationFilesize),
-		strconv.Itoa(row.Transport.MuxQueuePackets),
-		strconv.Itoa(row.Transport.MuxQueueBytes),
-		strconv.Itoa(row.Transport.RWTimeoutSeconds),
-		row.Audio.Codec, strconv.FormatBool(row.Audio.Mono),
+		strconv.FormatBool(wantsBackup(row)),
+		destArgvSig(destSpecFor(nil, row, compiled, "", backupTarget(row))),
+		upstream,
 	})
-}
-
-// expertArgvSig renders hand-written expert arguments the way the command line
-// will actually receive them, for the restart hashes.
-//
-// It is expertArgv without the logging. A hash is computed for every
-// destination on every reconcile, twice over -- primary and backup -- so
-// warning here would put three copies of the same line in the log every pass,
-// about a value the operator can already see reported in the editor.
-//
-// Unparseable text renders as nothing, matching what expertArgv hands the argv
-// builder. That is the second half of the bug this fixes: re-saving a value
-// SplitArgs refuses used to change the hash and cycle a live destination to
-// deliver a command line identical to the one already running.
-func expertArgvSig(raw string) string {
-	if strings.TrimSpace(raw) == "" {
-		return ""
-	}
-	argv, err := ffmpeg.SplitArgs(raw)
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%q", argv)
 }
 
 func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
