@@ -882,3 +882,40 @@ func TestAnIdenticalRefusalIsLoggedOncePerRunOfFailures(t *testing.T) {
 		}
 	}
 }
+
+// C8. A ticker's first fire is a whole period away, so a daemon restarted two
+// minutes before a show announced nothing for five -- and the loop's behaviour
+// after a restart differed from its behaviour in steady state, which is exactly
+// the difference nothing was watching.
+//
+// Mutation: in preannounce.go, delete the s.preannounceOnce call above
+// PreannounceLoop's for statement. Observed: red -- the create never arrives and
+// the test fails on its own deadline rather than waiting five minutes.
+func TestTheLoopSweepsBeforeItsFirstTick(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	created := make(chan struct{}, 1)
+	s.ingestForFn = func(ctx context.Context, p oauth.Provider, clientID string,
+		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
+		select {
+		case created <- struct{}{}:
+		default:
+		}
+		return &oauth.Broadcast{ID: "777",
+			Ingest: oauth.Ingest{URL: "rtmps://live.example/rtmp", Key: "k"}}, nil
+	}
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.PreannounceLoop(ctx)
+
+	select {
+	case <-created:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the loop announced nothing before its first tick, so a restart " +
+			"inside the last five minutes before a show misses it")
+	}
+}

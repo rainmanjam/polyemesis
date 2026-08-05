@@ -60,6 +60,12 @@ const (
 func (s *Server) PreannounceLoop(ctx context.Context) {
 	tick := time.NewTicker(preannounceTick)
 	defer tick.Stop()
+	// ONE SWEEP BEFORE THE FIRST TICK. A ticker's first fire is a whole period
+	// away, so a daemon restarted two minutes before a show would have waited
+	// five and announced nothing -- and the loop's behaviour after a restart
+	// would differ from its behaviour in steady state, which is the sort of
+	// difference nothing tests and everyone assumes away.
+	s.preannounceOnce(ctx, time.Now())
 	for {
 		select {
 		case <-ctx.Done():
