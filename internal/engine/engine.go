@@ -2081,7 +2081,14 @@ func (e *Engine) retunePolicy(p *supervisor.Process, row *db.Destination, want s
 	if p == nil {
 		return
 	}
-	before := p.Policy()
+	// Normalised on BOTH sides, or the comparison is between two spellings of
+	// the same policy. destPolicy reads the database row, where "unconfigured"
+	// is 0; supervisor.New filled those zeroes in with its defaults before the
+	// process ever ran. Compared raw, an untouched destination never matched --
+	// so every reconcile logged it as retuned and added a reload note, and a
+	// destination with a backup did it twice.
+	before := p.Policy().Normalised()
+	want = want.Normalised()
 	if before == want {
 		return
 	}

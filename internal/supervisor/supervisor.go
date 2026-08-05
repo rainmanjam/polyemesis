@@ -205,20 +205,47 @@ type Process struct {
 
 // New creates a supervised process. It does not start it.
 func New(log *slog.Logger, spec Spec) *Process {
-	if spec.MinBackoff == 0 {
-		spec.MinBackoff = defaultMinBackoff
-	}
-	if spec.MaxBackoff == 0 {
-		spec.MaxBackoff = defaultMaxBackoff
-	}
+	pol := Policy{
+		MinBackoff:  spec.MinBackoff,
+		MaxBackoff:  spec.MaxBackoff,
+		MaxRestarts: spec.MaxRestarts,
+	}.Normalised()
+	spec.MinBackoff, spec.MaxBackoff = pol.MinBackoff, pol.MaxBackoff
 	return &Process{
 		spec:   spec,
-		pol:    Policy{MinBackoff: spec.MinBackoff, MaxBackoff: spec.MaxBackoff, MaxRestarts: spec.MaxRestarts},
+		pol:    pol,
 		retune: make(chan struct{}, 1),
 		log:    log.With("process", spec.Name),
 		state:  StateStopped,
 		logs:   newRing(logRingSize),
 	}
+}
+
+// Normalised fills a Policy's zero fields with the defaults a running process
+// would have been given, and clamps a ceiling that sits below its floor.
+//
+// It exists because a zero Policy and the Policy it becomes are the same
+// intent expressed two ways, and CALLERS COMPARE THEM. internal/engine builds
+// its wanted policy straight from the database row, where "unconfigured" is 0,
+// and compares it against Policy() -- which New has already filled in. Without
+// one definition of "the same policy" those two never match, so every reconcile
+// reported an unconfigured destination as retuned: a log line and a reload note
+// each time, on a destination nobody had touched.
+//
+// A ceiling below the floor would make backoff *= 2 clamp downwards for ever,
+// pinning the retry curve at the floor. The API validates the pair, so that
+// only catches a caller that built a Policy by hand.
+func (p Policy) Normalised() Policy {
+	if p.MinBackoff <= 0 {
+		p.MinBackoff = defaultMinBackoff
+	}
+	if p.MaxBackoff <= 0 {
+		p.MaxBackoff = defaultMaxBackoff
+	}
+	if p.MaxBackoff < p.MinBackoff {
+		p.MaxBackoff = p.MinBackoff
+	}
+	return p
 }
 
 // Policy returns the live restart policy.
@@ -239,18 +266,7 @@ func (p *Process) Policy() Policy {
 // A lowered MaxRestarts applies from the NEXT exit and never retroactively: a
 // process is not failed for exits it made under the old rules.
 func (p *Process) SetPolicy(pol Policy) {
-	if pol.MinBackoff <= 0 {
-		pol.MinBackoff = defaultMinBackoff
-	}
-	if pol.MaxBackoff <= 0 {
-		pol.MaxBackoff = defaultMaxBackoff
-	}
-	// A ceiling below the floor would make backoff *= 2 clamp downwards for
-	// ever, pinning the retry curve at the floor. The API validates the pair,
-	// so this only catches a caller that constructed a Policy by hand.
-	if pol.MaxBackoff < pol.MinBackoff {
-		pol.MaxBackoff = pol.MinBackoff
-	}
+	pol = pol.Normalised()
 
 	p.policyMu.Lock()
 	changed := p.pol != pol
