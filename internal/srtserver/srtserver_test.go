@@ -415,6 +415,19 @@ func TestAQuietStandbysReconnectDoesNotEvictTheLivePrimary(t *testing.T) {
 	primary, backup, primarySink, backupSink := rolePair(6)
 	srv, addr := serve(t, primary, backup)
 
+	// The standby connects first so that the mutation above cannot refuse it on
+	// the way in: what is under test here is the takeover, not the admission.
+	first, err := dial(t, addr, tokenFor(backup))
+	if err != nil {
+		t.Fatalf("the standby was refused: %v", err)
+	}
+	if _, err := first.Write([]byte("B1")); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+	if !waitFor(3*time.Second, func() bool { return len(backupSink.bytes()) > 0 }) {
+		t.Fatal("the standby's first bytes never arrived")
+	}
+
 	pc, err := dial(t, addr, tokenFor(primary))
 	if err != nil {
 		t.Fatalf("the primary encoder was refused: %v", err)
@@ -439,17 +452,6 @@ func TestAQuietStandbysReconnectDoesNotEvictTheLivePrimary(t *testing.T) {
 		}
 	}()
 	defer func() { close(stop); <-done }()
-
-	first, err := dial(t, addr, tokenFor(backup))
-	if err != nil {
-		t.Fatalf("the standby was refused: %v", err)
-	}
-	if _, err := first.Write([]byte("B1")); err != nil {
-		t.Fatalf("write backup: %v", err)
-	}
-	if !waitFor(3*time.Second, func() bool { return len(backupSink.bytes()) > 0 }) {
-		t.Fatal("the standby's first bytes never arrived")
-	}
 
 	// The standby's uplink half-dies: quiet for longer than StaleAfter without
 	// closing, while the primary carries on.
