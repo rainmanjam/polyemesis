@@ -1415,14 +1415,35 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 
 // ---------------------------------------------------------------- processes
 
+// processSummary and processDetail are what these two endpoints say about a
+// process. They are named rather than inlined so that what leaves the API can
+// be asserted directly, without standing up an engine to own a process first --
+// which is why this was the one egress path where nobody noticed the redaction
+// policy was not being applied.
+//
+// Neither reads Args(). CommandString and Logs are the masked renderings;
+// Args() is the raw argv, and on a destination it carries the stream key and,
+// with backup ingest on, the backup key as well.
+func processSummary(p *supervisor.Process) map[string]any {
+	return map[string]any{
+		"status":  p.Status(),
+		"command": p.CommandString(),
+	}
+}
+
+func processDetail(name string, p *supervisor.Process) map[string]any {
+	return map[string]any{
+		"name":    name,
+		"command": p.CommandString(),
+		"lines":   p.Logs(),
+	}
+}
+
 func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 	procs := s.eng().Processes()
 	out := make([]map[string]any, 0, len(procs))
 	for _, p := range procs {
-		out = append(out, map[string]any{
-			"status":  p.Status(),
-			"command": p.CommandString(),
-		})
+		out = append(out, processSummary(p))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1440,11 +1461,7 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range s.eng().Processes() {
 		if p.Name() == name {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"name":    name,
-				"command": p.CommandString(),
-				"lines":   p.Logs(),
-			})
+			writeJSON(w, http.StatusOK, processDetail(name, p))
 			return
 		}
 	}

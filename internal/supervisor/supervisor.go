@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
@@ -316,15 +317,40 @@ func (p *Process) currentArgs() []string {
 	return p.spec.Args
 }
 
-// Args returns the command line, for display on the monitoring page.
+// Args returns the argv exactly as it was handed to the kernel, credentials
+// and all.
+//
+// This is the machine-readable form, for a caller that has to reason about the
+// arguments themselves -- expert mode strips its own additions back off this to
+// show an operator their edit rather than their edit stacked on the last one.
+// Anything destined for a screen wants CommandString instead, which is the same
+// argv with the credentials masked.
 func (p *Process) Args() []string { return append([]string{p.spec.Bin}, p.currentArgs()...) }
 
-// CommandString renders the full command line for the UI.
+// CommandString renders the full command line for a human, with every
+// credential masked.
+//
+// The masking lives here rather than at the API boundary because there is no
+// caller of this method that wants the unmasked text. It exists to be shown --
+// on the monitoring page, and in the spawn-time debug line below -- and both of
+// those are places a stream key must not appear. A destination's argv contains
+// rtmps://<host>/rtmp/<key>, and with backup ingest on it contains the backup
+// key too. A caller that genuinely needs the real argv has Args().
+//
+// alerts.Redact is deliberately the same function the alerts payloads, the
+// lifecycle hooks and the MQTT broker logs already run on this byte stream.
+// Having one redactor is the only thing that stops this path drifting from
+// those, which is exactly how it came to be the one egress that skipped the
+// policy.
+//
+// Redaction runs before quoting so the shell quoting describes the string that
+// is actually shown rather than the one being hidden.
 func (p *Process) CommandString() string {
 	live := p.currentArgs()
 	parts := make([]string, 0, len(live)+1)
 	parts = append(parts, p.spec.Bin)
 	for _, a := range live {
+		a = alerts.Redact(a)
 		if strings.ContainsAny(a, " \t\"'|&;<>()$`\\") {
 			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
 			continue
@@ -661,13 +687,25 @@ func (p *Process) Status() Status {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	// LastError is masked for the same reason Logs is, and it is the more
+	// dangerous of the two. runOnce builds it from the last three stderr lines
+	// classified as error or fatal, and "Error opening output rtmps://host/app/
+	// <key>: Connection refused" is exactly that shape -- so the field an
+	// operator reads to find out why a destination is down is also the field
+	// most likely to hold the key.
+	//
+	// It travels further than the process page: engine copies it onto the
+	// dashboard snapshot, and cmd/polyemesis/mqtt.go copies it into
+	// SourceState.IngestError, which is published RETAINED. A retained topic
+	// outlives the process that wrote it and is readable by every subscriber on
+	// the broker, with no session behind it.
 	st := Status{
 		Name:      p.spec.Name,
 		Kind:      p.spec.Kind,
 		State:     p.state,
 		PID:       p.pid,
 		Restarts:  p.restarts,
-		LastError: p.lastErr,
+		LastError: alerts.Redact(p.lastErr),
 		Progress:  p.progress,
 	}
 	if p.state == StateRunning && !p.startedAt.IsZero() {
@@ -683,8 +721,30 @@ func (p *Process) Status() Status {
 	return st
 }
 
-// Logs returns the buffered stderr tail.
-func (p *Process) Logs() []LogLine { return p.logs.snapshot() }
+// Logs returns the buffered stderr tail, with every credential masked.
+//
+// FFmpeg prints the full publish URL when a connect fails, so the tail of a
+// failing destination is precisely where a stream key surfaces -- and a failing
+// destination is the only reason anyone opens this. hooks.payload already
+// scrubs the same bytes on its way out for the same reason.
+//
+// Masking on the way out rather than on the way in is deliberate. classify()
+// and the on-disk sink have already seen the raw line, the ring keeps it, and
+// anything in-process that later needs to match on a URL still can. This method
+// is the boundary where the line stops being ours, so this is where it is
+// cleaned.
+//
+// alerts.Redact touches URLs and bare key=value credentials only. An FFmpeg
+// progress or error line has neither, so the diagnostic value an operator came
+// for -- the scheme, the host, "Connection refused", the frame counters --
+// survives intact.
+func (p *Process) Logs() []LogLine {
+	lines := p.logs.snapshot()
+	for i := range lines {
+		lines[i].Text = alerts.Redact(lines[i].Text)
+	}
+	return lines
+}
 
 // classify maps an FFmpeg stderr line to a severity the UI can colour.
 func classify(line string) string {
