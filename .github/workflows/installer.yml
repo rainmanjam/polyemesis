@@ -190,10 +190,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Preflight names the right package for this family
+        # Through env rather than interpolated, for the reason the ci.yml jobs
+        # give: a `run:` block is a shell, and a matrix value is still a string
+        # arriving from outside it.
+        env:
+          IMAGE: ${{ matrix.image }}
         run: |
           out="$(bash scripts/install.sh --check --mode binary 2>&1 || true)"
           echo "$out" | grep -E '^\[|^     ' || true
-          case "${{ matrix.image }}" in
+          case "$IMAGE" in
             fedora*)
               # There is no `ffmpeg` package on Fedora at all.
               echo "$out" | grep -q "ffmpeg-free" \
@@ -201,4 +206,12 @@ jobs:
             rocky*)
               echo "$out" | grep -qi "RPM Fusion" \
                 || { echo "RHEL-family hint missing"; exit 1; } ;;
+            # A case with no default arm asserts nothing about an image it does
+            # not recognise, so adding almalinux:9 to the matrix above would
+            # have bought a green tick and no check. Adding a row has to mean
+            # deciding what hint that family should print.
+            *)
+              echo "no package-name assertion is written for $IMAGE"
+              echo "add an arm to this case, or drop the row from the matrix"
+              exit 1 ;;
           esac
