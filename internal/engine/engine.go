@@ -1980,43 +1980,73 @@ func destPolicy(row *db.Destination) supervisor.Policy {
 // applyDestPolicy carries a changed reconnect policy into a destination that is
 // already running, and revives one that had given up under a stricter rule.
 //
+// BOTH outputs, not just the primary. The redundant feed is a separate
+// supervisor.Process built from the same row, and Resilience is deliberately
+// absent from backupSpecOf -- so reconcileBackup short-circuits on an unchanged
+// spec and nothing else in the file would ever deliver the new policy to it. An
+// operator raising giveUpAfter was told by noteReload that it applied; the
+// primary was retuned and revived, and the backup kept the MaxRestarts baked in
+// at supervisor.New time and, if it was already in StateFailed, stayed failed
+// permanently.
+//
+// The fix is NOT to add Resilience to backupSpecOf. That would restart a live
+// redundant feed to deliver a value that can be set on a running process, which
+// is the mistake destSpec's own comment records having already made once.
+func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
+	if d == nil {
+		return
+	}
+	want := destPolicy(row)
+	e.retunePolicy(d.proc, row, want, "")
+	e.retunePolicy(d.backup, row, want, destRoleBackup)
+}
+
+// retunePolicy pushes a changed reconnect policy into one running process, and
+// revives it if it had given up under a stricter rule.
+//
 // The revival is the one place this work chooses a restart over a live apply,
-// and it is chosen deliberately. Raising GiveUpAfter on a destination that has
+// and it is chosen deliberately. Raising GiveUpAfter on an output that has
 // already exhausted the old limit and would otherwise sit in StateFailed for
 // ever is exactly the "stored, reported as applied, and does nothing" failure
-// this file is littered with warnings about. Lowering it is NOT retroactive: a
-// destination is not executed for exits it made under the old rules.
+// this file is littered with warnings about. Lowering it is NOT retroactive: an
+// output is not executed for exits it made under the old rules.
 //
 // Start() cannot do the revival -- supervise returns down the give-up path
 // without clearing p.running, so Start takes its idempotence early return.
 // Restart() is the only door, and its Stop returns immediately because the
 // supervise goroutine has already closed done.
-func (e *Engine) applyDestPolicy(d *destination, row *db.Destination) {
-	if d == nil || d.proc == nil {
+//
+// role is empty for the primary, so its log lines and reload notes are
+// byte-identical to what they were before the backup shared this code.
+func (e *Engine) retunePolicy(p *supervisor.Process, row *db.Destination, want supervisor.Policy, role string) {
+	if p == nil {
 		return
 	}
-	before := d.proc.Policy()
-	want := destPolicy(row)
+	before := p.Policy()
 	if before == want {
 		return
 	}
-	d.proc.SetPolicy(want)
+	name := row.Name
+	if role != "" {
+		name = row.Name + " (" + role + ")"
+	}
+	p.SetPolicy(want)
 	e.log.Info("destination reconnect policy retuned without a restart",
-		"dest", row.Name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
+		"dest", name, "minBackoff", want.MinBackoff, "maxBackoff", want.MaxBackoff,
 		"giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", row.Name, reloadLive,
+	e.noteReload("destination", name, reloadLive,
 		fmt.Sprintf("reconnect policy retuned to %s..%s, giving up after %d",
 			want.MinBackoff, want.MaxBackoff, want.MaxRestarts))
 
-	if d.proc.Status().State != supervisor.StateFailed || !moreForgiving(before, want) {
+	if p.Status().State != supervisor.StateFailed || !moreForgiving(before, want) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 	defer cancel()
-	d.proc.Restart(ctx)
+	p.Restart(ctx)
 	e.log.Info("destination revived: it had given up under the previous limit",
-		"dest", row.Name, "giveUpAfter", want.MaxRestarts)
-	e.noteReload("destination", row.Name, reloadRestart,
+		"dest", name, "giveUpAfter", want.MaxRestarts)
+	e.noteReload("destination", name, reloadRestart,
 		"it had given up under the previous limit and the new one is more forgiving")
 }
 
