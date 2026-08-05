@@ -54,6 +54,11 @@ export function HooksCard() {
   const [meta, setMeta] = useState<HookMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Partial<Hook> | null>(null);
+  // In flight, same flag every other mutating dialog in this console carries.
+  // It matters more here than in most of them: a second create is not a
+  // duplicate row an operator can delete and forget, it is a second signing
+  // key that overwrites the first one on screen before anybody has copied it.
+  const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<HookTestResult | null>(null);
   // Kept outside the dialog: the key must survive closing it, because the
@@ -129,7 +134,8 @@ export function HooksCard() {
   };
 
   const save = async () => {
-    if (!draft) return;
+    if (!draft || busy) return;
+    setBusy(true);
     try {
       if (draft.id) {
         await api.hooks.update(draft.id, draft);
@@ -146,6 +152,8 @@ export function HooksCard() {
       await load();
     } catch (err) {
       toast.error(errText(err, "Could not save the hook."));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -374,6 +382,7 @@ export function HooksCard() {
       <HookDialog
         draft={draft}
         meta={meta}
+        busy={busy}
         onChange={setDraft}
         onClose={() => setDraft(null)}
         onSave={save}
@@ -424,12 +433,14 @@ function Stat({
 function HookDialog({
   draft,
   meta,
+  busy,
   onChange,
   onClose,
   onSave,
 }: {
   draft: Partial<Hook> | null;
   meta: HookMeta | null;
+  busy: boolean;
   onChange: (h: Partial<Hook>) => void;
   onClose: () => void;
   onSave: () => void;
@@ -533,10 +544,18 @@ function HookDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={onSave}>{editing ? "Save" : "Create"}</Button>
+          {/* Disabled while the request is in flight, the same shape as
+              DestinationDialog's footer. Two fast clicks on Create used to make
+              two hooks, and the UI shows one signing key -- the second -- so
+              the first receiver was left holding a hook it could never verify
+              a signature for, and the server cannot re-issue the key to fix it. */}
+          <Button onClick={onSave} disabled={busy}>
+            {busy && <Loader2 className="animate-spin" />}
+            {editing ? "Save" : "Create"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
