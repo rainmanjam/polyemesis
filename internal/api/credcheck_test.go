@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // The credential check on save, from the API's side.
@@ -125,33 +127,88 @@ func TestCheckRouteIsAJSONEndpoint(t *testing.T) {
 
 // The re-check reads what is stored rather than taking a body, so the secret
 // never has to leave the operator's console twice.
+//
+// The verdict has to VARY WITH THE STORED VALUE, which is the half this used to
+// miss. It seeded one valid-format client ID and asserted unverified/format --
+// but YouTube's check is format-only, so replacing `creds.ClientID` in
+// handleCheckCreds with any hard-coded valid-format Google id produced the same
+// verdict, and the stored secret was never consulted at all. The table below
+// makes each field load-bearing: a client ID the format check rejects, and a
+// stored secret that is empty.
+//
+// Mutations, each one line in oauth_handlers.go's handleCheckCreds:
+//   - `creds.ClientID` -> `"1234.apps.googleusercontent.com"` -- observed FAIL
+//     on the "a stored client ID that fails the format check" case.
+//   - `creds.ClientSecret` -> `"some-secret"` -- observed FAIL on the "a stored
+//     secret that went missing" case.
 func TestRecheckUsesTheStoredCredential(t *testing.T) {
-	_, h, _ := testServer(t, config.Config{})
-	sign := login(t, h)
+	for _, tc := range []struct {
+		name         string
+		clientID     string
+		clientSecret string
+		wantState    string
+		wantDetail   string
+	}{
+		{
+			name:     "a stored client ID the platform would accept",
+			clientID: "1234.apps.googleusercontent.com", clientSecret: "some-secret",
+			wantState: "unverified",
+		},
+		{
+			// The operator pasted the project name instead of the client ID.
+			// Re-checking has to tell them so, from storage alone.
+			name:     "a stored client ID that fails the format check",
+			clientID: "my-streaming-project", clientSecret: "some-secret",
+			wantState: "rejected", wantDetail: "apps.googleusercontent.com",
+		},
+		{
+			// Written straight to the store: the PUT route refuses a blank
+			// secret, and the point here is what the re-check makes of a row
+			// that holds one anyway -- a paste that picked up only the
+			// surrounding whitespace. A single space rather than "" because the
+			// column is NOT NULL, and this is the shortest value that still
+			// trims to nothing.
+			name:     "a stored secret that is blank",
+			clientID: "1234.apps.googleusercontent.com", clientSecret: " ",
+			wantState: "rejected", wantDetail: "client secret",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, h, store := testServer(t, config.Config{})
+			sign := login(t, h)
+			if err := store.PutPlatformCreds(srv.box, db.PlatformYouTube,
+				tc.clientID, tc.clientSecret); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
 
-	if code, _ := putCreds(t, h, sign, "youtube",
-		"1234.apps.googleusercontent.com", "some-secret"); code != http.StatusOK {
-		t.Fatalf("seed save failed with %d", code)
-	}
+			r := jsonRequest(t, http.MethodPost, "/api/v1/platforms/credentials/youtube/check", nil)
+			sign(r)
+			w := do(t, h, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("re-check status = %d, want 200: body %s", w.Code, w.Body.String())
+			}
 
-	r := jsonRequest(t, http.MethodPost, "/api/v1/platforms/credentials/youtube/check", nil)
-	sign(r)
-	w := do(t, h, r)
-	if w.Code != http.StatusOK {
-		t.Fatalf("re-check status = %d, want 200: body %s", w.Code, w.Body.String())
-	}
-
-	var got struct {
-		State  string `json:"state"`
-		Method string `json:"method"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	// Same verdict as the save produced, reached from storage alone.
-	if got.State != "unverified" || got.Method != "format" {
-		t.Errorf("state=%q method=%q, want unverified/format from the stored value",
-			got.State, got.Method)
+			var got struct {
+				State  string `json:"state"`
+				Method string `json:"method"`
+				Detail string `json:"detail"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got.State != tc.wantState {
+				t.Errorf("state = %q, want %q: the verdict has to come from the "+
+					"stored credential, not from a constant. detail=%q",
+					got.State, tc.wantState, got.Detail)
+			}
+			if got.Method != "format" {
+				t.Errorf("method = %q, want format: Google cannot be asked", got.Method)
+			}
+			if tc.wantDetail != "" && !strings.Contains(got.Detail, tc.wantDetail) {
+				t.Errorf("detail = %q, want it to mention %q so the operator knows "+
+					"what to fix", got.Detail, tc.wantDetail)
+			}
+		})
 	}
 }
 

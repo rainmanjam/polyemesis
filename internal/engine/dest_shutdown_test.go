@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
@@ -16,23 +15,19 @@ import (
 // The span of one is the assertion: a port that was not released cannot be
 // handed out again, so "did the stopped path give the port back" is answerable
 // without reaching inside the allocator.
+// A real store rather than an &Engine{...} literal, because the point of the
+// mutation is that the guarded process STARTS -- and a started process reports
+// its state, which reaches Status, which reads the database. A literal engine
+// panics there, and a panic is a much weaker signal than an assertion naming
+// what leaked.
 func stoppedEngine(t *testing.T) (*Engine, *relay.Hub) {
 	t.Helper()
-	hub, err := relay.New(testLogger(), 0)
-	if err != nil {
-		t.Fatalf("relay.New: %v", err)
-	}
-	t.Cleanup(func() { hub.Close() })
-	dir := t.TempDir()
-	e := &Engine{
-		log:   testLogger(),
-		tools: &ffmpeg.Tools{FFmpeg: dir + "/no-such-ffmpeg"},
-		alloc: relay.NewPortAllocator(freeUDPPort(t), 1),
-		hub:   hub,
-		dests: map[int64]*destination{},
-	}
+	e, _ := storeEngine(t)
+	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 1)
+	e.mu.Lock()
 	e.stopped = true
-	return e, hub
+	e.mu.Unlock()
+	return e, e.hub
 }
 
 // A8. startDest was the one start path in the file that did not check
