@@ -785,9 +785,11 @@ func TestTwoAccountsPushComplianceConcurrently(t *testing.T) {
 		}
 		select {
 		case <-both:
-		case <-time.After(5 * time.Second):
+		case <-time.After(2 * time.Second):
 			// Only reachable when the pushes are serialised; the assertion on
-			// peak below is what reports it.
+			// peak below is what reports it. Two of these have to fit inside
+			// pushAndSettle's own 10s deadline, or the failure comes back as
+			// "the push never finished" instead of naming the missing overlap.
 		}
 
 		mu.Lock()
