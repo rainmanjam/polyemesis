@@ -1823,7 +1823,7 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			// because its toggle is absent from destSpec -- so a destination
 			// that survived the stop phase is exactly the case nothing else
 			// would notice the setting changed.
-			e.reconcileBackup(&next, p.compiled, p.upstream)
+			e.reconcileBackup(id, &next, p.compiled, p.upstream)
 			continue
 		}
 		e.mu.Unlock()
@@ -1860,7 +1860,7 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 		e.mu.Lock()
 		d := e.dests[id]
 		e.mu.Unlock()
-		e.reconcileBackup(d, p.compiled, p.upstream)
+		e.reconcileBackup(id, d, p.compiled, p.upstream)
 	}
 }
 
@@ -2344,43 +2344,97 @@ func (e *Engine) teardownDest(d *destination) {
 	e.stopBackup(d)
 }
 
-// reconcileBackup brings the redundant output into line with the row, without
-// ever consulting or touching the primary.
+// backupPending is what an operator is told between switching redundancy on and
+// the platform having somewhere to send it.
+const backupPending = "Facebook has not offered a backup ingest endpoint yet; " +
+	"it is provisioned when the broadcast is created"
+
+// reconcileBackup brings the redundant output into line with the row and
+// publishes the result, without ever consulting or touching the primary.
 //
 // Called for a destination that is already running as well as one just
 // started, because the toggle is deliberately ABSENT from destSpec: nothing
 // else would ever notice it changed. Absence from that hash stops the primary
 // cycling; this is what makes the setting take effect.
-func (e *Engine) reconcileBackup(d *destination, compiled routing.Result, upstream string) {
-	if d == nil || d.row == nil {
+//
+// prev is the destination currently at e.dests[id], and NOTHING HERE WRITES
+// THROUGH IT. The backup fields used to be set in place immediately after
+// startDestinations published the pointer, which is precisely what the
+// copy-on-publish comment above that publication says must never happen:
+// "Status hands out these pointers and then reads their fields after dropping
+// the lock, which is only safe while a published destination never changes
+// again." A replacement is built, filled in while nothing else can see it, and
+// swapped in by publishDest.
+func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.Result, upstream string) {
+	if prev == nil || prev.row == nil {
 		return
 	}
-	want := backupSpecOf(d.row, compiled, upstream)
-	if !wantsBackup(d.row) {
-		// Includes the toggle-on-but-no-endpoint case, which is a real state
-		// between enabling the setting and the next broadcast being created.
-		e.stopBackup(d)
-		d.backupErr = ""
-		if d.row.Facebook.BackupIngest && d.row.BackupURL == "" {
-			d.backupErr = "Facebook has not offered a backup ingest endpoint yet; " +
-				"it is provisioned when the broadcast is created"
+	want := backupSpecOf(prev.row, compiled, upstream)
+	// The toggle-on-but-no-endpoint case is included in "not wanted": it is a
+	// real state between enabling the setting and the next broadcast being
+	// created, and it is reported rather than left blank.
+	reason := ""
+	if !wantsBackup(prev.row) && prev.row.Facebook.BackupIngest && prev.row.BackupURL == "" {
+		reason = backupPending
+	}
+	if wantsBackup(prev.row) {
+		if prev.backup != nil && prev.backupSpec == want {
+			return
 		}
+	} else if prev.backup == nil && prev.backupSub == "" && prev.backupPort == 0 &&
+		prev.backupSpec == "" && prev.backupErr == reason {
+		// Already exactly right, which is the common case on every reconcile of
+		// every destination without redundancy. Returning here is what keeps
+		// this from republishing an identical destination each pass.
 		return
 	}
-	if d.backup != nil && d.backupSpec == want {
-		return
+
+	e.stopBackup(prev)
+	next := *prev
+	next.backup, next.backupPort, next.backupSub = nil, 0, ""
+	next.backupSpec, next.backupErr = "", reason
+	if wantsBackup(prev.row) {
+		e.buildBackup(&next, compiled, want)
 	}
-	e.stopBackup(d)
-	e.startBackup(d, compiled, want)
+	e.publishDest(id, prev, &next)
 }
 
-// startBackup spawns the redundant output.
+// publishDest swaps a replacement destination into e.dests and starts whatever
+// the replacement brought with it.
+//
+// The check and the swap are one critical section, which is what startRendition
+// and startDest do and for the same reason: shutdown may have run since this
+// reconcile started, and a process started after Stop has copied e.dests is an
+// orphan nothing can ever reach. The identity check on prev is the other half
+// -- a replacement built from an entry that is no longer the one in the map
+// describes a destination that has already been torn down.
+func (e *Engine) publishDest(id int64, prev, next *destination) {
+	e.mu.Lock()
+	if e.stopped || e.dests[id] != prev {
+		e.mu.Unlock()
+		// Everything the replacement was given has to go back, or it is a
+		// subscription and a relay port held by a struct nothing references.
+		e.stopBackup(next)
+		return
+	}
+	e.dests[id] = next
+	e.mu.Unlock()
+
+	if next.backup != nil {
+		next.backup.Start()
+		e.log.Info("backup ingest started", "dest", next.row.Name)
+	}
+}
+
+// buildBackup prepares the redundant output on a destination that is NOT
+// published yet. It does not start the process; publishDest does, once the
+// replacement is the one in the map.
 //
 // The port is asked for LAST and its refusal costs only the backup. There are
 // 500 relay ports shared across every source engine, so exhaustion is a real
 // state -- and it must cost the redundancy rather than the broadcast, which is
 // why this returns quietly with a reason instead of failing the destination.
-func (e *Engine) startBackup(d *destination, compiled routing.Result, spec string) {
+func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec string) {
 	hub := d.hub
 	if hub == nil {
 		hub = e.hub
@@ -2409,29 +2463,20 @@ func (e *Engine) startBackup(d *destination, compiled routing.Result, spec strin
 		LogSink:     logSink{e},
 	})
 
-	e.mu.Lock()
-	// The same guard the primary and every other start path carries. A backup
-	// spawned after shutdown is the worst orphan in the file: it is built with
-	// AutoRestart, so it does not exit -- it reconnects to the platform's backup
-	// ingest for ever, from a process that is in no map and on no page.
-	if e.stopped {
-		e.mu.Unlock()
-		hub.Unsubscribe(sub)
-		e.alloc.Release(port)
-		return
-	}
 	d.backup = proc
 	d.backupPort = port
 	d.backupSub = sub
 	d.backupSpec = spec
 	d.backupErr = ""
-	e.mu.Unlock()
-
-	proc.Start()
-	e.log.Info("backup ingest started", "dest", d.row.Name)
 }
 
-// stopBackup tears down the redundant output and releases everything it held.
+// stopBackup tears the redundant output down and releases everything it held.
+//
+// It READS d and does not write to it, which is what lets it be called on a
+// destination the dashboard is already holding a pointer to -- from
+// teardownDest, where the entry has been removed from the map but not from
+// whatever Status copied a moment earlier. The caller publishes a replacement
+// with the fields cleared instead.
 //
 // Unsubscribing and releasing the port matter as much as stopping the process:
 // a stale subscriber keeps the hub writing datagrams into a socket nobody
@@ -2445,7 +2490,6 @@ func (e *Engine) stopBackup(d *destination) {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 		d.backup.Stop(ctx)
 		cancel()
-		d.backup = nil
 	}
 	if d.backupSub != "" {
 		hub := d.hub
@@ -2453,13 +2497,10 @@ func (e *Engine) stopBackup(d *destination) {
 			hub = e.hub
 		}
 		hub.Unsubscribe(d.backupSub)
-		d.backupSub = ""
 	}
 	if d.backupPort != 0 {
 		e.alloc.Release(d.backupPort)
-		d.backupPort = 0
 	}
-	d.backupSpec = ""
 }
 
 func renditionLabel(row *db.Destination) string {

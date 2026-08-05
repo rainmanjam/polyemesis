@@ -67,16 +67,16 @@ func TestStartingADestinationAfterShutdownLeavesNothingBehind(t *testing.T) {
 // built with AutoRestart, so an orphan does not exit -- it reconnects to the
 // platform's backup ingest for ever.
 //
-// Mutation: in startBackup, delete the `if e.stopped { ... return }` block
-// above the `d.backup = proc` assignment. Observed to fail on all three
-// assertions.
+// Mutation: in publishDest, delete `e.stopped ||` from the condition guarding
+// the swap. Observed to fail on all three assertions.
 func TestStartingABackupAfterShutdownLeavesNothingBehind(t *testing.T) {
 	e, hub := stoppedEngine(t)
 	d := &destination{row: backupRow(), hub: hub}
+	e.dests[d.row.ID] = d
 
-	e.startBackup(d, routing.Result{}, "spec")
+	e.reconcileBackup(d.row.ID, d, routing.Result{}, "up")
 
-	if d.backup != nil {
+	if got := e.dests[d.row.ID]; got.backup != nil {
 		t.Error("a backup spawned after shutdown was published onto the destination; " +
 			"it restarts for ever and no path can reach it to stop it")
 	}
