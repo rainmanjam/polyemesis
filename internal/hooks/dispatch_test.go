@@ -205,16 +205,37 @@ func TestASubscriptionFilterIsHonoured(t *testing.T) {
 	runDispatcher(t, d)
 	waitFor(t, func() bool { return d.HasHooks() })
 
-	d.Publish(Event{Trigger: TriggerIngestPublished, At: time.Now(), Source: SourceRef{ID: 1}})
+	// Proved by a FENCE, not by a sleep. The earlier version published the
+	// unsubscribed event, waited for the subscribed one, then slept 100ms and
+	// counted -- so a delivery that merely arrived late left it green, and on a
+	// loaded runner "late" is ordinary.
+	//
+	// Publish, fanOut and the worker queue are each strictly ordered, so once
+	// the SECOND subscribed event has been delivered the unsubscribed one
+	// between them has already been through fanOut and discarded. Nothing can
+	// still be in flight, and no interval has to be guessed.
+	//
+	// Mutation: fanOut's `wants := w.hook.Wants(ev.Trigger)` -> `wants := true`.
 	d.Publish(Event{Trigger: TriggerDestinationDown, At: time.Now(), Source: SourceRef{ID: 1}})
-	waitFor(t, func() bool { return len(rec.seen()) == 1 })
+	d.Publish(Event{Trigger: TriggerIngestPublished, At: time.Now(), Source: SourceRef{ID: 1}})
+	d.Publish(Event{Trigger: TriggerDestinationDown, At: time.Now(), Source: SourceRef{ID: 2}})
+	waitFor(t, func() bool {
+		for _, b := range rec.seen() {
+			if strings.Contains(b, `"id":2`) {
+				return true
+			}
+		}
+		return false
+	})
 
-	time.Sleep(100 * time.Millisecond)
-	if n := len(rec.seen()); n != 1 {
-		t.Fatalf("delivered %d, want only the subscribed trigger", n)
+	seen := rec.seen()
+	if len(seen) != 2 {
+		t.Fatalf("delivered %d, want only the two subscribed triggers: %v", len(seen), seen)
 	}
-	if !strings.Contains(rec.seen()[0], `"trigger":"destination.down"`) {
-		t.Fatalf("delivered the wrong one: %s", rec.seen()[0])
+	for i, b := range seen {
+		if !strings.Contains(b, `"trigger":"destination.down"`) {
+			t.Fatalf("delivery %d was not subscribed to: %s", i, b)
+		}
 	}
 }
 
