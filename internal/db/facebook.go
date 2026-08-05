@@ -97,15 +97,31 @@ const (
 	// to: a show that started this morning is still the one an operator is
 	// looking at.
 	announcementRetention = 24 * time.Hour
-	// maxAnnouncements is the hard ceiling, and it is not the real bound --
-	// announcementRetention is. It exists so that an install whose schedules
-	// are all in the future cannot grow the row without limit.
+	// maxAnnouncements is a ceiling on the markers it is SAFE to drop, and it
+	// is not the real bound -- announcementRetention is. It exists so that an
+	// install whose schedules are all in the future cannot grow the row without
+	// limit.
 	//
-	// Reaching it needs 32 distinct occurrences inside Facebook's seven-day
-	// horizon on ONE destination, i.e. 32 enabled start schedules that all
-	// target it. Past that the oldest is dropped, which costs a duplicate event
-	// page for the show nearest in time -- worth stating rather than pretending
-	// the ceiling is free.
+	// IT NEVER EVICTS A MARKER THAT NAMES A LIVE BROADCAST, and an earlier
+	// version of this did. That version sorted by occurrence and kept the tail,
+	// so the entry it dropped was the show NEAREST IN TIME -- and dropping a
+	// marker whose live_video still exists does not merely lose bookkeeping: the
+	// next sweep finds no marker, creates a second event page, and drops another
+	// marker to make room for it. People are already subscribed to the first.
+	// It thrashes, one orphaned event page per sweep, and it starts with the
+	// broadcast about to go out.
+	//
+	// Dropping the FURTHEST-out instead would only choose a quieter victim. Any
+	// eviction of a live marker has the same shape.
+	//
+	// So the ceiling applies only to intents -- markers with no BroadcastID,
+	// which record a create whose outcome never came back. Losing one of those
+	// costs a retry, which is the behaviour without the marker anyway. If a row
+	// is still over the ceiling once those are gone, it is kept: the set is
+	// bounded by the number of enabled start schedules targeting one destination
+	// inside a seven-day horizon, which an operator controls and which is a few
+	// hundred bytes even when it is absurd. A slightly larger JSON blob is worth
+	// less than a public event page nobody can find.
 	maxAnnouncements = 32
 )
 
@@ -198,11 +214,45 @@ func (f *FacebookSettings) Announce(scheduleID int64, occurrence time.Time, broa
 		ScheduleID: scheduleID, Occurrence: occurrence, BroadcastID: broadcastID,
 	})
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Occurrence.Before(kept[j].Occurrence) })
-	if len(kept) > maxAnnouncements {
-		kept = kept[len(kept)-maxAnnouncements:]
-	}
-	f.Announcements = kept
+	f.Announcements = capIntents(kept)
 	f.mirror()
+}
+
+// capIntents enforces maxAnnouncements by dropping INTENTS only -- markers
+// with no BroadcastID, which record a create whose outcome never came back.
+//
+// in must already be sorted by occurrence, ascending.
+//
+// Losing an intent costs a retry, which is what would have happened without the
+// marker at all. Losing a marker that names a live broadcast costs a public
+// event page: the next sweep sees nothing, creates a second one, and evicts
+// another marker to fit it. So if the row is still over the ceiling once every
+// intent is gone, it is kept whole. See maxAnnouncements.
+//
+// The furthest-out intents go first. An intent close in time is about to be
+// resolved one way or the other by the very next sweep; one seven days out has
+// the longest to sit there being wrong.
+func capIntents(in []Announcement) []Announcement {
+	over := len(in) - maxAnnouncements
+	if over <= 0 {
+		return in
+	}
+	out := make([]Announcement, 0, len(in))
+	// Walk from the furthest occurrence backwards, dropping intents until the
+	// row fits, then keep everything else in its original order.
+	drop := make(map[int]bool, over)
+	for i := len(in) - 1; i >= 0 && over > 0; i-- {
+		if in[i].BroadcastID == "" {
+			drop[i] = true
+			over--
+		}
+	}
+	for i, a := range in {
+		if !drop[i] {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Forget drops this schedule's marker, and any marker naming this broadcast.
