@@ -284,6 +284,27 @@ func quoteArgv(bin string, args []string) string {
 // relay port the hub actually assigned and the file path the recordings manager
 // actually resolved, which nothing outside the engine can reproduce. The
 // rebuilt form is the fallback for a stopped destination, and says so.
+//
+// THIS ONE IS DELIBERATELY NOT REDACTED, and the difference from every other
+// egress of these bytes is worth stating so nobody "fixes" it later.
+//
+// Process.CommandString, Process.Logs and Status.LastError are all masked
+// inside supervisor now, because no caller of those wanted the raw form and one
+// of them was reaching an MQTT broker retained. Args() stays raw for callers
+// that must reason about the arguments themselves, and this is that caller.
+//
+// Expert mode's whole contract is that the command the operator confirms cannot
+// drift from the one that runs -- see resolveExpertCommand, which splices
+// through the same function the engine does for exactly that reason. A masked
+// target would show them a command that is NOT the one that will run, while
+// telling them it is. That is a worse failure than the disclosure: it breaks
+// the approval this screen exists to obtain.
+//
+// The exposure is bounded by the same boundary the rest of the console has.
+// This route is inside the requireAuth+requireCSRF group, and the same caller
+// can already read streamKey and backupStreamKey in cleartext from
+// GET /destinations, so redacting here would remove nothing an authenticated
+// operator cannot already fetch.
 func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []string, live bool, note string, err error) {
 	bin = s.eng().Tools().FFmpeg
 
