@@ -24,13 +24,11 @@ func announcedDestination(t *testing.T, d *DB) *Destination {
 // rename, an enable, or a routing change made in that window was silently
 // reverted. This write owns four columns and no others.
 //
-// Mutation: in destinations.go, add `name=?` to UpdateAnnouncement's UPDATE and
-// pass cur.Name. That is not enough on its own to revert anything, because the
-// row is re-read here -- which is the point, and the reason the API-side guard
-// TestAnOperatorEditDuringTheGraphCallSurvives exists as well. Mutation that
-// this one catches: drop `stream_key=?` (and its argument) from the same
-// statement. Observed: red -- the pre-created key never reaches the encoder and
-// the announced event page stays empty beside a live stream.
+// Two mutations, both observed red. Add `name=?` to UpdateAnnouncement's UPDATE
+// and pass cur.Name: the callback's rename then lands and the sweep is writing a
+// column it does not own. Drop `stream_key=?` and its argument instead: the
+// pre-created key never reaches the encoder, and the announced event page stays
+// empty beside a live stream.
 func TestUpdateAnnouncementWritesOnlyWhatThePreannounceSweepOwns(t *testing.T) {
 	d := testDB(t)
 	created := announcedDestination(t, d)
@@ -79,10 +77,11 @@ func TestUpdateAnnouncementWritesOnlyWhatThePreannounceSweepOwns(t *testing.T) {
 // column the markers do, so writing that column from a stale copy would revert
 // those too.
 //
-// Mutation: in destinations.go, change UpdateAnnouncement's
-// `scanDestination(tx.QueryRow(destByIDQuery, id))` to read nothing and start
-// from a zero Destination. Observed: red -- the donate charity set after the
-// sweep's snapshot is gone.
+// Mutation: in destinations.go, replace UpdateAnnouncement's
+// `cur, err := scanDestination(tx.QueryRow(destByIDQuery, id))` with
+// `cur, err := &Destination{ID: id}, error(nil)`, which is the callback being
+// shown something other than the stored row. Observed: red -- the callback saw
+// an empty name and no donate charity.
 func TestUpdateAnnouncementAppliesToTheRowAsItStandsNow(t *testing.T) {
 	d := testDB(t)
 	created := announcedDestination(t, d)

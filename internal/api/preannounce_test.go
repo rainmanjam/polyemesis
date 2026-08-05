@@ -653,8 +653,10 @@ func TestTwoStartSchedulesEachGetTheirOwnEventPage(t *testing.T) {
 //
 // Mutation: in preannounce.go, change record's call to
 // `s.store.UpdateAnnouncement(d.ID, func(cur *db.Destination) bool { *cur = *d; return apply(cur) })`,
-// which restores writing the pre-Graph snapshot. Observed: red -- the rename is
-// gone and the destination is called "fb" again.
+// which restores writing the pre-Graph snapshot. Observed: red -- the donate
+// charity the operator set during the call is gone. The rename survives even
+// then, because the narrow column list is a second defence and does not carry
+// `name` at all; the Facebook blob is the one the stale snapshot reaches.
 func TestAnOperatorEditDuringTheGraphCallSurvives(t *testing.T) {
 	s, _, store := testServer(t, config.Config{})
 	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
