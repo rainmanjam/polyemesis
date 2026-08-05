@@ -8,7 +8,46 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-04
+
 ### Added
+
+- **Compliance metadata now reaches the platforms.** A YouTube COPPA
+  self-declaration, a YouTube privacy status and a Twitch content label were
+  editable, validated, saved — and had never once been sent. `PushCompliance`
+  existed from the first release and no code path called it, so every value an
+  operator set stopped at the database.
+
+  This is a behaviour change on upgrade, and a deliberate one: an install with
+  compliance already stored begins writing it to the platform on the next push.
+  A destination configured months ago with a privacy setting nobody remembers
+  will apply it. Two destinations pointing at one account with *different*
+  compliance refuse the push and name both, rather than letting one silently
+  win — discarding a legal declaration with nothing anywhere saying so is the
+  failure this change exists to end.
+
+- **Facebook accepts the metadata everything else already did.** Title,
+  description and tags on the composer push; audience, crossposting and the
+  donate button applied when the broadcast is created. A tag word Facebook
+  cannot resolve is a warning naming the word, not a failed push.
+
+- **A Facebook show can be announced before it starts.** A destination on a
+  start schedule gets its broadcast created ahead of time, so there is a public
+  event page days early rather than one appearing the moment bytes arrive.
+
+  A `once` schedule further out than Facebook's seven-day limit still saves and
+  still runs — it simply gets no event page, and is told so.
+
+- **A Facebook destination can publish a redundant backup feed.** A second
+  supervised FFmpeg to Facebook's backup ingest, so a dropped connection does
+  not drop the broadcast. Off by default: it doubles that destination's upload
+  bandwidth, which is an operator's call on a thin uplink. Enabling it costs one
+  reconnect and the dialog says so — a backup endpoint exists only on a
+  broadcast created with one, and creating that issues a new stream key.
+
+- **Every release carries a software bill of materials.** SPDX and CycloneDX,
+  scanned from the source tree rather than the binaries, so the embedded web
+  UI's npm dependencies appear alongside the Go modules and the pinned Actions.
 
 - **The failover selector can put a playlist on air.** A fourth candidate,
   ranked below both ingests and above the slate: a scheduled programme is a
@@ -143,6 +182,35 @@ its first tagged release.
 
 ### Fixed
 
+- **An IPv4 publisher could not reach the SRT ingest on macOS, and neither end
+  said why.** A bare `:6000` became one dual-stack socket, and the reply to a
+  v4-mapped peer went out as an IPv4 control message on an `AF_INET6` socket —
+  which Darwin refuses and the dependency discards. The datagrams arrived, the
+  handshake never completed, and the typed refusals that explain every other
+  rejection never ran.
+
+  A wildcard address now binds `0.0.0.0` and `::` as two listeners, neither of
+  which takes that path. If one family cannot be bound, the other still serves.
+  Fixes issue #28; the upstream report is `datarhei/gosrt#148`.
+
+- **A metadata push could report a result before it had one.** The composer is
+  promised a 202 with every account pending, and the workers were started
+  *before* the job was snapshotted — so a platform that failed instantly could
+  appear in the reply that was meant to say "not yet". With no developer
+  credentials configured, that takes microseconds.
+
+- **Settings a destination's platform cannot send are now cleared, and said.**
+  Configuring a destination for one platform and then switching it left the
+  first platform's settings behind, invisible — the compliance panel renders
+  only for the platforms that have one. Inert while it stayed there, and live
+  again if the destination was ever pointed back.
+
+- **A scheduled Facebook broadcast that no longer exists is replaced.** If the
+  operator deletes the video on Facebook, the reschedule refuses forever. Three
+  consecutive refusals now mean the broadcast is gone rather than briefly
+  unreachable, and a fresh one is created. One transient failure changes
+  nothing.
+
 - **`meters.intervalMs` was stored, reported as saved, and ignored.** The value
   was captured into the metering sidecar's stdout handler when it spawned, and
   it is not part of that process's restart signature — so changing it did
@@ -161,6 +229,13 @@ its first tagged release.
   reported as "this encoder is broken".
 
 ### Changed
+
+- **A hung acceptance suite now says what it was waiting for.** Every suite
+  carries a deadline below the CI job's own, so a stall reports the last step it
+  reached, how long it had been there, the live processes and the tail of the
+  server log — rather than being cancelled by the job ceiling with the log
+  ending mid-sentence. The install steps are bounded too, after one job spent
+  its whole budget inside `apt` and looked exactly like a suite hang.
 
 - **A timed-out wait in the acceptance suites now reports what it observed.**
   `acceptance-failover` and `acceptance-mqtt` both asserted causes they had
@@ -181,11 +256,6 @@ its first tagged release.
   allocating a console, or asking FFmpeg to quit over stdin — need a real
   Windows host to verify, and shipping an unverified fix to the process
   machinery every stream depends on is the worse trade.
-- **The macOS SRT wildcard failure is documented where it is met.** The startup
-  warning fires at boot; operators meet the failure when they point an encoder
-  at the box. `docs/TROUBLESHOOTING.md` now carries the measured matrix under
-  the symptom, because the existing checklist sent readers to the firewall,
-  which the hosted-runner results rule out. See issue #28.
 
 ## [0.1.0] — 2026-07-31
 
@@ -569,5 +639,6 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rainmanjam/polyemesis/releases/tag/v0.1.0
