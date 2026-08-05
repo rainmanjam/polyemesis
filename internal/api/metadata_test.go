@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -714,6 +715,21 @@ func TestAnAccountWithNoStoredComplianceIsLeftEntirelyAlone(t *testing.T) {
 // target carries its own db.Compliance, whose Labels map came from its own
 // destination and is only ever read, so there is nothing shared to corrupt —
 // this is the test that would notice if that stopped being true.
+//
+// The overlap has to be MEASURED, which is what this used to miss. It built a
+// `start` channel and closed it before the push began, so both stubs ran
+// straight through and two sequential workers satisfied every assertion —
+// removing `go` from runMetadataPush's fan-out left it green, and the -race
+// coverage it claimed did not exist. It now records the peak number of stubs in
+// flight and asserts it reached two.
+//
+// The rendezvous is bounded rather than a bare barrier: a sequential fan-out
+// would block on an unbounded one forever, and a test that hangs reports
+// nothing. The wait is only ever paid by a run that is already failing.
+//
+// Mutation: drop the `go` from `go func(i int, t metadataTarget)` in
+// runMetadataPush. Observed FAIL ("compliance pushes never overlapped: peak 1
+// in flight").
 func TestTwoAccountsPushComplianceConcurrently(t *testing.T) {
 	s, h, store := testServer(t, config.Config{})
 	sign := login(t, h)
@@ -741,19 +757,55 @@ func TestTwoAccountsPushComplianceConcurrently(t *testing.T) {
 	s.pushMetadataFn = func(ctx context.Context, pusher oauth.MetadataPusher, clientID, accessToken, accountRef string, m oauth.Metadata) (*oauth.MetadataResult, error) {
 		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldTitle}}, nil
 	}
-	// Buffered per call, and the goroutines are released together, so the two
-	// pushes genuinely overlap rather than queueing behind each other.
-	start := make(chan struct{})
+	// Each call announces itself, then waits for the other to arrive. Both are
+	// only released once both are inside the stub, which is what makes the
+	// overlap real instead of assumed -- and `peak` is the measurement, so a
+	// sequential fan-out is a failure with a number in it rather than a hang.
+	const targets = 2
+	var (
+		mu       sync.Mutex
+		inFlight int
+		peak     int
+	)
+	both := make(chan struct{})
+	var once sync.Once
 	seen := make(chan db.Compliance, 4)
 	s.pushComplianceFn = func(ctx context.Context, pusher oauth.CompliancePusher, clientID, accessToken string,
 		tgt oauth.ComplianceTarget, c db.Compliance) (*oauth.MetadataResult, error) {
-		<-start
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		arrived := inFlight
+		mu.Unlock()
+
+		if arrived == targets {
+			once.Do(func() { close(both) })
+		}
+		select {
+		case <-both:
+		case <-time.After(5 * time.Second):
+			// Only reachable when the pushes are serialised; the assertion on
+			// peak below is what reports it.
+		}
+
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
 		seen <- c
 		return &oauth.MetadataResult{Applied: []oauth.MetadataField{oauth.FieldPrivacy}}, nil
 	}
-	close(start)
 
 	job := pushAndSettle(t, h, sign, map[string]any{"title": "Live tonight"})
+	mu.Lock()
+	gotPeak := peak
+	mu.Unlock()
+	if gotPeak != targets {
+		t.Fatalf("compliance pushes never overlapped: peak %d in flight, want %d. "+
+			"The point of this test is to give -race two PushCompliance calls at "+
+			"once; with a serialised fan-out it watches nothing.", gotPeak, targets)
+	}
 	if len(job.Results) != 2 {
 		t.Fatalf("results = %+v, want one row per account", job.Results)
 	}
