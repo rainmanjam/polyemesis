@@ -217,6 +217,12 @@ export interface Destination {
    *  Empty when the platform offered none. */
   backupUrl?: string;
   backupStreamKey?: string;
+  /** The operator's intent: publish a redundant feed for this destination.
+   *  Sits beside the endpoint it gates rather than under `facebook`, because
+   *  neither the engine nor the endpoint is platform-specific. Intent without
+   *  an endpoint is the normal state between switching this on and the next
+   *  broadcast being created; the card reports it and starts nothing. */
+  backupIngestWanted?: boolean;
   enabled: boolean;
   audioBitrate: number;
   profile: RoutingProfile;

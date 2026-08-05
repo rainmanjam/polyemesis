@@ -1386,3 +1386,115 @@ func TestMigrateDestinationExpertArgsBackfillsFacebookOnAnUpgradedDatabase(t *te
 			"sending Facebook parameters nobody set", legacy.Facebook)
 	}
 }
+
+// THE SILENT HALF OF THE MIGRATION. backup_ingest_wanted arrives as
+// `INTEGER NOT NULL DEFAULT 0`, and 0 is the correct answer for a new row and
+// the wrong one for every install that already had redundancy switched on: the
+// intent used to live inside the facebook blob, as `{"backupIngest":true}`.
+// A bare ALTER answers "no" for all of them, wantsBackup goes false, and
+// nothing anywhere says so -- the operator finds out when a primary connection
+// drops and the second feed that was supposed to catch it was never started.
+//
+// So this builds the row in the shape it was actually written in, with the
+// column genuinely absent, and asks whether the intent came back. Same
+// technique as TestMigrateDestinationExpertArgsBackfillsFacebookOnAnUpgradedDatabase
+// above; the claim is about the UPDATE that follows the ALTER, which does not
+// run unless the column is missing when Open() is called.
+//
+// Mutation, run against a committed tree: in MigrateDestinationExpertArgs,
+// `UPDATE destinations SET backup_ingest_wanted = 1` -> `... = 0`, which is
+// exactly the bare-ALTER behaviour. Observed FAIL.
+func TestMigrateDestinationsCarriesBackupIntentOutOfTheFacebookBlob(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-backup-intent.db")
+
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	// Every column the release before this one had, including facebook and the
+	// two backup endpoint columns -- and NOT backup_ingest_wanted, which is the
+	// single column an upgrading install is missing.
+	if _, err := old.Exec(`CREATE TABLE destinations (
+		id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+		name                    TEXT    NOT NULL,
+		kind                    TEXT    NOT NULL,
+		platform                TEXT    NOT NULL DEFAULT '',
+		account_id              INTEGER,
+		url                     TEXT    NOT NULL DEFAULT '',
+		stream_key              TEXT    NOT NULL DEFAULT '',
+		enabled                 INTEGER NOT NULL DEFAULT 0,
+		audio_bitrate           INTEGER NOT NULL DEFAULT 160,
+		profile                 TEXT    NOT NULL,
+		rendition_id            INTEGER,
+		source_id               INTEGER,
+		extra_input_args        TEXT    NOT NULL DEFAULT '',
+		extra_output_args       TEXT    NOT NULL DEFAULT '',
+		expert_ack_reencode     INTEGER NOT NULL DEFAULT 0,
+		tr_no_duration_filesize INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_packets    INTEGER NOT NULL DEFAULT 0,
+		tr_mux_queue_bytes      INTEGER NOT NULL DEFAULT 0,
+		tr_rw_timeout_seconds   INTEGER NOT NULL DEFAULT 0,
+		rs_min_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_max_backoff_seconds  INTEGER NOT NULL DEFAULT 0,
+		rs_give_up_after        INTEGER NOT NULL DEFAULT 0,
+		au_codec                TEXT    NOT NULL DEFAULT '',
+		au_mono                 INTEGER NOT NULL DEFAULT 0,
+		compliance              TEXT    NOT NULL DEFAULT '{}',
+		facebook                TEXT    NOT NULL DEFAULT '{}',
+		backup_url              TEXT    NOT NULL DEFAULT '',
+		backup_stream_key       TEXT    NOT NULL DEFAULT '',
+		position                INTEGER NOT NULL DEFAULT 0,
+		created_at              INTEGER NOT NULL,
+		updated_at              INTEGER NOT NULL
+	);
+	INSERT INTO destinations
+		(name, kind, platform, url, stream_key, enabled, audio_bitrate, profile,
+		 rendition_id, source_id, compliance, facebook, backup_url, backup_stream_key,
+		 position, created_at, updated_at)
+	VALUES ('Redundant FB', 'rtmp', 'facebook', 'rtmps://live-api.facebook.com:443/rtmp/', 'abc-123', 1, 160,
+		'{"mode":"simple","tracks":[{"track":0,"enabled":true,"gain":1}],"normalize":"auto","sampleRate":48000}',
+		NULL, NULL, '{}', '{"backupIngest":true}', 'rtmps://backup.example/rtmp', 'backup-key',
+		0, 1000, 1000),
+	       ('Ordinary FB', 'rtmp', 'facebook', 'rtmps://live-api.facebook.com:443/rtmp/', 'def-456', 1, 160,
+		'{"mode":"simple","tracks":[{"track":0,"enabled":true,"gain":1}],"normalize":"auto","sampleRate":48000}',
+		NULL, NULL, '{}', '{}', '', '',
+		1, 1000, 1000);`); err != nil {
+		t.Fatalf("build pre-backup-intent database: %v", err)
+	}
+	if _, err := old.Exec(`SELECT backup_ingest_wanted FROM destinations`); err == nil {
+		t.Fatal("backup_ingest_wanted already exists on the hand-built table; this test proves nothing")
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-backup-intent database: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	list, err := d.ListDestinations()
+	if err != nil {
+		t.Fatalf("ListDestinations after migration: %v", err)
+	}
+	byName := map[string]*Destination{}
+	for _, row := range list {
+		byName[row.Name] = row
+	}
+	redundant, ok := byName["Redundant FB"]
+	if !ok {
+		t.Fatalf("the pre-existing rows did not survive the migration: %d rows", len(list))
+	}
+	if !redundant.BackupIngestWanted {
+		t.Error("an install that had redundancy switched on came back with it OFF. " +
+			"Nothing reports this: the destination goes live with one feed, and the " +
+			"operator learns about it the first time the primary drops.")
+	}
+	// The other direction, so the backfill cannot pass by setting everything.
+	// A row that never asked for redundancy must not start paying for it --
+	// double the upload bandwidth, on an operator who did not choose it.
+	if ordinary := byName["Ordinary FB"]; ordinary == nil || ordinary.BackupIngestWanted {
+		t.Errorf("a destination that never asked for redundancy came back wanting it: %+v", ordinary)
+	}
+}

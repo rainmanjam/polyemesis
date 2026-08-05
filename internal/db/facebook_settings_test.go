@@ -83,17 +83,27 @@ func TestTheMarkerDoesNotMakeSettingsLookNonEmpty(t *testing.T) {
 	}
 }
 
-// The endpoint lives in its own columns and the toggle rides the existing
-// facebook JSON blob. A field that marshals and does not scan back is a backup
-// URL that disappears on restart -- and the destination then publishes one feed
-// while the card claims two.
-func TestTheBackupEndpointAndToggleSurviveTheDatabase(t *testing.T) {
+// The endpoint and the intent that gates it live in three columns of their own.
+// A field that marshals and does not scan back is a backup URL that disappears
+// on restart -- and the destination then publishes one feed while the card
+// claims two.
+//
+// NOT a Facebook destination, deliberately. The intent is platform-neutral and
+// so is every column it sits in; a round trip proved against a Facebook row
+// would still pass if the toggle had been left inside the facebook JSON blob.
+//
+// Mutation, run against a committed tree: drop `backup_ingest_wanted` from the
+// INSERT's column list and `dst.BackupIngestWanted` from its arguments (the
+// placeholder count has to come down with it, or SQLite refuses the statement
+// and the whole package fails rather than this guard). Observed FAIL: "the
+// intent did not survive the round trip".
+func TestTheBackupEndpointAndIntentSurviveTheDatabase(t *testing.T) {
 	d := testDB(t)
 	created, err := d.CreateDestination(&Destination{
-		Name: "fb", Kind: "rtmp", Platform: PlatformFacebook,
-		URL: "rtmps://live.example/rtmp", StreamKey: "primary-key",
-		BackupURL: "rtmps://backup.example/rtmp", BackupStreamKey: "backup-key",
-		Facebook: FacebookSettings{BackupIngest: true},
+		Name: "twitch", Kind: "rtmp", Platform: PlatformTwitch,
+		URL: "rtmp://live.example/app", StreamKey: "primary-key",
+		BackupURL: "rtmp://backup.example/app", BackupStreamKey: "backup-key",
+		BackupIngestWanted: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateDestination: %v", err)
@@ -102,12 +112,13 @@ func TestTheBackupEndpointAndToggleSurviveTheDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDestination: %v", err)
 	}
-	if got.BackupURL != "rtmps://backup.example/rtmp" || got.BackupStreamKey != "backup-key" {
+	if got.BackupURL != "rtmp://backup.example/app" || got.BackupStreamKey != "backup-key" {
 		t.Errorf("backup endpoint = %q / %q, want it preserved",
 			got.BackupURL, got.BackupStreamKey)
 	}
-	if !got.Facebook.BackupIngest {
-		t.Error("the toggle did not survive the round trip")
+	if !got.BackupIngestWanted {
+		t.Error("the intent did not survive the round trip, so redundancy an " +
+			"operator switched on is off again after the next restart")
 	}
 }
 
