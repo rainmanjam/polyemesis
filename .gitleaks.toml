@@ -47,7 +47,11 @@ regex = '''(?i)(?:key|api|token|secret|client|passwd|password|auth|access)(?:[0-
 entropy = 3.5
 keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "auth", "access"]
 
-  [rules.allowlist]
+  # Plural [[rules.allowlists]] rather than the singular [rules.allowlist]:
+  # gitleaks refuses a config that mixes the two, and a second block is what
+  # keeps each set of fixtures scoped to the files it belongs to.
+  [[rules.allowlists]]
+  description = "YouTube and Facebook URL fixtures for the alerts redactor"
   # AND, not the default OR. With OR, listing the paths below would allowlist
   # ANY secret in those two files, including a real one committed by accident —
   # and a test file is exactly where a real key tends to get committed by
@@ -67,4 +71,30 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
   paths = [
     '''internal/alerts/redact_test\.go''',
     '''internal/oauth/facebook_test\.go''',
+  ]
+
+  # A SECOND block rather than more entries in the one above, because these
+  # values and those values do not belong in each other's files. With AND, one
+  # merged block would allowlist the YouTube fixture inside the supervisor's
+  # tests and the Facebook fixture inside alerts' — which nothing needs, and
+  # each widening of a scanner's blind spot should have to earn itself.
+  [[rules.allowlists]]
+  description = "Facebook stream-key fixtures for the redaction guards"
+  # Same reasoning as the block above: value AND path, never either alone.
+  condition = "AND"
+  regexTarget = "match"
+  regexes = [
+    # The invented Facebook stream keys the redaction guards assert are masked.
+    # They exist to look exactly like the real thing, which is the whole point:
+    # a fixture that does not resemble a credential proves nothing about a
+    # redactor. Shared by the supervisor's guards and the /processes endpoint
+    # guards, which is why both files are listed.
+    #
+    # If redaction ever breaks, those tests fail -- a better signal than
+    # gitleaks flagging the fixture for ever.
+    '''FB-101234567890123-0-[A-Za-z]+''',
+  ]
+  paths = [
+    '''internal/supervisor/redact_test\.go''',
+    '''internal/api/handlers_test\.go''',
   ]
