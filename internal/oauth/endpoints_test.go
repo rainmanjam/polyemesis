@@ -222,7 +222,7 @@ func TestEveryProviderCallGoesThroughTheInstanceBase(t *testing.T) {
 	consts := []string{
 		"fbGraphBase", "fbDialogBase",
 		"ytAPIBase", "ytConsentBase", "ytTokenBase",
-		"twitchHelixBase", "twitchAuthBase",
+		"twitchHelixBase", "twitchIDBase",
 		"kickIDBase", "kickAPIBase",
 	}
 	// A line may mention a constant if it declares it, comments on it, or wraps
