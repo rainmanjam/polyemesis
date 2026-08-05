@@ -515,6 +515,35 @@ install_docker_mode() {
     # Recordings are finalised on the way down. A shorter grace period truncates
     # whatever was being written, so this matches the project's own compose file.
     printf '    stop_grace_period: 30s\n'
+
+    # The image bakes in `wget -qO- http://127.0.0.1:8080/api/v1/health`, and
+    # both halves of that are assumptions this installer is free to break.
+    #
+    #   --http-port N   moves the listener, so the probe gets ECONNREFUSED
+    #   any TLS mode    makes :8080 speak HTTPS, so a plain-HTTP probe gets 400
+    #
+    # The second one fires on the DEFAULT install: the interactive TLS default
+    # is selfsigned, including under --yes. `install.sh --mode docker --yes`
+    # therefore produced a container that reported `unhealthy` forever while the
+    # server answered every request correctly -- measured at failing streak 5,
+    # `wget: server returned error: HTTP/1.0 400 Bad Request`, with the summary
+    # printing "server is up" and exiting 0.
+    #
+    # That is worse than cosmetic. `docker ps` is where an operator looks first,
+    # and anything gating on health -- a compose `depends_on: service_healthy`,
+    # an orchestrator, a load balancer -- treats a working server as down.
+    #
+    # --no-check-certificate is correct rather than lax here: selfsigned is the
+    # default and acme certificates are issued for the public hostname, so a
+    # loopback probe cannot present a name either one validates against.
+    if [ "$TLS_MODE" = "off" ]; then
+      printf '    healthcheck:\n      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:%s/api/v1/health || exit 1"]\n' "$HTTP_PORT"
+    else
+      printf '    healthcheck:\n      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://127.0.0.1:%s/api/v1/health || exit 1"]\n' "$HTTP_PORT"
+    fi
+    printf '      interval: 30s\n'
+    printf '      timeout: 3s\n'
+    printf '      start_period: 10s\n'
     printf 'volumes:\n'
     printf '  polyemesis-data:\n'
   } > "$INSTALL_DIR/docker-compose.yml"
