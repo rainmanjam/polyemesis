@@ -196,6 +196,23 @@ ask_yn() {
   esac
 }
 
+# Reports whether a question can actually be answered.
+#
+# ask() returns the default and moves on whenever nothing can answer it: under
+# --yes by design, and with no controlling terminal because there is nothing
+# else it could do. That is fine for a question with a usable default, and a
+# trap for a REQUIRED value validated by re-prompting -- the loop re-asks, gets
+# the same empty default, fails the same check, and never terminates.
+#
+# `--tls acme --yes` with no --hostname did exactly that: 302,994 copies of
+# "Let's Encrypt cannot validate '<empty>'" in 25 seconds, no exit, on a host
+# where the whole point of --yes was that nobody was watching. Callers use this
+# to fail with the flag name instead of looping.
+interactive() {
+  [ "${ASSUME_YES:-false}" = true ] && return 1
+  [ -r /dev/tty ] || [ -t 0 ]
+}
+
 # ------------------------------------------------------------------- preflight
 
 require_root() {
@@ -403,6 +420,14 @@ gather_configuration() {
   fi
 
   if [ "$TLS_MODE" = "acme" ]; then
+    # Both values below are required and are validated by re-prompting, so
+    # neither loop can make progress when there is nothing to prompt. Say which
+    # flag is missing and stop, rather than spinning on a question nobody is
+    # there to answer.
+    if ! interactive; then
+      [ -n "$DOMAIN_NAME" ] || die "--tls acme needs a public DNS name: pass --hostname stream.example.com"
+      [ -n "$ACME_EMAIL" ]  || die "--tls acme needs a contact address: pass --email you@example.com"
+    fi
     while [ -z "$DOMAIN_NAME" ]; do
       ask "Public DNS name pointing at this box (e.g. stream.example.com)" "" DOMAIN_NAME
       case "$DOMAIN_NAME" in
@@ -638,6 +663,18 @@ EOF
 
   systemctl daemon-reload
   systemctl enable --now "$SERVICE_NAME" || die "the service did not start — journalctl -u ${SERVICE_NAME} -n 50"
+
+  # `enable --now` starts a stopped unit and does nothing at all to a running
+  # one, so re-running the installer over a live install replaced the binary on
+  # disk and left the old process serving from the now-deleted inode. The
+  # installer printed its success summary, and `polyemesis --version` -- the
+  # check UPGRADING.md tells you to run -- reported the NEW version off disk
+  # while the OLD one was still answering requests. Restart explicitly.
+  #
+  # Ordered after enable --now rather than replacing it: on a first install the
+  # unit has to be enabled for boot as well as started, and restart alone does
+  # not do that.
+  systemctl restart "$SERVICE_NAME" || die "the service did not come back after restart — journalctl -u ${SERVICE_NAME} -n 50"
   ok "service enabled and started"
 }
 
