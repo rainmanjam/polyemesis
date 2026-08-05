@@ -601,8 +601,8 @@ func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
 //
 // Mutation: in internal/db/facebook.go, change AnnouncementFor's
 // `if a.ScheduleID == scheduleID` to `if a.BroadcastID != ""`. The second
-// schedule then finds the first's broadcast and moves it. Observed: red on the
-// reschedule count, which reached 3 across the three sweeps below.
+// schedule then finds the first's broadcast and moves it rather than creating
+// one of its own. Observed: red -- 1 broadcast created where two shows need 2.
 func TestTwoStartSchedulesEachGetTheirOwnEventPage(t *testing.T) {
 	s, _, store := testServer(t, config.Config{})
 	rec := &announced{key: "k", ids: []string{"tuesday-show", "thursday-show"}}

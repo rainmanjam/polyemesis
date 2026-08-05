@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -227,15 +228,19 @@ func TestAMarkerWrittenBeforeSchedulesWereKeyedIsAdoptedOnce(t *testing.T) {
 // The bound. A destination on a daily schedule passes an occurrence every day,
 // and a list that kept every one of them is a row that only ever grows.
 //
-// Mutation: in facebook.go, delete the `case a.Occurrence.Before(stale):` arm
-// from Announce. Observed: red, 12 markers kept instead of 2.
+// Mutation: in facebook.go, widen announcementRetention to
+// `24 * 3650 * time.Hour`, which is the prune never firing. Observed: red, 11
+// markers kept instead of 1. (Deleting the switch arm instead does not build --
+// `stale` goes unused -- so the retention is the honest one-line version.)
 func TestMarkersForShowsThatHaveBeenAndGoneAreDropped(t *testing.T) {
 	now := time.Date(2026, 8, 9, 9, 0, 0, 0, time.UTC)
 
 	var f FacebookSettings
-	// Ten schedules whose shows are all long past, then one that is not.
+	// Ten schedules whose shows are all long past, then one that is not. Ten
+	// DIFFERENT broadcasts: the same id twice is replaced rather than kept, so a
+	// loop that reused one would prove nothing about accumulation.
 	for i := range 10 {
-		f.Announce(int64(i+1), now.AddDate(0, 0, -30+i), "old", now)
+		f.Announce(int64(i+1), now.AddDate(0, 0, -30+i), fmt.Sprintf("old-%d", i), now)
 	}
 	f.Announce(99, now.Add(2*time.Hour), "next", now)
 
@@ -252,8 +257,10 @@ func TestMarkersForShowsThatHaveBeenAndGoneAreDropped(t *testing.T) {
 // SOONEST announced show rather than the last one written -- a sweep announces
 // in schedule order, not in time order.
 //
-// Mutation: in facebook.go, delete the sort.Slice in Announce. Observed: red,
-// the card links to next week's show while tonight's is the one on air.
+// Mutation: in facebook.go, reverse Announce's sort comparison to
+// `return kept[j].Occurrence.Before(kept[i].Occurrence)`. Observed: red -- the
+// card links to next week's show while tonight's is the one on air. (Deleting
+// the sort instead does not build: the sort import goes unused.)
 func TestTheCardLinksToTheSoonestAnnouncedShow(t *testing.T) {
 	now := time.Date(2026, 8, 9, 9, 0, 0, 0, time.UTC)
 
