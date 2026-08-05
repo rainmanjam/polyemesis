@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Check, ChevronsUpDown, ExternalLink, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import {
@@ -551,6 +551,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [kind, setKind] = useState<DestKind>("rtmp");
   const [url, setUrl] = useState("");
   const [streamKey, setStreamKey] = useState("");
+  // The key as it was when this dialog opened, so save can tell "the operator
+  // did not touch this field" from "the field happens to be empty". Compared
+  // against the loaded value rather than against "", because a destination
+  // whose key has not been fetched yet legitimately holds "" and must still be
+  // able to send one. A ref rather than state: nothing renders from it, and a
+  // re-render must not reset it.
+  const loadedStreamKey = useRef("");
   const [bitrate, setBitrate] = useState(160);
   // Muxer and socket tuning. An empty object is "no opt-in", which is what
   // every destination that predates this carries, and what the server turns
@@ -592,6 +599,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setKind(destination.kind);
       setUrl(destination.url);
       setStreamKey(destination.streamKey);
+      loadedStreamKey.current = destination.streamKey;
       setBitrate(destination.audioBitrate);
       setTransport(destination.transport ?? {});
       setResilience(destination.resilience ?? {});
@@ -614,6 +622,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setKind("rtmp");
       setUrl("");
       setStreamKey("");
+      loadedStreamKey.current = "";
       setBitrate(160);
       setAccountId("none");
       setRenditionId(PASSTHROUGH);
@@ -716,7 +725,6 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         kind,
         platform,
         url: url.trim(),
-        streamKey: streamKey.trim(),
         audioBitrate: bitrate,
         accountId: accountId === "none" ? null : Number(accountId),
         // null is passthrough: no encode, no process, straight off the ingest.
@@ -727,6 +735,29 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         compliance,
         facebook,
       };
+      // The stream key travels ONLY when this dialog is what changed it.
+      //
+      // The omitted-key merge that made the backup toggle one-way is the right
+      // behaviour here, and it is load-bearing. internal/api/preannounce.go
+      // writes a NEW primary key every time it creates a Facebook broadcast,
+      // and states the invariant in its own words: the key the pre-created
+      // broadcast returned has to be the one the encoder publishes to, or the
+      // event page people were notified about stays empty beside a live stream.
+      //
+      // This dialog reads the key once, when it opens. An operator who opens
+      // it, waits through a five-minute sweep, renames the destination and
+      // saves was sending the key from before the sweep -- reverting a
+      // pre-announced broadcast to a key nothing publishes to, with nothing on
+      // screen saying so. Leaving the field out preserves whatever the row
+      // holds now.
+      //
+      // Untouched is `streamKey === loadedStreamKey.current`, not "empty" and
+      // not a trimmed comparison: an operator who types only whitespace has
+      // still touched the field, and a create has no loaded value to be equal
+      // to, so it always sends.
+      if (!editing || streamKey !== loadedStreamKey.current) {
+        payload.streamKey = streamKey.trim();
+      }
       // The server drops settings this platform cannot send and says which.
       // Surfaced rather than swallowed: the case that produces them is
       // configuring a destination for one platform and then switching it, so
