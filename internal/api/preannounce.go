@@ -97,7 +97,7 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			if d.Facebook.AnnouncedFor(at) {
 				continue
 			}
-			s.announceOne(ctx, d, at)
+			s.announceOne(ctx, sc, d, at, now)
 		}
 	}
 }
@@ -107,6 +107,10 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 // An EMPTY DestinationIDs means EVERY destination -- "start the show" usually
 // names nothing, so this is the commonest shape and a rule that skipped it
 // would switch the feature off for most installs.
+//
+// It is also why the marker is keyed by schedule: two schedules of this shape
+// both reach every Facebook destination, and a marker that could hold only one
+// of them had the two moving one broadcast back and forth forever.
 func scheduleTargets(sc scheduler.Schedule, destID int64) bool {
 	if len(sc.DestinationIDs) == 0 {
 		return true
@@ -119,14 +123,21 @@ func scheduleTargets(sc scheduler.Schedule, destID int64) bool {
 	return false
 }
 
-// announceOne creates the broadcast, or moves an existing one.
+// announceOne creates this schedule's broadcast, or moves the one it already
+// has.
+//
+// PER SCHEDULE, not per destination. Two start schedules are two shows, and
+// each needs its own event page: the previous design kept one broadcast per
+// destination, so the second schedule to run in a sweep rescheduled the first
+// one's broadcast to its own occurrence, the next sweep moved it back, and
+// subscribers were notified of a time change every five minutes forever.
 //
 // Every failure path returns WITHOUT touching the destination. A half-written
-// marker -- a ScheduledFor recorded for a broadcast that was not created --
+// marker -- an occurrence recorded for a broadcast that was not created --
 // would suppress every later attempt for that occurrence, which is worse than
 // having no event page at all: the sweep would go quiet and nothing would say
 // why.
-func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Time) {
+func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.Destination, at, now time.Time) {
 	// tokenFor returns the ACCOUNT with a refreshed token on it, not a token
 	// string, and it does the refresh -- which is why it is used here rather
 	// than GetPlatformAccount.
@@ -139,22 +150,23 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// A broadcast already exists for a DIFFERENT occurrence -- the schedule
-	// moved. Move the broadcast rather than creating a second one, which would
-	// leave the first as an event page people are still subscribed to for a
-	// show that will not happen there.
-	if d.Facebook.BroadcastID != "" {
-		if err := s.rescheduleFn(cctx, acct, d.Facebook.BroadcastID, at); err != nil {
+	// This schedule already has a broadcast, for a DIFFERENT occurrence -- the
+	// schedule moved. Move the broadcast rather than creating a second one,
+	// which would leave the first as an event page people are still subscribed
+	// to for a show that will not happen there.
+	if prev, held := d.Facebook.AnnouncementFor(sc.ID); held && prev.BroadcastID != "" {
+		if err := s.rescheduleFn(cctx, acct, prev.BroadcastID, at); err != nil {
 			s.log.Warn("pre-announce: could not move the broadcast",
-				"destination", d.Name, "err", err)
-			s.noteRescheduleFailure(d)
+				"destination", d.Name, "schedule", sc.Name, "err", err)
+			s.noteRescheduleFailure(d, sc, prev, now)
 			return
 		}
-		s.clearRescheduleFailures(d.ID)
-		d.Facebook.ScheduledFor = at
+		s.clearAnnounceFailures(d.ID, sc.ID)
+		d.Facebook.Announce(sc.ID, at, prev.BroadcastID, now)
 		s.saveAnnouncement(d)
 		s.log.Info("moved a scheduled Facebook broadcast",
-			"destination", d.Name, "at", at, "broadcast", d.Facebook.BroadcastID)
+			"destination", d.Name, "schedule", sc.Name, "at", at,
+			"broadcast", prev.BroadcastID)
 		return
 	}
 
@@ -182,9 +194,10 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 		// repeat every sweep. See the note in the plan: suppressing a repeated
 		// identical refusal needs somewhere to remember it, which is not built.
 		s.log.Warn("pre-announce: could not create the broadcast",
-			"destination", d.Name, "err", err)
+			"destination", d.Name, "schedule", sc.Name, "err", err)
 		return
 	}
+	s.clearAnnounceFailures(d.ID, sc.ID)
 
 	// THE INVARIANT. The key the pre-created broadcast returned has to be the
 	// one the encoder publishes to, or the event page people were notified
@@ -198,11 +211,10 @@ func (s *Server) announceOne(ctx context.Context, d *db.Destination, at time.Tim
 		s.log.Warn("pre-announce: Facebook offered no backup ingest endpoint",
 			"destination", d.Name)
 	}
-	d.Facebook.BroadcastID = b.ID
-	d.Facebook.ScheduledFor = at
+	d.Facebook.Announce(sc.ID, at, b.ID, now)
 	s.saveAnnouncement(d)
 	s.log.Info("pre-announced a Facebook broadcast",
-		"destination", d.Name, "at", at, "broadcast", b.ID)
+		"destination", d.Name, "schedule", sc.Name, "at", at, "broadcast", b.ID)
 }
 
 // staleBroadcastAfter is how many CONSECUTIVE failed reschedules mean the
@@ -229,38 +241,60 @@ const staleBroadcastAfter = 3
 // Counting needs no such guess. It asks a question the answer to which is
 // observable: has this failed EVERY time for long enough that "temporarily
 // unreachable" has stopped being a credible explanation.
-func (s *Server) noteRescheduleFailure(d *db.Destination) {
-	s.preannounceMu.Lock()
-	if s.rescheduleFails == nil {
-		s.rescheduleFails = map[int64]int{}
-	}
-	s.rescheduleFails[d.ID]++
-	n := s.rescheduleFails[d.ID]
-	s.preannounceMu.Unlock()
-
-	if n < staleBroadcastAfter {
+func (s *Server) noteRescheduleFailure(d *db.Destination, sc scheduler.Schedule,
+	prev db.Announcement, now time.Time) {
+	if s.noteAnnounceFailure(d.ID, sc.ID) < staleBroadcastAfter {
 		return
 	}
 
-	// Clear the marker, not the destination. The next sweep sees no broadcast
-	// and creates a fresh one, which restores the event page. The stream was
-	// never at risk: it publishes to the stored key either way, and a key that
-	// has also stopped working is handled by the operator pressing Refresh key.
+	// Clear the marker, not the destination. The next sweep sees this schedule
+	// holding no broadcast and creates a fresh one, which restores the event
+	// page. The stream was never at risk: it publishes to the stored key either
+	// way, and a key that has also stopped working is handled by the operator
+	// pressing Refresh key.
 	s.log.Warn("pre-announce: giving up on a scheduled broadcast that will not move; "+
 		"a fresh one will be created",
-		"destination", d.Name, "broadcast", d.Facebook.BroadcastID,
-		"consecutiveFailures", n)
-	d.Facebook.BroadcastID = ""
-	d.Facebook.ScheduledFor = time.Time{}
+		"destination", d.Name, "schedule", sc.Name, "broadcast", prev.BroadcastID,
+		"consecutiveFailures", staleBroadcastAfter)
+	d.Facebook.Forget(sc.ID, prev.BroadcastID)
 	s.saveAnnouncement(d)
-	s.clearRescheduleFailures(d.ID)
+	s.clearAnnounceFailures(d.ID, sc.ID)
 }
 
-// clearRescheduleFailures resets the count. Called on every success, which is
-// what makes the threshold mean "consecutive".
-func (s *Server) clearRescheduleFailures(id int64) {
+// announceFailKey packs the two ids that identify one SHOW into the one int64
+// key s.rescheduleFails offers.
+//
+// Per (destination, schedule) rather than per destination, because a
+// destination now holds one broadcast per schedule: with a per-destination
+// count, one schedule's create failing three times would trip the give-up on
+// ANOTHER schedule's perfectly good broadcast and orphan its event page.
+//
+// The packing is safe for any id below 2^31, which is every id SQLite will hand
+// out in the lifetime of an install. Widening the map's value type to a struct
+// would be the honest fix and it is one line in api.go, which this change does
+// not own -- recorded here so the next edit there can take it.
+func announceFailKey(destID, scheduleID int64) int64 {
+	return destID<<32 | (scheduleID & 0xFFFFFFFF)
+}
+
+// noteAnnounceFailure counts one consecutive failure for this show and returns
+// the running total.
+func (s *Server) noteAnnounceFailure(destID, scheduleID int64) int {
 	s.preannounceMu.Lock()
-	delete(s.rescheduleFails, id)
+	defer s.preannounceMu.Unlock()
+	if s.rescheduleFails == nil {
+		s.rescheduleFails = map[int64]int{}
+	}
+	k := announceFailKey(destID, scheduleID)
+	s.rescheduleFails[k]++
+	return s.rescheduleFails[k]
+}
+
+// clearAnnounceFailures resets the count. Called on every success, which is
+// what makes the threshold mean "consecutive".
+func (s *Server) clearAnnounceFailures(destID, scheduleID int64) {
+	s.preannounceMu.Lock()
+	delete(s.rescheduleFails, announceFailKey(destID, scheduleID))
 	s.preannounceMu.Unlock()
 }
 

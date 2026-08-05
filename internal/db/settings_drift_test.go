@@ -158,6 +158,15 @@ func TestUITypesCanNameEveryDestinationField(t *testing.T) {
 		"extraInputArgs":    "edited through the expert-mode endpoint as ExpertArgs.inputArgs",
 		"extraOutputArgs":   "edited through the expert-mode endpoint as ExpertArgs.outputArgs",
 		"expertAckReencode": "edited through the expert-mode endpoint as ExpertArgs.ackReencode",
+		// The announcement markers are bookkeeping the pre-announce sweep writes
+		// and nobody types. What the operator sees of them IS reachable and is
+		// checked: facebook.broadcastId and facebook.scheduledFor mirror the
+		// soonest announced show and are what the card links to. The per-show
+		// entries behind that mirror have no control and never will -- an
+		// operator cannot choose which schedule owns which live_video.
+		"facebook.announcements.scheduleId":  "written by the pre-announce sweep, never entered",
+		"facebook.announcements.occurrence":  "written by the pre-announce sweep, never entered",
+		"facebook.announcements.broadcastId": "written by the pre-announce sweep; the mirror at facebook.broadcastId is what the card shows",
 	}
 
 	var missing []string

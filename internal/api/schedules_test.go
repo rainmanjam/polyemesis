@@ -121,12 +121,21 @@ func TestAOneOffScheduleAcceptsADate(t *testing.T) {
 
 // The 404s are asserted with their BODIES, not by their status alone. CI's Go
 // job never builds the UI, so the SPA fallback answers an unrouted /api/v1/...
-// path with 404 "UI not built." -- measured: with all three
-// r.Get/r.Put/r.Delete("/schedules/{id}") registrations commented out and
-// internal/web/dist/index.html moved aside, the status-only version of this test
-// passed. mustJSONError is the note on why.
+// path with 404 "UI not built." -- and a test that only counts to 404 cannot
+// tell that apart from a handler refusing an id.
 //
-// Mutation: comment out `r.Get("/schedules/{id}", s.handleGetSchedule)`.
+// Measured, on a committed tree: with all three r.Get/r.Put/r.Delete
+// registrations for "/schedules/{id}" commented out and
+// internal/web/dist/index.html moved aside, the status assertion still passed
+// and only the body assertion failed --
+//
+//	404, but the body is not JSON ... UI not built. Run `make ui`
+//
+// With index.html present the same mutation answers 200 instead. This is the
+// measurement mustJSONError's note generalises from.
+//
+// Mutation: comment out all three "/schedules/{id}" registrations. Removing
+// only one gives chi's 405, which the status alone would have caught.
 func TestScheduleRoutesRejectAnUnknownID(t *testing.T) {
 	h, _, sign := sourceServer(t)
 	mustJSONError(t, h, sign, http.MethodGet, "/api/v1/schedules/99999", nil, http.StatusNotFound)

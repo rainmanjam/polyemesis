@@ -28,19 +28,34 @@ type announced struct {
 	reschedules []time.Time
 	key         string
 	broadcastID string
-	backups     []oauth.Ingest
-	err         error
+	// ids, when set, is handed out one per create so a test can tell two event
+	// pages apart. Without it every create returns broadcastID, which is fine
+	// for the tests that only ever expect one.
+	ids     []string
+	backups []oauth.Ingest
+	err     error
+	// duringCreate runs inside the Graph call, which is where an operator edit
+	// lands in production: the sweep read the destination before it and writes
+	// after it.
+	duringCreate func(rec *announced)
 }
 
 func stubAnnounce(s *Server, rec *announced) {
 	s.ingestForFn = func(ctx context.Context, p oauth.Provider, clientID string,
 		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
 		rec.creates = append(rec.creates, opts)
+		if rec.duringCreate != nil {
+			rec.duringCreate(rec)
+		}
 		if rec.err != nil {
 			return nil, rec.err
 		}
+		id := rec.broadcastID
+		if len(rec.ids) > 0 {
+			id, rec.ids = rec.ids[0], rec.ids[1:]
+		}
 		return &oauth.Broadcast{
-			ID:      rec.broadcastID,
+			ID:      id,
 			Ingest:  oauth.Ingest{URL: "rtmps://live.example/rtmp", Key: rec.key},
 			Backups: rec.backups,
 		}, nil
@@ -76,7 +91,10 @@ func seedCreds(t *testing.T, s *Server, store *db.DB, platform db.Platform) {
 	}
 }
 
-func seedStartSchedule(t *testing.T, store *db.DB, kind scheduler.Kind, at time.Time, destIDs ...int64) {
+// seedStartSchedule returns the stored schedule's id, because the announcement
+// marker is keyed by it: a test that seeds the marker directly, or asserts which
+// show a broadcast belongs to, needs the same id the sweep will use.
+func seedStartSchedule(t *testing.T, store *db.DB, kind scheduler.Kind, at time.Time, destIDs ...int64) int64 {
 	t.Helper()
 	sc := &scheduler.Schedule{
 		Name: "show", Enabled: true, Action: scheduler.ActionStart, Kind: kind,
@@ -89,9 +107,11 @@ func seedStartSchedule(t *testing.T, store *db.DB, kind scheduler.Kind, at time.
 		sc.AtMinutes = at.UTC().Hour()*60 + at.UTC().Minute()
 		sc.Days = []time.Weekday{at.UTC().Weekday()}
 	}
-	if _, err := store.CreateSchedule(sc); err != nil {
+	stored, err := store.CreateSchedule(sc)
+	if err != nil {
 		t.Fatalf("create schedule: %v", err)
 	}
+	return stored.ID
 }
 
 func TestASchedulesNextOccurrenceGetsAnEventPage(t *testing.T) {
@@ -566,5 +586,62 @@ func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
 	if got, _ := store.GetDestination(d.ID); got.Facebook.BroadcastID == "" {
 		t.Error("the broadcast marker was discarded despite the failures never " +
 			"being consecutive")
+	}
+}
+
+// A7. TWO START SCHEDULES, ONE DESTINATION -- the shape that shipped broken and
+// that nothing covered. A schedule naming no destinations names them all, which
+// the code documents as the commonest shape, so both of these reach the one
+// Facebook destination.
+//
+// With one marker per destination the second schedule saw the first's broadcast
+// and RESCHEDULED it to its own occurrence; the next sweep moved it back. One
+// Graph write every five minutes forever, a time-change notification to
+// subscribers each way, and one of the two shows with no event page at all.
+//
+// Mutation: in internal/db/facebook.go, change AnnouncementFor's
+// `if a.ScheduleID == scheduleID` to `if a.BroadcastID != ""`. The second
+// schedule then finds the first's broadcast and moves it. Observed: red on the
+// reschedule count, which reached 3 across the three sweeps below.
+func TestTwoStartSchedulesEachGetTheirOwnEventPage(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	rec := &announced{key: "k", ids: []string{"tuesday-show", "thursday-show"}}
+	stubAnnounce(s, rec)
+
+	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	now := time.Now()
+	tuesday := now.Add(24 * time.Hour).Truncate(time.Second)
+	thursday := now.Add(3 * 24 * time.Hour).Truncate(time.Second)
+	// Naming nothing: both schedules target every destination.
+	seedStartSchedule(t, store, scheduler.KindOnce, tuesday)
+	seedStartSchedule(t, store, scheduler.KindOnce, thursday)
+
+	// Three sweeps, because the ping-pong needs two to be visible: A moves it
+	// back on the sweep after B moved it.
+	for range 3 {
+		s.preannounceOnce(context.Background(), now)
+	}
+
+	if len(rec.creates) != 2 {
+		t.Fatalf("created %d broadcasts for two shows, want 2 -- one of them has no "+
+			"event page at all", len(rec.creates))
+	}
+	if len(rec.reschedules) != 0 {
+		t.Fatalf("rescheduled %d times, want 0. Two schedules are two shows; moving "+
+			"one show's broadcast to the other's start time notifies its "+
+			"subscribers of a time change every five minutes forever",
+			len(rec.reschedules))
+	}
+	got, _ := store.GetDestination(d.ID)
+	if !got.Facebook.AnnouncedFor(tuesday) || !got.Facebook.AnnouncedFor(thursday) {
+		t.Fatalf("both occurrences must read as announced: %+v", got.Facebook.Announcements)
+	}
+	seen := map[string]bool{}
+	for _, a := range got.Facebook.Announcements {
+		if seen[a.BroadcastID] {
+			t.Errorf("both shows point at broadcast %q", a.BroadcastID)
+		}
+		seen[a.BroadcastID] = true
 	}
 }

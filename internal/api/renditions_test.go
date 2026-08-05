@@ -186,6 +186,12 @@ func send(t *testing.T, h http.Handler, sign func(*http.Request), method, path s
 // Neither configuration can produce JSON with an "error" field, which is what
 // makes this the assertion to reach for whenever a test's only claim about a
 // route is the status it answered with.
+//
+// One nuance worth recording, because it decides how much a status is worth:
+// removing ONE method from a path that still has others registered gives chi's
+// own 405, which a status assertion does catch. The fallback is only reached
+// when the whole pattern goes -- a handler renamed, a Group deleted, a route
+// block moved and half-reconnected. That is the refactor this is written for.
 func mustJSONError(t *testing.T, h http.Handler, sign func(*http.Request), method, path string, body any, want int) string {
 	t.Helper()
 	raw := send(t, h, sign, method, path, body, want)
