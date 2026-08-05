@@ -52,7 +52,7 @@ func TestStatusDoesNotRaceTheBackupFields(t *testing.T) {
 		URL: "rtmp://127.0.0.1:1/rtmp", StreamKey: "key", Enabled: true,
 		BackupURL: "rtmp://127.0.0.1:2/rtmp", BackupStreamKey: "backup-key",
 		AudioBitrate: 128, Profile: routing.DefaultProfile(),
-		Facebook: db.FacebookSettings{BackupIngest: true},
+		BackupIngestWanted: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateDestination: %v", err)
@@ -65,7 +65,7 @@ func TestStatusDoesNotRaceTheBackupFields(t *testing.T) {
 		Name: "fb awaiting an endpoint", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
 		URL: "rtmp://127.0.0.1:3/rtmp", StreamKey: "key", Enabled: true,
 		AudioBitrate: 128, Profile: routing.DefaultProfile(),
-		Facebook: db.FacebookSettings{BackupIngest: true},
+		BackupIngestWanted: true,
 	}); err != nil {
 		t.Fatalf("CreateDestination(pending): %v", err)
 	}

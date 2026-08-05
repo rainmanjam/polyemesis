@@ -552,11 +552,20 @@ const destRoleBackup = "backup"
 // wantsBackup reports whether this destination should be publishing a
 // redundant feed right now.
 //
-// Both halves are required. The toggle alone is intent; without an endpoint
+// Both halves are required. The intent alone is intent; without an endpoint
 // there is nowhere to publish, which is the normal state between enabling the
 // setting and the next broadcast being created.
+//
+// NOTHING HERE NAMES A PLATFORM, and that is the point. This read used to be
+// row.Facebook.BackupIngest, which meant the engine's gate on two
+// platform-neutral columns went through a platform-named struct: a Twitch row
+// with an endpoint and the intent set could never start a redundant feed,
+// because the field it was gated on belonged to a different platform's block.
+// The endpoint fields already carried the argument in their own comment -- the
+// engine should not have to know which platform a destination is -- and the
+// intent now sits beside them.
 func wantsBackup(row *db.Destination) bool {
-	return row.Facebook.BackupIngest && row.BackupURL != "" && row.Kind == db.DestRTMP
+	return row.BackupIngestWanted && row.BackupURL != "" && row.Kind == db.DestRTMP
 }
 
 // backupTarget is the redundant output's URL, assembled the way Target() does.
@@ -760,7 +769,7 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	// real state between enabling the setting and the next broadcast being
 	// created, and it is reported rather than left blank.
 	reason := ""
-	if !wantsBackup(prev.row) && prev.row.Facebook.BackupIngest && prev.row.BackupURL == "" {
+	if !wantsBackup(prev.row) && prev.row.BackupIngestWanted && prev.row.BackupURL == "" {
 		reason = backupPending
 	}
 	if wantsBackup(prev.row) {
