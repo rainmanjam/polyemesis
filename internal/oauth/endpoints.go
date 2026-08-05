@@ -108,14 +108,15 @@ func NewKick(opts ...ProviderOption) *Kick {
 // Set is a resolved group of providers plus the capability lookups that go with
 // it. It is the injection point internal/api was missing.
 //
-// The package-level Get, MetadataFor, ComplianceFor, TargetsFor and
-// ManualKeyFor all resolve against the production set, which is why a caller
-// outside this package could not aim them anywhere else -- and why internal/api
-// grew five function-pointer fields on Server (ingestForFn, pushMetadataFn,
-// pushComplianceFn, pushBroadcastFn, rescheduleFn) to stub out the calls those
-// lookups returned. A caller that holds a Set instead of calling the package
-// functions can be handed one built with WithBaseURL, and every one of those
-// fields becomes a closure over a provider the test already controls.
+// The package-level Get, MetadataFor, ComplianceFor, TargetsFor, ManualKeyFor
+// and ScheduledBroadcastsFor all resolve against the production set, which is
+// why a caller outside this package could not aim them anywhere else -- and
+// why internal/api grew five function-pointer fields on Server (ingestForFn,
+// pushMetadataFn, pushComplianceFn, pushBroadcastFn, rescheduleFn) to stub out
+// the calls those lookups returned. A caller that holds a Set instead of
+// calling the package functions can be handed one built with WithBaseURL, and
+// every one of those fields becomes a closure over a provider the test already
+// controls.
 //
 // The zero Set resolves to production rather than panicking on a nil map. That
 // is deliberately unlike the nil-hook pattern credcheck.go warns about: a
@@ -149,9 +150,16 @@ func (s Set) Get(p db.Platform) (Provider, error) {
 	return nil, fmt.Errorf("no OAuth provider for platform %q", p)
 }
 
-// MetadataFor, ComplianceFor, TargetsFor and ManualKeyFor mirror the
-// package-level functions of the same names, resolved against this set. False
-// means the platform has no such capability, which is a supported answer.
+// MetadataFor, ComplianceFor, TargetsFor, ManualKeyFor and
+// ScheduledBroadcastsFor mirror the package-level functions of the same names,
+// resolved against this set. False means the platform has no such capability,
+// which is a supported answer.
+//
+// Every capability the package grows needs its twin here, and the reason is
+// mechanical: a caller that resolves one capability through the Set and another
+// through the package function is holding a stubbed provider and a production
+// one at the same time, which is the partially-redirected provider this file
+// opens by warning about.
 func (s Set) MetadataFor(p db.Platform) (MetadataPusher, bool) {
 	pr, ok := s.All()[p]
 	if !ok {
@@ -186,4 +194,13 @@ func (s Set) ManualKeyFor(p db.Platform) (ManualKey, bool) {
 	}
 	mk, ok := pr.(ManualKey)
 	return mk, ok
+}
+
+func (s Set) ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
+	pr, ok := s.All()[p]
+	if !ok {
+		return nil, false
+	}
+	sb, ok := pr.(ScheduledBroadcaster)
+	return sb, ok
 }

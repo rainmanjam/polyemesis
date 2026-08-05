@@ -1402,6 +1402,101 @@ func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T)
 	}
 }
 
+// The capability must be DISCOVERABLE on Facebook and ABSENT everywhere else,
+// and the second half is the half that matters. A guard that only checked that
+// Facebook is found would pass with the absent branch broken -- and a lookup
+// that answers "yes" for YouTube hands the caller a nil ScheduledBroadcaster
+// that panics on the first call, which is strictly worse than the concrete
+// type assertion this interface replaced.
+//
+// MUTATION M1 (absent branch), internal/oauth/facebook.go, in
+// ScheduledBroadcastsFor: `return sb, ok` -> `return sb, true`.
+// Observed: FAIL -- youtube, twitch and kick all reported the capability.
+//
+// MUTATION M2 (found branch), same line: `return sb, ok` -> `return nil, false`.
+// Observed: FAIL -- facebook reported no capability. M1 leaves this half green
+// and M2 leaves the other half green, which is why both halves are here.
+func TestOnlyFacebookIsDiscoverableAsAScheduledBroadcaster(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform db.Platform
+		want     bool
+	}{
+		{"facebook creates the broadcast ahead of the show", db.PlatformFacebook, true},
+		{"youtube has no pre-announce path here yet", db.PlatformYouTube, false},
+		{"twitch has no broadcast object to schedule", db.PlatformTwitch, false},
+		{"kick has no broadcast object to schedule", db.PlatformKick, false},
+		{"an unknown platform is absent rather than an error", db.Platform("mystery"), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sb, ok := ScheduledBroadcastsFor(tc.platform)
+			if ok != tc.want {
+				t.Fatalf("ScheduledBroadcastsFor(%s) = %v, want %v", tc.platform, ok, tc.want)
+			}
+			// A false that still hands back a non-nil interface is the same
+			// trap from the other side: the caller's `if !ok` is the only
+			// thing standing between it and a call on a provider that cannot
+			// take it.
+			if !ok && sb != nil {
+				t.Errorf("ScheduledBroadcastsFor(%s) reported absent but returned %T", tc.platform, sb)
+			}
+			if ok && sb == nil {
+				t.Errorf("ScheduledBroadcastsFor(%s) reported present and returned nil", tc.platform)
+			}
+		})
+	}
+}
+
+// The bound belongs to the PLATFORM, so it is read from the capability rather
+// than written out at the call site. internal/api's facebookScheduleHorizon is
+// this same seven days spelled out behind a platform-name gate; this is the
+// value that replaces it.
+//
+// MUTATION M3, internal/oauth/facebook.go:
+// `func (f *Facebook) ScheduleHorizon() time.Duration { return 7 * 24 * time.Hour }`
+// -> `... { return 30 * 24 * time.Hour }`.
+// Observed: FAIL -- horizon = 720h0m0s, want 168h0m0s.
+func TestTheScheduledBroadcastCapabilityCarriesFacebooksOwnSevenDayBound(t *testing.T) {
+	sb, ok := ScheduledBroadcastsFor(db.PlatformFacebook)
+	if !ok {
+		t.Fatal("Facebook has no scheduled-broadcast capability")
+	}
+	if got := sb.ScheduleHorizon(); got != 7*24*time.Hour {
+		t.Errorf("horizon = %v, want %v -- Facebook refuses an event_params "+
+			"further out than seven days, and widening it here turns a refusal "+
+			"the caller could have avoided into a generic Graph error", got, 7*24*time.Hour)
+	}
+}
+
+// Resolved from a Set aimed at the stub, not from the package-level lookup: the
+// package one resolves against the production providers, so a caller that
+// reaches this capability through it is holding a provider pointed at
+// graph.facebook.com while the rest of its test is stubbed. This proves the Set
+// twin exists AND that it redirects.
+//
+// MUTATION M4, internal/oauth/endpoints.go, in Set.ScheduledBroadcastsFor:
+// `pr, ok := s.All()[p]` -> `pr, ok := Providers()[p]`.
+// Observed: FAIL -- "no POST reached the stub; calls were []", because the
+// reschedule went to the real graph.facebook.com.
+func TestASetsScheduledBroadcasterIsTheOneItWasAimedAt(t *testing.T) {
+	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
+	})
+
+	sb, ok := NewSet(WithBaseURL(fb.api)).ScheduledBroadcastsFor(db.PlatformFacebook)
+	if !ok {
+		t.Fatal("a Set has no scheduled-broadcast capability for Facebook")
+	}
+	if err := sb.RescheduleBroadcast(context.Background(), "tok", "555",
+		time.Unix(1800000123, 0)); err != nil {
+		t.Fatalf("RescheduleBroadcast through the set: %v", err)
+	}
+	if fbCall(*log, http.MethodPost, "/555") == nil {
+		t.Fatalf("no POST reached the stub; calls were %+v", *log)
+	}
+}
+
 // Moving a show must MOVE its broadcast. Creating a second one would leave the
 // first as an orphaned event page people are still subscribed to.
 func TestReschedulingPostsTheNewStartTimeToTheBroadcastItself(t *testing.T) {

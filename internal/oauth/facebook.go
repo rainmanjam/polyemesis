@@ -865,6 +865,84 @@ type fbLiveVideoPrivacy struct {
 	} `json:"privacy"`
 }
 
+// ------------------------------------------------- scheduled broadcasts
+
+// ScheduledBroadcaster is the optional capability for a platform that can
+// create a broadcast BEFORE the show and move it afterwards -- what gives a
+// scheduled show an event page people can subscribe to. Discover it with
+// ScheduledBroadcastsFor; never type-assert Provider at a call site, because
+// "absent" is the answer for every other platform and has to be handled once.
+//
+// It exists because that rule was being broken in the plainest possible way.
+// internal/api reached RescheduleBroadcast with a CONCRETE-type assertion --
+// `fb, ok := p.(*oauth.Facebook)` -- on a method that was on no interface at
+// all, so the one place that knew a platform could not do this was an `ok`
+// check against a struct pointer. A second platform with a schedulable
+// broadcast would have had to be added to that assertion by hand, and the
+// compiler would not have said a word.
+//
+// It lives in this file for the same reason TargetedProvider does: Facebook is
+// the only platform that has ever had it. If a second one appears, both belong
+// in oauth.go next to Provider. Nothing here is stubbed onto YouTube, Twitch or
+// Kick -- the value of the interface is that ABSENT is a supported answer,
+// handled once by the caller, not that every provider grows a method that
+// returns an error.
+//
+// CREATING the scheduled broadcast is deliberately NOT on this interface. That
+// is TargetedProvider.IngestFor with IngestOptions.ScheduledFor set, and has
+// been since that field was added. A Create method here would be a second
+// mechanism for one concept, which is exactly how endpoints.go records the
+// graphBase seam growing up beside WithBaseURL and covering one endpoint out of
+// thirteen. What is here is the pair a caller cannot get any other way: the
+// bound it has to respect, and the move.
+type ScheduledBroadcaster interface {
+	Provider
+	// ScheduleHorizon is how far ahead of now this platform will accept a
+	// start time. A caller must refuse an occurrence beyond it rather than
+	// send it, because the platform's refusal arrives as a generic Graph
+	// error that reads like every other one.
+	//
+	// A method rather than a constant at the call site because it is a fact
+	// about the PLATFORM. internal/api spells Facebook's seven days out as
+	// facebookScheduleHorizon in preannounce.go, inside a loop already gated
+	// on `d.Platform != db.PlatformFacebook` -- which is the same defect as
+	// the type assertion wearing a different hat. Read here, a caller enforces
+	// "this platform's bound" without knowing which platform it is holding.
+	ScheduleHorizon() time.Duration
+	// RescheduleBroadcast moves an already-created broadcast to a new start
+	// time. broadcastID is the id the create returned and the caller stored;
+	// an empty one is an error rather than a no-op, because a platform can
+	// answer a write to no object in a way that reads as success.
+	RescheduleBroadcast(ctx context.Context, accessToken, broadcastID string, at time.Time) error
+}
+
+// ScheduledBroadcastsFor returns the pre-announce capability for a platform, or
+// false when that platform has none. Mirrors TargetsFor and MetadataFor, both
+// in shape and in what false means: it covers "this platform cannot schedule"
+// and "there is no provider for this platform at all", because neither caller
+// does anything different about them.
+//
+// Named for the thing rather than shortened to SchedulesFor because the only
+// caller holds a scheduler.Schedule in the same function, and two unrelated
+// senses of "schedule" one line apart is how a reader loses the thread.
+func ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
+	pr, ok := Providers()[p]
+	if !ok {
+		return nil, false
+	}
+	sb, ok := pr.(ScheduledBroadcaster)
+	return sb, ok
+}
+
+// ScheduleHorizon is Facebook's own bound, and it is not ours to widen: Graph
+// refuses a live_video whose event_params is more than seven days out, at
+// create and at reschedule alike.
+//
+// It constrains far less than it looks like it does. The next occurrence of a
+// daily schedule is at most a day away and of a weekly one at most seven days,
+// by definition -- only a one-shot schedule can be set beyond this.
+func (f *Facebook) ScheduleHorizon() time.Duration { return 7 * 24 * time.Hour }
+
 // RescheduleBroadcast moves an already-created scheduled broadcast to a new
 // start time.
 //
