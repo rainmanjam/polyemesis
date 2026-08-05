@@ -356,20 +356,15 @@ func (s *Server) noteRescheduleFailure(d *db.Destination, sc scheduler.Schedule,
 	s.clearAnnounceFailures(d.ID, sc.ID)
 }
 
-// announceFailKey packs the two ids that identify one SHOW into the one int64
-// key s.rescheduleFails offers.
+// announceFailKey identifies one SHOW: a destination, and the schedule that
+// puts a broadcast on it.
 //
 // Per (destination, schedule) rather than per destination, because a
 // destination now holds one broadcast per schedule: with a per-destination
 // count, one schedule's create failing three times would trip the give-up on
 // ANOTHER schedule's perfectly good broadcast and orphan its event page.
-//
-// The packing is safe for any id below 2^31, which is every id SQLite will hand
-// out in the lifetime of an install. Widening the map's value type to a struct
-// would be the honest fix and it is one line in api.go, which this change does
-// not own -- recorded here so the next edit there can take it.
-func announceFailKey(destID, scheduleID int64) int64 {
-	return destID<<32 | (scheduleID & 0xFFFFFFFF)
+func announceFailKey(destID, scheduleID int64) showKey {
+	return showKey{DestinationID: destID, ScheduleID: scheduleID}
 }
 
 // noteAnnounceFailure counts one consecutive failure for this show and returns
@@ -378,12 +373,12 @@ func announceFailKey(destID, scheduleID int64) int64 {
 func (s *Server) noteAnnounceFailure(destID, scheduleID int64) int {
 	s.preannounceMu.Lock()
 	defer s.preannounceMu.Unlock()
-	if s.rescheduleFails == nil {
-		s.rescheduleFails = map[int64]int{}
+	if s.announceFails == nil {
+		s.announceFails = map[showKey]int{}
 	}
 	k := announceFailKey(destID, scheduleID)
-	s.rescheduleFails[k]++
-	return s.rescheduleFails[k]
+	s.announceFails[k]++
+	return s.announceFails[k]
 }
 
 // clearAnnounceFailures resets the count. Called on every success, which is
@@ -391,7 +386,7 @@ func (s *Server) noteAnnounceFailure(destID, scheduleID int64) int {
 // stopped and started again get reported.
 func (s *Server) clearAnnounceFailures(destID, scheduleID int64) {
 	s.preannounceMu.Lock()
-	delete(s.rescheduleFails, announceFailKey(destID, scheduleID))
+	delete(s.announceFails, announceFailKey(destID, scheduleID))
 	s.preannounceMu.Unlock()
 }
 

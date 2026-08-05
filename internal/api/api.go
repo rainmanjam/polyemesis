@@ -156,13 +156,32 @@ type Server struct {
 	// Defaults to the real call; only a test ever replaces it.
 	rescheduleFn func(ctx context.Context, acct *db.PlatformAccount, broadcastID string, at time.Time) error
 
-	// preannounceMu guards rescheduleFails, which the pre-announce sweep
-	// mutates and nothing else reads.
+	// preannounceMu guards announceFails, which the pre-announce sweep mutates
+	// and nothing else reads.
 	preannounceMu sync.Mutex
-	// rescheduleFails counts CONSECUTIVE failed reschedules per destination.
+	// announceFails counts CONSECUTIVE failures per SHOW -- creates as well as
+	// reschedules, which is why it is no longer named for one of them.
+	//
+	// Keyed per (destination, schedule) rather than per destination, because a
+	// destination now holds one broadcast per schedule: a per-destination count
+	// would let one schedule's create fail three times and trip the give-up on
+	// ANOTHER schedule's perfectly good broadcast, orphaning its event page.
+	//
+	// A named struct key rather than the two ids packed into an int64. The
+	// packing was safe for any id below 2^31 and it was still the wrong shape:
+	// a key that has to be encoded and decoded is one a reader has to verify,
+	// and Go compares struct keys natively.
+	//
 	// In memory on purpose: a restart resetting the count only means the sweep
 	// is more patient, which is the safe direction.
-	rescheduleFails map[int64]int
+	announceFails map[showKey]int
+}
+
+// showKey identifies one scheduled show: a destination, and the schedule that
+// puts a broadcast on it.
+type showKey struct {
+	DestinationID int64
+	ScheduleID    int64
 }
 
 // Options configures the server.
