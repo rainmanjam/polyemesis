@@ -104,13 +104,30 @@ type Provider interface {
 	Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error)
 }
 
-// Providers returns every implemented provider, keyed by platform.
-func Providers() map[db.Platform]Provider {
+// Providers returns every implemented provider, keyed by platform. This is
+// what production uses: no options, so every provider talks to its real host.
+func Providers() map[db.Platform]Provider { return ProvidersWith() }
+
+// ProvidersWith returns the same set, with every provider built from opts.
+//
+// This is the seam that lets a caller outside this package -- internal/api,
+// specifically -- exercise a handler end to end against a stub platform:
+//
+//	srv := httptest.NewServer(stub)
+//	provs := oauth.ProvidersWith(oauth.WithBaseURL(srv.URL))
+//
+// It exists because internal/api could not reach the base URL any other way,
+// and had grown five function-pointer fields on Server (ingestForFn,
+// pushMetadataFn, pushComplianceFn, pushBroadcastFn, rescheduleFn) to work
+// around it -- up from zero at v0.1.0, with each new platform call adding
+// another. A test that replaces the provider set replaces the thing that makes
+// the HTTP call, which is what those fields were imitating.
+func ProvidersWith(opts ...ProviderOption) map[db.Platform]Provider {
 	return map[db.Platform]Provider{
-		db.PlatformYouTube:  &YouTube{},
-		db.PlatformTwitch:   &Twitch{},
-		db.PlatformFacebook: &Facebook{},
-		db.PlatformKick:     &Kick{},
+		db.PlatformYouTube:  NewYouTube(opts...),
+		db.PlatformTwitch:   NewTwitch(opts...),
+		db.PlatformFacebook: NewFacebook(opts...),
+		db.PlatformKick:     NewKick(opts...),
 	}
 }
 

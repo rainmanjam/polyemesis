@@ -184,8 +184,11 @@ func TestScopeAdviceNamesTheScopeOnlyForAuthorizationFailures(t *testing.T) {
 
 // ---------------------------------------------------------------- YouTube
 
-// ytStub serves the four YouTube endpoints a push touches.
-func ytStub(t *testing.T, log *[]capture, broadcasts string) *httptest.Server {
+// ytStub serves the four YouTube endpoints a push touches, and returns a
+// provider aimed at them. It used to assign the ytAPIBase package var under a
+// t.Cleanup restore; the provider it returns is the only one a caller should
+// use, because a bare &YouTube{} still talks to googleapis.com.
+func ytStub(t *testing.T, log *[]capture, broadcasts string) (*YouTube, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(recordAll(t, log, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -208,10 +211,8 @@ func ytStub(t *testing.T, log *[]capture, broadcasts string) *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	old := ytAPIBase
-	ytAPIBase = srv.URL
-	t.Cleanup(func() { ytAPIBase = old; srv.Close() })
-	return srv
+	t.Cleanup(srv.Close)
+	return NewYouTube(WithBaseURL(srv.URL)), srv
 }
 
 func TestYouTubePicksTheBroadcastTheOperatorMeans(t *testing.T) {
@@ -251,9 +252,9 @@ func TestYouTubePicksTheBroadcastTheOperatorMeans(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var log []capture
-			ytStub(t, &log, tc.items)
+			y, _ := ytStub(t, &log, tc.items)
 
-			got, err := (&YouTube{}).liveBroadcast(context.Background(), "tok")
+			got, err := y.liveBroadcast(context.Background(), "tok")
 			if tc.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.err) {
 					t.Fatalf("err = %v, want one containing %q", err, tc.err)
@@ -275,9 +276,9 @@ const ytOneUpcoming = `{"items":[{"id":"bcast","snippet":{"title":"old title","d
 
 func TestYouTubePushWritesTitleDescriptionAndCategory(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytOneUpcoming)
+	y, _ := ytStub(t, &log, ytOneUpcoming)
 
-	res, err := (&YouTube{}).PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{
+	res, err := y.PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{
 		Title:       "Friday night set",
 		Description: "Two hours of house.",
 		Category:    "science and technology",
@@ -324,9 +325,9 @@ func TestYouTubePushWritesTitleDescriptionAndCategory(t *testing.T) {
 
 func TestYouTubePushKeepsExistingValuesForFieldsLeftBlank(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytOneUpcoming)
+	y, _ := ytStub(t, &log, ytOneUpcoming)
 
-	res, err := (&YouTube{}).PushMetadata(context.Background(), "cid", "tok", "4242",
+	res, err := y.PushMetadata(context.Background(), "cid", "tok", "4242",
 		Metadata{Title: "New title"})
 	if err != nil {
 		t.Fatalf("PushMetadata: %v", err)
@@ -345,9 +346,9 @@ func TestYouTubePushKeepsExistingValuesForFieldsLeftBlank(t *testing.T) {
 
 func TestYouTubeUnknownCategoryDoesNotLoseTheTitleThatLanded(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytOneUpcoming)
+	y, _ := ytStub(t, &log, ytOneUpcoming)
 
-	res, err := (&YouTube{}).PushMetadata(context.Background(), "cid", "tok", "4242",
+	res, err := y.PushMetadata(context.Background(), "cid", "tok", "4242",
 		Metadata{Title: "New title", Category: "Underwater Basket Weaving"})
 	if err != nil {
 		t.Fatalf("PushMetadata returned an error for a partial success: %v", err)
@@ -375,11 +376,9 @@ func TestYouTubeRefusalNamesTheScopeToReconnectFor(t *testing.T) {
 		io.WriteString(w, `{"error":{"message":"insufficient authentication scopes"}}`)
 	}))
 	defer srv.Close()
-	old := ytAPIBase
-	ytAPIBase = srv.URL
-	defer func() { ytAPIBase = old }()
+	y := NewYouTube(WithBaseURL(srv.URL))
 
-	_, err := (&YouTube{}).PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{Title: "x"})
+	_, err := y.PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{Title: "x"})
 	if err == nil {
 		t.Fatal("want an error")
 	}
@@ -390,12 +389,13 @@ func TestYouTubeRefusalNamesTheScopeToReconnectFor(t *testing.T) {
 
 // ----------------------------------------------------------------- Twitch
 
-func twitchStub(t *testing.T, log *[]capture, h http.HandlerFunc) {
+// twitchStub returns a provider aimed at a stub Helix. Like ytStub it used to
+// rewrite a package var; a bare &Twitch{} still talks to api.twitch.tv.
+func twitchStub(t *testing.T, log *[]capture, h http.HandlerFunc) *Twitch {
 	t.Helper()
 	srv := httptest.NewServer(recordAll(t, log, h))
-	old := twitchHelixBase
-	twitchHelixBase = srv.URL
-	t.Cleanup(func() { twitchHelixBase = old; srv.Close() })
+	t.Cleanup(srv.Close)
+	return NewTwitch(WithBaseURL(srv.URL))
 }
 
 func twitchDefault(w http.ResponseWriter, r *http.Request) {
@@ -420,9 +420,9 @@ func twitchDefault(w http.ResponseWriter, r *http.Request) {
 
 func TestTwitchPushSetsTitleAndGameAndReportsTheMissingDescription(t *testing.T) {
 	var log []capture
-	twitchStub(t, &log, twitchDefault)
+	tw := twitchStub(t, &log, twitchDefault)
 
-	res, err := (&Twitch{}).PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{
+	res, err := tw.PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{
 		Title:       "Friday night set",
 		Description: "Twitch has nowhere to put this.",
 		Category:    "Just Chatting",
@@ -454,9 +454,9 @@ func TestTwitchPushSetsTitleAndGameAndReportsTheMissingDescription(t *testing.T)
 
 func TestTwitchFallsBackToCategorySearchWhenTheExactNameMisses(t *testing.T) {
 	var log []capture
-	twitchStub(t, &log, twitchDefault)
+	tw := twitchStub(t, &log, twitchDefault)
 
-	res, err := (&Twitch{}).PushMetadata(context.Background(), "cid", "tok", "4242",
+	res, err := tw.PushMetadata(context.Background(), "cid", "tok", "4242",
 		Metadata{Category: "software and game development"})
 	if err != nil {
 		t.Fatalf("PushMetadata: %v", err)
@@ -471,7 +471,7 @@ func TestTwitchFallsBackToCategorySearchWhenTheExactNameMisses(t *testing.T) {
 
 func TestTwitchUnknownCategoryStillPushesTheTitle(t *testing.T) {
 	var log []capture
-	twitchStub(t, &log, func(w http.ResponseWriter, r *http.Request) {
+	tw := twitchStub(t, &log, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/search/categories" {
 			w.Header().Set("Content-Type", "application/json")
 			io.WriteString(w, `{"data":[]}`)
@@ -480,7 +480,7 @@ func TestTwitchUnknownCategoryStillPushesTheTitle(t *testing.T) {
 		twitchDefault(w, r)
 	})
 
-	res, err := (&Twitch{}).PushMetadata(context.Background(), "cid", "tok", "4242",
+	res, err := tw.PushMetadata(context.Background(), "cid", "tok", "4242",
 		Metadata{Title: "Friday night set", Category: "Nonexistent Game"})
 	if err != nil {
 		t.Fatalf("PushMetadata: %v", err)
@@ -502,9 +502,9 @@ func TestTwitchUnknownCategoryStillPushesTheTitle(t *testing.T) {
 
 func TestTwitchWithNothingItAcceptsMakesNoWrite(t *testing.T) {
 	var log []capture
-	twitchStub(t, &log, twitchDefault)
+	tw := twitchStub(t, &log, twitchDefault)
 
-	res, err := (&Twitch{}).PushMetadata(context.Background(), "cid", "tok", "4242",
+	res, err := tw.PushMetadata(context.Background(), "cid", "tok", "4242",
 		Metadata{Description: "only a description"})
 	if err != nil {
 		t.Fatalf("PushMetadata: %v", err)

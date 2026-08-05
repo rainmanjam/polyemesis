@@ -31,10 +31,10 @@ const ytLiveWithDetails = `{"items":[{"id":"bcast",
 // helper, because the request is the only thing YouTube sees.
 func TestEveryBroadcastUpdateCarriesTheFourRequiredProperties(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytEditableWithDetails)
+	y, _ := ytStub(t, &log, ytEditableWithDetails)
 
 	dvr := false
-	if _, err := (&YouTube{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	if _, err := y.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{EnableDvr: &dvr}); err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
 	}
@@ -78,10 +78,10 @@ func TestEveryBroadcastUpdateCarriesTheFourRequiredProperties(t *testing.T) {
 // were.
 func TestAPartialChangeCarriesTheRestOfThePartThrough(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytEditableWithDetails)
+	y, _ := ytStub(t, &log, ytEditableWithDetails)
 
 	dvr := false
-	if _, err := (&YouTube{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	if _, err := y.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{EnableDvr: &dvr}); err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
 	}
@@ -123,10 +123,10 @@ func TestAPartialChangeCarriesTheRestOfThePartThrough(t *testing.T) {
 // request anyway.
 func TestChangingOnlyTheScheduleDoesNotDisturbTheToggles(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytEditableWithDetails)
+	y, _ := ytStub(t, &log, ytEditableWithDetails)
 
 	when := "2026-08-01T20:00:00Z"
-	if _, err := (&YouTube{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	if _, err := y.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{ScheduledStart: &when}); err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
 	}
@@ -173,9 +173,9 @@ func TestTheEditableWindowIsAnAllowlist(t *testing.T) {
 
 func TestBroadcastWindowReportsWhatIsLockedAndWhy(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytLiveWithDetails)
+	y, _ := ytStub(t, &log, ytLiveWithDetails)
 
-	w, err := (&YouTube{}).BroadcastWindow(context.Background(), "tok")
+	w, err := y.BroadcastWindow(context.Background(), "tok")
 	if err != nil {
 		t.Fatalf("BroadcastWindow: %v", err)
 	}
@@ -194,8 +194,8 @@ func TestBroadcastWindowReportsWhatIsLockedAndWhy(t *testing.T) {
 	// And the editable case must NOT claim a lock, or every control is
 	// disabled forever.
 	var log2 []capture
-	ytStub(t, &log2, ytEditableWithDetails)
-	w2, err := (&YouTube{}).BroadcastWindow(context.Background(), "tok")
+	y2, _ := ytStub(t, &log2, ytEditableWithDetails)
+	w2, err := y2.BroadcastWindow(context.Background(), "tok")
 	if err != nil {
 		t.Fatalf("BroadcastWindow: %v", err)
 	}
@@ -209,10 +209,10 @@ func TestBroadcastWindowReportsWhatIsLockedAndWhy(t *testing.T) {
 // description and category through.
 func TestSettingTagsDoesNotEraseTheRestOfTheVideoSnippet(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytEditableWithDetails)
+	y, _ := ytStub(t, &log, ytEditableWithDetails)
 
 	tags := []string{"live", "house"}
-	res, err := (&YouTube{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	res, err := y.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{Tags: &tags})
 	if err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
@@ -252,10 +252,10 @@ func TestSettingTagsDoesNotEraseTheRestOfTheVideoSnippet(t *testing.T) {
 // ever grows.
 func TestTagsReplaceRatherThanMerge(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytEditableWithDetails)
+	y, _ := ytStub(t, &log, ytEditableWithDetails)
 
 	tags := []string{"only"}
-	if _, err := (&YouTube{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	if _, err := y.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{Tags: &tags}); err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
 	}
@@ -275,9 +275,9 @@ func TestTagsReplaceRatherThanMerge(t *testing.T) {
 // The zero value must touch nothing at all.
 func TestEmptyBroadcastSettingsWriteNothing(t *testing.T) {
 	var log []capture
-	ytStub(t, &log, ytEditableWithDetails)
+	y, _ := ytStub(t, &log, ytEditableWithDetails)
 
-	res, err := (&YouTube{}).PushBroadcastSettings(context.Background(), "cid", "tok", BroadcastSettings{})
+	res, err := y.PushBroadcastSettings(context.Background(), "cid", "tok", BroadcastSettings{})
 	if err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
 	}

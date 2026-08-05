@@ -61,20 +61,19 @@ func ManualKeyFor(p db.Platform) (ManualKey, bool) {
 // polyemesis can use: channel identity, title/category push, category search
 // and livestream stats.
 type Kick struct {
-	// idBase overrides https://id.kick.com. Empty in production; set by tests.
-	idBase string
+	// endpoints carries the base URLs; zero value is production. This replaced
+	// an idBase field that redirected id.kick.com alone alongside a kickAPIBase
+	// package var for api.kick.com -- two mechanisms for one concept, which is
+	// how Facebook's split base went unnoticed. See endpoints.go.
+	endpoints
 }
 
-func (k *Kick) idEndpoint() string {
-	if k.idBase != "" {
-		return k.idBase
-	}
-	return kickIDBase
-}
+func (k *Kick) idEndpoint() string  { return k.authBase(kickIDBase) }
+func (k *Kick) apiEndpoint() string { return k.apiBase(kickAPIBase) }
 
-// Endpoints are vars so tests can point the provider at a stub. Nothing at
-// runtime rewrites them.
-var (
+// Kick's production hosts. Constants: a test redirects a provider instance, not
+// the package.
+const (
 	kickIDBase  = "https://id.kick.com"
 	kickAPIBase = "https://api.kick.com"
 )
@@ -210,7 +209,7 @@ func (k *Kick) channel(ctx context.Context, accessToken string) (*kickChannel, e
 		Data []kickChannel `json:"data"`
 	}
 	// No parameters: Kick reads the channel belonging to the token.
-	if err := getJSON(ctx, kickAPIBase+"/public/v1/channels", accessToken, nil, &out); err != nil {
+	if err := getJSON(ctx, k.apiEndpoint()+"/public/v1/channels", accessToken, nil, &out); err != nil {
 		return nil, err
 	}
 	if len(out.Data) == 0 {
@@ -303,7 +302,7 @@ func (k *Kick) SearchCategories(ctx context.Context, clientID, accessToken, quer
 	var out struct {
 		Data []KickCategory `json:"data"`
 	}
-	err := getJSON(ctx, kickAPIBase+"/public/v1/categories?q="+url.QueryEscape(query), accessToken, nil, &out)
+	err := getJSON(ctx, k.apiEndpoint()+"/public/v1/categories?q="+url.QueryEscape(query), accessToken, nil, &out)
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +379,7 @@ func (k *Kick) UpdateChannel(ctx context.Context, accessToken string, u KickChan
 	if u.CustomTags != nil {
 		body["custom_tags"] = u.CustomTags
 	}
-	return requestJSON(ctx, http.MethodPatch, kickAPIBase+"/public/v1/channels", accessToken, body, nil, nil)
+	return requestJSON(ctx, http.MethodPatch, k.apiEndpoint()+"/public/v1/channels", accessToken, body, nil, nil)
 }
 
 // PushBroadcastSettings writes the one field of BroadcastSettings that Kick
@@ -549,7 +548,7 @@ func (k *Kick) livestreams(ctx context.Context, accessToken, endpoint string) ([
 	var out struct {
 		Data json.RawMessage `json:"data"`
 	}
-	if err := getJSON(ctx, kickAPIBase+endpoint, accessToken, nil, &out); err != nil {
+	if err := getJSON(ctx, k.apiEndpoint()+endpoint, accessToken, nil, &out); err != nil {
 		return nil, err
 	}
 	return decodeKickData(out.Data), nil

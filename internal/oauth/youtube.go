@@ -11,7 +11,26 @@ import (
 
 // YouTube implements Google OAuth 2.0 plus the Live Streaming API lookup that
 // turns a connected account into an ingest URL and stream key.
-type YouTube struct{}
+type YouTube struct {
+	// endpoints carries the base URLs; zero value is production. See
+	// endpoints.go.
+	endpoints
+}
+
+// Google splits what other platforms combine: consent is granted on
+// accounts.google.com, tokens are minted on oauth2.googleapis.com, and the data
+// API is a third host. All three are the authorization/data split endpoints.go
+// describes, so WithBaseURL moves all three together.
+const (
+	ytConsentBase = "https://accounts.google.com"
+	ytTokenBase   = "https://oauth2.googleapis.com"
+)
+
+// apiEndpoint is the YouTube Data API base for THIS provider. Account and
+// Ingest previously wrote https://www.googleapis.com/youtube/v3 inline while
+// the rest of the package went through the ytAPIBase var, so a test that
+// redirected the var still sent those two calls to Google.
+func (y *YouTube) apiEndpoint() string { return y.apiBase(ytAPIBase) }
 
 func (y *YouTube) Platform() db.Platform { return db.PlatformYouTube }
 
@@ -52,7 +71,7 @@ func (y *YouTube) AuthURL(clientID, redirectURI, state, challenge string) string
 		q.Set("code_challenge", challenge)
 		q.Set("code_challenge_method", "S256")
 	}
-	return "https://accounts.google.com/o/oauth2/v2/auth?" + q.Encode()
+	return y.authBase(ytConsentBase) + "/o/oauth2/v2/auth?" + q.Encode()
 }
 
 func (y *YouTube) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, verifier string) (*Token, error) {
@@ -66,11 +85,11 @@ func (y *YouTube) Exchange(ctx context.Context, clientID, clientSecret, redirect
 	if verifier != "" {
 		form.Set("code_verifier", verifier)
 	}
-	return postForm(ctx, "https://oauth2.googleapis.com/token", form, nil)
+	return postForm(ctx, y.authBase(ytTokenBase)+"/token", form, nil)
 }
 
 func (y *YouTube) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
-	t, err := postForm(ctx, "https://oauth2.googleapis.com/token", url.Values{
+	t, err := postForm(ctx, y.authBase(ytTokenBase)+"/token", url.Values{
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
@@ -97,7 +116,7 @@ func (y *YouTube) Account(ctx context.Context, clientID, accessToken string) (*A
 		} `json:"items"`
 	}
 	err := getJSON(ctx,
-		"https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true",
+		y.apiEndpoint()+"/channels?part=snippet&mine=true",
 		accessToken, nil, &out)
 	if err != nil {
 		return nil, err
@@ -135,7 +154,7 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 		Items []ytLiveStream `json:"items"`
 	}
 	err := getJSON(ctx,
-		"https://www.googleapis.com/youtube/v3/liveStreams?part=snippet,cdn&mine=true&maxResults=50",
+		y.apiEndpoint()+"/liveStreams?part=snippet,cdn&mine=true&maxResults=50",
 		accessToken, nil, &list)
 	if err != nil {
 		return nil, err
@@ -165,7 +184,7 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 		},
 	}
 	err = postJSON(ctx,
-		"https://www.googleapis.com/youtube/v3/liveStreams?part=snippet,cdn",
+		y.apiEndpoint()+"/liveStreams?part=snippet,cdn",
 		accessToken, payload, nil, &created)
 	if err != nil {
 		return nil, fmt.Errorf("could not create a YouTube ingest stream: %w", err)

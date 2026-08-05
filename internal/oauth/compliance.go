@@ -109,7 +109,7 @@ func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken stri
 			"id":     b.ID,
 			"status": map[string]any{"privacyStatus": string(c.Privacy)},
 		}
-		if err := requestJSON(ctx, http.MethodPut, ytAPIBase+"/liveBroadcasts?part=status",
+		if err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/liveBroadcasts?part=status",
 			accessToken, body, nil, nil); err != nil {
 			return nil, scopeAdvice(err, db.PlatformYouTube, y.MetadataCaps().Scope)
 		}
@@ -123,7 +123,7 @@ func (y *YouTube) PushCompliance(ctx context.Context, clientID, accessToken stri
 			"id":     b.ID,
 			"status": map[string]any{"selfDeclaredMadeForKids": *c.MadeForKids},
 		}
-		if err := requestJSON(ctx, http.MethodPut, ytAPIBase+"/videos?part=status",
+		if err := requestJSON(ctx, http.MethodPut, y.apiEndpoint()+"/videos?part=status",
 			accessToken, body, nil, nil); err != nil {
 			// Reported rather than fatal: the privacy change above may already
 			// have landed, and failing the whole push would send the operator
@@ -153,7 +153,7 @@ func (t *Twitch) PushCompliance(ctx context.Context, clientID, accessToken strin
 	}
 
 	body := map[string]any{"content_classification_labels": payload}
-	endpoint := twitchHelixBase + "/channels?broadcaster_id=" + url.QueryEscape(tgt.AccountRef)
+	endpoint := t.apiEndpoint() + "/channels?broadcaster_id=" + url.QueryEscape(tgt.AccountRef)
 	if err := requestJSON(ctx, http.MethodPatch, endpoint, accessToken, body,
 		helixHeaders(clientID), nil); err != nil {
 		return nil, scopeAdvice(err, db.PlatformTwitch, t.MetadataCaps().Scope)

@@ -14,20 +14,19 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
-// kickStub points both Kick base URLs at a test server for the duration of one
-// test. Both are redirected because a single flow crosses id.kick.com and
-// api.kick.com, and a stray real request would make the suite depend on the
-// network.
-func kickStub(t *testing.T, h http.HandlerFunc) *httptest.Server {
+// kickStub returns a provider pointed at a test server, plus the server.
+//
+// Both of Kick's base URLs are redirected because a single flow crosses
+// id.kick.com and api.kick.com, and a stray real request would make the suite
+// depend on the network -- WithBaseURL moves both at once, which is why it does
+// not offer a way to move only one. It used to assign the two package vars and
+// restore them in a t.Cleanup; the provider it returns now is the only one a
+// caller should use.
+func kickStub(t *testing.T, h http.HandlerFunc) (*Kick, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(h)
-	origID, origAPI := kickIDBase, kickAPIBase
-	kickIDBase, kickAPIBase = srv.URL, srv.URL
-	t.Cleanup(func() {
-		kickIDBase, kickAPIBase = origID, origAPI
-		srv.Close()
-	})
-	return srv
+	t.Cleanup(srv.Close)
+	return NewKick(WithBaseURL(srv.URL)), srv
 }
 
 // --------------------------------------------------------- the missing key
@@ -44,7 +43,15 @@ func TestKickIngestNeverFabricatesAnIngestURL(t *testing.T) {
 	// its ingest with a CDN whose host has changed, so a stale constant would
 	// publish to nowhere and read as a polyemesis bug. Never invent the URL:
 	// return what the API returned, or fail saying so.
-	ing, err := (&Kick{}).Ingest(context.Background(), "cid", "not-a-real-token")
+	//
+	// Pointed at a stub that refuses the token. It previously ran against a bare
+	// &Kick{}, i.e. the real api.kick.com, and "err != nil" was satisfied just as
+	// well by having no network as by Kick's refusal.
+	k, _ := kickStub(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"message":"invalid token"}`)
+	})
+	ing, err := k.Ingest(context.Background(), "cid", "not-a-real-token")
 	if err == nil {
 		t.Fatal("Ingest succeeded with a bogus token; the caller would store an empty key")
 	}
@@ -67,13 +74,13 @@ func TestKickIngestNeverFabricatesAnIngestURL(t *testing.T) {
 // an Ingest that refuses everything, which is exactly what it used to do.
 func TestKickIngestReadsTheKeyOffTheChannelsResource(t *testing.T) {
 	var gotPath string
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		io.WriteString(w, `{"data":[{"broadcaster_user_id":7,"slug":"chan",
 			"stream":{"is_live":true,"url":"rtmps://ingest.example/app/","key":"sk_live_abc"}}]}`)
 	})
 
-	ing, err := (&Kick{}).Ingest(context.Background(), "cid", "token")
+	ing, err := k.Ingest(context.Background(), "cid", "token")
 	if err != nil {
 		t.Fatalf("Ingest failed against a channels response carrying a key: %v", err)
 	}
@@ -93,11 +100,11 @@ func TestKickIngestReadsTheKeyOffTheChannelsResource(t *testing.T) {
 // A key with no URL must fail rather than guess. See the comment on
 // TestKickIngestNeverFabricatesAnIngestURL: a hardcoded host was nearly shipped.
 func TestKickIngestRefusesToInventAURLWhenOnlyTheKeyArrives(t *testing.T) {
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"data":[{"broadcaster_user_id":7,"slug":"chan",
 			"stream":{"is_live":true,"key":"sk_live_abc"}}]}`)
 	})
-	ing, err := (&Kick{}).Ingest(context.Background(), "cid", "token")
+	ing, err := k.Ingest(context.Background(), "cid", "token")
 	if err == nil {
 		t.Fatalf("Ingest returned %#v for a response with no stream.url; it must not "+
 			"substitute a host of its own", ing)
@@ -110,11 +117,11 @@ func TestKickIngestRefusesToInventAURLWhenOnlyTheKeyArrives(t *testing.T) {
 // A token minted before streamkey:read gets neither field, and must be told to
 // reconnect -- retrying forever is the failure mode this guards.
 func TestKickIngestTellsAStaleTokenToReconnect(t *testing.T) {
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"data":[{"broadcaster_user_id":7,"slug":"chan",
 			"stream":{"is_live":true}}]}`)
 	})
-	_, err := (&Kick{}).Ingest(context.Background(), "cid", "token")
+	_, err := k.Ingest(context.Background(), "cid", "token")
 	if !errors.Is(err, ErrNoStreamKeyAPI) {
 		t.Fatalf("a response with no key must wrap ErrNoStreamKeyAPI so callers can "+
 			"distinguish 'reconnect' from 'retry': %v", err)
@@ -341,7 +348,7 @@ func TestKickTokenRequestsSendTheGrantKickExpects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var got url.Values
 			var path string
-			kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+			k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 				path = r.URL.Path
 				raw, _ := io.ReadAll(r.Body)
 				got, _ = url.ParseQuery(string(raw))
@@ -349,7 +356,7 @@ func TestKickTokenRequestsSendTheGrantKickExpects(t *testing.T) {
 				_, _ = w.Write([]byte(`{"access_token":"at","refresh_token":"rt","expires_in":3600,"scope":"user:read"}`))
 			})
 
-			if _, err := tc.call(&Kick{}); err != nil {
+			if _, err := tc.call(k); err != nil {
 				t.Fatalf("token request: %v", err)
 			}
 			if path != "/oauth/token" {
@@ -370,10 +377,10 @@ func TestKickTokenRequestsSendTheGrantKickExpects(t *testing.T) {
 }
 
 func TestKickRefreshKeepsTheOldRefreshTokenWhenTheResponseOmitsOne(t *testing.T) {
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"access_token":"at","expires_in":3600}`))
 	})
-	tok, err := (&Kick{}).Refresh(context.Background(), "cid", "secret", "old-refresh")
+	tok, err := k.Refresh(context.Background(), "cid", "secret", "old-refresh")
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -388,12 +395,12 @@ func TestKickRefreshKeepsTheOldRefreshTokenWhenTheResponseOmitsOne(t *testing.T)
 func TestKickAccountReadsTheCurrentUsersChannelWithNoParameters(t *testing.T) {
 	var log []capture
 	var auth string
-	kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(`{"data":[{"broadcaster_user_id":4242,"slug":"nightowl","stream_title":"late"}]}`))
 	}))
 
-	acct, err := (&Kick{}).Account(context.Background(), "cid", "the-token")
+	acct, err := k.Account(context.Background(), "cid", "the-token")
 	if err != nil {
 		t.Fatalf("Account: %v", err)
 	}
@@ -415,10 +422,10 @@ func TestKickAccountReadsTheCurrentUsersChannelWithNoParameters(t *testing.T) {
 }
 
 func TestKickAccountSaysWhichScopeIsMissingWhenNoChannelComesBack(t *testing.T) {
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[]}`))
 	})
-	_, err := (&Kick{}).Account(context.Background(), "cid", "tok")
+	_, err := k.Account(context.Background(), "cid", "tok")
 	if err == nil {
 		t.Fatal("an empty channel list was accepted; the account would save with no name")
 	}
@@ -431,11 +438,11 @@ func TestKickAccountSaysWhichScopeIsMissingWhenNoChannelComesBack(t *testing.T) 
 
 func TestKickCategorySearchQueriesTheDirectory(t *testing.T) {
 	var log []capture
-	kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":15,"name":"Just Chatting"},{"id":28,"name":"Just Dance"}]}`))
 	}))
 
-	got, err := (&Kick{}).SearchCategories(context.Background(), "cid", "tok", "just ch")
+	got, err := k.SearchCategories(context.Background(), "cid", "tok", "just ch")
 	if err != nil {
 		t.Fatalf("SearchCategories: %v", err)
 	}
@@ -516,7 +523,7 @@ func TestKickPushMetadataWritesWhatKickAcceptsAndWarnsAboutTheRest(t *testing.T)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var log []capture
-			kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
+			k, _ := kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasPrefix(r.URL.Path, "/public/v1/categories") {
 					body := tc.categories
 					if body == "" {
@@ -528,7 +535,7 @@ func TestKickPushMetadataWritesWhatKickAcceptsAndWarnsAboutTheRest(t *testing.T)
 				w.WriteHeader(http.StatusNoContent)
 			}))
 
-			res, err := (&Kick{}).PushMetadata(context.Background(), "cid", "tok", "4242", tc.meta)
+			res, err := k.PushMetadata(context.Background(), "cid", "tok", "4242", tc.meta)
 			if err != nil {
 				t.Fatalf("PushMetadata: %v", err)
 			}
@@ -577,11 +584,11 @@ func assertFields(t *testing.T, label string, got, want []MetadataField) {
 }
 
 func TestKickMetadataScopeFailureNamesTheReconnect(t *testing.T) {
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"unauthorized"}`))
 	})
-	_, err := (&Kick{}).PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{Title: "t"})
+	_, err := k.PushMetadata(context.Background(), "cid", "tok", "4242", Metadata{Title: "t"})
 	if err == nil {
 		t.Fatal("a 401 was reported as success")
 	}
@@ -594,11 +601,11 @@ func TestKickUpdateChannelOmitsFieldsTheCallerDidNotSet(t *testing.T) {
 	// A PATCH that sent zero values would blank a live title or reset the
 	// category to nothing — the one failure mode worse than not writing at all.
 	var log []capture
-	kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
-	err := (&Kick{}).UpdateChannel(context.Background(), "tok", KickChannelUpdate{
+	err := k.UpdateChannel(context.Background(), "tok", KickChannelUpdate{
 		CustomTags: []string{"speedrun", "no-commentary"},
 	})
 	if err != nil {
@@ -706,7 +713,7 @@ func TestKickStatsReadsTheLiveChannelAndFallsBackWhenAnEndpointIsUnavailable(t *
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+			k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case kickUserLivestreamsPath:
 					tc.users(w)
@@ -717,7 +724,7 @@ func TestKickStatsReadsTheLiveChannelAndFallsBackWhenAnEndpointIsUnavailable(t *
 				}
 			})
 
-			got, err := (&Kick{}).Stats(context.Background(), "cid", "tok")
+			got, err := k.Stats(context.Background(), "cid", "tok")
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("both endpoints failed but Stats returned %#v", got)
@@ -756,14 +763,14 @@ func TestKickStatsParsesTheStartTimeAndSurvivesOneItCannotRead(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+			k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == kickUserLivestreamsPath {
 					_, _ = w.Write([]byte(`{"data":[{"viewer_count":3,"started_at":"` + tc.startedAt + `"}]}`))
 					return
 				}
 				_, _ = w.Write([]byte(`{"data":[]}`))
 			})
-			got, err := (&Kick{}).Stats(context.Background(), "cid", "tok")
+			got, err := k.Stats(context.Background(), "cid", "tok")
 			if err != nil {
 				t.Fatalf("Stats: %v", err)
 			}
@@ -844,7 +851,7 @@ func TestEveryRegisteredProviderHasASetupGuide(t *testing.T) {
 // thing.
 func TestKickTakesTagsAndSaysWhatItCannotDo(t *testing.T) {
 	var body map[string]any
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch && r.URL.Path == "/public/v1/channels" {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			w.WriteHeader(http.StatusOK)
@@ -856,7 +863,7 @@ func TestKickTakesTagsAndSaysWhatItCannotDo(t *testing.T) {
 	tags := []string{"speedrun", "chill"}
 	dvr := false
 	when := "2026-08-01T20:00:00Z"
-	res, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	res, err := k.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{Tags: &tags, EnableDvr: &dvr, ScheduledStart: &when})
 	if err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
@@ -894,7 +901,7 @@ func TestKickTakesTagsAndSaysWhatItCannotDo(t *testing.T) {
 func TestKickCanClearEveryTag(t *testing.T) {
 	var body map[string]any
 	var patched bool
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch && r.URL.Path == "/public/v1/channels" {
 			patched = true
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -905,7 +912,7 @@ func TestKickCanClearEveryTag(t *testing.T) {
 	})
 
 	empty := []string{}
-	if _, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	if _, err := k.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{Tags: &empty}); err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
 	}
@@ -920,14 +927,14 @@ func TestKickCanClearEveryTag(t *testing.T) {
 
 // A block with nothing Kick handles must not write at all.
 func TestKickWritesNothingWhenThereAreNoTags(t *testing.T) {
-	kickStub(t, func(w http.ResponseWriter, r *http.Request) {
+	k, _ := kickStub(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch {
 			t.Errorf("a settings block with no tags still wrote to %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 	dvr := true
-	res, err := (&Kick{}).PushBroadcastSettings(context.Background(), "cid", "tok",
+	res, err := k.PushBroadcastSettings(context.Background(), "cid", "tok",
 		BroadcastSettings{EnableDvr: &dvr})
 	if err != nil {
 		t.Fatalf("PushBroadcastSettings: %v", err)
