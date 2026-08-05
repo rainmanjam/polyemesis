@@ -2198,7 +2198,14 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		// path never comes straight from user input.
 		resolved, err := e.recman.ResolveForWrite(row.URL)
 		if err != nil {
-			e.hub.Unsubscribe(subName)
+			// The hub this subscribed to, which is not always the ingest's:
+			// upstreamHub returns e.hub only for a passthrough destination on a
+			// bare source, and a rendition or a running selector returns its
+			// own. Unsubscribing from e.hub left the subscriber in the OTHER hub
+			// for ever while the port went back to the allocator -- so the port
+			// is reissued and the stale entry blasts transport-stream datagrams
+			// into whatever now owns that socket.
+			hub.Unsubscribe(subName)
 			e.alloc.Release(port)
 			return err
 		}
