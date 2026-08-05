@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sync"
 
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -29,6 +30,17 @@ var schemaSQL string
 // LegacyPlaylistFilePath for the pure half this package still owns.
 type DB struct {
 	sql *sql.DB
+
+	// passwordCost is the bcrypt cost every password hash in this package uses.
+	// Open sets it to bcrypt.DefaultCost; only a test ever lowers it, through
+	// WithPasswordCost.
+	//
+	// A per-instance field rather than a package var, deliberately. This repo
+	// removed a set of package-var test seams in 0.3.0 for being order-dependent
+	// under -count=N and impossible to run in parallel with anything else in
+	// their package -- see internal/oauth/endpoints.go, which opens with that
+	// reasoning. A field on the thing being configured has neither problem.
+	passwordCost int
 
 	// settingsMu serialises READ-MODIFY-WRITE callers of the settings
 	// singleton, and nothing else.
@@ -54,8 +66,33 @@ type DB struct {
 	settingsMu sync.Mutex
 }
 
+// Option configures a DB at Open time.
+type Option func(*DB)
+
+// WithPasswordCost lowers the bcrypt cost used for password hashing.
+//
+// FOR TESTS, and for one measured reason. bcrypt at DefaultCost costs 1.40
+// SECONDS for a single hash-and-compare under -race, against 0.02s at MinCost
+// -- seventy times. Every test that stands up a server creates a user and logs
+// in, so internal/api was paying it on nearly every test: that package ran 709s
+// of a 900s ceiling on the CI attempt that passed, and hit the full 900s and
+// timed out on the attempt before it. The suite was a coin flip decided by
+// runner speed, and the timeout landed on whichever test happened to be running
+// -- which made an innocent test look flaky.
+//
+// The cost factor is a production hardening parameter, not behaviour: the same
+// code path runs at any cost, so nothing is left untested by lowering it. What
+// WAS going untested is every assertion after the fifteen-minute mark, because
+// the binary was killed before reaching them.
+//
+// Production must never call this, and TestTheDefaultPasswordCostIsNotWeakened
+// is what says so.
+func WithPasswordCost(cost int) Option {
+	return func(d *DB) { d.passwordCost = cost }
+}
+
 // Open opens (creating if needed) the database at path and applies the schema.
-func Open(path string) (*DB, error) {
+func Open(path string, opts ...Option) (*DB, error) {
 	// WAL keeps the API responsive while the retention sweeper writes, and
 	// busy_timeout turns the rare writer collision into a short wait instead
 	// of an SQLITE_BUSY error surfacing to the user.
@@ -77,7 +114,14 @@ func Open(path string) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	d := &DB{sql: sqldb}
+	// The default is applied BEFORE the options, so an install that passes none
+	// gets the production cost and a test that passes one wins.
+	d := &DB{sql: sqldb, passwordCost: bcrypt.DefaultCost}
+	for _, o := range opts {
+		if o != nil {
+			o(d)
+		}
+	}
 	// Adds destinations.rendition_id to a database created before renditions
 	// existed; CREATE TABLE IF NOT EXISTS cannot do it.
 	if err := d.MigrateRenditions(); err != nil {

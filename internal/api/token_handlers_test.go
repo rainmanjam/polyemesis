@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -40,7 +41,7 @@ func testServer(t *testing.T, cfg config.Config) (*Server, http.Handler, *db.DB)
 func testServerWith(t *testing.T, o Options) (*Server, http.Handler, *db.DB) {
 	t.Helper()
 
-	store, err := db.Open(filepath.Join(t.TempDir(), "polyemesis.db"))
+	store, err := db.Open(filepath.Join(t.TempDir(), "polyemesis.db"), db.WithPasswordCost(bcrypt.MinCost))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
