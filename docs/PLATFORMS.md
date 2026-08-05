@@ -242,6 +242,46 @@ connecting is what creates the broadcast and there is no permanent key to reuse.
 "Refresh key" on a Facebook destination therefore starts a new live video rather
 than re-reading an existing one.
 
+#### What a Facebook destination can be told to do
+
+All of these are set on the destination and applied when the broadcast is
+created, so they take effect on the next go-live rather than immediately.
+
+**Audience, crossposting and a donate button.** The audience is suppressed for
+Page targets — a Page broadcast has no personal audience for a value like
+*only me* to apply to — so the control is not offered there rather than being
+accepted and discarded. Crossposting names the Pages a broadcast is shared
+with; the donate button names one charity.
+
+**A broadcast announced before it starts.** A destination on a start schedule
+gets its Facebook broadcast created ahead of time, so there is a public event
+page days early instead of one appearing the moment bytes arrive.
+
+Facebook accepts a start time at most **seven days** ahead. That bounds far
+less than it sounds: the next occurrence of a daily schedule is at most a day
+away and of a weekly one at most seven, by definition — so only a *one-off*
+schedule can be set beyond it. One that is gets no event page, saves anyway,
+runs anyway, and says so.
+
+If you delete the scheduled video on Facebook, polyemesis notices after three
+consecutive failed attempts to move it and creates a fresh one. A single
+network failure changes nothing.
+
+**A redundant backup feed.** Facebook can provision a second ingest endpoint,
+and polyemesis will publish to both — so a dropped connection does not drop the
+broadcast. It is **off by default** because it doubles that destination's
+upload bandwidth and its audio encoding cost.
+
+Turning it on **reconnects the stream once**, and that is unavoidable rather
+than careless: a backup endpoint exists only on a broadcast created with one,
+and creating that broadcast issues a new stream key. **Enable it before you go
+live, not during.**
+
+Facebook decides which of the two feeds it takes. polyemesis publishes both and
+does not attempt to choose, because no endpoint reports which one is being
+ingested. The card shows the backup's own state beside the primary's — a backup
+that has quietly died is worse than none, since you would believe you had one.
+
 ### Kick
 
 Kick signs in and the stream key is fetched, like every other platform here.
@@ -305,10 +345,16 @@ Coverage by platform:
 - **Twitch** — `content_classification_labels`.
 - **Facebook** — the broadcast's audience, through the same read-back-confirmed
   path described in the Facebook section above.
-- **Kick has no compliance API at all.** A Kick destination with compliance
-  stored is reported **skipped, with a reason**, on every push — not silently
-  dropped, and not treated as a failure — until the setting is cleared on that
-  destination.
+- **Kick has no compliance API at all**, and since 0.2.0 a Kick destination
+  cannot hold compliance either. Saving one **clears the setting and says so**,
+  because a stored declaration that can never be sent is not merely useless: it
+  becomes live again the moment that destination is pointed back at a platform
+  that does have a compliance surface — a legal statement transmitted on behalf
+  of an operator who last saw it in a form they abandoned.
+
+  A destination carrying compliance from before the upgrade keeps it until its
+  next save, and is reported **skipped, with a reason**, on any push until then
+  — not silently dropped, and not treated as a failure.
 
 **Compliance is stored per destination; the platform account that receives it
 is shared.** A push targets an account, and a connected account can be the

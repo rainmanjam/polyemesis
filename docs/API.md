@@ -147,6 +147,39 @@ Send only stored fields on a `PUT`. Server-computed ones (`publishUrls`,
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
 
+**A create, update or `refresh-key` may return `warnings`**, an array of
+sentences meant to be shown to the operator. It is present only when something
+was changed or omitted that they did not ask for, and it never accompanies an
+error — the write succeeded, and this says what it did:
+
+```json
+{
+  "destination": { "...": "..." },
+  "warnings": [
+    "Compliance settings were removed: kick has no compliance surface, so a
+     privacy or COPPA declaration stored here would never be sent."
+  ]
+}
+```
+
+The cases that produce one today are a destination carrying settings its
+platform cannot send (see [PLATFORMS.md](PLATFORMS.md#compliance-metadata)), and
+a Facebook destination that asked for backup ingest and was not offered an
+endpoint.
+
+**Destination fields added in 0.2.0:** `backupUrl` and `backupStreamKey` — the
+platform's secondary ingest, stored when the broadcast was created and empty
+when it offered none — plus `facebook.backupIngest`, `facebook.scheduledFor`
+and `facebook.broadcastId`.
+
+**Status fields added in 0.2.0:** a destination's live status carries
+`backupProcess` (the redundant feed's own process state, absent when there is
+no backup), `backupError` (why a requested backup does not exist) and
+`facebookBroadcastId` (the pre-announced broadcast, which the dashboard links
+to). `backupProcess` is deliberately separate from `process`: a backup that has
+been dead for an hour beside a healthy primary is the one state this must not
+hide.
+
 **Expert mode splices arbitrary arguments into an FFmpeg command line.** Treat
 access to it as equivalent to shell access. `dry-run` tells you whether the
 result would start, without starting it.
@@ -312,6 +345,11 @@ submits the masked value unchanged keeps the real one.
 | `GET` `POST` | `/schedules` |
 | `GET` | `/schedules/runs` |
 | `GET` `PUT` `DELETE` | `/schedules/{id}` |
+
+A schedule create or update may also return `warnings`, on the same terms as a
+destination write. The one that exists today: a `once` schedule firing further
+ahead than Facebook accepts a scheduled broadcast gets no event page, and is
+told so. The schedule still saves and still runs.
 
 ### Platforms, metadata, chat
 
