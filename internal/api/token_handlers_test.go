@@ -23,7 +23,21 @@ const testPassword = "correct horse battery"
 // testServer returns a server whose store already holds the admin account,
 // plus its handler. Engine and event broker stay nil: no route exercised here
 // touches them.
+//
+// Its provider set is the zero oauth.Set, which resolves to the platforms' real
+// hosts. That is correct and deliberately inconvenient: a test that reaches a
+// platform without saying so fails by trying to reach the internet rather than
+// by quietly passing. A test that means to make a platform call uses
+// testServerWith and hands in a stubbed set.
 func testServer(t *testing.T, cfg config.Config) (*Server, http.Handler, *db.DB) {
+	t.Helper()
+	return testServerWith(t, Options{Config: cfg})
+}
+
+// testServerWith is testServer with the caller's own Options folded in. Only
+// the fields a test cannot supply for itself -- the store, the secret box, the
+// discarded logger -- are filled here; everything else is left as passed.
+func testServerWith(t *testing.T, o Options) (*Server, http.Handler, *db.DB) {
 	t.Helper()
 
 	store, err := db.Open(filepath.Join(t.TempDir(), "polyemesis.db"))
@@ -39,14 +53,22 @@ func testServer(t *testing.T, cfg config.Config) (*Server, http.Handler, *db.DB)
 	if err != nil {
 		t.Fatalf("secrets.New: %v", err)
 	}
-	s := New(Options{
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config:  cfg,
-		DB:      store,
-		Secrets: box,
-		Version: "test",
-	})
+	o.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	o.DB = store
+	o.Secrets = box
+	o.Version = "test"
+	s := New(o)
 	return s, s.Handler(), store
+}
+
+// stubbedServer is testServer plus a stub standing in for every platform API,
+// and it is what replaced `s.pushMetadataFn = func(...)`. The returned stub is
+// where a test reads what actually left the process.
+func stubbedServer(t *testing.T, cfg config.Config) (*Server, http.Handler, *db.DB, *platformStub) {
+	t.Helper()
+	stub := newPlatformStub(t)
+	s, h, store := testServerWith(t, Options{Config: cfg, Providers: stub.set()})
+	return s, h, store, stub
 }
 
 func do(t *testing.T, h http.Handler, r *http.Request) *httptest.ResponseRecorder {

@@ -38,14 +38,6 @@ import (
 )
 
 const (
-	// facebookScheduleHorizon is Facebook's own bound on how far ahead a
-	// broadcast may be scheduled. Not ours to widen.
-	//
-	// It constrains far less than it looks like it does: the NEXT occurrence of
-	// a daily schedule is at most a day away and of a weekly one at most seven
-	// days, by definition. Only a `once` schedule can be set beyond it.
-	facebookScheduleHorizon = 7 * 24 * time.Hour
-
 	// preannounceTick is how often the horizon is re-checked.
 	//
 	// Minutes rather than seconds, and deliberately much slower than the
@@ -97,11 +89,31 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			continue
 		}
 		at, ok := scheduler.Next(sc, now)
-		if !ok || at.Sub(now) > facebookScheduleHorizon {
+		if !ok {
 			continue
 		}
 		for _, d := range dests {
-			if !scheduleTargets(sc, d.ID) || d.Platform != db.PlatformFacebook {
+			if !scheduleTargets(sc, d.ID) {
+				continue
+			}
+			// THE CAPABILITY, NOT THE PLATFORM NAME. This used to read
+			// `d.Platform != db.PlatformFacebook` and then enforce a
+			// facebookScheduleHorizon constant declared in this file -- a
+			// platform fact written down twice, once as a name and once as a
+			// number, in the one package that has no way to check either.
+			// ScheduledBroadcastsFor answers both at once: absent for every
+			// platform that cannot pre-announce, and carrying that platform's
+			// own bound for the one that can.
+			sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
+			if !ok {
+				continue
+			}
+			// The bound is read here rather than beside scheduler.Next above
+			// because it belongs to the DESTINATION's platform, and the
+			// occurrence is not out of range until there is somewhere to send
+			// it. A schedule with no pre-announcing destination on it is out of
+			// scope however far away it is.
+			if at.Sub(now) > sb.ScheduleHorizon() {
 				continue
 			}
 			// No connected account means no token and no target, so there is
@@ -134,7 +146,7 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			if d.Facebook.AnnouncedFor(at) {
 				continue
 			}
-			s.announceOne(ctx, sc, d, at, now)
+			s.announceOne(ctx, sb, sc, d, at, now)
 		}
 	}
 }
@@ -175,7 +187,12 @@ func scheduleTargets(sc scheduler.Schedule, destID int64) bool {
 // a marker with no broadcast id, which is the opposite claim -- "a create was in
 // flight and its outcome is unknown" -- and exists so that a create Facebook
 // accepted but this process never recorded is not created a second time.
-func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.Destination, at, now time.Time) {
+// sb is the platform's pre-announce capability, resolved by the sweep and
+// passed in rather than looked up again: this function creates the broadcast
+// through it AND moves it through it, and two lookups is how one of them ends
+// up resolved against a different provider set from the other.
+func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
+	sc scheduler.Schedule, d *db.Destination, at, now time.Time) {
 	// tokenFor returns the ACCOUNT with a refreshed token on it, not a token
 	// string, and it does the refresh -- which is why it is used here rather
 	// than GetPlatformAccount.
@@ -195,7 +212,7 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 		// the schedule moved. Move the broadcast rather than creating a second
 		// one, which would leave the first as an event page people are still
 		// subscribed to for a show that will not happen there.
-		if err := s.rescheduleFn(cctx, acct, prev.BroadcastID, at); err != nil {
+		if err := sb.RescheduleBroadcast(cctx, acct.AccessToken, prev.BroadcastID, at); err != nil {
 			s.log.Warn("pre-announce: could not move the broadcast",
 				"destination", d.Name, "schedule", sc.Name, "err", err)
 			s.noteRescheduleFailure(d, sc, prev, now)
@@ -225,10 +242,6 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 		return
 	}
 
-	provider, err := oauth.Get(acct.Platform)
-	if err != nil {
-		return
-	}
 	creds, err := s.store.GetPlatformCreds(s.box, acct.Platform)
 	if err != nil {
 		// Not a failure worth shouting about: a platform with no developer
@@ -254,7 +267,7 @@ func (s *Server) announceOne(ctx context.Context, sc scheduler.Schedule, d *db.D
 		return
 	}
 
-	b, err := s.ingestForFn(cctx, provider, creds.ClientID, acct,
+	b, err := s.ingestFor(cctx, sb, creds.ClientID, acct,
 		ingestOptionsFor(d, at))
 	if err != nil {
 		// The intent goes back: Graph refused, so the next sweep is free to try

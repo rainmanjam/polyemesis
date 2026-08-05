@@ -67,7 +67,7 @@ func (s *Server) handleListCreds(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 	platform := db.Platform(chi.URLParam(r, "platform"))
-	if _, err := oauth.Get(platform); err != nil {
+	if _, err := s.providers.Get(platform); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -90,6 +90,11 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 	// the status code. An operator is usually part-way through a platform
 	// console when they paste these; refusing to save a credential they are
 	// three clicks from making valid is obstructive rather than protective.
+	//
+	// The one platform call in this package that does NOT go through
+	// s.providers, because oauth.Set has no twin for it: CheckCredentialsFor
+	// resolves its own provider and always reaches the real platform. Nothing
+	// here can stub it, which is why no test in this package drives it.
 	check := oauth.CheckCredentialsFor(r.Context(), platform, req.ClientID, req.ClientSecret)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"platform":  platform,
@@ -104,7 +109,7 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 // a client secret exactly once.
 func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
 	platform := db.Platform(chi.URLParam(r, "platform"))
-	if _, err := oauth.Get(platform); err != nil {
+	if _, err := s.providers.Get(platform); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -166,7 +171,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 // handleOAuthStart redirects the browser to the platform's consent screen.
 func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	platform := db.Platform(chi.URLParam(r, "platform"))
-	provider, err := oauth.Get(platform)
+	provider, err := s.providers.Get(platform)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -226,7 +231,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	provider, err := oauth.Get(platform)
+	provider, err := s.providers.Get(platform)
 	if err != nil {
 		s.oauthDone(w, r, "", err.Error())
 		return
@@ -323,7 +328,7 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	provider, err := oauth.Get(acct.Platform)
+	provider, err := s.providers.Get(acct.Platform)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"supported": false, "reason": err.Error()})
 		return
@@ -380,7 +385,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	provider, err := oauth.Get(acct.Platform)
+	provider, err := s.providers.Get(acct.Platform)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -391,7 +396,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b, err := s.ingestForFn(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
+	b, err := s.ingestFor(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
 	if err != nil {
 		// A platform that publishes no key endpoint is not a transport
 		// failure, and 502 invites a retry that can never succeed. The
@@ -491,7 +496,7 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 // which was being parsed by internal/oauth and discarded right here. A platform
 // with no broadcast object gets a synthetic one so every caller reads one shape.
 func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientID string, acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
-	if tp, ok := oauth.TargetsFor(acct.Platform); ok {
+	if tp, ok := s.providers.TargetsFor(acct.Platform); ok {
 		return tp.IngestFor(ctx, clientID, acct.AccessToken, acct.AccountRef, opts)
 	}
 	ing, err := provider.Ingest(ctx, clientID, acct.AccessToken)
@@ -517,7 +522,7 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 			acct.Platform)
 	}
 
-	provider, err := oauth.Get(acct.Platform)
+	provider, err := s.providers.Get(acct.Platform)
 	if err != nil {
 		return nil, err
 	}

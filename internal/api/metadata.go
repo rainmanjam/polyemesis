@@ -184,7 +184,7 @@ func (s *Server) handleMetadataOverview(w http.ResponseWriter, r *http.Request) 
 // metadataTargets lists connected accounts on platforms that implement the
 // capability, each carrying the compliance resolved from its destinations. A
 // platform that cannot do this is absent rather than present and failing — see
-// oauth.MetadataFor.
+// Set.MetadataFor.
 //
 // The conflicts return is not advisory. Destinations on one account asking for
 // different compliance have no answer, so complianceByTarget withholds that
@@ -208,7 +208,7 @@ func (s *Server) metadataTargets() ([]metadataTarget, map[int64][]string, error)
 
 	out := []metadataTarget{}
 	for _, a := range accts {
-		mp, ok := oauth.MetadataFor(a.Platform)
+		mp, ok := s.providers.MetadataFor(a.Platform)
 		if !ok {
 			continue
 		}
@@ -429,7 +429,7 @@ func (s *Server) handleBroadcastWindow(w http.ResponseWriter, r *http.Request) {
 			Platform:    t.Platform,
 			AccountName: t.AccountName,
 		}
-		pusher, ok := oauth.MetadataFor(t.Platform)
+		pusher, ok := s.providers.MetadataFor(t.Platform)
 		if !ok {
 			rows = append(rows, row)
 			continue
@@ -758,7 +758,7 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 		out.Message = fmt.Sprintf("developer credentials for %s are missing; add them in Settings → Platform credentials.", t.Platform)
 		return out
 	}
-	pusher, ok := oauth.MetadataFor(t.Platform)
+	pusher, ok := s.providers.MetadataFor(t.Platform)
 	if !ok {
 		out.State = metaError
 		out.Message = fmt.Sprintf("%s cannot receive stream metadata", t.Platform)
@@ -772,7 +772,7 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	res := &oauth.MetadataResult{}
 	if !meta.Empty() {
 		var err error
-		res, err = s.pushMetadataFn(ctx, pusher, creds.ClientID, acct.AccessToken, acct.AccountRef, meta)
+		res, err = pusher.PushMetadata(ctx, creds.ClientID, acct.AccessToken, acct.AccountRef, meta)
 		if err != nil {
 			out.State = metaError
 			out.Message = err.Error()
@@ -788,7 +788,7 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	// "unsupported" for every operator who tries.
 	if !bc.Empty() {
 		if bp, ok := pusher.(broadcastPusher); ok {
-			bres, err := s.pushBroadcastFn(ctx, bp, creds.ClientID, acct.AccessToken, bc)
+			bres, err := bp.PushBroadcastSettings(ctx, creds.ClientID, acct.AccessToken, bc)
 			switch {
 			case err != nil:
 				// Reported, not fatal. The metadata write above may already
@@ -829,8 +829,8 @@ func (s *Server) pushOne(meta oauth.Metadata, bc oauth.BroadcastSettings, t meta
 	// does not have teaches the operator to ignore red rows. Absent is still
 	// SAID, though -- see the else below.
 	if !t.Compliance.Empty() {
-		if cp, ok := oauth.ComplianceFor(t.Platform); ok {
-			cres, err := s.pushComplianceFn(ctx, cp, creds.ClientID, acct.AccessToken,
+		if cp, ok := s.providers.ComplianceFor(t.Platform); ok {
+			cres, err := cp.PushCompliance(ctx, creds.ClientID, acct.AccessToken,
 				oauth.ComplianceTarget{AccountRef: acct.AccountRef, StreamKey: t.StreamKey},
 				t.Compliance)
 			switch {

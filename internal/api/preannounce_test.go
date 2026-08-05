@@ -3,9 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,55 +18,93 @@ import (
 
 // These drive s.preannounceOnce directly rather than through a handler, which
 // is why testServer's nil engine is fine here: nothing reaches refuseIfSilent.
-//
-// They replace ingestForFn and rescheduleFn rather than stubbing Graph, because
-// internal/oauth's graph base is unexported -- the same reason those seams
-// exist at all. See the comments on them in api.go.
 
-// announced is what the seams recorded, so each test asserts on what the sweep
-// DID rather than on it having run.
+// announced configures the stub Graph API the sweep talks to, and reads back
+// what the sweep actually sent.
+//
+// It used to install two closures on Server -- ingestForFn and rescheduleFn --
+// which existed for one reason, and both said so: internal/oauth's graph base
+// was unexported, so nothing in this package could point a provider at a stub.
+// oauth.WithBaseURL is that seam, so the sweep now runs the REAL Facebook
+// provider against a real HTTP server, and every assertion below reads the
+// Graph request that came out of it. A provider that stopped putting
+// event_params on the create fails these tests; a closure that received the
+// right oauth.IngestOptions could not have noticed.
 type announced struct {
-	creates     []oauth.IngestOptions
-	reschedules []time.Time
-	key         string
+	stub *platformStub
+	// key is the stream key inside the ingest URL the create returns.
+	key string
+	// broadcastID is the live video id every create returns.
 	broadcastID string
 	// ids, when set, is handed out one per create so a test can tell two event
 	// pages apart. Without it every create returns broadcastID, which is fine
 	// for the tests that only ever expect one.
-	ids     []string
-	backups []oauth.Ingest
-	err     error
-	// duringCreate runs inside the Graph call, which is where an operator edit
-	// lands in production: the sweep read the destination before it and writes
-	// after it.
-	duringCreate func(rec *announced)
+	ids []string
+	// backups asks the stub to answer with a secondary ingest URL beside the
+	// primary, the way Facebook does when backup ingest was requested.
+	backups bool
+	// err, when set, is the Graph refusal the create and the reschedule both
+	// answer with.
+	err string
 }
 
-func stubAnnounce(s *Server, rec *announced) {
-	s.ingestForFn = func(ctx context.Context, p oauth.Provider, clientID string,
-		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
-		rec.creates = append(rec.creates, opts)
-		if rec.duringCreate != nil {
-			rec.duringCreate(rec)
-		}
-		if rec.err != nil {
-			return nil, rec.err
-		}
-		id := rec.broadcastID
-		if len(rec.ids) > 0 {
-			id, rec.ids = rec.ids[0], rec.ids[1:]
-		}
-		return &oauth.Broadcast{
-			ID:      id,
-			Ingest:  oauth.Ingest{URL: "rtmps://live.example/rtmp", Key: rec.key},
-			Backups: rec.backups,
-		}, nil
+func stubAnnounce(stub *platformStub, rec *announced) {
+	rec.stub = stub
+	stub.fbKey = rec.key
+	if rec.broadcastID != "" {
+		stub.fbLiveID = rec.broadcastID
 	}
-	s.rescheduleFn = func(ctx context.Context, acct *db.PlatformAccount,
-		broadcastID string, at time.Time) error {
-		rec.reschedules = append(rec.reschedules, at)
-		return rec.err
+	stub.fbLiveIDs = rec.ids
+	stub.fbBackups = rec.backups
+	stub.fbCreateErr = rec.err
+}
+
+// fail and succeed change what Graph answers part-way through a test, which is
+// how the consecutive-failure counter is driven. Both go through the stub's
+// lock: a sweep can be running in another goroutine.
+func (a *announced) fail(msg string) { a.stub.setCreateErr(msg) }
+func (a *announced) succeed()        { a.stub.setCreateErr("") }
+
+// onCreate runs inside the Graph call, which is where an operator edit lands in
+// production: the sweep read the destination before it and writes after it.
+func (a *announced) onCreate(fn func()) { a.stub.setDuringCreate(fn) }
+
+// creates is one entry per live_videos POST, decoded back out of Graph's query
+// parameters into the options that produced them.
+//
+// Decoded rather than recorded, and that is the whole difference from the
+// closure this replaced: what these tests now assert on is the wire form that
+// reached Facebook, not the struct the caller assembled one layer earlier.
+func (a *announced) creates() []oauth.IngestOptions {
+	var out []oauth.IngestOptions
+	for _, c := range a.stub.calls() {
+		if c.Method != http.MethodPost || !strings.HasSuffix(c.Path, "/live_videos") {
+			continue
+		}
+		o := oauth.IngestOptions{BackupIngest: c.Query.Get("enable_backup_ingest") == "true"}
+		if secs, err := strconv.ParseInt(c.Query.Get("event_params"), 10, 64); err == nil {
+			o.ScheduledFor = time.Unix(secs, 0)
+		}
+		out = append(out, o)
 	}
+	return out
+}
+
+// reschedules is one entry per POST to a live video NODE carrying a new start
+// time. The NODE, not the /live_videos edge: the edge creates a broadcast and
+// the node edits one, and a test that could not tell them apart would read a
+// duplicated event page as a moved one.
+func (a *announced) reschedules() []time.Time {
+	var out []time.Time
+	for _, c := range a.stub.calls() {
+		if c.Method != http.MethodPost || strings.HasSuffix(c.Path, "/live_videos") {
+			continue
+		}
+		if secs, err := strconv.ParseInt(c.Query.Get("event_params"), 10, 64); err == nil {
+			out = append(out, time.Unix(secs, 0))
+		}
+	}
+	return out
 }
 
 func seedDestination(t *testing.T, s *Server, store *db.DB, platform db.Platform, name string) *db.Destination {
@@ -116,10 +154,13 @@ func seedStartSchedule(t *testing.T, store *db.DB, kind scheduler.Kind, at time.
 	return stored.ID
 }
 
+// Mutation: replace `cur.StreamKey = b.Ingest.Key` in announceOne with
+// `_ = b.Ingest.Key`. Observed FAIL, here and in
+// TestThePreCreatedKeyIsWrittenToTheDestination.
 func TestASchedulesNextOccurrenceGetsAnEventPage(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -128,14 +169,14 @@ func TestASchedulesNextOccurrenceGetsAnEventPage(t *testing.T) {
 
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 1 {
-		t.Fatalf("created %d broadcasts, want 1", len(rec.creates))
+	if len(rec.creates()) != 1 {
+		t.Fatalf("created %d broadcasts, want 1", len(rec.creates()))
 	}
 	// Asserted on the OPTION, because that is what carries the schedule into
 	// the Graph call. A create with a zero ScheduledFor is a LIVE_NOW broadcast
 	// and no event page at all.
-	if !rec.creates[0].ScheduledFor.Equal(at) {
-		t.Errorf("ScheduledFor = %v, want the occurrence %v", rec.creates[0].ScheduledFor, at)
+	if !rec.creates()[0].ScheduledFor.Equal(at) {
+		t.Errorf("ScheduledFor = %v, want the occurrence %v", rec.creates()[0].ScheduledFor, at)
 	}
 	got, err := store.GetDestination(d.ID)
 	if err != nil {
@@ -153,9 +194,9 @@ func TestASchedulesNextOccurrenceGetsAnEventPage(t *testing.T) {
 // event page people were notified about stays empty while the stream goes
 // somewhere else.
 func TestThePreCreatedKeyIsWrittenToTheDestination(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -171,10 +212,14 @@ func TestThePreCreatedKeyIsWrittenToTheDestination(t *testing.T) {
 }
 
 // The case a boolean marker gets wrong in one direction.
+//
+// Mutation: `if false && d.Facebook.AnnouncedFor(at)` in preannounceOnce.
+// Observed FAIL ("rescheduled 1 times for an occurrence already announced") --
+// and note it is the reschedule count that catches it, not the create count.
 func TestASecondSweepForTheSameOccurrenceCreatesNothing(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -183,26 +228,26 @@ func TestASecondSweepForTheSameOccurrenceCreatesNothing(t *testing.T) {
 	s.preannounceOnce(context.Background(), time.Now())
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 1 {
+	if len(rec.creates()) != 1 {
 		t.Fatalf("created %d broadcasts across two sweeps, want 1. At a 5-minute "+
-			"tick this is a new public Facebook event every 5 minutes.", len(rec.creates))
+			"tick this is a new public Facebook event every 5 minutes.", len(rec.creates()))
 	}
 	// The creates count ALONE does not catch this. Once a broadcast exists the
 	// sweep takes the reschedule branch, so removing the AnnouncedFor skip
 	// leaves creates at 1 and quietly re-POSTs the same start time to Facebook
 	// every five minutes forever. Measured: that mutation did not turn this
 	// test red until this assertion was added.
-	if len(rec.reschedules) != 0 {
+	if len(rec.reschedules()) != 0 {
 		t.Fatalf("rescheduled %d times for an occurrence already announced, want 0",
-			len(rec.reschedules))
+			len(rec.reschedules()))
 	}
 }
 
 // Empty DestinationIDs means every destination, and it is the commonest shape.
 func TestAScheduleThatNamesNoDestinationsStillAnnouncesTheFacebookOnes(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -210,17 +255,23 @@ func TestAScheduleThatNamesNoDestinationsStillAnnouncesTheFacebookOnes(t *testin
 
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 1 {
+	if len(rec.creates()) != 1 {
 		t.Fatalf(`created %d broadcasts, want 1. "Start the show" usually names no `+
 			`destinations, so a rule that skipped this shape would switch the `+
-			`feature off for most installs.`, len(rec.creates))
+			`feature off for most installs.`, len(rec.creates()))
 	}
 }
 
+// The bound is the PLATFORM's, read through ScheduledBroadcaster.ScheduleHorizon
+// rather than from a constant this package keeps its own copy of.
+//
+// Mutation: replace `at.Sub(now) > sb.ScheduleHorizon()` in preannounceOnce with
+// `at.Sub(now) > 90*24*time.Hour`. Observed FAIL ("created 1 broadcasts beyond
+// Facebook's seven-day bound").
 func TestAnOccurrenceBeyondSevenDaysIsNotAnnounced(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -228,18 +279,22 @@ func TestAnOccurrenceBeyondSevenDaysIsNotAnnounced(t *testing.T) {
 
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 0 {
+	if len(rec.creates()) != 0 {
 		t.Fatalf("created %d broadcasts beyond Facebook's seven-day bound, want 0",
-			len(rec.creates))
+			len(rec.creates()))
 	}
 }
 
 // Best-effort has to be provably best-effort, and the marker must not be
 // written for a broadcast that does not exist.
+//
+// Mutation: on the create-failure path, replace `cur.Facebook.Forget(sc.ID, "")`
+// with `cur.Facebook.Announce(sc.ID, at, "failed-create", now)`. Observed FAIL
+// ("the marker was written for a broadcast that was never created").
 func TestAGraphFailureLeavesTheDestinationUntouched(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
-	rec := &announced{key: "k", broadcastID: "777", err: errors.New("graph said no")}
-	stubAnnounce(s, rec)
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777", err: "graph said no"}
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -257,10 +312,16 @@ func TestAGraphFailureLeavesTheDestinationUntouched(t *testing.T) {
 	}
 }
 
+// The gate is the CAPABILITY, not the platform name.
+//
+// Mutation: replace the `sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)`
+// lookup and its `if !ok { continue }` with
+// `sb, _ := s.providers.ScheduledBroadcastsFor(db.PlatformFacebook)`. Observed
+// FAIL ("created 1 broadcasts for a non-Facebook destination").
 func TestANonFacebookDestinationOnTheSameScheduleIsUntouched(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	seedDestination(t, s, store, db.PlatformTwitch, "tw")
 	seedCreds(t, s, store, db.PlatformTwitch)
@@ -268,18 +329,18 @@ func TestANonFacebookDestinationOnTheSameScheduleIsUntouched(t *testing.T) {
 
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 0 {
+	if len(rec.creates()) != 0 {
 		t.Fatalf("created %d broadcasts for a non-Facebook destination, want 0",
-			len(rec.creates))
+			len(rec.creates()))
 	}
 }
 
 // A stop schedule has nothing to announce; an event page for one would
 // advertise a show ending.
 func TestAStopScheduleAnnouncesNothing(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -294,8 +355,8 @@ func TestAStopScheduleAnnouncesNothing(t *testing.T) {
 
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 0 {
-		t.Fatalf("created %d broadcasts for a STOP schedule, want 0", len(rec.creates))
+	if len(rec.creates()) != 0 {
+		t.Fatalf("created %d broadcasts for a STOP schedule, want 0", len(rec.creates()))
 	}
 }
 
@@ -303,10 +364,13 @@ func TestAStopScheduleAnnouncesNothing(t *testing.T) {
 // its own start time, and it must MOVE the existing broadcast rather than
 // create a second one. A second create leaves the first as a public event page
 // people are still subscribed to.
+// Mutation: `case false && held && prev.BroadcastID != "":` in announceOne, which
+// is the reschedule branch switched off. Observed FAIL ("rescheduled 0 times,
+// want 1"), and also in TestABroadcastThatWillNotMoveIsEventuallyReplaced.
 func TestTheNextOccurrenceMovesTheBroadcastRatherThanDuplicatingIt(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -318,17 +382,24 @@ func TestTheNextOccurrenceMovesTheBroadcastRatherThanDuplicatingIt(t *testing.T)
 	// longer matches and the sweep must act again.
 	s.preannounceOnce(context.Background(), now.Add(8*24*time.Hour))
 
-	if len(rec.creates) != 1 {
+	if len(rec.creates()) != 1 {
 		t.Errorf("created %d broadcasts, want 1 -- the second occurrence must MOVE "+
-			"the first, not orphan it", len(rec.creates))
+			"the first, not orphan it", len(rec.creates()))
 	}
-	if len(rec.reschedules) != 1 {
-		t.Errorf("rescheduled %d times, want 1", len(rec.reschedules))
+	if len(rec.reschedules()) != 1 {
+		t.Errorf("rescheduled %d times, want 1", len(rec.reschedules()))
 	}
 }
 
 // It WARNS. It never refuses -- the schedule works either way, and what the
 // seven-day bound limits is only the pre-announced Facebook event page.
+//
+// The warning and the sweep's decision to skip now read the SAME bound, off the
+// destination's own provider, so they cannot disagree. They used to share a
+// facebookScheduleHorizon constant and each repeat the platform name beside it.
+//
+// Mutation: `13*sb.ScheduleHorizon()` in scheduleWarnings. Observed FAIL ("a
+// once schedule 23 days out was saved with no warning").
 func TestADistantOnceScheduleSavesAndWarnsAboutTheEventPage(t *testing.T) {
 	s, h, store := testServer(t, config.Config{})
 	sign := login(t, h)
@@ -430,13 +501,14 @@ func TestADistantStopScheduleIsNotWarnedAbout(t *testing.T) {
 // The scheduled path creates Facebook broadcasts too, and a refresh-key-only
 // implementation loses backup ingest for every pre-announced show -- the
 // feature working on the path someone tested and not on the one they forgot.
+//
+// Mutation: replace `cur.BackupURL, cur.BackupStreamKey = firstBackup(b)` in
+// announceOne with `_, _ = firstBackup(b)`. Observed FAIL ("the scheduled path
+// did not store the backup endpoint").
 func TestTheScheduledPathStoresTheBackupEndpointToo(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
-	rec := &announced{
-		key: "primary-key", broadcastID: "777",
-		backups: []oauth.Ingest{{URL: "rtmps://backup.example/rtmp", Key: "backup-key"}},
-	}
-	stubAnnounce(s, rec)
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	rec := &announced{key: "primary-key", broadcastID: "777", backups: true}
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	d.Facebook.BackupIngest = true
@@ -456,10 +528,13 @@ func TestTheScheduledPathStoresTheBackupEndpointToo(t *testing.T) {
 }
 
 // The toggle has to reach the create call, not just the database.
+//
+// Mutation: hardcode `BackupIngest: false` in ingestOptionsFor. Observed FAIL
+// ("the stored toggle did not reach the create call").
 func TestTheScheduledPathAsksForBackupIngestWhenEnabled(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	d.Facebook.BackupIngest = true
@@ -471,10 +546,10 @@ func TestTheScheduledPathAsksForBackupIngestWhenEnabled(t *testing.T) {
 
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 1 {
-		t.Fatalf("created %d broadcasts, want 1", len(rec.creates))
+	if len(rec.creates()) != 1 {
+		t.Fatalf("created %d broadcasts, want 1", len(rec.creates()))
 	}
-	if !rec.creates[0].BackupIngest {
+	if !rec.creates()[0].BackupIngest {
 		t.Error("the stored toggle did not reach the create call, so Facebook was " +
 			"never asked for a backup endpoint")
 	}
@@ -489,9 +564,9 @@ func TestTheScheduledPathAsksForBackupIngestWhenEnabled(t *testing.T) {
 // authoritative to match. Guessing wrong one way orphans a live event page;
 // wrong the other way creates a duplicate people are also subscribed to.
 func TestABroadcastThatWillNotMoveIsEventuallyReplaced(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -505,7 +580,7 @@ func TestABroadcastThatWillNotMoveIsEventuallyReplaced(t *testing.T) {
 	}
 
 	// Now every reschedule refuses, as a deleted video does.
-	rec.err = errors.New("(#100) Object does not exist")
+	rec.fail("(#100) Object does not exist")
 	for i := 1; i <= staleBroadcastAfter; i++ {
 		s.preannounceOnce(context.Background(), now.Add(time.Duration(7*i)*24*time.Hour))
 	}
@@ -525,10 +600,13 @@ func TestABroadcastThatWillNotMoveIsEventuallyReplaced(t *testing.T) {
 // The half that stops the cure being worse than the disease. ONE failure must
 // never clear the marker: a transient error would then orphan a perfectly good
 // event page and create a duplicate beside it.
+//
+// Mutation: `< 1` in place of `< staleBroadcastAfter` in noteRescheduleFailure.
+// Observed FAIL ("one transient failure discarded the broadcast").
 func TestASingleFailedRescheduleChangesNothing(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -536,7 +614,7 @@ func TestASingleFailedRescheduleChangesNothing(t *testing.T) {
 	seedStartSchedule(t, store, scheduler.KindWeekly, now.Add(24*time.Hour), d.ID)
 	s.preannounceOnce(context.Background(), now)
 
-	rec.err = errors.New("dial tcp: i/o timeout")
+	rec.fail("dial tcp: i/o timeout")
 	s.preannounceOnce(context.Background(), now.Add(8*24*time.Hour))
 
 	got, _ := store.GetDestination(d.ID)
@@ -550,9 +628,9 @@ func TestASingleFailedRescheduleChangesNothing(t *testing.T) {
 // DestResilience.GiveUpAfter draws. A destination that fails once, recovers,
 // and fails again must never accumulate its way to a verdict.
 func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -564,10 +642,10 @@ func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
 	// never that many in a row.
 	week := 0
 	for i := 0; i < staleBroadcastAfter; i++ {
-		rec.err = errors.New("transient")
+		rec.fail("transient")
 		week++
 		s.preannounceOnce(context.Background(), now.Add(time.Duration(7*week)*24*time.Hour))
-		rec.err = nil
+		rec.succeed()
 		week++
 		s.preannounceOnce(context.Background(), now.Add(time.Duration(7*week)*24*time.Hour))
 	}
@@ -580,10 +658,10 @@ func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
 	// removes the reset left the marker assertion green. A second create is
 	// the thing that actually happened, and the thing that would orphan an
 	// event page in production.
-	if len(rec.creates) != 1 {
+	if len(rec.creates()) != 1 {
 		t.Fatalf("created %d broadcasts; %d NON-consecutive failures discarded the "+
 			"first one, so a destination that recovers between failures "+
-			"accumulated its way to a verdict", len(rec.creates), staleBroadcastAfter)
+			"accumulated its way to a verdict", len(rec.creates()), staleBroadcastAfter)
 	}
 	if got, _ := store.GetDestination(d.ID); got.Facebook.BroadcastID == "" {
 		t.Error("the broadcast marker was discarded despite the failures never " +
@@ -605,10 +683,16 @@ func TestASuccessfulRescheduleResetsTheCount(t *testing.T) {
 // `if a.ScheduleID == scheduleID` to `if a.BroadcastID != ""`. The second
 // schedule then finds the first's broadcast and moves it rather than creating
 // one of its own. Observed: red -- 1 broadcast created where two shows need 2.
+//
+// The same defect from this package's side, so the guard does not depend on a
+// mutation in another one: pass a literal 0 rather than sc.ID to both
+// cur.Facebook.Announce calls in announceOne, which puts every schedule's
+// broadcast under one shared marker. Observed FAIL ("rescheduled 1 times,
+// want 0").
 func TestTwoStartSchedulesEachGetTheirOwnEventPage(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", ids: []string{"tuesday-show", "thursday-show"}}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -625,15 +709,15 @@ func TestTwoStartSchedulesEachGetTheirOwnEventPage(t *testing.T) {
 		s.preannounceOnce(context.Background(), now)
 	}
 
-	if len(rec.creates) != 2 {
+	if len(rec.creates()) != 2 {
 		t.Fatalf("created %d broadcasts for two shows, want 2 -- one of them has no "+
-			"event page at all", len(rec.creates))
+			"event page at all", len(rec.creates()))
 	}
-	if len(rec.reschedules) != 0 {
+	if len(rec.reschedules()) != 0 {
 		t.Fatalf("rescheduled %d times, want 0. Two schedules are two shows; moving "+
 			"one show's broadcast to the other's start time notifies its "+
 			"subscribers of a time change every five minutes forever",
-			len(rec.reschedules))
+			len(rec.reschedules()))
 	}
 	got, _ := store.GetDestination(d.ID)
 	if !got.Facebook.AnnouncedFor(tuesday) || !got.Facebook.AnnouncedFor(thursday) {
@@ -660,15 +744,15 @@ func TestTwoStartSchedulesEachGetTheirOwnEventPage(t *testing.T) {
 // then, because the narrow column list is a second defence and does not carry
 // `name` at all; the Facebook blob is the one the stale snapshot reaches.
 func TestAnOperatorEditDuringTheGraphCallSurvives(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
 	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
 
-	rec.duringCreate = func(*announced) {
+	rec.onCreate(func() {
 		row, err := store.GetDestination(d.ID)
 		if err != nil {
 			t.Errorf("read the destination mid-sweep: %v", err)
@@ -680,7 +764,7 @@ func TestAnOperatorEditDuringTheGraphCallSurvives(t *testing.T) {
 		if _, err := store.UpdateDestination(row); err != nil {
 			t.Errorf("operator edit mid-sweep: %v", err)
 		}
-	}
+	})
 
 	s.preannounceOnce(context.Background(), time.Now())
 
@@ -707,12 +791,12 @@ func TestAnOperatorEditDuringTheGraphCallSurvives(t *testing.T) {
 // recorded first so that failure leaves evidence.
 //
 // Mutation: in preannounce.go, delete the record(...Announce(sc.ID, at, "",
-// now)) block above the ingestForFn call. Observed: red -- nothing is stored
+// now)) block above the s.ingestFor call. Observed: red -- nothing is stored
 // when the create is made.
 func TestTheIntentIsRecordedBeforeTheBroadcastIsCreated(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -720,7 +804,7 @@ func TestTheIntentIsRecordedBeforeTheBroadcastIsCreated(t *testing.T) {
 	schedID := seedStartSchedule(t, store, scheduler.KindOnce, at, d.ID)
 
 	var pending, announcedTooEarly bool
-	rec.duringCreate = func(*announced) {
+	rec.onCreate(func() {
 		row, err := store.GetDestination(d.ID)
 		if err != nil {
 			t.Errorf("read the destination mid-create: %v", err)
@@ -731,7 +815,7 @@ func TestTheIntentIsRecordedBeforeTheBroadcastIsCreated(t *testing.T) {
 		// And it must NOT read as announced: a marker claiming a broadcast that
 		// does not exist yet would suppress every later attempt.
 		announcedTooEarly = row.Facebook.AnnouncedFor(at)
-	}
+	})
 
 	s.preannounceOnce(context.Background(), time.Now())
 
@@ -752,9 +836,9 @@ func TestTheIntentIsRecordedBeforeTheBroadcastIsCreated(t *testing.T) {
 // Observed: red -- a second broadcast is created for a show that may already
 // have one.
 func TestACreateWhoseOutcomeWasNeverRecordedIsNotMadeTwice(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "k", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
@@ -770,9 +854,9 @@ func TestACreateWhoseOutcomeWasNeverRecordedIsNotMadeTwice(t *testing.T) {
 
 	s.preannounceOnce(context.Background(), now)
 
-	if len(rec.creates) != 0 {
+	if len(rec.creates()) != 0 {
 		t.Fatalf("created %d broadcasts for a show whose create was already in "+
-			"flight, want 0", len(rec.creates))
+			"flight, want 0", len(rec.creates()))
 	}
 }
 
@@ -785,9 +869,9 @@ func TestACreateWhoseOutcomeWasNeverRecordedIsNotMadeTwice(t *testing.T) {
 // preannounceOnce. Observed: red -- a broadcast is created and the live
 // destination's key is replaced.
 func TestAnAlreadyLiveDestinationIsLeftAlone(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	d.Enabled = true
@@ -799,9 +883,9 @@ func TestAnAlreadyLiveDestinationIsLeftAlone(t *testing.T) {
 
 	s.preannounceOnce(context.Background(), time.Now())
 
-	if len(rec.creates) != 0 {
+	if len(rec.creates()) != 0 {
 		t.Fatalf("created %d broadcasts for a destination that is already live, want 0",
-			len(rec.creates))
+			len(rec.creates()))
 	}
 	got, _ := store.GetDestination(d.ID)
 	if got.StreamKey != "original-key" {
@@ -817,19 +901,19 @@ func TestAnAlreadyLiveDestinationIsLeftAlone(t *testing.T) {
 // Mutation: in preannounce.go, delete `if cur.Enabled { return false }` from the
 // completion callback. Observed: red -- the live destination's key is replaced.
 func TestADestinationThatGoesLiveDuringTheGraphCallKeepsItsKey(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
 	rec := &announced{key: "key-from-the-broadcast", broadcastID: "777"}
-	stubAnnounce(s, rec)
+	stubAnnounce(stub, rec)
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
 	seedStartSchedule(t, store, scheduler.KindOnce, time.Now().Add(2*24*time.Hour), d.ID)
 
-	rec.duringCreate = func(*announced) {
+	rec.onCreate(func() {
 		if err := store.SetDestinationEnabled(d.ID, true); err != nil {
 			t.Errorf("go live mid-sweep: %v", err)
 		}
-	}
+	})
 
 	s.preannounceOnce(context.Background(), time.Now())
 
@@ -849,9 +933,9 @@ func TestADestinationThatGoesLiveDuringTheGraphCallKeepsItsKey(t *testing.T) {
 // on the create-failure path to `>= 1`, which is the suppression switched off.
 // Observed: red, 6 warnings for the 2 the two destinations are owed.
 func TestAnIdenticalRefusalIsLoggedOncePerRunOfFailures(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
-	rec := &announced{key: "k", broadcastID: "777", err: errors.New("(#100) ineligible")}
-	stubAnnounce(s, rec)
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777", err: "(#100) ineligible"}
+	stubAnnounce(stub, rec)
 
 	var logs bytes.Buffer
 	s.log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -864,9 +948,9 @@ func TestAnIdenticalRefusalIsLoggedOncePerRunOfFailures(t *testing.T) {
 	for range 3 {
 		s.preannounceOnce(context.Background(), time.Now())
 	}
-	if len(rec.creates) != 6 {
+	if len(rec.creates()) != 6 {
 		t.Fatalf("attempted %d creates across three sweeps of two destinations, "+
-			"want 6 -- suppressing the LOG must not suppress the retry", len(rec.creates))
+			"want 6 -- suppressing the LOG must not suppress the retry", len(rec.creates()))
 	}
 
 	warnings := strings.Count(logs.String(), "could not create the broadcast")
@@ -892,17 +976,20 @@ func TestAnIdenticalRefusalIsLoggedOncePerRunOfFailures(t *testing.T) {
 // PreannounceLoop's for statement. Observed: red -- the create never arrives and
 // the test fails on its own deadline rather than waiting five minutes.
 func TestTheLoopSweepsBeforeItsFirstTick(t *testing.T) {
-	s, _, store := testServer(t, config.Config{})
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	rec := &announced{key: "k", broadcastID: "777"}
+	stubAnnounce(stub, rec)
+
+	// Signalled from inside the Graph call rather than counted afterwards: the
+	// loop runs in its own goroutine, so the test has to be woken by the create
+	// rather than poll for it.
 	created := make(chan struct{}, 1)
-	s.ingestForFn = func(ctx context.Context, p oauth.Provider, clientID string,
-		acct *db.PlatformAccount, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
+	rec.onCreate(func() {
 		select {
 		case created <- struct{}{}:
 		default:
 		}
-		return &oauth.Broadcast{ID: "777",
-			Ingest: oauth.Ingest{URL: "rtmps://live.example/rtmp", Key: "k"}}, nil
-	}
+	})
 
 	d := seedDestination(t, s, store, db.PlatformFacebook, "fb")
 	seedCreds(t, s, store, db.PlatformFacebook)
