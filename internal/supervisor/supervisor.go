@@ -190,6 +190,24 @@ type Process struct {
 	cancel  context.CancelFunc
 	done    chan struct{}
 	running bool
+	// retired is the terminal "do not start" latch. Stop sets it whether or not
+	// the process was running, and Start honours it for ever after.
+	//
+	// Without it, Stop on a process that has not been started yet is a silent
+	// no-op, and every caller that builds a process, publishes it somewhere a
+	// shutdown can find it, and only THEN calls Start has a window: the shutdown
+	// takes the published entry, calls Stop on a process that is not running,
+	// releases the port and the hub subscription it was given, and then the
+	// original caller starts a child that nothing holds a reference to -- still
+	// publishing, on a relay port the allocator has already handed to someone
+	// else. internal/engine's destinations, its backup ingest, its renditions and
+	// internal/playout's variants all have that shape, so the latch belongs here
+	// rather than being re-derived at each of them.
+	//
+	// Restart deliberately does NOT set it: cycling a process is not retiring it.
+	// A real Stop that lands between Restart's stop and its start does set it,
+	// and the restart correctly turns into a no-op.
+	retired bool
 
 	// policyMu guards pol. Deliberately NOT p.mu: setState takes p.mu and then
 	// calls OnState, which fans out to the WebSocket, and a reconcile applying
@@ -377,11 +395,15 @@ func (p *Process) CommandString() string {
 }
 
 // Start begins supervising. Calling it on an already-running process is a
-// no-op, which makes reconcile loops safe to run repeatedly.
+// no-op, which makes reconcile loops safe to run repeatedly. Calling it on a
+// process that has already been Stopped is also a no-op, for ever: see retired.
 func (p *Process) Start() {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
-	if p.running {
+	// Mutation that proves the retired half: delete this line and
+	// TestStopBeforeStartRetiresTheProcess fails, and so does the engine's
+	// TestAReconcileThatPublishesIntoAShutdownStartsNothing.
+	if p.retired || p.running {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -393,8 +415,29 @@ func (p *Process) Start() {
 
 // Stop terminates the child and stops supervising. It blocks until the child
 // is gone or ctx expires.
-func (p *Process) Stop(ctx context.Context) {
+//
+// Stop is TERMINAL. It retires the process even when there is nothing running
+// to terminate, so a Start that was already on its way -- built, published,
+// about to be called -- cannot bring a child up behind the shutdown that just
+// released its port and its subscription.
+func (p *Process) Stop(ctx context.Context) { p.stop(ctx, true) }
+
+// Restart stops and starts the process. Used when a routing profile changes:
+// only the affected destination is cycled, never the ingest.
+//
+// Non-terminal, unlike Stop: this is a cycle, not a retirement. If a real Stop
+// lands in the gap, its latch makes the Start below a no-op, which is the
+// outcome the caller of Stop asked for.
+func (p *Process) Restart(ctx context.Context) {
+	p.stop(ctx, false)
+	p.Start()
+}
+
+func (p *Process) stop(ctx context.Context, retire bool) {
 	p.runMu.Lock()
+	if retire {
+		p.retired = true
+	}
 	if !p.running {
 		p.runMu.Unlock()
 		return
@@ -413,13 +456,6 @@ func (p *Process) Stop(ctx context.Context) {
 		p.kill()
 	}
 	p.setState(StateStopped, "")
-}
-
-// Restart stops and starts the process. Used when a routing profile changes:
-// only the affected destination is cycled, never the ingest.
-func (p *Process) Restart(ctx context.Context) {
-	p.Stop(ctx)
-	p.Start()
 }
 
 func (p *Process) supervise(ctx context.Context, done chan struct{}) {

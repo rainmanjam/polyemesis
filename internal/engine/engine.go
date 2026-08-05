@@ -337,6 +337,17 @@ type Engine struct {
 	// stopped closes the door on a playlist request that arrives while the
 	// engine is shutting down, which would otherwise leave an orphan encoder.
 	stopped bool
+	// afterPublish, when set, runs in the window between a destination being
+	// published into e.dests and its process being started -- the gap e.stopped
+	// cannot close, because a Stop that lands inside it passes the guard and
+	// then tears down a process that has not started yet.
+	//
+	// A seam rather than a sleep: the window is a few instructions wide and no
+	// timing test could sit in it reliably. Set before anything concurrent
+	// exists and never written again, on the same basis decideFn above is safe.
+	// Nil in production, and the two reads are one nil check per destination
+	// start.
+	afterPublish func()
 
 	ctx    context.Context
 	cancel context.CancelFunc

@@ -659,6 +659,15 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	//
 	// nil rather than an error: an error makes startDestinations record a broken
 	// destination in the map this has just declined to write to.
+	//
+	// The guard alone is NOT the whole fix, and reading it as though it were is
+	// how the remaining window survived a review. It closes the case where Stop
+	// has already run. The case where Stop runs AFTER this publication and
+	// BEFORE the Start below is closed by supervisor.Process retiring on Stop:
+	// the teardown Stop performs on this very entry latches the process, and the
+	// Start below becomes a no-op. Without that latch, Stop on a process that
+	// has not started yet is a no-op, so the shutdown would release this port
+	// and this subscription and the Start would then bring a child up on both.
 	if e.stopped {
 		e.mu.Unlock()
 		hub.Unsubscribe(subName)
@@ -671,6 +680,9 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	}
 	e.mu.Unlock()
 
+	if e.afterPublish != nil {
+		e.afterPublish()
+	}
 	proc.Start()
 	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
@@ -767,6 +779,13 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 // orphan nothing can ever reach. The identity check on prev is the other half
 // -- a replacement built from an entry that is no longer the one in the map
 // describes a destination that has already been torn down.
+//
+// And, as in startDest, the guard is only half of it: a Stop that lands between
+// the swap and the Start below passes the guard, finds the replacement in the
+// map, and stops a backup that has not started. supervisor.Process retires on
+// Stop, so that teardown latches the process and the Start below does nothing.
+// This is the worse of the two paths to leave open -- the backup runs with
+// AutoRestart, so the orphan reconnects to the platform for ever.
 func (e *Engine) publishDest(id int64, prev, next *destination) {
 	e.mu.Lock()
 	if e.stopped || e.dests[id] != prev {
@@ -779,6 +798,9 @@ func (e *Engine) publishDest(id int64, prev, next *destination) {
 	e.dests[id] = next
 	e.mu.Unlock()
 
+	if e.afterPublish != nil {
+		e.afterPublish()
+	}
 	if next.backup != nil {
 		next.backup.Start()
 		e.log.Info("backup ingest started", "dest", next.row.Name)
