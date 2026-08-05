@@ -311,10 +311,36 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 	// A marker-only write, so it is allowed on a destination that went live
 	// since the sweep read it. If the write itself fails, nothing is created --
 	// strictly better than creating something nothing will remember.
-	if !s.record(d, func(cur *db.Destination) bool {
+	//
+	// AND IT IS A CLAIM, NOT JUST A NOTE. The check above ran against a snapshot
+	// taken at the top of the sweep, before a token refresh and a credentials
+	// read; two sweeps that both got past it would both create a live_video, and
+	// whichever finished last would overwrite the other's id -- leaving a public
+	// event page that nothing in this database names. UpdateAnnouncement re-reads
+	// the row inside the transaction that writes it, so refusing a row that
+	// already holds a marker for this schedule makes the intent a compare-and-set
+	// and the loser creates nothing.
+	//
+	// A mutex around the sweep would have covered the one process that happens to
+	// hold it. This covers two, which is what a daemon that can be started twice
+	// by an operator or a service manager actually needs -- and it puts the
+	// decision in the same transaction as the write it guards rather than in a
+	// lock some future caller can route around.
+	switch err := s.recordErr(d, func(cur *db.Destination) bool {
+		_, taken := cur.Facebook.AnnouncementFor(sc.ID)
+		if taken {
+			return false
+		}
 		cur.Facebook.Announce(sc.ID, at, "", now)
 		return true
-	}) {
+	}); {
+	case errors.Is(err, db.ErrAnnouncementSkipped):
+		// Not a failure and not counted as one: the show is being announced,
+		// just not by this sweep.
+		s.log.Debug("pre-announce: another sweep already claimed this show's broadcast",
+			"destination", d.Name, "schedule", sc.Name)
+		return
+	case err != nil:
 		return
 	}
 

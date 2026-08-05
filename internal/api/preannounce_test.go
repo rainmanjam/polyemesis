@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1146,5 +1147,101 @@ func TestAnIntentNothingCanResolveIsEventuallyRetried(t *testing.T) {
 	if len(rec.creates()) != 1 {
 		t.Fatalf("made %d creates after the intent was given up on, want 1",
 			len(rec.creates()))
+	}
+}
+
+// F4. Two sweeps that both read a destination before either wrote will both
+// create a live_video, and the one that finishes last overwrites the other's id
+// -- leaving a public event page that nothing in this database names, in front of
+// subscribers who were notified about it.
+//
+// Production starts one loop, so this is latent. PreannounceLoop is exported and
+// preannounceOnce is directly callable, and a state machine that is safe only
+// because of how it happens to be called is one edit from being wrong.
+//
+// THE INTERLEAVING IS REAL AND IT IS DETERMINISTIC. Two destinations on one
+// schedule are what make it so: sweep A blocks inside the Graph call for the
+// first, sweep B runs the whole way through and announces the SECOND, and A then
+// arrives at that second destination holding the snapshot it read before B
+// existed. That is exactly the production window -- a sweep deciding against a
+// destination it read before a token refresh and a 30-second Graph call -- rather
+// than a contrived one.
+//
+// Mutation: in announceOne's intent write, replace
+// `_, taken := cur.Facebook.AnnouncementFor(sc.ID)` with `taken := false`.
+// Observed: red -- 3 creates for 2 shows, and the second destination's stored
+// broadcast becomes the third one, orphaning the event page people were told
+// about.
+func TestTwoOverlappingSweepsCreateOneBroadcastEach(t *testing.T) {
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	// One id per create, in call order, so the event pages can be told apart:
+	// "first" and "second" are the two that should exist, and "extra" is the
+	// duplicate the claim refuses to make.
+	rec := &announced{key: "k", ids: []string{"first", "second", "extra"}}
+	stubAnnounce(stub, rec)
+
+	one := seedDestination(t, s, store, db.PlatformFacebook, "fb-one")
+	two := seedDestination(t, s, store, db.PlatformFacebook, "fb-two")
+	seedCreds(t, s, store, db.PlatformFacebook)
+	now := time.Now()
+	at := now.Add(2 * 24 * time.Hour).Truncate(time.Second)
+	schedID := seedStartSchedule(t, store, scheduler.KindOnce, at, one.ID, two.ID)
+
+	// Only the FIRST create blocks, and the rest must pass STRAIGHT through --
+	// including the duplicate a broken claim would make, or the test would hang
+	// rather than fail. Not sync.Once: Do makes every later caller wait for the
+	// first f to return, which held the second sweep's create inside the handler
+	// until both requests hit the client's 20-second timeout and the run proved
+	// nothing at all.
+	inFirstCreate := make(chan struct{})
+	release := make(chan struct{})
+	var (
+		mu    sync.Mutex
+		first = true
+	)
+	rec.onCreate(func() {
+		mu.Lock()
+		mine := first
+		first = false
+		mu.Unlock()
+		if !mine {
+			return
+		}
+		close(inFirstCreate)
+		<-release
+	})
+
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		s.preannounceOnce(context.Background(), now)
+	}()
+
+	// Sweep A is now inside Graph for fb-one, having written its intent. Sweep B
+	// runs entirely within that window: it backs off fb-one's intent and
+	// announces fb-two, which sweep A still has an un-announced snapshot of.
+	<-inFirstCreate
+	s.preannounceOnce(context.Background(), now)
+	close(release)
+	<-swept
+
+	if len(rec.creates()) != 2 {
+		t.Fatalf("two overlapping sweeps made %d broadcasts for 2 shows, want 2 -- the "+
+			"extra one is a public event page nothing here can name", len(rec.creates()))
+	}
+	for _, tc := range []struct {
+		dest *db.Destination
+		want string
+	}{{one, "first"}, {two, "second"}} {
+		row, err := store.GetDestination(tc.dest.ID)
+		if err != nil {
+			t.Fatalf("read %s back: %v", tc.dest.Name, err)
+		}
+		held, ok := row.Facebook.AnnouncementFor(schedID)
+		if !ok || held.BroadcastID != tc.want {
+			t.Errorf("%s holds broadcast %q (held=%v), want %q -- the later sweep "+
+				"replaced the id and orphaned the event page it names",
+				tc.dest.Name, held.BroadcastID, ok, tc.want)
+		}
 	}
 }
