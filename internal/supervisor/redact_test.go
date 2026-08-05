@@ -200,3 +200,72 @@ func TestArgsStaysRawBecauseItIsNotForDisplay(t *testing.T) {
 			"silently stops matching and the editor shows the wrong command.")
 	}
 }
+
+// capturingSink records what the process handed it, unchanged. A real FileSink
+// would do the same thing and then write it to disk.
+type capturingSink struct{ lines []LogLine }
+
+func (c *capturingSink) WriteLog(l LogLine) { c.lines = append(c.lines, l) }
+
+// Logs() was not the only way a line leaves the process, and masking there
+// covered the reader that prompted the fix while missing the two that matter
+// more.
+//
+// LogSink is a FileSink in production, so an unmasked line became a PERMANENT
+// one in process.log -- and a log file is the artifact people attach to bug
+// reports and ship in support tarballs, which the database beside it never is.
+//
+// Proven able to fail against the committed tree by changing appendLog's
+// `Text: alerts.Redact(text)` back to `Text: text`: measured FAIL, "the log
+// sink was handed the stream key".
+func TestTheLogSinkIsNeverHandedAStreamKey(t *testing.T) {
+	sink := &capturingSink{}
+	p := New(discardLog(), Spec{Name: "dest:3", Kind: "destination", LogSink: sink})
+	p.appendLog("[out#1/flv @ 0x7f9c] Error opening output rtmps://"+fbHost+
+		":443/rtmp/"+backupKey+": Connection refused", "error")
+
+	if len(sink.lines) != 1 {
+		t.Fatalf("the sink received %d lines, want the one appended", len(sink.lines))
+	}
+	got := sink.lines[0].Text
+	if strings.Contains(got, backupKey) {
+		t.Errorf("the log sink was handed the stream key, and FileSink writes it to "+
+			"process.log where it stays for ever.\ngot: %s", got)
+	}
+	if !strings.Contains(got, alerts.Mask) {
+		t.Errorf("the key was neither present nor masked; the line was rewritten some "+
+			"third way.\ngot: %s", got)
+	}
+	// A masked log nobody can diagnose from is a worse trade than the leak.
+	for _, want := range []string{"Error opening output", fbHost, "Connection refused"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the sink line has lost %q, which is why the destination is down.\ngot: %s", want, got)
+		}
+	}
+}
+
+// OnLog publishes to the event bus, which the console's live log panel reads
+// over the WebSocket. That socket is behind requireAuth so no privilege
+// boundary is crossed -- but it is precisely the panel an operator screenshots
+// into a ticket, which is the hazard the redaction policy exists for.
+//
+// Proven able to fail against the committed tree by changing appendLog's
+// `Text: alerts.Redact(text)` back to `Text: text`: measured FAIL, "the OnLog
+// callback was handed the stream key".
+func TestTheOnLogCallbackIsNeverHandedAStreamKey(t *testing.T) {
+	var seen []LogLine
+	p := New(discardLog(), Spec{
+		Name: "dest:3", Kind: "destination",
+		OnLog: func(l LogLine) { seen = append(seen, l) },
+	})
+	p.appendLog("[out#1/flv @ 0x7f9c] Error opening output rtmps://"+fbHost+
+		":443/rtmp/"+backupKey+": Connection refused", "error")
+
+	if len(seen) != 1 {
+		t.Fatalf("the callback received %d lines, want the one appended", len(seen))
+	}
+	if got := seen[0].Text; strings.Contains(got, backupKey) {
+		t.Errorf("the OnLog callback was handed the stream key, and it goes straight "+
+			"to the console's log panel.\ngot: %s", got)
+	}
+}

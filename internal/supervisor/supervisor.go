@@ -671,8 +671,33 @@ func (p *Process) setState(s State, errMsg string) {
 	}
 }
 
+// appendLog records one stderr line and fans it out.
+//
+// MASKED HERE, at the single point every copy is made from, rather than in
+// Logs() where it used to be. Masking on the way out covered the reader that
+// prompted it and missed the two that leave the process entirely:
+//
+//   - LogSink is FileSink in production, so an unmasked line became a
+//     PERMANENT one in process.log -- and a log file is the artifact people
+//     attach to bug reports and ship in support tarballs, which the database
+//     beside it never is.
+//   - OnLog publishes to the event bus, which the console's live log panel
+//     reads over the WebSocket. Authenticated, so no boundary is crossed, but
+//     it is precisely the panel an operator screenshots.
+//
+// Safe to do at construction because classify() has already run on the raw
+// line in the scan loop above: nothing downstream of here needs the
+// unmasked text, and p.logs.add is the only writer of the ring.
+//
+// The cost is one short string scan per stderr line. That is the right trade
+// against a key written to disk once and kept for ever.
 func (p *Process) appendLog(text, level string) {
-	l := LogLine{Time: time.Now(), Process: p.spec.Name, Text: text, Level: level}
+	l := LogLine{
+		Time:    time.Now(),
+		Process: p.spec.Name,
+		Text:    alerts.Redact(text),
+		Level:   level,
+	}
 	p.logs.add(l)
 	if p.spec.LogSink != nil {
 		p.spec.LogSink.WriteLog(l)
@@ -728,11 +753,15 @@ func (p *Process) Status() Status {
 // destination is the only reason anyone opens this. hooks.payload already
 // scrubs the same bytes on its way out for the same reason.
 //
-// Masking on the way out rather than on the way in is deliberate. classify()
-// and the on-disk sink have already seen the raw line, the ring keeps it, and
-// anything in-process that later needs to match on a URL still can. This method
-// is the boundary where the line stops being ours, so this is where it is
-// cleaned.
+// The ring is ALREADY masked -- see appendLog, which is the single point every
+// copy is made from. Masking only here, as this first did, covered this reader
+// and missed LogSink writing the raw line permanently into process.log and
+// OnLog publishing it to the console's live log panel.
+//
+// This pass stays anyway, and is not dead code by accident. It is the guarantee
+// the method's own name makes: no line leaves through Logs() unmasked, whatever
+// a future writer to the ring forgets. Redact is idempotent, so running it over
+// already-clean text costs a scan and changes nothing.
 //
 // alerts.Redact touches URLs and bare key=value credentials only. An FFmpeg
 // progress or error line has neither, so the diagnostic value an operator came
