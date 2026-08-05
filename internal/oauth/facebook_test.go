@@ -1413,9 +1413,11 @@ func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T)
 // ScheduledBroadcastsFor: `return sb, ok` -> `return sb, true`.
 // Observed: FAIL -- youtube, twitch and kick all reported the capability.
 //
-// MUTATION M2 (found branch), same line: `return sb, ok` -> `return nil, false`.
-// Observed: FAIL -- facebook reported no capability. M1 leaves this half green
-// and M2 leaves the other half green, which is why both halves are here.
+// MUTATION M2 (found branch), same function: `pr, ok := Providers()[p]` ->
+// `pr, ok := Providers()[db.PlatformTwitch]`.
+// Observed: FAIL -- facebook reported no capability, while every absent case
+// stayed green. M1 leaves this half green and M2 leaves the other half green,
+// which is why both halves are here.
 func TestOnlyFacebookIsDiscoverableAsAScheduledBroadcaster(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1477,8 +1479,9 @@ func TestTheScheduledBroadcastCapabilityCarriesFacebooksOwnSevenDayBound(t *test
 //
 // MUTATION M4, internal/oauth/endpoints.go, in Set.ScheduledBroadcastsFor:
 // `pr, ok := s.All()[p]` -> `pr, ok := Providers()[p]`.
-// Observed: FAIL -- "no POST reached the stub; calls were []", because the
-// reschedule went to the real graph.facebook.com.
+// Observed: FAIL, and the failure names the bug out loud -- the reschedule went
+// to the real graph.facebook.com and came back "Invalid OAuth access token -
+// Cannot parse access token", which is a live host answering a stubbed test.
 func TestASetsScheduledBroadcasterIsTheOneItWasAimedAt(t *testing.T) {
 	fb, log := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONBody(t, w, http.StatusOK, map[string]any{"success": true})
