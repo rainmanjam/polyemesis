@@ -27,6 +27,31 @@ jobs:
   probe:
     name: "${{ matrix.runner }} (${{ matrix.note }})"
     runs-on: ${{ matrix.runner }}
+    # A ceiling, because GitHub's default is SIX HOURS -- but a deliberately
+    # high one, because this job's worst case is not its typical case. Every
+    # run so far has finished in 13 to 52 seconds, and that number is not what
+    # this bounds.
+    #
+    # Neither `go test` below carries -timeout, so each is bounded by Go's
+    # default of 10 minutes per test binary. The second one is `if: always()`,
+    # so it runs even after the first has hung -- and hangs the same way. A
+    # wedged handshake therefore owns twenty minutes legitimately, on top of
+    # checkout and a cold Go toolchain on the two macOS runners.
+    #
+    # That budget belongs to Go, not to this ceiling. ci.yml states the rule
+    # twice: Go's timeout panics with a goroutine dump naming the test that was
+    # running, while the job timeout just kills the runner and tells you
+    # nothing, so whichever fires first decides how much you learn. An SRT
+    # handshake that never completes on macOS is the exact thing this workflow
+    # exists to characterise. Cancelling it at ten would throw away both the
+    # goroutine dump and the step summary below, which is where the answer
+    # actually lands -- and leave the run looking like the "cancelled" that
+    # #92's apt hang looked like.
+    #
+    # Tightening this means putting an explicit -timeout on both `go test`
+    # calls first. That changes what the probe measures, and needs its own
+    # argument rather than being smuggled in under a ceiling.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

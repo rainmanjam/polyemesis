@@ -37,6 +37,24 @@ jobs:
   # does not become a ticket nobody can action.
   govulncheck:
     runs-on: ubuntu-latest
+    # A ceiling, because GitHub's default is SIX HOURS -- and this workflow
+    # runs on every push and pull request, so it is the one most likely to be
+    # holding a runner that something else is queued behind.
+    #
+    # All four jobs here get ten, and the argument is the same one four times,
+    # so it is written once. Measured across 37 runs, the slowest job in this
+    # file is semgrep at 48 seconds and the rest are under half a minute. None
+    # of them has any work that legitimately grows: each is one fetch -- a
+    # module proxy, a registry index, a release tarball, a container image --
+    # followed by a scan of a tree this size. Ten is roughly twelve times the
+    # slowest thing ever observed here and thirty-six times the median, which
+    # leaves a cold cache and a bad network day comfortably green while still
+    # bounding a fetch that never returns.
+    #
+    # This job in particular has two network dependencies rather than one: the
+    # module proxy it builds govulncheck from, and vuln.go.dev, which it reads
+    # at run time.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -49,6 +67,9 @@ jobs:
   # JavaScript dependencies.
   npm-audit:
     runs-on: ubuntu-latest
+    # See the note on the govulncheck job for why ten, for all four jobs here.
+    # This one's single point of stall is the npm registry, during `npm ci`.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ui
@@ -87,6 +108,12 @@ jobs:
   # version assertion below is what makes the pin real rather than aspirational.
   gitleaks:
     runs-on: ubuntu-latest
+    # See the note on the govulncheck job for why ten, for all four jobs here.
+    # This one's are the release download below and the `fetch-depth: 0`
+    # checkout -- the full history, which is the only thing in this file that
+    # grows with the repository, and at seven to twelve seconds today it has a
+    # very long way to go.
+    timeout-minutes: 10
     env:
       GITLEAKS_VERSION: "8.30.1"
     steps:
@@ -181,6 +208,11 @@ jobs:
   # Static analysis.
   semgrep:
     runs-on: ubuntu-latest
+    # See the note on the govulncheck job for why ten, for all four jobs here.
+    # The slowest of the four at 29 to 48 seconds, and it has two stalls
+    # available to it rather than one: pulling the pinned engine image, and
+    # fetching the rules from the registry at scan time.
+    timeout-minutes: 10
     container:
       # Pinned, for the same reason gitleaks is pinned a few jobs up: an
       # untagged image is :latest, so the engine that decides whether this

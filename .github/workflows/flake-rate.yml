@@ -38,6 +38,15 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     permissions: {}
+    # A ceiling, because GitHub's default is SIX HOURS. One shell step that
+    # splits a comma-separated list into JSON, with no checkout and no network
+    # -- 2 to 6 seconds on every run. Five, matching ci.yml's container-suites,
+    # which is the same shape: a job that only decides what the next job does.
+    #
+    # measure below already carries 120, and a fan-out job with no ceiling in
+    # front of a bounded one is the wrong way round: nothing downstream of a
+    # stuck plan ever starts, so the whole matrix waits on it.
+    timeout-minutes: 5
     outputs:
       suites: ${{ steps.split.outputs.suites }}
     steps:

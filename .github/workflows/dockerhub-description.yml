@@ -40,6 +40,16 @@ jobs:
   sync:
     name: sync README to Docker Hub
     runs-on: ubuntu-latest
+    # A ceiling, because GitHub's default is SIX HOURS. This job is a checkout
+    # and one HTTPS PATCH against Docker Hub's API; it has finished in 4 to 7
+    # seconds on every run it has ever had. Nothing in it gets slow -- it
+    # either returns or it does not, and the action below has no timeout of
+    # its own, so a Hub API that accepts the connection and never answers
+    # holds a runner until GitHub reclaims it.
+    #
+    # Five, matching ci.yml's container-suites: the same shape, a job with no
+    # real work in it, where a minute is already a hang.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

@@ -36,6 +36,14 @@ jobs:
     name: flags and validation
     runs-on: ubuntu-latest
     container: ubuntu:24.04
+    # A ceiling, because GitHub's default is SIX HOURS. Measured at 9 to 17
+    # seconds: pull ubuntu:24.04, then run install.sh a handful of times with
+    # bad arguments. It installs no packages, which is what separates it from
+    # the two preflight jobs below and why it gets a third of their budget.
+    #
+    # Five leaves room for a slow-but-alive registry and none for one that
+    # accepts the connection and stops.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -77,6 +85,18 @@ jobs:
     name: "preflight: ${{ matrix.image }}"
     runs-on: ubuntu-latest
     container: ${{ matrix.image }}
+    # A ceiling, because GitHub's default is SIX HOURS -- and this job is the
+    # exact shape that consumed one. Its first step is `apt-get update` plus an
+    # FFmpeg install against a distribution mirror, which is what #92 caught
+    # eating an entire acceptance job in ci.yml and reporting only "cancelled".
+    # ci.yml answered that with a six-minute step timeout; here the install IS
+    # most of the job, so the bound belongs on the job.
+    #
+    # Measured at 37 to 81 seconds across the four images, the slowest being
+    # ubuntu:24.04. Fifteen is roughly eleven times that -- enough for a mirror
+    # that is degraded but serving, which is the case that must not go red, and
+    # far short of a mirror that has stopped answering.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -179,6 +199,13 @@ jobs:
     name: "preflight: ${{ matrix.image }}"
     runs-on: ubuntu-latest
     container: ${{ matrix.image }}
+    # Same reasoning and the same number as the preflight job above: a package
+    # manager talking to a distribution mirror is the failure mode, dnf here
+    # rather than apt. Measured at 21 to 43 seconds, so fifteen is more headroom
+    # again than it buys there -- deliberately the same figure, because the
+    # hazard is identical and two different numbers would invite the reader to
+    # look for a distinction that does not exist.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
