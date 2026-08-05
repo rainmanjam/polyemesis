@@ -1,6 +1,6 @@
 # Light mode, and a card that has grown too many things
 
-**Status: PLANNED for v0.3.0.** Researched 2026-08-04 against real product
+**Status: PLANNED for v0.4.0.** Researched 2026-08-04 against real product
 references; nothing built. The references are recorded with their links so
 picking this up does not mean re-doing the search.
 
@@ -63,7 +63,7 @@ Searched on Mobbin, 2026-08-04. Web platform.
 | **Revolut Business** | Mode and *background* as separate choices. Recorded as a road not to take — decoration polyemesis has no use for | [screen](https://mobbin.com/screens/d6ff3090-344e-4121-965a-3530f2ebe12b) |
 | **Discord** | A dark operator surface under real density, for comparison against ours | [screen](https://mobbin.com/screens/8411c1ef-51b5-4436-9d48-92dd89d62153) |
 
-## Proposed scope for v0.3.0
+## Proposed scope for v0.4.0
 
 1. **Derive the light signal palette.** Same four signal roles, re-solved for
    light surfaces against a stated contrast target. This is the whole risk of
