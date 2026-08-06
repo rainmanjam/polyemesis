@@ -31,6 +31,27 @@ const (
 	TypeDestinationDown Type = "destination.down"
 	// TypeDestinationRecovered closes out a TypeDestinationDown.
 	TypeDestinationRecovered Type = "destination.recovered"
+	// TypeDestinationFallingBehind fires when a destination stops keeping up
+	// with realtime, which is earlier and more useful than it going down.
+	//
+	// The measurement is FFmpeg's own speed ratio for that child. Almost every
+	// destination here is `-c:v copy`, so there is barely any encoding work to
+	// be slow at -- a passthrough sitting under 1.0 means FFmpeg is blocking on
+	// the socket write to the platform. That is the same question a platform
+	// health API would answer, arrived at from this side, for every destination
+	// including a pasted stream key or a custom RTMP URL that no API can see.
+	//
+	// It reports the measurement and hedges the cause on purpose. Speed is a
+	// symptom: a congested uplink, a platform throttling us and a slow disk
+	// under a file destination all look identical from here, and naming the
+	// wrong one sends somebody to fix something that is not broken.
+	TypeDestinationFallingBehind Type = "destination.falling_behind"
+	// TypeDestinationCaughtUp closes out a TypeDestinationFallingBehind.
+	//
+	// Deliberately NOT TypeDestinationRecovered, which already exists and pairs
+	// with TypeDestinationDown. One message closing out two different
+	// conditions would leave a reader unable to tell which had ended.
+	TypeDestinationCaughtUp Type = "destination.caught_up"
 	// TypeIngestLost fires when the source stops arriving.
 	TypeIngestLost Type = "ingest.lost"
 	// TypeIngestRecovered closes out a TypeIngestLost.
@@ -124,6 +145,12 @@ func AllTypes() []Type {
 		TypeLoginFailed, TypeLoginSucceeded,
 		TypePasswordChanged, TypeAPITokenCreated, TypeAPITokenRevoked,
 		TypeSettingsChanged, TypeClipCaptured,
+		// Appended rather than filed beside the other destination events, which
+		// is where they belong by meaning. The prefix above is pinned by test
+		// precisely so that a picker row never moves under an operator who has
+		// learned where it is, and grouping these correctly would move eight of
+		// them. Meaning loses to stability here.
+		TypeDestinationFallingBehind, TypeDestinationCaughtUp,
 	}
 }
 

@@ -85,9 +85,44 @@ you supply. Configure them under *Settings → Alerts*, or through
 Webhook URLs often carry their credential in the path, so they are masked in
 every API response. Handing the masked form back on an update means "unchanged".
 
+### A destination falling behind realtime
+
+`destination.falling_behind` fires when a destination stops keeping up, and
+`destination.caught_up` closes it out. It is an **earlier** signal than
+`destination.down`: a destination is usually degraded for a while before its
+FFmpeg child gives up.
+
+The measurement is FFmpeg's own speed ratio for that destination — output time
+over wall-clock time. What makes it useful here is that video is passed through
+untouched, so there is barely any encoding work to be slow at. **A passthrough
+destination sitting under 1.0 means FFmpeg is blocking on the write to the
+platform.**
+
+That is close to the question a platform's own health API would answer, and it
+is answered for *every* destination — including one configured from a pasted
+stream key, and a custom RTMP or SRT URL that no API knows about.
+
+The event reports what was measured and hedges the cause on purpose. A slow
+uplink, a platform throttling you, and a slow disk under a file destination all
+look identical from here, so it says the speed and the frame counts and leaves
+the diagnosis to you. The two frame counters are what tell the two apart:
+
+| Rising | Means |
+|---|---|
+| dropped frames | FFmpeg is discarding to keep up — the **output** is congested |
+| duplicated frames | FFmpeg is padding — the **source** is starving |
+
+Thresholds are `speed < 0.95` sustained for 30 seconds. Both are deliberately
+conservative: a dip at a keyframe boundary is normal and an alert that fires on
+one is an alert you mute. A destination with no process reports a speed of zero,
+which is treated as *unknown* rather than slow, so nothing fires while a
+destination is starting up or after it has stopped.
+
+The same numbers are on each destination's card, live.
+
 ### Security and configuration events
 
-Five of the subscribable types are not about the stream. They are about the
+Seven of the subscribable types are not about the stream. They are about the
 server itself, and they answer one question: *was that me?*
 
 | Event | Severity | Fires when |

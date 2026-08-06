@@ -5670,14 +5670,25 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 		snap.IngestError = st.Ingest.LastError
 	}
 	for _, d := range st.Destinations {
-		snap.Destinations = append(snap.Destinations, alerts.DestState{
+		ds := alerts.DestState{
 			ID: d.ID, Name: d.Name, Enabled: d.Enabled,
 			// A destination whose graph would not compile has no process at
 			// all, and that is as down as a failed one.
 			Running:  d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning,
 			Platform: string(d.Platform),
 			Error:    d.Error,
-		})
+		}
+		// FFmpeg has been reporting all three of these once a second per
+		// destination since -progress was wired up, and nothing has ever read
+		// them. Left at their zero values the watcher treats the speed as
+		// unknown and says nothing, which is what happens for a destination
+		// with no process.
+		if d.Process != nil {
+			ds.Speed = d.Process.Progress.Speed
+			ds.DropFrames = d.Process.Progress.DropFrames
+			ds.DupFrames = d.Process.Progress.DupFrames
+		}
+		snap.Destinations = append(snap.Destinations, ds)
 	}
 	if st.Failover != nil {
 		snap.Failover = &alerts.FailoverState{

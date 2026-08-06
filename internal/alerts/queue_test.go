@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -22,6 +23,50 @@ func downEvent(id string, at time.Time) Event {
 	return Event{
 		Type: TypeDestinationDown, Severity: SeverityCritical, Key: "destination:" + id,
 		Title: "Destination down: " + id, At: at,
+	}
+}
+
+// Eviction is oldest-first, and takes no account of severity.
+//
+// This is written down because destination.falling_behind made it matter more.
+// Each destination now holds up to TWO pending groups rather than one --
+// "destination:<id>" and "destination:<id>:speed" -- so an endpoint that is
+// unreachable starts evicting at roughly 32 destinations instead of 64.
+//
+// The loss itself is by design: the cap exists so an endpoint that has been
+// down for an hour cannot hold the process's memory, and the drop is counted.
+// What is NOT obviously right is that a critical destination.down can be
+// dropped in favour of a newer warning-level falling_behind purely because it
+// is older. Making eviction severity-aware is a change to shared alerting
+// behaviour and did not belong in the feature that surfaced it, so the current
+// behaviour is pinned here instead: the day somebody changes it should be a
+// day they meant to.
+func TestCoalescerEvictionIsOldestFirstNotSeverityAware(t *testing.T) {
+	c := newCoalescer()
+	rules := []Rule{testRule()}
+
+	// A critical event about the first subject, before everything else.
+	c.Add(rules, downEvent("first", base), base)
+
+	// Fill past the cap with newer, quieter groups -- the shape of many
+	// destinations each holding a speed group alongside their down group.
+	for i := 0; i < maxGroupsPerRule; i++ {
+		at := base.Add(time.Duration(i+1) * time.Second)
+		c.Add(rules, Event{
+			Type: TypeDestinationFallingBehind, Severity: SeverityWarning,
+			Key: "destination:" + strconv.Itoa(i) + ":speed", At: at,
+		}, at)
+	}
+
+	if c.dropped == 0 {
+		t.Fatal("nothing was evicted past the cap; the bound is not doing its job")
+	}
+	// The oldest went, and it was the critical one. If this ever starts
+	// passing with the critical group retained, eviction has been made
+	// severity-aware -- update the design note in
+	// docs/DESIGN-DESTINATION-HEALTH.md rather than deleting this test.
+	if _, kept := c.groups[groupKey{rule: rules[0].ID, key: "destination:first"}]; kept {
+		t.Error("the oldest critical group survived; eviction is no longer oldest-first")
 	}
 }
 
