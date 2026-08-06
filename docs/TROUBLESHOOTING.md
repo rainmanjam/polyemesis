@@ -221,9 +221,12 @@ normalise job failed on it — or until it reached air.
 A file the server accepts but you cannot play locally is worth checking the
 other way round: **your** player may lack a codec this FFmpeg has.
 
-If the server has no `ffprobe` on its PATH the check cannot run, and uploads
-are accepted unchecked rather than all refused. The startup log says which
-binaries were found.
+**The check is skipped rather than failed when it cannot run**, and uploads are
+accepted unchecked. That happens when the server has no `ffprobe` on its PATH,
+and also when it has no running engine — an install whose video pipeline will
+not build logs the reason and keeps serving, and refusing every upload on top
+of that would be a worse outage than the one it is guarding against. The
+startup log says which binaries were found and whether the engine came up.
 
 ### "Error binding filtergraph inputs/outputs"
 

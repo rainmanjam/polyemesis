@@ -155,23 +155,27 @@ const probeUploadTimeout = 30 * time.Second
 // working install for the sake of a check it cannot perform. The gate closes
 // only when ffprobe ran and disagreed.
 func (s *Server) probeUpload(ctx context.Context, store *uploads.Store, name string) (*uploads.MediaInfo, error) {
-	// s.mgr is nil in every test in this package, and Manager.Default takes a
-	// read lock on the manager, so an unguarded s.eng() turns POST
-	// /api/v1/media into a panic under `go test ./internal/api`. It is
-	// reachable on a real install too: Manager.reconcile logs and continues
-	// when engine.New fails, so an install whose video pipeline will not build
-	// has no default engine -- and refusing every upload because of that would
-	// be a worse outage than the one it is guarding against.
-	if s.mgr == nil {
-		return nil, nil
-	}
-	eng := s.eng()
-	if eng == nil {
-		return nil, nil
-	}
-	tools := eng.Tools()
-	if tools == nil || tools.FFprobe == "" {
-		return nil, nil
+	bin := s.probeBin
+	if bin == "" {
+		// s.mgr is nil in every test in this package, and Manager.Default takes
+		// a read lock on the manager, so an unguarded s.eng() turns POST
+		// /api/v1/media into a panic under `go test ./internal/api`. It is
+		// reachable on a real install too: Manager.reconcile logs and continues
+		// when engine.New fails, so an install whose video pipeline will not
+		// build has no default engine -- and refusing every upload because of
+		// that would be a worse outage than the one it is guarding against.
+		if s.mgr == nil {
+			return nil, nil
+		}
+		eng := s.eng()
+		if eng == nil {
+			return nil, nil
+		}
+		tools := eng.Tools()
+		if tools == nil || tools.FFprobe == "" {
+			return nil, nil
+		}
+		bin = tools.FFprobe
 	}
 	path, err := store.Resolve(name)
 	if err != nil {
@@ -180,7 +184,7 @@ func (s *Server) probeUpload(ctx context.Context, store *uploads.Store, name str
 	ctx, cancel := context.WithTimeout(ctx, probeUploadTimeout)
 	defer cancel()
 
-	res, err := ffmpeg.ProbeFile(ctx, tools.FFprobe, path)
+	res, err := ffmpeg.ProbeFile(ctx, bin, path)
 	if err != nil {
 		// ffprobe's own words. "moov atom not found" tells somebody their
 		// download was truncated; "could not read this file" tells them

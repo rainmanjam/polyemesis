@@ -158,6 +158,16 @@ type Server struct {
 	// what, on which branch -- cannot be asserted at all. Removing all five
 	// call sites left the package green.
 	auditSink func(alerts.Event)
+
+	// probeBin supplies the ffprobe path directly, and is set only by tests.
+	//
+	// Same shape as auditSink and for the same reason. probeUpload reaches
+	// ffprobe through s.eng().Tools(), and this package's tests have no
+	// manager, so probing is skipped and every upload is accepted -- which
+	// means deleting the probe call from the handler leaves the package green.
+	// Review found that; the tests did not. Setting this exercises the real
+	// handler path rather than replacing it.
+	probeBin string
 }
 
 // showKey identifies one scheduled show: a destination, and the schedule that
