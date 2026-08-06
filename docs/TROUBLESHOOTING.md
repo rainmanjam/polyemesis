@@ -67,6 +67,10 @@ pgrep -af ffmpeg
    `Protocol not found`.
 5. **Are you on macOS with a bare `:port`?** See directly below — this one looks
    exactly like a firewall and is not one.
+6. **Is the link lossy?** A handshake can fail on loss that an established
+   stream would shrug off, and it fails with a bare `I/O error` that names
+   nothing. See [It connects on some attempts and not
+   others](#it-connects-on-some-attempts-and-not-others).
 
 ### macOS: an IPv4 publisher times out and nothing is logged — FIXED
 
@@ -131,6 +135,69 @@ the source is enabled but nothing is running to receive it.
 Usually the encoder and the server disagreeing about latency, or genuine packet
 loss. The source's link telemetry (RTT, loss, retransmits) is on the **Sources**
 page. Raise the SRT latency on both ends if loss is real.
+
+### It connects on some attempts and not others
+
+Retrying works, and that is the fix. The reason it works is worth knowing,
+because the numbers say loss is hurting one specific moment rather than the link
+as a whole.
+
+**Once the connection is established, the data path is very robust.** Measured
+against a live server over 40s runs — 1200 kbit/s video plus three audio tracks —
+with sender-side loss applied 8s in, so every handshake completed on a clean
+link:
+
+| Sender-side condition | Publisher live | Packets lost | Delivered |
+|---|---|---|---|
+| clean | 100% of samples | 0 | 6.1 MB |
+| 2% loss | 100% | 199 | 6.1 MB |
+| 5% loss | 100% | 463 | 6.1 MB |
+| 10% loss + 120ms±40ms jitter | 100% | 4766 | 5.9 MB |
+| 20% loss | 100% | 1788 | 6.1 MB |
+
+The publisher never left the live state in any condition, and all three audio
+tracks kept metering throughout every one. At 20% loss the stream still
+delivered the same 6.1 MB as a clean link. The jittered row is the only one that
+lost ground — RTT rose to 89.8ms and delivered bytes fell about 3% — and it is
+also the only row with jitter. Counts here are not monotonic in loss and should
+not be read as if they were.
+
+**The handshake is the weak point.** Same conditions, but with loss present from
+the first packet so that it applies during connection setup — six attempts each:
+
+| Condition | Connected |
+|---|---|
+| clean | 6/6 |
+| 2% | 6/6 |
+| 5% | 6/6 |
+| 10% | 4/6 |
+| 20% | 4/6 |
+
+The asymmetry is structural rather than a defect. A data stream is thousands of
+packets protected by retransmission that has already been negotiated, so losing
+one costs a retransmit. A handshake is a handful of packets exchanged before any
+of that machinery exists, so losing one loses the whole attempt.
+
+A failed attempt surfaces at the publisher as nothing more than:
+
+```
+Error opening output files: I/O error
+```
+
+That is FFmpeg's message, not polyemesis's, and it names neither SRT, nor loss,
+nor suggests retrying. The server side is what tells you which failure you have.
+A handshake that never completed produces **no refusal at all** — nothing is
+logged, because nothing was refused. If instead you get a typed `REJ_` reason,
+loss is not your problem and [the refusal table](#the-publisher-is-refused) is.
+
+**What to do:** retry, and turn on your encoder's auto-reconnect so it retries
+for you. At 10% loss a second attempt is very likely to succeed where the first
+did not, and once it does the connection will carry the stream.
+
+Raising SRT latency does not help here. Latency sizes the receive buffer on an
+established connection, which is exactly the part that was already surviving 20%
+loss; it does not protect the handshake. Raise it for the symptom in the section
+above, not this one.
 
 ---
 
