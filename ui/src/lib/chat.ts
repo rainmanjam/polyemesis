@@ -70,6 +70,20 @@ const ACCENT: Record<
 
 /** Unknown platforms fall back rather than crash: the server may know about a
  *  platform this build does not. */
+/** Timeout choices. Seconds on the wire, always — the server converts for Kick,
+ *  which counts in minutes. The list stops at a day because past that a timeout
+ *  is a ban with extra steps, and Kick refuses beyond seven days anyway.
+ *
+ *  Here rather than beside either consumer: the user card and the right-click
+ *  menu both offer these durations, and two copies would drift into a menu
+ *  whose "1 hour" is not the card's. */
+export const TIMEOUTS: { label: string; seconds: number }[] = [
+  { label: "1 min", seconds: 60 },
+  { label: "10 min", seconds: 600 },
+  { label: "1 hour", seconds: 3600 },
+  { label: "1 day", seconds: 86400 },
+];
+
 export function accentFor(p: ChatPlatform) {
   return ACCENT[p] ?? ACCENT.custom;
 }

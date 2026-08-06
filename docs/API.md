@@ -370,7 +370,7 @@ told so. The schedule still saves and still runs.
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
-| `GET` | `/chat`, `/chat/messages`, `/chat/users` |
+| `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
@@ -390,6 +390,21 @@ platform here publishes an API for a user's message history, Twitch included.
 Its mod card is a web-app feature backed by internal endpoints. The trade is
 depth for breadth: shallower than Twitch's card, and it works across all four
 platforms at once.
+
+`/chat/search?q=` finds a message again, matching on its text **or its author's
+name**, newest first — the one read here that is not chronological, because a
+result list answers "where did that comment go" and burying the likeliest answer
+at the bottom would be perverse. `platform=` narrows it to one tab and `limit=`
+bounds the page.
+
+It searches the database and never the Hub's in-memory ring, which holds only
+what the current process has seen; "find the comment from earlier" is precisely
+the question a process-lifetime buffer cannot answer. The same caveat as
+`/chat/users` applies and applies harder: the response carries `retentionNote`
+and `truncated` because search is the one place an operator can conclude
+something did *not* happen. **An empty result means "not in the scrollback we
+kept", never "never said"** — so render the note alongside no-results, not only
+alongside a full page.
 
 `DELETE /chat/messages` removes one message on the platform. `POST
 /chat/messages/hide` is Facebook's reversible hide where the platform offers it,

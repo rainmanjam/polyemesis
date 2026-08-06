@@ -328,6 +328,11 @@ jobs:
       - run: npx --no-install tsc -b --noEmit
       - run: npm run lint
       - run: npm run build
+      # Unit tests for the pure logic the browser suite cannot enumerate --
+      # platform link construction has five platforms times several missing-field
+      # cases, and driving each through a real browser would cost minutes to
+      # assert what a millisecond of vitest does.
+      - run: npm test
       # A vulnerable direct dependency should fail the build, not sit in a
       # report nobody opens. --audit-level=high so a low-severity transitive
       # advisory does not block a hotfix.

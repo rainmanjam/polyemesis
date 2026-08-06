@@ -1529,6 +1529,23 @@ export interface ChatUserCard {
   retentionNote: string;
 }
 
+/** A chat search result set.
+ *
+ *  Carries the same two honesty fields as ChatUserCard and for a sharper
+ *  reason: search is the one place an operator can conclude something did NOT
+ *  happen. "No results" here means "not in the scrollback we kept", never "never
+ *  said", so `retentionNote` has to be rendered alongside an empty result and
+ *  not only alongside a full one. */
+export interface ChatSearchResult {
+  query: string;
+  /** Echoed back so the UI can label a narrowed result set. */
+  platform?: ChatPlatform;
+  messages: ChatMessage[];
+  /** The limit was reached; older matches may exist beyond this page. */
+  truncated: boolean;
+  retentionNote: string;
+}
+
 /** Messages that are gone. Carried by the "chatRetract" event.
  *
  *  A list rather than one id because a timeout removes everything one author

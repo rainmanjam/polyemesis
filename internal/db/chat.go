@@ -141,7 +141,25 @@ const (
 	chatByAuthorQuery = `SELECT ` + chatColumns + ` FROM chat_messages
 		WHERE platform = ? AND author_id = ?
 		ORDER BY at_ms DESC, id DESC LIMIT ?`
+
+	chatSearchQuery = `SELECT ` + chatColumns + ` FROM chat_messages
+		WHERE (text LIKE ? ESCAPE '\' OR author_name LIKE ? ESCAPE '\')
+		ORDER BY at_ms DESC, id DESC LIMIT ?`
+
+	chatSearchForPlatformQuery = `SELECT ` + chatColumns + ` FROM chat_messages
+		WHERE platform = ? AND (text LIKE ? ESCAPE '\' OR author_name LIKE ? ESCAPE '\')
+		ORDER BY at_ms DESC, id DESC LIMIT ?`
 )
+
+// likeEscape neutralises the wildcards in a term the operator typed.
+//
+// Without it `%` matches everything and `_` matches any character, so searching
+// for the literal text "100%" would quietly return the whole table — a search
+// box that answers a narrow question with every message reads as broken. The
+// backslash is escaped first, otherwise the escapes this adds get re-escaped.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
 
 // RecentChatMessages returns the newest limit messages in reading order —
 // oldest first — because that is how a chat pane renders them and reversing a
@@ -199,6 +217,53 @@ func (d *DB) ChatMessagesByAuthor(p Platform, authorID string, limit int) ([]Cha
 	// bottom the same way the pane is.
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// SearchChatMessages finds retained messages whose text or author name contains
+// term, optionally narrowed to one platform.
+//
+// Newest first, which is the one place here that does NOT read oldest-first.
+// The other reads render a transcript, where reading order is chronological; a
+// result list answers "where did that comment go", and the most recent match is
+// overwhelmingly the one being looked for. Reversing it would bury the likely
+// answer at the bottom of the list.
+//
+// The same depth caveat as ChatMessagesByAuthor applies, and harder: this
+// searches only what the purge has left, so an empty result means "not in the
+// retained scrollback", never "never said". The UI has to say so.
+func (d *DB) SearchChatMessages(p Platform, term string, limit int) ([]ChatMessage, error) {
+	term = strings.TrimSpace(term)
+	if limit <= 0 || term == "" {
+		return []ChatMessage{}, nil
+	}
+	pattern := "%" + likeEscape(term) + "%"
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if p == "" {
+		rows, err = d.sql.Query(chatSearchQuery, pattern, pattern, limit)
+	} else {
+		rows, err = d.sql.Query(chatSearchForPlatformQuery, p, pattern, pattern, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ChatMessage{}
+	for rows.Next() {
+		m, err := scanChat(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

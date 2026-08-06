@@ -7,6 +7,7 @@ import type {
   ChatModerationResult,
   ChatOverview,
   ChatPlatform,
+  ChatSearchResult,
   ChatSendResponse,
   ChatSettings,
   ChatUserCard,
@@ -646,6 +647,18 @@ export const api = {
     return get<{ messages: ChatMessage[]; stored: boolean }>(
       "/chat/messages" + (qs ? `?${qs}` : ""),
     );
+  },
+  /** Find a message again, by its text or by who said it.
+   *
+   *  Server-side and against the database, not the pane: the timeline holds one
+   *  session's worth of messages and "where did that comment go" is exactly the
+   *  question it cannot answer. Bounded by the chat retention setting, which is
+   *  why the response carries a note saying so. */
+  chatSearch: (opts: { q: string; platform?: ChatPlatform; limit?: number }) => {
+    const p = new URLSearchParams({ q: opts.q });
+    if (opts.platform) p.set("platform", opts.platform);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    return get<ChatSearchResult>(`/chat/search?${p.toString()}`);
   },
   /** Fan-out. Answers 200 even when every platform failed: the per-platform
    *  verdicts are the answer, and a status code cannot say "Twitch took it and

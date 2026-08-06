@@ -7,14 +7,18 @@ import { PageHeader } from "@/components/AppLayout";
 import {
   ChatComposer,
   ChatEmpty,
+  ChatSearchBox,
+  ChatSearchResults,
   ChatStatusList,
   ChatTimeline,
   PlatformFilter,
 } from "@/components/ChatPanel";
 import { accentFor, platformsIn } from "@/lib/chat";
 import { ChatUserCard } from "@/components/ChatUserCard";
+import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
 import { useChatFeed } from "@/hooks/useChatFeed";
+import { useChatSearch } from "@/hooks/useChatSearch";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /** One pane for every platform at once.
@@ -43,6 +47,8 @@ export function ChatPage() {
   } = useChatFeed();
 
   const [hidden, setHidden] = useState<Set<ChatPlatform>>(new Set());
+  const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
+  const search = useChatSearch();
 
   const platforms = useMemo(() => platformsIn(messages, statuses), [messages, statuses]);
   const counts = useMemo(() => {
@@ -143,27 +149,49 @@ export function ChatPage() {
             />
           )}
 
-          <ChatTimeline
-            messages={visible}
-            onDelete={del}
-            onOpenUser={setCard}
-            empty={
-              hidden.size > 0 && messages.length > 0 ? (
-                <div className="flex h-full items-center justify-center px-6 text-center">
-                  <p className="text-[11px] text-muted-foreground">
-                    Every platform with messages is filtered out.
-                  </p>
-                </div>
-              ) : (
-                <ChatEmpty
-                  loading={loading}
-                  configured={configured}
-                  error={error}
-                  statuses={statuses}
-                />
-              )
-            }
-          />
+          {menu && (
+            <ChatMessageMenu
+              message={menu.m}
+              anchor={menu.at}
+              onClose={() => setMenu(null)}
+              onOpenCard={setCard}
+              onDelete={del}
+            />
+          )}
+
+          <ChatSearchBox search={search} />
+
+          {search.active ? (
+            <ChatSearchResults
+              search={search}
+              onDelete={del}
+              onOpenUser={setCard}
+              onMenu={(m, at) => setMenu({ m, at })}
+            />
+          ) : (
+            <ChatTimeline
+              messages={visible}
+              onDelete={del}
+              onOpenUser={setCard}
+              onMenu={(m, at) => setMenu({ m, at })}
+              empty={
+                hidden.size > 0 && messages.length > 0 ? (
+                  <div className="flex h-full items-center justify-center px-6 text-center">
+                    <p className="text-[11px] text-muted-foreground">
+                      Every platform with messages is filtered out.
+                    </p>
+                  </div>
+                ) : (
+                  <ChatEmpty
+                    loading={loading}
+                    configured={configured}
+                    error={error}
+                    statuses={statuses}
+                  />
+                )
+              }
+            />
+          )}
 
           <ChatComposer statuses={statuses} limits={limits} configured={configured} />
         </section>

@@ -540,6 +540,9 @@ func (s *Server) Handler() http.Handler {
 			// survive a path segment. See chat.go.
 			r.Get("/chat", s.handleChatOverview)
 			r.Get("/chat/messages", s.handleChatMessages)
+			// Finding one comment again. Searches the table rather than the
+			// Hub's ring, which only holds this process's lifetime.
+			r.Get("/chat/search", s.handleChatSearch)
 			// The moderator's user card: what one person has said. Read from
 			// our own scrollback, because no platform publishes this.
 			r.Get("/chat/users", s.handleChatUser)
