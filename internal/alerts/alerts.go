@@ -50,6 +50,47 @@ const (
 	TypeLoudnessOut Type = "loudness.out_of_compliance"
 	// TypeLoudnessRecovered closes out a TypeLoudnessOut.
 	TypeLoudnessRecovered Type = "loudness.recovered"
+	// TypeLoginFailed fires when sign-in attempts from one address have passed
+	// the throttle's free allowance. Not on the first failure: a login that
+	// failed once is somebody mistyping their own password, and a channel that
+	// says so out loud is a channel that has been muted before the first real
+	// incident. It is also not raised on the throttled branch, where the
+	// request is already being answered with a 429 before the password is read
+	// -- publishing there would let an attacker set the event rate.
+	TypeLoginFailed Type = "auth.login.failed"
+	// TypeLoginSucceeded fires on every accepted sign-in. There is exactly one
+	// account on an install, so this is the only signal an operator has that
+	// somebody else is holding their password or their session cookie, neither
+	// of which can be revoked individually. It carries how many failures
+	// preceded it, which is the question a reader of TypeLoginFailed asks next.
+	TypeLoginSucceeded Type = "auth.login.succeeded"
+	// TypePasswordChanged fires when the admin password is replaced. Loud on
+	// purpose. The false positive is one message the operator was expecting;
+	// the false negative is never finding out that somebody locked them out of
+	// their own server, because SetPassword ends every session as it goes.
+	TypePasswordChanged Type = "auth.password.changed"
+	// TypeAPITokenCreated fires when an API token is minted. A token acts as
+	// the admin, is limited to no part of the API and never expires, and its
+	// plaintext exists exactly once -- it is what somebody establishes to
+	// survive the password change that would otherwise evict them.
+	TypeAPITokenCreated Type = "auth.token.created"
+	// TypeAPITokenRevoked fires when an API token is destroyed. It exists
+	// because minting is alerted and the pair is what an operator reads: a
+	// "created" with no matching "revoked" is a credential still out there, and
+	// a "revoked" nobody performed is somebody closing a door behind them.
+	// Without it the channel records only half of a token's life.
+	TypeAPITokenRevoked Type = "auth.token.revoked"
+	// TypeSettingsChanged fires when a settings save actually altered
+	// something. It names the sections that changed and never a value; see
+	// changedSections in internal/api/audit.go for why that is not
+	// squeamishness.
+	TypeSettingsChanged Type = "settings.changed"
+	// TypeClipCaptured fires when a clip is cut from the replay buffer. Info,
+	// and the quietest of the security set on purpose: on a busy stream this is
+	// somebody doing their job, repeatedly. It is here because a clip is the
+	// one operation that takes content OFF the server -- the alert is not
+	// "something broke", it is a record that material left.
+	TypeClipCaptured Type = "clip.captured"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -57,8 +98,21 @@ const (
 )
 
 // AllTypes is every subscribable type, in the order a settings page should
-// list them. TypeTest is absent on purpose: it is not something to subscribe
-// to.
+// list them: the streaming events first, because that is what an operator
+// scanning the picker came for, then the security and configuration ones.
+// TypeTest is absent on purpose: it is not something to subscribe to.
+//
+// The security types are APPENDED rather than interleaved, and they are in
+// this list rather than in a catalogue of their own. Both of those are load
+// bearing. Appending keeps every existing row of the picker where the operator
+// last saw it; being in the list at all is what stops Rule.Normalized deleting
+// a subscription to one of them, because Normalized drops anything KnownType
+// does not recognise and db.scanAlertRule runs Normalized on every read.
+//
+// The cost is stated rather than hidden: a rule with an empty Events list means
+// "everything", so an install that has never touched its subscriptions starts
+// receiving these on upgrade. See docs/MONITORING.md for why that is the change
+// we take rather than the one we migrate around.
 func AllTypes() []Type {
 	return []Type{
 		TypeDestinationDown, TypeDestinationRecovered,
@@ -67,6 +121,9 @@ func AllTypes() []Type {
 		TypeClipping,
 		TypeDiskLow, TypeDiskRecovered,
 		TypeLoudnessOut, TypeLoudnessRecovered,
+		TypeLoginFailed, TypeLoginSucceeded,
+		TypePasswordChanged, TypeAPITokenCreated, TypeAPITokenRevoked,
+		TypeSettingsChanged, TypeClipCaptured,
 	}
 }
 

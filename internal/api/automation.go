@@ -476,6 +476,11 @@ func (s *Server) handleCaptureClip(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// A clip is the one operation here that takes content off the server, so it
+	// is recorded even though nothing has gone wrong. Info severity: on a busy
+	// stream this is somebody doing their job, and a rule that wants only the
+	// incidents can drop it with MinSeverity rather than unsubscribing.
+	s.publishAudit(auditClipCaptured(clip.Name, s.clientIP(r)))
 	writeJSON(w, http.StatusCreated, map[string]any{"clip": clip})
 }
 

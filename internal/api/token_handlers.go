@@ -1,6 +1,9 @@
 package api
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 // requireSession rejects token-authenticated callers.
 //
@@ -50,6 +53,13 @@ func (s *Server) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("api token created", "name", token.Name, "prefix", token.Prefix)
+	// Loud, because this is the credential that survives the response to a
+	// compromise. Minting is already behind the password rather than behind a
+	// token -- see requireSession -- so somebody reaching here is somebody who
+	// has the password, and a token they mint keeps working after the password
+	// is changed. The alert carries the name and not the prefix; see
+	// auditAPITokenCreated.
+	s.publishAudit(auditAPITokenCreated(token.Name, s.clientIP(r)))
 
 	// The only response that ever carries the plaintext. Nothing stores it,
 	// so a client that drops this field has to start over.
@@ -68,10 +78,24 @@ func (s *Server) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// Read the name BEFORE the row goes, because the created event carries a
+	// name and an operator pairs the two by eye. An id alone would make them
+	// cross-reference a list the deletion has already changed. A failed lookup
+	// is not worth failing the revocation over -- the event degrades to the id.
+	name := fmt.Sprintf("#%d", id)
+	if tokens, err := s.store.ListAPITokens(); err == nil {
+		for _, t := range tokens {
+			if t.ID == id {
+				name = t.Name
+				break
+			}
+		}
+	}
 	if err := s.store.DeleteAPIToken(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	s.log.Info("api token revoked", "id", id)
+	s.publishAudit(auditAPITokenRevoked(name, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }

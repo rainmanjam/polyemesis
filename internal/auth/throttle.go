@@ -97,6 +97,33 @@ func (t *Throttle) Fail(key string) time.Duration {
 	return d
 }
 
+// Failures reports how many consecutive rejected credential checks key has
+// accumulated. Zero for an address that has never failed, and zero once
+// Succeed has run.
+//
+// It exists so the alert path can say something true rather than something
+// alarming. A sign-in alert published on every single failure is one an
+// operator mutes the first time they mistype their own password, so the
+// handler has to know whether this failure is past the free allowance -- and a
+// successful sign-in that follows a run of failures is a different event from
+// one that follows none, which is a distinction only this counter holds and
+// only until Succeed clears it.
+//
+// Idle expiry is honoured for the same reason Retry honours it: throttleIdleTTL
+// is the promise that walking away and coming back is a clean slate, and a
+// count that outlived it would attribute yesterday's guessing to today's
+// sign-in.
+func (t *Throttle) Failures(key string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	a := t.attempts[key]
+	if a == nil || t.now().Sub(a.seen) >= throttleIdleTTL {
+		return 0
+	}
+	return a.failures
+}
+
 // Succeed clears the counter for key, so a correct password immediately
 // restores full speed.
 func (t *Throttle) Succeed(key string) {

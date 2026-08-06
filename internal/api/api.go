@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -146,6 +147,17 @@ type Server struct {
 	// In memory on purpose: a restart resetting the count only means the sweep
 	// is more patient, which is the safe direction.
 	announceFails map[showKey]int
+
+	// auditSink diverts audit events instead of publishing them, and is set
+	// only by tests.
+	//
+	// It exists because the alternative is untestable rather than merely
+	// awkward. publishAudit needs a manager and a started engine, and this
+	// package's tests have neither, so without a seam every audit publish is a
+	// no-op under test and the wiring in the handlers -- which endpoint raises
+	// what, on which branch -- cannot be asserted at all. Removing all five
+	// call sites left the package green.
+	auditSink func(alerts.Event)
 }
 
 // showKey identifies one scheduled show: a destination, and the schedule that
