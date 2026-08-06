@@ -38,6 +38,7 @@ import type {
   LogLine,
   ProcessInfo,
 } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -113,6 +114,7 @@ const DRY_RUN_LABEL: Record<DryRunResult["verdict"], string> = {
  *  them. Someone pasting flags from a forum thread into a live stream should
  *  have to look at the whole line first. */
 function ExpertPanel() {
+  const t = useT();
   const [dests, setDests] = useState<Destination[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [draft, setDraft] = useState<ExpertDraft>({ inputArgs: "", outputArgs: "" });
@@ -240,7 +242,7 @@ function ExpertPanel() {
         </CardTitle>
         <Select value={selected} onValueChange={choose}>
           <SelectTrigger className="h-7 w-56 text-[11px]">
-            <SelectValue placeholder="Choose a destination…" />
+            <SelectValue placeholder={t("mon.chooseDestination")} />
           </SelectTrigger>
           <SelectContent>
             {dests.map((d) => (
@@ -269,7 +271,7 @@ function ExpertPanel() {
           <>
             <div className="grid gap-2.5 sm:grid-cols-2">
               <div>
-                <Label htmlFor="expert-in">Extra input arguments</Label>
+                <Label htmlFor="expert-in">{t("mon.extraInput")}</Label>
                 <Textarea
                   id="expert-in"
                   spellCheck={false}
@@ -280,7 +282,7 @@ function ExpertPanel() {
                 />
               </div>
               <div>
-                <Label htmlFor="expert-out">Extra output arguments</Label>
+                <Label htmlFor="expert-out">{t("mon.extraOutput")}</Label>
                 <Textarea
                   id="expert-out"
                   spellCheck={false}
@@ -299,7 +301,7 @@ function ExpertPanel() {
               </Button>
               <Button size="sm" variant="secondary" onClick={doDryRun} disabled={busy !== ""}>
                 {busy === "dryrun" && <Loader2 className="h-3 w-3 animate-spin" />}
-                Dry run
+            {t("mon.dryRun")}
               </Button>
               <Button size="sm" onClick={apply} disabled={!canApply}>
                 {busy === "apply" && <Loader2 className="h-3 w-3 animate-spin" />}
@@ -310,7 +312,7 @@ function ExpertPanel() {
               </Button>
               {!shown && (
                 <span className="text-[10px] text-muted-foreground">
-                  Resolve the command to see exactly what will run before applying.
+            {t("mon.resolveHint")}
                 </span>
               )}
             </div>
@@ -361,7 +363,7 @@ function ExpertPanel() {
               <div>
                 <div className="mb-1 flex items-center gap-2">
                   <span className="text-[10px] uppercase tracking-wide text-subtle-foreground">
-                    Full resolved command
+            {t("mon.fullCommand")}
                   </span>
                   <Badge variant={resolved.command.live ? "default" : "outline"}>
                     {resolved.command.live ? "from the running process" : "rebuilt"}
@@ -386,7 +388,7 @@ function ExpertPanel() {
               <div>
                 <div className="mb-1 flex items-center gap-2 text-[11px]">
                   <span className="text-[10px] uppercase tracking-wide text-subtle-foreground">
-                    Dry run
+            {t("mon.dryRun")}
                   </span>
                   <span className={DRY_RUN_TONE[dryRun.verdict]}>
                     {DRY_RUN_LABEL[dryRun.verdict]}
@@ -415,6 +417,7 @@ function ExpertPanel() {
 }
 
 export function MonitoringPage() {
+  const t = useT();
   const { system, bitrate, logs, status, clearLogs } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [history, setHistory] = useState<LogLine[]>([]);
@@ -522,8 +525,8 @@ export function MonitoringPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Monitoring"
-        subtitle="Process health, host resources, and the live FFmpeg log."
+        title={t("mon.title")}
+        subtitle={t("mon.subtitle")}
       />
 
       {/* ---------- host + relay ---------- */}
@@ -531,7 +534,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label="Host CPU"
+              label={t("mon.hostCpu")}
               value={pct(system?.cpuPercent ?? 0)}
               tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
             />
@@ -543,7 +546,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label="Memory"
+              label={t("mon.memory")}
               value={pct(system?.memPercent ?? 0)}
               tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
             />
@@ -555,7 +558,7 @@ export function MonitoringPage() {
         </Card>
         <Card>
           <CardContent className="pt-3">
-            <Stat label="Relay in" value={bytes(status?.relay.rxBytes ?? 0)} />
+            <Stat label={t("mon.relayIn")} value={bytes(status?.relay.rxBytes ?? 0)} />
             <div className="mt-1 text-[10px] text-muted-foreground">
               {status?.relay.subscribers?.length ?? 0} subscribers · port {status?.relay.port ?? "—"}
             </div>
@@ -564,7 +567,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label="Relay drops"
+              label={t("mon.relayDrops")}
               value={status?.relay.dropped ?? 0}
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
@@ -576,7 +579,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label="Ingest loss"
+              label={t("mon.ingestLoss")}
               value={`${(status?.relay.lossPercent ?? 0).toFixed(2)}%`}
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
@@ -592,7 +595,7 @@ export function MonitoringPage() {
       {/* ---------- ingest bitrate ---------- */}
       <Card className="mb-3">
         <CardHeader>
-          <CardTitle>Ingest bitrate — last 30 minutes</CardTitle>
+          <CardTitle>{t("mon.bitrateChart")}</CardTitle>
         </CardHeader>
         <CardContent className="h-40 px-1">
           {chartData.length < 2 ? (
@@ -657,7 +660,7 @@ export function MonitoringPage() {
         {/* ---------- processes ---------- */}
         <Card className="h-fit">
           <CardHeader>
-            <CardTitle>Processes</CardTitle>
+            <CardTitle>{t("mon.processes")}</CardTitle>
               {procFreshness.stale && (
                 <Badge variant="warn" title={`${procFreshness.failures} consecutive failed refreshes`}>
                   not updating
@@ -682,14 +685,14 @@ export function MonitoringPage() {
                     <Badge variant={toneBadge[tone]}>{labelForState(p.state)}</Badge>
                   </div>
                   <div className="mt-1 grid grid-cols-3 gap-1">
-                    <Stat label="PID" value={p.pid || "—"} tone="muted" />
+                    <Stat label={t("mon.pid")} value={p.pid || "—"} tone="muted" />
                     <Stat
-                      label="Uptime"
+                      label={t("mon.uptime")}
                       value={p.state === "running" ? duration(p.uptimeSec) : "—"}
                       tone="muted"
                     />
                     <Stat
-                      label="Restarts"
+                      label={t("mon.restarts")}
                       value={p.restarts}
                       tone={p.restarts > 0 ? "warn" : "muted"}
                     />
@@ -721,14 +724,14 @@ export function MonitoringPage() {
         {/* ---------- log tail ---------- */}
         <Card className="flex min-h-0 flex-col">
           <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle>FFmpeg log</CardTitle>
+            <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
             <div className="flex items-center gap-2">
               <Select value={filter} onValueChange={setFilter}>
                 <SelectTrigger className="h-7 w-36 text-[11px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All processes</SelectItem>
+                  <SelectItem value="all">{t("mon.allProcesses")}</SelectItem>
                   {processNames.map((n) => (
                     <SelectItem key={n} value={n}>
                       {n}
@@ -742,7 +745,7 @@ export function MonitoringPage() {
                   Follow
                 </Label>
               </div>
-              <Button variant="ghost" size="icon-sm" onClick={clearAll} aria-label="Clear log">
+              <Button variant="ghost" size="icon-sm" onClick={clearAll} aria-label={t("mon.clearLog")}>
                 <Eraser />
               </Button>
             </div>
