@@ -316,6 +316,31 @@ go test -v ./internal/routing/    # pan strings, 5.1 downmix, validation
 go test -v ./internal/ffmpeg/     # ingest/destination/recorder command builders
 ```
 
+The browser has a unit tier too, for the pure logic Playwright cannot practically
+enumerate:
+
+```bash
+cd ui && npm test           # vitest, scoped to src/**/*.test.ts
+```
+
+Two things live there, both chosen because a browser test would be the wrong
+tool rather than merely a slower one:
+
+- **`lib/platformLinks.test.ts`** — five platforms times several missing-field
+  cases. Driving each through a real browser would cost minutes to assert what
+  takes a millisecond here.
+- **`lib/i18n.test.ts`** — the translation catalogues. It checks the properties a
+  reviewer *cannot* check by reading: that no locale corrupts a `{placeholder}`,
+  defines a key English lacks, leaves an English function word inside a
+  non-Latin string, or splices a Latin word into a native one. It deliberately
+  does **not** judge whether a translation is good; no test can. Incompleteness
+  is not an error either — `lib/i18n.ts` falls back to English per key — so the
+  suite prints a coverage table rather than failing a lagging locale.
+
+Note that `e2e/` is Playwright's and is excluded from vitest in
+`vitest.config.ts`; handed to vitest those specs fail on importing
+`@playwright/test` rather than on anything real.
+
 ---
 
 ## 10. Acceptance suites

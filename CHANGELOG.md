@@ -8,6 +8,50 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **Chat search.** `GET /api/v1/chat/search?q=` matches a message's text or its
+  author's name across the retained scrollback, newest first, optionally scoped
+  to one platform. The pane gains a search box that replaces the live timeline
+  while a query is active — results come from the database and are frozen at the
+  moment of the query, so letting live messages append underneath them would
+  present two different things as one list. Search is where an operator can
+  wrongly conclude something did not happen, so the retention caveat renders on
+  an empty result, not only on a full one.
+- **Right-click and double-click moderation on a chat message.** Timeouts, delete
+  and the user card, two seconds from reading a bad line to acting on it.
+  Double-click is the same menu for pointers with no secondary button. It adds no
+  capability the user card lacked; a permanent ban deliberately does *not* fire
+  from the menu but opens the card, which confirms — the one irreversible action
+  reachable from a right-click should not be a single click on a menu that
+  appeared under the cursor.
+- **Links out to the platform.** Twitch gets its real moderator viewer card in a
+  separate window. YouTube, Kick and Facebook get a profile or channel link and
+  say so, because none of them publishes a per-viewer chat history at any URL —
+  a uniform "Open on <platform>" label would promise a moderator the same thing
+  everywhere and deliver it only on Twitch.
+- **Per-setting help.** An `(i)` popover beside a setting's label explains what it
+  actually changes — 2.5× your round-trip time for SRT latency, why the free-space
+  floor is the only limit that accounts for files polyemesis did not write. Click
+  rather than hover, so it works on touch and under a screen reader, and the body
+  is a catalogue key, so the explanation is translated too.
+
+### Changed
+
+- **Sources, Recordings and Settings are translated.** The catalogue grew from 135
+  keys to 419, and all fifteen languages are complete. Previously only the nav
+  shell and three widgets were extracted; every page rendered hard-coded English
+  whatever the operator had chosen.
+- `vitest` runs in CI alongside `tsc` and `oxlint`, covering the pure logic the
+  browser suite cannot practically enumerate — platform link construction across
+  five platforms, and the translation catalogues themselves.
+
+### Fixed
+
+- Chat's `(i)` help buttons no longer all announce as "More information"; each
+  names the setting it explains, so a screen-reader user can tell a dozen of them
+  apart.
+
 ## [0.3.0] — 2026-08-05
 
 A minor bump rather than a patch, and deliberately: `facebook.backupIngest`

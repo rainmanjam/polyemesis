@@ -53,6 +53,7 @@ import {
   tierInfo,
 } from "@/lib/capabilities";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import { LIMITS } from "@/lib/limits";
@@ -74,6 +75,7 @@ import type {
 } from "@/lib/types";
 
 export function SettingsPage() {
+  const t = useT();
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") ?? "ingest";
 
@@ -157,14 +159,14 @@ export function SettingsPage() {
 
   return (
     <div className="p-3">
-      <PageHeader title="Settings" subtitle={system ? `polyemesis ${system.version}` : undefined} />
+      <PageHeader title={t("set.title")} subtitle={system ? `polyemesis ${system.version}` : undefined} />
 
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <TabsList>
-          <TabsTrigger value="ingest">Ingest</TabsTrigger>
-          <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
-          <TabsTrigger value="platforms">Platform credentials</TabsTrigger>
-          <TabsTrigger value="security">Security</TabsTrigger>
+          <TabsTrigger value="ingest">{t("set.ingest")}</TabsTrigger>
+          <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
+          <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>
+          <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ingest">
@@ -203,6 +205,7 @@ function IngestSettings({
   onSave: (s: Settings) => void;
   saving: boolean;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   // This page had no idea whether a broadcast was running: it never read live
@@ -213,7 +216,7 @@ function IngestSettings({
   const copyUrl = async () => {
     if (!system?.ingestUrl) return;
     await navigator.clipboard.writeText(system.ingestUrl);
-    toast.success("Ingest URL copied.");
+    toast.success(t("set.ingestUrlCopied"));
   };
 
   const listeners = draft.listeners ?? { srtPort: 6000, rtmpPort: 1935 };
@@ -224,16 +227,12 @@ function IngestSettings({
     <div className="grid gap-3 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Listeners</CardTitle>
-          <CardDescription>
-            Where the server binds, for the whole install. One SRT port serves every source —
-            they are told apart by their publish token, so adding a source never means
-            publishing another port. RTMP has no such routing, so its port serves one source.
-          </CardDescription>
+          <CardTitle>{t("set.listeners")}</CardTitle>
+          <CardDescription>{t("set.listenersDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="listener-srt">SRT port</Label>
+            <Label htmlFor="listener-srt">{t("set.srtPort")}</Label>
             <Input
               id="listener-srt"
               type="number"
@@ -244,7 +243,7 @@ function IngestSettings({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="listener-rtmp">RTMP port</Label>
+            <Label htmlFor="listener-rtmp">{t("set.rtmpPort")}</Label>
             <Input
               id="listener-rtmp"
               type="number"
@@ -259,15 +258,12 @@ function IngestSettings({
 
       <Card>
         <CardHeader>
-          <CardTitle>Ingest</CardTitle>
-          <CardDescription>
-            SRT carries up to six audio tracks. RTMP carries one, and exists as a fallback for
-            encoders that cannot do SRT. Pull dials a source instead of waiting for one.
-          </CardDescription>
+          <CardTitle>{t("set.ingest")}</CardTitle>
+          <CardDescription>{t("set.ingestDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label>Mode</Label>
+            <Label>{t("set.mode")}</Label>
             <Select
               value={draft.ingest.mode}
               onValueChange={(v) =>
@@ -278,16 +274,13 @@ function IngestSettings({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="srt">SRT — multitrack (recommended)</SelectItem>
-                <SelectItem value="rtmp">RTMP — single track</SelectItem>
-                <SelectItem value="pull">Pull — dial a camera, feed or file</SelectItem>
+                <SelectItem value="srt">{t("set.modeSrt")}</SelectItem>
+                <SelectItem value="rtmp">{t("set.modeRtmp")}</SelectItem>
+                <SelectItem value="pull">{t("set.modePull")}</SelectItem>
               </SelectContent>
             </Select>
             {system && !system.ffmpeg.hasLibsrt && draft.ingest.mode === "srt" && (
-              <span className="text-[10px] text-warn">
-                This FFmpeg build has no SRT support. Install one configured with
-                --enable-libsrt, or use RTMP.
-              </span>
+              <span className="text-[10px] text-warn">{t("set.noLibsrt")}</span>
             )}
           </div>
 
@@ -297,7 +290,7 @@ function IngestSettings({
             <>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="srt-latency">Latency (ms)</Label>
+                  <Label htmlFor="srt-latency">{t("set.latencyMs")}</Label>
                   <Input
                     id="srt-latency"
                     type="number"
@@ -315,12 +308,12 @@ function IngestSettings({
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="srt-pass">Passphrase</Label>
+                <Label htmlFor="srt-pass">{t("set.passphrase")}</Label>
                 <Input
                   id="srt-pass"
                   type="password"
                   value={draft.ingest.srt.passphrase}
-                  placeholder="optional — 10 to 79 characters"
+                  placeholder={t("set.passphrasePlaceholder")}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -331,17 +324,14 @@ function IngestSettings({
                     })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">
-                  Enables AES encryption. Leave blank for none. SRT rejects passphrases outside
-                  10–79 characters.
-                </span>
+                <span className="text-[10px] text-muted-foreground">{t("set.passphraseNote")}</span>
               </div>
             </>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="rtmp-app">App</Label>
+                  <Label htmlFor="rtmp-app">{t("set.app")}</Label>
                   <Input
                     id="rtmp-app"
                     value={draft.ingest.rtmp.app}
@@ -358,7 +348,7 @@ function IngestSettings({
                 </div>
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="rtmp-key">Stream key</Label>
+                <Label htmlFor="rtmp-key">{t("set.streamKey")}</Label>
                 <Input
                   id="rtmp-key"
                   value={draft.ingest.rtmp.streamKey}
@@ -372,9 +362,7 @@ function IngestSettings({
                     })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">
-                  Publishers must use this exact path, so an open port is not an open door.
-                </span>
+                <span className="text-[10px] text-muted-foreground">{t("set.streamKeyNote")}</span>
               </div>
             </>
           )}
@@ -407,8 +395,8 @@ function IngestSettings({
 
       <Card className="h-fit">
         <CardHeader>
-          <CardTitle>Encoder URL</CardTitle>
-          <CardDescription>Point OBS at this address.</CardDescription>
+          <CardTitle>{t("set.encoderUrl")}</CardTitle>
+          <CardDescription>{t("set.pointObs")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
@@ -469,6 +457,7 @@ function PullIngestFields({
   draft: Settings;
   setDraft: (s: Settings) => void;
 }) {
+  const t = useT();
   const pull = draft.ingest.pull ?? { url: "", reconnectDelayMaxSeconds: 30, rtspTransport: "tcp" };
   const set = (patch: Partial<typeof pull>) =>
     setDraft({ ...draft, ingest: { ...draft.ingest, pull: { ...pull, ...patch } } });
@@ -479,17 +468,16 @@ function PullIngestFields({
   return (
     <>
       <div className="flex flex-col gap-1">
-        <Label htmlFor="pull-url">Source URL</Label>
+        <Label htmlFor="pull-url">{t("set.sourceUrl")}</Label>
         <Input
           id="pull-url"
           value={pull.url}
-          placeholder="rtsp://camera.local/stream1"
+          placeholder={t("set.sourceUrlPlaceholder")}
           onChange={(e) => set({ url: e.target.value })}
         />
         {pull.url !== "" && !known ? (
           <span className="text-[10px] text-warn">
-            The server dials only: {PULL_SCHEMES.join(", ")}.
-          </span>
+            {t("set.dialsOnly", { schemes: PULL_SCHEMES.join(", ") })}</span>
         ) : (
           <span className="text-[10px] text-muted-foreground">
             One of {PULL_SCHEMES.join(", ")}. A file:// source is a path RELATIVE to the data
@@ -501,19 +489,17 @@ function PullIngestFields({
 
       <div className="grid grid-cols-2 gap-2">
         <div className="flex flex-col gap-1">
-          <Label htmlFor="pull-reconnect">Reconnect backoff cap (s)</Label>
+          <Label htmlFor="pull-reconnect">{t("set.reconnectCap")}</Label>
           <Input
             id="pull-reconnect"
             type="number"
             value={pull.reconnectDelayMaxSeconds}
             onChange={(e) => set({ reconnectDelayMaxSeconds: Number(e.target.value) })}
           />
-          <span className="text-[10px] text-muted-foreground">
-            0 uses the default. HTTP and HLS sources only.
-          </span>
+          <span className="text-[10px] text-muted-foreground">{t("set.reconnectCapNote")}</span>
         </div>
         <div className="flex flex-col gap-1">
-          <Label>RTSP transport</Label>
+          <Label>{t("set.rtspTransport")}</Label>
           <Select value={pull.rtspTransport || "tcp"} onValueChange={(v) => set({ rtspTransport: v })}>
             <SelectTrigger>
               <SelectValue />
@@ -526,10 +512,7 @@ function PullIngestFields({
               ))}
             </SelectContent>
           </Select>
-          <span className="text-[10px] text-muted-foreground">
-            TCP unless the camera cannot. RTSP over UDP through NAT looks connected and delivers
-            nothing.
-          </span>
+          <span className="text-[10px] text-muted-foreground">{t("set.rtspNote")}</span>
         </div>
       </div>
     </>
@@ -574,6 +557,7 @@ function PipelineSettings({
   onClearMqttPassword: () => Promise<void>;
   saving: boolean;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   // Held here and never seeded from the server: the password is not in the
@@ -587,42 +571,33 @@ function PipelineSettings({
     <div className="grid gap-3 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Synthetic audio</CardTitle>
-          <CardDescription>
-            What happens when the ingest carries video and no audio at all.
-          </CardDescription>
+          <CardTitle>{t("set.syntheticAudio")}</CardTitle>
+          <CardDescription>{t("set.syntheticDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="synth-silence">Synthesise a silent track</Label>
+            <Label htmlFor="synth-silence">{t("set.synthesiseSilent")}</Label>
             <Switch
               id="synth-silence"
               checked={draft.synth?.silenceOnVideoOnly ?? true}
               onCheckedChange={(v) => setDraft({ ...draft, synth: { silenceOnVideoOnly: v } })}
             />
           </div>
-          <span className="text-[10px] text-muted-foreground">
-            Every major platform rejects a stream with no audio track. With this on, a video-only
-            ingest gains one silent stereo track and its destinations start; with it off they refuse
-            with "routing profile selects no audio". It only ever applies to an ingest that PROBED
-            with zero tracks, so it can never displace audio you are actually sending.
-          </span>
+          <span className="text-[10px] text-muted-foreground">{t("set.synthesiseNote")}</span>
           <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Going live</CardTitle>
-          <CardDescription>
-            What happens when several destinations start at once.
-          </CardDescription>
+          <CardTitle>{t("set.goingLive")}</CardTitle>
+          <CardDescription>{t("set.goingLiveDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="dest-stagger">Stagger connections (ms)</Label>
+            <Label htmlFor="dest-stagger">{t("set.stagger")}</Label>
             <Input
               id="dest-stagger"
               type="number"
@@ -634,35 +609,25 @@ function PipelineSettings({
               }
               className="w-28"
             />
+            <span className="text-[10px] text-muted-foreground">{t("set.staggerNote")}</span>
             <span className="text-[10px] text-muted-foreground">
-              0 is off. Going live otherwise means every destination opening a connection,
-              negotiating TLS and starting to encode audio in the same tick &mdash; on a small box
-              that is the moment most likely to drop frames, and it is the exact moment you are
-              watching, because it is when you went live. A few hundred milliseconds is plenty.
-            </span>
-            <span className="text-[10px] text-muted-foreground">
-              It never delays a <em>reconnect</em>. A destination that drops at 3am comes back
-              immediately rather than waiting its turn behind processes that are already healthy.
-            </span>
+              {t("set.staggerReconnectNote")}</span>
           </div>
           <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Chat history</CardTitle>
-          <CardDescription>
-            How far back the chat scrollback goes &mdash; and with it, how much a moderator can
-            see when they open somebody&rsquo;s card.
-          </CardDescription>
+          <CardTitle>{t("set.chatHistory")}</CardTitle>
+          <CardDescription>{t("set.chatHistoryDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-4">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="chat-hours">Keep for (hours)</Label>
+              <Label htmlFor="chat-hours">{t("set.chatHours")}</Label>
               <Input
                 id="chat-hours"
                 type="number"
@@ -681,7 +646,7 @@ function PipelineSettings({
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="chat-keep">Always keep (messages)</Label>
+              <Label htmlFor="chat-keep">{t("set.chatKeep")}</Label>
               <Input
                 id="chat-keep"
                 type="number"
@@ -696,13 +661,11 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-[10px] text-muted-foreground">
-                A floor, whatever their age.
-              </span>
+              <span className="text-[10px] text-muted-foreground">{t("set.chatKeepNote")}</span>
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="chat-history">Send on connect (messages)</Label>
+              <Label htmlFor="chat-history">{t("set.chatSendOnConnect")}</Label>
               <Input
                 id="chat-history"
                 type="number"
@@ -717,9 +680,7 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-[10px] text-muted-foreground">
-                Scrollback without a query.
-              </span>
+              <span className="text-[10px] text-muted-foreground">{t("set.chatSendNote")}</span>
             </div>
           </div>
 
@@ -729,25 +690,17 @@ function PipelineSettings({
             asked and a quiet one keeps more &mdash; which is the right way round, because the
             floor is what stops a slow channel&rsquo;s user cards being empty.
           </span>
+          <span className="text-[10px] text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
+          <span className="text-[10px] text-muted-foreground">{t("set.chatSmall")}</span>
           <span className="text-[10px] text-muted-foreground">
-            This is not only a disk setting. Clicking a name in chat opens what that person has
-            said before, and that history comes from here &mdash; no platform publishes an API for
-            it, so polyemesis can only show what it kept. Set this too short and somebody who has
-            been trouble for a week reads as though they have never said anything.
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            Chat is small. A channel averaging ten messages a second stores roughly 7&nbsp;MB an
-            hour; most are nowhere near that.
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            <strong>Send on connect</strong> is a different kind of number from the other two. Those
+            <strong>{t("set.chatSendOnConnectShort")}</strong> is a different kind of number from the other two. Those
             bound what is kept on disk; this one is a buffer held in memory, allocated in full
             whether or not anyone is talking. It is what a browser receives the instant it opens the
             page, before any of the stored history is queried &mdash; so raising it costs memory all
             the time to make the first screen fuller.
           </span>
           <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
           </Button>
         </CardContent>
       </Card>
@@ -764,14 +717,12 @@ function PipelineSettings({
           everything else on this page — so it is saved by the same button. */}
       <Card>
         <CardHeader>
-          <CardTitle>Alert delivery</CardTitle>
-          <CardDescription>
-            How hard a webhook that is not answering gets chased, before the alert is given up on.
-          </CardDescription>
+          <CardTitle>{t("set.alertDelivery")}</CardTitle>
+          <CardDescription>{t("set.alertDeliveryDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="alert-attempts">Delivery attempts</Label>
+            <Label htmlFor="alert-attempts">{t("set.deliveryAttempts")}</Label>
             <Input
               id="alert-attempts"
               type="number"
@@ -783,44 +734,30 @@ function PipelineSettings({
               }
               className="w-28"
             />
-            <span className="text-[10px] text-muted-foreground">
-              Including the first try. 1 means never retry.
-            </span>
+            <span className="text-[10px] text-muted-foreground">{t("set.attemptsNote")}</span>
           </div>
-          <span className="text-[10px] text-muted-foreground">
-            Only failures worth retrying are retried. A 404 from a webhook somebody deleted is
-            permanent, and trying it again four times only delays every alert queued behind it; a
-            502 from a reverse proxy is exactly what these attempts are for.
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            The wait between attempts backs off automatically to a 30&nbsp;second ceiling, so the
-            top of this range is already several minutes of chasing one dead endpoint. Bounded is
-            the point &mdash; retrying forever turns a single dead webhook into a queue that never
-            drains.
-          </span>
+          <span className="text-[10px] text-muted-foreground">{t("set.attemptsRetryable")}</span>
+          <span className="text-[10px] text-muted-foreground">{t("set.attemptsBackoff")}</span>
           <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
           </Button>
         </CardContent>
       </Card>
 
       <div className="flex justify-end">
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
         </Button>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Failover</CardTitle>
-          <CardDescription>
-            A standby input and a holding card, for when the live source stops delivering. Off by
-            default: with it off the pipeline is byte-for-byte what it was before this existed.
-          </CardDescription>
+          <CardTitle>{t("set.failover")}</CardTitle>
+          <CardDescription>{t("set.failoverDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="fo-enabled">Enabled</Label>
+            <Label htmlFor="fo-enabled">{t("set.enabled")}</Label>
             <Switch
               id="fo-enabled"
               checked={draft.failover?.enabled ?? false}
@@ -829,15 +766,12 @@ function PipelineSettings({
               }
             />
           </div>
-          <span className="text-[10px] text-muted-foreground">
-            Turning this on adds one remux hop between the ingest and everything below it. Cheap,
-            but not free, which is why it is a decision rather than a default.
-          </span>
+          <span className="text-[10px] text-muted-foreground">{t("set.failoverRemuxNote")}</span>
 
           {draft.failover?.enabled && (
             <>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="fo-grace">Grace period (seconds)</Label>
+                <Label htmlFor="fo-grace">{t("set.gracePeriod")}</Label>
                 <Input
                   id="fo-grace"
                   type="number"
@@ -850,15 +784,11 @@ function PipelineSettings({
                     })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">
-                  How long the live source may deliver nothing before the tier switches. Longer
-                  than a reconnect on purpose &mdash; an encoder re-establishing an RTMP connection
-                  is normal operation, not a failure.
-                </span>
+                <span className="text-[10px] text-muted-foreground">{t("set.graceNote")}</span>
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label>Coming back</Label>
+                <Label>{t("set.comingBack")}</Label>
                 <Select
                   value={draft.failover?.return ?? "manual"}
                   onValueChange={(v) =>
@@ -872,19 +802,16 @@ function PipelineSettings({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="manual">Manual &mdash; stay on the backup until I switch</SelectItem>
-                    <SelectItem value="auto">Automatic &mdash; return once the primary is steady</SelectItem>
+                    <SelectItem value="manual">{t("set.returnManual")}</SelectItem>
+                    <SelectItem value="auto">{t("set.returnAutomatic")}</SelectItem>
                   </SelectContent>
                 </Select>
-                <span className="text-[10px] text-muted-foreground">
-                  Manual is the default because an automatic return can flap: a primary that is
-                  recovering in bursts would move the programme back and forth mid-broadcast.
-                </span>
+                <span className="text-[10px] text-muted-foreground">{t("set.returnManualNote")}</span>
               </div>
 
               {draft.failover?.return === "auto" && (
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="fo-stable">Return after (seconds steady)</Label>
+                  <Label htmlFor="fo-stable">{t("set.returnAfter")}</Label>
                   <Input
                     id="fo-stable"
                     type="number"
@@ -905,7 +832,7 @@ function PipelineSettings({
               )}
 
               <div className="flex items-center justify-between">
-                <Label htmlFor="fo-slate">Show a slate when nothing is live</Label>
+                <Label htmlFor="fo-slate">{t("set.showSlate")}</Label>
                 <Switch
                   id="fo-slate"
                   checked={draft.failover?.slate?.enabled ?? false}
@@ -925,11 +852,11 @@ function PipelineSettings({
               {draft.failover?.slate?.enabled && (
                 <>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="fo-slate-img">Slate image</Label>
+                    <Label htmlFor="fo-slate-img">{t("set.slateImage")}</Label>
                     <Input
                       id="fo-slate-img"
                       value={draft.failover?.slate?.imagePath ?? ""}
-                      placeholder="slate/holding.png"
+                      placeholder={t("set.slateImagePlaceholder")}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
@@ -941,19 +868,15 @@ function PipelineSettings({
                         })
                       }
                     />
-                    <span className="text-[10px] text-muted-foreground">
-                      A path inside the data directory. Leave it empty to paint a flat colour
-                      instead &mdash; that is the fallback precisely because a colour has no file
-                      that can fail to open.
-                    </span>
+                    <span className="text-[10px] text-muted-foreground">{t("set.slateImageNote")}</span>
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="fo-slate-col">Slate colour</Label>
+                    <Label htmlFor="fo-slate-col">{t("set.slateColour")}</Label>
                     <Input
                       id="fo-slate-col"
                       value={draft.failover?.slate?.color ?? ""}
-                      placeholder="black"
+                      placeholder={t("set.slateColourPlaceholder")}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
@@ -965,16 +888,13 @@ function PipelineSettings({
                         })
                       }
                     />
-                    <span className="text-[10px] text-muted-foreground">
-                      One word, because it lands on a filter graph where a comma would end the
-                      argument. Used only when no image is set.
-                    </span>
+                    <span className="text-[10px] text-muted-foreground">{t("set.slateColourNote")}</span>
                   </div>
                 </>
               )}
 
               <div className="flex items-center justify-between">
-                <Label htmlFor="fo-playlist">Play a loop when nothing is live</Label>
+                <Label htmlFor="fo-playlist">{t("set.playLoop")}</Label>
                 <Switch
                   id="fo-playlist"
                   checked={draft.failover?.playlist?.enabled ?? false}
@@ -994,10 +914,7 @@ function PipelineSettings({
                   }
                 />
               </div>
-              <span className="text-[10px] text-muted-foreground">
-                A second candidate beside the slate: files play instead of a still image. Both can
-                be on -- see the tier order in the Failover design for which wins.
-              </span>
+              <span className="text-[10px] text-muted-foreground">{t("set.playLoopNote")}</span>
 
               {draft.failover?.playlist?.enabled && (
                 <PlaylistEditor
@@ -1018,22 +935,19 @@ function PipelineSettings({
           )}
 
           <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>MQTT telemetry</CardTitle>
-          <CardDescription>
-            Publishes state to a broker as retained messages, so a consumer that was not connected
-            when something changed still gets the current answer.
-          </CardDescription>
+          <CardTitle>{t("set.mqtt")}</CardTitle>
+          <CardDescription>{t("set.mqttDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="mq-enabled">Enabled</Label>
+            <Label htmlFor="mq-enabled">{t("set.enabled")}</Label>
             <Switch
               id="mq-enabled"
               checked={draft.mqtt?.enabled ?? false}
@@ -1041,7 +955,7 @@ function PipelineSettings({
             />
           </div>
           <span className="text-[10px] text-muted-foreground">
-            <strong>MQTT 5.0 only.</strong> A broker pinned to 3.1.1 will not complete a connection
+            <strong>{t("set.mqtt5Only")}</strong> A broker pinned to 3.1.1 will not complete a connection
             at all &mdash; it is not a degraded mode. Mosquitto 2.x, EMQX and the Home Assistant
             add-on are all fine.
           </span>
@@ -1049,7 +963,7 @@ function PipelineSettings({
           {draft.mqtt?.enabled && (
             <>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="mq-url">Broker URL</Label>
+                <Label htmlFor="mq-url">{t("set.brokerUrl")}</Label>
                 {/* The placeholder suggests mqtts, not mqtt. A placeholder is a
                     suggestion, and the encrypted scheme is the better thing to
                     suggest — the help below already says all four schemes work,
@@ -1060,15 +974,13 @@ function PipelineSettings({
                 <Input
                   id="mq-url"
                   value={draft.mqtt?.brokerUrl ?? ""}
-                  placeholder="mqtts://broker.local:8883"
+                  placeholder={t("set.brokerUrlPlaceholder")}
                   onChange={(e) =>
                     setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, brokerUrl: e.target.value } })
                   }
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  mqtt://, mqtts://, ws:// or wss://. A password in the URL is <em>refused</em>:
-                  a URL reaches log lines and <code>ps</code> output, and there is no taking it
-                  back. Put it in the field below, where it is encrypted at rest.
+                  {t("set.brokerUrlNote")}
                 </span>
                 {/* Said at the point of configuration rather than left to the
                     docs, because the credential is encrypted at rest and then
@@ -1078,18 +990,14 @@ function PipelineSettings({
                     own documentation recommends. */}
                 {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
                   <span className="text-[10px] text-amber-600 dark:text-amber-500">
-                    <code>mqtt://</code> is unencrypted. MQTT sends the username and password in
-                    its CONNECT packet, so both cross the network in the clear — fine on a
-                    trusted LAN, which is the usual Home Assistant case, and not fine over
-                    anything you do not control. Use <code>mqtts://</code> if the broker offers
-                    it.
+                    {t("set.brokerPlainNote")}
                   </span>
                 )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-user">Username</Label>
+                  <Label htmlFor="mq-user">{t("set.username")}</Label>
                   <Input
                     id="mq-user"
                     value={draft.mqtt?.username ?? ""}
@@ -1099,7 +1007,7 @@ function PipelineSettings({
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-pw">Password</Label>
+                  <Label htmlFor="mq-pw">{t("set.password")}</Label>
                   <Input
                     id="mq-pw"
                     type="password"
@@ -1109,10 +1017,7 @@ function PipelineSettings({
                   />
                 </div>
               </div>
-              <span className="text-[10px] text-muted-foreground">
-                The password is never returned by any API, so this box is blank even when one is
-                set. Leave it empty to keep the stored password; clear it with the button below.
-              </span>
+              <span className="text-[10px] text-muted-foreground">{t("set.passwordNote")}</span>
               {draft.mqtt?.hasPassword && (
                 <Button
                   size="sm"
@@ -1128,7 +1033,7 @@ function PipelineSettings({
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-prefix">Topic prefix</Label>
+                  <Label htmlFor="mq-prefix">{t("set.topicPrefix")}</Label>
                   <Input
                     id="mq-prefix"
                     value={draft.mqtt?.prefix ?? "polyemesis"}
@@ -1138,7 +1043,7 @@ function PipelineSettings({
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-inst">Instance</Label>
+                  <Label htmlFor="mq-inst">{t("set.instance")}</Label>
                   <Input
                     id="mq-inst"
                     value={draft.mqtt?.instance ?? "polyemesis"}
@@ -1149,15 +1054,12 @@ function PipelineSettings({
                 </div>
               </div>
               <span className="text-[10px] text-muted-foreground">
-                Separators in the prefix are preserved, so <code>home/av</code> means two levels.
-                A prefix starting with <code>$</code> is refused: brokers reserve those, and a
-                subscriber using <code>#</code> never receives them &mdash; the telemetry would
-                publish successfully and be invisible in exactly the view you would debug with.
+                {t("set.topicPrefixNote")}
               </span>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-int">Publish interval (s)</Label>
+                  <Label htmlFor="mq-int">{t("set.publishInterval")}</Label>
                   <Input
                     id="mq-int"
                     type="number"
@@ -1173,7 +1075,7 @@ function PipelineSettings({
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-ka">Keep-alive (s)</Label>
+                  <Label htmlFor="mq-ka">{t("set.keepAlive")}</Label>
                   <Input
                     id="mq-ka"
                     type="number"
@@ -1189,32 +1091,23 @@ function PipelineSettings({
                   />
                 </div>
               </div>
-              <span className="text-[10px] text-muted-foreground">
-                Unchanged state is not republished, so a short interval costs a comparison rather
-                than a message. The keep-alive is what bounds how long a dead link goes unnoticed
-                &mdash; and therefore how quickly the broker tells subscribers this instance is
-                gone.
-              </span>
+              <span className="text-[10px] text-muted-foreground">{t("set.intervalNote")}</span>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="mq-cid">Client ID</Label>
+                <Label htmlFor="mq-cid">{t("set.clientId")}</Label>
                 <Input
                   id="mq-cid"
                   value={draft.mqtt?.clientId ?? ""}
-                  placeholder="derived from the instance name"
+                  placeholder={t("set.clientIdPlaceholder")}
                   onChange={(e) =>
                     setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, clientId: e.target.value } })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">
-                  Must be unique on the broker. A collision is the number-one cause of an
-                  unexplained reconnect loop: the broker disconnects the older session on every
-                  connect, and both clients reconnect forever.
-                </span>
+                <span className="text-[10px] text-muted-foreground">{t("set.clientIdNote")}</span>
               </div>
 
               <div className="flex items-center justify-between">
-                <Label htmlFor="mq-disc">Home Assistant discovery</Label>
+                <Label htmlFor="mq-disc">{t("set.haDiscovery")}</Label>
                 <Switch
                   id="mq-disc"
                   checked={draft.mqtt?.discovery ?? true}
@@ -1224,7 +1117,7 @@ function PipelineSettings({
                 />
               </div>
               <div className="flex items-center justify-between">
-                <Label htmlFor="mq-tls">Accept a self-signed certificate</Label>
+                <Label htmlFor="mq-tls">{t("set.acceptSelfSigned")}</Label>
                 <Switch
                   id="mq-tls"
                   checked={draft.mqtt?.tlsSkipVerify ?? false}
@@ -1237,22 +1130,19 @@ function PipelineSettings({
           )}
 
           <Button size="sm" onClick={() => onSaveMqtt(draft, mqttPassword)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
           </Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Preview</CardTitle>
-          <CardDescription>
-            The dashboard's HLS monitor. This is the only place polyemesis re-encodes video, and it
-            runs on its own relay subscription so it can never affect a destination.
-          </CardDescription>
+          <CardTitle>{t("set.preview")}</CardTitle>
+          <CardDescription>{t("set.previewDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="prev-enabled">Enabled</Label>
+            <Label htmlFor="prev-enabled">{t("set.enabled")}</Label>
             <Switch
               id="prev-enabled"
               checked={draft.preview.enabled}
@@ -1261,7 +1151,7 @@ function PipelineSettings({
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="prev-seg">Segment (s)</Label>
+              <Label htmlFor="prev-seg">{t("set.segmentSec")}</Label>
               <Input
                 id="prev-seg"
                 type="number"
@@ -1277,7 +1167,7 @@ function PipelineSettings({
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="prev-h">Height</Label>
+              <Label htmlFor="prev-h">{t("set.height")}</Label>
               <Input
                 id="prev-h"
                 type="number"
@@ -1306,7 +1196,7 @@ function PipelineSettings({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="prev-idle">Stop after idle (s)</Label>
+            <Label htmlFor="prev-idle">{t("set.stopAfterIdle")}</Label>
             <Input
               id="prev-idle"
               type="number"
@@ -1320,26 +1210,19 @@ function PipelineSettings({
                 })
               }
             />
-            <span className="text-[10px] text-muted-foreground">
-              The encoder starts when the dashboard asks for the playlist and stops again this long
-              after the last request, so a closed dashboard costs no CPU. Changing this never
-              restarts a preview someone is watching.
-            </span>
+            <span className="text-[10px] text-muted-foreground">{t("set.previewIdleNote")}</span>
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Audio meters</CardTitle>
-          <CardDescription>
-            One sidecar process meters every channel of every track. Lower intervals update faster
-            and cost more CPU.
-          </CardDescription>
+          <CardTitle>{t("set.audioMeters")}</CardTitle>
+          <CardDescription>{t("set.metersDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="met-enabled">Enabled</Label>
+            <Label htmlFor="met-enabled">{t("set.enabled")}</Label>
             <Switch
               id="met-enabled"
               checked={draft.meters.enabled}
@@ -1347,7 +1230,7 @@ function PipelineSettings({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="met-int">Update interval (ms)</Label>
+            <Label htmlFor="met-int">{t("set.updateInterval")}</Label>
             <Input
               id="met-int"
               type="number"
@@ -1364,16 +1247,12 @@ function PipelineSettings({
 
       <Card>
         <CardHeader>
-          <CardTitle>Process logs</CardTitle>
-          <CardDescription>
-            Captured FFmpeg stderr is always kept in memory, but that dies with the server — which
-            loses exactly the lines explaining why it died. Persisting mirrors it to a rotating
-            file under the data directory.
-          </CardDescription>
+          <CardTitle>{t("set.processLogs")}</CardTitle>
+          <CardDescription>{t("set.logsDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="log-persist">Write logs to disk</Label>
+            <Label htmlFor="log-persist">{t("set.writeLogs")}</Label>
             <Switch
               id="log-persist"
               checked={draft.logging.persistProcessLogs}
@@ -1384,7 +1263,7 @@ function PipelineSettings({
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="log-mb">File size (MB)</Label>
+              <Label htmlFor="log-mb">{t("set.fileSizeMb")}</Label>
               <Input
                 id="log-mb"
                 type="number"
@@ -1400,7 +1279,7 @@ function PipelineSettings({
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="log-files">Files kept</Label>
+              <Label htmlFor="log-files">{t("set.filesKept")}</Label>
               <Input
                 id="log-files"
                 type="number"
@@ -1416,16 +1295,13 @@ function PipelineSettings({
               />
             </div>
           </div>
-          <span className="text-[10px] text-muted-foreground">
-            The log directory is bounded by the product of these two, so persistence can never be
-            the thing that fills the disk.
-          </span>
+          <span className="text-[10px] text-muted-foreground">{t("set.logsBoundNote")}</span>
         </CardContent>
       </Card>
 
       <div className="lg:col-span-2">
         <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />} Save pipeline settings
+          {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")} pipeline settings
         </Button>
       </div>
     </div>
@@ -1435,6 +1311,7 @@ function PipelineSettings({
 /* --------------------------------------------------------------- platforms */
 
 function PlatformSettings() {
+  const t = useT();
   const [guides, setGuides] = useState<SetupGuide[]>([]);
   const [creds, setCreds] = useState<PlatformCreds[]>([]);
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
@@ -1452,12 +1329,8 @@ function PlatformSettings() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Why you need your own developer app</CardTitle>
-          <CardDescription>
-            polyemesis cannot ship OAuth client secrets — anyone with the binary would have them,
-            and the platforms would revoke them. You register a free developer app once, paste the
-            client ID and secret here, and polyemesis then fetches your stream keys for you.
-          </CardDescription>
+          <CardTitle>{t("set.whyDevApp")}</CardTitle>
+          <CardDescription>{t("set.whyDevAppDesc")}          </CardDescription>
         </CardHeader>
       </Card>
 
@@ -1483,16 +1356,12 @@ function PlatformSettings() {
  *  streamed to at all. Reading it takes thirty seconds and it is deliberately
  *  the first thing on this tab. */
 function PlatformCapabilityMatrix() {
+  const t = useT();
   return (
     <Card>
       <CardHeader>
-        <CardTitle>What each platform can do</CardTitle>
-        <CardDescription>
-          Platforms differ in how much of this polyemesis can automate, and the difference is
-          worth knowing before you start rather than an hour in. Streaming itself works the same
-          everywhere — per-destination audio routing, renditions, reconnect and meters do not
-          depend on any of the columns below.
-        </CardDescription>
+        <CardTitle>{t("set.whatPlatformsDo")}</CardTitle>
+        <CardDescription>{t("set.platformsDesc")}        </CardDescription>
       </CardHeader>
 
       <CardContent className="flex flex-col gap-3">
@@ -1500,7 +1369,7 @@ function PlatformCapabilityMatrix() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Platform</TableHead>
+                <TableHead>{t("set.platform")}</TableHead>
                 {CAPABILITY_COLUMNS.map((c) => (
                   <TableHead key={c.key} title={c.help}>
                     {c.label}
@@ -1518,8 +1387,7 @@ function PlatformCapabilityMatrix() {
                           p.tier === "unsupported" ? "text-muted-foreground" : undefined
                         }
                       >
-                        {p.name}
-                      </span>
+                        {p.name}</span>
                       <Badge
                         variant={p.tier === "unsupported" ? "warn" : "outline"}
                         className="w-fit"
@@ -1612,6 +1480,7 @@ function PlatformCredCard({
   accounts: PlatformAccount[];
   onChanged: () => void;
 }) {
+  const t = useT();
   const [clientId, setClientId] = useState(creds?.clientId ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1654,13 +1523,13 @@ function PlatformCredCard({
 
   const remove = async () => {
     await api.deleteCreds(guide.platform);
-    toast.success("Credentials removed.");
+    toast.success(t("set.credsRemoved"));
     onChanged();
   };
 
   const disconnect = async (a: PlatformAccount) => {
     await api.deleteAccount(a.id);
-    toast.success("Account disconnected.");
+    toast.success(t("set.accountDisconnected"));
     onChanged();
   };
 
@@ -1693,7 +1562,7 @@ function PlatformCredCard({
       <CardContent className="flex flex-col gap-3">
         <Accordion type="single" collapsible>
           <AccordionItem value="steps" className="border-b-0">
-            <AccordionTrigger>Step-by-step setup</AccordionTrigger>
+            <AccordionTrigger>{t("set.stepByStep")}</AccordionTrigger>
             <AccordionContent>
               <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-[11px] text-muted-foreground">
                 {guide.steps.map((s, i) => (
@@ -1702,7 +1571,7 @@ function PlatformCredCard({
               </ol>
               {guide.redirectPath && (
                 <div className="mt-2 flex flex-col gap-1">
-                  <Label>Redirect URI to whitelist</Label>
+                  <Label>{t("set.redirectUri")}</Label>
                   <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
                     <code className="min-w-0 flex-1 break-all font-mono text-[10px]">
                       {guide.redirectPath}
@@ -1711,10 +1580,7 @@ function PlatformCredCard({
                       {copied ? <Check className="text-live" /> : <Copy />}
                     </Button>
                   </div>
-                  <span className="text-[10px] text-muted-foreground">
-                    Must match exactly, including scheme and port. If you reach polyemesis through a
-                    reverse proxy, use that public URL.
-                  </span>
+                  <span className="text-[10px] text-muted-foreground">{t("set.redirectNote")}</span>
                   {/* Above the credential fields on purpose: registering the
                       right URI has to happen before the credentials matter. */}
                   {guide.redirectWarnings?.map((warning) => (
@@ -1745,7 +1611,7 @@ function PlatformCredCard({
           <>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`cid-${guide.platform}`}>Client ID</Label>
+                <Label htmlFor={`cid-${guide.platform}`}>{t("set.clientId")}</Label>
                 <Input
                   id={`cid-${guide.platform}`}
                   value={clientId}
@@ -1754,7 +1620,7 @@ function PlatformCredCard({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`cs-${guide.platform}`}>Client secret</Label>
+                <Label htmlFor={`cs-${guide.platform}`}>{t("set.clientSecret")}</Label>
                 <Input
                   id={`cs-${guide.platform}`}
                   type="password"
@@ -1819,7 +1685,7 @@ function PlatformCredCard({
 
             {accounts.length > 0 && (
               <div className="flex flex-col gap-1">
-                <Label>Connected accounts</Label>
+                <Label>{t("set.connectedAccounts")}</Label>
                 {accounts.map((a) => (
                   <div
                     key={a.id}
@@ -1858,10 +1724,7 @@ function PlatformCredCard({
                     </Button>
                   </div>
                 ))}
-                <span className="text-[10px] text-muted-foreground">
-                  Connect the same platform more than once to stream to multiple channels — each
-                  account becomes its own destination.
-                </span>
+                <span className="text-[10px] text-muted-foreground">{t("set.multiAccountNote")}</span>
               </div>
             )}
           </>
@@ -1871,19 +1734,19 @@ function PlatformCredCard({
         open={confirmCreds.open}
         onOpenChange={confirmCreds.onOpenChange}
         subject={confirmCreds.target?.name ?? ""}
-        title="Remove these developer credentials?"
-        description="Every account connected through this app stops refreshing its token and will need reconnecting. The client secret is not recoverable from here — you would create a new app at the platform."
+        title={t("set.removeCredsTitle")}
+        description={t("set.removeCredsDesc")}
         requireTyping
-        confirmLabel="Remove credentials"
+        confirmLabel={t("set.removeCreds")}
         onConfirm={remove}
       />
       <ConfirmDestructive
         open={confirmDisconnect.open}
         onOpenChange={confirmDisconnect.onOpenChange}
         subject={confirmDisconnect.target?.accountName ?? ""}
-        title="Disconnect this account?"
-        description="Destinations using it keep their settings but stop refreshing their stream key. You can reconnect the same account afterwards."
-        confirmLabel="Disconnect"
+        title={t("set.disconnectTitle")}
+        description={t("set.disconnectDesc")}
+        confirmLabel={t("set.disconnect")}
         onConfirm={async () => {
           if (confirmDisconnect.target) await disconnect(confirmDisconnect.target);
         }}
@@ -1895,6 +1758,7 @@ function PlatformCredCard({
 /* ---------------------------------------------------------------- security */
 
 function SecuritySettings({ system }: { system: SystemInfo | null }) {
+  const t = useT();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -1903,13 +1767,13 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
   const change = async (e: React.FormEvent) => {
     e.preventDefault();
     if (next !== confirm) {
-      toast.error("The new passwords do not match.");
+      toast.error(t("set.passwordMismatch"));
       return;
     }
     setBusy(true);
     try {
       await api.changePassword(current, next);
-      toast.success("Password changed.");
+      toast.success(t("set.passwordChanged"));
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -1924,12 +1788,12 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
     <div className="grid gap-3 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Admin password</CardTitle>
+          <CardTitle>{t("set.adminPassword")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={change} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="cur-pw">Current password</Label>
+              <Label htmlFor="cur-pw">{t("set.currentPassword")}</Label>
               <Input
                 id="cur-pw"
                 type="password"
@@ -1940,7 +1804,7 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="new-pw">New password</Label>
+              <Label htmlFor="new-pw">{t("set.newPassword")}</Label>
               <Input
                 id="new-pw"
                 type="password"
@@ -1951,7 +1815,7 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="conf-pw">Confirm new password</Label>
+              <Label htmlFor="conf-pw">{t("set.confirmPassword")}</Label>
               <Input
                 id="conf-pw"
                 type="password"
@@ -2065,6 +1929,7 @@ function tlsYaml(tls: TlsStatus): string {
 }
 
 function TransportSecurity({ system }: { system: SystemInfo | null }) {
+  const t = useT();
   const [tls, setTls] = useState<TlsStatus | null>(null);
   const [loadError, setLoadError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -2091,11 +1956,8 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
   return (
     <Card className="h-fit">
       <CardHeader>
-        <CardTitle>Transport security</CardTitle>
-        <CardDescription>
-          Configured in config.yaml, not here — TLS must be right before the server starts
-          listening. This card reports what that produced.
-        </CardDescription>
+        <CardTitle>{t("set.transportSecurity")}</CardTitle>
+        <CardDescription>{t("set.tlsDesc")}        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {!tls && !loadError && (
@@ -2108,7 +1970,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
         {tls && (
           <>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground">Mode</span>
+              <span className="text-[11px] text-muted-foreground">{t("set.mode")}</span>
               <div className="flex items-center gap-1.5">
                 {tls.configured === "auto" && (
                   <span className="text-[10px] text-subtle-foreground">auto resolved to</span>
@@ -2128,24 +1990,23 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             {cert ? (
               <>
                 <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
-                  <span className="text-[11px] text-muted-foreground">Expires</span>
+                  <span className="text-[11px] text-muted-foreground">{t("set.expires")}</span>
                   <span className="flex items-baseline gap-1.5">
                     <code className="tnum font-mono text-[10px]">{timestamp(cert.notAfter)}</code>
                     <span className={`tnum text-[10px] ${toneText[expiryTone(cert.daysRemaining)]}`}>
-                      {expiryLabel(cert)}
-                    </span>
+                      {expiryLabel(cert)}</span>
                   </span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-[11px] text-muted-foreground">Issuer</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.issuer")}</span>
                   <span className="min-w-0 break-all text-right text-[10px]">{cert.issuer}</span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-[11px] text-muted-foreground">Subject</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.subject")}</span>
                   <span className="min-w-0 break-all text-right text-[10px]">{cert.subject}</span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-[11px] text-muted-foreground">Valid for</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.validFor")}</span>
                   <code className="min-w-0 break-all text-right font-mono text-[10px]">
                     {sans.length ? sans.join(", ") : "—"}
                   </code>
@@ -2214,7 +2075,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             <div className="flex items-center justify-between border-t border-border pt-2">
               <span className="text-[11px] text-muted-foreground">config.yaml</span>
               <Button size="sm" variant="ghost" onClick={copyYaml}>
-                {copied ? <Check /> : <Copy />} Copy
+                {copied ? <Check /> : <Copy />} {t("set.copy")}
               </Button>
             </div>
             <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
@@ -2224,7 +2085,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
         )}
 
         <div className="flex items-start justify-between gap-2 border-t border-border pt-2">
-          <span className="shrink-0 text-[11px] text-muted-foreground">Data directory</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.dataDirectory")}</span>
           <code className="min-w-0 break-all text-right font-mono text-[10px]">
             {system?.dataDir ?? "—"}
           </code>
@@ -2240,6 +2101,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
 }
 
 function ApiTokens() {
+  const t = useT();
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2288,24 +2150,20 @@ function ApiTokens() {
   return (
     <Card className="lg:col-span-2">
       <CardHeader>
-        <CardTitle>API tokens</CardTitle>
+        <CardTitle>{t("set.apiTokens")}</CardTitle>
         <CardDescription>
-          Long-lived credentials for scripts, Prometheus and anything else that cannot hold a
-          session. Send one as
-          <code className="mx-1 font-mono">Authorization: Bearer pmk_…</code>. A token can do
-          everything the admin can, except manage tokens — that stays behind the password, so
-          revoking one is final.
+          {t("set.apiTokensDesc")}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <form onSubmit={create} className="flex flex-wrap items-end gap-2">
           <div className="flex min-w-48 flex-1 flex-col gap-1">
-            <Label htmlFor="tok-name">Name</Label>
+            <Label htmlFor="tok-name">{t("set.name")}</Label>
             <Input
               id="tok-name"
               value={name}
               maxLength={64}
-              placeholder="prometheus"
+              placeholder={t("set.tokenNamePlaceholder")}
               onChange={(e) => setName(e.target.value)}
               required
             />
@@ -2328,14 +2186,12 @@ function ApiTokens() {
                 {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
               </Button>
             </div>
-            <span className="text-[10px] text-muted-foreground">
-              polyemesis stores only a hash. If you lose it, revoke this token and create another.
-            </span>
+            <span className="text-[10px] text-muted-foreground">{t("set.tokenHashNote")}</span>
           </div>
         )}
 
         {tokens.length === 0 ? (
-          <span className="text-[11px] text-muted-foreground">No tokens yet.</span>
+          <span className="text-[11px] text-muted-foreground">{t("set.noTokens")}</span>
         ) : (
           <div className="flex flex-col gap-1">
             {tokens.map((t) => (
