@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Trash2, Upload, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { bytes, timestamp } from "@/lib/format";
+import { bytes, duration, timestamp } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -226,6 +226,40 @@ export function MediaUploads() {
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
                     {bytes(f.bytes)} · {timestamp(f.modified)}
                   </div>
+                  {/* What the file actually is, which a name and a size cannot
+                      say. The track count leads because routing is per track:
+                      selecting track 3 of a file that carries one is silence
+                      on air, and this is the only place to notice beforehand.
+                      Absent for anything stored before uploads were probed,
+                      which renders as nothing rather than as zeroes. */}
+                  {f.media && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                      {f.media.durationSeconds > 0 && (
+                        <span>{duration(f.media.durationSeconds)}</span>
+                      )}
+                      {f.media.width > 0 && (
+                        <span>
+                          {f.media.width}×{f.media.height}
+                          {f.media.frameRate > 0 && ` @ ${f.media.frameRate.toFixed(0)}fps`}
+                        </span>
+                      )}
+                      {f.media.videoCodec && <span>{f.media.videoCodec}</span>}
+                      <span
+                        className={
+                          f.media.audioTracks === 0 ? "text-warn" : undefined
+                        }
+                        title={
+                          f.media.audioTracks === 0
+                            ? "No audio. Every major platform refuses a video-only stream — turn on the silence tier in Settings → Synthetic."
+                            : undefined
+                        }
+                      >
+                        {f.media.audioTracks} audio{" "}
+                        {f.media.audioTracks === 1 ? "track" : "tracks"}
+                        {f.media.audioLayout ? ` (${f.media.audioLayout})` : ""}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button

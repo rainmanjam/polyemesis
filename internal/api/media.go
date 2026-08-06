@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
@@ -91,6 +94,41 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 			writeUploadError(w, err)
 			return
 		}
+		// Probed before it is reported as accepted, and removed again if it is
+		// not media.
+		//
+		// Nothing checked this before. The extension allowlist looks like a
+		// gate and is not one -- SafeName only uses it to decide what to keep
+		// from the client's filename, and anything unrecognised is stored as
+		// ".bin" and still listed. A PDF, a zip or a truncated download all
+		// landed in the Library looking exactly like a video, and the first
+		// sign of trouble was a playlist normalise job failing, or the file
+		// reaching air.
+		//
+		// The reject is the point, but the numbers it collects on the way are
+		// what the Library then shows: an operator choosing between two similar
+		// files could previously see a name, a size and a date, none of which
+		// say whether the thing carries the three audio tracks they are about
+		// to route.
+		if info, probeErr := s.probeUpload(r.Context(), store, file.Name); probeErr != nil {
+			if delErr := store.Delete(file.Name); delErr != nil {
+				// Worth a line: the request is answered either way, but a file
+				// nothing will ever list is now occupying the volume.
+				s.log.Warn("could not remove a rejected upload",
+					"name", file.Name, "err", delErr)
+			}
+			s.log.Info("media rejected", "name", file.Name, "err", probeErr)
+			writeError(w, http.StatusBadRequest, probeErr.Error())
+			return
+		} else if info != nil {
+			// Best-effort: the file is good and already stored, so failing the
+			// upload because a cache could not be written would throw away
+			// minutes of the operator's time to protect a nicety.
+			if err := store.PutMedia(file.Name, *info); err != nil {
+				s.log.Warn("could not record media info", "name", file.Name, "err", err)
+			}
+			file.Media = info
+		}
 		s.log.Info("media uploaded",
 			"name", file.Name, "bytes", file.Bytes, "origin", file.Origin)
 		writeJSON(w, http.StatusCreated, file)
@@ -99,6 +137,82 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 
 	writeError(w, http.StatusBadRequest,
 		fmt.Sprintf("no %q part in the multipart body", uploadFieldName))
+}
+
+// probeUploadTimeout bounds the inspection of one stored file.
+//
+// Generous, because this runs against a file on local disk that may be several
+// gigabytes and on a machine that is also encoding a live broadcast. The cost
+// of being too tight is rejecting a perfectly good upload, which is worse than
+// the cost of waiting.
+const probeUploadTimeout = 30 * time.Second
+
+// probeUpload inspects a freshly stored file and reports whether it is media.
+//
+// A nil error with a nil result means "could not check" rather than "not
+// media": with no ffprobe on the box there is nothing to judge with, and
+// refusing every upload because the server cannot inspect them would break a
+// working install for the sake of a check it cannot perform. The gate closes
+// only when ffprobe ran and disagreed.
+func (s *Server) probeUpload(ctx context.Context, store *uploads.Store, name string) (*uploads.MediaInfo, error) {
+	// s.mgr is nil in every test in this package, and Manager.Default takes a
+	// read lock on the manager, so an unguarded s.eng() turns POST
+	// /api/v1/media into a panic under `go test ./internal/api`. It is
+	// reachable on a real install too: Manager.reconcile logs and continues
+	// when engine.New fails, so an install whose video pipeline will not build
+	// has no default engine -- and refusing every upload because of that would
+	// be a worse outage than the one it is guarding against.
+	if s.mgr == nil {
+		return nil, nil
+	}
+	eng := s.eng()
+	if eng == nil {
+		return nil, nil
+	}
+	tools := eng.Tools()
+	if tools == nil || tools.FFprobe == "" {
+		return nil, nil
+	}
+	path, err := store.Resolve(name)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeUploadTimeout)
+	defer cancel()
+
+	res, err := ffmpeg.ProbeFile(ctx, tools.FFprobe, path)
+	if err != nil {
+		// ffprobe's own words. "moov atom not found" tells somebody their
+		// download was truncated; "could not read this file" tells them
+		// nothing they can act on.
+		return nil, fmt.Errorf("this file could not be read as media: %s", err)
+	}
+	if res.Video == nil && len(res.Audio) == 0 {
+		// ffprobe parsed it and found nothing playable. A container with no
+		// streams is the shape a renamed archive or document arrives in.
+		return nil, errors.New("this file carries no video or audio stream")
+	}
+
+	info := uploads.MediaInfo{
+		DurationSeconds: res.DurationSeconds,
+		AudioTracks:     len(res.Audio),
+		ProbedAt:        time.Now().UTC(),
+	}
+	if res.Video != nil {
+		info.VideoCodec = res.Video.Codec
+		info.Width = res.Video.Width
+		info.Height = res.Video.Height
+		info.FrameRate = res.Video.FrameRate
+	}
+	if len(res.Audio) > 0 {
+		// The first track's shape, which is what a listing has room for. The
+		// count above is the number that matters for routing; per-track detail
+		// belongs on a detail view, not in a table row.
+		info.AudioCodec = res.Audio[0].Codec
+		info.AudioChannels = res.Audio[0].Channels
+		info.AudioLayout = res.Audio[0].Layout
+	}
+	return &info, nil
 }
 
 // handleListMedia returns the stored uploads, newest first.

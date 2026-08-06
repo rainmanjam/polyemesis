@@ -206,6 +206,25 @@ above, not this one.
 **Open its process log on the Monitoring page first.** The platform's own
 rejection is almost always there.
 
+### An upload is refused
+
+The Library probes every upload before accepting it, and refuses anything
+ffprobe cannot read as media. The message is ffprobe's own — `moov atom not
+found` means a truncated download, and `Invalid data found when processing
+input` usually means the file is not what its name says.
+
+This is stricter than it used to be. The extension list was never a gate: an
+unrecognised extension was stored as `.bin` and listed as media anyway, so a
+PDF or a zip could sit in the Library looking like a video until a playlist
+normalise job failed on it — or until it reached air.
+
+A file the server accepts but you cannot play locally is worth checking the
+other way round: **your** player may lack a codec this FFmpeg has.
+
+If the server has no `ffprobe` on its PATH the check cannot run, and uploads
+are accepted unchecked rather than all refused. The startup log says which
+binaries were found.
+
 ### "Error binding filtergraph inputs/outputs"
 
 The routing graph references a track the incoming stream does not have. Either

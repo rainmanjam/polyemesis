@@ -17,6 +17,7 @@ package uploads
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -203,6 +204,89 @@ type File struct {
 	// PullURL is what to paste into a pull source: relative to the data
 	// directory, which is what ffmpeg's file:// handling resolves against.
 	PullURL string `json:"pullUrl"`
+	// Media is what ffprobe said about this file when it was accepted, or nil
+	// for one stored before that was recorded. The Library shows it so an
+	// operator can tell two similar-looking files apart before scheduling one.
+	Media *MediaInfo `json:"media,omitempty"`
+}
+
+// MediaInfo is the probe result as the Library needs it.
+//
+// Plain data, and deliberately not internal/ffmpeg's ProbeResult: this package
+// stores bytes and knows nothing about encoders, and importing the ffmpeg
+// package here to describe a file on disk would invert that. The caller probes
+// and hands the answer down.
+type MediaInfo struct {
+	DurationSeconds float64 `json:"durationSeconds"`
+	VideoCodec      string  `json:"videoCodec"`
+	Width           int     `json:"width"`
+	Height          int     `json:"height"`
+	FrameRate       float64 `json:"frameRate"`
+	// AudioTracks is the count, and it is the field this whole feature is for.
+	// Per-destination audio routing is the product, so "does this file have the
+	// three tracks I am about to route" is the question the Library could not
+	// answer before.
+	AudioTracks   int    `json:"audioTracks"`
+	AudioCodec    string `json:"audioCodec"`
+	AudioChannels int    `json:"audioChannels"`
+	AudioLayout   string `json:"audioLayout"`
+	// ProbedAt dates the reading. A file cannot change under us -- the stored
+	// name is unguessable and nothing rewrites it -- but a probe from an older
+	// FFmpeg may have seen less, and a reader deserves to know how old the
+	// answer is.
+	ProbedAt time.Time `json:"probedAt"`
+}
+
+// sidecarPrefix marks the JSON file holding one upload's MediaInfo.
+//
+// A prefix rather than a suffix, and the same shape as ".partial-", because
+// List already skips that prefix and a reader of this file only has to learn
+// the convention once. Storing it beside the upload rather than in the database
+// keeps the two impossible to separate: deleting the directory takes both, and
+// there is no schema to migrate for something that is a cache of a fact about
+// a file.
+const sidecarPrefix = ".probe-"
+
+func sidecarName(stored string) string { return sidecarPrefix + stored + ".json" }
+
+// PutMedia records what a probe found about a stored upload.
+//
+// Best-effort by design, and the caller is expected to ignore the error. The
+// upload itself is already on disk and usable; failing the request because a
+// cache could not be written would throw away a file the operator has just
+// spent minutes sending, to protect a nicety.
+func (s *Store) PutMedia(stored string, info MediaInfo) error {
+	if strings.ContainsAny(stored, `/\`) || stored == "" {
+		return fmt.Errorf("uploads: refusing a media record for %q", stored)
+	}
+	b, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(s.dir, sidecarName(stored)), b, 0o600)
+}
+
+// readMedia returns the recorded probe, or nil when there is not one.
+//
+// Every failure is nil rather than an error: a missing sidecar is the normal
+// state for anything uploaded before this existed, and an unreadable one should
+// cost the operator a blank column rather than the whole listing.
+func (s *Store) readMedia(stored string) *MediaInfo {
+	b, err := os.ReadFile(filepath.Join(s.dir, sidecarName(stored)))
+	if err != nil {
+		return nil
+	}
+	var m MediaInfo
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil
+	}
+	return &m
+}
+
+// removeMedia drops the sidecar. Called on the paths that remove an upload, so
+// a name reused by a later upload cannot inherit the previous file's numbers.
+func (s *Store) removeMedia(stored string) {
+	_ = os.Remove(filepath.Join(s.dir, sidecarName(stored)))
 }
 
 // Save streams r into the uploads directory and returns the stored file.
@@ -312,8 +396,12 @@ func (s *Store) List() ([]File, error) {
 	out := make([]File, 0, len(entries))
 	for _, e := range entries {
 		// Skip directories and in-flight temp files: a partial upload is not
-		// something to offer as a source.
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".partial-") {
+		// something to offer as a source. Sidecars go with them -- a probe
+		// result is not itself media, and listing one would offer it as a
+		// pull source.
+		if e.IsDir() ||
+			strings.HasPrefix(e.Name(), ".partial-") ||
+			strings.HasPrefix(e.Name(), sidecarPrefix) {
 			continue
 		}
 		info, err := e.Info()
@@ -326,6 +414,10 @@ func (s *Store) List() ([]File, error) {
 			Bytes:    info.Size(),
 			Modified: info.ModTime().UTC(),
 			PullURL:  PullURL(e.Name()),
+			// Absent for anything stored before probing existed, which is why
+			// the field is a pointer and the UI has to cope with nil rather
+			// than being handed zeroes it would render as "0x0".
+			Media: s.readMedia(e.Name()),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
@@ -338,5 +430,9 @@ func (s *Store) Delete(name string) error {
 	if err != nil {
 		return err
 	}
+	// The sidecar goes with it. Stored names carry a random suffix so a reuse
+	// is vanishingly unlikely, but a stale probe surviving its file would be a
+	// listing that describes something that is gone.
+	s.removeMedia(name)
 	return os.Remove(full)
 }
