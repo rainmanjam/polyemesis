@@ -90,9 +90,9 @@ export function PlayoutPage() {
       setTitle(v.title);
       setDescription(v.description);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load playout");
+      toast.error(err instanceof Error ? err.message : t("play.couldNotLoadPlayout"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -163,7 +163,7 @@ export function PlayoutPage() {
       setView(await api.playout());
       toast.success(t("play.linkReset"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not rotate the token");
+      toast.error(err instanceof Error ? err.message : t("sources.rotateFailed"));
     } finally {
       setBusy(false);
     }
@@ -465,14 +465,14 @@ function ShareCard({
           value={view.urls.watch}
           hint={
             protectedLink
-              ? "Carries the playback token. Anyone with this URL can watch."
+              ? t("play.carriesThePlaybackTokenAnyone")
               : undefined
           }
         />
         <CopyField
           label={t("play.hlsPlaylist")}
           value={view.urls.master}
-          hint="For OBS, a CDN, or any player that speaks HLS."
+          hint={t("play.forObsACdnOr")}
         />
         <div className="grid gap-1.5">
           <Label htmlFor="playout-embed">{t("play.embedCode")}</Label>
@@ -879,7 +879,7 @@ function PackagingCard({
         <NumberField
           id="playout-segment"
           label={t("play.segmentLength")}
-          hint="Shorter is lower latency and more playlist churn."
+          hint={t("play.shorterIsLowerLatencyAnd")}
           value={play.segmentSeconds}
           min={1}
           max={30}
@@ -889,7 +889,7 @@ function PackagingCard({
         <NumberField
           id="playout-window"
           label={t("play.liveWindow")}
-          hint="Three is the minimum a player can buffer on."
+          hint={t("play.threeIsTheMinimumA")}
           value={play.playlistSegments}
           min={3}
           max={100}
@@ -909,7 +909,7 @@ function PackagingCard({
         <NumberField
           id="playout-disk"
           label={t("play.diskCap")}
-          hint="Across every rung. The backstop that keeps a long run from filling the disk."
+          hint={t("play.acrossEveryRungTheBackstop")}
           value={play.maxDiskMb}
           min={64}
           max={1048576}
@@ -919,7 +919,7 @@ function PackagingCard({
         <NumberField
           id="playout-audio"
           label={t("play.audioBitrate")}
-          hint="One stereo AAC track per rung."
+          hint={t("play.oneStereoAacTrackPer")}
           value={play.audioKbps}
           min={32}
           max={512}
@@ -929,7 +929,7 @@ function PackagingCard({
         <NumberField
           id="playout-idle"
           label={t("play.idleTimeout")}
-          hint="Must exceed one segment, or viewers flicker out between polls."
+          hint={t("play.mustExceedOneSegmentOr")}
           value={play.sessionIdleSeconds}
           min={5}
           max={3600}
@@ -939,7 +939,7 @@ function PackagingCard({
         <NumberField
           id="playout-sessions"
           label={t("play.sessionCap")}
-          hint="Bounds the viewer table. Viewers past it are served, just not counted."
+          hint={t("play.boundsTheViewerTableViewers")}
           value={play.maxSessions}
           min={1}
           max={1000000}

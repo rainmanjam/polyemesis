@@ -85,10 +85,10 @@ export function ChatPage() {
         // Verbatim. The server's sentence names the platform and, where one
         // exists, where the moderator can do it instead; rewording it here
         // would only make it vaguer.
-        toast.error(err instanceof Error ? err.message : "Could not delete that message.");
+        toast.error(err instanceof Error ? err.message : t("chatpage.couldNotDeleteThatMessage"));
       }
     },
-    [remove],
+    [remove, t],
   );
 
   // A platform is worth calling out at the top when it is neither live nor

@@ -314,7 +314,7 @@ function GoLiveComposer() {
       });
       setJob(started);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not push the metadata.");
+      toast.error(err instanceof Error ? err.message : t("dash.couldNotPushTheMetadata"));
     } finally {
       setPushing(false);
     }
@@ -459,7 +459,7 @@ function GoLiveComposer() {
                 {contentDetailsLocked && (
                   <p className="text-[10px] text-amber-600 dark:text-amber-500">
                     {lockedReason ||
-                      "YouTube stops accepting these once a broadcast leaves \"created\" or \"ready\"."}
+                      t("dash.youtubeStopsAcceptingTheseOnce")}
                   </p>
                 )}
 
@@ -607,7 +607,7 @@ export function Dashboard() {
       setEditing(destination);
       setDialogOpen(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load the destination.");
+      toast.error(err instanceof Error ? err.message : t("dash.couldNotLoadTheDestination"));
     }
   };
 
@@ -665,7 +665,7 @@ export function Dashboard() {
     } catch (err) {
       setPending(null);
       setMoveNote("");
-      toast.error(err instanceof Error ? err.message : "Could not reorder the destinations.");
+      toast.error(err instanceof Error ? err.message : t("dash.couldNotReorderTheDestinations"));
     }
   };
 

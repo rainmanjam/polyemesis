@@ -229,7 +229,7 @@ export function ClipEditor() {
 
   useEffect(() => {
     if (!Number.isFinite(recordingId)) {
-      setLoadError("That is not a recording id.");
+      setLoadError(t("clipedit.thatIsNotARecording"));
       setLoading(false);
       return;
     }
@@ -246,7 +246,7 @@ export function ClipEditor() {
         setTitle(s.recording.replace(/\.[^.]+$/, ""));
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(errText(err, "Could not open that recording."));
+        if (!cancelled) setLoadError(errText(err, t("clipedit.couldNotOpenThatRecording")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -254,7 +254,7 @@ export function ClipEditor() {
     return () => {
       cancelled = true;
     };
-  }, [recordingId]);
+  }, [recordingId, t]);
 
   useEffect(() => {
     if (!source?.hasTranscript) return;
@@ -330,7 +330,7 @@ export function ClipEditor() {
     if (outMs <= inMs) return;
     if (!audioAll && tracks.length === 0) {
       setPlan(null);
-      setPlanError("Pick at least one audio track, or take all of them.");
+      setPlanError(t("clipedit.pickAtLeastOneAudio"));
       return;
     }
     const handle = window.setTimeout(() => {
@@ -351,12 +351,12 @@ export function ClipEditor() {
         })
         .catch((err) => {
           setPlan(null);
-          setPlanError(errText(err, "That cut could not be planned."));
+          setPlanError(errText(err, t("clipedit.thatCutCouldNotBe")));
         })
         .finally(() => setPlanning(false));
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [recordingId, source, inMs, outMs, mode, audioMode, audioAll, tracks, title, container]);
+  }, [recordingId, source, inMs, outMs, mode, audioMode, audioAll, tracks, title, container, t]);
 
   const loadJobs = useCallback(() => {
     autoApi
@@ -610,7 +610,7 @@ export function ClipEditor() {
       toast.success(t("clipedit.exportQueued"));
       loadJobs();
     } catch (err) {
-      toast.error(errText(err, "Could not queue the export."));
+      toast.error(errText(err, t("clipedit.couldNotQueueTheExport")));
     } finally {
       setExporting(false);
     }
@@ -628,7 +628,7 @@ export function ClipEditor() {
   if (!source) {
     return (
       <div className="p-3">
-        <PageHeader title={t("clipedit.title")} subtitle={loadError || "That recording is not available."} />
+        <PageHeader title={t("clipedit.title")} subtitle={loadError || t("clipedit.thatRecordingIsNotAvailable")} />
         <Button variant="secondary" size="sm" asChild>
           <Link to="/library">
             <ArrowLeft /> Back to the library
@@ -867,13 +867,13 @@ export function ClipEditor() {
                     active={mode === "fast"}
                     onClick={() => setMode("fast")}
                     title={t("clipedit.fast")}
-                    body="Copies every packet. Seconds, bit-exact, and the start snaps back to the nearest keyframe."
+                    body={t("clipedit.copiesEveryPacketSecondsBit")}
                   />
                   <ModeButton
                     active={mode === "precise"}
                     onClick={() => setMode("precise")}
                     title={t("clipedit.precise")}
-                    body="Re-encodes only the leading part-GOP so the start is exact. The rest is still copied."
+                    body={t("clipedit.reEncodesOnlyTheLeading")}
                   />
                 </div>
               </div>
@@ -950,13 +950,13 @@ export function ClipEditor() {
                     active={container === "mkv"}
                     onClick={() => setContainer("mkv")}
                     title="MKV"
-                    body="Keeps every audio track in any codec. What the recorder writes."
+                    body={t("clipedit.keepsEveryAudioTrackIn")}
                   />
                   <ModeButton
                     active={container === "mp4"}
                     onClick={() => setContainer("mp4")}
                     title="MP4"
-                    body="What a social platform will accept. Fewer codecs survive it."
+                    body={t("clipedit.whatASocialPlatformWill")}
                   />
                 </div>
               </div>

@@ -53,7 +53,7 @@ import {
   tierInfo,
 } from "@/lib/capabilities";
 import { api } from "@/lib/api";
-import { useT } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import { LIMITS } from "@/lib/limits";
@@ -107,9 +107,9 @@ export function SettingsPage() {
     setSaving(true);
     try {
       setSettings(await api.putSettings(next));
-      toast.success("Settings saved. Affected processes have been restarted.");
+      toast.success(t("set.settingsSavedAffectedProcessesHave"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save the settings.");
+      toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -131,7 +131,7 @@ export function SettingsPage() {
       setSettings(saved);
       toast.success("MQTT settings saved.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save the MQTT settings.");
+      toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheMqtt"));
     } finally {
       setSaving(false);
     }
@@ -143,9 +143,9 @@ export function SettingsPage() {
       setSettings((prev) =>
         prev ? { ...prev, mqtt: { ...prev.mqtt, enabled: prev.mqtt?.enabled ?? false, hasPassword: false } } : prev,
       );
-      toast.success("Broker password cleared.");
+      toast.success(t("set.brokerPasswordCleared"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not clear the password.");
+      toast.error(err instanceof Error ? err.message : t("set.couldNotClearThePassword"));
     }
   };
 
@@ -1500,7 +1500,7 @@ function PlatformCredCard({
       setClientSecret("");
       onChanged();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save the credentials.");
+      toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheCredentials"));
     } finally {
       setBusy(false);
     }
@@ -1511,7 +1511,7 @@ function PlatformCredCard({
     try {
       setCheck(await api.checkCreds(guide.platform));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not re-check the credentials.");
+      toast.error(err instanceof Error ? err.message : t("set.couldNotReCheckThe"));
     } finally {
       setRechecking(false);
     }
@@ -1777,7 +1777,7 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
       setNext("");
       setConfirm("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not change the password.");
+      toast.error(err instanceof Error ? err.message : t("set.couldNotChangeThePassword"));
     } finally {
       setBusy(false);
     }
@@ -1842,12 +1842,12 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
 
 /** Human labels for the resolved mode. `auto` never reaches here — the server
  *  resolves it — but it is listed so the map stays exhaustive over TlsMode. */
-const tlsModeLabel: Record<TlsMode, string> = {
-  auto: "Auto",
-  acme: "Let's Encrypt",
-  selfsigned: "Self-signed",
-  manual: "Manual certificate",
-  off: "Not terminated here",
+const tlsModeLabel: Record<TlsMode, TranslationKey> = {
+  auto: "set.tlsAuto",
+  acme: "set.tlsAcme",
+  selfsigned: "set.tlsSelfsigned",
+  manual: "set.tlsManual",
+  off: "set.tlsOff",
 };
 
 /** Signal tone for the resolved mode. `off` is the one that depends on
@@ -1938,9 +1938,9 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
       .tlsStatus()
       .then(setTls)
       .catch((err) =>
-        setLoadError(err instanceof Error ? err.message : "Could not read the TLS status."),
+        setLoadError(err instanceof Error ? err.message : t("set.couldNotReadTheTls")),
       );
-  }, []);
+  }, [t]);
 
   const copyYaml = async () => {
     if (!tls) return;
@@ -1974,7 +1974,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
                 {tls.configured === "auto" && (
                   <span className="text-[10px] text-subtle-foreground">auto resolved to</span>
                 )}
-                <Badge variant={toneBadge[modeTone(tls)]}>{tlsModeLabel[tls.mode]}</Badge>
+                <Badge variant={toneBadge[modeTone(tls)]}>{t(tlsModeLabel[tls.mode])}</Badge>
               </div>
             </div>
 
@@ -2122,20 +2122,20 @@ function ApiTokens() {
       setName("");
       load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create the token.");
+      toast.error(err instanceof Error ? err.message : t("set.couldNotCreateTheToken"));
     } finally {
       setBusy(false);
     }
   };
 
-  const revoke = async (t: ApiToken) => {
+  const revoke = async (token: ApiToken) => {
     try {
-      await api.revokeToken(t.id);
-      toast.success(`Revoked ${t.name}.`);
-      if (minted?.token.id === t.id) setMinted(null);
+      await api.revokeToken(token.id);
+      toast.success(t("set.tokenRevoked", { name: token.name }));
+      if (minted?.token.id === token.id) setMinted(null);
       load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not revoke the token.");
+      toast.error(err instanceof Error ? err.message : t("set.couldNotRevokeTheToken"));
     }
   };
 

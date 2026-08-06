@@ -50,7 +50,7 @@ import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { autoApi } from "@/lib/autoApi";
 import { timestamp } from "@/lib/format";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
 
 export type AlertFormat = "json" | "discord" | "slack";
 export type AlertSeverity = "info" | "warning" | "critical";
@@ -139,31 +139,37 @@ interface ScheduleRun {
 /** Event types are stored strings, so the catalogue comes from the server and
  *  only the wording lives here. An unknown type still renders — as its own
  *  name — rather than vanishing from the picker. */
-const EVENT_LABELS: Record<string, string> = {
-  "destination.down": "Destination went down",
-  "destination.recovered": "Destination recovered",
-  "destination.falling_behind": "Destination falling behind realtime",
-  "destination.caught_up": "Destination keeping up again",
-  "ingest.lost": "Ingest lost",
-  "ingest.recovered": "Ingest recovered",
-  "failover.switched": "Failover switched source",
-  "audio.clipping": "Audio clipping",
-  "disk.low": "Disk running low",
-  "disk.recovered": "Disk recovered",
-  "loudness.out_of_compliance": "Loudness out of compliance",
-  "loudness.recovered": "Loudness back in compliance",
-  "auth.login.failed": "Repeated failed sign-ins",
-  "auth.login.succeeded": "Signed in",
-  "auth.password.changed": "Admin password changed",
-  "auth.token.created": "API token created",
-  "auth.token.revoked": "API token revoked",
-  "settings.changed": "Settings changed",
-  "clip.captured": "Clip captured",
+const EVENT_LABELS: Record<string, TranslationKey> = {
+  "destination.down": "auto.destinationWentDown",
+  "destination.recovered": "auto.destinationRecovered",
+  "destination.falling_behind": "auto.destinationFallingBehindRealtime",
+  "destination.caught_up": "auto.destinationKeepingUpAgain",
+  "ingest.lost": "auto.evIngestLost",
+  "ingest.recovered": "auto.evIngestRecovered",
+  "failover.switched": "auto.failoverSwitchedSource",
+  "audio.clipping": "auto.evAudioClipping",
+  "disk.low": "auto.evDiskLow",
+  "disk.recovered": "auto.evDiskRecovered",
+  "loudness.out_of_compliance": "auto.loudnessOutOfCompliance",
+  "loudness.recovered": "auto.loudnessBackInCompliance",
+  "auth.login.failed": "auto.repeatedFailedSignIns",
+  "auth.login.succeeded": "auto.evSignedIn",
+  "auth.password.changed": "auto.adminPasswordChanged",
+  "auth.token.created": "auth.tokenCreated",
+  "auth.token.revoked": "auth.tokenRevoked",
+  "settings.changed": "auto.evSettingsChanged",
+  "clip.captured": "auto.evClipCaptured",
 };
 
-const eventLabel = (t: string) => EVENT_LABELS[t] ?? t;
+/** The stored event name is the fallback: an unknown type renders as itself
+ *  rather than vanishing from the picker. */
+const eventLabel = (t: Translator, name: string) =>
+  name in EVENT_LABELS ? t(EVENT_LABELS[name]) : name;
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAY_KEYS: TranslationKey[] = [
+  "auto.weekSun", "auto.weekMon", "auto.weekTue", "auto.weekWed",
+  "auto.weekThu", "auto.weekFri", "auto.weekSat",
+];
 
 function hhmm(minutes: number): string {
   const m = Math.max(0, Math.min(1439, Math.round(minutes)));
@@ -207,7 +213,7 @@ function describeSchedule(s: Schedule): string {
     case "daily":
       return `Every day at ${s.localTime || hhmm(s.atMinutes)} ${zone}`;
     case "weekly": {
-      const days = (s.days ?? []).map((d) => WEEKDAYS[d] ?? d).join(", ");
+      const days = (s.days ?? []).map((d) => WEEKDAY_KEYS[d] ?? d).join(", ");
       return `${days || "no days"} at ${s.localTime || hhmm(s.atMinutes)} ${zone}`;
     }
     default:
@@ -249,9 +255,9 @@ export function AutomationPage() {
         setSchedules(s ?? []);
         setRuns(runList ?? []);
       })
-      .catch((err) => toast.error(errText(err, "Could not load automation settings.")))
+      .catch((err) => toast.error(errText(err, t("auto.couldNotLoadAutomationSettings"))))
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
   useEffect(load, [load]);
 
@@ -399,7 +405,7 @@ function AlertRules({
       await autoApi.put<AlertRule>(`/alerts/rules/${r.id}`, { enabled });
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not change the rule."));
+      toast.error(errText(err, t("auto.couldNotChangeTheRule")));
     }
   };
 
@@ -411,7 +417,7 @@ function AlertRules({
       toast.success(t("auto.ruleDeleted"));
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the rule."));
+      toast.error(errText(err, t("auto.couldNotDeleteTheRule")));
     }
   };
 
@@ -424,7 +430,7 @@ function AlertRules({
       await autoApi.post(`/alerts/rules/${r.id}/test`, {});
       toast.success(`Test alert delivered to ${r.name}. Check the channel.`);
     } catch (err) {
-      toast.error(errText(err, "The endpoint did not accept the test message."));
+      toast.error(errText(err, t("auto.theEndpointDidNotAccept")));
     } finally {
       setTesting(null);
     }
@@ -619,7 +625,7 @@ function RuleDialog({
       toast.success(editing ? t("auto.ruleSaved") : t("auto.ruleCreated"));
       onSaved();
     } catch (err) {
-      toast.error(errText(err, "Could not save the rule."));
+      toast.error(errText(err, t("auto.couldNotSaveTheRule")));
     } finally {
       setSaving(false);
     }
@@ -708,10 +714,10 @@ function RuleDialog({
               None selected means every event, which is the useful default for a first rule.
             </p>
             <div className="grid gap-1.5 sm:grid-cols-2">
-              {meta.events.map((t) => (
-                <label key={t} className="flex items-center gap-2 text-[11px]">
-                  <Checkbox checked={events.includes(t)} onCheckedChange={() => toggleEvent(t)} />
-                  {eventLabel(t)}
+              {meta.events.map((ev) => (
+                <label key={ev} className="flex items-center gap-2 text-[11px]">
+                  <Checkbox checked={events.includes(ev)} onCheckedChange={() => toggleEvent(ev)} />
+                  {eventLabel(t, ev)}
                 </label>
               ))}
             </div>
@@ -796,7 +802,7 @@ function Schedules({
       });
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not change the schedule."));
+      toast.error(errText(err, t("auto.couldNotChangeTheSchedule")));
     }
   };
 
@@ -808,7 +814,7 @@ function Schedules({
       toast.success(t("auto.scheduleDeleted"));
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the schedule."));
+      toast.error(errText(err, t("auto.couldNotDeleteTheSchedule")));
     }
   };
 
@@ -1007,7 +1013,7 @@ function ScheduleDialog({
       toast.success(editing ? t("auto.scheduleSaved") : t("auto.scheduleCreated"));
       onSaved();
     } catch (err) {
-      toast.error(errText(err, "Could not save the schedule."));
+      toast.error(errText(err, t("auto.couldNotSaveTheSchedule")));
     } finally {
       setSaving(false);
     }
@@ -1135,7 +1141,7 @@ function ScheduleDialog({
                 <div className="flex flex-col gap-1.5">
                   <Label>{t("auto.days")}</Label>
                   <div className="flex flex-wrap gap-3">
-                    {WEEKDAYS.map((label, i) => (
+                    {WEEKDAY_KEYS.map((label, i) => (
                       <label key={label} className="flex items-center gap-1.5 text-[11px]">
                         <Checkbox checked={days.includes(i)} onCheckedChange={() => toggleDay(i)} />
                         {label}

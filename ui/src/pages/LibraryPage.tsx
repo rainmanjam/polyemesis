@@ -137,11 +137,11 @@ export function LibraryPage() {
     try {
       setView(await api.library());
     } catch (err) {
-      toast.error(errText(err, "Could not load the library."));
+      toast.error(errText(err, t("lib.couldNotLoadTheLibrary")));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -202,7 +202,7 @@ export function LibraryPage() {
       setEditing(null);
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not save the session."));
+      toast.error(errText(err, t("lib.couldNotSaveTheSession")));
     } finally {
       setBusy(false);
     }
@@ -237,7 +237,7 @@ export function LibraryPage() {
                 );
                 await load();
               } catch (err) {
-                toast.error(errText(err, "Could not regroup."));
+                toast.error(errText(err, t("lib.couldNotRegroup")));
               } finally {
                 setBusy(false);
               }
@@ -555,11 +555,11 @@ function SessionCard({
       const res = await api.librarySession(session.id);
       setRecordings(res.recordings);
     } catch (err) {
-      toast.error(errText(err, "Could not load the session's segments."));
+      toast.error(errText(err, t("lib.couldNotLoadTheSession")));
     } finally {
       setLoading(false);
     }
-  }, [session.id]);
+  }, [session.id, t]);
 
   useEffect(() => {
     if (expanded) void loadMembers();
@@ -795,7 +795,7 @@ function RecordingList({
       toast.success(t("lib.recordingDeleted"));
       onChanged();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the recording."));
+      toast.error(errText(err, t("rec.deleteFailed")));
     } finally {
       setBusy(0);
     }
@@ -857,7 +857,7 @@ function RecordingList({
                     aria-label={t("lib.transcribe")}
                     title={
                       transcribeAvailable
-                        ? "Transcribe each track on its own — that is what gives speaker attribution"
+                        ? t("lib.transcribeEachTrackOnIts")
                         : `Transcription unavailable: ${transcribeNote ?? "whisper.cpp was not found"}`
                     }
                   >
@@ -953,11 +953,11 @@ function PlayerDialog({
         setTranscript(null);
       }
     } catch (err) {
-      toast.error(errText(err, "Could not open that recording."));
+      toast.error(errText(err, t("clipedit.couldNotOpenThatRecording")));
     } finally {
       setLoading(false);
     }
-  }, [target.recordingId]);
+  }, [target.recordingId, t]);
 
   useEffect(() => {
     void load();
@@ -982,7 +982,7 @@ function PlayerDialog({
       toast.success(res.created ? t("lib.proxyQueued") : t("lib.proxyAlreadyQueued"));
       onChanged();
     } catch (err) {
-      toast.error(errText(err, "Could not queue the proxy."));
+      toast.error(errText(err, t("lib.couldNotQueueTheProxy")));
     } finally {
       setBusy(false);
     }

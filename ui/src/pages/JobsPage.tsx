@@ -142,11 +142,11 @@ export function JobsPage() {
       // keep updating; only the form the user is holding is left alone.
       if (!dirtyRef.current) setDraft(next.policy);
     } catch (err) {
-      toast.error(errText(err, "Could not read the job queue."));
+      toast.error(errText(err, t("jobs.couldNotReadTheJob")));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -162,12 +162,12 @@ export function JobsPage() {
         toast.success(ok);
         await load();
       } catch (err) {
-        toast.error(errText(err, "That did not work."));
+        toast.error(errText(err, t("jobs.thatDidNotWork")));
       } finally {
         setBusy(false);
       }
     },
-    [load],
+    [load, t],
   );
 
   const savePolicy = useCallback(async () => {
@@ -179,14 +179,14 @@ export function JobsPage() {
       setDraft(res.policy);
       if (res.restartRequired) {
         toast.warning(
-          "Saved. The concurrency change takes effect when the server restarts — the queue fixes that when it starts.",
+          t("jobs.savedTheConcurrencyChangeTakes"),
         );
       } else {
         toast.success(t("jobs.policySaved"));
       }
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not save the policy."));
+      toast.error(errText(err, t("jobs.couldNotSaveThePolicy")));
     } finally {
       setBusy(false);
     }
@@ -285,7 +285,7 @@ export function JobsPage() {
                     ? (id) =>
                         act(
                           () => api.releaseJob(id),
-                          "Released. It will start as soon as a slot is free.",
+                          t("jobs.releasedItWillStartAs"),
                         )
                     : undefined
                 }
@@ -325,7 +325,7 @@ export function JobsPage() {
                     const { purged } = await api.purgeJobs({});
                     if (purged === 0) {
                       throw new Error(
-                        "Nothing was old enough to purge. Lower the retention in Policy first.",
+                        t("jobs.nothingWasOldEnoughTo"),
                       );
                     }
                   }, "History purged.")
@@ -826,7 +826,7 @@ function PolicyEditor({
               <NumberField
                 id="jobs-concurrency"
                 label={t("jobs.concurrency")}
-                hint="How many jobs may run at once. One, because a second transcode buys throughput nobody asked for at a risk nobody accepted."
+                hint={t("jobs.howManyJobsMayRun")}
                 value={draft.concurrency}
                 min={1}
                 max={16}
@@ -835,7 +835,7 @@ function PolicyEditor({
               <NumberField
                 id="jobs-cpu-ceiling"
                 label={t("jobs.cpuCeiling")}
-                hint="Nothing new starts above this. 0 disables the gate."
+                hint={t("jobs.nothingNewStartsAboveThis")}
                 value={draft.cpuCeilingPercent}
                 min={0}
                 max={100}
@@ -844,7 +844,7 @@ function PolicyEditor({
               <NumberField
                 id="jobs-cpu-resume"
                 label={t("jobs.cpuResume")}
-                hint="Where the ceiling releases. The gap is the hysteresis that stops the gate oscillating."
+                hint={t("jobs.whereTheCeilingReleasesThe")}
                 value={draft.cpuResumePercent}
                 min={0}
                 max={100}
@@ -893,7 +893,7 @@ function PolicyEditor({
               <NumberField
                 id="jobs-battery"
                 label={t("jobs.batteryFloor")}
-                hint="Hold deferred work back on a discharging laptop below this. 0 disables it."
+                hint={t("jobs.holdDeferredWorkBackOn")}
                 value={draft.batteryFloorPercent}
                 min={0}
                 max={100}
@@ -902,7 +902,7 @@ function PolicyEditor({
               <NumberField
                 id="jobs-thermal"
                 label={t("jobs.thermalCeiling")}
-                hint="Stops everything, realtime included: a CPU that is throttling has already begun degrading the stream. 0 disables it."
+                hint={t("jobs.stopsEverythingRealtimeIncludedA")}
                 value={draft.thermalCeilingC}
                 min={0}
                 max={120}
@@ -969,7 +969,7 @@ function PolicyEditor({
               <NumberField
                 id="jobs-retain-jobs"
                 label={t("jobs.alwaysKeepNewest")}
-                hint="This many finished jobs survive whatever their age."
+                hint={t("jobs.thisManyFinishedJobsSurvive")}
                 value={draft.retainJobs}
                 min={0}
                 max={100000}

@@ -75,22 +75,22 @@ import {
   type TrackRole,
   type TrackSel,
 } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
 
-const NORMALIZE_LABEL: Record<NormalizeMode, string> = {
-  auto: "Auto (limit when 2+ tracks)",
-  off: "Off",
-  limiter: "Limiter (−0.4 dBFS ceiling)",
-  loudnorm: "Loudness (EBU R128)",
+const NORMALIZE_LABEL: Record<NormalizeMode, TranslationKey> = {
+  auto: "route.autoLimitWhen2Tracks",
+  off: "route.normalizeOff",
+  limiter: "route.limiter04DbfsCeiling",
+  loudnorm: "route.normalizeLoudnorm",
 };
 
 /** The named loudness targets, plus the two ends of the range. Every value
  *  here is a starting point, never a default: the right number depends
  *  entirely on where the stream is going. */
-const LOUDNESS_PRESETS: { lufs: number; label: string }[] = [
-  { lufs: LUFS_STREAMING, label: "YouTube, Twitch, Spotify" },
-  { lufs: LUFS_PODCAST, label: "Podcast / spoken word" },
-  { lufs: LUFS_BROADCAST, label: "EBU R128 broadcast" },
+const LOUDNESS_PRESETS: { lufs: number; label: TranslationKey }[] = [
+  { lufs: LUFS_STREAMING, label: "route.youtubeTwitchSpotify" },
+  { lufs: LUFS_PODCAST, label: "route.podcastSpokenWord" },
+  { lufs: LUFS_BROADCAST, label: "route.lufsBroadcast" },
 ];
 
 const LOUDNESS_OFF = "__off__";
@@ -106,9 +106,9 @@ const LOUDNESS_ARMS: NormalizeMode[] = ["auto", "loudnorm"];
  *  splits it into a direction and a magnitude. */
 type DelayDirection = "audio" | "video";
 
-const DELAY_LABEL: Record<DelayDirection, string> = {
-  audio: "Audio later than video",
-  video: "Video later than audio",
+const DELAY_LABEL: Record<DelayDirection, TranslationKey> = {
+  audio: "route.audioLaterThanVideo",
+  video: "route.videoLaterThanAudio",
 };
 
 export function RoutingPage() {
@@ -157,13 +157,13 @@ export function RoutingPage() {
         }
       })
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Could not load destinations.");
+        toast.error(err instanceof Error ? err.message : t("route.couldNotLoadDestinations"));
         setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [id, navigate]);
+  }, [id, navigate, t]);
 
   // ---- seed the annotations from whatever the server knows ----
   // Once only: after that the editor owns them, or a websocket source update
@@ -209,11 +209,11 @@ export function RoutingPage() {
         })
         .catch((err) => {
           setCompiled(null);
-          setCompileError(err instanceof Error ? err.message : "Could not compile this routing.");
+          setCompileError(err instanceof Error ? err.message : t("route.couldNotCompileThisRouting"));
         });
     }, 180);
     return () => window.clearTimeout(debounceRef.current);
-  }, [profile]);
+  }, [profile, t]);
 
   const patch = useCallback((next: Partial<RoutingProfile>) => {
     setProfile((p) => (p ? { ...p, ...next } : p));
@@ -242,7 +242,7 @@ export function RoutingPage() {
 
   useEffect(() => {
     if (!annotationsEdited.current) return;
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       api
         .putAnnotations(annotations)
         .then(() => setAnnotationsStored(true))
@@ -253,11 +253,11 @@ export function RoutingPage() {
             setAnnotationsStored(false);
             return;
           }
-          toast.error(err instanceof Error ? err.message : "Could not save track roles.");
+          toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTrackRoles"));
         });
     }, 500);
-    return () => window.clearTimeout(t);
-  }, [annotations]);
+    return () => window.clearTimeout(timer);
+  }, [annotations, t]);
 
   const save = async () => {
     if (!selected || !profile) return;
@@ -275,7 +275,7 @@ export function RoutingPage() {
       setDirty(false);
       setList(await api.listDestinations());
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save the routing.");
+      toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTheRouting"));
     } finally {
       setSaving(false);
     }
@@ -290,7 +290,7 @@ export function RoutingPage() {
       setDirty(true);
       toast.success(t("route.presetApplied"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not apply the preset.");
+      toast.error(err instanceof Error ? err.message : t("route.couldNotApplyThePreset"));
     }
   };
 
@@ -475,7 +475,7 @@ export function RoutingPage() {
                         <SelectContent>
                           {(Object.keys(NORMALIZE_LABEL) as NormalizeMode[]).map((n) => (
                             <SelectItem key={n} value={n}>
-                              {NORMALIZE_LABEL[n]}
+                              {t(NORMALIZE_LABEL[n])}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -767,7 +767,7 @@ function MusicRightsCard({
   const excluded = excludeRoles.includes("music");
   const platformWants = decision?.exclude ?? false;
   const reason = decision?.reason || "this platform's music policy";
-  const who = platformName || "This destination's platform";
+  const who = platformName || t("route.thisDestinationSPlatform");
 
   const toggleRole = (role: TrackRole, on: boolean) => {
     const next = on
@@ -940,7 +940,7 @@ function LoudnessCard({
             <SelectItem value={LOUDNESS_OFF}>{t("route.noTarget")}</SelectItem>
             {LOUDNESS_PRESETS.map((p) => (
               <SelectItem key={p.lufs} value={String(p.lufs)}>
-                {p.lufs} LUFS — {p.label}
+                {p.lufs} LUFS — {t(p.label)}
               </SelectItem>
             ))}
             <SelectItem value={LOUDNESS_CUSTOM}>{t("route.custom")}</SelectItem>
@@ -986,7 +986,7 @@ function LoudnessCard({
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[10px] leading-relaxed text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
-              Clip protection is set to “{NORMALIZE_LABEL[normalize]}”, which polyemesis never
+              Clip protection is set to “{t(NORMALIZE_LABEL[normalize])}”, which polyemesis never
               overrides — you chose it. This target is stored but not applied. Switch clip
               protection to Auto or Loudness to arm it.
             </span>
@@ -995,7 +995,7 @@ function LoudnessCard({
 
         <p className="text-[10px] leading-relaxed text-muted-foreground">
           {loudness ? (
-            "Measured over the whole programme, not moment to moment: quiet passages stay quiet. These are the numbers the platforms' own normalizers aim at, so hitting one is what stops the platform turning you down."
+            t("route.measuredOverTheWholeProgramme")
           ) : normalize === "loudnorm" ? (
             <>
               Clip protection is set to Loudness, which normalises to a fixed{" "}
@@ -1003,7 +1003,7 @@ function LoudnessCard({
               targets were configurable. Choosing one above replaces it.
             </>
           ) : (
-            "Without a target the mix goes out at whatever level the ingest produced, with only the clip protection above applied."
+            t("route.withoutATargetTheMix")
           )}
         </p>
       </CardContent>
@@ -1081,7 +1081,7 @@ function DelayCard({
 
         <p className="text-[10px] leading-relaxed text-muted-foreground">
           {delayMs === 0 ? (
-            "Audio and video go out together."
+            t("route.audioAndVideoGoOut")
           ) : direction === "audio" ? (
             <>
               Audio is held back <span className="tnum text-foreground">{magnitude} ms</span>, so

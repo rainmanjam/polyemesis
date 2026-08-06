@@ -52,7 +52,7 @@ export function AuthScreen({
       }
       onDone();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong.");
+      toast.error(err instanceof Error ? err.message : t("auth.somethingWentWrong"));
       setPassword("");
       setConfirm("");
     } finally {

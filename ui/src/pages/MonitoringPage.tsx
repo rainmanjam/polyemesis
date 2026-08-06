@@ -38,7 +38,7 @@ import type {
   LogLine,
   ProcessInfo,
 } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -100,10 +100,10 @@ const DRY_RUN_TONE: Record<DryRunResult["verdict"], string> = {
   inconclusive: "text-warn",
 };
 
-const DRY_RUN_LABEL: Record<DryRunResult["verdict"], string> = {
-  ok: "FFmpeg accepted it",
-  invalid: "FFmpeg rejected an argument",
-  inconclusive: "Nothing proven either way",
+const DRY_RUN_LABEL: Record<DryRunResult["verdict"], TranslationKey> = {
+  ok: "mon.dryRunOk",
+  invalid: "mon.dryRunInvalid",
+  inconclusive: "mon.nothingProvenEitherWay",
 };
 
 /** Expert mode: append hand-written FFmpeg arguments to one destination.
@@ -223,9 +223,9 @@ function ExpertPanel() {
         setDryRun(null);
         setResolved(r);
         setResolvedFor({ inputArgs: "", outputArgs: "" });
-        setSaved("Cleared. This destination is back on the generated command.");
+        setSaved(t("mon.clearedThisDestinationIsBack"));
       }),
-    [run, selected],
+    [run, selected, t],
   );
 
   const guards = resolved?.guards ?? [];
@@ -391,7 +391,7 @@ function ExpertPanel() {
             {t("mon.dryRun")}
                   </span>
                   <span className={DRY_RUN_TONE[dryRun.verdict]}>
-                    {DRY_RUN_LABEL[dryRun.verdict]}
+                    {t(DRY_RUN_LABEL[dryRun.verdict])}
                   </span>
                 </div>
                 {dryRun.message && (

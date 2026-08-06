@@ -64,7 +64,7 @@ import type {
   RenditionView,
   VideoStream,
 } from "@/lib/types";
-import { useT, type Translator } from "@/lib/i18n";
+import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -82,7 +82,7 @@ const FALLBACK_BOUNDS: RenditionBounds = {
 /** Shown beside the presets if the server's own wording has not loaded. It is
  *  the same sentence db.PresetDisclaimer carries: the numbers are a place to
  *  start from, never a claim about what a platform accepts today. */
-const FALLBACK_DISCLAIMER = "Starting point — verify current limits with the platform.";
+const FALLBACK_DISCLAIMER: TranslationKey = "rend.presetStartingPoint";
 
 /** The sizes worth one click. "Keep source" is 0×0, the sentinel that means
  *  "do not scale", and it stays first because it is the cheapest answer. */
@@ -129,12 +129,14 @@ function encoderLabel(e: EncoderInfo): string {
  *  the select. The server's `reason` is FFmpeg's own words, which is the part
  *  worth keeping: "Cannot load libcuda.so.1" and "Permission denied" are two
  *  problems with two different fixes. */
-function encoderProblem(e: EncoderInfo | undefined): string {
+function encoderProblem(
+  t: Translator,
+e: EncoderInfo | undefined): string {
   if (!e || e.works) return "";
   if (!e.available) return e.reason || `This FFmpeg build has no ${e.name}.`;
   const measured = e.measured
-    ? `${e.name} failed a one-frame test encode on this machine.`
-    : `${e.name} was not offered because a related encoder failed here.`;
+    ? t("rend.encoderTestFailed", { name: e.name })
+    : t("rend.encoderRelatedFailed", { name: e.name });
   return e.reason ? `${measured} FFmpeg said: ${e.reason}` : measured;
 }
 
@@ -322,7 +324,8 @@ function encodeCost(
 /** Things that are worth saying about this rendition against this source, and
  *  are not opinions: upscaling and frame duplication are simply waste. */
 function sourceNotes(
-  r: { width: number; height: number; fps: number },
+  t: Translator,
+r: { width: number; height: number; fps: number },
   src: VideoStream | null | undefined,
 ): string[] {
   if (!src || src.width <= 0 || src.height <= 0) return [];
@@ -330,12 +333,12 @@ function sourceNotes(
   const { width, height } = effectiveSize(r, src);
   if (height > src.height || width > src.width) {
     notes.push(
-      `The source is ${src.width}×${src.height}. Scaling up costs CPU and adds no detail.`,
+      t("rend.noteUpscale", { width: src.width, height: src.height }),
     );
   }
   if (src.frameRate > 0 && r.fps > Math.round(src.frameRate)) {
     notes.push(
-      `The source runs at ${src.frameRate.toFixed(2)} fps, so ${r.fps} fps only duplicates frames.`,
+      t("rend.noteDuplicateFps", { srcFps: src.frameRate.toFixed(2), fps: r.fps }),
     );
   }
   return notes;
@@ -365,7 +368,7 @@ export function RenditionsPage() {
   const [redetecting, setRedetecting] = useState(false);
   const [presets, setPresets] = useState<RenditionPreset[]>([]);
   const [fonts, setFonts] = useState<FontsResponse | null>(null);
-  const [disclaimer, setDisclaimer] = useState(FALLBACK_DISCLAIMER);
+  const [disclaimer, setDisclaimer] = useState("");
   const [bounds, setBounds] = useState<RenditionBounds>(FALLBACK_BOUNDS);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -379,10 +382,10 @@ export function RenditionsPage() {
         .listRenditions()
         .then(setViews)
         .catch((err) =>
-          toast.error(err instanceof Error ? err.message : "Could not load the renditions."),
+          toast.error(err instanceof Error ? err.message : t("rend.loadFailed")),
         )
         .finally(() => setLoading(false)),
-    [],
+    [t],
   );
 
   // The encoder capabilities and the presets are properties of the machine, not
@@ -398,7 +401,7 @@ export function RenditionsPage() {
       .renditionPresets()
       .then((p) => {
         setPresets(p.presets);
-        setDisclaimer(p.disclaimer || FALLBACK_DISCLAIMER);
+        setDisclaimer(p.disclaimer || "");
         setBounds(p.bounds ?? FALLBACK_BOUNDS);
       })
       .catch(() => {});
@@ -459,14 +462,14 @@ export function RenditionsPage() {
       toast.success(
         working > 0
           ? `Hardware re-detected: ${next.hardware?.join(", ")} passed a test encode.`
-          : "Hardware re-detected. No hardware encoder passed a test encode on this machine.",
+          : t("rend.redetectedNoHardware"),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not re-detect the hardware.");
+      toast.error(err instanceof Error ? err.message : t("rend.redetectFailed"));
     } finally {
       setRedetecting(false);
     }
-  }, []);
+  }, [t]);
 
   const openCreate = () => {
     setEditing(null);
@@ -482,9 +485,9 @@ export function RenditionsPage() {
     setBusyId(r.id);
     try {
       await api.restartRendition(r.id);
-      toast.success(`${r.name} is restarting. Its destinations reconnect with it.`);
+      toast.success(t("rend.restarting", { name: r.name }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not restart the encode.");
+      toast.error(err instanceof Error ? err.message : t("rend.restartFailed"));
     } finally {
       setBusyId(null);
     }
@@ -587,7 +590,7 @@ export function RenditionsPage() {
         onRedetect={redetect}
         presets={presets}
         fonts={fonts}
-        disclaimer={disclaimer}
+        disclaimer={disclaimer || t(FALLBACK_DISCLAIMER)}
         bounds={bounds}
         source={sourceVideo}
         cores={system?.numCpu}
@@ -657,7 +660,7 @@ function RenditionCard({
   // the container lost its --device passthrough. The engine refuses to start it
   // with this same reason, so say it here rather than leave the row looking
   // healthy until someone enables a destination on it.
-  const encoderProblemText = encoderProblem(encoder);
+  const encoderProblemText = encoderProblem(t, encoder);
 
   return (
     <Card>
@@ -827,45 +830,17 @@ function emptyForm(defaultEncoder: string) {
 type AspectKey = "stretch" | "crop" | "pad" | "blurpad";
 type DeinterlaceKey = "off" | "auto" | "all";
 
-const ASPECT_MODES: { key: AspectKey; label: string; hint: string }[] = [
-  {
-    key: "stretch",
-    label: "Stretch to fit",
-    hint: "Scales to the target size and lets the picture distort if the source disagrees. What every rendition did before the other modes existed.",
-  },
-  {
-    key: "crop",
-    label: "Crop to fill",
-    hint: "Centre-crops to the target shape, then scales. Subjects keep their on-screen size; the edges of the frame are gone.",
-  },
-  {
-    key: "pad",
-    label: "Letterbox",
-    hint: "Scales the whole frame to fit and fills the rest with a flat colour. Nothing is lost, but a 16:9 source on a 9:16 canvas is mostly bars.",
-  },
-  {
-    key: "blurpad",
-    label: "Blurred fill",
-    hint: "Fills the remainder with a blurred, cropped-to-fill copy of the frame itself. This is the convention vertical feeds have settled on.",
-  },
+const ASPECT_MODES: { key: AspectKey; label: TranslationKey; hint: TranslationKey }[] = [
+  { key: "stretch", label: "rend.aspectStretch", hint: "rend.aspectStretchHint" },
+  { key: "crop", label: "rend.aspectCrop", hint: "rend.aspectCropHint" },
+  { key: "pad", label: "rend.aspectPad", hint: "rend.aspectPadHint" },
+  { key: "blurpad", label: "rend.aspectBlurpad", hint: "rend.aspectBlurpadHint" },
 ];
 
-const DEINTERLACE_MODES: { key: DeinterlaceKey; label: string; hint: string }[] = [
-  {
-    key: "off",
-    label: "Off",
-    hint: "Right for the progressive sources almost everyone has. Deinterlacing one softens it for no gain.",
-  },
-  {
-    key: "auto",
-    label: "Only interlaced frames",
-    hint: "Touches only frames the source flagged as interlaced, so progressive frames pass through untouched. The right choice for anything mixed.",
-  },
-  {
-    key: "all",
-    label: "Every frame",
-    hint: "For sources that are interlaced but do not say so. Plenty of SDI bridges and capture cards flag everything progressive regardless of what they were fed, and on those “only interlaced” is a no-op that looks like a broken setting.",
-  },
+const DEINTERLACE_MODES: { key: DeinterlaceKey; label: TranslationKey; hint: TranslationKey }[] = [
+  { key: "off", label: "rend.deintOff", hint: "rend.deintOffHint" },
+  { key: "auto", label: "rend.deintAuto", hint: "rend.deintAutoHint" },
+  { key: "all", label: "rend.deintAll", hint: "rend.deintAllHint" },
 ];
 
 // The font picker's "use the built-in" option. A sentinel rather than "",
@@ -1043,7 +1018,7 @@ function RenditionDialog({
 
   const encoder = encoders.find((e) => e.name === form.encoder);
   const cost = encodeCost(t, form, encoder, source, cores, hardwareExists);
-  const notes = sourceNotes(form, source);
+  const notes = sourceNotes(t, form, source);
   const enabledUsers = users.filter((d) => d.enabled).length;
   const diagnostics = useMemo(
     () => hardwareDiagnostics(caps?.gpu ?? null, encoders),
@@ -1139,7 +1114,7 @@ function RenditionDialog({
       onSaved();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save the rendition.");
+      toast.error(err instanceof Error ? err.message : t("rend.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -1310,16 +1285,16 @@ function RenditionDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {ASPECT_MODES.map((m) => (
-                    <SelectItem key={m.key} value={m.key} title={m.hint}>
-                      {m.label}
+                    <SelectItem key={m.key} value={m.key} title={t(m.hint)}>
+                      {t(m.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <span className="text-[10px] text-muted-foreground">
                 {!aspectApplies
-                  ? "Needs both a width and a height — with one axis free the scale already preserves the aspect ratio."
-                  : (ASPECT_MODES.find((m) => m.key === form.aspectMode)?.hint ?? "")}
+                  ? t("rend.needsBothAWidthAnd")
+                  : (() => { const m = ASPECT_MODES.find((m) => m.key === form.aspectMode); return m ? t(m.hint) : ""; })()}
               </span>
             </div>
 
@@ -1334,8 +1309,8 @@ function RenditionDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {DEINTERLACE_MODES.map((m) => (
-                    <SelectItem key={m.key} value={m.key} title={m.hint}>
-                      {m.label}
+                    <SelectItem key={m.key} value={m.key} title={t(m.hint)}>
+                      {t(m.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1632,7 +1607,7 @@ function RenditionDialog({
                       // one already saved stays selectable so an edit of an
                       // unrelated field is not blocked by it.
                       disabled={!e.works && e.name !== savedEncoder}
-                      title={encoderProblem(e) || `${e.name} encoded a test frame on this machine.`}
+                      title={encoderProblem(t, e) || t("rend.encoderTestOk", { name: e.name })}
                       // Radix refuses to select a disabled item on its own, so
                       // the pointer events shadcn turns off here are only
                       // costing the title tooltip — which is the one thing a
@@ -1650,8 +1625,8 @@ function RenditionDialog({
             {t("rend.noEncoder")}
                 </span>
               )}
-              {encoderProblem(encoder) && (
-                <span className="text-[10px] text-down">{encoderProblem(encoder)}</span>
+              {encoderProblem(t, encoder) && (
+                <span className="text-[10px] text-down">{encoderProblem(t, encoder)}</span>
               )}
               {!caps?.tested && choices.length > 0 && (
                 <span className="text-[10px] text-muted-foreground">
@@ -1809,6 +1784,7 @@ function DeleteRenditionDialog({
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
 
   const remove = async () => {
@@ -1821,7 +1797,7 @@ function DeleteRenditionDialog({
       onDeleted();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete the rendition.");
+      toast.error(err instanceof Error ? err.message : t("rend.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -1833,11 +1809,13 @@ function DeleteRenditionDialog({
     <Dialog open={rendition !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Delete {rendition?.name}?</DialogTitle>
+          <DialogTitle>{t("rend.deleteRenditionTitle", { name: rendition?.name ?? "" })}</DialogTitle>
           <DialogDescription>
             {users.length === 0
-              ? "Nothing selects this rendition, so deleting it changes no destination."
-              : `${users.length} destination${users.length === 1 ? "" : "s"} fall back to passthrough and will be sent the source video unchanged. Check the source still fits what each platform accepts.`}
+              ? t("rend.deleteNoDestinations")
+              : t(users.length === 1 ? "rend.deleteFallbackOne" : "rend.deleteFallbackMany", {
+                  count: users.length,
+                })}
           </DialogDescription>
         </DialogHeader>
 

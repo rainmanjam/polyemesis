@@ -98,15 +98,15 @@ export function ClipsPage() {
           if (v.buffer.buffer) setWindow(Math.round(v.buffer.buffer.windowSeconds));
         })
         .catch((err) => {
-          if (!quiet) toast.error(errText(err, "Could not load clips."));
+          if (!quiet) toast.error(errText(err, t("clips.couldNotLoadClips")));
         })
         .finally(() => setLoading(false)),
-    [],
+    [t],
   );
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, t]);
 
   // The buffer fills in real time and its depth is the only thing that says
   // whether a clip taken right now would be the full length asked for.
@@ -129,7 +129,7 @@ export function ClipsPage() {
       );
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not capture a clip."));
+      toast.error(errText(err, t("clips.couldNotCaptureAClip")));
     } finally {
       setCapturing(false);
     }
@@ -141,7 +141,7 @@ export function ClipsPage() {
       setView((v) => (v ? { ...v, buffer: st } : v));
       await load(true);
     } catch (err) {
-      toast.error(errText(err, "Could not change the clip buffer."));
+      toast.error(errText(err, t("clips.couldNotChangeTheClip")));
     }
   };
 
@@ -153,7 +153,7 @@ export function ClipsPage() {
       toast.success(t("clips.deleted"));
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the clip."));
+      toast.error(errText(err, t("clips.couldNotDeleteTheClip")));
     }
   };
 
@@ -278,7 +278,7 @@ export function ClipsPage() {
                             <Badge
                               variant="warn"
                               className="ml-1.5"
-                              title={c.note || "The clip does not start on a keyframe."}
+                              title={c.note || t("clips.theClipDoesNotStart")}
                             >
                               rough start
                             </Badge>
