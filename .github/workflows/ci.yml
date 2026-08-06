@@ -518,6 +518,12 @@ jobs:
           - acceptance-synth    # silence tier and the failover slate
           - acceptance-failover # switch without restarting a destination
           - acceptance-postprod
+          # A recording is finalised on SIGTERM rather than truncated. The unit
+          # file has promised this since it was written and nothing checked it;
+          # on Linux it was false, and the failure is silent -- a truncated
+          # Matroska is exactly the size it was when the process died, so only
+          # a decode tells you.
+          - acceptance-recording-stop
           # Retained MQTT telemetry. Brings up eclipse-mosquitto as a container
           # rather than installing a broker on the runner, so it needs no
           # apt step of its own -- Docker is already present on ubuntu-latest.

@@ -361,10 +361,40 @@ func (m *Manager) Reconcile() error {
 // Stop shuts every engine down.
 func (m *Manager) Stop() {
 	m.mu.Lock()
-	if m.srt != nil {
-		m.srt.Stop()
-		m.srt, m.srtAddr = nil, ""
-	}
+	// Captured here, stopped at the BOTTOM of this function. The ordering is
+	// the whole point and it is not obvious, so:
+	//
+	// srtserver.Stop closes every established publisher, and that publisher's
+	// read loop is the only thing calling Sink.Deliver -- it is what feeds the
+	// engine hub, and through it every relay subscriber. Stopping it here, as
+	// this used to, cut the feed BEFORE Engine.Stop had signalled a single
+	// child. Each of those children is an FFmpeg reading udp://127.0.0.1:...,
+	// and an FFmpeg blocked in a read on a source that has gone quiet does not
+	// act on SIGTERM. All of them missed the 8s grace and were killed as a
+	// group.
+	//
+	// The recorder is where that showed. Measured twice on a live host: the
+	// .mkv did not grow by a single byte across the stop -- no trailer -- and
+	// ffprobe reported duration=N/A on a file that had been recording for
+	// nearly two minutes. deploy/polyemesis.service promises the opposite in
+	// as many words, and PLATFORMS.md files the truncation as Windows-only.
+	//
+	// An A/B against a private port isolates it to this and nothing else:
+	// SIGTERM with the input still flowing exits in 0.105s and writes a
+	// finalised file; SIGTERM with the input already silent is still alive
+	// 15s later. The only variable is whether packets were arriving.
+	//
+	// So the publishers stay up while the engines come down, and each child
+	// gets its SIGTERM on a feed that is still delivering. Once an engine
+	// closes its own hub the deliveries become counted drops in Hub.fanout --
+	// a write to a closed UDP socket, already handled there -- rather than
+	// anything that can panic.
+	//
+	// Nothing new is accepted in that window: m.engines is emptied and
+	// m.started cleared under this lock, so a publisher arriving mid-teardown
+	// finds no target and is refused exactly as it would be at any other time.
+	srt := m.srt
+	m.srt, m.srtAddr = nil, ""
 	engines := make([]*Engine, 0, len(m.engines))
 	for _, eng := range m.engines {
 		engines = append(engines, eng)
@@ -375,6 +405,11 @@ func (m *Manager) Stop() {
 
 	for _, eng := range engines {
 		eng.Stop()
+	}
+
+	// After the engines, so the children finalised against a live feed.
+	if srt != nil {
+		srt.Stop()
 	}
 }
 
