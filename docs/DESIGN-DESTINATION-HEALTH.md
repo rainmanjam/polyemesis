@@ -1,6 +1,9 @@
 # Destination health from what we already measure
 
-**Status:** proposal. Nothing here is built.
+**Status:** built, with the caveats in [open questions](#open-questions) still
+open. The thresholds shipped as constants rather than as settings — see that
+section for why the reload-class work was not worth doing against numbers this
+provisional.
 
 polyemesis knows whether a destination's FFmpeg child is *running*. It does not
 say whether that child is *keeping up*, and the difference is most of a
@@ -265,9 +268,9 @@ an alerting feature is not being wrong, it is being ignored.
 |---|---|
 | `internal/alerts/alerts.go` | two `Type` constants, appended to `AllTypes()` |
 | `internal/alerts/watch.go` | `DestState` gains three fields; one condition; the overtaken-by-`down` branch |
-| `internal/alerts/config.go` | `SpeedFloor`, `FallingBehindFor` with defaults |
+| `internal/alerts/watch.go` | `SpeedFloor`, `FallingBehindFor` on `WatchConfig`, with defaults |
 | `internal/engine/…` | populate the new `DestState` fields from `d.Process.Progress` |
-| `internal/engine/reload.go` | new settings keys must be classified — `reload_test.go` walks every leaf path and fails on an unclassified one |
+| ~~`internal/engine/reload.go`~~ | **not needed.** The thresholds are `WatchConfig` constants, not `db.Settings` leaves, so nothing has to be classified. Making them operator-settable would pull that in, and is not worth doing against numbers this provisional |
 | `ui/src/pages/AutomationPage.tsx` | two label-map entries |
 | `ui/src/components/DestinationCard.tsx` | show speed and drop rate while running |
 | `docs/MONITORING.md` | document both events and the thresholds |
@@ -338,3 +341,24 @@ These need a decision or a measurement before this is built.
    the same incidents — but a destination dropping frames at a steady 1% while
    holding `speed == 1.0` is possible in principle and would go unreported.
    Worth a look at real data before deciding.
+
+5. **This halves how many destinations fit under the coalescer's cap.** Found in
+   review, and accepted rather than fixed.
+
+   `maxGroupsPerRule` is 64, and past it the coalescer drops the **oldest**
+   pending group — not the least important. Each destination now holds up to two
+   groups rather than one (`destination:<id>` and `destination:<id>:speed`), so
+   eviction begins at roughly 32 destinations instead of 64.
+
+   Three things make that tolerable. Groups only accumulate while an endpoint is
+   **unreachable**, which is the case the cap exists for; the drop is counted in
+   `Stats.Dropped` rather than being silent; and 32 destinations on one rule is
+   already an unusual install.
+
+   What is genuinely wrong is the eviction order: a `destination.down` at
+   critical can be dropped in favour of a newer `falling_behind` at warning,
+   purely because it is older. Fixing that means making eviction
+   severity-aware, which is a change to shared alerting behaviour and does not
+   belong in this feature. `TestCoalescerEvictionIsOldestFirstNotSeverityAware`
+   pins the current behaviour so the day somebody changes it is a deliberate
+   day.
