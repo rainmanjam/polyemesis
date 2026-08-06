@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 const MIN_PASSWORD = 8;
 
@@ -18,6 +19,7 @@ export function AuthScreen({
   mode: "setup" | "login";
   onDone: () => void;
 }) {
+  const t = useT();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -35,7 +37,7 @@ export function AuthScreen({
         return;
       }
       if (password !== confirm) {
-        toast.error("The passwords do not match.");
+        toast.error(t("auth.passwordMismatch"));
         return;
       }
     }
@@ -44,7 +46,7 @@ export function AuthScreen({
     try {
       if (isSetup) {
         await api.setup(username.trim() || "admin", password);
-        toast.success("Admin account created.");
+        toast.success(t("auth.accountCreated"));
       } else {
         await api.login(username.trim(), password);
       }
@@ -80,7 +82,7 @@ export function AuthScreen({
           <CardContent>
             <form onSubmit={submit} className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="username">{t("auth.username")}</Label>
                 <Input
                   id="username"
                   value={username}
@@ -91,7 +93,7 @@ export function AuthScreen({
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t("auth.password")}</Label>
                 <Input
                   id="password"
                   type="password"
@@ -110,7 +112,7 @@ export function AuthScreen({
 
               {isSetup && (
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="confirm">Confirm password</Label>
+                  <Label htmlFor="confirm">{t("auth.confirmPassword")}</Label>
                   <Input
                     id="confirm"
                     type="password"
