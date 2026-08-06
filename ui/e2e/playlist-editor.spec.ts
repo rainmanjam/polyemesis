@@ -126,9 +126,35 @@ async function deleteUpload(page: Page, name: string): Promise<number> {
  *  upload that is still there. */
 function removeUploadOutOfBand(name: string) {
   const container = process.env.E2E_CONTAINER ?? "poly-browser";
-  execFileSync("docker", ["exec", container, "rm", "--", `/data/uploads/${name}`], {
-    stdio: "pipe",
-  });
+  // The DERIVATIVE goes too, and that is not tidiness.
+  //
+  // playlistItemStatus asks its questions in precedence order, and the first
+  // one is "is there a non-empty derivative" -> ready, returning before it ever
+  // stats the upload. So an item whose source file has been deleted still reads
+  // READY as long as a normalised copy exists -- which is correct product
+  // behaviour, because that is what the playlist would actually play.
+  //
+  // This test passed for years without removing it only because the fixture
+  // was a text blob: normalisation failed, no derivative was ever written, and
+  // the upload check was reached by accident. The moment the fixture became
+  // real media the premise evaporated and this went red. Removing both is what
+  // the test always meant.
+  //
+  // Globbed on the version rather than pinned to .v2.ts: ProfileVersion is
+  // bumped whenever the profile changes, and a stale literal here would fail
+  // open -- the derivative would survive, the row would read ready, and this
+  // test would go green for the wrong reason all over again.
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      container,
+      "sh",
+      "-c",
+      `rm -f -- '/data/uploads/${name}' /data/playlist-media/'${name}'.v*.ts`,
+    ],
+    { stdio: "pipe" },
+  );
 }
 
 /** Clicks a switch only if it is not already in the wanted state, and reports
@@ -257,10 +283,16 @@ test.describe("playlist editor", () => {
     // with nothing watching it. Mutation: make the poll effect return
     // unconditionally and this row never changes.
     const row = page.locator('[data-testid="playlist-item"]', { hasText: gone });
-    // Longer than the default: the fixture is a text blob, so a normalisation
-    // job was queued at save and is briefly ACTIVE -- which reads as
-    // "Transcoding", correctly, by the state precedence. This has to outlast
-    // one job failure plus one poll interval.
+    // Longer than the default. The fixture is real media now, so a
+    // normalisation job queued at save actually runs, and while it is queued or
+    // running the row reads "Transcoding" -- correctly, by the state
+    // precedence. This has to outlast that job plus one poll interval.
+    //
+    // It used to say the fixture was a text blob and the wait was for a job
+    // FAILURE. That was true, and it was also why this test was passing for the
+    // wrong reason: a failed normalisation writes no derivative, so the ready
+    // branch never fired and the missing-upload branch was reached by accident
+    // rather than by the removal above.
     await expect(row.getByText("Needs attention")).toBeVisible({ timeout: 15_000 });
     // "no longer exists" is text ONLY the missing-upload branch produces
     // (internal/api/playlist_status.go). The assertion used to be
