@@ -149,6 +149,13 @@ const EVENT_LABELS: Record<string, string> = {
   "disk.recovered": "Disk recovered",
   "loudness.out_of_compliance": "Loudness out of compliance",
   "loudness.recovered": "Loudness back in compliance",
+  "auth.login.failed": "Repeated failed sign-ins",
+  "auth.login.succeeded": "Signed in",
+  "auth.password.changed": "Admin password changed",
+  "auth.token.created": "API token created",
+  "auth.token.revoked": "API token revoked",
+  "settings.changed": "Settings changed",
+  "clip.captured": "Clip captured",
 };
 
 const eventLabel = (t: string) => EVENT_LABELS[t] ?? t;

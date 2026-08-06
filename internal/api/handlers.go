@@ -104,9 +104,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if user.Username != req.Username || !user.CheckPassword(req.Password) {
 		wait := s.logins.Fail(ip)
 		s.log.Warn("failed login", "username", req.Username, "remote", ip, "penalty", wait)
+		// Only once the throttle has started imposing a delay, which is exactly
+		// when this address has spent its free allowance. A first mistyped
+		// password is not an incident, and an alert that fires on one is an
+		// alert the operator mutes before the first real attack. The throttled
+		// branch above raises nothing at all: it answers before the password is
+		// read, so publishing there would let an attacker set the event rate.
+		if wait > 0 {
+			s.publishAudit(auditLoginFailed(ip, s.logins.Failures(ip)))
+		}
 		writeError(w, http.StatusUnauthorized, "incorrect username or password")
 		return
 	}
+	// Read BEFORE Succeed clears the counter. "Somebody signed in after nine
+	// rejections from this address" is the one message here that means the
+	// guessing worked, and one line later there is nothing left to read it from.
+	failuresBefore := s.logins.Failures(ip)
 	s.logins.Succeed(ip)
 
 	token, err := s.sessions.Issue(user.ID, user.Username)
@@ -118,6 +131,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// After the session exists, not after the password checked out. A correct
+	// password that could not be turned into a session is not somebody being
+	// signed in, and reporting it as one would send the operator hunting for a
+	// session that never existed.
+	s.publishAudit(auditLoginSucceeded(ip, failuresBefore))
 	writeJSON(w, http.StatusOK, map[string]any{"username": user.Username})
 }
 
@@ -183,6 +201,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_ = s.sessions.SetSession(w, r, token)
 	}
+	// Raised after the store call and regardless of whether the re-issue above
+	// worked, because the password genuinely did change either way -- and the
+	// operator who did NOT do this is the reader who needs it most, at the exact
+	// moment their own session stopped working.
+	s.publishAudit(auditPasswordChanged(s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password changed"})
 }
 
@@ -698,6 +721,13 @@ func (s *Server) handlePutMQTTPassword(w http.ResponseWriter, r *http.Request) {
 	// No reconcile call: the MQTT runner polls the settings and notices the
 	// password changed by its hash, which is also what makes a rotation to a
 	// different password of the same length take effect.
+	//
+	// Raised here rather than left to PUT /settings, which this endpoint does
+	// not go through: the password is sealed straight into the store, so
+	// changedSections can never see it. Without this line the channel would
+	// report a cosmetic settings tweak and stay silent about a credential
+	// rotation, which is exactly backwards. Only the section name travels.
+	s.publishAudit(auditSettingsChanged([]string{"mqtt"}, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]bool{"hasPassword": req.Password != ""})
 }
 
@@ -735,7 +765,17 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	//
 	// The closure decodes the request over the stored document, so a partial
 	// payload still cannot blank fields the client did not send.
+	// The stored document as bytes, taken inside the closure below and read
+	// after it returns. Bytes rather than a db.Settings copy for the same
+	// reason the playlist is copied there: decoding into settings can rewrite
+	// slices in place, so a struct copy would not be a snapshot of anything.
+	// Marshalling is the cheapest thing that genuinely freezes the value.
+	//
+	// It never leaves this handler. changedSections compares it and returns
+	// section NAMES; nothing derived from these bytes reaches an alert.
+	var storedJSON []byte
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
+		storedJSON, _ = json.Marshal(settings)
 		// The stored playlist, copied BEFORE the decode overwrites it.
 		//
 		// The copy is not defensive tidiness: json.Unmarshal reuses a slice's
@@ -794,6 +834,25 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeStoreError(w, err)
 		return
+	}
+	// Raised here rather than at the end of the handler: the document is stored
+	// by this point, so every remaining exit -- a source update that fails, a
+	// reconcile that fails -- is one where the configuration really did change
+	// and the operator asking "was that me?" still deserves an answer.
+	//
+	// Only when something actually moved. Opening the settings page and pressing
+	// Save without touching anything is the most common way to reach this
+	// handler, and an alert for it is the noise that gets the channel muted.
+	//
+	// Both marshal errors are swallowed on purpose. changedSections reads
+	// unparseable input as "cannot tell" and answers with no alert, which is the
+	// right direction: the alternative is guessing that everything changed and
+	// sending the noisiest possible message on the least informed possible
+	// basis. UpdateSettings has just serialised this same document into SQLite,
+	// so neither call can realistically fail anyway.
+	savedJSON, _ := json.Marshal(settings)
+	if sections := changedSections(storedJSON, savedJSON); len(sections) > 0 {
+		s.publishAudit(auditSettingsChanged(sections, s.clientIP(r)))
 	}
 	// Ask for the derivative every playlist item needs. AFTER the save, so a
 	// rejected settings document never queues a transcode, and before the

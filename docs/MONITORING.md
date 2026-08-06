@@ -85,6 +85,71 @@ you supply. Configure them under *Settings → Alerts*, or through
 Webhook URLs often carry their credential in the path, so they are masked in
 every API response. Handing the masked form back on an update means "unchanged".
 
+### Security and configuration events
+
+Five of the subscribable types are not about the stream. They are about the
+server itself, and they answer one question: *was that me?*
+
+| Event | Severity | Fires when |
+|---|---|---|
+| `auth.login.failed` | `warning` | sign-ins from one address have passed the throttle's free allowance — **not** on the first mistyped password |
+| `auth.login.succeeded` | `info` | a sign-in was accepted; carries how many failures preceded it |
+| `auth.password.changed` | `critical` | the admin password was replaced |
+| `auth.token.created` | `critical` | an API token was minted |
+| `auth.token.revoked` | `warning` | an API token was destroyed; names the same token the created event named |
+| `settings.changed` | `warning` | a settings save altered the stored document, **or** the MQTT broker password or automod key was rotated |
+| `clip.captured` | `info` | a clip was cut from the replay buffer |
+
+The two `critical` ones are the pair worth putting on a phone. Changing the
+password evicts every existing session, and minting a token creates a
+credential that survives the password change — between them they are how
+somebody who has your password keeps your server.
+
+**Credential rotations raise `settings.changed` too.** The MQTT broker password
+and the automod key are sealed straight into the store by their own endpoints
+and never travel through `PUT /settings`, so the comparison that produces this
+event cannot see them. They publish it themselves, naming the section — `mqtt`
+or `automod` — and nothing else. Without that, a channel would report a
+cosmetic settings tweak and stay silent about a credential rotation, which is
+the wrong way round.
+
+**`clip.captured` is the one that will fire often.** On a busy stream it is
+somebody doing their job, repeatedly. It is `info` so that a rule wanting only
+incidents can raise its `minSeverity` and keep every other event on this page,
+rather than unsubscribing from the type and forgetting it exists. It is here
+because a clip is the one operation that takes content off the server.
+
+**These name things and never show values.** `settings.changed` says *which
+sections* changed — `ingest, listeners` — and never what they changed to. That
+is not squeamishness: the redactor works by recognising the syntax of URLs and
+`key=value` pairs, so it cannot see a bare SRT passphrase at all, and the only
+reliable defence is never putting a stored value in the message. For the same
+reason `auth.login.failed` does not repeat the username that was guessed, and
+`auth.token.created` gives the token's name but not its prefix.
+
+#### Upgrading from 0.3.x
+
+**A rule with no event checkboxes ticked means "everything", so such a rule
+starts receiving these the moment you upgrade.** That is the default the first
+rule you create is saved with, so on most installs it is the rule you have.
+Nothing is backfilled to narrow it, because a migration that re-ran on every
+start would silently re-narrow a list you had deliberately cleared later, and
+being quietly re-narrowed is worse than being loud once.
+
+If it is more than you want, the severity floor is the fast fix: raising a rule
+to `warning` drops routine sign-ins, and raising it to `critical` leaves only
+the password change and the token mint. Otherwise tick the events you do want,
+which turns the rule from "everything" into exactly that list.
+
+#### These are notifications, not an audit trail
+
+Nothing is written down locally. The alert path is lossy on purpose — a full
+queue drops events rather than slowing the streaming path down — so under
+sustained delivery failure a security event can vanish with only the notifier's
+`dropped` counter to show for it. An attacker who deletes your only alert rule
+leaves no local record at all. If you need a record that survives the incident,
+the receiving end of the webhook is where to keep it.
+
 ---
 
 ## Automation

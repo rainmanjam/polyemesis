@@ -75,6 +75,10 @@ func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// Same reasoning as the MQTT password: sealed straight into the store, so
+	// PUT /settings never sees it and changedSections cannot report it. The
+	// section name travels and the key never does.
+	s.publishAudit(auditSettingsChanged([]string{"automod"}, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]any{"hasApiKey": key != ""})
 }
 
