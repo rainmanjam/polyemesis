@@ -38,10 +38,29 @@ its first tagged release.
 
 ### Changed
 
-- **Sources, Recordings and Settings are translated.** The catalogue grew from 135
-  keys to 419, and all fifteen languages are complete. Previously only the nav
-  shell and three widgets were extracted; every page rendered hard-coded English
-  whatever the operator had chosen.
+- **The application is translated.** Every page under `src/pages` now reads from
+  the catalogue; a sweep for hard-coded prose returns nothing. The catalogue grew
+  from 135 keys to 1,098 and all fifteen languages are complete.
+
+  Previously only the nav shell and three widgets were extracted, so an operator
+  who chose Deutsch got a German sidebar and an English application. The 135 keys
+  that existed were complete in every language, which is exactly why the gap was
+  easy to miss: the coverage looked like 100%.
+
+  Extraction found prose in four shapes, each invisible to the check written for
+  the one before it — JSX text, string props and toasts; ternaries such as
+  `{busy ? "Pushing…" : "Push to platforms"}`; object-literal properties built
+  from template literals; and eight module-scope tables. The last of those could
+  never have called `useT()` at all, since hooks do not run at module scope, so
+  each now holds a `TranslationKey` and is translated where it is rendered — a
+  `Record<K, TranslationKey>` cannot hold a sentence, which the compiler enforces.
+- **One word per locale for "rendition".** Ten of the fifteen catalogues disagreed
+  with themselves across `nav.renditions`, `rend.title`, `sources.renditions` and
+  `dash.renditions`. In Polish the sidebar read "Opcje jakości" while the page it
+  opened was titled "Warianty", so following the link appeared to land elsewhere.
+  Japanese, Korean and Dutch additionally used a term meaning "rendering
+  settings"; a rendition is one video variant at a given size and bitrate, not a
+  settings screen, and they now say so.
 - `vitest` runs in CI alongside `tsc` and `oxlint`, covering the pure logic the
   browser suite cannot practically enumerate — platform link construction across
   five platforms, and the translation catalogues themselves.
