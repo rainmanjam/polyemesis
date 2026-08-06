@@ -133,7 +133,22 @@ Everything past that floor is where they diverge:
 | **Linux (server)** | The race detector, 11 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
 | **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
-| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect |
+| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect — see the note below |
+
+**On the recording truncation.** This table filed it as Windows-only, and that
+was wrong: it happened on Linux too, and had since the shared SRT listener was
+introduced. `Manager.Stop` closed every established publisher *before* stopping
+the engines, so the relay went quiet while the recorder's FFmpeg was still
+blocked reading it — and an FFmpeg blocked in a read never reaches its SIGTERM
+check. It missed the grace period, was killed, and the container's trailer was
+never written. Measured on a live host: the file did not grow by one byte
+across the stop, and `ffprobe` reported no duration on nearly two minutes of
+footage.
+
+That is fixed, and `scripts/acceptance-recording-stop.sh` holds it fixed. What
+is **not** established is whether Windows was failing for the same reason. The
+mechanism is not platform-specific, so it may well have been — but nobody has
+run the suite there, so the row above still says what it says.
 
 The distinction that matters for choosing: Windows is **tested, not operated**.
 The broadcast path demonstrably works there and that job has already caught
