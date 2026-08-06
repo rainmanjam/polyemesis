@@ -64,6 +64,7 @@ import type {
   RenditionView,
   VideoStream,
 } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -367,6 +368,7 @@ function renditionSignal(
 }
 
 export function RenditionsPage() {
+  const t = useT();
   const { status, system } = useLiveData();
   const [views, setViews] = useState<RenditionView[]>([]);
   const [caps, setCaps] = useState<EncoderList | null>(null);
@@ -501,8 +503,8 @@ export function RenditionsPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Renditions"
-        subtitle="One shared video encode, many destinations. Audio is never touched here."
+        title={t("rend.title")}
+        subtitle={t("rend.subtitle")}
         actions={
           <>
             {running > 0 && (
@@ -558,9 +560,7 @@ export function RenditionsPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
             <p className="max-w-lg text-[12px] text-muted-foreground">
-              No renditions. Every destination is on passthrough, which is exactly right until one
-              of them cannot take the source — a 4K60 ingest that Twitch, Kick or X will not accept,
-              say. Add a rendition and point those destinations at it.
+            {t("rend.empty")}
             </p>
             <Button size="sm" onClick={openCreate}>
               <Plus /> New rendition
@@ -656,6 +656,7 @@ function RenditionCard({
   onRestart: () => void;
   onDelete: () => void;
 }) {
+  const t = useT();
   const r = view.rendition;
   const total = users ? users.length : view.destinations;
   const enabled = users ? users.filter((d) => d.enabled).length : view.enabledDestinations;
@@ -686,14 +687,14 @@ function RenditionCard({
 
       <CardContent className="flex flex-col gap-2.5">
         <div className="grid grid-cols-3 gap-2">
-          <Stat label="Target" value={kbps(r.videoBitrate)} />
+          <Stat label={t("rend.target")} value={kbps(r.videoBitrate)} />
           <Stat
-            label="Live"
+            label={t("rend.live")}
             value={proc?.state === "running" ? kbps(proc.progress?.bitrateKbps ?? 0) : "—"}
             tone={proc?.state === "running" ? "live" : "muted"}
           />
           <Stat
-            label="Speed"
+            label={t("rend.speed")}
             value={proc?.state === "running" ? `${(proc.progress?.speed ?? 0).toFixed(2)}×` : "—"}
             // Below real time the encode is losing the race, and every
             // destination under it inherits the stutter.
@@ -701,10 +702,10 @@ function RenditionCard({
               proc?.state === "running" && (proc.progress?.speed ?? 0) < 0.98 ? "warn" : "muted"
             }
           />
-          <Stat label="GOP" value={`${r.gopSeconds}s`} tone="muted" />
-          <Stat label="Preset" value={r.preset} tone="muted" />
+          <Stat label={t("rend.gop")} value={`${r.gopSeconds}s`} tone="muted" />
+          <Stat label={t("rend.preset")} value={r.preset} tone="muted" />
           <Stat
-            label="Uptime"
+            label={t("rend.uptime")}
             value={proc?.state === "running" ? duration(proc.uptimeSec) : "—"}
             tone="muted"
           />
@@ -723,8 +724,7 @@ function RenditionCard({
           </div>
           {total === 0 ? (
             <p className="text-[11px] text-muted-foreground">
-              No destination selects this yet, so nothing is being encoded. Pick it on a destination
-              to start the encode.
+            {t("rend.unused")}
             </p>
           ) : users ? (
             <div className="flex flex-wrap gap-1">
@@ -734,7 +734,7 @@ function RenditionCard({
             </div>
           ) : (
             <p className="text-[11px] text-muted-foreground">
-              Waiting for the first live snapshot.
+            {t("rend.waitingSnapshot")}
             </p>
           )}
         </div>
@@ -940,6 +940,7 @@ function RenditionDialog({
   users: DestStatus[];
   onSaved: () => void;
 }) {
+  const t = useT();
   const editing = rendition !== null;
   const encoders = useMemo(() => caps?.encoders ?? [], [caps]);
   const defaultEncoder = caps?.default ?? "libx264";
@@ -1143,7 +1144,7 @@ function RenditionDialog({
         );
       } else {
         await api.createRendition(payload);
-        toast.success("Rendition created. Select it on a destination to start the encode.");
+        toast.success(t("rend.created"));
       }
       onSaved();
       onOpenChange(false);
@@ -1191,25 +1192,24 @@ function RenditionDialog({
                   into presenting these numbers as a platform's actual limits. */}
               <span className="text-[10px] text-warn">{disclaimer}</span>
               <span className="text-[10px] text-muted-foreground">
-                These seed the form and nothing more — edit anything before saving. Platform
-                ceilings change and differ by partner status.
+            {t("rend.seedNote")}
               </span>
             </div>
           )}
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="rend-name">Name</Label>
+            <Label htmlFor="rend-name">{t("rend.name")}</Label>
             <Input
               id="rend-name"
               value={form.name}
               onChange={(e) => set("name", e.target.value)}
-              placeholder="1080p60 for Twitch and Kick"
+              placeholder={t("rend.namePlaceholder")}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label>Resolution</Label>
+              <Label>{t("rend.resolution")}</Label>
               <Select value={sizeKey} onValueChange={chooseSize}>
                 <SelectTrigger>
                   <SelectValue />
@@ -1220,13 +1220,13 @@ function RenditionDialog({
                       {s.label}
                     </SelectItem>
                   ))}
-                  <SelectItem value="custom">Custom…</SelectItem>
+                  <SelectItem value="custom">{t("rend.custom")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-fps">Frame rate</Label>
+              <Label htmlFor="rend-fps">{t("rend.frameRate")}</Label>
               <Input
                 id="rend-fps"
                 type="number"
@@ -1244,7 +1244,7 @@ function RenditionDialog({
           {sizeKey === "custom" && (
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <Label htmlFor="rend-w">Width</Label>
+                <Label htmlFor="rend-w">{t("rend.width")}</Label>
                 <Input
                   id="rend-w"
                   type="number"
@@ -1256,7 +1256,7 @@ function RenditionDialog({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="rend-h">Height</Label>
+                <Label htmlFor="rend-h">{t("rend.height")}</Label>
                 <Input
                   id="rend-h"
                   type="number"
@@ -1268,15 +1268,14 @@ function RenditionDialog({
                 />
               </div>
               <span className="col-span-2 text-[10px] text-muted-foreground">
-                0 on an axis keeps the source's and preserves the aspect ratio — set height alone to
-                rescale. Both must be even numbers: H.264 and HEVC have no odd-sized chroma plane.
+            {t("rend.evenNote")}
               </span>
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-bitrate">Video bitrate</Label>
+              <Label htmlFor="rend-bitrate">{t("rend.videoBitrate")}</Label>
               <Input
                 id="rend-bitrate"
                 type="number"
@@ -1292,7 +1291,7 @@ function RenditionDialog({
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-gop">Keyframe interval</Label>
+              <Label htmlFor="rend-gop">{t("rend.keyframeInterval")}</Label>
               <Input
                 id="rend-gop"
                 type="number"
@@ -1310,7 +1309,7 @@ function RenditionDialog({
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-aspect">Aspect handling</Label>
+              <Label htmlFor="rend-aspect">{t("rend.aspectHandling")}</Label>
               <Select
                 value={form.aspectMode}
                 onValueChange={(v) => set("aspectMode", v as AspectKey)}
@@ -1335,7 +1334,7 @@ function RenditionDialog({
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-deint">Deinterlace</Label>
+              <Label htmlFor="rend-deint">{t("rend.deinterlace")}</Label>
               <Select
                 value={form.deinterlace}
                 onValueChange={(v) => set("deinterlace", v as DeinterlaceKey)}
@@ -1359,15 +1358,15 @@ function RenditionDialog({
 
           {aspectApplies && form.aspectMode === "pad" && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-padcolor">Letterbox colour</Label>
+              <Label htmlFor="rend-padcolor">{t("rend.letterboxColour")}</Label>
               <Input
                 id="rend-padcolor"
                 value={form.padColor}
-                placeholder="black"
+                placeholder={t("rend.colourBlack")}
                 onChange={(e) => set("padColor", e.target.value)}
               />
               <span className="text-[10px] text-muted-foreground">
-                Empty means black. One word — <code>black</code>, <code>0x101010</code> — because it
+                Empty means black. One word — <code>{t("rend.colourBlack")}</code>, <code>0x101010</code> — because it
                 lands on a filter graph where a comma would end the argument.
               </span>
             </div>
@@ -1375,7 +1374,7 @@ function RenditionDialog({
 
           <div className="flex flex-col gap-2 rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="rend-overlay-image">Watermark image</Label>
+              <Label htmlFor="rend-overlay-image">{t("rend.watermarkImage")}</Label>
               {!aspectApplies && (
                 <span className="text-[10px] text-muted-foreground">
                   needs a fixed width and height
@@ -1386,7 +1385,7 @@ function RenditionDialog({
               id="rend-overlay-image"
               value={form.overlayImage}
               disabled={!aspectApplies}
-              placeholder="overlays/logo.png"
+              placeholder={t("rend.watermarkPlaceholder")}
               onChange={(e) => set("overlayImage", e.target.value)}
             />
             <span className="text-[10px] text-muted-foreground">
@@ -1404,7 +1403,7 @@ function RenditionDialog({
                     onChange={(v) => set("overlayAnchor", v)}
                   />
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-width">Width (% of frame)</Label>
+                    <Label htmlFor="rend-overlay-width">{t("rend.widthPct")}</Label>
                     <Input
                       id="rend-overlay-width"
                       type="number"
@@ -1418,7 +1417,7 @@ function RenditionDialog({
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-mx">Margin X (%)</Label>
+                    <Label htmlFor="rend-overlay-mx">{t("rend.marginX")}</Label>
                     <Input
                       id="rend-overlay-mx"
                       type="number"
@@ -1429,7 +1428,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-my">Margin Y (%)</Label>
+                    <Label htmlFor="rend-overlay-my">{t("rend.marginY")}</Label>
                     <Input
                       id="rend-overlay-my"
                       type="number"
@@ -1440,7 +1439,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-opacity">Opacity (%)</Label>
+                    <Label htmlFor="rend-overlay-opacity">{t("rend.opacity")}</Label>
                     <Input
                       id="rend-overlay-opacity"
                       type="number"
@@ -1453,8 +1452,7 @@ function RenditionDialog({
                 </div>
 
                 <span className="text-[10px] text-muted-foreground">
-                  Everything is a percentage of the frame, so the same settings are correct on a
-                  16:9 tier and a 9:16 one. Margins are ignored on a centred axis.
+            {t("rend.percentNote")}
                 </span>
               </>
             )}
@@ -1462,7 +1460,7 @@ function RenditionDialog({
 
           <div className="flex flex-col gap-2 rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="rend-text-content">Burned-in text</Label>
+              <Label htmlFor="rend-text-content">{t("rend.burnedText")}</Label>
               {!aspectApplies && (
                 <span className="text-[10px] text-muted-foreground">
                   needs a fixed width and height
@@ -1479,7 +1477,7 @@ function RenditionDialog({
               value={form.textContent}
               disabled={!aspectApplies || (fonts ? !fonts.textSupported : false)}
               maxLength={200}
-              placeholder="MY STATION"
+              placeholder={t("rend.textPlaceholder")}
               onChange={(e) => set("textContent", e.target.value)}
             />
             <span className="text-[10px] text-muted-foreground">
@@ -1498,7 +1496,7 @@ function RenditionDialog({
               <>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label>Font</Label>
+                    <Label>{t("rend.font")}</Label>
                     <Select
                       value={form.textFont === "" ? DEFAULT_FONT_KEY : form.textFont}
                       onValueChange={(v) => set("textFont", v === DEFAULT_FONT_KEY ? "" : v)}
@@ -1507,7 +1505,7 @@ function RenditionDialog({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={DEFAULT_FONT_KEY}>Built-in default</SelectItem>
+                        <SelectItem value={DEFAULT_FONT_KEY}>{t("rend.builtInFont")}</SelectItem>
                         {(fonts?.fonts ?? []).map((f) => (
                           <SelectItem key={f.name} value={f.name}>
                             {f.name}
@@ -1531,7 +1529,7 @@ function RenditionDialog({
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-size">Size (% of height)</Label>
+                    <Label htmlFor="rend-text-size">{t("rend.sizePct")}</Label>
                     <Input
                       id="rend-text-size"
                       type="number"
@@ -1542,7 +1540,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-mx">Margin X (%)</Label>
+                    <Label htmlFor="rend-text-mx">{t("rend.marginX")}</Label>
                     <Input
                       id="rend-text-mx"
                       type="number"
@@ -1553,7 +1551,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-my">Margin Y (%)</Label>
+                    <Label htmlFor="rend-text-my">{t("rend.marginY")}</Label>
                     <Input
                       id="rend-text-my"
                       type="number"
@@ -1567,26 +1565,26 @@ function RenditionDialog({
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-color">Text colour</Label>
+                    <Label htmlFor="rend-text-color">{t("rend.textColour")}</Label>
                     <Input
                       id="rend-text-color"
                       value={form.textColor}
-                      placeholder="white"
+                      placeholder={t("rend.colourWhite")}
                       onChange={(e) => set("textColor", e.target.value)}
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-boxcolor">Box colour</Label>
+                    <Label htmlFor="rend-text-boxcolor">{t("rend.boxColour")}</Label>
                     <Input
                       id="rend-text-boxcolor"
                       value={form.textBoxColor}
                       disabled={!form.textBox}
-                      placeholder="black"
+                      placeholder={t("rend.colourBlack")}
                       onChange={(e) => set("textBoxColor", e.target.value)}
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-boxopacity">Box opacity (%)</Label>
+                    <Label htmlFor="rend-text-boxopacity">{t("rend.boxOpacity")}</Label>
                     <Input
                       id="rend-text-boxopacity"
                       type="number"
@@ -1609,7 +1607,7 @@ function RenditionDialog({
                 </label>
                 <span className="text-[10px] text-muted-foreground">
                   The box is what keeps white text readable over a white shirt. Colours are one word
-                  — <code>white</code>, <code>0x101010</code> — because they land on a filter graph.
+                  — <code>{t("rend.colourWhite")}</code>, <code>0x101010</code> — because they land on a filter graph.
                 </span>
               </>
             )}
@@ -1618,14 +1616,14 @@ function RenditionDialog({
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2">
-                <Label>Encoder</Label>
+                <Label>{t("rend.encoder")}</Label>
                 <Button
                   variant="ghost"
                   size="sm"
                   type="button"
                   onClick={onRedetect}
                   disabled={redetecting}
-                  title="Re-run the GPU scan and encode one test frame with each encoder. Takes a few seconds."
+                  title={t("rend.redetectTitle")}
                 >
                   {redetecting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
                   Re-detect hardware
@@ -1659,7 +1657,7 @@ function RenditionDialog({
               </Select>
               {choices.length === 0 && (
                 <span className="text-[10px] text-warn">
-                  This FFmpeg reported no usable video encoder.
+            {t("rend.noEncoder")}
                 </span>
               )}
               {encoderProblem(encoder) && (
@@ -1667,21 +1665,20 @@ function RenditionDialog({
               )}
               {!caps?.tested && choices.length > 0 && (
                 <span className="text-[10px] text-muted-foreground">
-                  Nothing has been test-encoded on this machine yet, so this list is what the FFmpeg
-                  build contains rather than what the hardware can do. Re-detect to find out.
+            {t("rend.notProbed")}
                 </span>
               )}
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-preset">Encoder preset</Label>
+              <Label htmlFor="rend-preset">{t("rend.encoderPreset")}</Label>
               <Input
                 id="rend-preset"
                 value={form.preset}
                 maxLength={32}
                 className="font-mono"
                 onChange={(e) => set("preset", e.target.value)}
-                placeholder="veryfast"
+                placeholder={t("rend.presetPlaceholder")}
               />
               <span className="text-[10px] text-muted-foreground">
                 The encoder's own speed knob, and its vocabulary: veryfast for x264, p4 for nvenc.
@@ -1740,8 +1737,7 @@ function RenditionDialog({
 
           {encoder?.codec === "hevc" && (
             <div className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
-              This encoder produces HEVC. Most RTMP destinations accept H.264 only — pick it only
-              for a destination that has told you it takes HEVC.
+            {t("rend.hevcWarning")}
             </div>
           )}
 
@@ -1765,13 +1761,13 @@ function RenditionDialog({
           </div>
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="rend-note">Note</Label>
+            <Label htmlFor="rend-note">{t("rend.note")}</Label>
             <Textarea
               id="rend-note"
               rows={2}
               value={form.note}
               onChange={(e) => set("note", e.target.value)}
-              placeholder="What this tier is for."
+              placeholder={t("rend.notePlaceholder")}
             />
           </div>
 

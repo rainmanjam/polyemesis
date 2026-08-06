@@ -75,6 +75,7 @@ import {
   type TrackRole,
   type TrackSel,
 } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 const NORMALIZE_LABEL: Record<NormalizeMode, string> = {
   auto: "Auto (limit when 2+ tracks)",
@@ -111,6 +112,7 @@ const DELAY_LABEL: Record<DelayDirection, string> = {
 };
 
 export function RoutingPage() {
+  const t = useT();
   const { id } = useParams();
   const navigate = useNavigate();
   const { levels, source } = useLiveData();
@@ -286,7 +288,7 @@ export function RoutingPage() {
       setCompiled(res.routing);
       setCompileError("");
       setDirty(true);
-      toast.success("Preset applied. Review it, then save.");
+      toast.success(t("route.presetApplied"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not apply the preset.");
     }
@@ -339,7 +341,7 @@ export function RoutingPage() {
   if (list.length === 0) {
     return (
       <div className="p-3">
-        <PageHeader title="Routing" />
+        <PageHeader title={t("route.title")} />
         <Card>
           <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
             Add a destination first — routing is configured per destination.
@@ -352,8 +354,8 @@ export function RoutingPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Audio routing"
-        subtitle="Choose exactly which ingest tracks each destination receives."
+        title={t("route.audioRouting")}
+        subtitle={t("route.audioRoutingDesc")}
         actions={
           <>
             {dirty && <Badge variant="warn">unsaved</Badge>}
@@ -369,7 +371,7 @@ export function RoutingPage() {
         {/* ---------- destination picker ---------- */}
         <Card className="h-fit">
           <CardHeader>
-            <CardTitle>Destinations</CardTitle>
+            <CardTitle>{t("route.destinations")}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-0.5">
             {list.map(({ destination: d, routing }) => {
@@ -446,8 +448,8 @@ export function RoutingPage() {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <TabsList>
-                      <TabsTrigger value="simple">Simple</TabsTrigger>
-                      <TabsTrigger value="matrix">Mix matrix</TabsTrigger>
+                      <TabsTrigger value="simple">{t("route.simple")}</TabsTrigger>
+                      <TabsTrigger value="matrix">{t("route.mixMatrix")}</TabsTrigger>
                     </TabsList>
 
                     <div className="flex items-center gap-2">
@@ -497,14 +499,12 @@ export function RoutingPage() {
                     />
                     {annotating && annotationsStored === false && (
                       <p className="mt-2 text-[10px] text-warn">
-                        This server does not store track roles yet, so these stay in this
-                        browser. Everything else on the page saves normally.
+            {t("route.localOnlyNote")}
                       </p>
                     )}
                     {annotating && annotationsStored !== false && (
                       <p className="mt-2 text-[10px] text-muted-foreground">
-                        Roles describe the ingest, not this destination, and save on their own.
-                        Nothing is filtered until a destination below asks for it.
+            {t("route.rolesNote")}
                       </p>
                     )}
                   </TabsContent>
@@ -554,7 +554,7 @@ export function RoutingPage() {
             {/* result */}
             <Card>
               <CardHeader className="flex-row items-center justify-between">
-                <CardTitle>Result</CardTitle>
+                <CardTitle>{t("route.result")}</CardTitle>
                 {compiled && (
                   <div className="flex flex-wrap items-center justify-end gap-1.5">
                     <Badge variant="armed">{compiled.summary}</Badge>
@@ -628,6 +628,7 @@ function PresetRow({
   onApply,
   showMusicPolicy = false,
 }: PresetRowProps) {
+  const t = useT();
   return (
     <div className="flex flex-wrap items-start gap-2">
       {presets.map((p) => (
@@ -648,7 +649,7 @@ function PresetRow({
           )}
           {p.needsMusicTrack && !p.platform && (
             <TrackPick
-              label="music"
+              label={t("route.roleMusic")}
               value={opts.musicTrack}
               options={trackOptions}
               onChange={(v) => setOpts((o) => ({ ...o, musicTrack: v }))}
@@ -656,7 +657,7 @@ function PresetRow({
           )}
           {p.needsMicTrack && (
             <TrackPick
-              label="mic"
+              label={t("route.roleMic")}
               value={opts.micTrack}
               options={trackOptions}
               onChange={(v) => setOpts((o) => ({ ...o, micTrack: v }))}
@@ -664,7 +665,7 @@ function PresetRow({
           )}
           {p.needsSurroundTrack && (
             <TrackPick
-              label="5.1"
+              label={t("route.role51")}
               value={opts.surroundTrack}
               options={trackOptions}
               onChange={(v) => setOpts((o) => ({ ...o, surroundTrack: v }))}
@@ -672,7 +673,7 @@ function PresetRow({
           )}
           {p.needsCleanTrack && (
             <TrackPick
-              label="clean"
+              label={t("route.roleClean")}
               value={opts.cleanTrack}
               options={trackOptions}
               onChange={(v) => setOpts((o) => ({ ...o, cleanTrack: v }))}
@@ -681,10 +682,10 @@ function PresetRow({
           {p.needsLanguage && (
             <Input
               value={opts.language ?? ""}
-              placeholder="lang — e.g. es"
+              placeholder={t("route.langPlaceholder")}
               onChange={(e) => setOpts((o) => ({ ...o, language: e.target.value }))}
               className="h-6 text-[10px]"
-              aria-label="Commentary language"
+              aria-label={t("route.commentaryLanguage")}
             />
           )}
           {showMusicPolicy && p.policy?.exclude && (
@@ -697,13 +698,13 @@ function PresetRow({
                 }))
               }
             >
-              <SelectTrigger className="h-6 text-[10px]" aria-label="Music policy">
+              <SelectTrigger className="h-6 text-[10px]" aria-label={t("route.musicPolicy")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="default">Platform default</SelectItem>
-                <SelectItem value="exclude">Exclude music</SelectItem>
-                <SelectItem value="keep">Keep music</SelectItem>
+                <SelectItem value="default">{t("route.platformDefault")}</SelectItem>
+                <SelectItem value="exclude">{t("route.excludeMusic")}</SelectItem>
+                <SelectItem value="keep">{t("route.keepMusic")}</SelectItem>
               </SelectContent>
             </Select>
           )}
@@ -762,6 +763,7 @@ function MusicRightsCard({
   musicTracks: number[];
   onExcludeRoles: (roles: TrackRole[]) => void;
 }) {
+  const t = useT();
   const excluded = excludeRoles.includes("music");
   const platformWants = decision?.exclude ?? false;
   const reason = decision?.reason || "this platform's music policy";
@@ -829,9 +831,9 @@ function MusicRightsCard({
           <Switch
             checked={excluded}
             onCheckedChange={(v) => toggleRole("music", v)}
-            aria-label="Keep music out of this destination"
+            aria-label={t("route.keepMusicOut")}
           />
-          <span className="text-[12px]">Keep music out of this destination</span>
+          <span className="text-[12px]">{t("route.keepMusicOut")}</span>
           {excluded !== platformWants && decision && (
             <Badge variant="outline">operator override</Badge>
           )}
@@ -851,13 +853,13 @@ function MusicRightsCard({
             ) : (
               <>
                 No ingest track is marked as music yet. Open{" "}
-                <span className="text-foreground">Label tracks</span> above and set one to
+                <span className="text-foreground">{t("route.labelTracks")}</span> above and set one to
                 “Music” — this destination will drop it from that moment on, without another
                 edit here.
               </>
             )
           ) : (
-            <>Every selected track reaches this destination, music included.</>
+            <>{t("route.everyTrackReaches")}</>
           )}
         </p>
 
@@ -902,6 +904,7 @@ function LoudnessCard({
   normalize: NormalizeMode;
   onChange: (l: Loudness | null) => void;
 }) {
+  const t = useT();
   const named = loudness && LOUDNESS_PRESETS.some((p) => p.lufs === loudness.targetLufs);
   const value = !loudness ? LOUDNESS_OFF : named ? String(loudness.targetLufs) : LOUDNESS_CUSTOM;
   // A target under `off` or `limiter` is stored but inert — routing never
@@ -930,24 +933,24 @@ function LoudnessCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         <Select value={value} onValueChange={select}>
-          <SelectTrigger aria-label="Loudness target">
+          <SelectTrigger aria-label={t("route.loudnessTarget")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={LOUDNESS_OFF}>No target (leave levels alone)</SelectItem>
+            <SelectItem value={LOUDNESS_OFF}>{t("route.noTarget")}</SelectItem>
             {LOUDNESS_PRESETS.map((p) => (
               <SelectItem key={p.lufs} value={String(p.lufs)}>
                 {p.lufs} LUFS — {p.label}
               </SelectItem>
             ))}
-            <SelectItem value={LOUDNESS_CUSTOM}>Custom…</SelectItem>
+            <SelectItem value={LOUDNESS_CUSTOM}>{t("route.custom")}</SelectItem>
           </SelectContent>
         </Select>
 
         {loudness && (
           <div className="grid grid-cols-3 gap-2">
             <NumberField
-              label="Target"
+              label={t("route.target")}
               unit="LUFS"
               value={loudness.targetLufs}
               min={MIN_TARGET_LUFS}
@@ -957,7 +960,7 @@ function LoudnessCard({
               onChange={(n) => onChange({ ...loudness, targetLufs: n })}
             />
             <NumberField
-              label="True peak"
+              label={t("route.truePeak")}
               unit="dBTP"
               value={loudness.truePeakDb ?? 0}
               placeholder={String(DEFAULT_TRUE_PEAK_DB)}
@@ -967,7 +970,7 @@ function LoudnessCard({
               onChange={(n) => onChange({ ...loudness, truePeakDb: n })}
             />
             <NumberField
-              label="Range"
+              label={t("route.range")}
               unit="LU"
               value={loudness.rangeLu ?? 0}
               placeholder={String(DEFAULT_LOUDNESS_LRA)}
@@ -1027,6 +1030,7 @@ function DelayCard({
   videoDelayMs: number;
   onChange: (ms: number) => void;
 }) {
+  const t = useT();
   const direction: DelayDirection = delayMs < 0 ? "video" : "audio";
   const magnitude = Math.abs(delayMs);
   const max = direction === "audio" ? MAX_DELAY_MS : -MIN_DELAY_MS;
@@ -1056,7 +1060,7 @@ function DelayCard({
       <CardContent className="flex flex-col gap-2">
         <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2">
           <Select value={direction} onValueChange={(v) => setDirection(v as DelayDirection)}>
-            <SelectTrigger aria-label="Delay direction">
+            <SelectTrigger aria-label={t("route.delayDirection")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1065,7 +1069,7 @@ function DelayCard({
             </SelectContent>
           </Select>
           <NumberField
-            label="Offset"
+            label={t("route.offset")}
             unit="ms"
             value={magnitude}
             min={0}
@@ -1121,6 +1125,7 @@ function DuckingCard({
   annotations: TrackAnnotation[];
   onChange: (d: Ducking | null) => void;
 }) {
+  const t = useT();
   // A duck needs something to push down and something to push it down with.
   // Below two tracks in the mix there is no second group, so the controls
   // would only be able to describe an impossible graph.
@@ -1169,15 +1174,14 @@ function DuckingCard({
           <Switch
             checked={ducking !== null}
             onCheckedChange={enable}
-            aria-label="Enable ducking"
+            aria-label={t("route.enableDucking")}
           />
         </label>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {!ducking ? (
           <p className="text-[10px] leading-relaxed text-muted-foreground">
-            Pull one group of tracks down whenever another is speaking — the mic over the music
-            bed. Off means every selected track is summed at its own gain, unchanged.
+            {t("route.duckingNote")}
           </p>
         ) : (
           <>
@@ -1198,8 +1202,7 @@ function DuckingCard({
                 ))}
               </div>
               <p className="text-[10px] text-muted-foreground">
-                A trigger does not have to be in this destination’s mix — a mic can duck the
-                music here while only the music is sent.
+            {t("route.duckingTriggerNote")}
               </p>
             </div>
 
@@ -1223,7 +1226,7 @@ function DuckingCard({
 
             <div className="grid grid-cols-2 gap-2 border-t border-border pt-2 sm:grid-cols-4">
               <NumberField
-                label="Threshold"
+                label={t("route.threshold")}
                 unit="dB"
                 value={ducking.thresholdDb ?? 0}
                 placeholder={String(DEFAULT_DUCK_THRESHOLD_DB)}
@@ -1233,7 +1236,7 @@ function DuckingCard({
                 onChange={(n) => onChange({ ...ducking, thresholdDb: n })}
               />
               <NumberField
-                label="Ratio"
+                label={t("route.ratio")}
                 unit=":1"
                 value={ducking.ratio ?? 0}
                 placeholder={String(DEFAULT_DUCK_RATIO)}
@@ -1243,7 +1246,7 @@ function DuckingCard({
                 onChange={(n) => onChange({ ...ducking, ratio: n })}
               />
               <NumberField
-                label="Attack"
+                label={t("route.attack")}
                 unit="ms"
                 value={ducking.attackMs ?? 0}
                 placeholder={String(DEFAULT_DUCK_ATTACK_MS)}
@@ -1253,7 +1256,7 @@ function DuckingCard({
                 onChange={(n) => onChange({ ...ducking, attackMs: n })}
               />
               <NumberField
-                label="Release"
+                label={t("route.release")}
                 unit="ms"
                 value={ducking.releaseMs ?? 0}
                 placeholder={String(DEFAULT_DUCK_RELEASE_MS)}

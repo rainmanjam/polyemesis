@@ -48,6 +48,7 @@ import type {
   RenditionView,
   Settings,
 } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 const MAX_VARIANTS = 8;
 
@@ -65,6 +66,7 @@ const MAX_VARIANTS = 8;
  *  The page leads with exposure because that is the fact an operator most needs
  *  to be sure of, and the one that is most expensive to get wrong. */
 export function PlayoutPage() {
+  const t = useT();
   const [view, setView] = useState<PlayoutAdminView | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [renditions, setRenditions] = useState<RenditionView[]>([]);
@@ -159,13 +161,13 @@ export function PlayoutPage() {
     try {
       await api.rotatePlayoutToken();
       setView(await api.playout());
-      toast.success("New playback link generated. The previous one no longer works.");
+      toast.success(t("play.linkReset"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not rotate the token");
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   const play = settings?.playout;
 
@@ -184,8 +186,8 @@ export function PlayoutPage() {
   return (
     <div className="p-4">
       <PageHeader
-        title="Playout"
-        subtitle="Serve the stream to viewers directly, as public HLS."
+        title={t("play.title")}
+        subtitle={t("play.subtitle")}
         actions={
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-muted-foreground">
@@ -195,7 +197,7 @@ export function PlayoutPage() {
               checked={play.enabled}
               disabled={busy}
               onCheckedChange={(enabled) => void savePlayoutSettings({ ...play, enabled })}
-              aria-label="Enable playout"
+              aria-label={t("play.enable")}
             />
           </div>
         }
@@ -228,10 +230,10 @@ export function PlayoutPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Watching now" value={String(analytics.viewers)} />
-              <Stat label="Peak" value={String(analytics.peak)} />
-              <Stat label="Sessions" value={String(analytics.sessions)} />
-              <Stat label="On disk" value={fmtBytes(usage.bytes)} />
+              <Stat label={t("play.watchingNow")} value={String(analytics.viewers)} />
+              <Stat label={t("play.peak")} value={String(analytics.peak)} />
+              <Stat label={t("play.sessions")} value={String(analytics.sessions)} />
+              <Stat label={t("play.onDisk")} value={fmtBytes(usage.bytes)} />
             </div>
             {analytics.uncounted > 0 && (
               <p className="mt-3 text-[11px] text-muted-foreground">
@@ -257,7 +259,7 @@ export function PlayoutPage() {
                     .resetPlayoutAnalytics()
                     .then(() => api.playout())
                     .then(setView)
-                    .catch(() => toast.error("Could not reset"));
+                    .catch(() => toast.error(t("play.resetFailed")));
                 }}
               >
                 <RotateCw />
@@ -278,20 +280,19 @@ export function PlayoutPage() {
 
       <Card className="mt-3">
         <CardHeader>
-          <CardTitle className="text-[13px]">Player page</CardTitle>
+          <CardTitle className="text-[13px]">{t("play.playerPage")}</CardTitle>
           <CardDescription>
-            Shown above the video on the public page. The poster is a recent
-            keyframe, refreshed automatically.
+            {t("play.posterNote")}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">
-            <Label htmlFor="playout-title">Title</Label>
+            <Label htmlFor="playout-title">{t("play.metaTitle")}</Label>
             <Input
               id="playout-title"
               value={title}
               maxLength={200}
-              placeholder="Untitled stream"
+              placeholder={t("play.untitled")}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() => {
                 if (title !== view.title) void savePublish({ title });
@@ -299,7 +300,7 @@ export function PlayoutPage() {
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="playout-description">Description</Label>
+            <Label htmlFor="playout-description">{t("play.metaDescription")}</Label>
             <Textarea
               id="playout-description"
               value={description}
@@ -335,6 +336,7 @@ export function PlayoutPage() {
  *  stated in words at the top of the page rather than inferred from a toggle
  *  three cards down. */
 function ExposureBanner({ view }: { view: PlayoutAdminView }) {
+  const t = useT();
   if (!view.status.enabled) {
     return (
       <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-[12px] text-muted-foreground">
@@ -348,7 +350,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
       <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-[12px]">
         <Lock className="h-3.5 w-3.5 shrink-0 text-ok" />
         <span>
-          <span className="font-medium">Private.</span>{" "}
+          <span className="font-medium">{t("play.private")}</span>{" "}
           <span className="text-muted-foreground">
             Only a signed-in administrator can watch. Turn on “Public” below to
             share a link.
@@ -378,7 +380,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
     <div className="mb-3 flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-[12px]">
       <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
       <span>
-        <span className="font-medium">Unlisted.</span>{" "}
+        <span className="font-medium">{t("play.unlisted")}</span>{" "}
         <span className="text-muted-foreground">
           Anyone holding the playback link can watch, without signing in. The
           link is the password — treat it like one.
@@ -401,6 +403,7 @@ function CopyField({
   hint?: string;
   mono?: boolean;
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <div className="grid gap-1.5">
@@ -423,7 +426,7 @@ function CopyField({
                 setCopied(true);
                 window.setTimeout(() => setCopied(false), 1500);
               })
-              .catch(() => toast.error("Clipboard is unavailable; select and copy by hand"));
+              .catch(() => toast.error(t("play.clipboardUnavailable")));
           }}
         >
           {copied ? <Check /> : <Copy />}
@@ -445,11 +448,12 @@ function ShareCard({
   busy: boolean;
   onRotate: () => void;
 }) {
+  const t = useT();
   const protectedLink = play.public && view.protection === "token";
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-[13px]">Share</CardTitle>
+        <CardTitle className="text-[13px]">{t("play.share")}</CardTitle>
         <CardDescription>
           {play.public
             ? "These links work without an account."
@@ -458,7 +462,7 @@ function ShareCard({
       </CardHeader>
       <CardContent className="grid gap-3">
         <CopyField
-          label="Player page"
+          label={t("play.playerPage")}
           value={view.urls.watch}
           hint={
             protectedLink
@@ -467,12 +471,12 @@ function ShareCard({
           }
         />
         <CopyField
-          label="HLS playlist"
+          label={t("play.hlsPlaylist")}
           value={view.urls.master}
           hint="For OBS, a CDN, or any player that speaks HLS."
         />
         <div className="grid gap-1.5">
-          <Label htmlFor="playout-embed">Embed code</Label>
+          <Label htmlFor="playout-embed">{t("play.embedCode")}</Label>
           <Textarea
             id="playout-embed"
             readOnly
@@ -520,18 +524,18 @@ function ProtectionCard({
   onSave: (body: { protection?: PlayoutProtection }) => Promise<void>;
   onSaveSettings: (next: PlayoutSettings) => Promise<void>;
 }) {
+  const t = useT();
   return (
     <Card className="mt-3">
       <CardHeader>
-        <CardTitle className="text-[13px]">Who can watch</CardTitle>
+        <CardTitle className="text-[13px]">{t("play.whoCanWatch")}</CardTitle>
         <CardDescription>
-          Playback is protected by default. Opening it is a separate, deliberate
-          step.
+            {t("play.protectedNote")}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
         <div className="grid gap-1.5">
-          <Label htmlFor="playout-protection">Protection</Label>
+          <Label htmlFor="playout-protection">{t("play.protection")}</Label>
           <Select
             value={view.protection}
             disabled={busy}
@@ -558,7 +562,7 @@ function ProtectionCard({
 
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
-            <p className="text-[12px] font-medium">Public</p>
+            <p className="text-[12px] font-medium">{t("play.public")}</p>
             <p className="text-[11px] text-muted-foreground">
               Serve viewers who are not signed in. Off means administrators only,
               whatever the protection setting says.
@@ -567,14 +571,14 @@ function ProtectionCard({
           <Switch
             checked={play.public}
             disabled={busy}
-            aria-label="Serve viewers without a session"
+            aria-label={t("play.serveWithoutSession")}
             onCheckedChange={(pub) => void onSaveSettings({ ...play, public: pub })}
           />
         </div>
 
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
-            <p className="text-[12px] font-medium">Allow cross-origin</p>
+            <p className="text-[12px] font-medium">{t("play.allowCrossOrigin")}</p>
             <p className="text-[11px] text-muted-foreground">
               Lets a player embedded on another website fetch the media, and lets
               this server's player page be framed. Not needed for same-site
@@ -584,7 +588,7 @@ function ProtectionCard({
           <Switch
             checked={play.allowCrossOrigin}
             disabled={busy}
-            aria-label="Allow cross-origin playback"
+            aria-label={t("play.allowCrossOriginPlayback")}
             onCheckedChange={(allow) =>
               void onSaveSettings({ ...play, allowCrossOrigin: allow })
             }
@@ -610,6 +614,7 @@ function VariantsCard({
   busy: boolean;
   onSave: (next: PlayoutSettings) => Promise<void>;
 }) {
+  const t = useT();
   const statusByName = useMemo(() => {
     const m = new Map<string, NonNullable<typeof variants>[number]>();
     for (const v of variants ?? []) m.set(v.name, v);
@@ -644,15 +649,13 @@ function VariantsCard({
           Ladder
         </CardTitle>
         <CardDescription>
-          Each rung copies its rendition's video bit-for-bit, so adding one costs
-          a muxer and never a second video encode. Only the audio track differs
-          per rung; per-destination routing is untouched.
+            {t("play.rungNote")}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-2">
         {play.variants.length === 0 && (
           <p className="text-[12px] text-muted-foreground">
-            No rungs yet. Add one to publish anything.
+            {t("play.noRungs")}
           </p>
         )}
 
@@ -674,7 +677,7 @@ function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-[10px]">Name</Label>
+                <Label className="text-[10px]">{t("play.name")}</Label>
                 {/* Uncontrolled, and committed on blur rather than on every
                     keystroke: a rename is a directory move and a muxer
                     restart, so saving mid-word would cycle the stream once per
@@ -693,7 +696,7 @@ function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-[10px]">Video source</Label>
+                <Label className="text-[10px]">{t("play.videoSource")}</Label>
                 <Select
                   value={v.renditionId == null ? "source" : String(v.renditionId)}
                   disabled={busy}
@@ -705,7 +708,7 @@ function VariantsCard({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="source">Ingest (passthrough)</SelectItem>
+                    <SelectItem value="source">{t("play.passthrough")}</SelectItem>
                     {renditions.map((r) => (
                       <SelectItem key={r.rendition.id} value={String(r.rendition.id)}>
                         {r.rendition.name}
@@ -716,7 +719,7 @@ function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-[10px]">Audio track</Label>
+                <Label className="text-[10px]">{t("play.audioTrack")}</Label>
                 {/* Committed on blur for the same reason the name is: each
                     save restarts this rung's muxer. */}
                 <Input
@@ -842,20 +845,20 @@ function PackagingCard({
   busy: boolean;
   onSave: (next: PlayoutSettings) => Promise<void>;
 }) {
+  const t = useT();
   const set = (patch: Partial<PlayoutSettings>) => void onSave({ ...play, ...patch });
 
   return (
     <Card className="mt-3">
       <CardHeader>
-        <CardTitle className="text-[13px]">Packaging</CardTitle>
+        <CardTitle className="text-[13px]">{t("play.packaging")}</CardTitle>
         <CardDescription>
-          Changing any of these restarts the muxers, which interrupts viewers for
-          a few seconds.
+            {t("play.restartNote")}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="grid gap-1.5">
-          <Label htmlFor="playout-format">Format</Label>
+          <Label htmlFor="playout-format">{t("play.format")}</Label>
           <Select
             value={play.format}
             disabled={busy}
@@ -865,8 +868,8 @@ function PackagingCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="hls">HLS</SelectItem>
-              <SelectItem value="hls+dash">HLS and DASH</SelectItem>
+              <SelectItem value="hls">{t("play.hls")}</SelectItem>
+              <SelectItem value="hls+dash">{t("play.hlsDash")}</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[11px] text-muted-foreground">
@@ -877,7 +880,7 @@ function PackagingCard({
 
         <NumberField
           id="playout-segment"
-          label="Segment length (s)"
+          label={t("play.segmentLength")}
           hint="Shorter is lower latency and more playlist churn."
           value={play.segmentSeconds}
           min={1}
@@ -887,7 +890,7 @@ function PackagingCard({
         />
         <NumberField
           id="playout-window"
-          label="Live window (segments)"
+          label={t("play.liveWindow")}
           hint="Three is the minimum a player can buffer on."
           value={play.playlistSegments}
           min={3}
@@ -897,7 +900,7 @@ function PackagingCard({
         />
         <NumberField
           id="playout-dvr"
-          label="DVR window (s)"
+          label={t("play.dvrWindow")}
           hint="0 is live only. Anything longer lets viewers seek back."
           value={play.dvrWindowSeconds}
           min={0}
@@ -907,7 +910,7 @@ function PackagingCard({
         />
         <NumberField
           id="playout-disk"
-          label="Disk cap (MB)"
+          label={t("play.diskCap")}
           hint="Across every rung. The backstop that keeps a long run from filling the disk."
           value={play.maxDiskMb}
           min={64}
@@ -917,7 +920,7 @@ function PackagingCard({
         />
         <NumberField
           id="playout-audio"
-          label="Audio bitrate (kbps)"
+          label={t("play.audioBitrate")}
           hint="One stereo AAC track per rung."
           value={play.audioKbps}
           min={32}
@@ -927,7 +930,7 @@ function PackagingCard({
         />
         <NumberField
           id="playout-idle"
-          label="Viewer idle timeout (s)"
+          label={t("play.idleTimeout")}
           hint="Must exceed one segment, or viewers flicker out between polls."
           value={play.sessionIdleSeconds}
           min={5}
@@ -937,7 +940,7 @@ function PackagingCard({
         />
         <NumberField
           id="playout-sessions"
-          label="Session cap"
+          label={t("play.sessionCap")}
           hint="Bounds the viewer table. Viewers past it are served, just not counted."
           value={play.maxSessions}
           min={1}

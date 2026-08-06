@@ -39,6 +39,7 @@ import {
 import { autoApi } from "@/lib/autoApi";
 import { bytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 /* ===========================================================================
    The clip editor.
@@ -184,6 +185,7 @@ const DEFAULT_ZOOM_INDEX = 4;
 const SHUTTLE_SPEEDS = [1, 2, 4, 8];
 
 export function ClipEditor() {
+  const t = useT();
   const params = useParams();
   const recordingId = Number(params.id);
 
@@ -605,7 +607,7 @@ export function ClipEditor() {
         title,
         container,
       });
-      toast.success("Export queued. It runs when the machine can spare the cycles.");
+      toast.success(t("clipedit.exportQueued"));
       loadJobs();
     } catch (err) {
       toast.error(errText(err, "Could not queue the export."));
@@ -626,7 +628,7 @@ export function ClipEditor() {
   if (!source) {
     return (
       <div className="p-3">
-        <PageHeader title="Clip editor" subtitle={loadError || "That recording is not available."} />
+        <PageHeader title={t("clipedit.title")} subtitle={loadError || "That recording is not available."} />
         <Button variant="secondary" size="sm" asChild>
           <Link to="/library">
             <ArrowLeft /> Back to the library
@@ -649,7 +651,7 @@ export function ClipEditor() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Clip editor"
+        title={t("clipedit.title")}
         subtitle={
           source.sessionName
             ? `${source.recording} — ${source.sessionName}`
@@ -707,7 +709,7 @@ export function ClipEditor() {
                   size="sm"
                   variant={shuttle < 0 ? "default" : "secondary"}
                   onClick={shuttleBack}
-                  title="J — shuttle backwards"
+                  title={t("clipedit.shuttleBack")}
                 >
                   <ChevronLeft /> J
                 </Button>
@@ -715,7 +717,7 @@ export function ClipEditor() {
                   size="sm"
                   variant={shuttle === 0 ? "default" : "secondary"}
                   onClick={() => setShuttle(0)}
-                  title="K — stop"
+                  title={t("clipedit.stop")}
                 >
                   <Pause /> K
                 </Button>
@@ -723,7 +725,7 @@ export function ClipEditor() {
                   size="sm"
                   variant={shuttle > 0 ? "default" : "secondary"}
                   onClick={shuttleForward}
-                  title="L — play, again for faster"
+                  title={t("clipedit.playFaster")}
                 >
                   <Play /> L
                 </Button>
@@ -735,10 +737,10 @@ export function ClipEditor() {
 
                 <span className="mx-1 h-5 w-px bg-border" />
 
-                <Button size="sm" variant="secondary" onClick={() => nudge(-FINE_STEP_MS)} title="Back 33 ms">
+                <Button size="sm" variant="secondary" onClick={() => nudge(-FINE_STEP_MS)} title={t("clipedit.back33")}>
                   −33 ms
                 </Button>
-                <Button size="sm" variant="secondary" onClick={() => nudge(FINE_STEP_MS)} title="Forward 33 ms">
+                <Button size="sm" variant="secondary" onClick={() => nudge(FINE_STEP_MS)} title={t("clipedit.forward33")}>
                   +33 ms
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => nudge(-COARSE_STEP_MS)}>
@@ -750,10 +752,10 @@ export function ClipEditor() {
 
                 <span className="mx-1 h-5 w-px bg-border" />
 
-                <Button size="sm" onClick={markIn} title="I — mark in at the playhead">
+                <Button size="sm" onClick={markIn} title={t("clipedit.markIn")}>
                   Mark in (I)
                 </Button>
-                <Button size="sm" onClick={markOut} title="O — mark out at the playhead">
+                <Button size="sm" onClick={markOut} title={t("clipedit.markOut")}>
                   Mark out (O)
                 </Button>
 
@@ -761,7 +763,7 @@ export function ClipEditor() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Zoom out"
+                    aria-label={t("clipedit.zoomOut")}
                     disabled={zoom >= ZOOM_STOPS_MS.length - 1}
                     onClick={() => setZoom((z) => Math.min(ZOOM_STOPS_MS.length - 1, z + 1))}
                   >
@@ -770,7 +772,7 @@ export function ClipEditor() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Zoom in"
+                    aria-label={t("clipedit.zoomIn")}
                     disabled={zoom <= 0}
                     onClick={() => setZoom((z) => Math.max(0, z - 1))}
                   >
@@ -822,8 +824,8 @@ export function ClipEditor() {
               />
 
               <div className="flex flex-wrap items-end gap-2">
-                <TimecodeField label="In" valueMs={inMs} onCommit={(ms) => setInMs(Math.max(0, Math.min(ms, outMs - 1)))} />
-                <TimecodeField label="Out" valueMs={outMs} onCommit={(ms) => setOutMs(Math.max(inMs + 1, Math.min(ms, durationMs)))} />
+                <TimecodeField label={t("clipedit.in")} valueMs={inMs} onCommit={(ms) => setInMs(Math.max(0, Math.min(ms, outMs - 1)))} />
+                <TimecodeField label={t("clipedit.out")} valueMs={outMs} onCommit={(ms) => setOutMs(Math.max(inMs + 1, Math.min(ms, durationMs)))} />
                 <div className="flex flex-col gap-1">
                   <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     Length
@@ -833,9 +835,7 @@ export function ClipEditor() {
                   </div>
                 </div>
                 <p className="ml-auto max-w-md text-[10px] text-subtle-foreground">
-                  J / K / L shuttle, I and O mark in and out, arrows nudge 33 ms and shift-arrows a
-                  second. The fine step is one frame at 30 fps; this recording's real rate is not
-                  indexed, so it is named in milliseconds rather than guessed at.
+            {t("clipedit.shortcuts")}
                 </p>
               </div>
             </CardContent>
@@ -855,7 +855,7 @@ export function ClipEditor() {
         <div className="flex flex-col gap-3">
           <Card>
             <CardHeader>
-              <CardTitle>Cut</CardTitle>
+              <CardTitle>{t("clipedit.cut")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
@@ -866,13 +866,13 @@ export function ClipEditor() {
                   <ModeButton
                     active={mode === "fast"}
                     onClick={() => setMode("fast")}
-                    title="Fast"
+                    title={t("clipedit.fast")}
                     body="Copies every packet. Seconds, bit-exact, and the start snaps back to the nearest keyframe."
                   />
                   <ModeButton
                     active={mode === "precise"}
                     onClick={() => setMode("precise")}
-                    title="Precise"
+                    title={t("clipedit.precise")}
                     body="Re-encodes only the leading part-GOP so the start is exact. The rest is still copied."
                   />
                 </div>
@@ -886,7 +886,7 @@ export function ClipEditor() {
                   <Checkbox
                     checked={audioAll}
                     onCheckedChange={(v) => setAudioAll(v === true)}
-                    aria-label="Keep every audio track"
+                    aria-label={t("clipedit.keepAllTracks")}
                   />
                   Every track, bit-exact
                 </label>
@@ -932,7 +932,7 @@ export function ClipEditor() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="clip-title">Name</Label>
+                <Label htmlFor="clip-title">{t("clipedit.name")}</Label>
                 <Input
                   id="clip-title"
                   value={title}
@@ -969,8 +969,7 @@ export function ClipEditor() {
                 Export clip
               </Button>
               <p className="text-[10px] text-subtle-foreground">
-                The export is queued, not run here: it yields to the live stream, so a cut taken
-                mid-broadcast waits rather than stealing the cycles the stream needs.
+            {t("clipedit.queueNote")}
               </p>
             </CardContent>
           </Card>
@@ -988,9 +987,7 @@ export function ClipEditor() {
             <CardContent className="flex flex-col gap-2">
               {!source.hasTranscript ? (
                 <p className="text-[11px] text-muted-foreground">
-                  Nothing has been transcribed for this recording yet. Each microphone was recorded
-                  on its own track, so transcribing it gives you speaker names without a
-                  diarization model — and then you can clip by what was said.
+            {t("clipedit.noTranscript")}
                 </p>
               ) : (
                 <>
@@ -999,9 +996,9 @@ export function ClipEditor() {
                     <Input
                       value={filter}
                       onChange={(e) => setFilter(e.target.value)}
-                      placeholder="Find what was said"
+                      placeholder={t("clipedit.findSaid")}
                       className="pl-7"
-                      aria-label="Filter the transcript"
+                      aria-label={t("clipedit.filterTranscript")}
                     />
                   </div>
                   <div
@@ -1025,8 +1022,7 @@ export function ClipEditor() {
                     )}
                   </div>
                   <p className="text-[10px] text-subtle-foreground">
-                    Click a line to jump there. Select across several and the in and out points move
-                    to the words you highlighted.
+            {t("clipedit.clickLine")}
                   </p>
                 </>
               )}
@@ -1036,11 +1032,11 @@ export function ClipEditor() {
           {/* ---------- exports ---------- */}
           <Card>
             <CardHeader>
-              <CardTitle>Exports</CardTitle>
+              <CardTitle>{t("clipedit.exports")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
               {jobs.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">Nothing exported yet.</p>
+                <p className="text-[11px] text-muted-foreground">{t("clipedit.nothingExported")}</p>
               ) : (
                 jobs.map((j) => <JobRow key={j.id} job={j} />)
               )}
@@ -1138,6 +1134,7 @@ function PlanPanel({
   tooLong: boolean;
   maxSeconds: number;
 }) {
+  const t = useT();
   const drift = plan?.inDriftMs ?? 0;
   const moved = Boolean(plan?.driftKnown) && drift !== 0;
 
@@ -1166,24 +1163,24 @@ function PlanPanel({
             <p className="text-[12px]">{plan.describe}</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Stat
-                label="Starts"
+                label={t("clipedit.starts")}
                 value={timecode(plan.inMs)}
                 tone={moved ? "warn" : "default"}
               />
               <Stat
-                label="Start moved"
+                label={t("clipedit.startMoved")}
                 value={
                   !plan.driftKnown ? "unknown" : drift === 0 ? "not at all" : driftText(drift)
                 }
                 tone={!plan.driftKnown ? "warn" : moved ? "warn" : "default"}
               />
               <Stat
-                label="Copied"
+                label={t("clipedit.copied")}
                 value={`${Math.round(plan.losslessFraction * 100)}%`}
                 tone={plan.losslessFraction >= 0.999 ? "live" : "default"}
               />
               <Stat
-                label="Re-encoded"
+                label={t("clipedit.reencoded")}
                 value={plan.reEncodedMs > 0 ? `${plan.reEncodedMs} ms` : "nothing"}
                 tone={plan.reEncodedMs > 0 ? "warn" : "live"}
               />
@@ -1209,9 +1206,7 @@ function PlanPanel({
 
         {plan && !plan.driftKnown && (
           <p className="text-[11px] text-warn">
-            The keyframe positions could not be read, so nobody can say where this cut will really
-            start. It will still work — FFmpeg's own seek lands on a keyframe — but the start may
-            be up to one GOP early and this page cannot show you by how much.
+            {t("clipedit.noKeyframes")}
           </p>
         )}
       </CardContent>
@@ -1230,6 +1225,7 @@ function TranscriptRow({
   onSeek: () => void;
   onClip: (e: ReactMouseEvent) => void;
 }) {
+  const t = useT();
   return (
     <div
       data-line-start={line.startMs}
@@ -1252,8 +1248,8 @@ function TranscriptRow({
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label="Clip this line"
-        title="Set the in and out points around this line"
+        aria-label={t("clipedit.clipThisLine")}
+        title={t("clipedit.clipThisLineTitle")}
         className="opacity-0 transition-opacity group-hover:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
@@ -1267,6 +1263,7 @@ function TranscriptRow({
 }
 
 function JobRow({ job }: { job: ClipJob }) {
+  const t = useT();
   const done = job.state === "done";
   const failed = job.state === "failed" || job.state === "cancelled";
   const res = job.result;
@@ -1278,7 +1275,7 @@ function JobRow({ job }: { job: ClipJob }) {
           {done && res?.bytes ? bytes(res.bytes) : `${Math.round((job.progress ?? 0) * 100)}%`}
         </span>
         {done && (
-          <Button variant="ghost" size="icon-sm" asChild aria-label="Download the clip">
+          <Button variant="ghost" size="icon-sm" asChild aria-label={t("clipedit.downloadClip")}>
             <a href={`/api/v1/clipper/jobs/${job.id}/download`} download>
               <Download />
             </a>
