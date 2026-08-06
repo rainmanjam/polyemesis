@@ -89,6 +89,111 @@ func TestWatcherDestinationTransitions(t *testing.T) {
 	})
 }
 
+// falling_behind is an EARLY warning, so its whole value is in not firing on
+// the dips that a live encoder makes constantly.
+func TestWatcherFallingBehindNeedsTheDwell(t *testing.T) {
+	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 30 * time.Second})
+	at := func(speed float64) func(*Snapshot) {
+		return func(s *Snapshot) {
+			s.Destinations = []DestState{{ID: 7, Name: "Twitch", Enabled: true, Running: true, Speed: speed}}
+		}
+	}
+	runSteps(t, w, nil, []step{
+		{after: 0, snap: at(1.0)},
+		// A dip that returns inside the dwell is a keyframe boundary, not an
+		// incident. Firing here is what gets the whole feature muted.
+		{after: 5 * time.Second, snap: at(0.80)},
+		{after: 20 * time.Second, snap: at(1.0)},
+		// Sustained is different.
+		{after: 30 * time.Second, snap: at(0.87)},
+		{after: 45 * time.Second, snap: at(0.87)},
+		{after: 61 * time.Second, snap: at(0.87), want: []Type{TypeDestinationFallingBehind}},
+		// And it says so exactly once while it stays bad.
+		{after: 75 * time.Second, snap: at(0.85)},
+		{after: 90 * time.Second, snap: at(1.01), want: []Type{TypeDestinationCaughtUp}},
+	})
+}
+
+// Speed 0 is "no progress block yet", not "stopped dead". Treating it as bad
+// fires on every destination for the first second of every broadcast.
+func TestWatcherTreatsUnknownSpeedAsUnknown(t *testing.T) {
+	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 10 * time.Second})
+	zero := func(s *Snapshot) {
+		s.Destinations = []DestState{{ID: 1, Name: "YouTube", Enabled: true, Running: true, Speed: 0}}
+	}
+	runSteps(t, w, nil, []step{
+		{after: 0, snap: zero},
+		{after: 30 * time.Second, snap: zero},
+		{after: 120 * time.Second, snap: zero},
+	})
+}
+
+// A destination that dies while it is already flagged did not recover. Emitting
+// caught_up here would tell an operator the opposite of what happened, at the
+// exact moment they are reading the channel to find out.
+func TestWatcherDoesNotReportCaughtUpWhenTheDestinationDiedInstead(t *testing.T) {
+	w := NewWatcher(WatchConfig{
+		DownFor: 20 * time.Second, SpeedFloor: 0.95, FallingBehindFor: 30 * time.Second,
+	})
+	state := func(running bool, speed float64) func(*Snapshot) {
+		return func(s *Snapshot) {
+			s.Destinations = []DestState{{ID: 3, Name: "Kick", Enabled: true, Running: running, Speed: speed}}
+		}
+	}
+	runSteps(t, w, nil, []step{
+		{after: 0, snap: state(true, 1.0)},
+		{after: 10 * time.Second, snap: state(true, 0.6)},
+		{after: 45 * time.Second, snap: state(true, 0.6), want: []Type{TypeDestinationFallingBehind}},
+		// It gives up. Speed goes to zero because there is no longer a process
+		// emitting progress, which must NOT read as a recovery.
+		{after: 50 * time.Second, snap: state(false, 0)},
+		{after: 75 * time.Second, snap: state(false, 0), want: []Type{TypeDestinationDown}},
+		{after: 100 * time.Second, snap: state(true, 1.0), want: []Type{TypeDestinationRecovered}},
+	})
+}
+
+// A congested uplink degrades every destination at once, and each is its own
+// subject. Two events is the correct answer here; suppressing one because
+// another fired would hide a destination that was independently sick.
+func TestWatcherFallingBehindIsPerDestination(t *testing.T) {
+	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 20 * time.Second})
+	both := func(a, b float64) func(*Snapshot) {
+		return func(s *Snapshot) {
+			s.Destinations = []DestState{
+				{ID: 1, Name: "Twitch", Enabled: true, Running: true, Speed: a},
+				{ID: 2, Name: "YouTube", Enabled: true, Running: true, Speed: b},
+			}
+		}
+	}
+	runSteps(t, w, nil, []step{
+		{after: 0, snap: both(1.0, 1.0)},
+		{after: 5 * time.Second, snap: both(0.7, 0.7)},
+		{after: 30 * time.Second, snap: both(0.7, 0.7), want: []Type{
+			TypeDestinationFallingBehind, TypeDestinationFallingBehind,
+		}},
+		// One recovers, the other does not. The events must not be entangled.
+		{after: 40 * time.Second, snap: both(1.0, 0.7), want: []Type{TypeDestinationCaughtUp}},
+	})
+}
+
+// A disabled destination has no speed worth judging, and re-enabling it must
+// start the clock fresh rather than counting the time it spent switched off.
+func TestWatcherIgnoresSpeedOnADisabledDestination(t *testing.T) {
+	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 20 * time.Second})
+	d := func(enabled bool, speed float64) func(*Snapshot) {
+		return func(s *Snapshot) {
+			s.Destinations = []DestState{{ID: 9, Name: "File", Enabled: enabled, Running: true, Speed: speed}}
+		}
+	}
+	runSteps(t, w, nil, []step{
+		{after: 0, snap: d(false, 0.1)},
+		{after: 300 * time.Second, snap: d(false, 0.1)},
+		{after: 301 * time.Second, snap: d(true, 0.1)},
+		{after: 310 * time.Second, snap: d(true, 0.1)},
+		{after: 322 * time.Second, snap: d(true, 0.1), want: []Type{TypeDestinationFallingBehind}},
+	})
+}
+
 func TestWatcherForgetsADestinationThatWasDeleted(t *testing.T) {
 	w := NewWatcher(WatchConfig{DownFor: time.Second})
 	w.Observe(Snapshot{At: base, Destinations: []DestState{{ID: 1, Enabled: true}}})

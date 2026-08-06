@@ -141,6 +141,8 @@ interface ScheduleRun {
 const EVENT_LABELS: Record<string, string> = {
   "destination.down": "Destination went down",
   "destination.recovered": "Destination recovered",
+  "destination.falling_behind": "Destination falling behind realtime",
+  "destination.caught_up": "Destination keeping up again",
   "ingest.lost": "Ingest lost",
   "ingest.recovered": "Ingest recovered",
   "failover.switched": "Failover switched source",

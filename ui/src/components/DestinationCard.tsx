@@ -169,7 +169,7 @@ export function DestinationCard({
         </div>
 
         {/* --- performance --- */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           <Stat
             label="Bitrate"
             value={running ? kbps(progress?.bitrateKbps ?? 0) : "—"}
@@ -189,6 +189,22 @@ export function DestinationCard({
             label="Dropped"
             value={progress?.dropFrames ?? 0}
             tone={(progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
+          />
+          {/* Almost every destination here is a passthrough, so there is barely
+              any encoding work to be slow at — a speed under 1 means FFmpeg is
+              blocking on the write to the platform. Zero is "no progress block
+              yet" rather than stopped, which is why it renders as a dash and
+              not as a failure. */}
+          <Stat
+            label="Speed"
+            value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
+            tone={
+              !running || (progress?.speed ?? 0) === 0
+                ? "muted"
+                : (progress?.speed ?? 0) < 0.95
+                  ? "warn"
+                  : "default"
+            }
           />
         </div>
 

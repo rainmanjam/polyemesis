@@ -25,6 +25,12 @@ const (
 	// and a large one runs out of gigabytes slowly, and both end the same way.
 	DefaultDiskFloorBytes   = uint64(2) << 30
 	DefaultDiskFloorPercent = 5.0
+	// DefaultSpeedFloor and DefaultFallingBehindFor gate
+	// TypeDestinationFallingBehind. See the fields on WatchConfig: both are
+	// argued rather than measured, and want revisiting against a real
+	// broadcast's speed distribution.
+	DefaultSpeedFloor       = 0.95
+	DefaultFallingBehindFor = 30 * time.Second
 	// DefaultLoudnessFor is how long a destination must be out of tolerance.
 	// EBU R128 integrates over the whole programme, so a minute of drift is a
 	// mix that is wrong rather than a quiet passage.
@@ -39,6 +45,15 @@ type WatchConfig struct {
 	DiskFloorBytes   uint64
 	DiskFloorPercent float64
 	LoudnessFor      time.Duration
+	// SpeedFloor is the encoder speed below which a destination is judged not
+	// to be keeping up, and FallingBehindFor is how long it must stay there.
+	//
+	// Both are placeholders chosen by argument rather than measurement, and
+	// should be revisited against a real broadcast: 1.0 is the target so a few
+	// percent under is ordinary jitter, and 30s is long enough to ride out a
+	// keyframe-alignment stall while still mattering inside a short stream.
+	SpeedFloor       float64
+	FallingBehindFor time.Duration
 }
 
 func (c WatchConfig) normalized() WatchConfig {
@@ -60,6 +75,12 @@ func (c WatchConfig) normalized() WatchConfig {
 	if c.LoudnessFor <= 0 {
 		c.LoudnessFor = DefaultLoudnessFor
 	}
+	if c.SpeedFloor <= 0 {
+		c.SpeedFloor = DefaultSpeedFloor
+	}
+	if c.FallingBehindFor <= 0 {
+		c.FallingBehindFor = DefaultFallingBehindFor
+	}
 	return c
 }
 
@@ -73,6 +94,23 @@ type DestState struct {
 	Running  bool
 	Platform string
 	Error    string
+	// Speed is FFmpeg's output-time-over-wall-clock ratio for this
+	// destination's child, and 0 when there is no process to have one.
+	//
+	// Zero means UNKNOWN, not stopped. A child that has not yet emitted its
+	// first progress block reports 0, and so does one that has just died, so
+	// the condition below requires Speed > 0 before it judges anything. Reading
+	// zero as slow would fire on every destination for the first second of
+	// every broadcast, which is how an alert gets muted before it is ever
+	// useful.
+	Speed float64
+	// DropFrames and DupFrames are cumulative counts, carried for context in
+	// the event rather than thresholded. They are the pair that tells an
+	// operator WHICH way a destination is unwell: drops mean FFmpeg is
+	// discarding to keep up, so the output is congested; dups mean it is
+	// padding, so the source is starving. Same symptom, opposite fixes.
+	DropFrames int64
+	DupFrames  int64
 }
 
 // FailoverState is the source-selector tier, absent when it is off.
@@ -161,6 +199,11 @@ func (d *downState) observe(bad bool, now time.Time, after time.Duration) (fire,
 type Watcher struct {
 	cfg  WatchConfig
 	dest map[int64]*downState
+	// slow is keyed the same way as dest but tracked separately, because a
+	// destination can be up and falling behind at the same time -- that is the
+	// entire point of the condition -- and one downState cannot hold two
+	// independent "how long has this been true" clocks.
+	slow map[int64]*downState
 	loud map[int64]*downState
 	// clipHits counts consecutive observations on the ceiling, per channel.
 	clipHits map[string]int
@@ -176,6 +219,7 @@ func NewWatcher(cfg WatchConfig) *Watcher {
 	return &Watcher{
 		cfg:      cfg.normalized(),
 		dest:     map[int64]*downState{},
+		slow:     map[int64]*downState{},
 		loud:     map[int64]*downState{},
 		clipHits: map[string]int{},
 	}
@@ -233,15 +277,62 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 			st = &downState{}
 			w.dest[d.ID] = st
 		}
+		slow := w.slow[d.ID]
+		if slow == nil {
+			slow = &downState{}
+			w.slow[d.ID] = slow
+		}
 		if !d.Enabled {
 			// A destination the operator turned off is not down. Clearing the
 			// state means turning it back on starts the clock fresh instead of
 			// firing on the time it spent disabled.
 			*st = downState{}
+			*slow = downState{}
 			continue
 		}
 		fire, recovered := st.observe(!d.Running, now, w.cfg.DownFor)
 		key := "destination:" + strconv.FormatInt(d.ID, 10)
+
+		// Speed is only judged while the destination is up and has actually
+		// reported one. See DestState.Speed for why zero is not slow.
+		var slowFire, slowRecovered bool
+		if d.Running {
+			behind := d.Speed > 0 && d.Speed < w.cfg.SpeedFloor
+			slowFire, slowRecovered = slow.observe(behind, now, w.cfg.FallingBehindFor)
+		} else {
+			// A destination that is not running has no speed, so the condition
+			// is UNOBSERVABLE rather than recovered. Feeding "not slow" into
+			// observe() here would announce that it caught up, at the exact
+			// moment it actually gave up -- and it would do so ahead of
+			// destination.down, which has its own longer dwell to serve. The
+			// latch is dropped silently and destination.down does the
+			// reporting.
+			*slow = downState{}
+		}
+		switch {
+		case slowFire:
+			out = append(out, Event{
+				Type: TypeDestinationFallingBehind, Severity: SeverityWarning,
+				Key:   key + ":speed",
+				Title: d.Name + " is falling behind",
+				Text: d.Name + " has been encoding at " + speedText(d.Speed) +
+					" realtime for " + short(now.Sub(slow.since)) +
+					". That usually means the platform or the network is not " +
+					"taking data fast enough.",
+				At: now,
+			}.WithField("destination", d.Name).
+				WithField("platform", d.Platform).
+				WithField("speed", speedText(d.Speed)).
+				WithField("dropped frames", strconv.FormatInt(d.DropFrames, 10)).
+				WithField("duplicated frames", strconv.FormatInt(d.DupFrames, 10)))
+		case slowRecovered:
+			out = append(out, Event{
+				Type: TypeDestinationCaughtUp, Severity: SeverityInfo,
+				Key:   key + ":speed",
+				Title: d.Name + " is keeping up again",
+				Text:  d.Name + " is back to realtime.", At: now,
+			}.WithField("destination", d.Name))
+		}
 		switch {
 		case fire:
 			ev := Event{
@@ -264,9 +355,17 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 	for id := range w.dest {
 		if !live[id] {
 			delete(w.dest, id)
+			delete(w.slow, id)
 		}
 	}
 	return out
+}
+
+// speedText renders FFmpeg's speed ratio the way its own output does, so an
+// operator comparing the alert against a process log sees the same number in
+// the same shape.
+func speedText(speed float64) string {
+	return strconv.FormatFloat(speed, 'f', 2, 64) + "x"
 }
 
 func (w *Watcher) watchFailover(s Snapshot, now time.Time) []Event {

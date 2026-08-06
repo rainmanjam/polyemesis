@@ -57,10 +57,14 @@ func TestAllTypesKeepsTheOperationalPickerOrderItAlreadyHad(t *testing.T) {
 		TypeDiskLow, TypeDiskRecovered,
 		TypeLoudnessOut, TypeLoudnessRecovered,
 	}
+	// Appended after the audit block for the same stability reason this test
+	// exists: they belong beside the other destination events by meaning, and
+	// putting them there would move eight established rows.
+	health := []Type{TypeDestinationFallingBehind, TypeDestinationCaughtUp}
 	all := AllTypes()
-	if len(all) != len(operational)+len(auditTypes) {
-		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit",
-			len(all), len(operational), len(auditTypes))
+	if len(all) != len(operational)+len(auditTypes)+len(health) {
+		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health",
+			len(all), len(operational), len(auditTypes), len(health))
 	}
 	for i, want := range operational {
 		if all[i] != want {

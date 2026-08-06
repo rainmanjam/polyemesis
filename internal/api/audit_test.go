@@ -60,8 +60,13 @@ func TestEveryAuditEventIsCoveredByTheRedactionTest(t *testing.T) {
 	}
 	for _, ty := range alerts.AllTypes() {
 		switch ty {
-		// The operational types are raised by the engine, not by this package.
+		// The operational types are raised by the engine's watcher, not by this
+		// package, so there is no constructor here to check. Their fields come
+		// from measurements rather than from anything an operator typed, which
+		// is the property that makes them uninteresting to a leak test -- and
+		// it is a property worth re-checking before adding to this list.
 		case alerts.TypeDestinationDown, alerts.TypeDestinationRecovered,
+			alerts.TypeDestinationFallingBehind, alerts.TypeDestinationCaughtUp,
 			alerts.TypeIngestLost, alerts.TypeIngestRecovered,
 			alerts.TypeFailoverSwitched, alerts.TypeClipping,
 			alerts.TypeDiskLow, alerts.TypeDiskRecovered,
