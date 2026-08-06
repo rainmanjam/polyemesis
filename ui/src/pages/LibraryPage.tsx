@@ -420,8 +420,7 @@ export function LibraryPage() {
           <Card>
             <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
               {view?.sessions.length
-                ? "No session matches those filters."
-                : "Nothing recorded yet. Sessions appear as the recorder writes segments."}
+                ? t("lib.noSessionMatch") : t("lib.nothingRecorded")}
             </CardContent>
           </Card>
         )}
@@ -581,7 +580,7 @@ function SessionCard({
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
-          aria-label={expanded ? "Collapse session" : "Expand session"}
+          aria-label={expanded ? t("lib.collapseSession") : t("lib.expandSession")}
           className="mt-0.5 text-muted-foreground hover:text-foreground"
         >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -813,7 +812,7 @@ function RecordingList({
               type="button"
               onClick={() => onPlay(r.id)}
               className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              title={r.assets.proxy ? "Play the proxy" : "No proxy yet — open to generate one"}
+              title={r.assets.proxy ? t("lib.playProxy") : t("lib.noProxyYet")}
             >
               <Film
                 className={cn(
@@ -980,7 +979,7 @@ function PlayerDialog({
     setBusy(true);
     try {
       const res = await api.submitRecordingJob(target.recordingId, "media.proxy");
-      toast.success(res.created ? "Proxy queued." : "A proxy is already queued.");
+      toast.success(res.created ? t("lib.proxyQueued") : t("lib.proxyAlreadyQueued"));
       onChanged();
     } catch (err) {
       toast.error(errText(err, "Could not queue the proxy."));

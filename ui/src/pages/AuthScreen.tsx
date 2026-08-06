@@ -72,11 +72,10 @@ export function AuthScreen({
 
         <Card>
           <CardHeader>
-            <CardTitle>{isSetup ? "First-run setup" : "Sign in"}</CardTitle>
+            <CardTitle>{isSetup ? t("auth.firstRun") : t("auth.signIn")}</CardTitle>
             <CardDescription>
               {isSetup
-                ? "Choose the administrator credentials for this server. There is no account recovery, so store them somewhere safe."
-                : "Enter your administrator credentials."}
+                ? t("auth.firstRunDesc") : t("auth.signInDesc")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -126,7 +125,7 @@ export function AuthScreen({
 
               <Button type="submit" disabled={busy} className="mt-1">
                 {busy && <Loader2 className="animate-spin" />}
-                {isSetup ? "Create account" : "Sign in"}
+                {isSetup ? t("auth.createAccount") : t("auth.signIn")}
               </Button>
             </form>
           </CardContent>

@@ -616,7 +616,7 @@ function RuleDialog({
       };
       if (editing) await autoApi.put(`/alerts/rules/${form.id}`, body);
       else await autoApi.post("/alerts/rules", body);
-      toast.success(editing ? "Alert rule saved." : "Alert rule created. Send it a test.");
+      toast.success(editing ? t("auto.ruleSaved") : t("auto.ruleCreated"));
       onSaved();
     } catch (err) {
       toast.error(errText(err, "Could not save the rule."));
@@ -629,7 +629,7 @@ function RuleDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit alert rule" : "New alert rule"}</DialogTitle>
+          <DialogTitle>{editing ? t("auto.editRule") : t("auto.newRule")}</DialogTitle>
           <DialogDescription>
             One endpoint and what it wants to hear about. Everything raised about the same subject
             inside the coalescing window arrives as a single message with a count.
@@ -659,8 +659,7 @@ function RuleDialog({
             />
             <span className="text-[10px] text-muted-foreground">
               {editing
-                ? "Shown masked because the secret lives in the path. Leave it alone to keep the current endpoint, or paste a new URL to replace it."
-                : "Discord and Slack both give you one under channel settings."}
+                ? t("auto.secretMasked") : t("auto.webhookHint")}
             </span>
           </div>
 
@@ -750,7 +749,7 @@ function RuleDialog({
           </Button>
           <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
             {saving && <Loader2 className="animate-spin" />}
-            {editing ? "Save rule" : "Create rule"}
+            {editing ? t("auto.saveRule") : t("auto.createRule")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -926,7 +925,7 @@ function Schedules({
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-[11px]">{r.name}</span>
                   <Badge variant={r.error ? "down" : r.fired ? "live" : "outline"}>
-                    {r.error ? "error" : r.fired ? "fired" : "skipped"}
+                    {r.error ? "error" : r.fired ? t("auto.fired") : t("auto.skipped")}
                   </Badge>
                 </div>
                 <span className="tnum font-mono text-[10px] text-muted-foreground">
@@ -1005,7 +1004,7 @@ function ScheduleDialog({
       };
       if (editing) await autoApi.put(`/schedules/${form.id}`, body);
       else await autoApi.post("/schedules", body);
-      toast.success(editing ? "Schedule saved." : "Schedule created.");
+      toast.success(editing ? t("auto.scheduleSaved") : t("auto.scheduleCreated"));
       onSaved();
     } catch (err) {
       toast.error(errText(err, "Could not save the schedule."));
@@ -1018,7 +1017,7 @@ function ScheduleDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit schedule" : "New schedule"}</DialogTitle>
+          <DialogTitle>{editing ? t("auto.editSchedule") : t("auto.newSchedule")}</DialogTitle>
           <DialogDescription>
             Wall-clock times carry their own zone, so a schedule does not move when the server's
             does.
@@ -1192,7 +1191,7 @@ function ScheduleDialog({
           </Button>
           <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
             {saving && <Loader2 className="animate-spin" />}
-            {editing ? "Save schedule" : "Create schedule"}
+            {editing ? t("auto.saveSchedule") : t("auto.createSchedule")}
           </Button>
         </DialogFooter>
       </DialogContent>

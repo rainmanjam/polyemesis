@@ -64,7 +64,7 @@ import type {
   RenditionView,
   VideoStream,
 } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator } from "@/lib/i18n";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -246,6 +246,7 @@ function sizeLabel(r: { width: number; height: number }): string {
  *  core count, no promise. What it will do is refuse to let someone pick x264
  *  at 4K60 without reading that it is not going to keep up. */
 function encodeCost(
+  t: Translator,
   r: { width: number; height: number; fps: number },
   encoder: EncoderInfo | undefined,
   src: VideoStream | null | undefined,
@@ -263,26 +264,22 @@ function encodeCost(
     return {
       tone: "muted",
       pixelRate: 0,
-      headline: "Cost cannot be estimated yet",
-      detail:
-        "Nothing has probed the source, so “keep source” has no numbers behind it. Start the ingest and this fills in.",
+      headline: t("rend.costNoNumbers"),
+      detail: t("rend.costNoNumbersDetail"),
     };
   }
 
   const rate = width * height * fps;
-  const label = `${width}×${height} at ${fps} fps`;
+  const label = `${width}\u00d7${height} at ${fps} fps`;
   const mpps = `${Math.round(rate / 1e6)} MP/s`;
-  const machine = cores && cores > 0 ? ` This machine reports ${cores} logical cores.` : "";
+  const machine = cores && cores > 0 ? t("rend.costMachineCores", { cores }) : "";
 
   if (hardware) {
     return {
       tone: rate >= SOFTWARE_UNREALISTIC_PIXELS ? "warn" : "muted",
       pixelRate: rate,
-      headline: `Offloaded to ${encoder?.name ?? "hardware"}`,
-      detail:
-        `${label} (${mpps}) runs on the GPU's fixed-function encoder, so it costs little CPU. ` +
-        "Quality and rate control vary by driver, and every chip has a ceiling of its own — " +
-        "check the output before a show that matters.",
+      headline: t("rend.costOffloaded", { encoder: encoder?.name ?? t("rend.hardwareFallback") }),
+      detail: t("rend.costOffloadedDetail", { label, mpps }),
     };
   }
 
@@ -290,20 +287,15 @@ function encodeCost(
   // hardware encoder passed its test encode here, in which case there is no way
   // out and saying so is the only honest thing left.
   const escape = hardwareExists
-    ? "Choose a hardware encoder, or a smaller output."
-    : "No hardware encoder works on this machine, so there is nothing to move this onto — " +
-      "the only lever here is a smaller output. Re-detect hardware if you have since " +
-      "installed a driver or passed a GPU into the container.";
+    ? t("rend.chooseHardware")
+    : t("rend.noHardwareEscape");
 
   if (rate >= SOFTWARE_UNREALISTIC_PIXELS) {
     return {
       tone: "down",
       pixelRate: rate,
-      headline: "Software encoding this in real time is beyond most machines",
-      detail:
-        `${label} is ${mpps} for a single encode. x264 at this size usually loses the race with ` +
-        "real time, and a rendition that falls behind drops frames for every destination reading " +
-        `it — which you find out mid-stream.${machine} ${escape}`,
+      headline: t("rend.costBeyond"),
+      detail: t("rend.costBeyondDetail", { label, mpps, machine, escape }),
     };
   }
 
@@ -311,21 +303,19 @@ function encodeCost(
     return {
       tone: "warn",
       pixelRate: rate,
-      headline: "Expect several cores to be busy",
-      detail:
-        `${label} is ${mpps} on ${encoder?.name ?? "a software encoder"}, which is a heavy ` +
-        `real-time encode.${machine} Watch the encoder's speed once it is live: below 1.0× it is ` +
-        `falling behind and the destinations under it will start dropping frames. ${escape}`,
+      headline: t("rend.costBusy"),
+      detail: t("rend.costBusyDetail", {
+        label, mpps, machine, escape,
+        encoder: encoder?.name ?? t("rend.softwareEncoderFallback"),
+      }),
     };
   }
 
   return {
     tone: "muted",
     pixelRate: rate,
-    headline: "Modest software encode",
-    detail:
-      `${label} is ${mpps}, within reach of most machines.${machine} It is still one real encode — ` +
-      "shared by every destination that selects it, but not free.",
+    headline: t("rend.costModest"),
+    detail: t("rend.costModestDetail", { label, mpps, machine }),
   };
 }
 
@@ -661,7 +651,7 @@ function RenditionCard({
   const total = users ? users.length : view.destinations;
   const enabled = users ? users.filter((d) => d.enabled).length : view.enabledDestinations;
   const signal = renditionSignal(live, enabled);
-  const cost = encodeCost(r, encoder, source, cores, hardwareExists);
+  const cost = encodeCost(t, r, encoder, source, cores, hardwareExists);
   const proc = live?.process;
   // A saved rendition goes stale: the card was swapped, the driver upgraded,
   // the container lost its --device passthrough. The engine refuses to start it
@@ -772,7 +762,7 @@ function RenditionCard({
             size="sm"
             onClick={onRestart}
             disabled={busy || !proc}
-            title={proc ? "Restart this encode and the destinations reading it" : "Not running"}
+            title={proc ? t("rend.restartEncode") : t("rend.notRunning")}
           >
             {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} Restart
           </Button>
@@ -1052,7 +1042,7 @@ function RenditionDialog({
   }, [encoders]);
 
   const encoder = encoders.find((e) => e.name === form.encoder);
-  const cost = encodeCost(form, encoder, source, cores, hardwareExists);
+  const cost = encodeCost(t, form, encoder, source, cores, hardwareExists);
   const notes = sourceNotes(form, source);
   const enabledUsers = users.filter((d) => d.enabled).length;
   const diagnostics = useMemo(
@@ -1159,7 +1149,7 @@ function RenditionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit rendition" : "New rendition"}</DialogTitle>
+          <DialogTitle>{editing ? t("rend.editRendition") : t("rend.newRendition")}</DialogTitle>
           <DialogDescription>
             Video only. Every audio track is copied through untouched, and each destination applies
             its own routing on top — so this changes the picture for everyone that selects it and
@@ -1710,8 +1700,7 @@ function RenditionDialog({
                   )}
                 >
                   {permissionBlocked
-                    ? "A GPU is present but this process cannot open it"
-                    : "What the hardware scan found"}
+                    ? t("rend.gpuUnopenable") : t("rend.hardwareScanFound")}
                 </span>
                 {diagnostics.map((d) => (
                   <span
@@ -1797,7 +1786,7 @@ function RenditionDialog({
           </Button>
           <Button onClick={save} disabled={busy || !nameOk || !bitrateOk}>
             {busy && <Loader2 className="animate-spin" />}
-            {editing ? "Save" : "Create"}
+            {editing ? t("common.save") : t("hooks.create")}
           </Button>
         </DialogFooter>
       </DialogContent>

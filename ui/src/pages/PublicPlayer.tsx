@@ -248,7 +248,7 @@ export function PublicPlayer() {
 
         <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
           <span>
-            {view.viewers} {view.viewers === 1 ? "viewer" : "viewers"}
+            {view.viewers} {view.viewers === 1 ? t("player.viewer") : t("player.viewers")}
           </span>
           {view.variants && view.variants.length > 1 && (
             <span>
@@ -276,7 +276,7 @@ export function PublicPlayer() {
               onClick={() => void copyEmbed()}
               className="mt-2 rounded bg-neutral-800 px-2.5 py-1 text-[11px] text-neutral-200 hover:bg-neutral-700"
             >
-              {copied ? "Copied" : "Copy"}
+              {copied ? t("clipedit.copied") : t("common.copy")}
             </button>
           </details>
         )}

@@ -366,7 +366,7 @@ function ExpertPanel() {
             {t("mon.fullCommand")}
                   </span>
                   <Badge variant={resolved.command.live ? "default" : "outline"}>
-                    {resolved.command.live ? "from the running process" : "rebuilt"}
+                    {resolved.command.live ? t("mon.fromRunningProcess") : t("mon.rebuilt")}
                   </Badge>
                   {!shown && <Badge variant="outline">stale</Badge>}
                 </div>

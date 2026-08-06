@@ -496,10 +496,10 @@ function GoLiveComposer() {
 
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={push} disabled={empty || busy}>
-                <Megaphone /> {busy ? "Pushing…" : "Push to platforms"}
+                <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
               <span className="text-[10px] text-muted-foreground">
-                Applies to {accepts("title").length === 1 ? "the connected account" : "every connected account"}.
+                Applies to {accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount")}.
               </span>
             </div>
 
@@ -787,7 +787,7 @@ export function Dashboard() {
                   // The preview encoder is started on demand and stopped again
                   // when nobody is watching, so having no process is the normal
                   // idle state rather than a fault or a disabled feature.
-                  ["Preview", status?.preview, settingsPreview ? "idle" : "disabled"],
+                  ["Preview", status?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
                   ["Meters", status?.meters, "disabled"],
                 ] as const
               ).map(([label, proc, absent]) => {

@@ -246,12 +246,12 @@ export function JobsPage() {
               onClick={() =>
                 act(
                   () => (view.paused ? api.resumeJobs() : api.pauseJobs()),
-                  view.paused ? "Queue resumed." : "Queue paused.",
+                  view.paused ? t("jobs.queueResumed") : t("jobs.queuePaused"),
                 )
               }
             >
               {view.paused ? <Play /> : <Pause />}
-              {view.paused ? "Resume all" : "Pause all"}
+              {view.paused ? t("jobs.resumeAll") : t("jobs.pauseAll")}
             </Button>
           </>
         }

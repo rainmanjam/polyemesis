@@ -1169,7 +1169,7 @@ function DuckingCard({
         </CardTitle>
         <label className="flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            {ducking ? "on" : "off"}
+            {ducking ? t("route.on") : t("clips.off")}
           </span>
           <Switch
             checked={ducking !== null}

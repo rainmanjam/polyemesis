@@ -388,7 +388,7 @@ function IngestSettings({
             disabled={saving}
           >
             {saving ? <Loader2 className="animate-spin" /> : <Save />}
-            {live ? "Save and drop the live stream" : "Save ingest settings"}
+            {live ? t("set.saveAndDrop") : t("set.saveIngest")}
           </Button>
         </CardContent>
       </Card>
@@ -403,7 +403,7 @@ function IngestSettings({
             <code className="min-w-0 flex-1 break-all font-mono text-[10px] text-muted-foreground">
               {system?.ingestUrl ?? "…"}
             </code>
-            <Button variant="ghost" size="icon-sm" onClick={copyUrl} aria-label="Copy">
+            <Button variant="ghost" size="icon-sm" onClick={copyUrl} aria-label={t("set.copy")}>
               <Copy />
             </Button>
           </div>
@@ -416,10 +416,10 @@ function IngestSettings({
             <div className="mt-1 flex flex-wrap gap-1">
               <Badge variant="outline">ffmpeg {system.ffmpeg.version}</Badge>
               <Badge variant={system.ffmpeg.hasLibsrt ? "live" : "warn"}>
-                srt {system.ffmpeg.hasLibsrt ? "yes" : "no"}
+                srt {system.ffmpeg.hasLibsrt ? t("set.yes") : t("set.no")}
               </Badge>
               <Badge variant={system.ffmpeg.hasLibx264 ? "outline" : "warn"}>
-                x264 {system.ffmpeg.hasLibx264 ? "yes" : "no"}
+                x264 {system.ffmpeg.hasLibx264 ? t("set.yes") : t("set.no")}
               </Badge>
               {/* Only shown once the filter probe has run. An absent list means
                   the probe did not happen, and reporting "no" for that would be
@@ -429,11 +429,10 @@ function IngestSettings({
                   variant={system.ffmpeg.filters?.includes("drawtext") ? "outline" : "warn"}
                   title={
                     system.ffmpeg.filters?.includes("drawtext")
-                      ? "This build can draw text on video."
-                      : "This build has no drawtext filter, so text overlays are unavailable. It needs an FFmpeg built with libfreetype."
+                      ? t("set.drawtextOk") : t("set.drawtextMissing")
                   }
                 >
-                  text overlays {system.ffmpeg.filters?.includes("drawtext") ? "yes" : "no"}
+                  text overlays {system.ffmpeg.filters?.includes("drawtext") ? t("set.yes") : t("set.no")}
                 </Badge>
               )}
             </div>
@@ -1576,7 +1575,7 @@ function PlatformCredCard({
                     <code className="min-w-0 flex-1 break-all font-mono text-[10px]">
                       {guide.redirectPath}
                     </code>
-                    <Button variant="ghost" size="icon-sm" onClick={copyRedirect} aria-label="Copy">
+                    <Button variant="ghost" size="icon-sm" onClick={copyRedirect} aria-label={t("set.copy")}>
                       {copied ? <Check className="text-live" /> : <Copy />}
                     </Button>
                   </div>
@@ -1718,7 +1717,7 @@ function PlatformCredCard({
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => confirmDisconnect.ask(a)}
-                      aria-label="Disconnect"
+                      aria-label={t("set.disconnect")}
                     >
                       <Unplug />
                     </Button>
@@ -1982,8 +1981,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             {tls.mode === "off" && (
               <p className="text-[10px] text-muted-foreground">
                 {tls.trustProxyHeaders
-                  ? "A reverse proxy in front of polyemesis terminates TLS, so this server serves plain HTTP on purpose."
-                  : "Nothing is encrypting this connection. Passwords and session cookies cross the network in plaintext — set tls.mode: auto, or bind to 127.0.0.1 behind a proxy."}
+                  ? t("set.proxyTerminatesTls") : t("set.noEncryption")}
               </p>
             )}
 
@@ -2183,7 +2181,7 @@ function ApiTokens() {
                 {minted.plaintext}
               </code>
               <Button size="sm" variant="outline" onClick={copy}>
-                {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
+                {copied ? <Check /> : <Copy />} {copied ? t("clipedit.copied") : t("common.copy")}
               </Button>
             </div>
             <span className="text-[10px] text-muted-foreground">{t("set.tokenHashNote")}</span>

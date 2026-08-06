@@ -191,7 +191,7 @@ export function PlayoutPage() {
         actions={
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-muted-foreground">
-              {play.enabled ? "Enabled" : "Disabled"}
+              {play.enabled ? t("common.enabled") : t("common.disabled")}
             </span>
             <Switch
               checked={play.enabled}
@@ -456,8 +456,7 @@ function ShareCard({
         <CardTitle className="text-[13px]">{t("play.share")}</CardTitle>
         <CardDescription>
           {play.public
-            ? "These links work without an account."
-            : "These links only work for a signed-in administrator until you turn on Public."}
+            ? t("play.linksPublic") : t("play.linksProtected")}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -555,8 +554,7 @@ function ProtectionCard({
           </Select>
           <p className="text-[11px] text-muted-foreground">
             {view.protection === "token"
-              ? "Players that cannot follow a link (a set-top box, a CDN) can send the same secret as an HTTP basic password instead."
-              : "No credential of any kind is required. Only appropriate for a stream you intend the whole internet to see."}
+              ? t("play.basicPasswordNote") : t("play.noCredentialNote")}
           </p>
         </div>
 

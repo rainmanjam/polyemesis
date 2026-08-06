@@ -134,7 +134,7 @@ export function MetersPage() {
         subtitle={t("meters.subtitle")}
         actions={
           <Badge variant={metersRunning ? "live" : "outline"}>
-            {metersRunning ? "metering" : "idle"}
+            {metersRunning ? t("meters.metering") : t("dash.idle")}
           </Badge>
         }
       />
@@ -169,8 +169,7 @@ export function MetersPage() {
           {reports.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">
               {monitorOn
-                ? "Nothing to measure yet. Each running destination gets its own EBU R128 analyser on the mix it receives."
-                : "The monitor is off. Turn it on to measure what each destination is delivering."}
+                ? t("meters.nothingToMeasure") : t("meters.monitorOff")}
             </p>
           ) : (
             reports.map((rep) => (
@@ -190,25 +189,25 @@ export function MetersPage() {
       </Card>
 
       <div className="grid gap-3 xl:grid-cols-2">
-        {tracks.map((t) => {
-          const peak = levels?.peak?.[t.index] ?? [];
-          const rms = levels?.rms?.[t.index] ?? [];
-          const labels = channelLabels(t.channels);
+        {tracks.map((track) => {
+          const peak = levels?.peak?.[track.index] ?? [];
+          const rms = levels?.rms?.[track.index] ?? [];
+          const labels = channelLabels(track.channels);
           const active = peak.some((p) => p > -100);
           const hottest = peak.length ? Math.max(...peak) : -100;
           const clipping = hottest >= -0.2;
 
           return (
-            <Card key={t.index} className={cn(clipping && "border-down/50")}>
+            <Card key={track.index} className={cn(clipping && "border-down/50")}>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
-                  Track {t.index + 1}
+                  Track {track.index + 1}
                   <span className="font-mono text-[10px] font-normal text-muted-foreground">
-                    {t.layout} · {t.codec}
+                    {track.layout} · {track.codec}
                   </span>
-                  {t.title && (
+                  {track.title && (
                     <span className="truncate text-[10px] font-normal text-muted-foreground">
-                      {t.title}
+                      {track.title}
                     </span>
                   )}
                 </CardTitle>
@@ -259,7 +258,7 @@ export function MetersPage() {
                   </>
                 ) : (
                   <div className="py-3 text-center font-mono text-[11px] text-subtle-foreground">
-                    {probed ? "no signal on this track" : "waiting for stream"}
+                    {probed ? t("meters.noSignal") : t("clips.waitingForStream")}
                   </div>
                 )}
               </CardContent>

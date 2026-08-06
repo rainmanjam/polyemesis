@@ -164,7 +164,7 @@ export function ClipsPage() {
         subtitle={t("clips.subtitle")}
         actions={
           <Badge variant={buffer?.running ? "live" : buffer?.enabled ? "warn" : "outline"}>
-            {buffer?.running ? "buffering" : buffer?.enabled ? "waiting for stream" : "off"}
+            {buffer?.running ? "buffering" : buffer?.enabled ? t("clips.waitingForStream") : t("clips.off")}
           </Badge>
         }
       />
@@ -337,7 +337,7 @@ export function ClipsPage() {
               <Stat label={t("clips.bitrate")} value={`${stats?.bitrateKbps ?? 0} kbps`} tone="muted" />
               <Stat
                 label={t("clips.keyframes")}
-                value={stats?.videoFound ? "seen" : "none"}
+                value={stats?.videoFound ? t("clips.seen") : t("clips.none")}
                 tone={stats?.videoFound ? "default" : "warn"}
               />
             </CardContent>
