@@ -272,19 +272,19 @@ const features = [
     <div class="wrap grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
       <div>
         <p class="eyebrow">Before you invest an evening</p>
-        <h2 class="mt-3 text-balance text-3xl font-medium">What it does not do.</h2>
+        <h2 class="mt-3 text-balance text-3xl font-medium">Where the edges are.</h2>
         <p class="mt-4 text-sm leading-relaxed text-subtle">
-          These are design decisions, not a roadmap. Stated here rather than
-          discovered an hour in.
+          Every one of these is a decision, made once and held to. Stated here
+          rather than discovered an hour in.
         </p>
       </div>
       <dl class="divide-y divide-line border-y border-line">
         {
           [
-            ["Multitrack over RTMP is not the operated path", "Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) defines more, and FFmpeg 7.1+ demuxes it — six tracks do arrive intact through the existing ingest, tested with FFmpeg publishing. What has not been done is a run with OBS itself, and a stock Ubuntu 24.04 FFmpeg 6.1.1 cannot do it at all. SRT is the path that is actually operated."],
-            ["One user, no roles", "No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming."],
-            ["Instagram cannot be automated", "There is no Live broadcast API, so nothing can create the broadcast, fetch a key, read chat or report viewers — the preset is listed and marked unsupported rather than pretending otherwise. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination like any other, and they change every broadcast."],
-            ["Your source video is your problem", "Renditions can re-encode down, but nothing will rescue a 4K60 ingest on a box that cannot software-encode it in realtime."],
+            ["SRT is the multitrack path", "It carries every audio track, on any FFmpeg above the floor, and it is the path that is operated. RTMP is fully supported and carries one stereo pair; Enhanced RTMP defines more and FFmpeg 7.1+ demuxes it correctly — six tracks arrive intact, verified end to end. We also ran OBS 30.2.3 against it and found OBS does not send multitrack audio over RTMP at all: the capability is gated behind a service flag no service enables. So if you want several tracks out of OBS today, use SRT — and that is a statement about OBS, not about the ingest."],
+            ["Built for the operator at the desk", "One account, full control, no permission model to configure or get wrong. It is a single-operator tool by design; if you need per-destination permissions and team accounts, that is a different product."],
+            ["Instagram works, by hand", "There is no Live broadcast API for anyone to build against, so nothing can create the broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination like any other — the preset says so plainly rather than implying automation nobody can offer."],
+            ["Your hardware sets the ceiling", "Audio routing is close to free — video is stream-copied untouched. Renditions re-encode when you ask them to, and that is the one thing that costs CPU: a 4K60 ingest needs a box that can software-encode 4K60 in realtime. Nothing here pretends otherwise, which is why the cost of an encode is shown before you start one."],
           ].map(([t, d]) => (
             <div class="py-4">
               <dt class="text-[15px] font-medium text-fg">{t}</dt>

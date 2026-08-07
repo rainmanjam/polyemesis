@@ -19,19 +19,19 @@ const wins = [
 const losses = [
   [
     "WebRTC / WHIP output",
-    "Missing. A sizeable subsystem, and the real use case is sub-second self-monitoring.",
+    "Not built. It is a sizeable subsystem and the real use case is sub-second self-monitoring, which the preview path does not try to be. Restreamer has it.",
   ],
   [
     "Maturity and deployment count",
-    "Restreamer is years older and far more widely run. That is not a feature you can ship.",
+    "Restreamer is years older and far more widely run, and that is not something a newer tool can talk its way out of. What polyemesis offers instead is a small surface you can read: one binary, one config file, and acceptance suites that publish real streams.",
   ],
   [
     "Hosted option",
-    "There isn't one. restream.io will run it for you; polyemesis is a binary you operate.",
+    "There isn't one, by design. restream.io will run it for you and charge per destination; polyemesis is a binary you operate on hardware you control, with no per-destination pricing and nothing leaving your network.",
   ],
   [
     "Multi-user and roles",
-    "One admin. No per-destination permissions, no team accounts.",
+    "One admin, deliberately — no permission model to configure, and none to get wrong. If you need per-destination permissions or team accounts, this is not the tool.",
   ],
 ];
 ---
@@ -52,15 +52,16 @@ const losses = [
         amber is reserved for things that do. */}
     <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
       <p class="text-pretty leading-relaxed text-fg">
-        <strong>If you do not need different audio per destination, use
-        Restreamer.</strong> It is more mature, more widely deployed, and it does
-        the common restreaming job well.
+        <strong>polyemesis exists for one case:</strong> <em>this</em> platform
+        gets the clean mix, <em>that</em> one gets the full mix — from one
+        upload and one video encode, with the picture never re-encoded to do it.
+        Nothing else here does that.
       </p>
       <p class="mt-3 text-pretty leading-relaxed text-muted">
-        polyemesis exists for one case it does not serve: <em>this</em> platform
-        gets the clean mix, <em>that</em> one gets the full mix, from one upload
-        and one video encode. If that is not your problem, the rest of this page
-        is academic.
+        If that is not your problem, use Restreamer. It is more mature, more
+        widely deployed, and it does the common restreaming job well. Saying so
+        costs nothing: the people who need per-destination audio know who they
+        are, and the people who do not are better served elsewhere.
       </p>
     </div>
   </section>
@@ -98,10 +99,12 @@ const losses = [
 
   <section class="border-t border-line bg-surface/30 py-16" data-reveal>
     <div class="wrap">
-      <h2 class="text-2xl font-medium">What it does not have</h2>
+      <h2 class="text-2xl font-medium">Where Restreamer is the better answer</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
         Ranked roughly by how often it gets asked for, which is the honest
-        ordering.
+        ordering. If one of these is your requirement, take it seriously — a
+        tool that claims everything is worth less than one that tells you when
+        to use something else.
       </p>
       <dl class="mt-8 max-w-3xl divide-y divide-line border-y border-line">
         {
