@@ -85,6 +85,58 @@ INSTALL_COMPLETE=false
 # static analysis, which cannot resolve "${ARRAY[@]}" and reported four
 # downloads as unpinned when every one of them was pinned.
 
+# fetch_https downloads one URL to one path, over https, refusing to be walked
+# down to plaintext by a redirect. Returns non-zero if no downloader is present.
+#
+# THREE IMPLEMENTATIONS, because the honest answer to "which of these is always
+# installed" is "none of them". A bare ubuntu:24.04 image has curl, wget AND
+# python3 all absent; Debian minimal has python3 and no curl; and the documented
+# way to run this script is `curl ... | sh`, which obviously implies curl. Any
+# single choice is wrong on some host somebody actually has.
+#
+# This used to be python3 alone, on the reasoning that "neither curl nor wget is
+# guaranteed present" — true, but it left urlretrieve following redirects with no
+# restriction on scheme, which made this the ONE fetch in the installer that
+# could be downgraded to http. It writes a binary into /usr/local/bin with
+# install -m 0755, to be run by a root service, so that is a code-execution path
+# and not a privacy question. All three branches below pin the scheme.
+#
+# Used only for this optional FFmpeg upgrade. The polyemesis binary and its
+# checksums keep their inline curl, for the reason given at the top of this file:
+# on the fetch that matters most, the reader piping this into a shell should see
+# the flags on the line doing the download.
+fetch_https() {
+  local url="$1" out="$2"
+  case "$url" in https://*) ;; *) return 1 ;; esac
+
+  if command -v curl >/dev/null 2>&1; then
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$out" "$url" 2>/dev/null
+    return $?
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    # --https-only is wget's --proto-redir: it refuses to follow a redirect to
+    # any other scheme rather than silently downgrading.
+    wget --https-only --secure-protocol=TLSv1_2 -q -O "$out" "$url" 2>/dev/null
+    return $?
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    # urlopen rather than urlretrieve, so the FINAL url after redirects can be
+    # checked. urlretrieve reports only the last response, never the chain, and
+    # will happily land on http.
+    python3 - "$url" "$out" <<'PYFETCH' 2>/dev/null
+import shutil, sys, urllib.request
+url, out = sys.argv[1], sys.argv[2]
+with urllib.request.urlopen(url) as r:
+    if not r.geturl().startswith("https://"):
+        sys.exit("redirected off https")
+    with open(out, "wb") as f:
+        shutil.copyfileobj(r, f)
+PYFETCH
+    return $?
+  fi
+  return 1
+}
+
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
@@ -346,11 +398,10 @@ offer_ffmpeg_upgrade() {
   trap "rm -rf '$tmp'" RETURN
 
   echo "     Fetching $asset ..."
-  # python3 rather than curl/wget: neither is guaranteed present, and python3 is
-  # on every distribution this installer supports.
-  if ! python3 -c "import urllib.request,sys; urllib.request.urlretrieve('https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/'+sys.argv[1], sys.argv[2])" \
-        "$asset" "$tmp/ff.tar.xz" 2>/dev/null; then
+  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$asset" \
+        "$tmp/ff.tar.xz"; then
     warn "download failed — staying on $have.x. Nothing was changed."
+    warn "(needs one of curl, wget or python3; this host appears to have none)"
     return 0
   fi
 
