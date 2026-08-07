@@ -68,13 +68,26 @@ is MIT; `wlynxg/anet` is BSD-3-Clause. All compatible with this project's MIT.
 | Net-new modules | 7 | **18** |
 | Logging | **logrus** — a framework, own dep tree, global state | `pion/logging` — two files, stdlib only, a `LoggerFactory` interface built to be replaced |
 | Dead upstream | `pkg/errors`, `mapstructure` — both dead | none; one org, one release cadence |
-| **Could FFmpeg do it instead?** | **Yes** — `ffmpeg -listen 1` was a complete answer | **No** — FFmpeg has no ICE/DTLS/SRTP offer-answer that can serve a browser |
+| **Could FFmpeg do it instead?** | **No, as it turned out** — see below | **No** — FFmpeg has no ICE/DTLS/SRTP offer-answer that can serve a browser |
 
-The last row is the whole argument. go-rtmp was refused because a subprocess
-already did the job and the dependency bought nothing. There is no FFmpeg path to
-a browser PeerConnection. And the precedent already exists here:
-**`datarhei/gosrt` was accepted on exactly this reasoning**, and
-`internal/srtserver` is the shape to copy.
+The last row is the whole argument, and it needs a correction that makes it
+*stronger* rather than weaker. go-rtmp was refused on the belief that a
+subprocess already did the job. That belief was wrong: `ffmpeg -listen 1` is a
+single-connection listener, so it could serve one RTMP publisher and never two —
+the identical limitation that disqualified FFmpeg's SRT support. When that was
+noticed on 2026-08-06, an RTMP dependency was taken after all
+(`bluenviron/gortmplib`, not go-rtmp — see
+[DESIGN-ONE-PORT-ONLY.md](../DESIGN-ONE-PORT-ONLY.md#rtmp)).
+
+So the rule stands unchanged — **a protocol dependency is justified only when
+FFmpeg cannot do the job** — and it has now been applied three times rather than
+twice. What that history warns against is not taking the dependency; it is
+answering "can FFmpeg do this?" from habit. There is no FFmpeg path to a browser
+PeerConnection, and unlike the RTMP case that is not a matter of degree.
+
+The precedent to copy is still **`datarhei/gosrt`**, accepted on exactly this
+reasoning, with `internal/srtserver` — and now `internal/rtmpserver` — as the
+shape.
 
 **Honest costs, to be written into `docs/DEPENDENCIES.md` rather than
 discovered later:**

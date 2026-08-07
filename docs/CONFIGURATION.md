@@ -101,15 +101,21 @@ cannot validate is an excellent way to lock yourself out of your own tool.
 
 ### `enhancedRtmp` was removed
 
-It is no longer a key. Enhanced RTMP / multitrack FLV ingest (OBS 30.2+) is not
-implemented and RTMP ingest is single-track either way, so the key never did
-anything — it was declared as a placeholder and kept on the belief that config
-files already carrying it would otherwise fail to parse.
+It is no longer a key, and it does not need reinstating. Enhanced RTMP /
+multitrack FLV ingest (OBS 30.2+) turns out to work on **FFmpeg 7.1+** —
+verified end to end — and not on FFmpeg 6.1.1, which is Ubuntu 24.04's stock
+build. Either way there is nothing for a flag to switch: where it works, it
+works by default, because the tracks arrive through the existing ingest command
+unchanged. It confirms rather than undermines the removal — the key was declared
+as a placeholder and kept on the belief that config files already carrying it
+would otherwise fail to parse.
 
 That belief was wrong: config loading ignores unrecognised keys, so the
 declaration was buying nothing while presenting a knob an operator could set and
 watch have no effect. **A config file that still names `enhancedRtmp` loads
-exactly as before.** For multitrack ingest today, use SRT.
+exactly as before.** For multitrack ingest that is actually operated, use SRT:
+Enhanced RTMP's version dependency is real, and it has not been confirmed with
+OBS itself as the publisher. See `notes/enhanced-rtmp-multitrack.md`.
 
 ## The data directory
 

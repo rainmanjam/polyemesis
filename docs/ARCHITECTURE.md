@@ -17,10 +17,16 @@ any number of destinations select and that touches video only. See §3.
         │
         │  SRT (mpegts): 1 video + up to 6 AAC tracks
         │  or RTMP (1 video + 1 AAC track)
+        │
+        │  Both land on ONE shared listener per protocol, addressed by the
+        │  publish token (SRT) or the stream key (RTMP). RTMP's is a Go
+        │  pub/sub server: the encoder publishes, the ingest ffmpeg below
+        │  subscribes to the same port over loopback.
         ▼
 ┌───────────────────────────────────────────┐
 │ ingest ffmpeg  (supervised)               │
 │   -i srt://0.0.0.0:P?mode=listener        │
+│   or -i rtmp://127.0.0.1:1935/live/KEY    │
 │   -map 0 -c copy -f mpegts                │
 │   udp://127.0.0.1:HUB_IN                  │   all tracks preserved, no decode
 └───────────────────────────────────────────┘
@@ -93,25 +99,53 @@ slow subscriber stall the hub, and `fifo_size`/`overrun_nonfatal=1` on the
 consumer side. A future `relay.Mode = "srt"` can swap the transport without
 touching anything above it.
 
-### Why FFmpeg's RTMP listener, not yutopp/go-rtmp
+### Why a Go RTMP server (`internal/rtmpserver`), not `ffmpeg -listen 1`
 
-RTMP is the *fallback* ingest (single audio track), so the bar is "robust and
-cheap", not "feature-rich".
+RTMP is the *fallback* ingest (one audio track on classic RTMP — see
+`notes/enhanced-rtmp-multitrack.md` for what changes on FFmpeg 7.1+), and for a
+long time the bar was "robust and cheap": `ffmpeg -listen 1` demuxed FLV and
+emitted MPEG-TS with `-c copy`, which was the exact same code path as SRT
+ingest, and the supervisor's respawn-with-backoff made "wait for the next
+publisher" free.
 
-- go-rtmp hands us FLV tags. To reach the relay we would then have to write an
-  FLV→MPEG-TS muxer plus AVC/AAC bitstream handling (AVCDecoderConfigurationRecord
-  → Annex-B, ADTS framing) by hand. That is a large, subtle surface area for zero
-  user-visible gain.
-- `ffmpeg -listen 1 -i rtmp://0.0.0.0:1935/live/KEY` demuxes FLV and emits
-  MPEG-TS with `-c copy`, which is **the exact same code path as SRT ingest** —
-  one `IngestArgs` builder, one supervisor, one relay entry point.
-- The listener serves one publisher then exits; the supervisor already respawns
-  processes with backoff, so "wait for next publisher" is free.
-- Stream-key auth comes from the URL path, which ffmpeg matches against the
-  publisher's `app/playpath`.
+What that could never do is **demultiplex by path**. `-listen 1` is a
+single-connection receiver, so an install could carry exactly one RTMP source
+while SRT carried as many as you liked. That asymmetry was an artifact of the
+tool, not a decision — and the rule it produced ("how many programmes you can
+run depends on which protocol your encoder speaks") is not one anybody would
+choose. It is now gone; the full argument, including what it cost to close, is
+in [DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md#rtmp).
 
-The product has exactly one publisher (the streamer), so single-publisher
-semantics are correct, not a limitation.
+The shape that replaced it:
+
+- `internal/rtmpserver` wraps `bluenviron/gortmplib` and adds only the part that
+  is ours, which is the same part `srtserver` adds over `gosrt`: a constant-time
+  `Lookup` from stream key to source, one publisher slot per (source, role), and
+  a relay. It is not a protocol implementation.
+- **One port, both directions.** The encoder publishes to
+  `rtmp://host:1935/live/KEY`; the ingest ffmpeg subscribes to
+  `rtmp://127.0.0.1:1935/live/KEY` on that same listener. No per-source ports,
+  not even loopback ones — which is exactly what the earlier relay-outward draft
+  would have reintroduced.
+- **Messages, never frames.** gortmplib's `Reader` hands over decoded access
+  units; using it would put a muxer in the critical path of every frame. This
+  forwards RTMP *messages*, so the bytes reaching FFmpeg are the bytes the
+  encoder sent, `-map 0 -c copy` is untouched downstream, and Enhanced RTMP
+  multitrack rides through without the package knowing what a track is.
+- The one exception is stream **setup** — `onMetaData` and the codec sequence
+  headers — which are cached per stream key and replayed to each new subscriber.
+  A subscriber that joins after them cannot decode anything, and the order of
+  "encoder connects" and "FFmpeg connects" genuinely varies. That is a type
+  switch, not a decode.
+- **Subscribing is loopback-only.** A stream key is a publish credential; if it
+  also authorised playback, every ingest key would quietly become a viewing key.
+  Viewer playback is `playout/`'s job, behind authentication.
+
+`yutopp/go-rtmp`, the dependency measured and rejected when this section was
+first written, is still rejected — see
+[DEPENDENCIES.md](DEPENDENCIES.md#githubcombluenvirongortmplib--the-third-protocol-dependency)
+for why gortmplib is a different question rather than the same one answered
+differently.
 
 ---
 
@@ -533,8 +567,11 @@ Worth stating because the TLS mode is easy to mistake for the whole story:
 - SRT ingest carries its own AES encryption via a passphrase
   (`db.SRTSettings.Passphrase`, 10–79 characters, enforced in
   `Settings.Validate`), rendered into both the listener URL and the
-  copy-pasteable encoder URL. RTMP ingest has no equivalent — it is
-  authenticated by the stream key in the path and is otherwise in the clear.
+  copy-pasteable encoder URL. RTMP ingest has no equivalent: it is authenticated
+  by the stream key in the path — matched in constant time by
+  `internal/rtmpserver`, the same contract `srtserver` applies to tokens — but
+  the connection carries no encryption, so the key and the media both cross the
+  network in the clear.
 - Destination URLs are passed to FFmpeg verbatim, and `db.Destination.Validate`
   accepts `rtmps://` as well as `rtmp://`, so a destination can be TLS-wrapped
   independently of how the UI is served.
@@ -582,6 +619,10 @@ internal/
   -- ingest and viewer-facing edges
   srtserver/   the one-port SRT ingest: one listener serving every source,
                demultiplexed by the publish token
+  rtmpserver/  the same shape for RTMP: one listener serving every source,
+               demultiplexed by the stream key in the publish URL. Publish and
+               subscribe on that one port -- encoders push in, this install's
+               own FFmpeg pulls back out over loopback
   playout/     the viewer-facing origin: packages the relay into public HLS
                (optionally DASH) and counts who is watching
   meters/      the measurement tier: what a destination is ACTUALLY sending,

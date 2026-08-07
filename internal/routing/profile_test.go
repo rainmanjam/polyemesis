@@ -2,6 +2,7 @@ package routing
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -450,9 +451,16 @@ func TestValidateAnnotations(t *testing.T) {
 			wantErr: `unknown role "karaoke"`,
 		},
 		{
-			name:    "track above the six-track ceiling",
-			anns:    []TrackAnnotation{{Track: 6, Role: RoleMic}},
-			wantErr: "track 6 out of range",
+			// Relative to MaxTracks, not a literal. This case asserted track 6
+			// when the ceiling was 6; raising it to 32 made track 6 legal and
+			// the test silently stopped testing a ceiling at all.
+			name:    "track above the ceiling",
+			anns:    []TrackAnnotation{{Track: MaxTracks, Role: RoleMic}},
+			wantErr: fmt.Sprintf("track %d out of range", MaxTracks),
+		},
+		{
+			name: "the highest legal track is accepted",
+			anns: []TrackAnnotation{{Track: MaxTracks - 1, Role: RoleMic}},
 		},
 		{
 			name:    "negative track",
@@ -625,8 +633,8 @@ func TestValidateOptionalFields(t *testing.T) {
 		},
 		{
 			name:    "ducking trigger out of range",
-			profile: withDucking(Ducking{Trigger: []int{9}, Target: []int{0}}),
-			wantErr: "ducking trigger track 9 out of range",
+			profile: withDucking(Ducking{Trigger: []int{MaxTracks}, Target: []int{0}}),
+			wantErr: fmt.Sprintf("ducking trigger track %d out of range", MaxTracks),
 		},
 		{
 			name:    "duplicate ducking target",

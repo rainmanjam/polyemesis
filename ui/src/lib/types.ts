@@ -1,7 +1,10 @@
 /** Types mirroring the Go API. Kept hand-written and small rather than
  *  generated, so the shapes the UI actually consumes stay obvious. */
 
-export const MAX_TRACKS = 6;
+/** Mirrors routing.MaxTracks. The server also reports this as `maxTracks` in
+ *  its capabilities response — prefer that where it is to hand, and treat this
+ *  as the fallback for code that renders before capabilities have loaded. */
+export const MAX_TRACKS = 32;
 
 export type RoutingMode = "simple" | "matrix";
 export type NormalizeMode = "auto" | "off" | "limiter" | "loudnorm";

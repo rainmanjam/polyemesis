@@ -29,7 +29,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
-import { labelForState, toneBadge, toneForState } from "@/lib/signal";
+import { toneBadge, toneForState } from "@/lib/signal";
 import { cn } from "@/lib/utils";
 import type {
   Destination,
@@ -38,7 +38,7 @@ import type {
   LogLine,
   ProcessInfo,
 } from "@/lib/types";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, type TranslationKey, useStateLabel } from "@/lib/i18n";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -417,6 +417,7 @@ function ExpertPanel() {
 }
 
 export function MonitoringPage() {
+  const stateLabel = useStateLabel();
   const t = useT();
   const { system, bitrate, logs, status, clearLogs } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
@@ -682,7 +683,7 @@ export function MonitoringPage() {
                       <StatusDot tone={tone} size="sm" />
                       <span className="truncate font-mono text-[11px]">{p.name}</span>
                     </div>
-                    <Badge variant={toneBadge[tone]}>{labelForState(p.state)}</Badge>
+                    <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
                   </div>
                   <div className="mt-1 grid grid-cols-3 gap-1">
                     <Stat label={t("mon.pid")} value={p.pid || "—"} tone="muted" />

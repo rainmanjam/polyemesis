@@ -2,7 +2,8 @@
 
 This is the feature the rest of the product exists to serve.
 
-One encoder sends up to six audio tracks. Every destination gets its own mix of
+One encoder sends up to 32 audio tracks — six is what OBS sends, and what most
+setups use. Every destination gets its own mix of
 them, compiled into its own FFmpeg `-filter_complex` graph. YouTube can receive
 the clean mix while your archive keeps everything and your Discord restream
 keeps the mic hot — from one upload and one video encode.

@@ -243,7 +243,7 @@ export function PlayoutPage() {
               </p>
             )}
             {usage.overLimit && (
-              <p className="mt-3 flex items-start gap-1.5 text-[11px] text-danger">
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] text-down">
                 <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
                 The disk cap is below one playlist window. Raise it or lower the
                 bitrate — segments viewers are mid-playback on cannot be deleted.
@@ -348,7 +348,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
   if (!view.status.public) {
     return (
       <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-[12px]">
-        <Lock className="h-3.5 w-3.5 shrink-0 text-ok" />
+        <Lock className="h-3.5 w-3.5 shrink-0 text-live" />
         <span>
           <span className="font-medium">{t("play.private")}</span>{" "}
           <span className="text-muted-foreground">
@@ -361,10 +361,10 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
   }
   if (view.exposed) {
     return (
-      <div className="mb-3 flex items-start gap-2 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-[12px]">
-        <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" />
+      <div className="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px]">
+        <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
         <span>
-          <span className="font-medium text-danger">
+          <span className="font-medium text-destructive">
             This stream is public to the internet.
           </span>{" "}
           <span className="text-muted-foreground">
@@ -767,7 +767,7 @@ function VariantsCard({
               </div>
 
               {st?.error && (
-                <p className="text-[11px] text-danger sm:col-span-5">{st.error}</p>
+                <p className="text-[11px] text-down sm:col-span-5">{st.error}</p>
               )}
             </div>
           );

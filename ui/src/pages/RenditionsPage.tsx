@@ -46,7 +46,7 @@ import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { labelForState, toneBadge, toneForState, type SignalTone } from "@/lib/signal";
+import { toneBadge, toneForState, type SignalTone } from "@/lib/signal";
 import type {
   DestStatus,
   EncoderInfo,
@@ -64,7 +64,7 @@ import type {
   RenditionView,
   VideoStream,
 } from "@/lib/types";
-import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
+import { useT, type Translator, type TranslationKey, useStateLabel, type StateLabeller } from "@/lib/i18n";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -349,15 +349,17 @@ r: { width: number; height: number; fps: number },
  *  No process is the normal state for a rendition nothing has selected — the
  *  ref count is doing its job — so it must not read as a failure. */
 function renditionSignal(
+  t: Translator,
+  stateLabel: StateLabeller,
   live: RenditionStatus | undefined,
   enabledUsers: number,
 ): { tone: SignalTone; label: string } {
   if (live?.process) {
-    return { tone: toneForState(live.process.state), label: labelForState(live.process.state) };
+    return { tone: toneForState(live.process.state), label: stateLabel(live.process.state) };
   }
-  if (live?.error) return { tone: "down", label: "Error" };
-  if (enabledUsers === 0) return { tone: "idle", label: "Idle" };
-  return { tone: "warn", label: "Starting" };
+  if (live?.error) return { tone: "down", label: t("rend.signalError") };
+  if (enabledUsers === 0) return { tone: "idle", label: t("rend.signalIdle") };
+  return { tone: "warn", label: t("state.starting") };
 }
 
 export function RenditionsPage() {
@@ -611,11 +613,13 @@ export function RenditionsPage() {
 /** One destination, as a chip. Disabled rows are drawn too: they still select
  *  this rendition, and deleting it affects them the moment they are enabled. */
 function DestChip({ dest }: { dest: DestStatus }) {
+  const t = useT();
+  const stateLabel = useStateLabel();
   const tone: SignalTone = dest.enabled ? toneForState(dest.process?.state) : "idle";
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-[11px]"
-      title={dest.enabled ? labelForState(dest.process?.state) : "Disabled"}
+      title={dest.enabled ? stateLabel(dest.process?.state) : t("state.disabled")}
     >
       <StatusDot tone={tone} size="sm" />
       <span className="max-w-40 truncate">{dest.name}</span>
@@ -649,11 +653,12 @@ function RenditionCard({
   onRestart: () => void;
   onDelete: () => void;
 }) {
+  const stateLabel = useStateLabel();
   const t = useT();
   const r = view.rendition;
   const total = users ? users.length : view.destinations;
   const enabled = users ? users.filter((d) => d.enabled).length : view.enabledDestinations;
-  const signal = renditionSignal(live, enabled);
+  const signal = renditionSignal(t, stateLabel, live, enabled);
   const cost = encodeCost(t, r, encoder, source, cores, hardwareExists);
   const proc = live?.process;
   // A saved rendition goes stale: the card was swapped, the driver upgraded,

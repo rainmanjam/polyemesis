@@ -55,9 +55,14 @@ SECOND INPUT has never been done in this codebase.
 largest item and the only one that puts the audio differentiator in play.
 `RenditionArgs` says outright that if `-map 0:a -c:a copy` ever becomes a mixdown
 the product's differentiator is gone, so a composite must CONCATENATE track lists
-and never mix — which collides with `routing.MaxTracks = 6`, since two six-track
-sources overflow it. That is a product decision, not an engineering one, and it
-should be settled before any code is written.
+and never mix.
+
+That used to collide with `routing.MaxTracks = 6`, because two six-track sources
+overflow it. **`MaxTracks` is now 32, so they no longer do** — the product
+decision this item was waiting on has been overtaken. What remains is the
+engineering, plus the narrower limit that replaced it: metering merges every
+channel into one amerge and stops at 64 (`routing.MaxMeterChannels`), so a
+composite of five six-track sources routes but does not fully meter.
 
 The one part worth remembering if it is ever picked up: point each composite
 input at the contributing source's SELECTOR hub rather than its raw ingest, and

@@ -43,8 +43,10 @@ hot. One upload, one video encode, different audio per platform.
   encode feeds every destination that selects it, ref-counted so an unused tier
   costs nothing — and it re-encodes **video only**, so audio still routes per
   destination. [→ RENDITIONS.md](docs/RENDITIONS.md)
-- **SRT multitrack ingest** (up to 6 AAC tracks), addressed by token on a single
-  port, with RTMP as a single-track fallback. [→ OBS.md](docs/OBS.md)
+- **SRT multitrack ingest** (up to 32 AAC tracks; six is what OBS sends), addressed by token on a single
+  port, with RTMP as a single-track fallback — also one port, addressed by
+  stream key, and equally unlimited in how many sources it carries.
+  [→ OBS.md](docs/OBS.md)
 - **Live audio meters** for every channel of every track — how you verify the
   clean track really is clean, *before* going live.
 - **Unlimited destinations**: RTMP(S), SRT, or local file, each independently
@@ -86,9 +88,8 @@ roadmap.
 
 | | |
 |---|---|
-| **No multitrack over RTMP.** | RTMP carries one stereo pair. Enhanced RTMP multitrack from OBS 30.2+ is **not** supported, and the `enhancedRtmp` config key is an inert placeholder. Multitrack means SRT. |
-| **One RTMP source, maximum.** | polyemesis has no RTMP server of its own — it uses `ffmpeg -listen 1`, which cannot demultiplex by path. Any number of sources can share the SRT port; only one can use RTMP. [Why](docs/DESIGN-ONE-PORT-ONLY.md#rtmp) |
-| **No per-source ports.** | Every push source is addressed by its token on one SRT port. Giving one programme its own port for firewall, NIC or QoS purposes is not something polyemesis does. [Why](docs/DESIGN-ONE-PORT-ONLY.md#what-it-costs) |
+| **RTMP multitrack is not the operated path.** | Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) carries more and works on FFmpeg 7.1+ — verified end to end — but not on FFmpeg 6.1.1, and not yet confirmed with OBS publishing. SRT is what is operated. See `docs/notes/enhanced-rtmp-multitrack.md`. |
+| **No per-source ports.** | Every push source is addressed by its token on one SRT port, or its stream key on one RTMP port. Giving one programme its own port for firewall, NIC or QoS purposes is not something polyemesis does. [Why](docs/DESIGN-ONE-PORT-ONLY.md#what-it-costs) |
 | **One user, no roles.** | No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming — and, through file destinations and expert mode, meaningful control of the machine. |
 | **Instagram Live cannot work.** | There is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts. It is listed and marked unsupported rather than shipped as a preset that quietly never connects. |
 | **Your source video is your problem.** | Renditions can re-encode down, but polyemesis will not rescue a 4K60 ingest on a box that cannot software-encode it in realtime. |

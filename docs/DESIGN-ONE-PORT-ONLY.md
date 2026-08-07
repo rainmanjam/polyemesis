@@ -10,7 +10,7 @@ costs.
 | | Before | After |
 |---|---|---|
 | **SRT** | a UDP port per source; a shared token-addressed port as an opt-in extra, **off by default** | **one** UDP port, token-addressed, always, no alternative |
-| **RTMP** | a TCP port per source | one TCP port, serving at most **one** source |
+| **RTMP** | a TCP port per source | one TCP port, serving at most **one** source — *superseded 2026-08-06, see [RTMP](#rtmp)* |
 | **Pull** | dials out, binds nothing | unchanged |
 | **Port fields per source** | SRT port, RTMP port, with conflict detection and auto-move | **gone** |
 
@@ -72,6 +72,14 @@ That line is now gone. SECURITY.md instead says SRT is authenticated by
 construction, and the caveat that remains is RTMP's — which has no token routing
 and is protected by its stream key alone.
 
+> **Outcome, 2026-08-06.** The RTMP half of that caveat no longer holds either.
+> RTMP is now routed by stream key on the shared listener, matched in constant
+> time against every source's key, so a publisher presenting nothing or
+> something unrecognised is refused rather than landing on whichever source
+> happened to hold the socket. What separates the two protocols now is
+> encryption, not authentication: SRT's passphrase is real AES, an RTMP stream
+> key is a string comparison over a cleartext connection. See [RTMP](#rtmp).
+
 **One published port, forever.** `docker-compose.yml` stops being something you
 edit when you add a programme.
 
@@ -90,6 +98,14 @@ address* rather than a per-source port — which is what the QoS and NIC cases
 actually want — not the port-per-source model being removed here.
 
 ## RTMP
+
+> **Superseded, 2026-08-06.** RTMP now has the same shape as SRT — one port,
+> addressed by a key, unlimited sources — and the one-source limit is gone.
+> `internal/rtmpserver` is the listener that closed it.
+>
+> The original argument is kept below rather than deleted, because two of its
+> three premises were sound and are still the reason this was not done earlier.
+> What actually moved is recorded in [What changed](#what-changed) after it.
 
 RTMP keeps its single well-known port and serves **at most one source**.
 
@@ -112,6 +128,94 @@ independent single-track programmes, and nobody has asked.
 So: **at most one source may use RTMP ingest**, enforced with an error that says
 why and points at SRT. A second RTMP source is refused rather than accepted and
 silently starved, which is what would happen if two of them tried to bind 1935.
+
+### What changed
+
+Three things, in the order they mattered.
+
+**The principle was wrong, not just the implementation.** The clearest way to
+see it: *how many programmes you can run should not depend on which protocol
+your encoder speaks.* Unlimited over SRT and exactly one over RTMP was never a
+position anyone argued for — it was what `ffmpeg -listen 1` happened to permit,
+back-filled with a justification. "Nobody has asked" is a fine reason to defer
+work; it is not a reason to call the resulting limit a design.
+
+**The dependency was re-measured, and it is a different dependency.** The
+rejection was of `yutopp/go-rtmp`, and that rejection still stands — it has not
+moved since. What exists now did not exist in this form when the decision was
+taken:
+
+| | transitive deps | version | provenance |
+|---|---|---|---|
+| `github.com/datarhei/gosrt` (the bar) | **1** | v0.11.0 | datarhei |
+| **`github.com/bluenviron/gortmplib`** | **3** — `abema/go-mp4`, `bluenviron/mediacommon/v2`, `google/uuid` | **v1.0.0** | gortsplib / MediaMTX maintainers |
+| `github.com/yutopp/go-rtmp` | 7 — `logrus`, `pkg/errors`, `mapstructure`, … | v0.0.7 | unchanged |
+
+Three modules against gosrt's one is a real cost, not a free one. But it is a
+different order of magnitude from seven, none of it is dead upstream, there is
+no second logging framework, and the provenance is the same argument that
+justified gosrt. All three are MIT and `CGO_ENABLED=0` clean.
+
+**"Writing one is the largest single piece of work in the repository" was
+answering the wrong question.** Nothing here implements RTMP. `internal/rtmpserver`
+wraps gortmplib and adds only the part that is ours — the same part
+`internal/srtserver` adds over gosrt: a constant-time `Lookup` from key to
+source, one publisher slot per (source, role), and a relay. It is ~540 lines
+plus tests, not a protocol stack.
+
+The premise that has moved *least* is the one about tracks. **RTMP still carries
+one stereo pair on classic FLV.** Enhanced RTMP multitrack does work on FFmpeg
+7.1+ — verified end to end — but not on 6.1.1, and it has not been confirmed
+with OBS publishing. Multi-source RTMP does not change that and was never going
+to. It closes a different gap: **encoders that cannot speak SRT at all.**
+Hardware encoders and older appliances, where the install previously supported
+exactly one of them. If your encoder can do SRT, SRT is still strictly better
+and was already unlimited.
+
+### The shape it took
+
+One port, both directions. Encoders publish to the listener and this install's
+own FFmpeg subscribes to it, on that same port:
+
+```
+encoder  --publish--> rtmp://host:1935/live/<streamkey>
+ffmpeg   --play-----> rtmp://127.0.0.1:1935/live/<streamkey>
+```
+
+The first implementation relayed each publisher *outward* to a per-source FFmpeg
+listening on its own loopback port. That works, and it is what `ffmpeg -listen 1`
+forced before any of this existed, but it would have reintroduced per-source
+ports — the exact surface this document removed — for no gain. Publish/subscribe
+on one port is how RTMP servers are actually built: datarhei Core runs its
+internal RTMP server this way, and so does everything else.
+
+Three consequences worth stating, because each is a decision rather than a
+detail:
+
+- **Media is never parsed.** gortmplib also offers a `Reader` that hands over
+  decoded access units. Using it would put a muxer in the critical path of every
+  frame and make a whole class of bug ours that currently belongs to FFmpeg.
+  This forwards RTMP *messages*, so the bytes reaching FFmpeg are the bytes the
+  encoder sent and `-c copy` downstream is untouched.
+- **Subscribers are loopback-only.** A stream key is a *publish* credential — it
+  is what sits in an operator's OBS settings. If it also authorised playback,
+  every ingest key would quietly become a viewing key for anyone who learned it.
+  Playback for viewers is the playout page's job, behind authentication.
+- **Setup messages are cached and replayed.** A subscriber that arrives after
+  the metadata and codec sequence headers have gone past has a byte stream it
+  cannot interpret. They are remembered per stream key and replayed on
+  subscribe, which is what makes the order of "encoder connects" and "FFmpeg
+  connects" not matter — and it does vary, since an encoder reconnecting
+  mid-session is routine. This is the only message inspection in the package: a
+  type switch, not a decode.
+
+The failover standby gets a slot of its own on the same listener, keyed on
+(source, role) exactly as SRT's is. Keying on the source alone would let the
+primary and the standby evict each other, which is the failover feature failing
+in the one situation it exists for.
+
+The full record, including the options rejected, is in
+[notes/multi-source-rtmp.md](notes/multi-source-rtmp.md).
 
 ## The failover backup needs an address too
 
@@ -148,6 +252,9 @@ has gone away.
 ## The rule this leaves
 
 - Every push source is addressed by its token on one SRT port.
-- One source, at most, may additionally be reached over RTMP.
+- Every RTMP source is addressed by its stream key on one RTMP port. Any number
+  of them, the same as SRT. *(Updated 2026-08-06; this line previously read
+  "one source, at most, may additionally be reached over RTMP" — see
+  [RTMP](#rtmp).)*
 - Pull sources dial out and bind nothing.
 - There are no per-source ports anywhere.

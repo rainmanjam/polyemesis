@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -421,9 +422,13 @@ func TestValidate(t *testing.T) {
 			wantErr: "unsupported sample rate 96000",
 		},
 		{
-			name:    "track index above the six-track ceiling",
-			profile: Profile{Mode: ModeSimple, Normalize: NormOff, SampleRate: 48000, Tracks: []TrackSel{{Track: 9, Enabled: true, Gain: 1}}},
-			wantErr: "track 9 out of range",
+			name:    "track index above the ceiling",
+			profile: Profile{Mode: ModeSimple, Normalize: NormOff, SampleRate: 48000, Tracks: []TrackSel{{Track: MaxTracks, Enabled: true, Gain: 1}}},
+			wantErr: fmt.Sprintf("track %d out of range", MaxTracks),
+		},
+		{
+			name:    "the highest legal track index is accepted",
+			profile: Profile{Mode: ModeSimple, Normalize: NormOff, SampleRate: 48000, Tracks: []TrackSel{{Track: MaxTracks - 1, Enabled: true, Gain: 1}}},
 		},
 		{
 			name:    "negative track index",

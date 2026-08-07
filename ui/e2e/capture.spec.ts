@@ -50,7 +50,22 @@ test("dashboard — the hero shot", async ({ page }) => {
   await page.goto("/");
   // The ingest has to read live before this is worth photographing: a
   // dashboard whose source says "waiting" is a picture of nothing happening.
-  await expect(page.getByText(/live/i).first()).toBeVisible({ timeout: 120_000 });
+  //
+  // Asserted as the ABSENCE of "Offline" rather than the presence of "live".
+  // The earlier guard was `getByText(/live/i).first()`, which matched the
+  // destination counter in the header — "3 LIVE" — and passed instantly while
+  // the ingest card still read OFFLINE and the preview still said "Waiting for
+  // a stream…". It shipped a hero image claiming the product was broken, which
+  // is the exact failure docs/media/README.md says this script refuses to
+  // produce. "Offline" appears in the header and on the ingest badge and
+  // nowhere else, so requiring zero of them cannot pass early.
+  await expect(page.getByText("Offline", { exact: true })).toHaveCount(0, {
+    timeout: 120_000,
+  });
+  // And the preview has to be showing frames, not its placeholder.
+  await expect(page.getByText("Waiting for a stream…")).toHaveCount(0, {
+    timeout: 120_000,
+  });
   await settle(page);
   await page.screenshot({ path: `${OUT}/01-dashboard.png` });
 });

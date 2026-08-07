@@ -1,0 +1,322 @@
+---
+import Base from "../layouts/Base.astro";
+import MixMatrix from "../components/MixMatrix.astro";
+import SpecStrip from "../components/SpecStrip.astro";
+import LoudnessBars from "../components/LoudnessBars.astro";
+
+const features = [
+  {
+    t: "Video is copied, not re-encoded — unless you ask for a rendition",
+    d: "Without a rendition every destination gets -c:v copy, so CPU cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC.",
+  },
+  {
+    t: "Shared renditions for the platforms that refuse your source",
+    d: "One encode feeds every destination that selects it, ref-counted so an unused tier costs nothing — and it re-encodes video only, so audio still routes per destination.",
+  },
+  {
+    t: "One port per protocol, many programmes",
+    d: "Sources are told apart by a publish token on SRT and by the stream key on RTMP, so a second programme never means opening a second port either way. RTMP is still the single-track fallback: one stereo pair on anything below FFmpeg 7.1.",
+  },
+  {
+    t: "Live meters on every channel of every track",
+    d: "How you verify the clean track really is clean before you go live, rather than after a copyright strike.",
+  },
+  {
+    t: "Chat moderation across all four platforms",
+    d: "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick — and a moderator card showing what one person said across every platform at once.",
+  },
+  {
+    t: "Failover with a standby ingest and a slate",
+    d: "A source selector that switches without restarting a single destination. Off by default: with it off the pipeline is byte-for-byte what it was before.",
+  },
+];
+---
+
+<Base
+  title="polyemesis — self-hosted restreaming server with per-destination audio routing"
+  description="A self-hosted live restreaming server with per-destination multichannel audio routing. One SRT ingest, up to 32 audio tracks, a different mix to every platform."
+  path="/"
+>
+  {/* ---------------------------------------------------------------- hero */}
+  <section class="relative overflow-hidden border-b border-line">
+    <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
+    <div class="wrap relative grid gap-12 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
+      <div class="max-w-xl">
+        <span class="chip rise rise-1">
+          <span class="size-1.5 rounded-full bg-live"></span>
+          MIT licensed · self-hosted
+        </span>
+
+        <h1 class="rise rise-2 mt-6 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
+          Six tracks from OBS.<br />
+          A different mix to<br />
+          every platform.
+        </h1>
+
+        <p class="rise rise-3 mt-6 text-pretty text-lg leading-relaxed text-muted">
+          Every live platform accepts exactly one stereo pair. So you either pick
+          one mix for everyone, or you run several encoders and several uploads.
+          polyemesis ingests once over SRT and lets you choose, per destination,
+          which of your tracks get summed into the stereo feed that destination
+          receives.
+        </p>
+
+        <div class="rise rise-4 mt-8 flex flex-wrap gap-3">
+          <a href="/download" class="btn btn-primary">Install it</a>
+          <a href="#matrix" class="btn btn-ghost">See the routing →</a>
+        </div>
+
+        <p class="mt-5 font-mono text-xs text-subtle">
+          docker run -d -v polyemesis-data:/data -p 8080:8080 -p 6000:6000/udp rainmanjam/polyemesis
+        </p>
+      </div>
+
+      {/* The hero visual is the signal path itself, not a screenshot floating
+          at an angle. Both design passes reached that independently: the
+          product's architecture IS the argument, so the page opens with it. */}
+      <div class="relative">
+        <div class="card rise rise-3 overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
+            <span class="size-1.5 rounded-full bg-live"></span>
+            <span class="font-mono text-[11px] text-subtle">one ingest · three destinations</span>
+          </div>
+
+          <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-5 sm:gap-5 sm:p-6">
+            {/* sources */}
+            <div class="space-y-1.5">
+              <p class="mb-2 font-mono text-[10px] uppercase tracking-wider text-subtle">
+                SRT ingest
+              </p>
+              {
+                [
+                  ["01", "full mix", "w-[86%]"],
+                  ["02", "clean mix", "w-[72%]"],
+                  ["03", "mic", "w-[58%]"],
+                  ["04", "guest", "w-[46%]"],
+                  ["05", "game", "w-[66%]"],
+                  ["06", "ambience", "w-[28%]"],
+                ].map(([n, label, w], i) => (
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-[10px] text-subtle">{n}</span>
+                    <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-ink">
+                      {/* Each track drifts on its own phase and its own period.
+                          Six bars sharing one keyframe would pump in unison,
+                          which is the one thing six independent audio sources
+                          never do. Movement stays under 6% of width: enough to
+                          read as live, not enough to imply levels that are not
+                          being measured. */}
+                      <div
+                        class={`meter-live h-full rounded-full bg-meter/70 ${w}`}
+                        style={`animation-delay: -${(i * 0.41).toFixed(2)}s; animation-duration: ${(2.1 + i * 0.23).toFixed(2)}s`}
+                      />
+                    </div>
+                    <span class="w-16 shrink-0 font-mono text-[10px] text-subtle">{label}</span>
+                  </div>
+                ))
+              }
+            </div>
+
+            {/* The split. Drawn twice: a dim static path so the topology is
+                legible the instant it paints, and a marching dash over it so
+                the lines read as a path with something in them rather than a
+                diagram of one. The three branches are separate elements only
+                so their dashes can be offset from each other — three lines
+                pulsing in lockstep looks like a loading spinner. */}
+            <div class="flex h-full items-center" aria-hidden="true">
+              <svg width="34" height="120" viewBox="0 0 34 120" fill="none">
+                <g stroke="#e8a33d" stroke-width="1.25" opacity="0.32">
+                  <path d="M0 60h10M10 60V22h24M10 60h24M10 60v38h24" />
+                </g>
+                <g stroke="#e8a33d" stroke-width="1.25" stroke-linecap="round">
+                  <path class="route-live" d="M0 60h10" />
+                  <path class="route-live" style="animation-delay: -0.1s" d="M10 60V22h24" />
+                  <path class="route-live" style="animation-delay: -0.45s" d="M10 60h24" />
+                  <path class="route-live" style="animation-delay: -0.8s" d="M10 60v38h24" />
+                </g>
+                <circle cx="10" cy="60" r="2.5" fill="#e8a33d" />
+              </svg>
+            </div>
+
+            {/* destinations */}
+            <div class="space-y-2">
+              <p class="mb-2 font-mono text-[10px] uppercase tracking-wider text-subtle">
+                stereo out
+              </p>
+              {
+                [
+                  ["YouTube", "02 + 03", "text-live"],
+                  ["Twitch", "01 + 03", "text-live"],
+                  ["Archive", "all six", "text-meter"],
+                ].map(([name, mix, tone]) => (
+                  <div class="rounded border border-line bg-ink px-2.5 py-2">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-[13px]">{name}</span>
+                      <span class={`font-mono text-[10px] ${tone}`}>●</span>
+                    </div>
+                    <span class="font-mono text-[10px] text-subtle">{mix}</span>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+
+          <p class="border-t border-line px-5 py-3 font-mono text-[11px] leading-relaxed text-subtle">
+            one video encode · <span class="text-fg">-c:v copy</span> to all three
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <SpecStrip />
+
+  {/* ------------------------------------------------------------- problem */}
+  <section class="wrap py-20 sm:py-24" data-reveal>
+    <div class="grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
+      <div>
+        <p class="eyebrow">The problem</p>
+        <h2 class="mt-3 text-balance text-3xl font-medium">
+          You have six tracks. Every platform will take one stereo pair.
+        </h2>
+      </div>
+      <div class="space-y-4 text-pretty leading-relaxed text-muted">
+        <p>
+          You run OBS with several audio tracks. Track 1 is the full mix
+          including copyrighted music, track 2 is the clean mix without it,
+          track 3 is your microphone.
+        </p>
+        <p>
+          Every live platform accepts exactly one stereo audio stream. So
+          normally you must choose one mix for everyone — and take a copyright
+          strike on YouTube, or send Twitch a broadcast with no music — or run
+          several encoders and several uploads off one machine and one
+          connection.
+        </p>
+        <p class="text-fg">
+          polyemesis ingests once and lets you pick, per destination, which
+          tracks get summed into the stereo feed that destination receives.
+          YouTube gets the clean mix. Your local archive keeps everything. Your
+          Discord restream keeps the mic hot.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <MixMatrix />
+
+  {/* --------------------------------------------------------------- proof */}
+  <section class="border-y border-line bg-surface/30 py-20 sm:py-24" data-reveal>
+    <div class="wrap">
+      <div class="max-w-2xl">
+        <p class="eyebrow">Proof, not a diagram</p>
+        <h2 class="mt-3 text-balance text-3xl font-medium">
+          Three destinations, three different loudness readings, one ingest.
+        </h2>
+        <p class="mt-4 text-pretty leading-relaxed text-muted">
+          One three-track source feeds all three destinations. The meters read
+          <span class="font-mono text-fg">−15.6</span>,
+          <span class="font-mono text-fg">−17.0</span> and
+          <span class="font-mono text-fg">−21.9&nbsp;LUFS</span> because each
+          was sent a different set of tracks — loudness is measured per
+          destination, after routing, on the programme that destination
+          actually receives.
+        </p>
+      </div>
+
+      <div class="mt-10 grid gap-6 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+        <LoudnessBars />
+        <figure>
+          <img
+            src="/shots/04-meters.png"
+          alt="polyemesis audio meters: three destinations showing −15.6, −17.0 and −21.9 LUFS from one ingest, with three source tracks metering live"
+          width="2880"
+          height="1800"
+          loading="lazy"
+          decoding="async"
+          class="w-full rounded-token border border-line"
+        />
+          <figcaption class="mt-3 font-mono text-[11px] text-subtle">
+            A capture from a running install. The bars on the left carry the same
+            measured figures; their movement is illustrative, the numbers are not.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ features */}
+  <section class="wrap py-20 sm:py-24" data-reveal>
+    <div class="max-w-2xl">
+      <p class="eyebrow">What else it does</p>
+      <h2 class="mt-3 text-balance text-3xl font-medium">
+        The rest of it is a broadcast server.
+      </h2>
+    </div>
+    <div class="mt-10 grid gap-px overflow-hidden rounded-token border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+      {
+        features.map((f) => (
+          <div class="bg-surface p-6">
+            <h3 class="text-pretty text-[15px] font-medium leading-snug text-fg">{f.t}</h3>
+            <p class="mt-2.5 text-sm leading-relaxed text-muted">{f.d}</p>
+          </div>
+        ))
+      }
+    </div>
+    <p class="mt-6 text-sm text-subtle">
+      <a href="/features" class="text-primary-bright hover:underline">The full list →</a>
+    </p>
+  </section>
+
+  {/* ------------------------------------------------------- what it won't do */}
+  <section class="border-t border-line bg-surface/30 py-20 sm:py-24" data-reveal>
+    <div class="wrap grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
+      <div>
+        <p class="eyebrow">Before you invest an evening</p>
+        <h2 class="mt-3 text-balance text-3xl font-medium">What it does not do.</h2>
+        <p class="mt-4 text-sm leading-relaxed text-subtle">
+          These are design decisions, not a roadmap. Stated here rather than
+          discovered an hour in.
+        </p>
+      </div>
+      <dl class="divide-y divide-line border-y border-line">
+        {
+          [
+            ["Multitrack over RTMP is not the operated path", "Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) defines more, and FFmpeg 7.1+ demuxes it — six tracks do arrive intact through the existing ingest, tested with FFmpeg publishing. What has not been done is a run with OBS itself, and a stock Ubuntu 24.04 FFmpeg 6.1.1 cannot do it at all. SRT is the path that is actually operated."],
+            ["One user, no roles", "No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming."],
+            ["Instagram cannot be automated", "There is no Live broadcast API, so nothing can create the broadcast, fetch a key, read chat or report viewers — the preset is listed and marked unsupported rather than pretending otherwise. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination like any other, and they change every broadcast."],
+            ["Your source video is your problem", "Renditions can re-encode down, but nothing will rescue a 4K60 ingest on a box that cannot software-encode it in realtime."],
+          ].map(([t, d]) => (
+            <div class="py-4">
+              <dt class="text-[15px] font-medium text-fg">{t}</dt>
+              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  {/* ----------------------------------------------------------------- cta */}
+  <section class="wrap py-20 sm:py-28" data-reveal>
+    <div class="card relative overflow-hidden px-6 py-14 text-center sm:px-12">
+      <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
+      <div class="relative">
+        <h2 class="text-balance text-3xl font-medium sm:text-4xl">
+          One binary. One config file. Your hardware.
+        </h2>
+        <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
+          No account, nothing phoning home, no hosted tier to graduate to. Pull the
+          image or download the binary and point OBS at it.
+        </p>
+        <div class="mt-8 flex flex-wrap justify-center gap-3">
+          <a href="/download" class="btn btn-primary">Install polyemesis</a>
+          <a
+            href="https://github.com/rainmanjam/polyemesis"
+            rel="noopener"
+            class="btn btn-ghost">Read the source</a
+          >
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>

@@ -1,0 +1,134 @@
+---
+import Base from "../layouts/Base.astro";
+
+/* Sourced from docs/COMPARISON.md, which is itself sourced from a survey of
+ * Restreamer's issue trackers. The losing rows are kept. A comparison page that
+ * only lists wins is read as marketing and discounted entirely; this audience
+ * checks. */
+
+const wins = [
+  ["Per-destination audio mix from one multitrack ingest", "No", "No"],
+  ["Channel-level mix matrix with per-cell gain", "No", "No"],
+  ["Per-destination loudness target, measured after routing", "No", "No"],
+  ["Multitrack archive — every ingest track preserved, stream-copied", "No", "No"],
+  ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "No", "No"],
+  ["Track annotations — what each incoming track actually is", "No", "No"],
+  ["Typed SRT rejections — the publisher is told why it was refused", "No", "n/a"],
+];
+
+const losses = [
+  [
+    "WebRTC / WHIP output",
+    "Missing. A sizeable subsystem, and the real use case is sub-second self-monitoring.",
+  ],
+  [
+    "Maturity and deployment count",
+    "Restreamer is years older and far more widely run. That is not a feature you can ship.",
+  ],
+  [
+    "Hosted option",
+    "There isn't one. restream.io will run it for you; polyemesis is a binary you operate.",
+  ],
+  [
+    "Multi-user and roles",
+    "One admin. No per-destination permissions, no team accounts.",
+  ],
+];
+---
+
+<Base
+  title="polyemesis vs Restreamer vs restream.io — self-hosted restreaming compared"
+  description="A self-hosted Restreamer and restream.io alternative, compared honestly — including where polyemesis loses. Per-destination audio is the thing neither does."
+  path="/comparison"
+>
+  <section class="wrap py-16 sm:py-20">
+    <p class="eyebrow">Comparison</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      Including the parts where it loses.
+    </h1>
+
+    {/* Primary, not amber. This is the most important paragraph on the site —
+        it tells a reader to go use a competitor — but it carries no signal, and
+        amber is reserved for things that do. */}
+    <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
+      <p class="text-pretty leading-relaxed text-fg">
+        <strong>If you do not need different audio per destination, use
+        Restreamer.</strong> It is more mature, more widely deployed, and it does
+        the common restreaming job well.
+      </p>
+      <p class="mt-3 text-pretty leading-relaxed text-muted">
+        polyemesis exists for one case it does not serve: <em>this</em> platform
+        gets the clean mix, <em>that</em> one gets the full mix, from one upload
+        and one video encode. If that is not your problem, the rest of this page
+        is academic.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap pb-16" data-reveal>
+    <h2 class="text-2xl font-medium">What polyemesis has that neither has</h2>
+    <div class="mt-6 overflow-x-auto rounded-token border border-line">
+      <table class="w-full min-w-[40rem] border-collapse text-sm">
+        <thead class="bg-surface">
+          <tr class="border-b border-line">
+            <th scope="col" class="px-4 py-3 text-left font-medium">Capability</th>
+            <th scope="col" class="w-32 px-4 py-3 text-center font-medium">Restreamer</th>
+            <th scope="col" class="w-32 px-4 py-3 text-center font-medium">restream.io</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            wins.map(([cap, a, b]) => (
+              <tr class="border-b border-line/60 last:border-0">
+                <td class="px-4 py-3 text-fg">{cap}</td>
+                <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{a}</td>
+                <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{b}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+      The multitrack ask is not hypothetical. “Multiple audio tracks for Twitch”
+      is an open request on Restreamer's own tracker — users asking it for the
+      thing polyemesis was built to be.
+    </p>
+  </section>
+
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What it does not have</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Ranked roughly by how often it gets asked for, which is the honest
+        ordering.
+      </p>
+      <dl class="mt-8 max-w-3xl divide-y divide-line border-y border-line">
+        {
+          losses.map(([t, d]) => (
+            <div class="py-4">
+              <dt class="text-[15px] font-medium text-fg">{t}</dt>
+              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
+            </div>
+          ))
+        }
+      </dl>
+      <p class="mt-8 text-sm text-subtle">
+        The full version, with the issue-tracker evidence behind each row, is in
+        <a
+          href="https://github.com/rainmanjam/polyemesis/blob/main/docs/COMPARISON.md"
+          rel="noopener"
+          class="text-primary-bright hover:underline">docs/COMPARISON.md</a
+        >.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap py-20 text-center" data-reveal>
+    <h2 class="text-balance text-3xl font-medium">Still the right problem?</h2>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="/download" class="btn btn-primary">Install it</a>
+      <a href="/#matrix" class="btn btn-ghost">Try the routing matrix</a>
+    </div>
+  </section>
+</Base>

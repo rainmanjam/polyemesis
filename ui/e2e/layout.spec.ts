@@ -20,8 +20,36 @@ async function metrics(page: import("@playwright/test").Page) {
     const b = document.body;
     const nav = document.querySelector("nav")!;
     const main = document.querySelector("main")!;
+    const de = document.documentElement;
     return {
+      // documentElement, NOT body.
+      //
+      // This measured body and could not see the bug it was written for. An
+      // absolutely positioned element with no positioned ancestor resolves
+      // against the initial containing block -- the html element -- so it
+      // extends documentElement.scrollHeight while body stays exactly the
+      // viewport height. The Dashboard's aria-live <output class="sr-only">
+      // did this: body measured a clean 900/900 and this assertion passed
+      // while the user was looking at two scrollbars.
+      docOverflowPx: de.scrollHeight - de.clientHeight,
       bodyOverflowPx: b.scrollHeight - b.clientHeight,
+
+      // Absolutely positioned elements whose containing block is the ICB and
+      // which sit below the fold. spillBelowFold cannot catch these: it bails
+      // as soon as an ancestor scrolls, which is right for ordinary content
+      // (that content is legitimately inside the scroller) and wrong for these
+      // (position:absolute lets them escape the ancestor that clips).
+      escapedAbsolutes: [...document.querySelectorAll("body *")]
+        .filter((el) => {
+          const cs = getComputedStyle(el);
+          if (cs.position !== "absolute") return false;
+          for (let q = el.parentElement; q; q = q.parentElement) {
+            if (getComputedStyle(q).position !== "static") return false; // contained
+          }
+          return el.getBoundingClientRect().bottom > de.clientHeight + 1;
+        })
+        .map((el) => `${el.tagName.toLowerCase()}.${(el.className || "").toString().split(" ")[0]}`),
+
       navOverflowY: getComputedStyle(nav).overflowY,
       navScrolls: nav.scrollHeight > nav.clientHeight + 1,
       mainScrolls: main.scrollHeight > main.clientHeight + 1,
@@ -54,7 +82,24 @@ test.describe("app shell scrolling", () => {
     // drew a page scrollbar immediately beside <main>'s -- two bars, one of
     // which scrolled nothing the user cared about.
     expect(m.spillBelowFold, "elements hanging unclipped below the fold").toBe(0);
-    expect(m.bodyOverflowPx, "the document must not extend past the viewport").toBe(0);
+    expect(m.escapedAbsolutes, "absolutely positioned elements escaping to the html element").toEqual([]);
+    expect(m.docOverflowPx, "the document must not extend past the viewport").toBe(0);
+    expect(m.bodyOverflowPx, "body must not extend past the viewport").toBe(0);
+  });
+
+  test("no page-level scrollbar on a tall viewport either", async ({ page }) => {
+    // The escaping <output> was viewport-independent: it sat at a fixed offset
+    // inside main's content, so it extended the document by the same amount at
+    // 900px tall as at 500px. Every case in this file used a SHORT viewport,
+    // because the original bug was the nav not fitting -- so the whole suite
+    // could pass with a second scrollbar present at ordinary window sizes.
+    await page.setViewportSize(TALL);
+    await page.goto("/");
+    await expect(page.locator("nav")).toBeVisible();
+
+    const m = await metrics(page);
+    expect(m.escapedAbsolutes, "absolutely positioned elements escaping to the html element").toEqual([]);
+    expect(m.docOverflowPx, "the document must not extend past the viewport").toBe(0);
   });
 
   test("the nav scrolls itself when it cannot fit, rather than the page", async ({ page }) => {

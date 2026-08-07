@@ -318,7 +318,24 @@ export function AppLayout({
           </nav>
         </TooltipProvider>
 
-        <main className="min-w-0 flex-1 overflow-y-auto">
+        {/* `relative` is load-bearing, not decoration.
+
+            The shell is h-dvh, so nothing should ever scroll the document —
+            only this pane and the sidebar. An absolutely positioned descendant
+            with no positioned ancestor resolves against the initial containing
+            block instead, which is the html element, so it extends
+            documentElement.scrollHeight without touching body's. That produces
+            a second scrollbar down the right-hand side next to this pane's own,
+            and measuring body tells you nothing because body is still exactly
+            the viewport height.
+
+            The Dashboard's aria-live <output> did precisely this: Tailwind's
+            .sr-only is `position: absolute` with no top/left, so it sat at its
+            static position ~951px down and stretched the document to 952px
+            against a 900px viewport. Making this pane a containing block keeps
+            that — and anything else a page renders — inside the scroller where
+            it belongs. */}
+        <main className="relative min-w-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>

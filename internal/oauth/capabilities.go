@@ -342,7 +342,7 @@ var platformCapabilities = []PlatformCapability{
 	},
 	{
 		PresetID: "instagram", Name: "Instagram Live", Tier: TierUnsupported,
-		Summary:   "polyemesis cannot stream to Instagram. Instagram's platform covers messaging, content publishing and comments — there is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts.",
+		Summary:   "polyemesis cannot automate Instagram: there is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination — copied by hand, and they change every broadcast.",
 		ReadFirst: "This entry exists to save you the evening. A destination that silently never connects is worse than no destination at all: it looks like a bug in polyemesis, and there is nothing to fix. If your account still has Live Producer RTMP access, add a Generic RTMPS destination and paste the server URL and key Meta gives you — but check that you have it before you build the show around it.",
 		Caps: map[Capability]Support{
 			CapSSO: SupportNo,

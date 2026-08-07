@@ -39,7 +39,8 @@ Homebrew's `ffmpeg` bottle currently has no SRT. Options:
 - Use the **direct-to-relay** method (§6) — full multitrack routing, no SRT.
 
 polyemesis starts and warns rather than refusing, so you can always reach
-Settings and switch the ingest to RTMP.
+Settings and switch a source's ingest to RTMP. Any number of sources can be on
+RTMP at once, so an SRT-less FFmpeg no longer limits you to testing one.
 
 ---
 
@@ -86,7 +87,8 @@ Notes on the flags that matter:
   GOP boundaries.
 
 Want six tracks instead of three? Add more `-f lavfi -i "sine=frequency=..."`
-inputs and matching `-map N:a` entries, up to six.
+inputs and matching `-map N:a` entries. The ceiling is `routing.MaxTracks` (32),
+though six is what OBS sends and what the fixtures assume.
 
 **Verify polyemesis saw it.** On the Dashboard, "Audio tracks" should read `3`
 and the video line should read `h264 1280×720 @ 30.00fps`. On the Audio meters
@@ -205,17 +207,59 @@ the copyrighted-music track really is absent from the YouTube feed.
 RTMP carries one audio track by protocol, so this exercises ingest, relay,
 supervision and destinations but not multitrack routing.
 
-Set Settings → Ingest → Mode to **RTMP**, note the app and stream key, then:
+Open the source under **Sources**, set `Ingest → Mode: RTMP`, and copy its app
+and stream key — they are per-source, so use that source's key rather than a
+fixed one:
 
 ```bash
+KEY=<the stream key from Sources>
+
 ffmpeg -hide_banner -re \
   -f lavfi -i "testsrc2=size=1280x720:rate=30" \
   -f lavfi -i "sine=frequency=440:sample_rate=48000" \
   -map 0:v -map 1:a \
   -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -b:v 2500k \
   -c:a aac -b:a 128k \
-  -f flv "rtmp://127.0.0.1:1935/live/stream"
+  -f flv "rtmp://127.0.0.1:1935/live/$KEY"
 ```
+
+### 5a. Two RTMP sources at once
+
+The check worth adding, because until 2026-08-06 it was impossible: one RTMP
+port carrying two independent programmes, told apart by their keys. If this
+fails, the one-port RTMP listener has regressed to the `ffmpeg -listen 1`
+behaviour it replaced — one publisher holding the socket and the second silently
+receiving nothing.
+
+Make a **second** source, also RTMP, and run both publishers together. Give them
+different tones so the meters distinguish them without guesswork:
+
+```bash
+KEY_A=<first source's stream key>
+KEY_B=<second source's stream key>
+
+for pair in "440:$KEY_A" "880:$KEY_B"; do
+  freq=${pair%%:*}; key=${pair#*:}
+  ffmpeg -hide_banner -re \
+    -f lavfi -i "testsrc2=size=1280x720:rate=30" \
+    -f lavfi -i "sine=frequency=$freq:sample_rate=48000" \
+    -map 0:v -map 1:a \
+    -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -b:v 2500k \
+    -c:a aac -b:a 128k \
+    -f flv "rtmp://127.0.0.1:1935/live/$key" &
+done
+wait
+```
+
+Both sources should go live and stay live. Two further things to confirm, each
+guarding a decision rather than a line of code:
+
+- **Stopping one does not disturb the other.** They are separate publisher slots
+  on one listener; if killing publisher A drops B, the slots are keyed wrongly.
+- **A wrong key is refused, not misrouted.** Publish to
+  `rtmp://127.0.0.1:1935/live/nonsense` and it should be dropped with a log line
+  that names no source. Landing on whichever source happened to be there would
+  make the stream key decorative rather than the address.
 
 ---
 

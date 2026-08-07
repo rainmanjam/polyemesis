@@ -1,0 +1,139 @@
+---
+import "../styles/global.css";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+
+interface Props {
+  title: string;
+  description: string;
+  /** Canonical path, e.g. "/features". Defaults to the current URL. */
+  path?: string;
+}
+
+const { title, description, path } = Astro.props;
+const canonical = new URL(path ?? Astro.url.pathname, Astro.site ?? "https://polyemesis.com");
+const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical.href} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical.href} />
+    <meta property="og:image" content={ogImage.href} />
+    <meta property="og:site_name" content="polyemesis" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage.href} />
+
+    {/* Structured data. Every property here is checkable against the repo —
+        there is deliberately no aggregateRating, because inventing review
+        counts to win a star rating in search results is exactly the kind of
+        thing the audience for a self-hosted broadcast server would notice and
+        hold against the project. `offers` at price 0 is the honest way to say
+        "free and MIT" in a vocabulary search engines read. */}
+    <script type="application/ld+json" is:inline set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      name: "polyemesis",
+      applicationCategory: "MultimediaApplication",
+      applicationSubCategory: "Live video streaming server",
+      operatingSystem: "Linux, macOS, Windows, Docker",
+      url: "https://polyemesis.com",
+      downloadUrl: "https://github.com/rainmanjam/polyemesis/releases/latest",
+      codeRepository: "https://github.com/rainmanjam/polyemesis",
+      license: "https://spdx.org/licenses/MIT.html",
+      softwareRequirements: "FFmpeg 6.0 or newer, built with libsrt for multitrack SRT ingest",
+      description:
+        "Self-hosted live restreaming server with per-destination multichannel " +
+        "audio routing. One SRT ingest carrying multiple audio tracks; each " +
+        "destination receives its own mix. Video is copied, never re-encoded.",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      isAccessibleForFree: true,
+    })} />
+
+    <meta name="theme-color" content="#0b0d11" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    {/* Self-hosted, not linked. A font request to a third party is a request the
+        visitor did not make and the slowest thing on an otherwise static page.
+        All three are variable fonts subset to latin, so the whole typographic
+        system is 94 KB — one file per family covering every weight used. */}
+    <link rel="preload" href="/fonts/space-grotesk.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-sans.woff2" as="font" type="font/woff2" crossorigin />
+    <style is:inline>
+      @font-face {
+        font-family: "Space Grotesk";
+        src: url("/fonts/space-grotesk.woff2") format("woff2");
+        font-weight: 400 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "IBM Plex Sans";
+        src: url("/fonts/ibm-plex-sans.woff2") format("woff2");
+        font-weight: 400 600;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("/fonts/jetbrains-mono.woff2") format("woff2");
+        font-weight: 400 500;
+        font-display: swap;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen antialiased">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-primary focus:px-4 focus:py-2 focus:text-ink"
+      >Skip to content</a
+    >
+    <Nav />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+
+    {/* Entry reveals, for browsers without scroll-driven animations. Where
+        `animation-timeline: view()` exists the CSS drives it and this never
+        runs — the check is the same @supports test, asked from script.
+
+        The elements start visible in the markup and are only hidden once this
+        script has confirmed it can bring them back. A reader with JavaScript
+        off, or one whose network drops this file, sees the whole page rather
+        than a column of blank space. */}
+    <script is:inline>
+      (() => {
+        const css = window.CSS;
+        if (css && css.supports && css.supports("animation-timeline", "view()")) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+        const targets = document.querySelectorAll("[data-reveal]");
+        if (!targets.length || !("IntersectionObserver" in window)) return;
+
+        targets.forEach((el) => el.classList.add("reveal"));
+
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (!e.isIntersecting) continue;
+              e.target.classList.add("shown");
+              io.unobserve(e.target); // reveal once; re-animating on scroll-back is nausea, not polish
+            }
+          },
+          { rootMargin: "0px 0px -8% 0px", threshold: 0.05 },
+        );
+        targets.forEach((el) => io.observe(el));
+      })();
+    </script>
+  </body>
+</html>

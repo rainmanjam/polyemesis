@@ -15,7 +15,24 @@ import (
 // port from a unit test.
 func sourceServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	t.Helper()
-	return renditionServer(t, defaultTools())
+	h, store, sign := renditionServer(t, defaultTools())
+
+	// Say SRT out loud.
+	//
+	// A fresh install now starts at db.IngestUnset — nothing is chosen for the
+	// operator — so a source created by the fixture has no ingest mode and
+	// therefore no publish URL and no token enforcement. That is the point of
+	// the change, and it means a test that wants SRT behaviour has to ask for
+	// it rather than inherit it from a default that no longer exists.
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("fixture source: %v", err)
+	}
+	src.Ingest.Mode = db.IngestSRT
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("fixture: choose SRT: %v", err)
+	}
+	return h, store, sign
 }
 
 type sourceRow struct {
@@ -88,6 +105,78 @@ func TestTheSRTPublishURLCarriesTheToken(t *testing.T) {
 	}
 	if !strings.Contains(srt, rows[0].Token) {
 		t.Errorf("the SRT publish URL does not carry the token, so it addresses nothing: %s", srt)
+	}
+}
+
+// RTMP is addressed by the same token, split across OBS's two boxes: the map
+// value is the server half and streamKey carries the address.
+//
+// It used to emit ingest.rtmp.streamKey, which was "stream" for every source
+// created from the defaults. Handing that to an operator now would give them a
+// key that reaches nothing -- and if it did reach something, it would be
+// whichever source the map happened to yield.
+func TestTheRTMPPublishURLsCarryTheToken(t *testing.T) {
+	h, store, sign := sourceServer(t)
+
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Ingest.Mode = db.IngestRTMP
+	src.Ingest.RTMP.App = "live"
+	src.Ingest.RTMP.StreamKey = "stream" // what an older build stored
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+
+	row := listSources(t, h, sign)[0]
+	if got := row.PublishURLs["streamKey"]; got != row.Token {
+		t.Errorf("streamKey = %q, want the token %q: anything else addresses nothing", got, row.Token)
+	}
+	server := row.PublishURLs["rtmp"]
+	if server == "" {
+		t.Fatal("no RTMP publish URL offered")
+	}
+	// The server half must NOT also carry the address. An operator who fills in
+	// both boxes would publish to /live/<token>/<token>, which reaches nothing
+	// and looks exactly like it should work.
+	if strings.Contains(server, row.Token) {
+		t.Errorf("the RTMP server URL carries the token as well as the key box: %s", server)
+	}
+	if !strings.HasSuffix(server, "/live") {
+		t.Errorf("rtmp server URL = %q, want it to end at the app", server)
+	}
+}
+
+// tokenEnforced must be true for RTMP too. It used to be hard-coded to SRT,
+// which was honest while RTMP was addressed by a stream key and is a lie now:
+// an RTMP source told "your token is not enforced" would have its operator
+// leave a rotated token alone believing it protects nothing.
+func TestTokenEnforcedCoversRTMPSources(t *testing.T) {
+	h, store, sign := sourceServer(t)
+
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Ingest.Mode = db.IngestRTMP
+	src.Ingest.RTMP.App = "live"
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+	srv := serverUnderTest(t, h)
+	if srv.mgr == nil {
+		t.Fatal("no manager in the fixture")
+	}
+	if err := srv.mgr.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if !srv.mgr.ListenerBound(db.IngestRTMP) {
+		t.Skip("the RTMP listener could not bind in this environment; nothing to assert")
+	}
+	if !listSources(t, h, sign)[0].TokenEnforced {
+		t.Error("tokenEnforced is false for an RTMP source while its listener is bound")
 	}
 }
 func TestUpdatingASourceWithoutATokenKeepsTheStoredOne(t *testing.T) {

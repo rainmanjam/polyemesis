@@ -169,57 +169,20 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 	return s, err
 }
 
-// rtmpHolder returns the name of the source already using RTMP ingest, if any.
-// excludeID is the row being updated, so a source never conflicts with itself.
-func (d *DB) rtmpHolder(excludeID int64) (string, error) {
-	rows, err := d.ListSources()
-	if err != nil {
-		return "", err
-	}
-	for _, s := range rows {
-		if s.ID != excludeID && s.Ingest.Mode == IngestRTMP {
-			return s.Name, nil
-		}
-	}
-	return "", nil
-}
-
-// checkRTMPExclusive refuses a second source on RTMP ingest.
-//
-// There is one RTMP listener and no way to address a second source through it:
-// RTMP routing would need the app/streamkey path demultiplexed, which needs a
-// real RTMP server rather than the single-connection `ffmpeg -listen 1` this
-// uses. SRT has no such limit because it is addressed by token.
-//
-// Refused at the form rather than at runtime. The alternative is a source that
-// saves cleanly, reports itself configured, and silently never receives
-// anything because the socket is already held.
-func (d *DB) checkRTMPExclusive(s *Source) error {
-	if s.Ingest.Mode != IngestRTMP {
-		return nil
-	}
-	owner, err := d.rtmpHolder(s.ID)
-	if err != nil {
-		return err
-	}
-	if owner != "" {
-		return fmt.Errorf("source %q already uses the RTMP listener, and there is only one. "+
-			"Use SRT for this source -- it is addressed by token, so any number can share the port", owner)
-	}
-	return nil
-}
-
 // CreateSource inserts a source, minting publish tokens when none were given.
 //
-// There is no longer any port to allocate or move out of the way: every source
-// arrives on the one SRT listener and is told apart by its token, so adding a
-// source cannot collide with an existing one. The only exclusivity left is
-// RTMP, which has a single listener and no way to address a second source.
+// There is nothing left to allocate or move out of the way, and no exclusivity
+// left to check. Every source arrives on one listener per protocol and is told
+// apart by its token -- SRT by the streamid, RTMP by the URL path -- so adding
+// a source cannot collide with an existing one whichever protocol it uses.
+//
+// RTMP used to be the exception (checkRTMPExclusive, deleted): `ffmpeg -listen
+// 1` is a single-connection receiver that cannot demultiplex by path, so an
+// install could carry exactly one RTMP source. internal/rtmpserver replaced it
+// with a real one-port server, which is what removed the rule rather than
+// merely stopping it from being enforced.
 func (d *DB) CreateSource(s *Source) error {
 	if err := validateSource(s); err != nil {
-		return err
-	}
-	if err := d.checkRTMPExclusive(s); err != nil {
 		return err
 	}
 	if s.Token == "" {
@@ -259,12 +222,6 @@ func (d *DB) CreateSource(s *Source) error {
 // UpdateSource writes every mutable field.
 func (d *DB) UpdateSource(s *Source) error {
 	if err := validateSource(s); err != nil {
-		return err
-	}
-	// Rejected rather than moved, unlike create: an edit is an operator naming
-	// a specific port, and silently using a different one would leave them
-	// pointing an encoder somewhere nothing is listening.
-	if err := d.checkRTMPExclusive(s); err != nil {
 		return err
 	}
 	if s.Token == "" {

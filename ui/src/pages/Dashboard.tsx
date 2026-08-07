@@ -18,10 +18,10 @@ import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
-import { labelForState, toneBadge, toneForState } from "@/lib/signal";
+import { toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
 import type { Destination, MetaField, SystemInfo } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useT, useStateLabel } from "@/lib/i18n";
 
 // hls.js is a few hundred kilobytes that only the preview needs, and the
 // preview is off entirely for some installs. Load it alongside the dashboard
@@ -568,6 +568,7 @@ function GoLiveComposer() {
 }
 
 export function Dashboard() {
+  const stateLabel = useStateLabel();
   const t = useT();
   const { status } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -714,7 +715,7 @@ export function Dashboard() {
                 <StatusDot tone={ingestTone} />
                 Ingest
               </CardTitle>
-              <Badge variant={toneBadge[ingestTone]}>{labelForState(ingest?.state)}</Badge>
+              <Badge variant={toneBadge[ingestTone]}>{stateLabel(ingest?.state)}</Badge>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -799,7 +800,7 @@ export function Dashboard() {
                       <span className="text-[11px]">{label}</span>
                     </div>
                     <span className="font-mono text-[10px] text-muted-foreground">
-                      {proc ? labelForState(proc.state) : absent}
+                      {proc ? stateLabel(proc.state) : absent}
                     </span>
                   </div>
                 );

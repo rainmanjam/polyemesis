@@ -1,0 +1,37 @@
+---
+/* What replaces the logo marquee.
+ *
+ * Both design passes independently said to kill the greyed-out customer-logo
+ * strip, and for the same reason: this project has no logos to show and an
+ * invented one would be the fastest way to lose the audience. What a
+ * self-hoster wants in that slot is the spec sheet.
+ *
+ * Every figure here is checkable against the repo. None of them is a
+ * performance claim — "0.2% CPU" was proposed and dropped, because a number
+ * without a reproducible benchmark behind it is exactly the kind of thing this
+ * audience tests and disbelieves.
+ */
+const specs = [
+  { k: "Ingest", v: "SRT · up to 32 tracks" },
+  { k: "Video", v: "-c:v copy" },
+  { k: "Ships as", v: "one static binary" },
+  { k: "Runtime deps", v: "FFmpeg only" },
+  { k: "Loudness", v: "EBU R128 per destination" },
+  { k: "Licence", v: "MIT" },
+];
+---
+
+<div class="border-y border-line bg-surface/40">
+  <div class="wrap">
+    <dl class="grid grid-cols-2 divide-line sm:grid-cols-3 lg:grid-cols-6 lg:divide-x">
+      {
+        specs.map((s) => (
+          <div class="px-4 py-4 first:pl-0 lg:px-5">
+            <dt class="font-mono text-[10px] uppercase tracking-wider text-subtle">{s.k}</dt>
+            <dd class="mt-1 font-mono text-[13px] text-fg">{s.v}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+</div>

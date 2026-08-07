@@ -514,7 +514,14 @@ function SourceCard({
               <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-live" />
               <span>
                 <strong className="font-semibold">{t("sources.tokenIsCredential")}</strong>{" "}
-                {t("sources.tokenEnforcedDetail")}
+                {/* Mode-specific, because the two protocols carry the token in
+                    different places and the generic sentence named only SRT's.
+                    Now that the token is enforced for RTMP too, an RTMP operator
+                    was being told to put it in an "SRT streamid" — a field their
+                    encoder does not have. */}
+                {ing.mode === "rtmp"
+                  ? t("sources.tokenEnforcedDetailRtmp")
+                  : t("sources.tokenEnforcedDetailSrt")}
               </span>
             </p>
           ) : (

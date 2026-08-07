@@ -5,9 +5,11 @@
 > a shared token-addressed port *alongside* per-source ports, with the shared
 > path off by default. That position was reversed: token-addressed SRT is now
 > the only SRT path, per-source ports are gone entirely, and the failover backup
-> is reached at `<token>.backup` on the same port. The comparison with Core
-> below still holds and is why this page is kept — read the successor first for
-> what actually shipped.
+> is reached at `<token>.backup` on the same port. RTMP followed on 2026-08-06 —
+> one port, addressed by stream key, any number of sources — so the "Not doing
+> (yet)" section below is now fully spent. The comparison with Core below still
+> holds and is why this page is kept — read the successor first for what
+> actually shipped.
 
 Inspired by datarhei Core, not copied from it. Core proves the shape works —
 one SRT port, many programmes, demultiplexed at accept time. This document is
@@ -140,6 +142,14 @@ a real SRT publisher and every SRT proof so far has had to run in Docker.
   so a port each costs little, and a Go RTMP server is a separate dependency
   decision — Core uses a joy4 fork; `mediamtx` is the better-maintained MIT
   option today.
+
+  > **Done, 2026-08-06.** Deferred twice — here, then again in
+  > DESIGN-ONE-PORT-ONLY, which replaced "a port each" with "one port, one
+  > source". Both are now superseded: RTMP is one port serving any number of
+  > sources, addressed by the stream key. The instinct in this bullet was right
+  > about *where* the answer would come from — the dependency turned out to be
+  > `bluenviron/gortmplib`, from the MediaMTX maintainers, rather than a joy4
+  > fork. See [DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md#rtmp).
 - **Replacing per-port addressing.** Both work at once: the shared port
   demultiplexes by token, and a source may still hold a dedicated port. Core is
   one-port only; per-port remains genuinely useful for firewall rules, separate

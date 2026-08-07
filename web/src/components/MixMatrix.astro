@@ -1,0 +1,303 @@
+---
+/* The patchbay, playable.
+ *
+ * This is the whole product in one control. Every other restreamer sends the
+ * same stereo pair everywhere; polyemesis's claim is that each column below can
+ * differ. Someone who toggles two crosspoints and watches one platform's level
+ * move while another's stays put has understood the pitch without reading a
+ * word of it.
+ *
+ * ON THE NUMBERS. An earlier draft labelled the computed figure "LUFS" and that
+ * was wrong: LUFS is K-weighted and gated over time, and this is a power sum of
+ * nominal track levels. It is labelled "sum level, dBFS" and the method is
+ * stated on the page. The audience for this product measures loudness for a
+ * living and would have caught it — and a site that fakes a meter has told them
+ * everything they need to know about the software.
+ *
+ * The matrix also emits the config for whatever you built, which is the
+ * difference between a toy and a tool.
+ */
+
+const TRACKS = [
+  { id: 1, name: "Full mix", note: "music + game + mic", dbfs: -19.5, slug: "full-mix" },
+  { id: 2, name: "Clean mix", note: "no copyrighted music", dbfs: -20.8, slug: "clean-mix" },
+  { id: 3, name: "Mic", note: "your voice only", dbfs: -21.9, slug: "mic" },
+  { id: 4, name: "Guest", note: "remote caller", dbfs: -22.4, slug: "guest" },
+  { id: 5, name: "Game", note: "capture audio", dbfs: -20.1, slug: "game" },
+  { id: 6, name: "Ambience", note: "room / crowd", dbfs: -26.0, slug: "ambience" },
+];
+
+const DESTS = [
+  { id: "youtube", name: "YouTube", hint: "clean — no DMCA", preset: [2, 3] },
+  { id: "twitch", name: "Twitch", hint: "music is fine", preset: [1, 3] },
+  { id: "kick", name: "Kick", hint: "same as Twitch", preset: [1, 3] },
+  { id: "archive", name: "Archive", hint: "everything, unencoded", preset: [1, 2, 3, 4, 5, 6] },
+];
+---
+
+<section class="wrap py-20 sm:py-28" id="matrix" data-reveal>
+  <div class="max-w-2xl">
+    <p class="eyebrow">The thing nothing else does</p>
+    <h2 class="mt-3 text-balance text-3xl font-medium sm:text-4xl">
+      Patch each track to the platforms that should hear it.
+    </h2>
+    <p class="mt-4 text-pretty leading-relaxed text-muted">
+      This ingest carries six audio tracks. Light a crosspoint and that track is
+      summed into that destination's stereo pair — and into no other. Hover a
+      column to trace one destination's path. The video is copied, not
+      re-encoded, so none of this buys a second encode.
+    </p>
+  </div>
+
+  <div class="mt-10 overflow-hidden rounded-token border border-line bg-surface">
+    <div class="overflow-x-auto">
+      <table class="patch w-full min-w-[46rem] border-collapse text-sm">
+        <caption class="sr-only">
+          Routing matrix: which ingest audio tracks each destination receives
+        </caption>
+        <thead>
+          <tr class="border-b border-line">
+            <th scope="col" class="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-subtle">
+              Ingest track
+            </th>
+            {
+              DESTS.map((d, i) => (
+                <th scope="col" class={`col-${i + 1} px-3 py-3 text-center font-medium`}>
+                  <span class="block text-fg">{d.name}</span>
+                  <span class="block font-sans text-[11px] font-normal text-subtle">{d.hint}</span>
+                </th>
+              ))
+            }
+          </tr>
+        </thead>
+        <tbody>
+          {
+            TRACKS.map((t) => (
+              <tr class="border-b border-line/60 last:border-0">
+                <th scope="row" class="px-4 py-2 text-left font-normal">
+                  <span class="block">
+                    <span class="font-mono text-xs text-subtle">{String(t.id).padStart(2, "0")}</span>
+                    <span class="ml-2 text-fg">{t.name}</span>
+                  </span>
+                  <span class="ml-7 block text-[11px] text-subtle">{t.note}</span>
+                </th>
+                {
+                  DESTS.map((d, i) => (
+                    <td class={`c${i + 1} px-3 py-2 text-center`}>
+                      <input
+                        type="checkbox"
+                        class="xpt mm-box"
+                        data-dest={d.id}
+                        data-db={t.dbfs}
+                        data-track={t.id}
+                        checked={d.preset.includes(t.id)}
+                        aria-label={`Send track ${t.id}, ${t.name}, to ${d.name}`}
+                      />
+                    </td>
+                  ))
+                }
+              </tr>
+            ))
+          }
+        </tbody>
+        <tfoot>
+          <tr class="border-t border-line bg-raised/60">
+            <th scope="row" class="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-subtle">
+              Sum level
+            </th>
+            {
+              DESTS.map((d, i) => (
+                <td class={`c${i + 1} px-3 py-3 text-center`}>
+                  <span class="font-mono text-base text-live" data-out={d.id}>—</span>
+                  <span class="block font-mono text-[10px] text-subtle">dBFS</span>
+                </td>
+              ))
+            }
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+  <div class="mt-4 flex flex-wrap items-start justify-between gap-4">
+    <p class="max-w-3xl text-xs leading-relaxed text-subtle">
+      <strong class="text-muted">How that figure is derived:</strong> summing
+      <em>k</em> uncorrelated sources raises level by 10·log₁₀(<em>k</em>), so two
+      tracks land about 3&nbsp;dB above one. This is a power sum of nominal track
+      levels — <em>not</em> a loudness measurement. Real EBU&nbsp;R128 loudness is
+      K-weighted and gated over time, and polyemesis measures it per destination
+      on the mix that destination actually receives.
+    </p>
+    <button type="button" id="mm-reset" class="btn btn-ghost h-9 whitespace-nowrap px-3 text-sm">
+      Reset
+    </button>
+  </div>
+
+  <div class="mt-8 overflow-hidden rounded-token border border-line bg-ink">
+    <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
+      <span class="font-mono text-xs text-subtle">the routing you just built</span>
+      <button
+        type="button"
+        id="mm-copy"
+        class="rounded border border-line-strong px-2.5 py-1 font-mono text-[11px] text-muted transition-colors hover:border-primary hover:text-fg"
+      >
+        Copy
+      </button>
+    </div>
+    <pre class="overflow-x-auto px-4 py-4 font-mono text-xs leading-relaxed text-muted"><code id="mm-yaml"></code></pre>
+  </div>
+</section>
+
+<script>
+  import { animate } from "motion/mini";
+  import { spring } from "motion";
+
+  /* Plain DOM on purpose. This is the only interactive thing on the site and a
+     framework for one table would outweigh the page it sits on.
+     Motion is here for one reason, and the import line is chosen carefully.
+
+     WHAT WAS MEASURED, tree-shaken and gzipped:
+       motion/mini  animate only ................ 3.1 KB
+       motion/mini + spring ...................... 4.7 KB   <- what this uses
+       motion       animate + scroll ............ 25.4 KB
+       motion       animate + number tweening ... 22.8 KB
+
+     motion/mini cannot tween a raw number — `animate(0, 1, …)` throws "No
+     valid elements provided", because mini is WAAPI-driven and element-only.
+     Getting the readout to count would mean the full package: 22.8 KB, versus
+     the dozen lines of requestAnimationFrame below. On a page that ships no
+     other JavaScript, to an audience that will open the Network panel, 18 KB
+     for one number tween is not a trade worth making.
+
+     What mini IS paid for is the spring on the crosspoint: a real spring
+     settles differently depending on how fast it was displaced, so a cell
+     toggled during another cell's animation resolves correctly instead of
+     restarting. CSS keyframes cannot do that — `latch` restarts from scale
+     0.88 every time, which is visible when you toggle a row quickly.
+
+     scroll() is deliberately NOT imported. It would replace
+     `animation-timeline: view()` — already running, free, and off the main
+     thread — with a JS-driven equivalent, in exactly the browsers we would be
+     adding weight for. */
+
+  const REDUCED = matchMedia("(prefers-reduced-motion: reduce)");
+  const TRACK_SLUG: Record<string, string> = {
+    "1": "full-mix", "2": "clean-mix", "3": "mic",
+    "4": "guest", "5": "game", "6": "ambience",
+  };
+  const DEST_LABEL: Record<string, string> = {
+    youtube: "YouTube", twitch: "Twitch", kick: "Kick", archive: "Archive",
+  };
+
+  const boxes = Array.from(document.querySelectorAll<HTMLInputElement>(".mm-box"));
+  const yamlEl = document.getElementById("mm-yaml");
+  const initial = boxes.map((b) => b.checked);
+
+  /** Power sum. Two equal sources are 3 dB above one; this generalises it. */
+  function sumDb(levels: number[]): number | null {
+    if (!levels.length) return null;
+    return 10 * Math.log10(levels.reduce((a, l) => a + Math.pow(10, l / 10), 0));
+  }
+
+  /** Tween the readout so a changed level reads as having moved, and in which
+   *  direction. An instant textContent swap is the one thing that makes the
+   *  matrix feel like a form rather than a meter.
+   *
+   *  Keyed per destination and cancellable: toggling three cells quickly must
+   *  not leave three tweens fighting over the same node. */
+  const tweens = new Map<string, number>();
+
+  function setLevel(el: HTMLElement, dest: string, to: number | null) {
+    const prev = tweens.get(dest);
+    if (prev) cancelAnimationFrame(prev);
+
+    const paint = (v: number) => {
+      el.textContent = v.toFixed(1);
+      // Past −12 dBFS a summed programme is running hot enough that a limiter
+      // starts doing real work. Colour says so; a bare number would not.
+      el.className = v > -12 ? "font-mono text-base text-cross" : "font-mono text-base text-live";
+    };
+
+    if (to === null) {
+      el.textContent = "silent";
+      el.className = "font-mono text-base text-down";
+      tweens.delete(dest);
+      return;
+    }
+
+    const from = Number.parseFloat(el.textContent ?? "");
+    if (!Number.isFinite(from) || REDUCED.matches) { paint(to); return; }
+
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / 260);
+      // easeOutCubic: fast start, soft landing — a needle settling.
+      paint(from + (to - from) * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) tweens.set(dest, requestAnimationFrame(step));
+      else tweens.delete(dest);
+    };
+    tweens.set(dest, requestAnimationFrame(step));
+  }
+
+  function render() {
+    const byDest = new Map<string, { tracks: number[]; levels: number[] }>();
+    for (const b of boxes) {
+      const d = b.dataset.dest!;
+      if (!byDest.has(d)) byDest.set(d, { tracks: [], levels: [] });
+      if (b.checked) {
+        byDest.get(d)!.tracks.push(Number(b.dataset.track));
+        byDest.get(d)!.levels.push(Number(b.dataset.db));
+      }
+    }
+
+    for (const [dest, { levels }] of byDest) {
+      const out = document.querySelector<HTMLElement>(`[data-out="${dest}"]`);
+      if (!out) continue;
+      setLevel(out, dest, sumDb(levels));
+    }
+
+    const lines: string[] = ["destinations:"];
+    for (const [dest, { tracks }] of byDest) {
+      lines.push(`  - name: ${DEST_LABEL[dest]}`);
+      lines.push("    video: copy");
+      if (!tracks.length) {
+        lines.push("    audio: []                 # this destination gets silence");
+      } else {
+        const list = `    audio: [${tracks.join(", ")}]`;
+        lines.push(`${list.padEnd(30)}# ${tracks.map((t) => TRACK_SLUG[String(t)]).join(" + ")}`);
+      }
+    }
+    if (yamlEl) yamlEl.textContent = lines.join("\n");
+  }
+
+  boxes.forEach((b) => {
+    b.addEventListener("change", () => {
+      render();
+      if (REDUCED.matches) return;
+      // Displace and let the spring resolve it. Toggling the same cell again
+      // mid-flight retargets from wherever it currently is, which is the whole
+      // reason this is a spring and not the CSS keyframe it replaced.
+      animate(b, { scale: [0.86, 1] }, { type: spring, stiffness: 520, damping: 18 });
+    });
+  });
+
+  document.getElementById("mm-reset")?.addEventListener("click", () => {
+    boxes.forEach((b, i) => (b.checked = initial[i]));
+    render();
+  });
+
+  document.getElementById("mm-copy")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    try {
+      await navigator.clipboard.writeText(yamlEl?.textContent ?? "");
+      btn.textContent = "Copied";
+    } catch {
+      // Clipboard is unavailable on an insecure origin — say so rather than
+      // reporting a success that did not happen.
+      btn.textContent = "Select and copy";
+    }
+    setTimeout(() => (btn.textContent = "Copy"), 1600);
+  });
+
+  render();
+</script>

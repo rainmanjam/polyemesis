@@ -220,7 +220,9 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		SRTLatencyMS:  settings.Ingest.SRT.LatencyMS,
 		RTMPPort:      settings.Listeners.RTMPPort,
 		RTMPApp:       settings.Ingest.RTMP.App,
-		RTMPStreamKey: settings.Ingest.RTMP.StreamKey,
+		// No RTMPAddress. Only PublicIngestURL is read below, and that renders
+		// the server half alone -- the address is per source and belongs on the
+		// Sources page, next to the button that rotates it.
 		// Verbatim, userinfo and all. An rtsp://user:pass@cam/ source does
 		// carry a credential, but this endpoint is authenticated and the same
 		// caller can read the identical string out of GET /settings, so
@@ -798,6 +800,31 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// validation failures, whichever of the two found it.
 		if err := settings.Validate(); err != nil {
 			return db.InvalidSettingsError{Err: err}
+		}
+		// A save that touches the ingest section may not leave the mode unset.
+		//
+		// db.IngestUnset is storable on purpose — it is what a fresh install is
+		// before anyone has chosen, and the migration writes it during DB open,
+		// so the store cannot refuse it. But it is a starting state, never a
+		// choice: nobody opens this form and decides on "none". Refusing it here
+		// is what turns "no default" into "you have to pick", without which the
+		// unset state would just be a silent no-ingest.
+		//
+		// Scoped to CLEARING a mode that was already chosen, not to every save
+		// made before one is. The settings page PUTs the whole document, so
+		// refusing any unset ingest would fail the first unrelated change an
+		// operator makes on a fresh install — for a reason that has nothing to
+		// do with what they touched. What forces the choice on a fresh install
+		// is that nothing ingests until it is made, and the UI says so.
+		if settings.Ingest.Mode == db.IngestUnset {
+			var stored struct {
+				Ingest struct {
+					Mode db.IngestMode `json:"mode"`
+				} `json:"ingest"`
+			}
+			if json.Unmarshal(storedJSON, &stored) == nil && stored.Ingest.Mode != db.IngestUnset {
+				return badRequestError{"choose an ingest mode: srt, rtmp or pull"}
+			}
 		}
 		// The half of playlist validation that needs a filesystem.
 		// Settings.Validate checks an item's SHAPE and cannot check its

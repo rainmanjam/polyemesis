@@ -349,10 +349,13 @@ func TestARenditionWithNoSourceIsRefusedAtTheBoundary(t *testing.T) {
 	}
 }
 
-// One RTMP listener, so one RTMP source. The rule replaced port-conflict
-// detection: with SRT addressed by token there is nothing left to collide, and
-// RTMP is the single case where a second source genuinely cannot be reached.
-func TestOnlyOneSourceMayUseRTMP(t *testing.T) {
+// How many sources an install can run must NOT depend on the protocol.
+//
+// This is the whole point of internal/rtmpserver, asserted at the layer that
+// used to refuse it: checkRTMPExclusive capped an install at one RTMP source
+// because `ffmpeg -listen 1` cannot demultiplex by path. If this ever fails
+// again, the rule has come back and RTMP is a second-class ingest once more.
+func TestSeveralSourcesMayUseRTMP(t *testing.T) {
 	d := testDB(t)
 	if err := d.MigrateSources(); err != nil {
 		t.Fatalf("MigrateSources: %v", err)
@@ -371,23 +374,19 @@ func TestOnlyOneSourceMayUseRTMP(t *testing.T) {
 	second := &Source{Name: "Vertical", Enabled: true, Ingest: DefaultSettings().Ingest}
 	second.Ingest.Mode = IngestRTMP
 	second.Ingest.RTMP.App = "live"
-	err = d.CreateSource(second)
-	if err == nil {
-		t.Fatal("a second RTMP source was accepted; it would never receive anything")
+	if err := d.CreateSource(second); err != nil {
+		t.Fatalf("a second RTMP source was refused: %v", err)
 	}
-	// The message has to name the source holding the listener AND say what to
-	// do instead, because "refused" with no way forward is where an operator
-	// gets stuck.
-	if !strings.Contains(err.Error(), base.Name) {
-		t.Errorf("error = %q, want it to name the source already using RTMP", err)
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "srt") {
-		t.Errorf("error = %q, want it to point at SRT as the answer", err)
+	// Two distinct addresses, or the pair is worse than the refusal was: one
+	// programme would answer for the other with nothing to say it had.
+	if second.Token == "" || second.Token == base.Token {
+		t.Fatalf("tokens = %q and %q, want two distinct addresses", base.Token, second.Token)
 	}
 }
 
-// The same source keeping RTMP across an update must not be refused by its own
-// reservation. An off-by-one on excludeID would make a source unsaveable.
+// A source that keeps RTMP across an update must save. Trivial now, and it was
+// trivial to get wrong before: an off-by-one on checkRTMPExclusive's excludeID
+// made a source conflict with itself and become unsaveable.
 func TestASourceKeepingRTMPCanStillBeSaved(t *testing.T) {
 	d := testDB(t)
 	if err := d.MigrateSources(); err != nil {
@@ -402,7 +401,25 @@ func TestASourceKeepingRTMPCanStillBeSaved(t *testing.T) {
 	}
 	s.Name = "Renamed"
 	if err := d.UpdateSource(s); err != nil {
-		t.Fatalf("a source that already holds RTMP could not be saved again: %v", err)
+		t.Fatalf("a source on RTMP could not be saved again: %v", err)
+	}
+}
+
+// The default settings must mint NO RTMP stream key.
+//
+// It used to be "stream" for every source, which was harmless while the key was
+// a playpath FFmpeg checked and fatal the moment it became an address: two
+// sources from the defaults would have claimed the same one, and
+// engine.legacyRTMPKeys would have had to refuse both. A default here is also
+// what would let the grandfather clause for upgraded installs collide with a
+// source created afterwards.
+func TestDefaultSettingsMintNoRTMPStreamKey(t *testing.T) {
+	def := DefaultSettings()
+	if k := def.Ingest.RTMP.StreamKey; k != "" {
+		t.Errorf("default rtmp stream key = %q, want empty: every new source would claim it", k)
+	}
+	if k := def.Failover.Backup.RTMP.StreamKey; k != "" {
+		t.Errorf("default backup rtmp stream key = %q, want empty", k)
 	}
 }
 

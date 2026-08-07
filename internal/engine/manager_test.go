@@ -2,11 +2,13 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -230,12 +232,12 @@ func TestIngestLiveAndGPUBusyAggregateAcrossProgrammes(t *testing.T) {
 	}
 }
 
-// The SRT listener is no longer optional -- it IS the SRT ingest -- so the
-// thing worth pinning is that it comes up on its own, and that a port it
-// cannot use leaves it down rather than bound to something arbitrary.
-func TestTheSRTListenerBindsWithoutBeingAskedTo(t *testing.T) {
+// Neither listener is optional -- each IS the ingest for its protocol -- so the
+// thing worth pinning is that both come up on their own, and that a port one of
+// them cannot use leaves it down rather than bound to something arbitrary.
+func TestBothListenersBindWithoutBeingAskedTo(t *testing.T) {
 	m, store := managerFixture(t)
-	// A free port rather than the 6000 default: a unit test that binds a
+	// Free ports rather than the 6000/1935 defaults: a unit test that binds a
 	// well-known port fails whenever anything else on the machine holds it,
 	// which makes a real regression indistinguishable from a busy laptop.
 	st, err := store.GetSettings()
@@ -243,15 +245,30 @@ func TestTheSRTListenerBindsWithoutBeingAskedTo(t *testing.T) {
 		t.Fatalf("GetSettings: %v", err)
 	}
 	st.Listeners.SRTPort = freeUDPPort(t)
+	st.Listeners.RTMPPort = freeTCPPort(t)
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// Nothing switched it on: the listener IS the SRT ingest now.
-	if !m.SharedIngestListening() {
-		t.Fatal("the SRT listener did not bind; every source is unreachable")
+	// SRT's listener IS the SRT ingest and binds unconditionally: a source can
+	// be pointed at it at any moment.
+	if !m.ListenerBound(db.IngestSRT) {
+		t.Error("the SRT listener did not bind; every SRT source is unreachable")
+	}
+	// RTMP's does NOT, and the asymmetry is deliberate. Before the shared
+	// listener existed, `ffmpeg -listen 1` bound 1935 only while an RTMP source
+	// was configured. Binding it unconditionally would newly expose a port on
+	// every install — including a fresh one that has not chosen an ingest mode —
+	// for a protocol nothing there speaks. This fixture has no RTMP source.
+	if m.ListenerBound(db.IngestRTMP) {
+		t.Error("the RTMP listener bound with no RTMP source configured; that is a port nobody asked for")
+	}
+	// Pull dials out and has no listener to be gated by. Answering yes here
+	// would tell an operator a token protects an ingest no publisher reaches.
+	if m.ListenerBound(db.IngestPull) {
+		t.Error("ListenerBound reported a listener for pull mode, which binds nothing")
 	}
 }
 
@@ -265,6 +282,17 @@ func freeUDPPort(t *testing.T) int {
 	}
 	defer c.Close()
 	return c.LocalAddr().(*net.UDPAddr).Port
+}
+
+// freeTCPPort is the same trick for the RTMP listener, which is TCP.
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("no free tcp port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 func TestPortZeroLeavesTheListenerDownRatherThanBoundAtRandom(t *testing.T) {
@@ -282,17 +310,118 @@ func TestPortZeroLeavesTheListenerDownRatherThanBoundAtRandom(t *testing.T) {
 	// "any free port". Without a guard the listener binds something random,
 	// reports itself listening, and tells the operator their tokens are
 	// enforced at an address nobody was given.
+	//
+	// Both protocols, because reconcileListener is written once and
+	// instantiated twice: a guard that only ran for one of them is exactly the
+	// drift that made it worth writing once.
 	st.Listeners.SRTPort = 0
+	st.Listeners.RTMPPort = 0
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
 	if err := m.Reconcile(); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	if m.SharedIngestListening() {
-		t.Error("the listener bound port 0 to a random ephemeral port and called itself listening")
+	if m.ListenerBound(db.IngestSRT) {
+		t.Error("the SRT listener bound port 0 to a random ephemeral port and called itself listening")
+	}
+	if m.ListenerBound(db.IngestRTMP) {
+		t.Error("the RTMP listener bound port 0 to a random ephemeral port and called itself listening")
 	}
 	if got := len(m.Engines()); got == 0 {
 		t.Error("a refused listener took the engines down with it")
 	}
+}
+
+// A port change has to actually rebind. It used to be one listener's code path;
+// it is now a shared helper serving two, and a rebind that only worked for one
+// protocol would leave an operator's encoder pointed at a port nothing answers
+// on while the settings page insists it moved.
+func TestChangingAListenerPortRebindsIt(t *testing.T) {
+	m, store := managerFixture(t)
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Listeners.SRTPort = freeUDPPort(t)
+	st.Listeners.RTMPPort = freeTCPPort(t)
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	// The RTMP listener binds only while a source actually uses RTMP, so this
+	// test has to ask for one. Without it there is no port to move and the test
+	// would assert on a listener that is correctly absent.
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Ingest.Mode = db.IngestRTMP
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	moved := freeTCPPort(t)
+	st.Listeners.RTMPPort = moved
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	if err := m.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !m.ListenerBound(db.IngestRTMP) {
+		t.Fatal("the RTMP listener is down after a port change")
+	}
+	m.mu.RLock()
+	got := m.rtmpAddr
+	m.mu.RUnlock()
+	if want := fmt.Sprintf(":%d", moved); got != want {
+		t.Errorf("rtmp listener address = %q, want %q", got, want)
+	}
+}
+
+// By the time Start has brought the engines up, the RTMP port must already
+// accept connections.
+//
+// The property, not the call order, but it is the property the call order
+// exists for: an RTMP source's ingest child DIALS
+// rtmp://127.0.0.1:PORT/live/<token>. Binding after the engines -- which is
+// what Start used to do, with a comment about a lookup dependency that never
+// existed, since both lookups resolve m.Engine(id) at connect time -- means
+// every one of those children gets connection-refused and crash-loops against
+// a 500ms backoff. Transient at startup, permanent if the port never binds.
+func TestTheRTMPPortAcceptsSubscribersOnceStartReturns(t *testing.T) {
+	m, store := managerFixture(t)
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Listeners.SRTPort = freeUDPPort(t)
+	port := freeTCPPort(t)
+	st.Listeners.RTMPPort = port
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	// The ingest children this test is about only exist for an RTMP source, and
+	// the listener only binds for one. Both halves of the ordering being tested
+	// depend on that, so the fixture has to configure it.
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Ingest.Mode = db.IngestRTMP
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
+	if err != nil {
+		t.Fatalf("an ingest child dialling the listener would be refused: %v", err)
+	}
+	_ = c.Close()
 }

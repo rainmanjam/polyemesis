@@ -40,6 +40,11 @@ You can use RTMP, but **RTMP carries one stereo pair**. If you only have one
 audio track there is nothing to route, and the main reason to use polyemesis
 disappears.
 
+What RTMP is *not* short of is sources: one port carries any number of them,
+each addressed by its own stream key, exactly as SRT sources are addressed by
+their token. (Before 2026-08-06 an install could run exactly one RTMP source —
+if you have read that anywhere, it is out of date.)
+
 For multitrack you need SRT. Check with:
 
 ```sh
@@ -50,10 +55,24 @@ Homebrew's FFmpeg on macOS has no SRT. Use Docker.
 
 ## What about Enhanced RTMP / multitrack FLV from OBS 30.2+?
 
-Not implemented, and RTMP ingest is single-track either way. An `enhancedRtmp`
-config key used to be declared for it and has been removed, because a key that
-accepts a value and changes nothing is worse than no key. A config file that
-still carries it keeps loading; the key is simply ignored. Use SRT.
+It works on a new enough FFmpeg. Multitrack FLV demuxing landed in FFmpeg 7.1,
+and from there the tracks arrive through polyemesis's existing ingest command
+unchanged — verified end to end: a destination configured for tracks 1 and 3
+received exactly those two and neither of the others. It does **not** work on
+FFmpeg 6.1.1, which is Ubuntu 24.04's stock build: that refuses with *"at most
+one audio stream is supported in flv"*, and the extra tracks are lost with no
+error at either end.
+
+What has not been done is a run with OBS itself as the publisher — the testing
+used FFmpeg. OBS writes the same `MULTITRACKTYPE_ONE_TRACK` format (read from
+its `flv-mux.c`), so the wire format is not in question, but the handshake and
+metadata path are unconfirmed. SRT remains the operated path.
+
+See `notes/enhanced-rtmp-multitrack.md`.
+
+The `enhancedRtmp` config key is still gone, and still does not need to come
+back: this needs no flag. A config file that names it keeps loading; the key is
+ignored.
 
 ## Can I run horizontal and vertical at once?
 

@@ -36,6 +36,7 @@ Ten, deliberately. Each one earns its place below.
 
 | Module | Version | Used by |
 | --- | --- | --- |
+| `github.com/bluenviron/gortmplib` | v1.0.0 | `internal/rtmpserver` |
 | `github.com/datarhei/gosrt` | v0.11.0 | `internal/srtserver` |
 | `github.com/eclipse/paho.golang` | v0.23.0 | `internal/mqtt` |
 | `github.com/go-chi/chi/v5` | v5.3.1 | `internal/api` |
@@ -61,10 +62,25 @@ rejected — see
 [DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md#rtmp). go-rtmp would have
 pulled seven further modules including `logrus` (a second logging framework in a
 binary that uses `log/slog`) plus `pkg/errors` and `mapstructure`, both dead
-upstream — and `ffmpeg -listen 1` was already a complete answer for RTMP. gosrt
-had no such alternative: FFmpeg's SRT support is a client and a
+upstream. gosrt had no such alternative: FFmpeg's SRT support is a client and a
 single-connection listener, and neither can demultiplex many publishers by
 `streamid` on one port.
+
+The same reasoning eventually applied to RTMP, and it is why
+`github.com/bluenviron/gortmplib` joined the tree on 2026-08-06: three
+transitive modules against go-rtmp's seven, at v1.0.0 rather than v0.0.7, from
+the people who maintain gortsplib and MediaMTX. Re-measured, not assumed —
+see `notes/multi-source-rtmp.md`.
+
+> **The RTMP half of that comparison was retired on 2026-08-06.** It read "and
+> `ffmpeg -listen 1` was already a complete answer for RTMP", and that was the
+> claim that failed: `-listen 1` is *also* a single-connection listener, so it
+> could not demultiplex many publishers by `app/streamkey` on one port either —
+> the identical objection, which nobody had noticed applied to both. The rule
+> survives unchanged and was in fact what settled the question; only the belief
+> that FFmpeg satisfied it for RTMP was wrong. See
+> [gortmplib](#githubcombluenvirongortmplib--the-third-protocol-dependency)
+> below.
 
 Pure Go, MIT, and `CGO_ENABLED=0` clean.
 
@@ -102,6 +118,49 @@ of our code:
 
 `paho.mqtt.golang` — the older sibling — was not taken: it is in maintenance
 mode and speaks 3.1.1, which is the wrong direction for a new integration.
+
+### `github.com/bluenviron/gortmplib` — the third protocol dependency
+
+Added for `internal/rtmpserver`, so that how many sources an install can carry
+does not depend on which protocol the encoder speaks.
+
+It clears gosrt's bar for exactly the reason gosrt did, applied to the protocol
+nobody had thought to apply it to. FFmpeg's RTMP support is a client and
+`-listen 1`, a single-connection listener — the same shape as its SRT support,
+and the same failure: neither can demultiplex many publishers by `app/streamkey`
+on one port. The earlier "FFmpeg was already a complete answer for RTMP" was
+true only of the single-source case, which is the case that was the problem.
+
+The dependency that was rejected is not this one. That measurement is worth
+keeping side by side, because the difference is the whole justification:
+
+| | net-new modules | version | provenance |
+|---|---|---|---|
+| `datarhei/gosrt` | 1 | v0.11.0 | datarhei |
+| **`bluenviron/gortmplib`** | **3** — `abema/go-mp4`, `bluenviron/mediacommon/v2`, `google/uuid`* | v1.0.0 | gortsplib / MediaMTX maintainers |
+| `yutopp/go-rtmp` (rejected) | 7 — `logrus`, `pkg/errors`, `mapstructure`, … | v0.0.7 | unchanged since 2021 |
+
+\* `google/uuid` was already in the tree via sqlite, so the true net-new count
+is two.
+
+Three modules is a real cost and not a free one. What makes it payable rather
+than a reversal of the earlier decision:
+
+- **None of it is dead upstream**, which was the specific objection to go-rtmp's
+  tree — `mapstructure` pinned at a 2021 release, `pkg/errors` archived.
+- **No second logging framework.** go-rtmp brings `logrus` into a binary that
+  uses `log/slog`.
+- **v1.0.0, not v0.0.7**, from the people who maintain gortsplib and MediaMTX —
+  the same provenance argument that justified gosrt.
+- All three are MIT and `CGO_ENABLED=0` clean.
+
+**Only the `Conn` seam is used, never `Reader`.** gortmplib will hand over
+decoded access units if you ask it to; taking that would put a muxer in the
+critical path of every frame and make a class of bug ours that currently belongs
+to FFmpeg. `internal/rtmpserver` forwards RTMP *messages*, which is why
+`-map 0 -c copy` downstream is untouched and Enhanced RTMP multitrack works
+without the package knowing what a track is. That restraint is the reason this
+is a ~540-line package and not a media stack.
 
 ### `modernc.org/sqlite` — and why not `mattn/go-sqlite3`
 
@@ -222,9 +281,13 @@ bundling is aggregation in an image, and does not change the analysis above.
 
 ## Indirect Go dependencies
 
-All indirect modules come from exactly two roots: `gopsutil` and
-`modernc.org/sqlite`. There are no other transitive sources, which is a
-property worth preserving.
+Every indirect module traces to one of a small, countable set of roots:
+`gopsutil`, `modernc.org/sqlite`, `golang.org/x/crypto`, `gosrt` (one module,
+`benburkert/openpgp`) and `gortmplib` (`abema/go-mp4`,
+`bluenviron/mediacommon/v2`, and `google/uuid`, which sqlite already pulled).
+There are no other transitive sources. Keeping that list short enough to write
+down is the property worth preserving; `go mod why -m` should always have a
+one-line answer.
 
 They are kept current on a plain `go get -u ./... && go mod tidy`, gated on the
 full verification below. As of the last review all indirect modules resolve to
@@ -232,10 +295,13 @@ their latest published versions.
 
 A handful of modules appear in `go.sum` but not in `go.mod` — `google/pprof`,
 `golang.org/x/mod`, `golang.org/x/tools`, `golang.org/x/xerrors`,
-`check.v1`, `modernc.org/cc/v4`, `modernc.org/gc/v3`. These are build- and
-test-time dependencies of modernc's own code generation. They are not in the
-binary. `go list -u -m all` will report some of them as outdated forever; that
-is expected and is not a finding.
+`check.v1`, `modernc.org/cc/v4`, `modernc.org/gc/v3`, and from the gortmplib
+side `orcaman/writerseeker`, `sunfish-shogi/bufseekio`, `asticode/go-astits`,
+`asticode/go-astikit` and `stretchr/testify`. These are build- and test-time
+dependencies of other modules' own suites and code generation. They are not in
+the binary — `go.mod`'s indirect block is the list that is, which is why the
+net-new count above is three and not thirteen. `go list -u -m all` will report
+some of them as outdated forever; that is expected and is not a finding.
 
 ## Frontend dependencies
 
