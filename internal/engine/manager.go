@@ -222,7 +222,7 @@ func (m *Manager) reconcileSharedIngest() {
 	rtmp, rtmpAddr := m.rtmp, m.rtmpAddr
 	m.mu.Unlock()
 
-	srt, srtAddr = reconcileListener(m.log, "srt", st.Listeners.SRTPort, srt, srtAddr,
+	srt, srtAddr = reconcileListener(m.log, "srt", st.Listeners.SRTPort, true, srt, srtAddr,
 		(*srtserver.Server).Stop,
 		func(addr string) (*srtserver.Server, error) {
 			s := srtserver.New(m.log, addr, m.lookupToken)
@@ -238,16 +238,17 @@ func (m *Manager) reconcileSharedIngest() {
 	// protocol nothing there speaks. Port 0 disables it explicitly, and no RTMP
 	// source has the same effect.
 	rtmpPort := st.Listeners.RTMPPort
+	wantRTMP := true
 	if rows, err := m.store.ListSources(); err != nil {
 		// Read failure: leave the listener as it is rather than tearing it down
 		// on a transient error. An RTMP encoder that is mid-broadcast must not
 		// lose its socket because a settings read blipped.
 		m.log.Warn("cannot list sources for the rtmp listener gate; leaving it as-is", "err", err)
-		rtmpPort = currentRTMPPort(rtmpAddr, rtmpPort)
-	} else if !anyRTMPSource(rows) {
-		rtmpPort = 0
+		wantRTMP = rtmpAddr != ""
+	} else {
+		wantRTMP = anyRTMPSource(rows)
 	}
-	rtmp, rtmpAddr = reconcileListener(m.log, "rtmp", rtmpPort, rtmp, rtmpAddr,
+	rtmp, rtmpAddr = reconcileListener(m.log, "rtmp", rtmpPort, wantRTMP, rtmp, rtmpAddr,
 		(*rtmpserver.Server).Stop,
 		func(addr string) (*rtmpserver.Server, error) {
 			s := rtmpserver.New(m.log, addr, m.lookupStreamKey)
@@ -258,15 +259,6 @@ func (m *Manager) reconcileSharedIngest() {
 	m.srt, m.srtAddr = srt, srtAddr
 	m.rtmp, m.rtmpAddr = rtmp, rtmpAddr
 	m.mu.Unlock()
-}
-
-// currentRTMPPort keeps whatever is bound now, for the case where the decision
-// input could not be read.
-func currentRTMPPort(addr string, configured int) int {
-	if addr == "" {
-		return 0 // nothing bound; leave it that way
-	}
-	return configured
 }
 
 // anyRTMPSource reports whether any enabled source expects the RTMP listener.
@@ -301,6 +293,11 @@ func reconcileListener[T any](
 	log *slog.Logger,
 	proto string,
 	port int,
+	// wanted separates "this listener is deliberately off" from "this port is
+	// wrong". Overloading port 0 for both conflated a fresh install that simply
+	// has no RTMP source with a misconfiguration, and logged an ERROR about a
+	// port nobody set on every startup.
+	wanted bool,
 	cur *T, curAddr string,
 	stop func(*T),
 	start func(addr string) (*T, error),
@@ -315,8 +312,8 @@ func reconcileListener[T any](
 	// There is no longer an "off" to fall back to: these listeners ARE the
 	// ingest, on both protocols. An out-of-range port is therefore an error
 	// that leaves nothing bound, not a quiet downgrade to something else.
-	ok := port >= 1 && port <= 65535
-	if !ok {
+	ok := wanted && port >= 1 && port <= 65535
+	if wanted && !ok {
 		log.Error("ingest not started: listener port out of range", "proto", proto, "port", port)
 	}
 	addr := fmt.Sprintf(":%d", port)
