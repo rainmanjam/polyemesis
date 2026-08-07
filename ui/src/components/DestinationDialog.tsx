@@ -885,17 +885,17 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="dest-name">Name</Label>
+            <Label htmlFor="dest-name">{t("dest.name")}</Label>
             <Input
               id="dest-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="YouTube — main channel"
+              placeholder={t("dest.namePlaceholder")}
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <Label>Platform</Label>
+            <Label>{t("dest.platform")}</Label>
             <Button
               type="button"
               variant="outline"
@@ -972,7 +972,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 still empty. */}
                             {p.kind && !p.url && rowCaps.tier !== "unsupported" && (
                               <span className="shrink-0 text-[9px] text-muted-foreground">
-                                URL from dashboard
+                                {t("dest.urlFromDashboard")}
                               </span>
                             )}
                             <span className="shrink-0 font-mono text-[9px] uppercase text-muted-foreground">
@@ -1045,22 +1045,22 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           )}
 
           <div className="flex flex-col gap-1">
-            <Label>Transport</Label>
+            <Label>{t("dest.transport")}</Label>
             <Select value={kind} onValueChange={(v) => setKind(v as DestKind)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="rtmp">RTMP / RTMPS</SelectItem>
+                <SelectItem value="rtmp">{t("dest.transportRtmp")}</SelectItem>
                 <SelectItem value="srt">SRT</SelectItem>
-                <SelectItem value="file">Local file</SelectItem>
+                <SelectItem value="file">{t("dest.transportFile")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           {showOAuth && caps?.connect && (
             <div className="flex flex-col gap-1">
-              <Label>Connected account</Label>
+              <Label>{t("dest.connectedAccount")}</Label>
               {platformAccounts.length > 0 ? (
                 <Select value={accountId} onValueChange={setAccountId}>
                   <SelectTrigger>
@@ -1070,7 +1070,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     {/* "Not linked" is neutral wording on purpose. On Kick the
                         key is always typed, so calling the unlinked state
                         "manual" would imply the account link had failed. */}
-                    <SelectItem value="none">Not linked</SelectItem>
+                    <SelectItem value="none">{t("dest.notLinked")}</SelectItem>
                     {platformAccounts.map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>
                         {a.accountName}
@@ -1141,7 +1141,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           {kind === "rtmp" && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-key">Stream key</Label>
+              <Label htmlFor="dest-key">{t("dest.streamKeyLabel")}</Label>
               <Input
                 id="dest-key"
                 type="password"
@@ -1181,13 +1181,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               the whole point, and it is what Restreamer already does (its
               filter controls render only when the codec is not `copy`). */}
           <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-[12px] font-medium">Video treatment</legend>
+            <legend className="mb-1 text-[12px] font-medium">{t("dest.videoTreatment")}</legend>
 
             {/* role="radio" is only meaningful inside a radiogroup. Without this
                 wrapper the two cards are announced as two unrelated radios with
                 no shared name, so a screen reader user is told "checked" about a
                 choice whose alternatives were never named. */}
-            <div role="radiogroup" aria-label="Video treatment" className="flex flex-col gap-2">
+            <div role="radiogroup" aria-label={t("dest.videoTreatment")} className="flex flex-col gap-2">
               <button
                 type="button"
                 role="radio"
@@ -1202,7 +1202,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               >
                 <span className="flex items-center gap-2">
                   <StatusDot tone={renditionId === PASSTHROUGH ? "live" : "idle"} size="sm" />
-                  <span className="text-[13px] font-medium">Copy the source video</span>
+                  <span className="text-[13px] font-medium">{t("dest.copySource")}</span>
                   <Badge variant="outline" className="ml-auto">recommended</Badge>
                 </span>
                 <span className="mt-1 block text-[10px] text-muted-foreground">
@@ -1230,7 +1230,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               >
                 <span className="flex items-center gap-2">
                   <StatusDot tone={renditionId !== PASSTHROUGH ? "live" : "idle"} size="sm" />
-                  <span className="text-[13px] font-medium">Use a shared video encode</span>
+                  <span className="text-[13px] font-medium">{t("dest.useSharedEncode")}</span>
                 </span>
                 <span className="mt-1 block text-[10px] text-muted-foreground">
                   {renditions.length === 0
@@ -1249,7 +1249,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       own — it sits under a radio card that supplies the meaning,
                       which leaves the select itself anonymous to a screen reader
                       and ambiguous to a test. */}
-                  <SelectTrigger aria-label="Shared video encode" data-testid="rendition-picker">
+                  <SelectTrigger aria-label={t("dest.sharedEncodeAria")} data-testid="rendition-picker">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1292,17 +1292,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     onToggle={(e) => setVariantOpen((e.target as HTMLDetailsElement).open)}
                   >
                     <summary className="cursor-pointer text-[11px] font-medium">
-                      Customise for this destination
+                      {t("dest.customiseSummary")}
                     </summary>
                     <p className="mt-1.5 text-[10px] text-muted-foreground">
-                      Starts a <strong>second encode</strong> from your source, seeded from
-                      “{selectedRendition.name}”. It is not a free variation and it does not
-                      change what the other destinations on that encode receive. Leave a field
-                      blank to keep the source's.
+                      {t("dest.variantWarning", { name: selectedRendition.name })}
                     </p>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <div className="flex flex-col gap-1">
-                        <Label htmlFor="var-bitrate">Video bitrate (kbps)</Label>
+                        <Label htmlFor="var-bitrate">{t("dest.varBitrate")}</Label>
                         <Input
                           id="var-bitrate"
                           value={variantBitrate}
@@ -1311,33 +1308,33 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         />
                       </div>
                       <div className="flex flex-col gap-1">
-                        <Label htmlFor="var-fps">Frame rate</Label>
+                        <Label htmlFor="var-fps">{t("dest.varFps")}</Label>
                         <Input
                           id="var-fps"
                           value={variantFps}
                           onChange={(e) => setVariantFps(e.target.value)}
                           inputMode="numeric"
-                          placeholder="source"
+                          placeholder={t("dest.varSourceHint")}
                         />
                       </div>
                       <div className="flex flex-col gap-1">
-                        <Label htmlFor="var-width">Width</Label>
+                        <Label htmlFor="var-width">{t("dest.varWidth")}</Label>
                         <Input
                           id="var-width"
                           value={variantWidth}
                           onChange={(e) => setVariantWidth(e.target.value)}
                           inputMode="numeric"
-                          placeholder="source"
+                          placeholder={t("dest.varSourceHint")}
                         />
                       </div>
                       <div className="flex flex-col gap-1">
-                        <Label htmlFor="var-height">Height</Label>
+                        <Label htmlFor="var-height">{t("dest.varHeight")}</Label>
                         <Input
                           id="var-height"
                           value={variantHeight}
                           onChange={(e) => setVariantHeight(e.target.value)}
                           inputMode="numeric"
-                          placeholder="source"
+                          placeholder={t("dest.varSourceHint")}
                         />
                       </div>
                     </div>
@@ -1366,7 +1363,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                           setVariantErr("");
                         }}
                       >
-                        Fill from what this platform publishes
+                        {t("dest.fillFromPlatform")}
                       </button>
                     )}
                     {variantErr && (
@@ -1414,7 +1411,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         }
                       }}
                     >
-                      Create this variant
+                      {t("dest.createVariant")}
                     </Button>
                   </details>
                 )}
@@ -1481,7 +1478,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           </fieldset>
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="dest-bitrate">Audio bitrate</Label>
+            <Label htmlFor="dest-bitrate">{t("dest.audioBitrate")}</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="dest-bitrate"
@@ -1502,7 +1499,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label>Audio codec</Label>
+              <Label>{t("dest.audioCodec")}</Label>
               <Select
                 value={audio.codec || "aac"}
                 onValueChange={(v) =>
@@ -1525,7 +1522,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </span>
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-mono">Channels</Label>
+              <Label htmlFor="dest-mono">{t("dest.channels")}</Label>
               <div className="flex h-9 items-center gap-2">
                 <Switch
                   id="dest-mono"
@@ -1545,7 +1542,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
-              <p className="text-xs font-medium">Compliance</p>
+              <p className="text-xs font-medium">{t("dest.compliance")}</p>
               <span className="text-[10px] text-muted-foreground">
                 Not cosmetic. COPPA is a law for YouTube, Twitch requires labels for several
                 content classes, Facebook has no way to widen a broadcast's audience once
@@ -1557,7 +1554,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               {platform === "youtube" && (
                 <>
                   <div className="flex flex-col gap-1">
-                    <Label>Visibility</Label>
+                    <Label>{t("dest.visibility")}</Label>
                     <Select
                       value={compliance.privacy || "unset"}
                       onValueChange={(v) =>
@@ -1571,10 +1568,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
-                        <SelectItem value="private">Private</SelectItem>
-                        <SelectItem value="unlisted">Unlisted</SelectItem>
-                        <SelectItem value="public">Public</SelectItem>
+                        <SelectItem value="unset">{t("dest.leaveOnYouTube")}</SelectItem>
+                        <SelectItem value="private">{t("dest.private")}</SelectItem>
+                        <SelectItem value="unlisted">{t("dest.unlisted")}</SelectItem>
+                        <SelectItem value="public">{t("dest.public")}</SelectItem>
                       </SelectContent>
                     </Select>
                     <span className="text-[10px] text-muted-foreground">
@@ -1586,7 +1583,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <Label>Made for kids (COPPA)</Label>
+                    <Label>{t("dest.madeForKids")}</Label>
                     <Select
                       value={
                         compliance.madeForKids === undefined ||
@@ -1613,7 +1610,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
+                        <SelectItem value="unset">{t("dest.leaveOnYouTube")}</SelectItem>
                         <SelectItem value="no">No &mdash; not made for kids</SelectItem>
                         <SelectItem value="yes">Yes &mdash; made for kids</SelectItem>
                       </SelectContent>
@@ -1629,7 +1626,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
               {platform === "twitch" && (
                 <div className="flex flex-col gap-1">
-                  <Label>Content labels</Label>
+                  <Label>{t("dest.contentLabels")}</Label>
                   <div className="flex flex-col gap-1">
                     {TWITCH_LABELS.map((id) => (
                       <div key={id} className="flex items-center justify-between gap-2">
@@ -1664,7 +1661,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
               {platform === "facebook" && !facebookTargetsAPage && (
                 <div className="flex flex-col gap-1">
-                  <Label>Audience</Label>
+                  <Label>{t("dest.audience")}</Label>
                   <Select
                     value={compliance.facebookPrivacy || "unset"}
                     onValueChange={(v) =>
@@ -1678,11 +1675,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="unset">Leave as it is on Facebook</SelectItem>
-                      <SelectItem value="SELF">Only me</SelectItem>
-                      <SelectItem value="ALL_FRIENDS">Friends</SelectItem>
-                      <SelectItem value="FRIENDS_OF_FRIENDS">Friends of friends</SelectItem>
-                      <SelectItem value="EVERYONE">Public</SelectItem>
+                      <SelectItem value="unset">{t("dest.leaveOnFacebook")}</SelectItem>
+                      <SelectItem value="SELF">{t("dest.onlyMe")}</SelectItem>
+                      <SelectItem value="ALL_FRIENDS">{t("dest.friends")}</SelectItem>
+                      <SelectItem value="FRIENDS_OF_FRIENDS">{t("dest.friendsOfFriends")}</SelectItem>
+                      <SelectItem value="EVERYONE">{t("dest.public")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <span className="text-[10px] text-muted-foreground">
@@ -1839,7 +1836,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </span>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="dest-rwt">Socket timeout (seconds)</Label>
+                <Label htmlFor="dest-rwt">{t("dest.socketTimeout")}</Label>
                 <Input
                   id="dest-rwt"
                   type="number"
@@ -1880,7 +1877,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="dest-mqp">Muxing queue (packets)</Label>
+                  <Label htmlFor="dest-mqp">{t("dest.muxQueue")}</Label>
                   <Input
                     id="dest-mqp"
                     type="number"
@@ -1905,19 +1902,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </div>
               </div>
               <span className="text-[10px] text-muted-foreground">
-                These are a <strong>pair</strong>: FFmpeg applies the packet cap only once the queue
-                has grown past the byte threshold, so a threshold on its own does nothing and will
-                be refused. Raise them if a destination reports interleave errors &mdash; the audio
-                path here has variable latency, because loudness normalisation reads ahead.
+                {t("dest.muxQueuePair")}
               </span>
 
               <div className="border-t border-border pt-3">
-                <p className="text-xs font-medium">Reconnecting</p>
+                <p className="text-xs font-medium">{t("dest.reconnecting")}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="dest-minbo">Retry after (seconds)</Label>
+                  <Label htmlFor="dest-minbo">{t("dest.retryAfter")}</Label>
                   <Input
                     id="dest-minbo"
                     type="number"
@@ -1949,7 +1943,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </span>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="dest-giveup">Give up after (retries)</Label>
+                <Label htmlFor="dest-giveup">{t("dest.giveUpAfter")}</Label>
                 <Input
                   id="dest-giveup"
                   type="number"

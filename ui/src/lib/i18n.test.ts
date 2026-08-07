@@ -176,4 +176,37 @@ describe("translation catalogues", () => {
     );
     expect(total).toBeGreaterThan(0);
   });
+
+  // A RATCHET, not a completeness rule.
+  //
+  // The reporting test above is deliberately non-enforcing, and its reasoning
+  // holds: lib/i18n.ts falls back per key, so a locale that is behind degrades
+  // to readable English rather than breaking. Nothing here changes that.
+  //
+  // What it did not survive is the case it was written for. Every catalogue was
+  // at 100%, then 45 keys were added for the destination dialog and translated
+  // nowhere -- and the whole suite stayed green while fourteen locales silently
+  // rendered English. "Visible in a console.log nobody reads during a passing
+  // run" is not visible.
+  //
+  // So the level is pinned instead. Falling behind is still allowed in the
+  // sense that it does not break the app; it is just no longer something that
+  // can happen without anyone agreeing to it. Adding a key means translating it
+  // or deliberately lowering this floor, which is a reviewable act rather than
+  // an oversight.
+  it("every locale stays fully translated", () => {
+    const behind = Object.entries(CATALOGUES)
+      .map(([lang, cat]) => ({
+        lang,
+        missing: Object.keys(english).filter((k) => !(k in cat) || cat[k].trim() === ""),
+      }))
+      .filter((r) => r.missing.length > 0)
+      .map((r) => `${r.lang}: ${r.missing.length} missing (${r.missing.slice(0, 5).join(", ")}…)`);
+
+    expect(
+      behind,
+      "a key was added to en.json without translations. Translate it in every " +
+        "locale, or lower this floor on purpose — but do not let it happen silently.",
+    ).toEqual([]);
+  });
 });
