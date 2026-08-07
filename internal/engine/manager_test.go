@@ -233,8 +233,9 @@ func TestIngestLiveAndGPUBusyAggregateAcrossProgrammes(t *testing.T) {
 }
 
 // Neither listener is optional -- each IS the ingest for its protocol -- so the
-// thing worth pinning is that both come up on their own, and that a port one of
-// them cannot use leaves it down rather than bound to something arbitrary.
+// thing worth pinning is that both come up on their own, whatever the sources
+// happen to be configured for, and that a port one of them cannot use leaves it
+// down rather than bound to something arbitrary.
 func TestBothListenersBindWithoutBeingAskedTo(t *testing.T) {
 	m, store := managerFixture(t)
 	// Free ports rather than the 6000/1935 defaults: a unit test that binds a
@@ -252,18 +253,22 @@ func TestBothListenersBindWithoutBeingAskedTo(t *testing.T) {
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// SRT's listener IS the SRT ingest and binds unconditionally: a source can
-	// be pointed at it at any moment.
+	// BOTH bind, and this fixture has no RTMP source at all — that is the point.
+	//
+	// This test used to assert the opposite for RTMP, on the reasoning that
+	// binding it unconditionally would newly expose a port on an install where
+	// nothing spoke the protocol. The hole in that argument was visible in the
+	// line above it: SRT bound unconditionally on exactly the same install,
+	// including a fresh one that had chosen no ingest mode. The asymmetry was
+	// two histories preserved side by side rather than a decision, and it made
+	// the project's own install instructions — which publish both ports — describe
+	// something that might not be listening.
 	if !m.ListenerBound(db.IngestSRT) {
 		t.Error("the SRT listener did not bind; every SRT source is unreachable")
 	}
-	// RTMP's does NOT, and the asymmetry is deliberate. Before the shared
-	// listener existed, `ffmpeg -listen 1` bound 1935 only while an RTMP source
-	// was configured. Binding it unconditionally would newly expose a port on
-	// every install — including a fresh one that has not chosen an ingest mode —
-	// for a protocol nothing there speaks. This fixture has no RTMP source.
-	if m.ListenerBound(db.IngestRTMP) {
-		t.Error("the RTMP listener bound with no RTMP source configured; that is a port nobody asked for")
+	if !m.ListenerBound(db.IngestRTMP) {
+		t.Error("the RTMP listener did not bind. Both ports are open by default now; " +
+			"the port setting is the switch, and 0 is how an operator declines one")
 	}
 	// Pull dials out and has no listener to be gated by. Answering yes here
 	// would tell an operator a token protects an ingest no publisher reaches.

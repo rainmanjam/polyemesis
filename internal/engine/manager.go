@@ -228,27 +228,33 @@ func (m *Manager) reconcileSharedIngest() {
 			s := srtserver.New(m.log, addr, m.lookupToken)
 			return s, s.Start()
 		})
-	// The RTMP port is bound only when a source actually uses RTMP.
+	// BOTH LISTENERS BIND, ALWAYS. The port is the switch, not the source list.
 	//
-	// SRT's listener is unconditional because it IS the SRT ingest and a source
-	// can be pointed at it at any moment. RTMP's was not: before this package,
-	// `ffmpeg -listen 1` bound 1935 only while an RTMP source was configured,
-	// so making it unconditional would newly expose a port on every install —
-	// including a fresh one that has not chosen an ingest mode yet — for a
-	// protocol nothing there speaks. Port 0 disables it explicitly, and no RTMP
-	// source has the same effect.
+	// RTMP used to bind only when some enabled source was configured for it,
+	// which preserved what `ffmpeg -listen 1` did before this package existed.
+	// SRT bound unconditionally, which preserved what IT did. Neither was a
+	// policy: they were two different histories, and the asymmetry showed. A
+	// fresh install that has not chosen an ingest mode still opened 6000 — the
+	// exact thing the old comment here justified NOT doing for 1935.
+	//
+	// Symmetry is also what the ecosystem does and what this project already
+	// documents: datarhei Restreamer publishes 1935 and 6000 together, and
+	// docs/HARDWARE.md and docs/TROUBLESHOOTING.md have always told operators to
+	// run `-p 6000:6000/udp -p 1935:1935`. Binding only one of them made our own
+	// install instructions describe a port that might not be listening.
+	//
+	// The exposure this adds is small and bounded. Both listeners refuse an
+	// unknown token or key in constant time, both require Target.Ready before
+	// admitting anything, and a connection that opens and says nothing dies on
+	// the handshake timeout. What changes is that a host with no firewall now
+	// has 1935 reachable where the source list used to close it by accident —
+	// so `install.sh`'s RTMP prompt, which controls the ufw rule and the
+	// compose publish, is now the only thing that decides reachability. It was
+	// always the thing that SAID it did.
+	//
+	// Port 0 remains the explicit off switch for either protocol.
 	rtmpPort := st.Listeners.RTMPPort
-	wantRTMP := true
-	if rows, err := m.store.ListSources(); err != nil {
-		// Read failure: leave the listener as it is rather than tearing it down
-		// on a transient error. An RTMP encoder that is mid-broadcast must not
-		// lose its socket because a settings read blipped.
-		m.log.Warn("cannot list sources for the rtmp listener gate; leaving it as-is", "err", err)
-		wantRTMP = rtmpAddr != ""
-	} else {
-		wantRTMP = anyRTMPSource(rows)
-	}
-	rtmp, rtmpAddr = reconcileListener(m.log, "rtmp", rtmpPort, wantRTMP, rtmp, rtmpAddr,
+	rtmp, rtmpAddr = reconcileListener(m.log, "rtmp", rtmpPort, true, rtmp, rtmpAddr,
 		(*rtmpserver.Server).Stop,
 		func(addr string) (*rtmpserver.Server, error) {
 			s := rtmpserver.New(m.log, addr, m.lookupStreamKey)
@@ -259,20 +265,6 @@ func (m *Manager) reconcileSharedIngest() {
 	m.srt, m.srtAddr = srt, srtAddr
 	m.rtmp, m.rtmpAddr = rtmp, rtmpAddr
 	m.mu.Unlock()
-}
-
-// anyRTMPSource reports whether any enabled source expects the RTMP listener.
-//
-// Disabled sources do not count: a disabled source has no engine, so it has no
-// subscriber, so a publisher reaching it would be admitted into a stream nobody
-// reads — which is the failure Target.Ready exists to prevent.
-func anyRTMPSource(rows []*db.Source) bool {
-	for _, s := range rows {
-		if s.Enabled && s.Ingest.Mode == db.IngestRTMP {
-			return true
-		}
-	}
-	return false
 }
 
 // reconcileListener brings one shared listener to match its configured port,
