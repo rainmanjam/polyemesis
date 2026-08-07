@@ -599,6 +599,18 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // the entire argument for renditions existing, and the UI could not state it.
   const [renditions, setRenditions] = useState<RenditionView[]>([]);
   const [busy, setBusy] = useState(false);
+  // The variant form: an operator wanting "this tier but 4500 kbps for the
+  // constrained uplink". Deliberately NOT a per-destination override of the
+  // shared encode — there is no such thing, and there must not be: editing the
+  // shared tier would silently change the picture every other destination on it
+  // receives. A variant is a SECOND encode, and the UI says so before you make
+  // one.
+  const [variantOpen, setVariantOpen] = useState(false);
+  const [variantBitrate, setVariantBitrate] = useState("");
+  const [variantWidth, setVariantWidth] = useState("");
+  const [variantHeight, setVariantHeight] = useState("");
+  const [variantFps, setVariantFps] = useState("");
+  const [variantErr, setVariantErr] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -696,6 +708,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
    *  remediation is "make a note of the video encode, in case you need to refer
    *  to it again". It is the same arithmetic as joining, run backwards, so it
    *  costs nothing to say. */
+  useEffect(() => {
+    if (!variantOpen || !selectedRendition) return;
+    setVariantBitrate(String(selectedRendition.videoBitrate));
+    setVariantWidth(selectedRendition.width ? String(selectedRendition.width) : "");
+    setVariantHeight(selectedRendition.height ? String(selectedRendition.height) : "");
+    setVariantFps(selectedRendition.fps ? String(selectedRendition.fps) : "");
+    setVariantErr("");
+  }, [variantOpen, selectedRendition]);
+
   const leaving = useMemo(() => {
     const wasId = destination?.renditionId;
     if (!wasId || String(wasId) === renditionId) return null;
@@ -1222,6 +1243,119 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 )}
                 {selectedRendition?.note && (
                   <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+                )}
+
+                {/* Advanced: make a variant.
+                    There is no per-destination override of a shared encode, and
+                    there must not be — editing the shared tier would silently
+                    change the picture every other destination on it receives.
+                    So "customise for this destination" means creating a second
+                    encode, and the cost is stated before the form, not after
+                    the operator has filled it in. */}
+                {selectedRendition && (
+                  <details
+                    className="mt-1 rounded-md border border-border p-2"
+                    open={variantOpen}
+                    onToggle={(e) => setVariantOpen((e.target as HTMLDetailsElement).open)}
+                  >
+                    <summary className="cursor-pointer text-[11px] font-medium">
+                      Customise for this destination
+                    </summary>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                      Starts a <strong>second encode</strong> from your source, seeded from
+                      “{selectedRendition.name}”. It is not a free variation and it does not
+                      change what the other destinations on that encode receive. Leave a field
+                      blank to keep the source's.
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-bitrate">Video bitrate (kbps)</Label>
+                        <Input
+                          id="var-bitrate"
+                          value={variantBitrate}
+                          onChange={(e) => setVariantBitrate(e.target.value)}
+                          inputMode="numeric"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-fps">Frame rate</Label>
+                        <Input
+                          id="var-fps"
+                          value={variantFps}
+                          onChange={(e) => setVariantFps(e.target.value)}
+                          inputMode="numeric"
+                          placeholder="source"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-width">Width</Label>
+                        <Input
+                          id="var-width"
+                          value={variantWidth}
+                          onChange={(e) => setVariantWidth(e.target.value)}
+                          inputMode="numeric"
+                          placeholder="source"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-height">Height</Label>
+                        <Input
+                          id="var-height"
+                          value={variantHeight}
+                          onChange={(e) => setVariantHeight(e.target.value)}
+                          inputMode="numeric"
+                          placeholder="source"
+                        />
+                      </div>
+                    </div>
+                    {variantErr && (
+                      <p className="mt-1.5 text-[10px] text-down">{variantErr}</p>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      disabled={busy}
+                      onClick={async () => {
+                        setVariantErr("");
+                        const kbps = Number(variantBitrate);
+                        if (!Number.isFinite(kbps) || kbps <= 0) {
+                          // Every other field may legitimately be blank ("keep
+                          // the source's"). Bitrate cannot: an encode with no
+                          // target is not a variation of anything.
+                          setVariantErr("Video bitrate is required — an encode needs a target.");
+                          return;
+                        }
+                        setBusy(true);
+                        try {
+                          const num = (v: string) => (v.trim() === "" ? 0 : Number(v));
+                          const made = await api.createRendition({
+                            ...selectedRendition,
+                            id: undefined,
+                            // Named after what it is FOR, so the picker's
+                            // spec-first row is followed by something that says
+                            // why this one exists rather than repeating the spec.
+                            name: `${selectedRendition.name} — ${name || "variant"}`,
+                            videoBitrate: kbps,
+                            width: num(variantWidth),
+                            height: num(variantHeight),
+                            fps: num(variantFps),
+                          } as Partial<Rendition>);
+                          const rows = await api.listRenditions();
+                          setRenditions(rows);
+                          setRenditionId(String(made.rendition.id));
+                          setVariantOpen(false);
+                        } catch (e) {
+                          setVariantErr(e instanceof Error ? e.message : "Could not create the encode.");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Create this variant
+                    </Button>
+                  </details>
                 )}
               </div>
             )}
