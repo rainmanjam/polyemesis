@@ -169,18 +169,21 @@ const sections = [
           <tbody>
             {
               [
-                ["Per-destination audio mix from one multitrack ingest", "No", "No"],
-                ["Channel-level mix matrix with per-cell gain", "No", "No"],
-                ["Per-destination loudness target, measured after routing", "No", "No"],
-                ["Multitrack archive — every ingest track preserved, stream-copied", "No", "No"],
-                ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "No", "No"],
-                ["Track annotations — what each incoming track actually is", "No", "No"],
-                ["Typed SRT rejections — the publisher is told why it was refused", "No", "n/a"],
-                ["Runs on your hardware, no per-destination pricing", "Yes", "No"],
-              ].map(([cap, rs, ri]) => (
+                ["Per-destination audio mix from one multitrack ingest", "Yes", "No", "No"],
+                ["Channel-level mix matrix with per-cell gain", "Yes", "No", "No"],
+                ["Per-destination loudness target, measured after routing", "Yes", "No", "No"],
+                ["Multitrack archive — every ingest track preserved, stream-copied", "Yes", "No", "No"],
+                ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "Yes", "No", "No"],
+                ["Track annotations — what each incoming track actually is", "Yes", "No", "No"],
+                ["Typed SRT rejections — the publisher is told why it was refused", "Yes", "No", "n/a"],
+                ["Runs on your hardware, no per-destination pricing", "Yes", "Yes", "No"],
+              ].map(([cap, poly, rs, ri]) => (
                 <tr class="border-b border-line">
                   <td class="py-3 pr-4 leading-relaxed text-fg">{cap}</td>
-                  <td class="py-3 pr-4 font-mono text-[13px] text-live">Yes</td>
+                  <td class:list={[
+                    "py-3 pr-4 font-mono text-[13px]",
+                    poly === "Yes" ? "text-live" : "text-subtle",
+                  ]}>{poly}</td>
                   <td class:list={["py-3 pr-4 font-mono text-[13px]", rs === "Yes" ? "text-fg" : "text-subtle"]}>
                     {rs}
                   </td>
