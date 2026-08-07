@@ -61,12 +61,17 @@ reading content and not stream position.
 Those probe results come from polyemesis's own `ProbeArgs`
 (`internal/ffmpeg/build.go:1074`), not an ad-hoc ffprobe invocation.
 
-The harness is `scripts/verify-ertmp-multitrack.py`:
+The harness is `scripts/verify_ertmp_multitrack.go`:
 
 ```sh
-python3 scripts/verify-ertmp-multitrack.py 5            # both codecs
-python3 scripts/verify-ertmp-multitrack.py 1 --shuffle  # prove it can fail
+go run scripts/verify_ertmp_multitrack.go -runs 5            # both codecs
+go run scripts/verify_ertmp_multitrack.go -runs 1 -shuffle   # prove it can fail
 ```
+
+It checks FFmpeg's own multitrack conformance, not polyemesis's ingest path —
+that stopped being `ffmpeg -listen 1` when the listener became
+`internal/rtmpserver`. The shipped path is covered by
+`TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder`.
 
 ### It is genuinely E-RTMP v2, and genuinely the mode OBS uses
 

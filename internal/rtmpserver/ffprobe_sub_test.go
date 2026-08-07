@@ -84,8 +84,8 @@ func TestRealFFmpegPublishesAndRealFFprobeSubscribes(t *testing.T) {
 // untouched and needs no DSP in the test: rtmpserver relays messages and never
 // decodes, so if it reorders or drops anything the sequence changes.
 //
-// scripts/verify-ertmp-multitrack.py does the deeper version of this — six
-// tracks identified by Goertzel tone detection, with a --shuffle mode to prove
+// scripts/verify_ertmp_multitrack.go does the deeper version of this — six
+// tracks identified by Goertzel tone detection, with a -shuffle mode to prove
 // the harness can fail. What it does NOT do any more is exercise this path: it
 // publishes into `ffmpeg -listen 1`, which is what IngestArgs used to build
 // before the listener became polyemesis's own. This test covers the path that
