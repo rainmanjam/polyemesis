@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bluenviron/gortmplib"
@@ -514,4 +515,125 @@ func TestAnIdleStreamIsReapedWhenItsLastSubscriberLeaves(t *testing.T) {
 	if n != 0 {
 		t.Error("the stream entry survived its last subscriber; every rotated-out key would leak one forever")
 	}
+}
+
+/* ------------------------------------------------------- shutdown under load */
+
+// Stop walks every subscriber and closes its socket, while serveSubscriber is
+// still setting those subscribers up. The two goroutines meet on the same
+// struct, so the ONLY thing keeping them apart is the order in which a
+// subscriber is initialised and published into s.streams.
+//
+// This is a regression test for a real defect, and one that only CI found:
+// sub.conn was assigned AFTER the subscriber had been put in the map, so Stop
+// could read the field while serveSubscriber wrote it. Every local run passed —
+// the bug is invisible without -race, which is the point. Run this package with
+// -race or this test proves nothing:
+//
+//	go test -race ./internal/rtmpserver/
+//
+// Verified to fail: moving the sub.conn assignment back below the s.mu.Unlock
+// in serveSubscriber makes this report a data race.
+func TestStopWhileSubscribersAreConnectingIsRaceFree(t *testing.T) {
+	const subscribers = 12
+
+	targets := map[string]Target{
+		"key-a": {SourceID: 1, Name: "a", Enabled: true, Ready: true},
+	}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(targets))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+
+	// The subscribers are deliberately NOT synchronised with the Stop below.
+	// Staggering them so some are mid-handshake, some are registered and some
+	// have not dialled yet is what puts a half-initialised subscriber in the
+	// map at the moment Stop walks it.
+	var wg sync.WaitGroup
+	for i := 0; i < subscribers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			u, _ := url.Parse("rtmp://" + addr + "/live/key-a")
+			c := &gortmplib.Client{URL: u, Publish: false}
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			if err := c.Initialize(ctx); err != nil {
+				// Refused or torn down mid-handshake is a legitimate outcome
+				// here — Stop is racing these on purpose. The assertion is
+				// about memory safety, not about who wins.
+				return
+			}
+			defer c.Close()
+			for {
+				if _, err := c.Read(); err != nil {
+					return
+				}
+			}
+		}()
+	}
+
+	// Long enough that some connections are established and short enough that
+	// others are still arriving.
+	time.Sleep(150 * time.Millisecond)
+	s.Stop()
+	wg.Wait()
+
+	// Stop must also have emptied the table rather than merely dropping its
+	// reference to it, or the sockets it was meant to close are still open.
+	s.mu.Lock()
+	n := len(s.streams)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Errorf("Stop left %d stream(s) behind; the subscriber sockets it should have closed are still open", n)
+	}
+}
+
+// Stop being called from several goroutines at once is not hypothetical: the
+// engine reconciles on a timer and on demand, and both paths can decide the
+// listener is no longer wanted. Closing a channel twice panics, so the guard
+// inside close() has to hold under genuine concurrency, not just sequentially.
+func TestConcurrentStopsDoNotPanic(t *testing.T) {
+	targets := map[string]Target{
+		"key-a": {SourceID: 1, Name: "a", Enabled: true, Ready: true},
+	}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(targets))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+
+	// A real subscriber, so Stop has something to walk rather than exercising
+	// the empty-map path that would pass no matter what.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		u, _ := url.Parse("rtmp://" + addr + "/live/key-a")
+		c := &gortmplib.Client{URL: u, Publish: false}
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		if err := c.Initialize(ctx); err != nil {
+			return
+		}
+		defer c.Close()
+		for {
+			if _, err := c.Read(); err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(200 * time.Millisecond)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); s.Stop() }()
+	}
+	wg.Wait()
+	<-done
 }

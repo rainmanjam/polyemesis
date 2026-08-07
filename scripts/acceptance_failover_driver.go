@@ -107,6 +107,9 @@ func main() {
 		}
 		login()
 		restarts(os.Args[3])
+	case "publishkey":
+		login()
+		publishKey()
 	default:
 		die("unknown subcommand " + cmd)
 	}
@@ -329,6 +332,50 @@ func restarts(name string) {
 		}
 	}
 	fmt.Println(-1)
+}
+
+// publishKey prints the stream key an encoder must use to reach the source.
+//
+// This exists because the RTMP ingest stopped being "whatever turns up on the
+// port". There is now one shared RTMP listener for the whole install, and it
+// addresses sources BY KEY -- so a publisher with no key, or the wrong one, is
+// refused at the handshake and the suite sees an encoder that connected and
+// then died with a broken pipe.
+//
+// The token is what the UI puts in the publish URL, so this is also the address
+// a real operator would be given. Reading it from the API rather than pinning a
+// constant here keeps the suite honest about rotation: if the token changes
+// shape, this follows it.
+func publishKey() {
+	code, out := do(http.MethodGet, "/sources", nil)
+	if code != http.StatusOK {
+		die(fmt.Sprintf("cannot read sources: %d %s", code, out))
+	}
+	var rows []struct {
+		Source struct {
+			ID    int64  `json:"id"`
+			Token string `json:"token"`
+		} `json:"source"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		die("sources unreadable: " + err.Error())
+	}
+	for _, r := range rows {
+		// The list endpoint wraps each row, but has carried the token at both
+		// levels over its life. Take whichever is populated rather than
+		// silently publishing to an empty key, which is the exact failure this
+		// function exists to prevent.
+		if t := r.Source.Token; t != "" {
+			fmt.Println(t)
+			return
+		}
+		if r.Token != "" {
+			fmt.Println(r.Token)
+			return
+		}
+	}
+	die("no source carried a publish token")
 }
 
 func pin(kind string) {

@@ -343,7 +343,11 @@ function SourceCard({
               <InfoHint body="sources.help.ingest" title="sources.ingest" />
             </Label>
             <Select value={ing.mode} onValueChange={(v) => setIngest({ mode: v as typeof ing.mode })}>
-              <SelectTrigger className="h-7 text-[11px]">
+              <SelectTrigger
+                className="h-7 text-[11px]"
+                aria-label={t("sources.ingest")}
+                data-testid="ingest-mode"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

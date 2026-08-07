@@ -522,6 +522,19 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 	key := target.Key()
 
 	sub := &subscriber{ch: make(chan message.Message, subscriberQueue), done: make(chan struct{})}
+	// conn is set BEFORE the subscriber is published into s.streams, and never
+	// again. Assigning it after registration is a data race, and not a
+	// theoretical one: Stop walks st.subs and reads sub.conn, so the moment
+	// this pointer is in the map another goroutine may read the field. The
+	// race detector caught it in CI on the very first run.
+	//
+	// Publish-then-initialise is the bug; the mutex around the map does not
+	// help, because the write it needs to order was outside it. Everything
+	// mutable on a subscriber after this point lives behind s.mu or is owned
+	// by the single goroutine below.
+	if c, isConn := sc.RW.(net.Conn); isConn {
+		sub.conn = c
+	}
 
 	s.mu.Lock()
 	st := s.streams[key]
@@ -535,10 +548,6 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 	st.subs[sub] = struct{}{}
 	replay := append([]message.Message(nil), st.setup...)
 	s.mu.Unlock()
-
-	if c, isConn := sc.RW.(net.Conn); isConn {
-		sub.conn = c
-	}
 
 	// No play-response sequence is written here, and that is deliberate.
 	//
@@ -565,10 +574,16 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 				delete(s.streams, key)
 			}
 		}
+		// Read under the lock that guards the writes, then log outside it.
+		// This is safe either way — the delete above means pump can no longer
+		// reach this subscriber — but that argument spans two functions, and
+		// the copy costs nothing. Logging is I/O and does not belong under a
+		// mutex the publisher needs for every message.
+		lost := sub.dropped
 		s.mu.Unlock()
-		if sub.dropped > 0 {
+		if lost > 0 {
 			s.log.Warn("rtmp subscriber fell behind and lost messages",
-				"component", "rtmp-ingest", "peer", peer, "dropped", sub.dropped)
+				"component", "rtmp-ingest", "peer", peer, "dropped", lost)
 		}
 	}()
 

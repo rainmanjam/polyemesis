@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
 import { Switch } from "@/components/ui/switch";
 // The capability matrix this dialog renders inline. Data, not a component, and
 // shared with the settings page — see lib/capabilities.ts.
@@ -737,16 +738,20 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     setVariantErr("");
   }, [variantOpen, selectedRendition]);
 
-  const leaving = useMemo(() => {
-    const wasId = destination?.renditionId;
-    if (!wasId || String(wasId) === renditionId) return null;
-    const was = renditions.find((v) => v.rendition.id === wasId);
-    if (!was) return null;
-    // This destination is still counted in enabledDestinations while the dialog
-    // is open, so "last one out" means the count reaches one, not zero.
-    const lastOut = destination?.enabled === true && was.enabledDestinations <= 1;
-    return { name: was.rendition.name, lastOut, others: Math.max(0, was.enabledDestinations - 1) };
-  }, [destination, renditionId, renditions]);
+  const leaving = useMemo(
+    () =>
+      computeLeaving(destination?.renditionId, renditionId, destination?.enabled === true, (id) => {
+        const was = renditions.find((v) => v.rendition.id === id);
+        return was
+          ? {
+              name: was.rendition.name,
+              destinations: was.destinations,
+              enabledDestinations: was.enabledDestinations,
+            }
+          : null;
+      }),
+    [destination, renditionId, renditions],
+  );
 
   // Thirty entries is past the point where scanning works, so the list is
   // searchable over everything an operator might type: the name, the id, the
@@ -1178,63 +1183,73 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-1 text-[12px] font-medium">Video treatment</legend>
 
-            <button
-              type="button"
-              role="radio"
-              aria-checked={renditionId === PASSTHROUGH}
-              onClick={() => setRenditionId(PASSTHROUGH)}
-              className={cn(
-                "rounded-md border p-2.5 text-left transition-colors",
-                renditionId === PASSTHROUGH
-                  ? "border-primary bg-primary/10"
-                  : "border-border hover:border-primary/60",
-              )}
-            >
-              <span className="flex items-center gap-2">
-                <StatusDot tone={renditionId === PASSTHROUGH ? "live" : "idle"} size="sm" />
-                <span className="text-[13px] font-medium">Copy the source video</span>
-                <Badge variant="outline" className="ml-auto">recommended</Badge>
-              </span>
-              <span className="mt-1 block text-[10px] text-muted-foreground">
-                <span className="font-mono">-c:v copy</span> — the source video exactly as your
-                encoder sent it. No encode, no process, no CPU.
-              </span>
-            </button>
+            {/* role="radio" is only meaningful inside a radiogroup. Without this
+                wrapper the two cards are announced as two unrelated radios with
+                no shared name, so a screen reader user is told "checked" about a
+                choice whose alternatives were never named. */}
+            <div role="radiogroup" aria-label="Video treatment" className="flex flex-col gap-2">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={renditionId === PASSTHROUGH}
+                onClick={() => setRenditionId(PASSTHROUGH)}
+                className={cn(
+                  "rounded-md border p-2.5 text-left transition-colors",
+                  renditionId === PASSTHROUGH
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:border-primary/60",
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <StatusDot tone={renditionId === PASSTHROUGH ? "live" : "idle"} size="sm" />
+                  <span className="text-[13px] font-medium">Copy the source video</span>
+                  <Badge variant="outline" className="ml-auto">recommended</Badge>
+                </span>
+                <span className="mt-1 block text-[10px] text-muted-foreground">
+                  <span className="font-mono">-c:v copy</span> — the source video exactly as your
+                  encoder sent it. No encode, no process, no CPU.
+                </span>
+              </button>
 
-            <button
-              type="button"
-              role="radio"
-              aria-checked={renditionId !== PASSTHROUGH}
-              onClick={() => {
-                if (renditionId === PASSTHROUGH && renditions.length > 0) {
-                  setRenditionId(String(renditions[0].rendition.id));
-                }
-              }}
-              disabled={renditions.length === 0}
-              className={cn(
-                "rounded-md border p-2.5 text-left transition-colors disabled:opacity-50",
-                renditionId !== PASSTHROUGH
-                  ? "border-primary bg-primary/10"
-                  : "border-border hover:border-primary/60",
-              )}
-            >
-              <span className="flex items-center gap-2">
-                <StatusDot tone={renditionId !== PASSTHROUGH ? "live" : "idle"} size="sm" />
-                <span className="text-[13px] font-medium">Use a shared video encode</span>
-              </span>
-              <span className="mt-1 block text-[10px] text-muted-foreground">
-                {renditions.length === 0
-                  ? "No shared encodes yet. Create one on the Renditions page first."
-                  : "Changes the picture once and shares it between destinations."}
-              </span>
-            </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={renditionId !== PASSTHROUGH}
+                onClick={() => {
+                  if (renditionId === PASSTHROUGH && renditions.length > 0) {
+                    setRenditionId(String(renditions[0].rendition.id));
+                  }
+                }}
+                disabled={renditions.length === 0}
+                className={cn(
+                  "rounded-md border p-2.5 text-left transition-colors disabled:opacity-50",
+                  renditionId !== PASSTHROUGH
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:border-primary/60",
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <StatusDot tone={renditionId !== PASSTHROUGH ? "live" : "idle"} size="sm" />
+                  <span className="text-[13px] font-medium">Use a shared video encode</span>
+                </span>
+                <span className="mt-1 block text-[10px] text-muted-foreground">
+                  {renditions.length === 0
+                    ? "No shared encodes yet. Create one on the Renditions page first."
+                    : "Changes the picture once and shares it between destinations."}
+                </span>
+              </button>
+            </div>
 
             {/* Collapsed under Copy. The free path has nothing to configure,
                 and rendering an empty picker under it would imply otherwise. */}
             {renditionId !== PASSTHROUGH && (
               <div className="ml-2 flex flex-col gap-1.5 border-l border-border pl-3">
                 <Select value={renditionId} onValueChange={setRenditionId}>
-                  <SelectTrigger>
+                  {/* Named, because this control has no visible label of its
+                      own — it sits under a radio card that supplies the meaning,
+                      which leaves the select itself anonymous to a screen reader
+                      and ambiguous to a test. */}
+                  <SelectTrigger aria-label="Shared video encode" data-testid="rendition-picker">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1256,9 +1271,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         this costs a new encode or nothing at all is the fact
                         the whole shared model turns on, and it was previously
                         one static sentence that could not tell the two apart. */}
-                    {selectedView.enabledDestinations > 0
-                      ? `Feeds ${selectedView.destinations} destination${selectedView.destinations === 1 ? "" : "s"} · already encoding. This destination joins the running encode — no new encode starts.`
-                      : "Starts one shared encode when an enabled destination uses it."}
+                    {joinConsequence(selectedView)}
                   </span>
                 )}
                 {selectedRendition?.note && (
@@ -1462,9 +1475,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
             {leaving && (
               <span className="text-[10px] text-warn">
-                {leaving.lastOut
-                  ? `Stops the “${leaving.name}” encode — no other enabled destination is on it.`
-                  : `${leaving.others} other enabled destination${leaving.others === 1 ? "" : "s"} stay on “${leaving.name}”. Nothing else changes.`}
+                {leaveConsequence(leaving)}
               </span>
             )}
           </fieldset>
