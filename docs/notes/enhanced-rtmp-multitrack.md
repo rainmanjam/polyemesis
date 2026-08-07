@@ -112,15 +112,29 @@ So the pipeline from the relay onward needs no work at all.
 
 ## What actually remains
 
-### 1. A confirmation run against real OBS
+### 1. A confirmation run against real OBS — DONE, and it found something else
 
-Everything above used FFmpeg as the publisher. What that leaves unverified is
-narrow but real: OBS's RTMP `connect`/handshake, the `onMetaData` it sends
-(including `audioTrackIdInfoMap`), and behaviour under sustained load. The wire
-*format* of the audio tags is no longer in question — it was read out of OBS's
-source and matched byte-shape against what was tested.
+`scripts/acceptance-obs-multitrack.sh` runs OBS headless in Docker and publishes
+into a real polyemesis. Two results, and the second was not expected.
 
-This is now a confirmation, not an investigation. Half a day.
+**Confirmed:** OBS's RTMP `connect`/handshake is accepted by the shared
+listener, its stream key is admitted, and what it sends is probed and decodable.
+That was the part FFmpeg-as-publisher could not stand in for.
+
+**Disproved:** OBS 30.2.3 does not send multitrack audio over RTMP. Three audio
+tracks configured, each on its own mixer, `StreamMultiTrackAudioMixes=7`, custom
+RTMP service — and the captured wire bytes are `0xaf legacy ×3541` with no
+`0x95` multitrack tag anywhere.
+
+The gate is `supports_additional_audio_track`, tested in `rtmp-services.so`.
+No service in `services.json` declares it (0 of 91), so it is unreachable for
+every service including custom RTMP. Note the singular in the name: even where
+it is enabled, it appears to buy one *additional* track, not six.
+
+This section previously said the wire format "is no longer in question — it was
+read out of OBS's source". That was true and beside the point: the muxer
+implements multitrack correctly, and nothing reaches it. Reading an
+implementation tells you what the code would do, not whether it runs.
 
 ### 2. Track identity — largely answered
 
@@ -192,7 +206,9 @@ many connections the listener can tell apart.
 > tracks ride through the new listener untouched, because it relays RTMP
 > messages and never decodes them — the same reason they rode through
 > `ffmpeg -listen 1` untouched. The FFmpeg version dependency is unchanged:
-> 7.1+ verified, 6.1.1 refuses, OBS-as-publisher still unconfirmed.
+> 7.1+ verified, 6.1.1 refuses. OBS-as-publisher is now run and confirmed for
+> connect/handshake/probe — and disproved for multitrack, which OBS 30.2.3 does
+> not send at all. See section 1 under "What actually remains".
 
 The reasoning in `DESIGN-ONE-PORT-ONLY.md` — "no amount of RTMP work enables
 per-destination multitrack routing" — is the part that has aged. It is now
@@ -205,7 +221,7 @@ two ended up connected after all.
 | | |
 |---|---|
 | Minimum-FFmpeg check + capability probe | half a day — **newly required, see above** |
-| Confirmation run against real OBS | half a day |
+| ~~Confirmation run against real OBS~~ | **done** — `scripts/acceptance-obs-multitrack.sh` |
 | Reconnect-with-different-tracks test | half a day (order itself is verified) |
 | Codec guard | half a day |
 | Docs + UI string + 15 locales | half a day |

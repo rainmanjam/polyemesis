@@ -63,10 +63,25 @@ FFmpeg 6.1.1, which is Ubuntu 24.04's stock build: that refuses with *"at most
 one audio stream is supported in flv"*, and the extra tracks are lost with no
 error at either end.
 
-What has not been done is a run with OBS itself as the publisher — the testing
-used FFmpeg. OBS writes the same `MULTITRACKTYPE_ONE_TRACK` format (read from
-its `flv-mux.c`), so the wire format is not in question, but the handshake and
-metadata path are unconfirmed. SRT remains the operated path.
+**OBS does not currently send it.** That run has now been done —
+`scripts/acceptance-obs-multitrack.sh`, with OBS headless in Docker — and the
+answer was not the expected one. OBS 30.2.3, configured with three audio tracks
+and `StreamMultiTrackAudioMixes=7` against a custom RTMP server, publishes a
+single legacy-tagged audio track: capturing its bytes and walking the FLV tag
+headers gives `0xaf legacy ×3541` and no `0x95` multitrack tag at all.
+
+The reason is a gate in OBS's service catalogue rather than anything about the
+muxer. `rtmp-services.so` tests `supports_additional_audio_track`, and no service
+in its `services.json` declares it — 0 of 91 — so the capability is unreachable
+for every service, custom RTMP included.
+
+The earlier claim here was read from OBS's `flv-mux.c`, which does implement the
+format correctly. What was not checked is whether anything reaches that code.
+
+So: polyemesis accepts multitrack from a publisher that sends it (FFmpeg ≥ 7.1
+does), and OBS's connect, handshake and stream are accepted and probed
+correctly — but if you need multiple audio tracks out of OBS today, use SRT.
+SRT remains the operated path.
 
 See `notes/enhanced-rtmp-multitrack.md`.
 
