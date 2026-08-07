@@ -446,7 +446,7 @@ var destinationPresets = []DestinationPreset{
 		ID: "youtube", Name: "YouTube Live", Group: GroupMajor,
 		Video: &VideoGuidance{
 			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
-			Note:   "12000 is YouTube's recommended H.264 figure for 1080p60; it publishes no H.264 maximum. Keyframes must not exceed 4s -- beyond that YouTube reports gopSizeLong and the stream buffers. CBR.",
+			Note:   "12000 is YouTube's RECOMMENDED H.264 figure for 1080p60, not a ceiling -- OBS's services.json carries 51000 as YouTube's maximum, a different fact rather than a contradiction. Keyframes must not exceed 4s -- beyond that YouTube reports gopSizeLong and the stream buffers. CBR.",
 			Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06",
 		},
 		Transport: PresetRTMP, Kind: DestRTMP, Platform: PlatformYouTube,
@@ -477,7 +477,7 @@ var destinationPresets = []DestinationPreset{
 		ID: "twitch", Name: "Twitch", Group: GroupMajor,
 		Video: &VideoGuidance{
 			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 6000, KbpsMax: 6000, GOPSeconds: 2,
-			Note:   "Twitch's encoder guidance is the same for everyone; what is tiered is what happens AFTER ingest. Partners get transcodes on every broadcast, everyone else gets them on availability -- so a viewer on a slow connection may have no lower option. No maximum bitrate is published.",
+			Note:   "Twitch's encoder guidance is the same for everyone; what is tiered is what happens AFTER ingest. Partners get transcodes on every broadcast, everyone else gets them on availability -- so a viewer on a slow connection may have no lower option. No maximum video bitrate is published. The two sources disagree on audio: Twitch's help page says 160 kbps maximum, OBS's services.json says 320.",
 			Source: "https://help.twitch.tv/s/article/broadcasting-guidelines", Checked: "2026-08-06",
 		},
 		Transport: PresetRTMP, Kind: DestRTMP, Platform: PlatformTwitch,
@@ -585,8 +585,8 @@ var destinationPresets = []DestinationPreset{
 	{
 		ID: "trovo", Name: "Trovo", Group: GroupVideo,
 		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 30, KbpsMin: 4000, KbpsMax: 6000,
-			Note:   "Above 6000 kbps is subscribers only. Trovo publishes no keyframe interval, audio codec or audio bitrate, and the page is undated -- those fields are left empty rather than guessed.",
+			Width: 1920, Height: 1080, FPS: 30, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
+			Note:   "Above 6000 kbps is subscribers only. Trovo's own page is undated and omits the keyframe interval, audio codec and audio bitrate; the 2s keyframe here is from OBS's services.json, in which Trovo maintains its own entry. OBS carries a 9000 kbps ceiling against Trovo's published 6000-for-non-subscribers.",
 			Source: "https://support.trovo.live/category/1/article/778", Checked: "2026-08-06",
 		},
 		Transport: PresetRTMP, Kind: DestRTMP,
