@@ -457,7 +457,7 @@ function GoLiveComposer() {
                 </div>
 
                 {contentDetailsLocked && (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-500">
+                  <p className="text-[10px] text-warn">
                     {lockedReason ||
                       t("dash.youtubeStopsAcceptingTheseOnce")}
                   </p>

@@ -106,3 +106,96 @@ describe("colour utilities name a declared token", () => {
       .toEqual([]);
   });
 });
+
+/* ------------------------------------------------------- motion as a signal */
+
+/** The three properties that make motion honest in this application.
+ *
+ *  Each one has already failed once, here or on the website:
+ *   - a pulse applied to the indicator itself, so the urgent state was the one
+ *     that periodically disappeared;
+ *   - motion tokens declared and never wired, so the reduced-motion override
+ *     that set them to 0ms did nothing at all;
+ *   - a reduced-motion path that removed an animation and, with it, the only
+ *     thing the animation was communicating.
+ */
+describe("motion is a signal, not decoration", () => {
+  const statusDot = readFileSync(join(SRC, "components/signature/StatusDot.tsx"), "utf8");
+  const css = readFileSync(join(SRC, "index.css"), "utf8");
+
+  it("pulses the halo, never the dot itself", () => {
+    // The core is the last <span>; it must carry no animate-* class. A pulse on
+    // the core takes opacity to 0.35 at its midpoint, which is the indicator
+    // half-vanishing on the state that most needs to be seen.
+    const core = statusDot.slice(statusDot.lastIndexOf('"relative inline-flex h-full w-full'));
+    expect(core).not.toMatch(/animate-signal/);
+    // And both animated tones must go through one shared branch, so the
+    // asymmetry that caused this cannot return by editing a single tone.
+    expect(statusDot).toMatch(/const pulse\s*=/);
+  });
+
+  it("wires the motion tokens to Tailwind's default", () => {
+    // Declared-but-unregistered is the state this was in: 27 transition-colors
+    // using Tailwind's 150ms while --motion-instant sat unread, which also made
+    // the reduced-motion override decorative.
+    expect(css).toMatch(/--default-transition-duration:\s*var\(--motion-instant\)/);
+    expect(css).toMatch(/--default-transition-timing-function:\s*var\(--ease-out\)/);
+  });
+
+  it("keeps the default a var(), so reduced motion can still override it", () => {
+    // A literal here would be baked in at build time and the 0ms override would
+    // stop working — the same bug, one level down.
+    const decl = css.match(/--default-transition-duration:\s*([^;]+);/)?.[1] ?? "";
+    expect(decl.trim()).toMatch(/^var\(/);
+  });
+
+  it("replaces the reconnecting blink rather than deleting it", () => {
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    // Suppressing the animation is fine; suppressing what it MEANT is not.
+    expect(reduced).toMatch(/\.animate-signal-fast\s*\{[^}]*box-shadow/);
+  });
+});
+
+/* ------------------------------------------------- the palette stays semantic */
+
+/** No raw Tailwind signal colours in application code.
+ *
+ *  The app encodes state in five tokens — live, warn, down, armed, idle. A raw
+ *  `amber-500` or `red-500` beside them is a second vocabulary for the same
+ *  idea: `red-500` is ΔE 8.11 from `--down`, which is to say indistinguishable,
+ *  so a reader cannot tell whether a red thing is a failed destination or just
+ *  a red thing. Twenty-one such uses had accumulated.
+ *
+ *  The existing guard above cannot see this: it checks that a colour class
+ *  names a DECLARED token, and Tailwind's own palette is declared, so every one
+ *  of them passed.
+ */
+describe("state colour comes from tokens, not the Tailwind palette", () => {
+  /** The public viewer page, deliberately.
+   *
+   *  Its red LIVE badge follows the convention every viewer already knows from
+   *  YouTube and Twitch. That page is not the operator console and carries no
+   *  destination state, so the collision with `--down` cannot mislead anyone
+   *  reading it. Exempted by name rather than by pattern, so adding a second
+   *  exemption has to be an explicit decision. */
+  const EXEMPT = new Set(["pages/PublicPlayer.tsx"]);
+  const SIGNAL = /\b(?:text|bg|border|ring|outline|fill|stroke)-(?:red|amber|yellow|orange|green|emerald|lime)-\d{2,3}\b/g;
+
+  it("uses no raw signal colours outside the exemptions", () => {
+    const offenders: string[] = [];
+    for (const file of tsxFiles(SRC)) {
+      // SRC carries a trailing slash, so no +1 here — that ate the first
+      // character and made every exemption silently fail to match.
+      const rel = file.slice(SRC.length);
+      if (EXEMPT.has(rel)) continue;
+      const hits = readFileSync(file, "utf8").match(SIGNAL);
+      if (hits) offenders.push(`${rel}: ${[...new Set(hits)].join(", ")}`);
+    }
+    expect(
+      offenders,
+      "use the semantic tokens (text-warn, text-down, text-live…) so a colour " +
+        "keeps meaning one thing. If a use is genuinely outside the state " +
+        "vocabulary, add it to EXEMPT with the reason.",
+    ).toEqual([]);
+  });
+});

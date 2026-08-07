@@ -988,7 +988,7 @@ function PipelineSettings({
                     a trusted LAN is the normal Home Assistant setup and what our
                     own documentation recommends. */}
                 {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
-                  <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                  <span className="text-[10px] text-warn">
                     {t("set.brokerPlainNote")}
                   </span>
                 )}
@@ -1694,7 +1694,7 @@ function PlatformCredCard({
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-[12px]">{a.accountName}</span>
                         {a.reconnect?.needed && (
-                          <Badge variant="outline" className="border-amber-500 text-[9px] text-amber-600 dark:text-amber-500">
+                          <Badge variant="outline" className="border-warn text-[9px] text-warn">
                             reconnect needed
                           </Badge>
                         )}
@@ -1705,7 +1705,7 @@ function PlatformCredCard({
                           the point is that a token cannot gain a permission it
                           was not issued with, which is nobody's mistake. */}
                       {a.reconnect?.needed && (
-                        <div className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-500">
+                        <div className="mt-0.5 text-[10px] text-warn">
                           {a.reconnect.reason}
                           {a.reconnect.missing && a.reconnect.missing.length > 0 && (
                             <> Missing: <code>{a.reconnect.missing.join(", ")}</code></>

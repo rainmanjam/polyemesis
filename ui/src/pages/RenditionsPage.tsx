@@ -1437,7 +1437,7 @@ function RenditionDialog({
                 </span>
               )}
               {aspectApplies && fonts && !fonts.textSupported && (
-                <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                <span className="text-[10px] text-warn">
                   this FFmpeg has no drawtext
                 </span>
               )}
@@ -1455,7 +1455,7 @@ function RenditionDialog({
               The text is never interpreted, so a <code>%</code> is just a percent sign.
             </span>
             {fonts && !fonts.textSupported && (
-              <span className="text-[10px] text-amber-600 dark:text-amber-500">
+              <span className="text-[10px] text-warn">
                 This FFmpeg was built without libfreetype, so it has no <code>drawtext</code> filter
                 and text would never render. The setting is disabled rather than accepted and
                 silently ignored.
