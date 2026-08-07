@@ -430,6 +430,13 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 	}
 	now := time.Now()
 	targets := make(map[string]rtmpserver.Target, len(rows)*2)
+	// Snapshotted once, outside the loop and outside this server's own lock.
+	// Taken before the loop so every target in one lookup answers against the
+	// same listener.
+	m.mu.RLock()
+	rtmp := m.rtmp
+	m.mu.RUnlock()
+
 	primaries := make(map[int64]rtmpserver.Target, len(rows))
 	for _, s := range rows {
 		// Ready is the counterpart of srtserver's `Sink != nil`: it must mean an
@@ -444,12 +451,30 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 		// Sources page to "publishing" while that source's real SRT encoder
 		// might be down. The backup branch below already gated on mode; this
 		// one did not, and its own comment described the bug it had.
+		// CONFIRMED SUBSCRIBED, not "the database says rtmp".
+		//
+		// The comment above is the contract and the expression below used to
+		// miss it by one step: an engine record plus a stored mode says a
+		// subscriber SHOULD exist, never that one does. Between the two sits
+		// every state where reconcileIngest spawned nothing or the child is
+		// crash-looping — including its own early return for a source with no
+		// publish token. In all of them a publisher was admitted, held a clean
+		// session for as long as it liked, and delivered into a stream with no
+		// reader. Nothing logged an error, because from the server's side
+		// nothing had gone wrong.
+		//
+		// Asking the listener whether anyone is actually reading closes it. The
+		// ingest child dials in when the source is enabled, well before an
+		// operator hits Start in their encoder, so the ordinary case is that the
+		// subscriber is already waiting and this is true — see the note in
+		// serveSubscriber about subscribe-before-publish being the normal order.
 		eng := m.Engine(s.ID)
+		subscribed := rtmp != nil && rtmp.HasSubscriber(s.ID, false)
 		primary := rtmpserver.Target{
 			SourceID: s.ID,
 			Name:     s.Name,
 			Enabled:  s.Enabled,
-			Ready:    eng != nil && s.Ingest.Mode == db.IngestRTMP,
+			Ready:    eng != nil && s.Ingest.Mode == db.IngestRTMP && subscribed,
 		}
 		primaries[s.ID] = primary
 		for _, tok := range s.ValidTokens(now) {

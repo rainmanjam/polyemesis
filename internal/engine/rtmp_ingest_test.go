@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/routing"
+	"os"
+	"strings"
 )
 
 // The one-port RTMP listener is addressed by the source's publish TOKEN, the
@@ -76,7 +79,19 @@ func TestARotatedRTMPTokenKeepsWorkingDuringTheGrace(t *testing.T) {
 // publisher whose engine failed to start is admitted into a stream with no
 // subscriber: the encoder goes green, the bytes go nowhere, and the operator
 // has a healthy OBS and no output with nothing saying why.
-func TestAnRTMPTargetIsNotReadyUntilItsEngineIs(t *testing.T) {
+//
+// THIS TEST USED TO ASSERT THE WRONG CONTRACT. It was called
+// "...NotReadyUntilItsEngineIs" and required Ready to become true as soon as
+// the manager started, which is precisely the gap: an engine record plus a
+// stored mode says a subscriber SHOULD exist, never that one does. Everything
+// in between — a child that never spawned, one crash-looping, the early return
+// for a source with no publish token — still admitted a publisher and held it
+// on a stream nobody read.
+//
+// The fixture makes the distinction visible for free: its FFmpeg path cannot
+// exec, so the manager starts, the engine exists, and no ingest child ever
+// dials in. Under the old rule that was Ready. Under the real one it is not.
+func TestAnRTMPTargetIsNotReadyUntilSomethingIsSubscribed(t *testing.T) {
 	m, store := managerFixture(t)
 	src := rtmpSource(t, store, "Horizontal")
 
@@ -92,8 +107,13 @@ func TestAnRTMPTargetIsNotReadyUntilItsEngineIs(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	after, ok := m.lookupStreamKey(src.Token)
-	if !ok || !after.Ready {
-		t.Errorf("target = %+v, %v; want Ready once the engine is up", after, ok)
+	if !ok {
+		t.Fatalf("the token stopped resolving once the manager was up: %+v", after)
+	}
+	if after.Ready {
+		t.Error("Ready with no subscriber attached. The engine exists and the mode is " +
+			"rtmp, but this fixture's ffmpeg cannot exec so nothing ever dialled the " +
+			"listener — admitting a publisher here is the green-encoder-no-output failure")
 	}
 }
 
@@ -285,4 +305,60 @@ func TestANewSourceHasNoLegacyAddress(t *testing.T) {
 	if got := m.LegacyRTMPKey(src.ID); got != "" {
 		t.Errorf("LegacyRTMPKey = %q on a source created today, want none", got)
 	}
+}
+
+// A routing graph is never compiled against a layout nobody has measured.
+//
+// Until the probe lands, e.source is routing.DefaultSource() — six stereo
+// tracks that exist so the routing editor has something to draw, not a claim
+// about what is arriving. reconcileMeters and stemPlanFor have always refused
+// on that; destinations read e.source raw and did not, which is the one that
+// matters most because per-destination routing is the product.
+//
+// Two failures came out of it. A profile naming a track the stream lacks emits
+// `[0:a:5]`, FFmpeg refuses, and the destination crash-loops — loud, and
+// findable. The quieter one is worse: the placeholder claims Channels: 2 on
+// every track, so a real 5.1 track compiles to `pan=stereo|c0=c0|c1=c1`, which
+// is perfectly valid FFmpeg. The destination starts, stays up, and publishes
+// front L/R only — centre, where dialogue lives, silently discarded.
+func TestDestinationsAreNotPlannedAgainstAnUnprobedLayout(t *testing.T) {
+	// The hazard is a property of the placeholder itself: it has tracks, so a
+	// zero-track check cannot catch it, and it claims two channels on all of
+	// them, so a downmix built from it is wrong for anything wider.
+	ph := routing.DefaultSource()
+	if len(ph.Tracks) == 0 {
+		t.Fatal("the placeholder has no tracks; the guard under test would be unnecessary")
+	}
+	for _, tr := range ph.Tracks {
+		if tr.Channels != 2 {
+			t.Fatalf("placeholder track %d claims %d channels; this test's premise "+
+				"is that every placeholder track claims stereo", tr.Index, tr.Channels)
+		}
+	}
+
+	// And the guard itself: reconcileOutputs must hold rather than plan when the
+	// layout is unmeasured and no silence tier is standing in with a real one.
+	src := readFile(t, "engine.go")
+	guard := "if !probed && silenceSig == \"\" {"
+	if !strings.Contains(src, guard) {
+		t.Error("reconcileOutputs no longer holds destination planning on an unprobed " +
+			"layout; a routing graph compiled from the placeholder can publish the " +
+			"wrong channels without erroring")
+	}
+	// It must read the flag, not infer it from the track count.
+	if !strings.Contains(src, "probed := e.probed") {
+		t.Error("reconcileOutputs no longer reads e.probed. Inferring 'unprobed' from " +
+			"len(tracks)==0 is the mistake this guard exists to avoid: the " +
+			"placeholder HAS six tracks")
+	}
+}
+
+// readFile reads a file from this package's directory.
+func readFile(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", name, err)
+	}
+	return string(b)
 }

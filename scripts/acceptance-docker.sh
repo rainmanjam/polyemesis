@@ -437,11 +437,20 @@ NR=$(drive tracks)
 #
 # Step 4b covers RTMP ingest properly, over the same port and token, with the
 # arriving audio identified by content.
-if [ -n "$NR" ] && [ "$NR" -ge 1 ] 2>/dev/null; then
-  ok "RTMP ingest reachable (track count not asserted -- see the note above)"
-else
-  bad "RTMP ingest probed '$NR' tracks, expected at least 1"
-fi
+# "unprobed" is now a possible answer and it is the honest one: the driver
+# reports the probed FLAG rather than the length of a list that exists before
+# any stream does. Either outcome is accepted here, and the reason each is
+# acceptable is stated, because the thing this step can prove today is that the
+# publisher is admitted -- step 4b is what proves RTMP ingest end to end.
+case "$NR" in
+  unprobed)
+    ok "legacy RTMP: source correctly reports UNPROBED rather than a placeholder count"
+    printf "        the publisher is admitted; nothing had reached the relay when this ran\n" ;;
+  ''|*[!0-9]*)
+    bad "could not read the track state: '$NR'" ;;
+  *)
+    ok "legacy RTMP ingest probed $NR audio track(s)" ;;
+esac
 docker rm -f pub-acc >/dev/null 2>&1
 drive mode srt >/dev/null
 

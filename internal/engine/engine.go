@@ -1640,6 +1640,7 @@ func (e *Engine) reconcileOutputs() error {
 
 	e.mu.RLock()
 	src := e.source
+	probed := e.probed
 	fps := probedFPS(e.videoInfo)
 	e.mu.RUnlock()
 
@@ -1674,6 +1675,33 @@ func (e *Engine) reconcileOutputs() error {
 	}
 	e.mu.RUnlock()
 	startRends, stopRends := diffRenditions(wantRends, haveRends)
+
+	// DO NOT COMPILE A ROUTING GRAPH AGAINST A LAYOUT NOBODY HAS MEASURED.
+	//
+	// Until the probe lands, e.source is routing.DefaultSource(): six stereo
+	// tracks that exist so the routing editor has something to draw, not a claim
+	// about what is arriving. reconcileMeters and stemPlanFor both refuse on
+	// exactly this — see the comment at reconcileMeters, which spells out that
+	// the zero-track check cannot catch it because the placeholder HAS tracks.
+	// Destinations were the one process-building consumer that read e.source raw,
+	// and they are the ones that matter most.
+	//
+	// Two ways it goes wrong, and the second is the reason this is a guard rather
+	// than a warning. A profile naming a track the stream does not have emits
+	// `[0:a:5]` and FFmpeg refuses to start, so the destination crash-loops —
+	// loud, and diagnosable. But the placeholder also claims Channels: 2 on every
+	// track, so a real 5.1 track compiles to `pan=stereo|c0=c0|c1=c1`, which is
+	// VALID FFmpeg: the destination starts, stays up, and publishes front L/R
+	// only. Centre — where dialogue lives — is discarded, with no error anywhere.
+	//
+	// A silence tier substitutes synthTrack() above, which IS a measured layout,
+	// so that case is known and proceeds normally.
+	if !probed && silenceSig == "" {
+		e.noteReload("destinations", "all", reloadRestart,
+			"held: the ingest layout has not been probed yet, and a routing graph "+
+				"compiled against the placeholder would map tracks that may not exist")
+		return nil
+	}
 
 	plans := e.planDestinations(destRows, wantRends, src, srcSig)
 

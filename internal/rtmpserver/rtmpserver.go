@@ -766,6 +766,28 @@ func setupSlot(msg message.Message) (string, bool) {
 	return "", false
 }
 
+// HasSubscriber reports whether anything is currently reading this source's
+// stream — in practice, whether the engine's ingest child has dialled in and is
+// waiting on the far end.
+//
+// This exists so Target.Ready can mean what its comment always claimed: that an
+// RTMP SUBSCRIBER exists, not merely that an engine record does. Without it a
+// publisher was admitted whenever the database said "rtmp", held a full clean
+// session, and delivered into a stream nobody read — encoder green, no output,
+// and nothing anywhere saying why. That is the exact failure Ready was invented
+// to prevent, and it could still happen whenever the ingest child was absent:
+// crash-looping, or bailed out early for want of a publish token.
+//
+// SAFE TO CALL FROM A Lookup. The lookup runs before this server takes s.mu on
+// both the publish and the subscribe path, so re-entering here does not
+// deadlock. Anything that changes that ordering has to revisit this.
+func (s *Server) HasSubscriber(sourceID int64, backup bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.streams[PublisherKey{SourceID: sourceID, Backup: backup}]
+	return st != nil && len(st.subs) > 0
+}
+
 // LinkStats is one live publisher, for the API.
 type LinkStats struct {
 	SourceID  int64     `json:"sourceId"`

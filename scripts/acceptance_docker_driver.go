@@ -277,6 +277,18 @@ func tracks() {
 		} `json:"tracks"`
 	}
 	_ = json.Unmarshal(out, &src)
+	// PROBED, OR THE COUNT MEANS NOTHING.
+	//
+	// An unprobed source still carries a track list: routing.DefaultSource() is
+	// six placeholder tracks, so the routing editor has something to draw before
+	// a stream arrives. This function decoded `probed` and then printed the
+	// length regardless, so "6" was returned for a source that had never seen a
+	// packet — and the RTMP step's `>= 1` assertion was satisfied by it. The
+	// engine was answering honestly; the driver was throwing the answer away.
+	if !src.Probed {
+		fmt.Println("unprobed")
+		return
+	}
 	fmt.Println(len(src.Tracks))
 }
 
