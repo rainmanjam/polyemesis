@@ -15,6 +15,27 @@ import Base from "../layouts/Base.astro";
  * markup. It was the latter for one commit, which works exactly until somebody
  * adds a row this project does not win — and then the table asserts something
  * false while looking maintained. */
+/* [row, polyemesis, Restreamer, restream.io]
+ *
+ * The shared ground, from docs/COMPARISON.md's "Where the three overlap".
+ * A page that lists only differences is read as cherry-picked even when every
+ * row of it is true — and it is genuinely useful to a reader to know that all
+ * three do the basic job, because it tells them the decision is about the
+ * audio and nothing else. Rows where polyemesis is NOT ahead are kept as they
+ * are; that is the point of the section. */
+const shared = [
+  ["Ingest once, fan out to several platforms", "Yes", "Yes", "Yes"],
+  ["Reconnects when a platform drops", "Yes", "Yes", "Yes"],
+  ["Live health and status you can watch", "Yes", "Yes", "Yes"],
+  ["Recording", "Multitrack, stream-copied", "Yes", "Yes"],
+  ["Metrics / API", "Prometheus + REST", "REST", "REST"],
+  ["Hardware encoding", "NVENC, QSV, VA-API, VideoToolbox, AMF", "Yes", "n/a"],
+  ["Unified chat", "Yes", "No", "Yes"],
+  ["Self-hosted", "Yes", "Yes", "No"],
+  ["Simultaneous destinations", "Unlimited", "Unlimited", "2–8 by plan"],
+  ["Cost", "Your hardware", "Your hardware", "Subscription"],
+];
+
 const wins = [
   ["Per-destination audio mix from one multitrack ingest", "Yes", "No", "No"],
   ["Channel-level mix matrix with per-cell gain", "Yes", "No", "No"],
@@ -58,7 +79,11 @@ const wins = [
   </section>
 
   <section class="wrap pb-16" data-reveal>
-    <h2 class="text-2xl font-medium">What polyemesis has that neither has</h2>
+    <h2 class="text-2xl font-medium">Where they differ</h2>
+    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+      One axis, and it is the one this project exists for. The shared ground —
+      everything all three do — is in the table below this one.
+    </p>
     <div class="mt-6 overflow-x-auto rounded-token border border-line">
       <table class="w-full min-w-[46rem] border-collapse text-sm">
         <thead class="bg-surface">
@@ -98,6 +123,48 @@ const wins = [
     </p>
   </section>
 
+
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What all three do</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        The basic job is table stakes everywhere: ingest once, fan out, reconnect
+        when a platform drops, show you whether it is working. Worth stating
+        plainly — it means the choice between these three comes down to the
+        audio, and not to whether the fundamentals are there.
+      </p>
+      <div class="mt-6 overflow-x-auto rounded-token border border-line">
+        <table class="w-full min-w-[46rem] border-collapse text-sm">
+          <thead class="bg-surface">
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left font-medium">&nbsp;</th>
+              <th scope="col" class="w-44 px-4 py-3 text-center font-medium text-primary">polyemesis</th>
+              <th scope="col" class="w-36 px-4 py-3 text-center font-medium">Restreamer</th>
+              <th scope="col" class="w-36 px-4 py-3 text-center font-medium">restream.io</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              shared.map(([row, poly, a, b]) => (
+                <tr class="border-b border-line/60 last:border-0">
+                  <td class="px-4 py-3 text-fg">{row}</td>
+                  <td class="px-4 py-3 text-center font-mono text-xs text-muted">{poly}</td>
+                  <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{a}</td>
+                  <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{b}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+        Two rows are not a tie and are left that way: restream.io needs no server
+        from you at all, and Restreamer is years older and far more widely
+        deployed. Both are real advantages, and neither changes what happens to
+        your audio.
+      </p>
+    </div>
+  </section>
 
   <section class="wrap py-20 text-center" data-reveal>
     <h2 class="text-balance text-3xl font-medium">Still the right problem?</h2>
