@@ -85,7 +85,12 @@ export function DestinationCard({
   // would send someone looking for a fault in the wrong place.
   const video = dest.renditionId
     ? dest.renditionName || `rendition ${dest.renditionId}`
-    : "passthrough · copy";
+    // One name for the free state, everywhere. It read four different ways
+    // across the UI — "passthrough · copy" here, "Passthrough — source, copied"
+    // in the dialog, "Ingest (passthrough)" in playout — for one concept, which
+    // is how Wowza ended up shipping "Encode", "Preset" and "Stream Name Group"
+    // for a single thing.
+    : "source, copied";
 
   return (
     <Card className="overflow-hidden">

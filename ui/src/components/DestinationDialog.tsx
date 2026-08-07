@@ -10,6 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { StatusDot } from "@/components/signature/StatusDot";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +47,7 @@ import type {
   Platform,
   PlatformAccount,
   Rendition,
+  RenditionView,
 } from "@/lib/types";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
@@ -589,7 +592,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
-  const [renditions, setRenditions] = useState<Rendition[]>([]);
+  // RenditionView, not Rendition. The view carries `destinations` and
+  // `enabledDestinations`, and this used to strip them off one line after they
+  // arrived — throwing away the only data that can tell an operator whether
+  // picking an encode starts a new one or joins a running one. That fact is
+  // the entire argument for renditions existing, and the UI could not state it.
+  const [renditions, setRenditions] = useState<RenditionView[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -597,7 +605,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     api.listAccounts().then(setAccounts).catch(() => setAccounts([]));
     api
       .listRenditions()
-      .then((rows) => setRenditions(rows.map((r) => r.rendition)))
+      .then(setRenditions)
       .catch(() => setRenditions([]));
 
     setPickerOpen(false);
@@ -676,10 +684,28 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     return acct?.accountRef?.startsWith("page:") ?? false;
   }, [accounts, accountId]);
 
-  const selectedRendition = useMemo(
-    () => renditions.find((r) => String(r.id) === renditionId) ?? null,
+  const selectedView = useMemo(
+    () => renditions.find((v) => String(v.rendition.id) === renditionId) ?? null,
     [renditions, renditionId],
   );
+  const selectedRendition = selectedView?.rendition ?? null;
+
+  /** What the encode this destination is LEAVING will do once it has gone.
+   *
+   *  Nothing in the field tells an operator this — MediaLive's documented
+   *  remediation is "make a note of the video encode, in case you need to refer
+   *  to it again". It is the same arithmetic as joining, run backwards, so it
+   *  costs nothing to say. */
+  const leaving = useMemo(() => {
+    const wasId = destination?.renditionId;
+    if (!wasId || String(wasId) === renditionId) return null;
+    const was = renditions.find((v) => v.rendition.id === wasId);
+    if (!was) return null;
+    // This destination is still counted in enabledDestinations while the dialog
+    // is open, so "last one out" means the count reaches one, not zero.
+    const lastOut = destination?.enabled === true && was.enabledDestinations <= 1;
+    return { name: was.rendition.name, lastOut, others: Math.max(0, was.enabledDestinations - 1) };
+  }, [destination, renditionId, renditions]);
 
   // Thirty entries is past the point where scanning works, so the list is
   // searchable over everything an operator might type: the name, the id, the
@@ -1100,40 +1126,114 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           {/* Video and audio sit together on purpose: what a platform receives
               is one answer with two halves, and the pairing is the feature. */}
-          <div className="flex flex-col gap-1">
-            <Label>Video</Label>
-            <Select value={renditionId} onValueChange={setRenditionId}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={PASSTHROUGH}>Passthrough — source, copied</SelectItem>
-                {renditions.map((r) => (
-                  <SelectItem key={r.id} value={String(r.id)}>
-                    {r.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-[10px] text-muted-foreground">
-              {selectedRendition ? (
-                <>
-                  <span className="font-mono">{renditionSpec(selectedRendition)}</span>
-                  {/* Shared, not per-destination: this is why picking a
-                      rendition for a third platform costs nothing extra. */}
-                  {" — one encode, shared by every destination on this rendition."}
-                </>
-              ) : (
-                <>
-                  <span className="font-mono">-c:v copy</span> — the source video, byte for byte,
-                  at zero CPU cost. Pick a rendition when a platform will not accept the source.
-                </>
+          {/* Two cards, not a <Select>.
+              A dropdown presents copying and encoding as the same kind of
+              choice. They are not: copying is `-c:v copy` and costs nothing,
+              while an encode is the most expensive thing an operator can switch
+              on here. Making that a structural difference — two cards, with
+              everything under the second one collapsed until it is chosen — is
+              the whole point, and it is what Restreamer already does (its
+              filter controls render only when the codec is not `copy`). */}
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-[12px] font-medium">Video treatment</legend>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={renditionId === PASSTHROUGH}
+              onClick={() => setRenditionId(PASSTHROUGH)}
+              className={cn(
+                "rounded-md border p-2.5 text-left transition-colors",
+                renditionId === PASSTHROUGH
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary/60",
               )}
-            </span>
-            {selectedRendition?.note && (
-              <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+            >
+              <span className="flex items-center gap-2">
+                <StatusDot tone={renditionId === PASSTHROUGH ? "live" : "idle"} size="sm" />
+                <span className="text-[13px] font-medium">Copy the source video</span>
+                <Badge variant="outline" className="ml-auto">recommended</Badge>
+              </span>
+              <span className="mt-1 block text-[10px] text-muted-foreground">
+                <span className="font-mono">-c:v copy</span> — the source video exactly as your
+                encoder sent it. No encode, no process, no CPU.
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={renditionId !== PASSTHROUGH}
+              onClick={() => {
+                if (renditionId === PASSTHROUGH && renditions.length > 0) {
+                  setRenditionId(String(renditions[0].rendition.id));
+                }
+              }}
+              disabled={renditions.length === 0}
+              className={cn(
+                "rounded-md border p-2.5 text-left transition-colors disabled:opacity-50",
+                renditionId !== PASSTHROUGH
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary/60",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <StatusDot tone={renditionId !== PASSTHROUGH ? "live" : "idle"} size="sm" />
+                <span className="text-[13px] font-medium">Use a shared video encode</span>
+              </span>
+              <span className="mt-1 block text-[10px] text-muted-foreground">
+                {renditions.length === 0
+                  ? "No shared encodes yet. Create one on the Renditions page first."
+                  : "Changes the picture once and shares it between destinations."}
+              </span>
+            </button>
+
+            {/* Collapsed under Copy. The free path has nothing to configure,
+                and rendering an empty picker under it would imply otherwise. */}
+            {renditionId !== PASSTHROUGH && (
+              <div className="ml-2 flex flex-col gap-1.5 border-l border-border pl-3">
+                <Select value={renditionId} onValueChange={setRenditionId}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {renditions.map((v) => (
+                      <SelectItem key={v.rendition.id} value={String(v.rendition.id)}>
+                        {/* Spec first, name second. An encode named by its
+                            creator tells the next person nothing; what it
+                            PRODUCES tells them everything. */}
+                        <span className="font-mono">{renditionSpec(v.rendition)}</span>
+                        {v.rendition.name ? ` — ${v.rendition.name}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {selectedView && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {/* The consequence, computed rather than asserted. Whether
+                        this costs a new encode or nothing at all is the fact
+                        the whole shared model turns on, and it was previously
+                        one static sentence that could not tell the two apart. */}
+                    {selectedView.enabledDestinations > 0
+                      ? `Feeds ${selectedView.destinations} destination${selectedView.destinations === 1 ? "" : "s"} · already encoding. This destination joins the running encode — no new encode starts.`
+                      : "Starts one shared encode when an enabled destination uses it."}
+                  </span>
+                )}
+                {selectedRendition?.note && (
+                  <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+                )}
+              </div>
             )}
-          </div>
+
+            {leaving && (
+              <span className="text-[10px] text-warn">
+                {leaving.lastOut
+                  ? `Stops the “${leaving.name}” encode — no other enabled destination is on it.`
+                  : `${leaving.others} other enabled destination${leaving.others === 1 ? "" : "s"} stay on “${leaving.name}”. Nothing else changes.`}
+              </span>
+            )}
+          </fieldset>
 
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-bitrate">Audio bitrate</Label>
