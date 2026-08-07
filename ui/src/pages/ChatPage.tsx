@@ -7,14 +7,19 @@ import { PageHeader } from "@/components/AppLayout";
 import {
   ChatComposer,
   ChatEmpty,
+  ChatSearchBox,
+  ChatSearchResults,
   ChatStatusList,
   ChatTimeline,
   PlatformFilter,
 } from "@/components/ChatPanel";
 import { accentFor, platformsIn } from "@/lib/chat";
 import { ChatUserCard } from "@/components/ChatUserCard";
+import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
 import { useChatFeed } from "@/hooks/useChatFeed";
+import { useChatSearch } from "@/hooks/useChatSearch";
+import { useT } from "@/lib/i18n";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /** One pane for every platform at once.
@@ -28,6 +33,7 @@ import type { ChatMessage, ChatPlatform } from "@/lib/types";
  *  The panel, the timeline and the composer all live in ChatPanel.tsx and are
  *  shared with the compact dashboard pane. This file is layout. */
 export function ChatPage() {
+  const t = useT();
   const {
     messages,
     statuses,
@@ -43,6 +49,8 @@ export function ChatPage() {
   } = useChatFeed();
 
   const [hidden, setHidden] = useState<Set<ChatPlatform>>(new Set());
+  const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
+  const search = useChatSearch();
 
   const platforms = useMemo(() => platformsIn(messages, statuses), [messages, statuses]);
   const counts = useMemo(() => {
@@ -77,10 +85,10 @@ export function ChatPage() {
         // Verbatim. The server's sentence names the platform and, where one
         // exists, where the moderator can do it instead; rewording it here
         // would only make it vaguer.
-        toast.error(err instanceof Error ? err.message : "Could not delete that message.");
+        toast.error(err instanceof Error ? err.message : t("chatpage.couldNotDeleteThatMessage"));
       }
     },
-    [remove],
+    [remove, t],
   );
 
   // A platform is worth calling out at the top when it is neither live nor
@@ -90,12 +98,12 @@ export function ChatPage() {
   return (
     <div className="flex h-full min-h-0 flex-col p-3">
       <PageHeader
-        title="Chat"
-        subtitle="Every platform in one timeline, with one send box."
+        title={t("chatpage.title")}
+        subtitle={t("chatpage.subtitle")}
         actions={
           <>
             {stored && (
-              <Badge variant="outline" title="Nothing is attached; this is the stored scrollback.">
+              <Badge variant="outline" title={t("chatpage.storedTitle")}>
                 stored history
               </Badge>
             )}
@@ -105,7 +113,7 @@ export function ChatPage() {
                 socket offline
               </Badge>
             )}
-            <Button variant="ghost" size="icon-sm" onClick={() => void reload()} aria-label="Reload">
+            <Button variant="ghost" size="icon-sm" onClick={() => void reload()} aria-label={t("chatpage.reload")}>
               <RefreshCw className={loading ? "animate-spin" : undefined} />
             </Button>
           </>
@@ -117,7 +125,7 @@ export function ChatPage() {
         <section className="flex min-h-0 flex-col rounded-md border border-border bg-card">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1.5">
             <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-[12px] font-semibold">Timeline</span>
+            <span className="text-[12px] font-semibold">{t("chatpage.timeline")}</span>
             <span className="tnum font-mono text-[10px] text-subtle-foreground">
               {visible.length}
               {visible.length !== messages.length && ` of ${messages.length}`}
@@ -143,27 +151,49 @@ export function ChatPage() {
             />
           )}
 
-          <ChatTimeline
-            messages={visible}
-            onDelete={del}
-            onOpenUser={setCard}
-            empty={
-              hidden.size > 0 && messages.length > 0 ? (
-                <div className="flex h-full items-center justify-center px-6 text-center">
-                  <p className="text-[11px] text-muted-foreground">
-                    Every platform with messages is filtered out.
-                  </p>
-                </div>
-              ) : (
-                <ChatEmpty
-                  loading={loading}
-                  configured={configured}
-                  error={error}
-                  statuses={statuses}
-                />
-              )
-            }
-          />
+          {menu && (
+            <ChatMessageMenu
+              message={menu.m}
+              anchor={menu.at}
+              onClose={() => setMenu(null)}
+              onOpenCard={setCard}
+              onDelete={del}
+            />
+          )}
+
+          <ChatSearchBox search={search} />
+
+          {search.active ? (
+            <ChatSearchResults
+              search={search}
+              onDelete={del}
+              onOpenUser={setCard}
+              onMenu={(m, at) => setMenu({ m, at })}
+            />
+          ) : (
+            <ChatTimeline
+              messages={visible}
+              onDelete={del}
+              onOpenUser={setCard}
+              onMenu={(m, at) => setMenu({ m, at })}
+              empty={
+                hidden.size > 0 && messages.length > 0 ? (
+                  <div className="flex h-full items-center justify-center px-6 text-center">
+                    <p className="text-[11px] text-muted-foreground">
+                    {t("chatpage.allFiltered")}
+                    </p>
+                  </div>
+                ) : (
+                  <ChatEmpty
+                    loading={loading}
+                    configured={configured}
+                    error={error}
+                    statuses={statuses}
+                  />
+                )
+              }
+            />
+          )}
 
           <ChatComposer statuses={statuses} limits={limits} configured={configured} />
         </section>
@@ -184,37 +214,35 @@ export function ChatPage() {
 
           {configured && statuses.length === 0 && (
             <p className="rounded-md border border-border bg-card px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
-              Chat is running, but no platform account is attached. Connect one under Settings →
-              Platform credentials.
+                    {t("chatpage.noAccount")}
             </p>
           )}
 
           {!configured && !loading && (
             <p className="rounded-md border border-border bg-card px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
-              No chat is running on this server. The scrollback below the timeline is whatever was
-              stored before, and the send box is disabled until a platform is attached.
+                    {t("chatpage.notRunning")}
             </p>
           )}
 
           {stats && (
             <dl className="rounded-md border border-border bg-card px-2 py-1.5 text-[10px] text-subtle-foreground">
               <div className="flex justify-between gap-2">
-                <dt>Received</dt>
+                <dt>{t("chatpage.received")}</dt>
                 <dd className="tnum font-mono">{stats.received.toLocaleString()}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt title="The same message seen twice — our own echo, or a platform replaying it.">
+                <dt title={t("chatpage.dupTitle")}>
                   Deduplicated
                 </dt>
                 <dd className="tnum font-mono">{stats.deduped.toLocaleString()}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt>Stored</dt>
+                <dt>{t("chatpage.stored")}</dt>
                 <dd className="tnum font-mono">{stats.stored.toLocaleString()}</dd>
               </div>
               {stats.dropped > 0 && (
                 <div className="flex justify-between gap-2 text-warn">
-                  <dt title="Shown live, but persistence fell behind and the scrollback lost them.">
+                  <dt title={t("chatpage.droppedTitle")}>
                     Dropped from history
                   </dt>
                   <dd className="tnum font-mono">{stats.dropped.toLocaleString()}</dd>
@@ -224,9 +252,7 @@ export function ChatPage() {
           )}
 
           <p className="px-1 text-[10px] leading-relaxed text-subtle-foreground">
-            Deleting removes the message on the platform that issued it. A platform polyemesis
-            cannot delete on says so and names where it can be done instead — the action is never
-            hidden on a guess.
+                    {t("chatpage.deleteNote")}
           </p>
         </aside>
       </div>

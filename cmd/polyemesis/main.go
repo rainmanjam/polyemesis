@@ -569,7 +569,14 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 
 	fmt.Printf("\n  polyemesis %s\n", version)
 	fmt.Printf("  web ui      %s://%s\n", scheme, shown)
-	fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
+	// An install that has not chosen yet prints that, rather than an empty mode
+	// beside a port number — which reads as "srt on 6000" to anyone skimming and
+	// is the one impression this must not give.
+	if settings.Ingest.Mode == db.IngestUnset {
+		fmt.Printf("  ingest      not chosen yet — pick SRT, RTMP or pull in the web UI\n")
+	} else {
+		fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
+	}
 	fmt.Printf("  data dir    %s\n", cfg.DataDir)
 	fmt.Printf("  ffmpeg      %s\n", tools.Version)
 	reportTLS(cfg, provider, shown)

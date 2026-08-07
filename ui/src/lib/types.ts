@@ -1,7 +1,10 @@
 /** Types mirroring the Go API. Kept hand-written and small rather than
  *  generated, so the shapes the UI actually consumes stay obvious. */
 
-export const MAX_TRACKS = 6;
+/** Mirrors routing.MaxTracks. The server also reports this as `maxTracks` in
+ *  its capabilities response — prefer that where it is to hand, and treat this
+ *  as the fallback for code that renders before capabilities have loaded. */
+export const MAX_TRACKS = 32;
 
 export type RoutingMode = "simple" | "matrix";
 export type NormalizeMode = "auto" | "off" | "limiter" | "loudnorm";
@@ -384,6 +387,34 @@ export interface FontInfo {
 
 /** A rendition plus its usage. `enabledDestinations` is the ref count the
  *  engine acts on: at zero there is no process and no CPU burnt. */
+/** A platform's OWN published encoder guidance, served from
+ *  GET /platforms/presets. Advisory: it seeds a form and annotates a choice,
+ *  and never gates anything.
+ *
+ *  `source` and `checked` are not decoration. Once a bitrate is sitting in a
+ *  form field an operator cannot tell a researched number from a guess, so the
+ *  UI always shows where it came from and when it was last read. */
+export interface VideoGuidance {
+  width?: number;
+  height?: number;
+  fps?: number;
+  kbpsMin?: number;
+  kbpsMax?: number;
+  gopSeconds?: number;
+  note?: string;
+  source: string;
+  checked: string;
+}
+
+/** One entry of the server's platform catalogue. Only the fields the dialog
+ *  reads are typed here — the UI keeps its own preset list for the picker and
+ *  consults this for the researched data it must not duplicate. */
+export interface PlatformPresetInfo {
+  id: string;
+  name: string;
+  video?: VideoGuidance;
+}
+
 export interface RenditionView {
   rendition: Rendition;
   destinations: number;
@@ -1526,6 +1557,23 @@ export interface ChatUserCard {
   /** The limit was reached, so the count is a floor and not a total. */
   truncated: boolean;
   /** Why the history is only this deep. Show it. */
+  retentionNote: string;
+}
+
+/** A chat search result set.
+ *
+ *  Carries the same two honesty fields as ChatUserCard and for a sharper
+ *  reason: search is the one place an operator can conclude something did NOT
+ *  happen. "No results" here means "not in the scrollback we kept", never "never
+ *  said", so `retentionNote` has to be rendered alongside an empty result and
+ *  not only alongside a full one. */
+export interface ChatSearchResult {
+  query: string;
+  /** Echoed back so the UI can label a narrowed result set. */
+  platform?: ChatPlatform;
+  messages: ChatMessage[];
+  /** The limit was reached; older matches may exist beyond this page. */
+  truncated: boolean;
   retentionNote: string;
 }
 

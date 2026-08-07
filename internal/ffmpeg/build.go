@@ -108,9 +108,26 @@ type IngestSpec struct {
 	SRTLatencyMS  int
 
 	// RTMP
-	RTMPPort      int
-	RTMPApp       string
-	RTMPStreamKey string
+	//
+	// RTMPPort is the shared one-port RTMP listener, which polyemesis binds
+	// itself; this spec never binds it. The ingest child is a SUBSCRIBER that
+	// dials that listener back out on loopback, the same shape every RTMP server
+	// uses, so the two addresses below are a dial target and a display string
+	// rather than a bind.
+	//
+	// RTMPApp is the cosmetic first path element -- the "live" in
+	// rtmp://host/live/<key>. The listener discards it (rtmpserver.StreamKey),
+	// so it decides nothing; it exists because encoders expect a server URL that
+	// looks like one, and because it is what goes in OBS's "Server" box.
+	//
+	// RTMPAddress is what actually selects the source: the publish token, or
+	// "<token>.backup" for the failover standby. It replaced a per-source
+	// RTMPStreamKey, which used to be a playpath FFmpeg checked while listening
+	// -- a mechanism that no longer exists, and one that could not tell two
+	// sources apart because nothing made stream keys unique.
+	RTMPPort    int
+	RTMPApp     string
+	RTMPAddress string
 
 	// Pull
 	//
@@ -247,11 +264,17 @@ func (s IngestSpec) IngestURL() string {
 		src, _ := s.PullSource()
 		return src
 	case IngestRTMP:
-		u := fmt.Sprintf("rtmp://0.0.0.0:%d/%s", s.RTMPPort, strings.Trim(s.RTMPApp, "/"))
-		if s.RTMPStreamKey != "" {
-			u += "/" + s.RTMPStreamKey
-		}
-		return u
+		// 127.0.0.1, and it matters that it is not 0.0.0.0. This is a DIAL
+		// target now: polyemesis binds the RTMP port itself and this child
+		// subscribes to it. 0.0.0.0 was correct while `-listen 1` made FFmpeg
+		// the server, and as a dial target it is the wrong address rather than
+		// the same one spelled differently.
+		//
+		// Loopback also because rtmpserver refuses any non-loopback subscriber:
+		// a stream key is a publish credential and must not double as a viewing
+		// one.
+		return fmt.Sprintf("rtmp://127.0.0.1:%d/%s/%s",
+			s.RTMPPort, strings.Trim(s.RTMPApp, "/"), s.RTMPAddress)
 	default:
 		q := url.Values{}
 		q.Set("mode", "listener")
@@ -280,6 +303,11 @@ func (s IngestSpec) PublicIngestURL(host string) string {
 	case IngestPull:
 		return strings.TrimSpace(s.PullURL)
 	case IngestRTMP:
+		// The app only, deliberately: this is OBS's "Server" box and the address
+		// goes in its "Stream Key" box beside it. Appending the address here
+		// too would produce /live/<token>/<token> for the operator who fills in
+		// both, which is the one mistake this split exists to make impossible.
+		// api.publishURLs emits the key as its own field for that reason.
 		return fmt.Sprintf("rtmp://%s:%d/%s", host, s.RTMPPort, strings.Trim(s.RTMPApp, "/"))
 	default:
 		q := url.Values{}
@@ -307,10 +335,13 @@ func IngestArgs(s IngestSpec) []string {
 
 	switch s.Kind {
 	case IngestRTMP:
-		// The rtmp protocol's own listen option. FFmpeg accepts one publisher,
-		// then exits; the supervisor respawns it, which is exactly the
-		// "wait for the next session" behaviour we want.
-		args = append(args, "-listen", "1")
+		// Nothing. RTMP used to pass `-listen 1` here, which made FFmpeg the
+		// server and is exactly what capped an install at ONE RTMP source: a
+		// single-connection receiver cannot demultiplex by path. The listener is
+		// now polyemesis's own, on one port for every source, and this child
+		// dials it as an ordinary client -- no more flags than SRT needs, and
+		// for the same reason (see pullDirect): it either reconnects itself or
+		// exits, and the supervisor respawns it.
 	case IngestPull:
 		args = append(args, s.pullInputArgs()...)
 	}
@@ -1014,6 +1045,50 @@ func (s MetersSpec) ChannelOffset(track int) int {
 
 // MetersArgs builds the metering sidecar command.
 //
+// MeterChannelLimit is amerge's ceiling. Beyond 64 channels it refuses outright
+// with "Too many channels (max 64)", so this is a hard boundary of the
+// one-process meters design rather than a tuning choice.
+//
+// Duplicated from routing.MaxMeterChannels rather than imported: this package
+// builds command lines and deliberately does not depend on routing. The
+// constants are asserted equal in the tests.
+const MeterChannelLimit = 64
+
+// meterableTracks reports how many leading tracks fit under MeterChannelLimit.
+//
+// Whole tracks only -- metering half of a 5.1 track would report channels
+// against the wrong labels, which is worse than not reporting them. Returning
+// fewer than len(chans) is a real outcome for a wide ingest, and MetersDropped
+// is what tells the operator so.
+//
+// The first track is always included, however wide it is. The limit belongs to
+// amerge, and a lone track is never merged -- it goes straight to astats. This
+// also keeps the count non-zero, which the caller depends on: it indexes
+// labels[0] unconditionally.
+func meterableTracks(chans []int) int {
+	total := 0
+	for i, c := range chans {
+		if c <= 0 {
+			c = 1 // a track whose width never probed still occupies a leg
+		}
+		if i > 0 && total+c > MeterChannelLimit {
+			return i
+		}
+		total += c
+	}
+	return len(chans)
+}
+
+// MetersDropped reports how many trailing tracks MetersArgs could not cover.
+//
+// Zero for every ingest anyone is likely to send -- 32 stereo tracks fit. It
+// exists so a wide ingest degrades visibly instead of silently metering a
+// prefix and letting an operator believe a track is silent when it is merely
+// unmeasured.
+func MetersDropped(chans []int) int {
+	return len(chans) - meterableTracks(chans)
+}
+
 // One process meters every channel of every track. The trick is amerge: rather
 // than running N processes (and pulling N copies of the video over the relay
 // just to reach the audio), every track is merged into one wide stream and a
@@ -1026,7 +1101,7 @@ func MetersArgs(s MetersSpec) []string {
 	if s.SampleRate == 0 {
 		s.SampleRate = 48000
 	}
-	n := len(s.TrackChannels)
+	n := meterableTracks(s.TrackChannels)
 
 	var chains []string
 	var labels []string

@@ -857,11 +857,12 @@ func TestFailoverValidationRefusesWhatCannotStart(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			// The one exclusivity left. There is a single RTMP listener and no
-			// token routing on it, so a primary and a backup cannot both have
-			// it -- and finding that out at runtime means a backup that never
-			// takes over on the night it was needed.
-			name: "an RTMP backup behind an RTMP primary is refused",
+			// The last exclusivity, now gone. It existed because there was one
+			// RTMP listener with no token routing on it, so a primary and a
+			// backup could not both have it. internal/rtmpserver routes by
+			// token, and the standby is reached at "<token>.backup" on the same
+			// socket -- exactly as it already was over SRT.
+			name: "an RTMP backup behind an RTMP primary is fine",
 			mut: func(s *db.Settings) {
 				s.Ingest.Mode = db.IngestRTMP
 				s.Ingest.RTMP.App = "live"
@@ -870,7 +871,7 @@ func TestFailoverValidationRefusesWhatCannotStart(t *testing.T) {
 				s.Failover.Backup.Mode = db.IngestRTMP
 				s.Failover.Backup.RTMP.App = "live"
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			// An RTMP backup is fine when the primary is not using RTMP.

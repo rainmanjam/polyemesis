@@ -273,11 +273,22 @@ type Engine struct {
 	// push and per telemetry tick, and a database read on that path buys
 	// nothing -- a rename cannot happen without a reconcile.
 	sourceName string
-	probed     bool
-	videoInfo  *ffmpeg.VideoStream
-	levels     ffmpeg.Levels
-	levelsAt   time.Time
-	settings   db.Settings
+	// sourceToken is this programme's publish secret, refreshed on the same
+	// reconcile as sourceName.
+	//
+	// It is here because it is not just a credential any more, it is an ADDRESS:
+	// the RTMP ingest child dials rtmp://127.0.0.1:PORT/live/<token> to
+	// subscribe to what the encoder published, so building that command needs
+	// the token in hand. db.Settings carries the ingest block but not the token,
+	// and reaching for the row inside ingestSpec would put a database read in
+	// the middle of command construction for no benefit -- a rotation cannot
+	// happen without a reconcile either.
+	sourceToken string
+	probed      bool
+	videoInfo   *ffmpeg.VideoStream
+	levels      ffmpeg.Levels
+	levelsAt    time.Time
+	settings    db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
@@ -904,9 +915,18 @@ func (e *Engine) effectiveSettings() (db.Settings, error) {
 	// reconcile.
 	e.mu.Lock()
 	e.sourceName = src.Name
+	e.sourceToken = src.Token
 	e.mu.Unlock()
 
 	return settings, nil
+}
+
+// ingestToken is the address this programme is reached at on the shared
+// listeners. Empty until the first reconcile has read the row.
+func (e *Engine) ingestToken() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.sourceToken
 }
 
 // SourceID reports which programme this engine owns.
@@ -995,7 +1015,38 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// That is not hypothetical: it is exactly what this did until the port was
 	// made install-wide, and on a host whose FFmpeg lacks libsrt it hid behind
 	// "Protocol not found" rather than showing itself as a conflict.
+	//
+	// RTMP IS NOT THE SAME CASE, even though it now has a one-port Go listener
+	// too. srtserver hands datagrams straight to a Sink, so an SRT source needs
+	// no child at all; rtmpserver has no Sink and re-publishes to subscribers,
+	// so an RTMP source still needs a child -- one that DIALS the listener on
+	// loopback instead of binding 1935. Extending this early return to RTMP
+	// would leave the programme with a publisher and nobody reading it.
 	if s.Ingest.Mode == db.IngestSRT {
+		e.stopIngestProcess()
+		return
+	}
+
+	// Nothing chosen yet. A fresh install does not pick an ingest on the
+	// operator's behalf (see db.IngestUnset), so there is nothing to listen
+	// with until they do — and spawning FFmpeg with an empty Kind would build a
+	// command with no input and crash-loop against it.
+	if s.Ingest.Mode == db.IngestUnset {
+		e.stopIngestProcess()
+		return
+	}
+
+	// An RTMP source with no token has no address, and the child must not be
+	// spawned without one. `rtmp://127.0.0.1:1935/live/` resolves — StreamKey
+	// falls back to the whole path when there is no second segment — so the
+	// subscriber would silently attach to the stream key "live" and receive
+	// whatever any publisher happened to send there. Reachable only through
+	// effectiveSettings' fail-open path, where the source row went missing
+	// mid-reconcile, which is exactly when quietly crossing two programmes
+	// would be hardest to notice.
+	if s.Ingest.Mode == db.IngestRTMP && e.ingestToken() == "" {
+		e.log.Error("rtmp ingest not started: the source has no publish token, so it has no address",
+			"source", e.sourceID)
 		e.stopIngestProcess()
 		return
 	}
@@ -1069,7 +1120,12 @@ func (e *Engine) ingestSpec(s db.Settings) []string {
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
 		RTMPPort:      s.Listeners.RTMPPort,
 		RTMPApp:       s.Ingest.RTMP.App,
-		RTMPStreamKey: s.Ingest.RTMP.StreamKey,
+		// The token, not s.Ingest.RTMP.StreamKey. This child SUBSCRIBES to the
+		// shared listener, and the path it dials has to be the same address the
+		// manager registered for this source -- which is the token, because that
+		// is the only per-source value that is unique, rotatable and never
+		// logged. See db.RTMPSettings.StreamKey for what the old field became.
+		RTMPAddress: e.ingestToken(),
 		// DataDir is the confinement root for a file:// source. Without it a
 		// relative path resolves against the process working directory, which
 		// fails open — FFmpeg says "no such file" — rather than fails unsafe.
@@ -1090,8 +1146,10 @@ func (e *Engine) ingestPublicURL(s db.Settings) string {
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
 		RTMPPort:      s.Listeners.RTMPPort,
 		RTMPApp:       s.Ingest.RTMP.App,
-		// In pull mode nobody points an encoder anywhere, so the address the
-		// operator needs to see is the one we dial.
+		// No RTMPAddress: PublicIngestURL deliberately renders the server half
+		// only, and the token goes in OBS's separate stream-key box. This is a
+		// log line and a dashboard string, so the token stays out of it.
+
 		PullURL: s.Ingest.Pull.URL,
 	}
 	return spec.PublicIngestURL("<server>")
@@ -3397,7 +3455,7 @@ func (e *Engine) feedUpstreamSig(s db.Settings, kind sourceKind, silenceSig stri
 	}
 	switch kind {
 	case sourceBackup:
-		return hashStrings([]string{"backup", backupIngestSig(s)})
+		return hashStrings([]string{"backup", backupIngestSig(s, e.ingestToken())})
 	case sourcePlaylist:
 		// playlistSig, exactly as the backup folds in backupIngestSig: the feed
 		// here is only a copy hop out of the playlist's hub, but that hub is
@@ -3688,7 +3746,7 @@ func (e *Engine) slateSpec(s db.Settings, out string, offset float64) (ffmpeg.Sl
 // ----------------------------------------------------------- backup listener
 
 // backupIngestSig hashes everything the second listener's command depends on.
-func backupIngestSig(s db.Settings) string {
+func backupIngestSig(s db.Settings, token string) string {
 	b := s.Failover.Backup
 	if !s.Failover.Enabled || !b.Enabled {
 		return ""
@@ -3696,7 +3754,11 @@ func backupIngestSig(s db.Settings) string {
 	return hashStrings([]string{
 		string(b.Mode),
 		b.SRT.Passphrase, strconv.Itoa(b.SRT.LatencyMS),
-		b.RTMP.App, b.RTMP.StreamKey,
+		// The standby's RTMP address, not b.RTMP.StreamKey, which addresses
+		// nothing now. Rotating the source's token moves where the standby
+		// subscribes, so it has to restart -- and this hash is the only thing
+		// that makes it.
+		b.RTMP.App, token + backupTokenSuffix,
 		// The listener ports are install-wide now, but they still belong in
 		// this hash: changing one changes the command the backup runs.
 		strconv.Itoa(s.Listeners.SRTPort), strconv.Itoa(s.Listeners.RTMPPort),
@@ -3707,7 +3769,8 @@ func backupIngestSig(s db.Settings) string {
 // reconcileBackupIngest starts, stops or restarts the second listener. The
 // caller must hold selMu.
 func (e *Engine) reconcileBackupIngest(s db.Settings) {
-	want := backupIngestSig(s)
+	token := e.ingestToken()
+	want := backupIngestSig(s, token)
 
 	e.mu.Lock()
 	cur := e.backup
@@ -3747,6 +3810,12 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 		// socket, and the backup is reached on it by publishing to
 		// `<token>.backup`. All this tier needs is the hub to receive into,
 		// which was created above.
+		//
+		// RTMP is addressed the same way and does NOT come through here, for the
+		// reason reconcileIngest gives: srtserver delivers into a hub, so there
+		// is nothing to spawn, while rtmpserver re-publishes to a subscriber, so
+		// the subscriber still has to be a child. Same address, different
+		// plumbing.
 		e.mu.Lock()
 		e.backup = &backupIngest{hub: hub, sig: want}
 		e.mu.Unlock()
@@ -3761,7 +3830,7 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 		SRTLatencyMS:          b.SRT.LatencyMS,
 		RTMPPort:              s.Listeners.RTMPPort,
 		RTMPApp:               b.RTMP.App,
-		RTMPStreamKey:         b.RTMP.StreamKey,
+		RTMPAddress:           token + backupTokenSuffix,
 		PullURL:               b.Pull.URL,
 		PullDataDir:           e.cfg.DataDir,
 		PullReconnectDelayMax: b.Pull.ReconnectDelayMaxSeconds,

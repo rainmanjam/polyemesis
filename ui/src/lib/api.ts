@@ -7,6 +7,7 @@ import type {
   ChatModerationResult,
   ChatOverview,
   ChatPlatform,
+  ChatSearchResult,
   ChatSendResponse,
   ChatSettings,
   ChatUserCard,
@@ -46,6 +47,7 @@ import type {
   RenditionBounds,
   RenditionDeleted,
   RenditionPreset,
+  PlatformPresetInfo,
   RenditionView,
   RoutingProfile,
   RoutingResult,
@@ -348,6 +350,11 @@ export const api = {
   // A rendition is one shared video encode several destinations can select, so
   // N destinations wanting 1080p60 cost one encode rather than N. A destination
   // with no rendition is passthrough, which is the default and costs nothing.
+  /** The server's platform catalogue, including researched encoder guidance.
+   *  Fetched rather than mirrored: the numbers carry a source and a date, and
+   *  a second copy of them in the UI would drift silently. */
+  platformPresets: () =>
+    get<{ presets: PlatformPresetInfo[]; disclaimer: string }>("/platforms/presets"),
   listRenditions: () => get<RenditionView[]>("/renditions"),
   getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
   createRendition: (r: Partial<Rendition>) =>
@@ -646,6 +653,18 @@ export const api = {
     return get<{ messages: ChatMessage[]; stored: boolean }>(
       "/chat/messages" + (qs ? `?${qs}` : ""),
     );
+  },
+  /** Find a message again, by its text or by who said it.
+   *
+   *  Server-side and against the database, not the pane: the timeline holds one
+   *  session's worth of messages and "where did that comment go" is exactly the
+   *  question it cannot answer. Bounded by the chat retention setting, which is
+   *  why the response carries a note saying so. */
+  chatSearch: (opts: { q: string; platform?: ChatPlatform; limit?: number }) => {
+    const p = new URLSearchParams({ q: opts.q });
+    if (opts.platform) p.set("platform", opts.platform);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    return get<ChatSearchResult>(`/chat/search?${p.toString()}`);
   },
   /** Fan-out. Answers 200 even when every platform failed: the per-platform
    *  verdicts are the answer, and a status code cannot say "Twitch took it and

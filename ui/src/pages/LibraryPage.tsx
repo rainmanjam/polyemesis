@@ -52,6 +52,7 @@ import type {
   TranscriptOrder,
   TranscriptView,
 } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 // The library is the session, not the file. A broadcast is one thing; that the
 // recorder wrote it as eleven MKV segments is an implementation detail, and the
@@ -110,6 +111,7 @@ interface PlayerTarget {
 }
 
 export function LibraryPage() {
+  const t = useT();
   const [view, setView] = useState<LibraryView | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -135,11 +137,11 @@ export function LibraryPage() {
     try {
       setView(await api.library());
     } catch (err) {
-      toast.error(errText(err, "Could not load the library."));
+      toast.error(errText(err, t("lib.couldNotLoadTheLibrary")));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -196,11 +198,11 @@ export function LibraryPage() {
     setBusy(true);
     try {
       await api.updateLibrarySession(id, patch);
-      toast.success("Session saved.");
+      toast.success(t("lib.sessionSaved"));
       setEditing(null);
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not save the session."));
+      toast.error(errText(err, t("lib.couldNotSaveTheSession")));
     } finally {
       setBusy(false);
     }
@@ -219,8 +221,8 @@ export function LibraryPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Library"
-        subtitle="Every broadcast, searchable. Each microphone was recorded on its own track, so the transcript already knows who said it."
+        title={t("lib.title")}
+        subtitle={t("lib.subtitle")}
         actions={
           <Button
             variant="outline"
@@ -235,12 +237,12 @@ export function LibraryPage() {
                 );
                 await load();
               } catch (err) {
-                toast.error(errText(err, "Could not regroup."));
+                toast.error(errText(err, t("lib.couldNotRegroup")));
               } finally {
                 setBusy(false);
               }
             }}
-            title="Re-runs the grouping. Additive and idempotent: it never merges a grouping you split by hand."
+            title={t("lib.regroupTitle")}
           >
             <Sparkles />
             Regroup
@@ -263,9 +265,9 @@ export function LibraryPage() {
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search everything anyone said, across every recording…"
+              placeholder={t("lib.searchPlaceholder")}
               className="h-9 border-0 bg-transparent text-[13px] focus-visible:ring-0"
-              aria-label="Search transcripts"
+              aria-label={t("lib.searchTranscripts")}
             />
             {searching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
             {query && (
@@ -273,7 +275,7 @@ export function LibraryPage() {
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => setQuery("")}
-                aria-label="Clear search"
+                aria-label={t("lib.clearSearch")}
               >
                 <X />
               </Button>
@@ -287,18 +289,18 @@ export function LibraryPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="relevance">Best match</SelectItem>
-                  <SelectItem value="recent">Most recent</SelectItem>
-                  <SelectItem value="time">Oldest first</SelectItem>
+                  <SelectItem value="relevance">{t("lib.bestMatch")}</SelectItem>
+                  <SelectItem value="recent">{t("lib.mostRecent")}</SelectItem>
+                  <SelectItem value="time">{t("lib.oldestFirst")}</SelectItem>
                 </SelectContent>
               </Select>
               {(view?.speakers.length ?? 0) > 0 && (
                 <Select value={speaker || "__all"} onValueChange={(v) => setSpeaker(v === "__all" ? "" : v)}>
                   <SelectTrigger className="h-7 w-40 text-[11px]">
-                    <SelectValue placeholder="Any speaker" />
+                    <SelectValue placeholder={t("lib.anySpeaker")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__all">Any speaker</SelectItem>
+                    <SelectItem value="__all">{t("lib.anySpeaker")}</SelectItem>
                     {view?.speakers.map((s) => (
                       <SelectItem key={s} value={s}>
                         {s}
@@ -353,13 +355,13 @@ export function LibraryPage() {
       <div className="mb-3 flex flex-wrap items-end gap-3">
         {(view?.tags.length ?? 0) > 0 && (
           <div className="flex flex-col gap-1">
-            <Label htmlFor="lib-tag">Tag</Label>
+            <Label htmlFor="lib-tag">{t("lib.tag")}</Label>
             <Select value={tag || "__all"} onValueChange={(v) => setTag(v === "__all" ? "" : v)}>
               <SelectTrigger id="lib-tag" className="h-7 w-40 text-[11px]">
-                <SelectValue placeholder="Any tag" />
+                <SelectValue placeholder={t("lib.anyTag")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all">Any tag</SelectItem>
+                <SelectItem value="__all">{t("lib.anyTag")}</SelectItem>
                 {view?.tags.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
@@ -370,7 +372,7 @@ export function LibraryPage() {
           </div>
         )}
         <div className="flex flex-col gap-1">
-          <Label htmlFor="lib-since">From</Label>
+          <Label htmlFor="lib-since">{t("lib.from")}</Label>
           <Input
             id="lib-since"
             type="date"
@@ -418,8 +420,7 @@ export function LibraryPage() {
           <Card>
             <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
               {view?.sessions.length
-                ? "No session matches those filters."
-                : "Nothing recorded yet. Sessions appear as the recorder writes segments."}
+                ? t("lib.noSessionMatch") : t("lib.nothingRecorded")}
             </CardContent>
           </Card>
         )}
@@ -441,7 +442,7 @@ export function LibraryPage() {
         {(view?.ungrouped.length ?? 0) > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle>Ungrouped segments</CardTitle>
+              <CardTitle>{t("lib.ungrouped")}</CardTitle>
             </CardHeader>
             <CardContent className="px-0 pb-0">
               <RecordingList
@@ -544,6 +545,7 @@ function SessionCard({
   onPlay: (recordingId: number) => void;
   onChanged: () => void;
 }) {
+  const t = useT();
   const [recordings, setRecordings] = useState<LibraryRecording[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -553,11 +555,11 @@ function SessionCard({
       const res = await api.librarySession(session.id);
       setRecordings(res.recordings);
     } catch (err) {
-      toast.error(errText(err, "Could not load the session's segments."));
+      toast.error(errText(err, t("lib.couldNotLoadTheSession")));
     } finally {
       setLoading(false);
     }
-  }, [session.id]);
+  }, [session.id, t]);
 
   useEffect(() => {
     if (expanded) void loadMembers();
@@ -578,7 +580,7 @@ function SessionCard({
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
-          aria-label={expanded ? "Collapse session" : "Expand session"}
+          aria-label={expanded ? t("lib.collapseSession") : t("lib.expandSession")}
           className="mt-0.5 text-muted-foreground hover:text-foreground"
         >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -604,13 +606,13 @@ function SessionCard({
               {session.recordings} segment{session.recordings === 1 ? "" : "s"}
             </span>
             {session.transcribed > 0 && (
-              <Badge variant="armed" title="Segments with a transcript, so they are searchable">
+              <Badge variant="armed" title={t("lib.searchableOnly")}>
                 <Captions className="h-2.5 w-2.5" />
                 {session.transcribed}/{session.recordings}
               </Badge>
             )}
             {session.auto && (
-              <Badge variant="outline" title="Grouped automatically. Editing it makes it yours.">
+              <Badge variant="outline" title={t("lib.autoGrouped")}>
                 auto
               </Badge>
             )}
@@ -627,7 +629,7 @@ function SessionCard({
           )}
         </div>
 
-        <Button variant="ghost" size="icon-sm" onClick={onEdit} aria-label="Edit session">
+        <Button variant="ghost" size="icon-sm" onClick={onEdit} aria-label={t("lib.editSession")}>
           <Pencil />
         </Button>
       </CardHeader>
@@ -668,6 +670,7 @@ function SessionEditor({
   onClose: () => void;
   onSave: (patch: { title: string; description: string; tags: string[] }) => void;
 }) {
+  const t = useT();
   const [title, setTitle] = useState(session.title);
   const [description, setDescription] = useState(session.description);
   const [tags, setTags] = useState((session.tags ?? []).join(", "));
@@ -676,11 +679,11 @@ function SessionEditor({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Session</DialogTitle>
+          <DialogTitle>{t("lib.session")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sess-title">Title</Label>
+            <Label htmlFor="sess-title">{t("lib.sessionTitle")}</Label>
             <Input
               id="sess-title"
               value={title}
@@ -689,7 +692,7 @@ function SessionEditor({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sess-desc">Description</Label>
+            <Label htmlFor="sess-desc">{t("lib.sessionDescription")}</Label>
             <Textarea
               id="sess-desc"
               rows={3}
@@ -698,18 +701,17 @@ function SessionEditor({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sess-tags">Tags</Label>
+            <Label htmlFor="sess-tags">{t("lib.sessionTags")}</Label>
             <Input
               id="sess-tags"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
-              placeholder="comma, separated"
+              placeholder={t("lib.tagsPlaceholder")}
             />
           </div>
           {session.auto && (
             <p className="text-[11px] text-muted-foreground">
-              This session was grouped automatically. Saving makes it yours, and
-              the grouping pass will stop rewriting it.
+            {t("lib.autoGroupedNote")}
             </p>
           )}
           <div className="flex justify-end gap-2">
@@ -756,6 +758,7 @@ function RecordingList({
   onPlay: (id: number) => void;
   onChanged: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(0);
   // Above the early return: a hook after a conditional return runs in a
   // different order on the render where the list is empty, which is a crash
@@ -765,7 +768,7 @@ function RecordingList({
   if (recordings.length === 0) {
     return (
       <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
-        No segments here.
+            {t("lib.noSegments")}
       </div>
     );
   }
@@ -789,10 +792,10 @@ function RecordingList({
     setBusy(rec.id);
     try {
       await api.deleteRecording(rec.id);
-      toast.success("Recording deleted.");
+      toast.success(t("lib.recordingDeleted"));
       onChanged();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the recording."));
+      toast.error(errText(err, t("rec.deleteFailed")));
     } finally {
       setBusy(0);
     }
@@ -809,7 +812,7 @@ function RecordingList({
               type="button"
               onClick={() => onPlay(r.id)}
               className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              title={r.assets.proxy ? "Play the proxy" : "No proxy yet — open to generate one"}
+              title={r.assets.proxy ? t("lib.playProxy") : t("lib.noProxyYet")}
             >
               <Film
                 className={cn(
@@ -831,7 +834,7 @@ function RecordingList({
 
             <div className="flex shrink-0 items-center gap-1">
               {r.hasTranscript && (
-                <Badge variant="armed" title="Searchable">
+                <Badge variant="armed" title={t("lib.searchable")}>
                   <Captions className="h-2.5 w-2.5" />
                 </Badge>
               )}
@@ -851,10 +854,10 @@ function RecordingList({
                     size="icon-sm"
                     disabled={working || !transcribeAvailable}
                     onClick={() => submit(r, "transcribe", "Transcription")}
-                    aria-label="Transcribe"
+                    aria-label={t("lib.transcribe")}
                     title={
                       transcribeAvailable
-                        ? "Transcribe each track on its own — that is what gives speaker attribution"
+                        ? t("lib.transcribeEachTrackOnIts")
                         : `Transcription unavailable: ${transcribeNote ?? "whisper.cpp was not found"}`
                     }
                   >
@@ -865,22 +868,22 @@ function RecordingList({
                     size="icon-sm"
                     disabled={working}
                     onClick={() => submit(r, "media.proxy", "Proxy")}
-                    aria-label="Generate proxy"
-                    title="Generate the browser-playable proxy"
+                    aria-label={t("lib.generateProxy")}
+                    title={t("lib.generateProxyTitle")}
                   >
                     <Film />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" asChild aria-label="Clip">
+                  <Button variant="ghost" size="icon-sm" asChild aria-label={t("lib.clip")}>
                     {/* The clip editor owns in and out points, keyframes and
                         drift. Linking there beats a second, worse cut UI here. */}
-                    <Link to={`/clips/${r.id}`} title="Cut a clip from this recording">
+                    <Link to={`/clips/${r.id}`} title={t("lib.clipTitle")}>
                       <Scissors />
                     </Link>
                   </Button>
                 </>
               )}
-              <Button variant="ghost" size="icon-sm" asChild aria-label="Download master">
-                <a href={api.downloadUrl(r.id)} download title="Download the multitrack master">
+              <Button variant="ghost" size="icon-sm" asChild aria-label={t("lib.downloadMaster")}>
+                <a href={api.downloadUrl(r.id)} download title={t("lib.downloadMasterTitle")}>
                   <Download />
                 </a>
               </Button>
@@ -889,7 +892,7 @@ function RecordingList({
                 size="icon-sm"
                 disabled={working}
                 onClick={() => confirmDelete.ask(r)}
-                aria-label="Delete"
+                aria-label={t("lib.delete")}
                 className="hover:text-down"
               >
                 <Trash2 />
@@ -902,8 +905,8 @@ function RecordingList({
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.filename ?? ""}
-        title="Delete this recording?"
-        description="The file is removed from disk, along with its proxies, thumbnails and transcript. This cannot be undone."
+        title={t("lib.deleteTitle")}
+        description={t("lib.deleteDescription")}
         requireTyping
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target);
@@ -931,6 +934,7 @@ function PlayerDialog({
   jobsAvailable: boolean;
   onChanged: () => void;
 }) {
+  const t = useT();
   const [rec, setRec] = useState<LibraryRecording | null>(null);
   const [transcript, setTranscript] = useState<TranscriptView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -949,11 +953,11 @@ function PlayerDialog({
         setTranscript(null);
       }
     } catch (err) {
-      toast.error(errText(err, "Could not open that recording."));
+      toast.error(errText(err, t("clipedit.couldNotOpenThatRecording")));
     } finally {
       setLoading(false);
     }
-  }, [target.recordingId]);
+  }, [target.recordingId, t]);
 
   useEffect(() => {
     void load();
@@ -975,10 +979,10 @@ function PlayerDialog({
     setBusy(true);
     try {
       const res = await api.submitRecordingJob(target.recordingId, "media.proxy");
-      toast.success(res.created ? "Proxy queued." : "A proxy is already queued.");
+      toast.success(res.created ? t("lib.proxyQueued") : t("lib.proxyAlreadyQueued"));
       onChanged();
     } catch (err) {
-      toast.error(errText(err, "Could not queue the proxy."));
+      toast.error(errText(err, t("lib.couldNotQueueTheProxy")));
     } finally {
       setBusy(false);
     }
@@ -1054,7 +1058,7 @@ function PlayerDialog({
                       href={api.downloadUrl(rec.id)}
                       download
                     >
-                      Download master
+            {t("lib.downloadMaster")}
                     </a>
                   </>
                 )}

@@ -5,9 +5,11 @@ import {
   Filter,
   Loader2,
   MessagesSquare,
+  Search,
   Send,
   Shield,
   Trash2,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,9 @@ import {
   splitMessage,
 } from "@/lib/chat";
 import { messageKey, useChatFeed } from "@/hooks/useChatFeed";
+import { useChatSearch, type ChatSearchState } from "@/hooks/useChatSearch";
 import { ChatUserCard } from "@/components/ChatUserCard";
+import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import type {
   ChatLimit,
   ChatMessage,
@@ -97,12 +101,15 @@ function MessageRow({
   m,
   onDelete,
   onOpenUser,
+  onMenu,
   compact,
 }: {
   m: ChatMessage;
   onDelete?: (m: ChatMessage) => void;
   /** Open the moderator's user card for whoever said this. */
   onOpenUser?: (m: ChatMessage) => void;
+  /** Open the quick-action menu at a point. */
+  onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
   compact?: boolean;
 }) {
   const accent = accentFor(m.platform);
@@ -119,8 +126,24 @@ function MessageRow({
     }
   };
 
+  // Right-click is the moderator's reflex from every other chat tool, and
+  // double-click is the same menu for anyone whose pointer has no right button
+  // — a trackpad without secondary-click configured, or a touch device.
+  //
+  // Text selection is deliberately NOT sacrificed for this: the browser's own
+  // selection survives because neither handler fires on a drag, and copying a
+  // line to quote it elsewhere is something moderators do constantly.
+  const openMenu = onMenu
+    ? (e: React.MouseEvent) => {
+        e.preventDefault();
+        onMenu(m, { x: e.clientX, y: e.clientY });
+      }
+    : undefined;
+
   return (
     <div
+      onContextMenu={openMenu}
+      onDoubleClick={openMenu}
       className={cn(
         "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised",
         accent.rule,
@@ -210,12 +233,14 @@ export function ChatTimeline({
   messages,
   onDelete,
   onOpenUser,
+  onMenu,
   compact,
   empty,
 }: {
   messages: ChatMessage[];
   onDelete?: (m: ChatMessage) => void;
   onOpenUser?: (m: ChatMessage) => void;
+  onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
   compact?: boolean;
   empty?: React.ReactNode;
 }) {
@@ -260,6 +285,7 @@ export function ChatTimeline({
                 m={m}
                 onDelete={onDelete}
                 onOpenUser={onOpenUser}
+                onMenu={onMenu}
                 compact={compact}
               />
             ))}
@@ -551,6 +577,121 @@ export function ChatStatusList({
   );
 }
 
+// -------------------------------------------------------------------- search
+
+/** The search box. Narrow on purpose: one field, one clear button. */
+export function ChatSearchBox({
+  search,
+  className,
+}: {
+  search: ChatSearchState;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1",
+        className,
+      )}
+    >
+      <Search className="h-3 w-3 shrink-0 text-subtle-foreground" aria-hidden />
+      <input
+        type="search"
+        value={search.query}
+        onChange={(e) => search.setQuery(e.target.value)}
+        // Escape is the way out of a search box everywhere else, and a
+        // moderator who has to find and click a small × while chat scrolls has
+        // been given a worse tool than they had before.
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            search.clear();
+          }
+        }}
+        placeholder="Search chat history…"
+        aria-label="Search chat history"
+        className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-subtle-foreground"
+      />
+      {search.loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-subtle-foreground" />}
+      {search.query && (
+        <button
+          type="button"
+          onClick={search.clear}
+          aria-label="Clear search"
+          className="shrink-0 rounded p-0.5 text-subtle-foreground hover:text-foreground"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Search results, in place of the live timeline.
+ *
+ *  Replacing the timeline rather than filtering it is the honest rendering:
+ *  these messages come from the database and are frozen at the moment of the
+ *  query, so letting live messages continue to append underneath them would
+ *  present two different things as one list. */
+export function ChatSearchResults({
+  search,
+  onDelete,
+  onOpenUser,
+  onMenu,
+}: {
+  search: ChatSearchState;
+  onDelete?: (m: ChatMessage) => void;
+  onOpenUser?: (m: ChatMessage) => void;
+  onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-[10px] text-subtle-foreground">
+        <span>
+          {search.loading
+            ? "Searching…"
+            : `${search.results.length} match${search.results.length === 1 ? "" : "es"}`}
+          {search.truncated && " (showing the newest)"}
+        </span>
+        <span className="ml-auto">newest first</span>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto py-1" role="log">
+        {search.error ? (
+          <p className="px-2 py-4 text-[12px] text-down">{search.error}</p>
+        ) : search.results.length === 0 && !search.loading ? (
+          // The caveat matters most exactly here. An empty result is the one
+          // outcome an operator can misread as evidence, and "no matches" on
+          // its own invites "then they never said it" — which is a conclusion
+          // about a purged table, not about a person.
+          <div className="px-2 py-4 text-[12px] text-muted-foreground">
+            <p>No matches in the retained scrollback.</p>
+            {search.note && (
+              <p className="mt-1 text-[11px] text-subtle-foreground">{search.note}</p>
+            )}
+          </div>
+        ) : (
+          search.results.map((m) => (
+            <MessageRow
+              key={messageKey(m)}
+              m={m}
+              onDelete={onDelete}
+              onOpenUser={onOpenUser}
+              onMenu={onMenu}
+            />
+          ))
+        )}
+      </div>
+
+      {search.results.length > 0 && search.note && (
+        <p className="shrink-0 border-t border-border px-2 py-1 text-[10px] leading-snug text-subtle-foreground">
+          {search.note}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // -------------------------------------------------------------- the panel
 
 /** The compact pane, sized to sit beside the dashboard preview.
@@ -587,6 +728,9 @@ export function ChatPanel({
   // just an id keeps the platform and account with it, which the card needs to
   // address a moderation call and cannot re-derive.
   const [card, setCard] = useState<ChatMessage | null>(null);
+  // Same reasoning for the quick menu, plus where it was opened.
+  const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
+  const search = useChatSearch();
 
   const del = useCallback(
     async (m: ChatMessage) => {
@@ -613,6 +757,15 @@ export function ChatPanel({
           onOpenChange={(o) => !o && setCard(null)}
         />
       )}
+      {menu && (
+        <ChatMessageMenu
+          message={menu.m}
+          anchor={menu.at}
+          onClose={() => setMenu(null)}
+          onOpenCard={setCard}
+          onDelete={del}
+        />
+      )}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
         <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12px] font-semibold">Chat</span>
@@ -631,15 +784,27 @@ export function ChatPanel({
         </div>
       </div>
 
-      <ChatTimeline
-        messages={visible}
-        onDelete={del}
-        onOpenUser={setCard}
-        compact
-        empty={
-          <ChatEmpty loading={loading} configured={configured} error={error} statuses={statuses} />
-        }
-      />
+      <ChatSearchBox search={search} />
+
+      {search.active ? (
+        <ChatSearchResults
+          search={search}
+          onDelete={del}
+          onOpenUser={setCard}
+          onMenu={(m, at) => setMenu({ m, at })}
+        />
+      ) : (
+        <ChatTimeline
+          messages={visible}
+          onDelete={del}
+          onOpenUser={setCard}
+          onMenu={(m, at) => setMenu({ m, at })}
+          compact
+          empty={
+            <ChatEmpty loading={loading} configured={configured} error={error} statuses={statuses} />
+          }
+        />
+      )}
 
       {showComposer && (
         <ChatComposer statuses={statuses} limits={limits} configured={configured} compact />

@@ -25,8 +25,9 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { TrackSummary } from "@/components/signature/TrackRows";
 import { Stat } from "@/components/signature/Stat";
 import { duration, kbps } from "@/lib/format";
-import { labelForState, toneBadge, toneForState } from "@/lib/signal";
+import { toneBadge, toneForState } from "@/lib/signal";
 import type { DestStatus } from "@/lib/types";
+import { useT, useStateLabel } from "@/lib/i18n";
 
 const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
@@ -70,6 +71,8 @@ export function DestinationCard({
   canMoveLater: boolean;
   busy?: boolean;
 }) {
+  const t = useT();
+  const stateLabel = useStateLabel();
   const state = dest.process?.state;
   const tone = dest.enabled ? toneForState(state) : "idle";
   const running = state === "running";
@@ -82,7 +85,12 @@ export function DestinationCard({
   // would send someone looking for a fault in the wrong place.
   const video = dest.renditionId
     ? dest.renditionName || `rendition ${dest.renditionId}`
-    : "passthrough · copy";
+    // One name for the free state, everywhere. It read four different ways
+    // across the UI — "passthrough · copy" here, "Passthrough — source, copied"
+    // in the dialog, "Ingest (passthrough)" in playout — for one concept, which
+    // is how Wowza ended up shipping "Encode", "Preset" and "Stream Name Group"
+    // for a single thing.
+    : "source, copied";
 
   return (
     <Card className="overflow-hidden">
@@ -101,7 +109,7 @@ export function DestinationCard({
 
           <div className="flex shrink-0 items-center gap-1">
             <Badge variant={dest.enabled ? toneBadge[tone] : "outline"}>
-              {dest.enabled ? labelForState(state) : "Stopped"}
+              {dest.enabled ? stateLabel(state) : t("state.stopped")}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -234,9 +242,16 @@ export function DestinationCard({
         {dest.backupProcess && (
           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
             <span>backup feed:</span>
-            <span className={dest.backupProcess.state === "running" ? "text-ok" : "text-warn"}>
-              {dest.backupProcess.state}
-            </span>
+            {/* Through toneForState, like every other state in the app. The
+                two hand-written classes this replaced were `text-ok` and
+                `text-warn`: there is no --color-ok token, so Tailwind never
+                emitted the first one and a *healthy* backup rendered in plain
+                body text while an unhealthy one was amber — the two states
+                were told apart only by the presence of colour, and the good
+                one was the invisible half. The raw `state` string was also
+                escaping the catalogue untranslated. */}
+            <StatusDot tone={toneForState(dest.backupProcess.state)} size="sm" />
+            <span>{stateLabel(dest.backupProcess.state)}</span>
           </div>
         )}
         {dest.backupError && (

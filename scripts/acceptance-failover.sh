@@ -47,6 +47,16 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 
+# BUILD IT. This suite used to run whatever binary happened to be sitting in the
+# repo root, which meant a local run could pass against code from hours earlier
+# while CI -- which always builds -- failed on the same commit. That is not a
+# flake: it is the suite testing a different program from the one under review,
+# and it hid a real ingest regression for a full session.
+#
+# Built here rather than assumed, and the failure is fatal: a suite that cannot
+# build the thing it measures has nothing to say about it.
+go build -o "$BIN" "$ROOT/cmd/polyemesis" || { echo "cannot build polyemesis"; exit 1; }
+
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
@@ -141,7 +151,7 @@ publish_geom() { # width height fps
     -map 0:v -map 1:a -c:v libx264 -preset veryfast \
     -profile:v high -level 4.0 -g "$((2 * $3))" -pix_fmt yuv420p \
     -b:v 3000k -c:a aac -b:a 128k -ac 2 -shortest -t 3600 \
-    -f flv "rtmp://127.0.0.1:$INGEST/live" \
+    -f flv "rtmp://127.0.0.1:$INGEST/live/$PUBKEY" \
     > "publisher-$RANDOM.log" 2>&1 &
 }
 publish() { publish_geom "$PROFILE_W" "$PROFILE_H" "$PROFILE_FPS"; }
@@ -267,6 +277,22 @@ OUT=$(drive)
 case "$OUT" in *SETUP_OK*)    ok "first-run setup" ;;          *) bad "setup: $OUT"; exit 1 ;; esac
 case "$OUT" in *FAILOVER_OK*) ok "failover enabled with a slate" ;; *) bad "failover: $OUT"; exit 1 ;; esac
 case "$OUT" in *DEST_OK*)     ok "one destination on the selector" ;; *) bad "dest: $OUT"; exit 1 ;; esac
+
+# THE PUBLISH KEY. RTMP ingest is now one shared listener for the whole install,
+# addressed by stream key, so `rtmp://host:port/live` with no key reaches
+# nothing -- the server refuses it at the handshake and the encoder dies with a
+# broken pipe several checks later, looking like a failover fault.
+#
+# This suite published keylessly for its whole life and passed, because the old
+# ingest child bound the port itself with `-listen 1` and took whatever arrived.
+# It survived the change locally by ACCIDENT: the child still won the race for
+# the port often enough on a fast machine. CI lost that race every time.
+PUBKEY=$(drive publishkey 2>&1 | tail -1)
+case "$PUBKEY" in
+  ""|*" "*|*FAIL*|*fail*)
+    bad "could not read the source publish key: $PUBKEY"; exit 1 ;;
+  *) ok "publish key read from the API ($(printf %s "$PUBKEY" | cut -c1-4)…)" ;;
+esac
 
 step "2. Three playlist items, normalised by the production job"
 # THE PRODUCTION PATH, END TO END, AND NOTHING IS COPIED BY HAND.

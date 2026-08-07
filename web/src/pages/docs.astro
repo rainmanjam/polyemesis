@@ -1,0 +1,144 @@
+---
+import Base from "../layouts/Base.astro";
+
+/* A directory, not a copy. The repo carries 30+ markdown files that are
+ * versioned with the code; mirroring them here would guarantee a page that
+ * disagrees with the software it documents. This links out and explains what
+ * each one answers, which is the part a directory listing on GitHub does not. */
+
+const BASE = "https://github.com/rainmanjam/polyemesis/blob/main/docs";
+
+const groups = [
+  {
+    id: "start",
+    title: "Getting it running",
+    docs: [
+      ["QUICKSTART.md", "Zero to a live restream", "The shortest path: install, point OBS at it, add one destination."],
+      ["INSTALL.md", "Install modes in detail", "Docker versus binary, the systemd unit, data directories, upgrades."],
+      ["OBS.md", "OBS and your encoder", "Encoder settings that work, and the multitrack setup the whole product depends on."],
+      ["TLS.md", "Certificates", "Let's Encrypt when the box has a public name, a local CA when it does not, and out of the way behind a proxy."],
+    ],
+  },
+  {
+    id: "audio-routing",
+    title: "The routing",
+    docs: [
+      ["AUDIO-ROUTING.md", "Per-destination audio", "Simple mode, the mix matrix, per-cell gain, and what the resolved filtergraph actually looks like."],
+      ["RENDITIONS.md", "Shared video encodes", "When a platform refuses your source, and how overlays fit in."],
+      ["DESIGN-ONE-PORT-INGEST.md", "One port, many sources", "Why sources are told apart by token rather than by port, and what that costs."],
+    ],
+  },
+  {
+    id: "operating",
+    title: "Operating it",
+    docs: [
+      ["MONITORING.md", "Metrics and alerts", "Prometheus, in-process alert rules, and webhook delivery."],
+      ["HOOKS.md", "Lifecycle webhooks", "A signed POST the moment a stream starts, stops, or a destination drops."],
+      ["MQTT.md", "Telemetry and Home Assistant", "Retained messages, discovery, and why it is MQTT 5.0 only."],
+      ["HOT-RELOAD.md", "What applies without a restart", "The dividing line is mechanical: a value that reaches an FFmpeg command line replaces the process that runs it."],
+      ["TROUBLESHOOTING.md", "When it will not connect", "SRT handshake failures, codec refusals, and the errors platforms return."],
+    ],
+  },
+  {
+    id: "api",
+    title: "Reference",
+    docs: [
+      ["API.md", "HTTP API", "Every endpoint, including chat search and the moderation calls, with the reasoning behind the awkward ones."],
+      ["CONFIGURATION.md", "config.yaml", "Every key, its default, and whether changing it restarts anything."],
+      ["ARCHITECTURE.md", "How it fits together", "The relay hub, the engine per source, and the FFmpeg child processes."],
+      ["PLATFORMS.md", "Per-platform capability", "What each of the four can be automated for, and what it cannot."],
+      ["TESTING.md", "How it is tested", "Unit, acceptance and browser tiers, and what each catches that the others cannot."],
+    ],
+  },
+];
+---
+
+<Base
+  title="Documentation — OBS setup, audio routing, API reference | polyemesis"
+  description="Setup, audio routing, operations and API reference for polyemesis. The documentation lives with the code and is versioned with it."
+  path="/docs"
+>
+  <section class="wrap py-16 sm:py-20">
+    <p class="eyebrow">Documentation</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      The docs live with the code.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      They are versioned alongside the software rather than copied onto a
+      website, so they never drift from the code. These links point at
+      <span class="font-mono">main</span>, so if you are running a release, read
+      the copies in your own checkout instead. This page
+      is a map of what each one answers.
+    </p>
+  </section>
+
+  <div class="wrap grid gap-10 pb-20 lg:grid-cols-[13rem_1fr] lg:gap-16">
+    <nav class="lg:sticky lg:top-20 lg:self-start" aria-label="Documentation sections">
+      <ul class="space-y-1">
+        {
+          groups.map((g) => (
+            <li>
+              <a
+                href={`#${g.id}`}
+                class="block rounded px-2 py-1.5 text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
+              >
+                {g.title}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <div class="space-y-12">
+      {
+        groups.map((g) => (
+          <section id={g.id} data-reveal>
+            <h2 class="text-xl font-medium">{g.title}</h2>
+            <ul class="mt-4 divide-y divide-line border-y border-line">
+              {g.docs.map((d) => {
+                const file = d[0];
+                const title = d[1];
+                const blurb = d[2];
+                return (
+                  <li>
+                    <a
+                      href={`${BASE}/${file}`}
+                      rel="noopener"
+                      class="group flex flex-col gap-1 py-4 transition-colors"
+                    >
+                      <span class="flex flex-wrap items-baseline gap-x-3">
+                        <span class="text-[15px] font-medium text-fg group-hover:text-primary-bright">
+                          {title}
+                        </span>
+                        <span class="font-mono text-[11px] text-subtle">{file}</span>
+                      </span>
+                      <span class="text-sm leading-relaxed text-muted">{blurb}</span>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))
+      }
+    </div>
+  </div>
+
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap max-w-3xl text-center">
+      <h2 class="text-2xl font-medium">Something wrong or missing?</h2>
+      <p class="mt-3 leading-relaxed text-muted">
+        The docs are in the same repository as the code. Corrections are a pull
+        request, and the ones that say “this was wrong and here is why” are the
+        most useful kind.
+      </p>
+      <div class="mt-7 flex flex-wrap justify-center gap-3">
+        <a href="https://github.com/rainmanjam/polyemesis/issues" rel="noopener" class="btn btn-ghost">
+          Open an issue
+        </a>
+        <a href="/download" class="btn btn-primary">Install it</a>
+      </div>
+    </div>
+  </section>
+</Base>

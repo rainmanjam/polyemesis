@@ -13,6 +13,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/relay"
+	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
@@ -40,16 +41,23 @@ type Manager struct {
 	alloc *relay.PortAllocator
 
 	mu sync.RWMutex
-	// srt is the one-port listener, shared by every source. Nil when the
-	// feature is off or the port could not be bound -- in which case the
-	// per-source ports still work, which is why a bind failure is logged
-	// rather than fatal.
-	srt     *srtserver.Server
-	srtAddr string
-	engines map[int64]*Engine
-	order   []int64 // source ids in display order, so Default is deterministic
-	ctx     context.Context
-	started bool
+	// srt and rtmp are the one-port listeners, one per protocol, each shared by
+	// every source. Nil when the port could not be bound, which is logged
+	// rather than fatal: one protocol failing to bind must not take the other
+	// -- or the engines -- down with it.
+	//
+	// Two slots rather than one because they are two sockets with two different
+	// jobs on the far side: srtserver delivers into an engine's hub, rtmpserver
+	// re-publishes to a subscriber the engine spawns. What they share is the
+	// bookkeeping, which is why reconcileListener is written once.
+	srt      *srtserver.Server
+	srtAddr  string
+	rtmp     *rtmpserver.Server
+	rtmpAddr string
+	engines  map[int64]*Engine
+	order    []int64 // source ids in display order, so Default is deterministic
+	ctx      context.Context
+	started  bool
 
 	// transcriber is remembered rather than applied once, because engines are
 	// created after Start whenever a source is added, and a programme whose
@@ -96,10 +104,22 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.started = true
 	m.mu.Unlock()
 
+	// Listeners BEFORE engines. This used to be the other way round, with a
+	// comment about the token lookup needing to see the engines -- but the
+	// lookups resolve m.Engine(id) at connect time, so they were always late-
+	// bound and the dependency did not exist.
+	//
+	// The order does matter, in the opposite direction, and only for RTMP: an
+	// RTMP source's ingest child DIALS rtmp://127.0.0.1:1935/live/<token>, so
+	// starting the engines first means every one of those children gets
+	// connection-refused and crash-loops against a 500ms backoff until the
+	// listener binds. Transient at startup, permanent if 1935 never binds at
+	// all, and in both cases it fills the log with a failure that has nothing
+	// to do with the source.
+	m.reconcileSharedIngest()
 	if err := m.Sync(); err != nil {
 		return err
 	}
-	m.reconcileSharedIngest()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if len(m.engines) == 0 {
@@ -185,18 +205,103 @@ func (m *Manager) Sync() error {
 	return nil
 }
 
-// reconcileSharedIngest brings the one-port SRT listener up or down to match
-// the settings, and rebinds it when the port changes.
+// reconcileSharedIngest brings the one-port listeners up or down to match the
+// settings, and rebinds them when a port changes.
 //
-// It lives on the manager because it is ONE listener for every source: an
-// engine could not own it without owning the other engines' traffic.
+// They live on the manager because each is ONE listener for every source: an
+// engine could not own one without owning the other engines' traffic.
 func (m *Manager) reconcileSharedIngest() {
 	st, err := m.store.GetSettings()
 	if err != nil {
 		m.log.Warn("cannot read shared-ingest settings", "err", err)
 		return
 	}
-	port := st.Listeners.SRTPort
+
+	m.mu.Lock()
+	srt, srtAddr := m.srt, m.srtAddr
+	rtmp, rtmpAddr := m.rtmp, m.rtmpAddr
+	m.mu.Unlock()
+
+	srt, srtAddr = reconcileListener(m.log, "srt", st.Listeners.SRTPort, true, srt, srtAddr,
+		(*srtserver.Server).Stop,
+		func(addr string) (*srtserver.Server, error) {
+			s := srtserver.New(m.log, addr, m.lookupToken)
+			return s, s.Start()
+		})
+	// The RTMP port is bound only when a source actually uses RTMP.
+	//
+	// SRT's listener is unconditional because it IS the SRT ingest and a source
+	// can be pointed at it at any moment. RTMP's was not: before this package,
+	// `ffmpeg -listen 1` bound 1935 only while an RTMP source was configured,
+	// so making it unconditional would newly expose a port on every install —
+	// including a fresh one that has not chosen an ingest mode yet — for a
+	// protocol nothing there speaks. Port 0 disables it explicitly, and no RTMP
+	// source has the same effect.
+	rtmpPort := st.Listeners.RTMPPort
+	wantRTMP := true
+	if rows, err := m.store.ListSources(); err != nil {
+		// Read failure: leave the listener as it is rather than tearing it down
+		// on a transient error. An RTMP encoder that is mid-broadcast must not
+		// lose its socket because a settings read blipped.
+		m.log.Warn("cannot list sources for the rtmp listener gate; leaving it as-is", "err", err)
+		wantRTMP = rtmpAddr != ""
+	} else {
+		wantRTMP = anyRTMPSource(rows)
+	}
+	rtmp, rtmpAddr = reconcileListener(m.log, "rtmp", rtmpPort, wantRTMP, rtmp, rtmpAddr,
+		(*rtmpserver.Server).Stop,
+		func(addr string) (*rtmpserver.Server, error) {
+			s := rtmpserver.New(m.log, addr, m.lookupStreamKey)
+			return s, s.Start()
+		})
+
+	m.mu.Lock()
+	m.srt, m.srtAddr = srt, srtAddr
+	m.rtmp, m.rtmpAddr = rtmp, rtmpAddr
+	m.mu.Unlock()
+}
+
+// anyRTMPSource reports whether any enabled source expects the RTMP listener.
+//
+// Disabled sources do not count: a disabled source has no engine, so it has no
+// subscriber, so a publisher reaching it would be admitted into a stream nobody
+// reads — which is the failure Target.Ready exists to prevent.
+func anyRTMPSource(rows []*db.Source) bool {
+	for _, s := range rows {
+		if s.Enabled && s.Ingest.Mode == db.IngestRTMP {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileListener brings one shared listener to match its configured port,
+// returning what is bound afterwards and at which address.
+//
+// Written once and instantiated twice rather than copied, because the port
+// validation, the rebind-on-change and the bind-failure handling are the same
+// three decisions for both protocols. Two near-copies drift on the next fix to
+// any of them, and what drift produces here -- one protocol quietly not
+// rebinding after a port change -- is invisible until an operator's encoder
+// cannot connect and the settings page says it should.
+//
+// Generic over the server type rather than over an interface so that `cur` can
+// be compared against nil: a nil *srtserver.Server placed in an interface is
+// not a nil interface, and that trap is exactly how a "no listener" state turns
+// into a nil dereference.
+func reconcileListener[T any](
+	log *slog.Logger,
+	proto string,
+	port int,
+	// wanted separates "this listener is deliberately off" from "this port is
+	// wrong". Overloading port 0 for both conflated a fresh install that simply
+	// has no RTMP source with a misconfiguration, and logged an ERROR about a
+	// port nobody set on every startup.
+	wanted bool,
+	cur *T, curAddr string,
+	stop func(*T),
+	start func(addr string) (*T, error),
+) (*T, string) {
 	// The store does not validate -- Settings.Validate runs in the API handler
 	// -- so the manager is the last place between a stored value and a bound
 	// socket, and it has to check. Port 0 is the one that matters: it is not
@@ -204,43 +309,37 @@ func (m *Manager) reconcileSharedIngest() {
 	// bind something random, report itself as listening, and tell the operator
 	// their token is enforced while nothing they could publish to exists.
 	//
-	// There is no longer an "off" to fall back to: this listener IS the SRT
-	// ingest. An out-of-range port is therefore an error that leaves nothing
-	// bound, not a quiet downgrade to per-source ports.
-	ok := port >= 1 && port <= 65535
-	if !ok {
-		m.log.Error("srt ingest not started: listener port out of range", "port", port)
+	// There is no longer an "off" to fall back to: these listeners ARE the
+	// ingest, on both protocols. An out-of-range port is therefore an error
+	// that leaves nothing bound, not a quiet downgrade to something else.
+	ok := wanted && port >= 1 && port <= 65535
+	if wanted && !ok {
+		log.Error("ingest not started: listener port out of range", "proto", proto, "port", port)
 	}
 	addr := fmt.Sprintf(":%d", port)
 
-	m.mu.Lock()
-	cur, curAddr := m.srt, m.srtAddr
-	m.mu.Unlock()
-
 	if cur != nil && (!ok || curAddr != addr) {
-		cur.Stop()
-		m.mu.Lock()
-		m.srt, m.srtAddr = nil, ""
-		m.mu.Unlock()
-		m.log.Info("one-port srt ingest stopped")
+		stop(cur)
+		log.Info("one-port ingest stopped", "proto", proto)
 		cur = nil
 	}
-	if !ok || cur != nil {
-		return
+	if !ok {
+		return nil, ""
+	}
+	if cur != nil {
+		return cur, curAddr
 	}
 
-	srv := srtserver.New(m.log, addr, m.lookupToken)
-	if err := srv.Start(); err != nil {
-		// A listener that cannot bind must not take the engines down with it:
-		// every source still has its own port, which is the whole reason both
-		// addressing modes are kept.
-		m.log.Error("one-port srt ingest could not start; per-source ports still work",
-			"addr", addr, "err", err)
-		return
+	srv, err := start(addr)
+	if err != nil {
+		// A listener that cannot bind must not take the engines -- or the other
+		// protocol's listener -- down with it. An install whose 1935 is held by
+		// something else still ingests over SRT, and saying so in the log is
+		// the only way anyone finds out.
+		log.Error("one-port ingest could not start", "proto", proto, "addr", addr, "err", err)
+		return nil, ""
 	}
-	m.mu.Lock()
-	m.srt, m.srtAddr = srv, addr
-	m.mu.Unlock()
+	return srv, addr
 }
 
 // lookupToken resolves a publish token to the source that owns it, in constant
@@ -313,7 +412,162 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 // A suffix rather than a second secret: see lookupToken.
 const backupTokenSuffix = ".backup"
 
-// SRTLinks reports uplink health for every publisher on the shared listener.
+// lookupStreamKey resolves an RTMP publish path to the source that owns it.
+//
+// The SAME addressing as SRT, deliberately: `rtmp://host:1935/live/<token>` and
+// `srt://host:6000?streamid=<token>` are one concept in two spellings, and
+// `<token>.backup` reaches the standby on either. The alternative on the table
+// was ingest.rtmp.streamKey, and it cannot be an address: DefaultSettings used
+// to hand every source the identical key "stream", nothing in the schema or the
+// validator made it unique, and it cannot be rotated without an operator
+// editing a text field and cutting their encoder off mid-broadcast. A token is
+// 192 bits of crypto/rand, unique, rotatable with a grace window, and never
+// logged.
+//
+// Structural difference from lookupToken worth knowing about:
+// rtmpserver.ConstantTimeLookup takes a PREBUILT map while srtserver's takes
+// two closures and a token slice per target. The rotation grace has to survive
+// either way, so it is expressed here by inserting ONE MAP ENTRY PER VALID
+// TOKEN, all pointing at the same Target. Still constant-time -- the map is
+// bookkeeping, the comparison inside is what has to not short-circuit.
+func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
+	rows, err := m.store.ListSources()
+	if err != nil {
+		m.log.Warn("cannot read sources for an rtmp publish attempt", "err", err)
+		return rtmpserver.Target{}, false
+	}
+	now := time.Now()
+	targets := make(map[string]rtmpserver.Target, len(rows)*2)
+	primaries := make(map[int64]rtmpserver.Target, len(rows))
+	for _, s := range rows {
+		// Ready is the counterpart of srtserver's `Sink != nil`: it must mean an
+		// RTMP SUBSCRIBER exists for this source, not merely that an engine
+		// does.
+		//
+		// `eng != nil` alone was wrong, and wrong in the direction that hides
+		// itself. Every source got a Ready RTMP target regardless of its ingest
+		// mode, but reconcileIngest takes an early return for IngestSRT and
+		// spawns no RTMP subscriber — so publishing to an SRT-only source's
+		// token was ADMITTED into a stream with no reader, and flipped the
+		// Sources page to "publishing" while that source's real SRT encoder
+		// might be down. The backup branch below already gated on mode; this
+		// one did not, and its own comment described the bug it had.
+		eng := m.Engine(s.ID)
+		primary := rtmpserver.Target{
+			SourceID: s.ID,
+			Name:     s.Name,
+			Enabled:  s.Enabled,
+			Ready:    eng != nil && s.Ingest.Mode == db.IngestRTMP,
+		}
+		primaries[s.ID] = primary
+		for _, tok := range s.ValidTokens(now) {
+			targets[tok] = primary
+		}
+
+		// The standby, on the same listener, addressed by "<token>.backup". Its
+		// subscriber is a child of this engine, so it only exists when the
+		// engine does and when failover is actually configured to use RTMP --
+		// registering it otherwise would accept a backup encoder into a stream
+		// with no reader, which is the failure Ready exists to prevent.
+		if eng == nil {
+			continue
+		}
+		fo := eng.Settings().Failover
+		if !fo.Enabled || !fo.Backup.Enabled || fo.Backup.Mode != db.IngestRTMP {
+			continue
+		}
+		backup := rtmpserver.Target{
+			SourceID: s.ID,
+			Name:     s.Name + " (backup)",
+			Enabled:  s.Enabled,
+			Backup:   true,
+			Ready:    true,
+		}
+		for _, tok := range s.ValidTokens(now) {
+			targets[tok+backupTokenSuffix] = backup
+		}
+	}
+	// Copied from the primary rather than rebuilt, so a source's two addresses
+	// cannot disagree about Enabled or Ready.
+	for id, legacy := range legacyRTMPKeys(rows) {
+		if primary, ok := primaries[id]; ok {
+			targets[legacy] = primary
+		}
+	}
+	return rtmpserver.ConstantTimeLookup(targets)(key)
+}
+
+// legacyRTMPKeys maps each source that still answers to its pre-one-port stream
+// key. Sources without one are absent.
+//
+// It exists to keep an upgrading install's encoder on the air. Before
+// internal/rtmpserver an RTMP source was addressed by
+// `rtmp://host:1935/<app>/<ingest.rtmp.streamKey>`, and checkRTMPExclusive
+// guaranteed at most one such source per install. Moving the address to the
+// token breaks that encoder on restart, and breaks it SILENTLY: RTMP carries no
+// typed rejection reason, so OBS says "could not connect" and nothing anywhere
+// says why. Honouring the stored key as a second address costs one map entry
+// and takes nobody's broadcast off the air.
+//
+// It cannot grow into a liability. DefaultSettings mints no stream key, so only
+// rows written by an older build carry one, and clearing the field retires it.
+//
+// Two gates, both load-bearing:
+//
+//   - A key claimed by more than one source answers for NONE of them.
+//     Resolving it arbitrarily is exactly the "one source answering for
+//     another" failure this whole change exists to remove, and it is reachable
+//     by hand because two operator-typed keys can match.
+//   - A key that matches any token, live or lapsed, primary or standby, is
+//     refused. Otherwise it could shadow the address the Sources page is
+//     telling someone to use. Costs an upgrading install nothing: a 192-bit
+//     random string is not what anyone typed into a stream-key box.
+func legacyRTMPKeys(rows []*db.Source) map[int64]string {
+	claims := map[string]int{}
+	reserved := map[string]bool{}
+	for _, s := range rows {
+		if s.Ingest.Mode == db.IngestRTMP && s.Ingest.RTMP.StreamKey != "" {
+			claims[s.Ingest.RTMP.StreamKey]++
+		}
+		for _, t := range []string{s.Token, s.PrevToken} {
+			if t == "" {
+				continue
+			}
+			reserved[t] = true
+			reserved[t+backupTokenSuffix] = true
+		}
+	}
+	out := map[int64]string{}
+	for _, s := range rows {
+		key := s.Ingest.RTMP.StreamKey
+		if s.Ingest.Mode != db.IngestRTMP || key == "" {
+			continue
+		}
+		if claims[key] != 1 || reserved[key] {
+			continue
+		}
+		out[s.ID] = key
+	}
+	return out
+}
+
+// LegacyRTMPKey reports the pre-one-port stream key that still reaches this
+// source, or "" when none does.
+//
+// Surfaced so the Sources page can say so. An operator publishing to a
+// grandfathered address needs to be told it is one, or the URL on their screen
+// and the URL in their encoder disagree forever with nothing to say which is
+// real.
+func (m *Manager) LegacyRTMPKey(sourceID int64) string {
+	rows, err := m.store.ListSources()
+	if err != nil {
+		return ""
+	}
+	return legacyRTMPKeys(rows)[sourceID]
+}
+
+// SRTLinks reports uplink health for every publisher on the shared SRT
+// listener.
 func (m *Manager) SRTLinks() []srtserver.LinkStats {
 	m.mu.RLock()
 	srv := m.srt
@@ -324,13 +578,37 @@ func (m *Manager) SRTLinks() []srtserver.LinkStats {
 	return srv.Stats()
 }
 
-// SharedIngestPublishing reports whether one source has a live publisher on the
-// shared listener.
+// RTMPLinks reports the live publishers on the shared RTMP listener.
+//
+// Separate from SRTLinks, and returning a different type, because the two
+// carry genuinely different facts rather than the same ones under different
+// names: SRT reports RTT, loss and retransmits because the protocol measures
+// them, and TCP has no such numbers to report. Merging them would mean a
+// half-empty struct for every RTMP source and a reader unable to tell "zero
+// loss" from "loss is not a thing here".
+func (m *Manager) RTMPLinks() []rtmpserver.LinkStats {
+	m.mu.RLock()
+	srv := m.rtmp
+	m.mu.RUnlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Stats()
+}
+
+// SharedIngestPublishing reports whether one source has a live publisher on
+// either shared listener.
+//
+// Protocol-neutral on purpose, and it now means what its name says: the caller
+// is asking "is an encoder feeding this programme", which is one question
+// regardless of what the encoder speaks. It used to consult SRT only, which was
+// the same answer only because RTMP had no shared listener to consult.
 func (m *Manager) SharedIngestPublishing(sourceID int64) bool {
 	m.mu.RLock()
-	srv := m.srt
+	srt, rtmp := m.srt, m.rtmp
 	m.mu.RUnlock()
-	return srv != nil && srv.Publishing(sourceID)
+	return (srt != nil && srt.Publishing(sourceID)) ||
+		(rtmp != nil && rtmp.Publishing(sourceID))
 }
 
 // Reconcile syncs the engine set, then reconciles each engine.
@@ -340,12 +618,13 @@ func (m *Manager) SharedIngestPublishing(sourceID int64) bool {
 // programmes after it in the map un-reconciled for reasons that have nothing
 // to do with them.
 func (m *Manager) Reconcile() error {
+	// Before Sync, for the reason Start gives: an engine started against an
+	// unbound RTMP port has its ingest child crash-looping on connection-
+	// refused. The lookups are late-bound, so nothing is lost by binding first.
+	m.reconcileSharedIngest()
 	if err := m.Sync(); err != nil {
 		return err
 	}
-	// After Sync, so the listener's token lookup can already see an engine for
-	// a source that was added in the same reconcile.
-	m.reconcileSharedIngest()
 	var firstErr error
 	for _, eng := range m.Engines() {
 		if err := eng.Reconcile(); err != nil {
@@ -393,8 +672,18 @@ func (m *Manager) Stop() {
 	// Nothing new is accepted in that window: m.engines is emptied and
 	// m.started cleared under this lock, so a publisher arriving mid-teardown
 	// finds no target and is refused exactly as it would be at any other time.
-	srt := m.srt
+	//
+	// THE SAME INVARIANT HOLDS FOR RTMP, and for the same reason with one link
+	// added. rtmpserver.Stop closes every subscriber connection, and those
+	// subscribers ARE the engines' ingest children -- the FFmpeg reading
+	// rtmp://127.0.0.1:1935/live/<token>. Stopping it first kills each child's
+	// input before the child has been signalled, which is the "SIGTERM against
+	// a source that has gone quiet" case measured above: 15s and still alive,
+	// killed as a group, recording left with no trailer. So it comes down at
+	// the bottom too.
+	srt, rtmp := m.srt, m.rtmp
 	m.srt, m.srtAddr = nil, ""
+	m.rtmp, m.rtmpAddr = nil, ""
 	engines := make([]*Engine, 0, len(m.engines))
 	for _, eng := range m.engines {
 		engines = append(engines, eng)
@@ -410,6 +699,9 @@ func (m *Manager) Stop() {
 	// After the engines, so the children finalised against a live feed.
 	if srt != nil {
 		srt.Stop()
+	}
+	if rtmp != nil {
+		rtmp.Stop()
 	}
 }
 
@@ -543,13 +835,29 @@ func (m *Manager) GPUBusy() bool {
 	return false
 }
 
-// SharedIngestListening reports whether the one-port listener is actually bound.
+// ListenerBound reports whether the one-port listener for a protocol is
+// actually bound.
 //
 // Distinct from the setting: a listener whose port was already taken leaves the
 // setting on while enforcing nothing, and the UI has to be able to tell those
 // apart before it tells anyone their token protects an ingest.
-func (m *Manager) SharedIngestListening() bool {
+//
+// It takes the mode rather than answering for "the" listener because there are
+// two now, and they fail independently -- 1935 being held by something else
+// says nothing about 6000. A caller that did not have to name a protocol would
+// get one listener's answer for the other's question.
+func (m *Manager) ListenerBound(mode db.IngestMode) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.srt != nil
+	switch mode {
+	case db.IngestSRT:
+		return m.srt != nil
+	case db.IngestRTMP:
+		return m.rtmp != nil
+	default:
+		// Pull dials out and unset has nothing to bind. Neither has a listener
+		// to be enforced by, and saying "yes" would tell an operator a token
+		// gates an ingest that no publisher ever reaches.
+		return false
+	}
 }

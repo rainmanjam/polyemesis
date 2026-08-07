@@ -83,8 +83,22 @@ jobs:
       - name: Install FFmpeg
         timeout-minutes: 6
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          # Ubuntu's own package is 6.1.1, and the Docker image ships 8.1.2.
+          # Testing against 6.1.1 meant CI never exercised the FFmpeg users
+          # actually get, and the two differ in ways that matter: 6.1.1 accepts
+          # an 80-channel amerge where 8.1 stops at 64, and 6.1.1 cannot demux
+          # multitrack FLV at all. Pin the same 8.1 line the image uses.
+          set -euo pipefail
+          cd /tmp
+          # -c rather than a heredoc: inside a YAML block the heredoc body and
+          # its terminator are indented, which Python reads as a bad indent and
+          # bash does not accept as a delimiter.
+          python3 -c 'import urllib.request; urllib.request.urlretrieve("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz", "/tmp/ff.tar.xz")'
+          mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+          sudo install -m 0755 ffbuild/bin/ffmpeg  /usr/local/bin/ffmpeg
+          sudo install -m 0755 ffbuild/bin/ffprobe /usr/local/bin/ffprobe
+          # Fail loudly rather than silently testing a build without SRT.
+          ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
 
       # The gate is "gofmt named no files", and it has to rest on gofmt having
@@ -196,7 +210,24 @@ jobs:
       - name: Install FFmpeg (Linux)
         timeout-minutes: 6
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+        run: |
+          # Ubuntu's own package is 6.1.1, and the Docker image ships 8.1.2.
+          # Testing against 6.1.1 meant CI never exercised the FFmpeg users
+          # actually get, and the two differ in ways that matter: 6.1.1 accepts
+          # an 80-channel amerge where 8.1 stops at 64, and 6.1.1 cannot demux
+          # multitrack FLV at all. Pin the same 8.1 line the image uses.
+          set -euo pipefail
+          cd /tmp
+          # -c rather than a heredoc: inside a YAML block the heredoc body and
+          # its terminator are indented, which Python reads as a bad indent and
+          # bash does not accept as a delimiter.
+          python3 -c 'import urllib.request; urllib.request.urlretrieve("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz", "/tmp/ff.tar.xz")'
+          mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+          sudo install -m 0755 ffbuild/bin/ffmpeg  /usr/local/bin/ffmpeg
+          sudo install -m 0755 ffbuild/bin/ffprobe /usr/local/bin/ffprobe
+          # Fail loudly rather than silently testing a build without SRT.
+          ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
+          ffmpeg -hide_banner -version | head -1
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
@@ -328,6 +359,11 @@ jobs:
       - run: npx --no-install tsc -b --noEmit
       - run: npm run lint
       - run: npm run build
+      # Unit tests for the pure logic the browser suite cannot enumerate --
+      # platform link construction has five platforms times several missing-field
+      # cases, and driving each through a real browser would cost minutes to
+      # assert what a millisecond of vitest does.
+      - run: npm test
       # A vulnerable direct dependency should fail the build, not sit in a
       # report nobody opens. --audit-level=high so a low-severity transitive
       # advisory does not block a hotfix.

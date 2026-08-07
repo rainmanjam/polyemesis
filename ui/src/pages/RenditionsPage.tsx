@@ -46,7 +46,7 @@ import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { labelForState, toneBadge, toneForState, type SignalTone } from "@/lib/signal";
+import { toneBadge, toneForState, type SignalTone } from "@/lib/signal";
 import type {
   DestStatus,
   EncoderInfo,
@@ -64,6 +64,7 @@ import type {
   RenditionView,
   VideoStream,
 } from "@/lib/types";
+import { useT, type Translator, type TranslationKey, useStateLabel, type StateLabeller } from "@/lib/i18n";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -81,7 +82,7 @@ const FALLBACK_BOUNDS: RenditionBounds = {
 /** Shown beside the presets if the server's own wording has not loaded. It is
  *  the same sentence db.PresetDisclaimer carries: the numbers are a place to
  *  start from, never a claim about what a platform accepts today. */
-const FALLBACK_DISCLAIMER = "Starting point — verify current limits with the platform.";
+const FALLBACK_DISCLAIMER: TranslationKey = "rend.presetStartingPoint";
 
 /** The sizes worth one click. "Keep source" is 0×0, the sentinel that means
  *  "do not scale", and it stays first because it is the cheapest answer. */
@@ -128,12 +129,14 @@ function encoderLabel(e: EncoderInfo): string {
  *  the select. The server's `reason` is FFmpeg's own words, which is the part
  *  worth keeping: "Cannot load libcuda.so.1" and "Permission denied" are two
  *  problems with two different fixes. */
-function encoderProblem(e: EncoderInfo | undefined): string {
+function encoderProblem(
+  t: Translator,
+e: EncoderInfo | undefined): string {
   if (!e || e.works) return "";
   if (!e.available) return e.reason || `This FFmpeg build has no ${e.name}.`;
   const measured = e.measured
-    ? `${e.name} failed a one-frame test encode on this machine.`
-    : `${e.name} was not offered because a related encoder failed here.`;
+    ? t("rend.encoderTestFailed", { name: e.name })
+    : t("rend.encoderRelatedFailed", { name: e.name });
   return e.reason ? `${measured} FFmpeg said: ${e.reason}` : measured;
 }
 
@@ -245,6 +248,7 @@ function sizeLabel(r: { width: number; height: number }): string {
  *  core count, no promise. What it will do is refuse to let someone pick x264
  *  at 4K60 without reading that it is not going to keep up. */
 function encodeCost(
+  t: Translator,
   r: { width: number; height: number; fps: number },
   encoder: EncoderInfo | undefined,
   src: VideoStream | null | undefined,
@@ -262,26 +266,22 @@ function encodeCost(
     return {
       tone: "muted",
       pixelRate: 0,
-      headline: "Cost cannot be estimated yet",
-      detail:
-        "Nothing has probed the source, so “keep source” has no numbers behind it. Start the ingest and this fills in.",
+      headline: t("rend.costNoNumbers"),
+      detail: t("rend.costNoNumbersDetail"),
     };
   }
 
   const rate = width * height * fps;
-  const label = `${width}×${height} at ${fps} fps`;
+  const label = `${width}\u00d7${height} at ${fps} fps`;
   const mpps = `${Math.round(rate / 1e6)} MP/s`;
-  const machine = cores && cores > 0 ? ` This machine reports ${cores} logical cores.` : "";
+  const machine = cores && cores > 0 ? t("rend.costMachineCores", { cores }) : "";
 
   if (hardware) {
     return {
       tone: rate >= SOFTWARE_UNREALISTIC_PIXELS ? "warn" : "muted",
       pixelRate: rate,
-      headline: `Offloaded to ${encoder?.name ?? "hardware"}`,
-      detail:
-        `${label} (${mpps}) runs on the GPU's fixed-function encoder, so it costs little CPU. ` +
-        "Quality and rate control vary by driver, and every chip has a ceiling of its own — " +
-        "check the output before a show that matters.",
+      headline: t("rend.costOffloaded", { encoder: encoder?.name ?? t("rend.hardwareFallback") }),
+      detail: t("rend.costOffloadedDetail", { label, mpps }),
     };
   }
 
@@ -289,20 +289,15 @@ function encodeCost(
   // hardware encoder passed its test encode here, in which case there is no way
   // out and saying so is the only honest thing left.
   const escape = hardwareExists
-    ? "Choose a hardware encoder, or a smaller output."
-    : "No hardware encoder works on this machine, so there is nothing to move this onto — " +
-      "the only lever here is a smaller output. Re-detect hardware if you have since " +
-      "installed a driver or passed a GPU into the container.";
+    ? t("rend.chooseHardware")
+    : t("rend.noHardwareEscape");
 
   if (rate >= SOFTWARE_UNREALISTIC_PIXELS) {
     return {
       tone: "down",
       pixelRate: rate,
-      headline: "Software encoding this in real time is beyond most machines",
-      detail:
-        `${label} is ${mpps} for a single encode. x264 at this size usually loses the race with ` +
-        "real time, and a rendition that falls behind drops frames for every destination reading " +
-        `it — which you find out mid-stream.${machine} ${escape}`,
+      headline: t("rend.costBeyond"),
+      detail: t("rend.costBeyondDetail", { label, mpps, machine, escape }),
     };
   }
 
@@ -310,28 +305,27 @@ function encodeCost(
     return {
       tone: "warn",
       pixelRate: rate,
-      headline: "Expect several cores to be busy",
-      detail:
-        `${label} is ${mpps} on ${encoder?.name ?? "a software encoder"}, which is a heavy ` +
-        `real-time encode.${machine} Watch the encoder's speed once it is live: below 1.0× it is ` +
-        `falling behind and the destinations under it will start dropping frames. ${escape}`,
+      headline: t("rend.costBusy"),
+      detail: t("rend.costBusyDetail", {
+        label, mpps, machine, escape,
+        encoder: encoder?.name ?? t("rend.softwareEncoderFallback"),
+      }),
     };
   }
 
   return {
     tone: "muted",
     pixelRate: rate,
-    headline: "Modest software encode",
-    detail:
-      `${label} is ${mpps}, within reach of most machines.${machine} It is still one real encode — ` +
-      "shared by every destination that selects it, but not free.",
+    headline: t("rend.costModest"),
+    detail: t("rend.costModestDetail", { label, mpps, machine }),
   };
 }
 
 /** Things that are worth saying about this rendition against this source, and
  *  are not opinions: upscaling and frame duplication are simply waste. */
 function sourceNotes(
-  r: { width: number; height: number; fps: number },
+  t: Translator,
+r: { width: number; height: number; fps: number },
   src: VideoStream | null | undefined,
 ): string[] {
   if (!src || src.width <= 0 || src.height <= 0) return [];
@@ -339,12 +333,12 @@ function sourceNotes(
   const { width, height } = effectiveSize(r, src);
   if (height > src.height || width > src.width) {
     notes.push(
-      `The source is ${src.width}×${src.height}. Scaling up costs CPU and adds no detail.`,
+      t("rend.noteUpscale", { width: src.width, height: src.height }),
     );
   }
   if (src.frameRate > 0 && r.fps > Math.round(src.frameRate)) {
     notes.push(
-      `The source runs at ${src.frameRate.toFixed(2)} fps, so ${r.fps} fps only duplicates frames.`,
+      t("rend.noteDuplicateFps", { srcFps: src.frameRate.toFixed(2), fps: r.fps }),
     );
   }
   return notes;
@@ -355,25 +349,28 @@ function sourceNotes(
  *  No process is the normal state for a rendition nothing has selected — the
  *  ref count is doing its job — so it must not read as a failure. */
 function renditionSignal(
+  t: Translator,
+  stateLabel: StateLabeller,
   live: RenditionStatus | undefined,
   enabledUsers: number,
 ): { tone: SignalTone; label: string } {
   if (live?.process) {
-    return { tone: toneForState(live.process.state), label: labelForState(live.process.state) };
+    return { tone: toneForState(live.process.state), label: stateLabel(live.process.state) };
   }
-  if (live?.error) return { tone: "down", label: "Error" };
-  if (enabledUsers === 0) return { tone: "idle", label: "Idle" };
-  return { tone: "warn", label: "Starting" };
+  if (live?.error) return { tone: "down", label: t("rend.signalError") };
+  if (enabledUsers === 0) return { tone: "idle", label: t("rend.signalIdle") };
+  return { tone: "warn", label: t("state.starting") };
 }
 
 export function RenditionsPage() {
+  const t = useT();
   const { status, system } = useLiveData();
   const [views, setViews] = useState<RenditionView[]>([]);
   const [caps, setCaps] = useState<EncoderList | null>(null);
   const [redetecting, setRedetecting] = useState(false);
   const [presets, setPresets] = useState<RenditionPreset[]>([]);
   const [fonts, setFonts] = useState<FontsResponse | null>(null);
-  const [disclaimer, setDisclaimer] = useState(FALLBACK_DISCLAIMER);
+  const [disclaimer, setDisclaimer] = useState("");
   const [bounds, setBounds] = useState<RenditionBounds>(FALLBACK_BOUNDS);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -387,10 +384,10 @@ export function RenditionsPage() {
         .listRenditions()
         .then(setViews)
         .catch((err) =>
-          toast.error(err instanceof Error ? err.message : "Could not load the renditions."),
+          toast.error(err instanceof Error ? err.message : t("rend.loadFailed")),
         )
         .finally(() => setLoading(false)),
-    [],
+    [t],
   );
 
   // The encoder capabilities and the presets are properties of the machine, not
@@ -406,7 +403,7 @@ export function RenditionsPage() {
       .renditionPresets()
       .then((p) => {
         setPresets(p.presets);
-        setDisclaimer(p.disclaimer || FALLBACK_DISCLAIMER);
+        setDisclaimer(p.disclaimer || "");
         setBounds(p.bounds ?? FALLBACK_BOUNDS);
       })
       .catch(() => {});
@@ -467,14 +464,14 @@ export function RenditionsPage() {
       toast.success(
         working > 0
           ? `Hardware re-detected: ${next.hardware?.join(", ")} passed a test encode.`
-          : "Hardware re-detected. No hardware encoder passed a test encode on this machine.",
+          : t("rend.redetectedNoHardware"),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not re-detect the hardware.");
+      toast.error(err instanceof Error ? err.message : t("rend.redetectFailed"));
     } finally {
       setRedetecting(false);
     }
-  }, []);
+  }, [t]);
 
   const openCreate = () => {
     setEditing(null);
@@ -490,9 +487,9 @@ export function RenditionsPage() {
     setBusyId(r.id);
     try {
       await api.restartRendition(r.id);
-      toast.success(`${r.name} is restarting. Its destinations reconnect with it.`);
+      toast.success(t("rend.restarting", { name: r.name }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not restart the encode.");
+      toast.error(err instanceof Error ? err.message : t("rend.restartFailed"));
     } finally {
       setBusyId(null);
     }
@@ -501,8 +498,8 @@ export function RenditionsPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Renditions"
-        subtitle="One shared video encode, many destinations. Audio is never touched here."
+        title={t("rend.title")}
+        subtitle={t("rend.subtitle")}
         actions={
           <>
             {running > 0 && (
@@ -558,9 +555,7 @@ export function RenditionsPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
             <p className="max-w-lg text-[12px] text-muted-foreground">
-              No renditions. Every destination is on passthrough, which is exactly right until one
-              of them cannot take the source — a 4K60 ingest that Twitch, Kick or X will not accept,
-              say. Add a rendition and point those destinations at it.
+            {t("rend.empty")}
             </p>
             <Button size="sm" onClick={openCreate}>
               <Plus /> New rendition
@@ -597,7 +592,7 @@ export function RenditionsPage() {
         onRedetect={redetect}
         presets={presets}
         fonts={fonts}
-        disclaimer={disclaimer}
+        disclaimer={disclaimer || t(FALLBACK_DISCLAIMER)}
         bounds={bounds}
         source={sourceVideo}
         cores={system?.numCpu}
@@ -618,11 +613,13 @@ export function RenditionsPage() {
 /** One destination, as a chip. Disabled rows are drawn too: they still select
  *  this rendition, and deleting it affects them the moment they are enabled. */
 function DestChip({ dest }: { dest: DestStatus }) {
+  const t = useT();
+  const stateLabel = useStateLabel();
   const tone: SignalTone = dest.enabled ? toneForState(dest.process?.state) : "idle";
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-[11px]"
-      title={dest.enabled ? labelForState(dest.process?.state) : "Disabled"}
+      title={dest.enabled ? stateLabel(dest.process?.state) : t("state.disabled")}
     >
       <StatusDot tone={tone} size="sm" />
       <span className="max-w-40 truncate">{dest.name}</span>
@@ -656,17 +653,19 @@ function RenditionCard({
   onRestart: () => void;
   onDelete: () => void;
 }) {
+  const stateLabel = useStateLabel();
+  const t = useT();
   const r = view.rendition;
   const total = users ? users.length : view.destinations;
   const enabled = users ? users.filter((d) => d.enabled).length : view.enabledDestinations;
-  const signal = renditionSignal(live, enabled);
-  const cost = encodeCost(r, encoder, source, cores, hardwareExists);
+  const signal = renditionSignal(t, stateLabel, live, enabled);
+  const cost = encodeCost(t, r, encoder, source, cores, hardwareExists);
   const proc = live?.process;
   // A saved rendition goes stale: the card was swapped, the driver upgraded,
   // the container lost its --device passthrough. The engine refuses to start it
   // with this same reason, so say it here rather than leave the row looking
   // healthy until someone enables a destination on it.
-  const encoderProblemText = encoderProblem(encoder);
+  const encoderProblemText = encoderProblem(t, encoder);
 
   return (
     <Card>
@@ -686,14 +685,14 @@ function RenditionCard({
 
       <CardContent className="flex flex-col gap-2.5">
         <div className="grid grid-cols-3 gap-2">
-          <Stat label="Target" value={kbps(r.videoBitrate)} />
+          <Stat label={t("rend.target")} value={kbps(r.videoBitrate)} />
           <Stat
-            label="Live"
+            label={t("rend.live")}
             value={proc?.state === "running" ? kbps(proc.progress?.bitrateKbps ?? 0) : "—"}
             tone={proc?.state === "running" ? "live" : "muted"}
           />
           <Stat
-            label="Speed"
+            label={t("rend.speed")}
             value={proc?.state === "running" ? `${(proc.progress?.speed ?? 0).toFixed(2)}×` : "—"}
             // Below real time the encode is losing the race, and every
             // destination under it inherits the stutter.
@@ -701,10 +700,10 @@ function RenditionCard({
               proc?.state === "running" && (proc.progress?.speed ?? 0) < 0.98 ? "warn" : "muted"
             }
           />
-          <Stat label="GOP" value={`${r.gopSeconds}s`} tone="muted" />
-          <Stat label="Preset" value={r.preset} tone="muted" />
+          <Stat label={t("rend.gop")} value={`${r.gopSeconds}s`} tone="muted" />
+          <Stat label={t("rend.preset")} value={r.preset} tone="muted" />
           <Stat
-            label="Uptime"
+            label={t("rend.uptime")}
             value={proc?.state === "running" ? duration(proc.uptimeSec) : "—"}
             tone="muted"
           />
@@ -723,8 +722,7 @@ function RenditionCard({
           </div>
           {total === 0 ? (
             <p className="text-[11px] text-muted-foreground">
-              No destination selects this yet, so nothing is being encoded. Pick it on a destination
-              to start the encode.
+            {t("rend.unused")}
             </p>
           ) : users ? (
             <div className="flex flex-wrap gap-1">
@@ -734,7 +732,7 @@ function RenditionCard({
             </div>
           ) : (
             <p className="text-[11px] text-muted-foreground">
-              Waiting for the first live snapshot.
+            {t("rend.waitingSnapshot")}
             </p>
           )}
         </div>
@@ -772,7 +770,7 @@ function RenditionCard({
             size="sm"
             onClick={onRestart}
             disabled={busy || !proc}
-            title={proc ? "Restart this encode and the destinations reading it" : "Not running"}
+            title={proc ? t("rend.restartEncode") : t("rend.notRunning")}
           >
             {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} Restart
           </Button>
@@ -837,45 +835,17 @@ function emptyForm(defaultEncoder: string) {
 type AspectKey = "stretch" | "crop" | "pad" | "blurpad";
 type DeinterlaceKey = "off" | "auto" | "all";
 
-const ASPECT_MODES: { key: AspectKey; label: string; hint: string }[] = [
-  {
-    key: "stretch",
-    label: "Stretch to fit",
-    hint: "Scales to the target size and lets the picture distort if the source disagrees. What every rendition did before the other modes existed.",
-  },
-  {
-    key: "crop",
-    label: "Crop to fill",
-    hint: "Centre-crops to the target shape, then scales. Subjects keep their on-screen size; the edges of the frame are gone.",
-  },
-  {
-    key: "pad",
-    label: "Letterbox",
-    hint: "Scales the whole frame to fit and fills the rest with a flat colour. Nothing is lost, but a 16:9 source on a 9:16 canvas is mostly bars.",
-  },
-  {
-    key: "blurpad",
-    label: "Blurred fill",
-    hint: "Fills the remainder with a blurred, cropped-to-fill copy of the frame itself. This is the convention vertical feeds have settled on.",
-  },
+const ASPECT_MODES: { key: AspectKey; label: TranslationKey; hint: TranslationKey }[] = [
+  { key: "stretch", label: "rend.aspectStretch", hint: "rend.aspectStretchHint" },
+  { key: "crop", label: "rend.aspectCrop", hint: "rend.aspectCropHint" },
+  { key: "pad", label: "rend.aspectPad", hint: "rend.aspectPadHint" },
+  { key: "blurpad", label: "rend.aspectBlurpad", hint: "rend.aspectBlurpadHint" },
 ];
 
-const DEINTERLACE_MODES: { key: DeinterlaceKey; label: string; hint: string }[] = [
-  {
-    key: "off",
-    label: "Off",
-    hint: "Right for the progressive sources almost everyone has. Deinterlacing one softens it for no gain.",
-  },
-  {
-    key: "auto",
-    label: "Only interlaced frames",
-    hint: "Touches only frames the source flagged as interlaced, so progressive frames pass through untouched. The right choice for anything mixed.",
-  },
-  {
-    key: "all",
-    label: "Every frame",
-    hint: "For sources that are interlaced but do not say so. Plenty of SDI bridges and capture cards flag everything progressive regardless of what they were fed, and on those “only interlaced” is a no-op that looks like a broken setting.",
-  },
+const DEINTERLACE_MODES: { key: DeinterlaceKey; label: TranslationKey; hint: TranslationKey }[] = [
+  { key: "off", label: "rend.deintOff", hint: "rend.deintOffHint" },
+  { key: "auto", label: "rend.deintAuto", hint: "rend.deintAutoHint" },
+  { key: "all", label: "rend.deintAll", hint: "rend.deintAllHint" },
 ];
 
 // The font picker's "use the built-in" option. A sentinel rather than "",
@@ -940,6 +910,7 @@ function RenditionDialog({
   users: DestStatus[];
   onSaved: () => void;
 }) {
+  const t = useT();
   const editing = rendition !== null;
   const encoders = useMemo(() => caps?.encoders ?? [], [caps]);
   const defaultEncoder = caps?.default ?? "libx264";
@@ -1051,8 +1022,8 @@ function RenditionDialog({
   }, [encoders]);
 
   const encoder = encoders.find((e) => e.name === form.encoder);
-  const cost = encodeCost(form, encoder, source, cores, hardwareExists);
-  const notes = sourceNotes(form, source);
+  const cost = encodeCost(t, form, encoder, source, cores, hardwareExists);
+  const notes = sourceNotes(t, form, source);
   const enabledUsers = users.filter((d) => d.enabled).length;
   const diagnostics = useMemo(
     () => hardwareDiagnostics(caps?.gpu ?? null, encoders),
@@ -1143,12 +1114,12 @@ function RenditionDialog({
         );
       } else {
         await api.createRendition(payload);
-        toast.success("Rendition created. Select it on a destination to start the encode.");
+        toast.success(t("rend.created"));
       }
       onSaved();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save the rendition.");
+      toast.error(err instanceof Error ? err.message : t("rend.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -1158,7 +1129,7 @@ function RenditionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit rendition" : "New rendition"}</DialogTitle>
+          <DialogTitle>{editing ? t("rend.editRendition") : t("rend.newRendition")}</DialogTitle>
           <DialogDescription>
             Video only. Every audio track is copied through untouched, and each destination applies
             its own routing on top — so this changes the picture for everyone that selects it and
@@ -1191,25 +1162,24 @@ function RenditionDialog({
                   into presenting these numbers as a platform's actual limits. */}
               <span className="text-[10px] text-warn">{disclaimer}</span>
               <span className="text-[10px] text-muted-foreground">
-                These seed the form and nothing more — edit anything before saving. Platform
-                ceilings change and differ by partner status.
+            {t("rend.seedNote")}
               </span>
             </div>
           )}
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="rend-name">Name</Label>
+            <Label htmlFor="rend-name">{t("rend.name")}</Label>
             <Input
               id="rend-name"
               value={form.name}
               onChange={(e) => set("name", e.target.value)}
-              placeholder="1080p60 for Twitch and Kick"
+              placeholder={t("rend.namePlaceholder")}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label>Resolution</Label>
+              <Label>{t("rend.resolution")}</Label>
               <Select value={sizeKey} onValueChange={chooseSize}>
                 <SelectTrigger>
                   <SelectValue />
@@ -1220,13 +1190,13 @@ function RenditionDialog({
                       {s.label}
                     </SelectItem>
                   ))}
-                  <SelectItem value="custom">Custom…</SelectItem>
+                  <SelectItem value="custom">{t("rend.custom")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-fps">Frame rate</Label>
+              <Label htmlFor="rend-fps">{t("rend.frameRate")}</Label>
               <Input
                 id="rend-fps"
                 type="number"
@@ -1244,7 +1214,7 @@ function RenditionDialog({
           {sizeKey === "custom" && (
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <Label htmlFor="rend-w">Width</Label>
+                <Label htmlFor="rend-w">{t("rend.width")}</Label>
                 <Input
                   id="rend-w"
                   type="number"
@@ -1256,7 +1226,7 @@ function RenditionDialog({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="rend-h">Height</Label>
+                <Label htmlFor="rend-h">{t("rend.height")}</Label>
                 <Input
                   id="rend-h"
                   type="number"
@@ -1268,15 +1238,14 @@ function RenditionDialog({
                 />
               </div>
               <span className="col-span-2 text-[10px] text-muted-foreground">
-                0 on an axis keeps the source's and preserves the aspect ratio — set height alone to
-                rescale. Both must be even numbers: H.264 and HEVC have no odd-sized chroma plane.
+            {t("rend.evenNote")}
               </span>
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-bitrate">Video bitrate</Label>
+              <Label htmlFor="rend-bitrate">{t("rend.videoBitrate")}</Label>
               <Input
                 id="rend-bitrate"
                 type="number"
@@ -1292,7 +1261,7 @@ function RenditionDialog({
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-gop">Keyframe interval</Label>
+              <Label htmlFor="rend-gop">{t("rend.keyframeInterval")}</Label>
               <Input
                 id="rend-gop"
                 type="number"
@@ -1310,7 +1279,7 @@ function RenditionDialog({
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-aspect">Aspect handling</Label>
+              <Label htmlFor="rend-aspect">{t("rend.aspectHandling")}</Label>
               <Select
                 value={form.aspectMode}
                 onValueChange={(v) => set("aspectMode", v as AspectKey)}
@@ -1321,21 +1290,21 @@ function RenditionDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {ASPECT_MODES.map((m) => (
-                    <SelectItem key={m.key} value={m.key} title={m.hint}>
-                      {m.label}
+                    <SelectItem key={m.key} value={m.key} title={t(m.hint)}>
+                      {t(m.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <span className="text-[10px] text-muted-foreground">
                 {!aspectApplies
-                  ? "Needs both a width and a height — with one axis free the scale already preserves the aspect ratio."
-                  : (ASPECT_MODES.find((m) => m.key === form.aspectMode)?.hint ?? "")}
+                  ? t("rend.needsBothAWidthAnd")
+                  : (() => { const m = ASPECT_MODES.find((m) => m.key === form.aspectMode); return m ? t(m.hint) : ""; })()}
               </span>
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-deint">Deinterlace</Label>
+              <Label htmlFor="rend-deint">{t("rend.deinterlace")}</Label>
               <Select
                 value={form.deinterlace}
                 onValueChange={(v) => set("deinterlace", v as DeinterlaceKey)}
@@ -1345,8 +1314,8 @@ function RenditionDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {DEINTERLACE_MODES.map((m) => (
-                    <SelectItem key={m.key} value={m.key} title={m.hint}>
-                      {m.label}
+                    <SelectItem key={m.key} value={m.key} title={t(m.hint)}>
+                      {t(m.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1359,15 +1328,15 @@ function RenditionDialog({
 
           {aspectApplies && form.aspectMode === "pad" && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-padcolor">Letterbox colour</Label>
+              <Label htmlFor="rend-padcolor">{t("rend.letterboxColour")}</Label>
               <Input
                 id="rend-padcolor"
                 value={form.padColor}
-                placeholder="black"
+                placeholder={t("rend.colourBlack")}
                 onChange={(e) => set("padColor", e.target.value)}
               />
               <span className="text-[10px] text-muted-foreground">
-                Empty means black. One word — <code>black</code>, <code>0x101010</code> — because it
+                Empty means black. One word — <code>{t("rend.colourBlack")}</code>, <code>0x101010</code> — because it
                 lands on a filter graph where a comma would end the argument.
               </span>
             </div>
@@ -1375,7 +1344,7 @@ function RenditionDialog({
 
           <div className="flex flex-col gap-2 rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="rend-overlay-image">Watermark image</Label>
+              <Label htmlFor="rend-overlay-image">{t("rend.watermarkImage")}</Label>
               {!aspectApplies && (
                 <span className="text-[10px] text-muted-foreground">
                   needs a fixed width and height
@@ -1386,7 +1355,7 @@ function RenditionDialog({
               id="rend-overlay-image"
               value={form.overlayImage}
               disabled={!aspectApplies}
-              placeholder="overlays/logo.png"
+              placeholder={t("rend.watermarkPlaceholder")}
               onChange={(e) => set("overlayImage", e.target.value)}
             />
             <span className="text-[10px] text-muted-foreground">
@@ -1404,7 +1373,7 @@ function RenditionDialog({
                     onChange={(v) => set("overlayAnchor", v)}
                   />
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-width">Width (% of frame)</Label>
+                    <Label htmlFor="rend-overlay-width">{t("rend.widthPct")}</Label>
                     <Input
                       id="rend-overlay-width"
                       type="number"
@@ -1418,7 +1387,7 @@ function RenditionDialog({
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-mx">Margin X (%)</Label>
+                    <Label htmlFor="rend-overlay-mx">{t("rend.marginX")}</Label>
                     <Input
                       id="rend-overlay-mx"
                       type="number"
@@ -1429,7 +1398,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-my">Margin Y (%)</Label>
+                    <Label htmlFor="rend-overlay-my">{t("rend.marginY")}</Label>
                     <Input
                       id="rend-overlay-my"
                       type="number"
@@ -1440,7 +1409,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-overlay-opacity">Opacity (%)</Label>
+                    <Label htmlFor="rend-overlay-opacity">{t("rend.opacity")}</Label>
                     <Input
                       id="rend-overlay-opacity"
                       type="number"
@@ -1453,8 +1422,7 @@ function RenditionDialog({
                 </div>
 
                 <span className="text-[10px] text-muted-foreground">
-                  Everything is a percentage of the frame, so the same settings are correct on a
-                  16:9 tier and a 9:16 one. Margins are ignored on a centred axis.
+            {t("rend.percentNote")}
                 </span>
               </>
             )}
@@ -1462,7 +1430,7 @@ function RenditionDialog({
 
           <div className="flex flex-col gap-2 rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="rend-text-content">Burned-in text</Label>
+              <Label htmlFor="rend-text-content">{t("rend.burnedText")}</Label>
               {!aspectApplies && (
                 <span className="text-[10px] text-muted-foreground">
                   needs a fixed width and height
@@ -1479,7 +1447,7 @@ function RenditionDialog({
               value={form.textContent}
               disabled={!aspectApplies || (fonts ? !fonts.textSupported : false)}
               maxLength={200}
-              placeholder="MY STATION"
+              placeholder={t("rend.textPlaceholder")}
               onChange={(e) => set("textContent", e.target.value)}
             />
             <span className="text-[10px] text-muted-foreground">
@@ -1498,7 +1466,7 @@ function RenditionDialog({
               <>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label>Font</Label>
+                    <Label>{t("rend.font")}</Label>
                     <Select
                       value={form.textFont === "" ? DEFAULT_FONT_KEY : form.textFont}
                       onValueChange={(v) => set("textFont", v === DEFAULT_FONT_KEY ? "" : v)}
@@ -1507,7 +1475,7 @@ function RenditionDialog({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={DEFAULT_FONT_KEY}>Built-in default</SelectItem>
+                        <SelectItem value={DEFAULT_FONT_KEY}>{t("rend.builtInFont")}</SelectItem>
                         {(fonts?.fonts ?? []).map((f) => (
                           <SelectItem key={f.name} value={f.name}>
                             {f.name}
@@ -1531,7 +1499,7 @@ function RenditionDialog({
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-size">Size (% of height)</Label>
+                    <Label htmlFor="rend-text-size">{t("rend.sizePct")}</Label>
                     <Input
                       id="rend-text-size"
                       type="number"
@@ -1542,7 +1510,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-mx">Margin X (%)</Label>
+                    <Label htmlFor="rend-text-mx">{t("rend.marginX")}</Label>
                     <Input
                       id="rend-text-mx"
                       type="number"
@@ -1553,7 +1521,7 @@ function RenditionDialog({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-my">Margin Y (%)</Label>
+                    <Label htmlFor="rend-text-my">{t("rend.marginY")}</Label>
                     <Input
                       id="rend-text-my"
                       type="number"
@@ -1567,26 +1535,26 @@ function RenditionDialog({
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-color">Text colour</Label>
+                    <Label htmlFor="rend-text-color">{t("rend.textColour")}</Label>
                     <Input
                       id="rend-text-color"
                       value={form.textColor}
-                      placeholder="white"
+                      placeholder={t("rend.colourWhite")}
                       onChange={(e) => set("textColor", e.target.value)}
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-boxcolor">Box colour</Label>
+                    <Label htmlFor="rend-text-boxcolor">{t("rend.boxColour")}</Label>
                     <Input
                       id="rend-text-boxcolor"
                       value={form.textBoxColor}
                       disabled={!form.textBox}
-                      placeholder="black"
+                      placeholder={t("rend.colourBlack")}
                       onChange={(e) => set("textBoxColor", e.target.value)}
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="rend-text-boxopacity">Box opacity (%)</Label>
+                    <Label htmlFor="rend-text-boxopacity">{t("rend.boxOpacity")}</Label>
                     <Input
                       id="rend-text-boxopacity"
                       type="number"
@@ -1609,7 +1577,7 @@ function RenditionDialog({
                 </label>
                 <span className="text-[10px] text-muted-foreground">
                   The box is what keeps white text readable over a white shirt. Colours are one word
-                  — <code>white</code>, <code>0x101010</code> — because they land on a filter graph.
+                  — <code>{t("rend.colourWhite")}</code>, <code>0x101010</code> — because they land on a filter graph.
                 </span>
               </>
             )}
@@ -1618,14 +1586,14 @@ function RenditionDialog({
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2">
-                <Label>Encoder</Label>
+                <Label>{t("rend.encoder")}</Label>
                 <Button
                   variant="ghost"
                   size="sm"
                   type="button"
                   onClick={onRedetect}
                   disabled={redetecting}
-                  title="Re-run the GPU scan and encode one test frame with each encoder. Takes a few seconds."
+                  title={t("rend.redetectTitle")}
                 >
                   {redetecting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
                   Re-detect hardware
@@ -1644,7 +1612,7 @@ function RenditionDialog({
                       // one already saved stays selectable so an edit of an
                       // unrelated field is not blocked by it.
                       disabled={!e.works && e.name !== savedEncoder}
-                      title={encoderProblem(e) || `${e.name} encoded a test frame on this machine.`}
+                      title={encoderProblem(t, e) || t("rend.encoderTestOk", { name: e.name })}
                       // Radix refuses to select a disabled item on its own, so
                       // the pointer events shadcn turns off here are only
                       // costing the title tooltip — which is the one thing a
@@ -1659,29 +1627,28 @@ function RenditionDialog({
               </Select>
               {choices.length === 0 && (
                 <span className="text-[10px] text-warn">
-                  This FFmpeg reported no usable video encoder.
+            {t("rend.noEncoder")}
                 </span>
               )}
-              {encoderProblem(encoder) && (
-                <span className="text-[10px] text-down">{encoderProblem(encoder)}</span>
+              {encoderProblem(t, encoder) && (
+                <span className="text-[10px] text-down">{encoderProblem(t, encoder)}</span>
               )}
               {!caps?.tested && choices.length > 0 && (
                 <span className="text-[10px] text-muted-foreground">
-                  Nothing has been test-encoded on this machine yet, so this list is what the FFmpeg
-                  build contains rather than what the hardware can do. Re-detect to find out.
+            {t("rend.notProbed")}
                 </span>
               )}
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-preset">Encoder preset</Label>
+              <Label htmlFor="rend-preset">{t("rend.encoderPreset")}</Label>
               <Input
                 id="rend-preset"
                 value={form.preset}
                 maxLength={32}
                 className="font-mono"
                 onChange={(e) => set("preset", e.target.value)}
-                placeholder="veryfast"
+                placeholder={t("rend.presetPlaceholder")}
               />
               <span className="text-[10px] text-muted-foreground">
                 The encoder's own speed knob, and its vocabulary: veryfast for x264, p4 for nvenc.
@@ -1713,8 +1680,7 @@ function RenditionDialog({
                   )}
                 >
                   {permissionBlocked
-                    ? "A GPU is present but this process cannot open it"
-                    : "What the hardware scan found"}
+                    ? t("rend.gpuUnopenable") : t("rend.hardwareScanFound")}
                 </span>
                 {diagnostics.map((d) => (
                   <span
@@ -1740,8 +1706,7 @@ function RenditionDialog({
 
           {encoder?.codec === "hevc" && (
             <div className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
-              This encoder produces HEVC. Most RTMP destinations accept H.264 only — pick it only
-              for a destination that has told you it takes HEVC.
+            {t("rend.hevcWarning")}
             </div>
           )}
 
@@ -1765,13 +1730,13 @@ function RenditionDialog({
           </div>
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="rend-note">Note</Label>
+            <Label htmlFor="rend-note">{t("rend.note")}</Label>
             <Textarea
               id="rend-note"
               rows={2}
               value={form.note}
               onChange={(e) => set("note", e.target.value)}
-              placeholder="What this tier is for."
+              placeholder={t("rend.notePlaceholder")}
             />
           </div>
 
@@ -1801,7 +1766,7 @@ function RenditionDialog({
           </Button>
           <Button onClick={save} disabled={busy || !nameOk || !bitrateOk}>
             {busy && <Loader2 className="animate-spin" />}
-            {editing ? "Save" : "Create"}
+            {editing ? t("common.save") : t("hooks.create")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1824,6 +1789,7 @@ function DeleteRenditionDialog({
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
 
   const remove = async () => {
@@ -1836,7 +1802,7 @@ function DeleteRenditionDialog({
       onDeleted();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete the rendition.");
+      toast.error(err instanceof Error ? err.message : t("rend.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -1848,11 +1814,13 @@ function DeleteRenditionDialog({
     <Dialog open={rendition !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Delete {rendition?.name}?</DialogTitle>
+          <DialogTitle>{t("rend.deleteRenditionTitle", { name: rendition?.name ?? "" })}</DialogTitle>
           <DialogDescription>
             {users.length === 0
-              ? "Nothing selects this rendition, so deleting it changes no destination."
-              : `${users.length} destination${users.length === 1 ? "" : "s"} fall back to passthrough and will be sent the source video unchanged. Check the source still fits what each platform accepts.`}
+              ? t("rend.deleteNoDestinations")
+              : t(users.length === 1 ? "rend.deleteFallbackOne" : "rend.deleteFallbackMany", {
+                  count: users.length,
+                })}
           </DialogDescription>
         </DialogHeader>
 

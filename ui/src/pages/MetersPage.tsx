@@ -13,6 +13,7 @@ import { autoApi } from "@/lib/autoApi";
 import { db } from "@/lib/format";
 import { toneBadge, type SignalTone } from "@/lib/signal";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 type Verdict = "unknown" | "pass" | "warn" | "fail";
 
@@ -94,6 +95,7 @@ function signed(v: number): string {
  *  play the music, watch track 1 move and track 2 stay flat. It is the only
  *  way to be certain before going live, so it gets the whole width. */
 export function MetersPage() {
+  const t = useT();
   const { levels, source, status } = useLiveData();
   const tracks = useSourceTracks();
   const probed = source?.probed ?? false;
@@ -128,11 +130,11 @@ export function MetersPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Audio meters"
-        subtitle="Every channel of every ingest track, straight from the relay."
+        title={t("meters.title")}
+        subtitle={t("meters.subtitle")}
         actions={
           <Badge variant={metersRunning ? "live" : "outline"}>
-            {metersRunning ? "metering" : "idle"}
+            {metersRunning ? t("meters.metering") : t("dash.idle")}
           </Badge>
         }
       />
@@ -155,7 +157,7 @@ export function MetersPage() {
           only one of those is a number somebody else acts on. */}
       <Card className="mb-3">
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>Loudness compliance</CardTitle>
+          <CardTitle>{t("meters.loudness")}</CardTitle>
           <div className="flex items-center gap-2">
             <Label htmlFor="loud-monitor" className="text-[10px] text-muted-foreground">
               Monitor
@@ -167,8 +169,7 @@ export function MetersPage() {
           {reports.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">
               {monitorOn
-                ? "Nothing to measure yet. Each running destination gets its own EBU R128 analyser on the mix it receives."
-                : "The monitor is off. Turn it on to measure what each destination is delivering."}
+                ? t("meters.nothingToMeasure") : t("meters.monitorOff")}
             </p>
           ) : (
             reports.map((rep) => (
@@ -188,25 +189,25 @@ export function MetersPage() {
       </Card>
 
       <div className="grid gap-3 xl:grid-cols-2">
-        {tracks.map((t) => {
-          const peak = levels?.peak?.[t.index] ?? [];
-          const rms = levels?.rms?.[t.index] ?? [];
-          const labels = channelLabels(t.channels);
+        {tracks.map((track) => {
+          const peak = levels?.peak?.[track.index] ?? [];
+          const rms = levels?.rms?.[track.index] ?? [];
+          const labels = channelLabels(track.channels);
           const active = peak.some((p) => p > -100);
           const hottest = peak.length ? Math.max(...peak) : -100;
           const clipping = hottest >= -0.2;
 
           return (
-            <Card key={t.index} className={cn(clipping && "border-down/50")}>
+            <Card key={track.index} className={cn(clipping && "border-down/50")}>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
-                  Track {t.index + 1}
+                  Track {track.index + 1}
                   <span className="font-mono text-[10px] font-normal text-muted-foreground">
-                    {t.layout} · {t.codec}
+                    {track.layout} · {track.codec}
                   </span>
-                  {t.title && (
+                  {track.title && (
                     <span className="truncate text-[10px] font-normal text-muted-foreground">
-                      {t.title}
+                      {track.title}
                     </span>
                   )}
                 </CardTitle>
@@ -257,7 +258,7 @@ export function MetersPage() {
                   </>
                 ) : (
                   <div className="py-3 text-center font-mono text-[11px] text-subtle-foreground">
-                    {probed ? "no signal on this track" : "waiting for stream"}
+                    {probed ? t("meters.noSignal") : t("clips.waitingForStream")}
                   </div>
                 )}
               </CardContent>
@@ -282,6 +283,7 @@ function ComplianceRow({
   report: LoudnessReport;
   truePeakFailOverDb: number;
 }) {
+  const t = useT();
   const tone = VERDICT_TONE[report.verdict] ?? "idle";
   const targeted = report.target.source !== "none";
   const peakOver =
@@ -313,25 +315,25 @@ function ComplianceRow({
       ) : (
         <>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-            <Stat label="Momentary" value={lufs(report.momentaryLufs)} unit="LUFS" />
-            <Stat label="Short term" value={lufs(report.shortTermLufs)} unit="LUFS" />
+            <Stat label={t("meters.momentary")} value={lufs(report.momentaryLufs)} unit="LUFS" />
+            <Stat label={t("meters.shortTerm")} value={lufs(report.shortTermLufs)} unit="LUFS" />
             {/* The only figure a platform normalizes against, so it carries the
                 verdict's colour and the others stay neutral. */}
             <Stat
-              label="Integrated"
+              label={t("meters.integrated")}
               value={report.integrated ? lufs(report.integratedLufs) : "—"}
               unit="LUFS"
               tone={VERDICT_STAT[report.verdict] ?? "muted"}
             />
             <Stat
-              label="Deviation"
+              label={t("meters.deviation")}
               value={targeted && report.integrated ? signed(report.deviationLu) : "—"}
               unit="LU"
               tone="muted"
             />
-            <Stat label="Range" value={lufs(report.rangeLu)} unit="LU" tone="muted" />
+            <Stat label={t("meters.range")} value={lufs(report.rangeLu)} unit="LU" tone="muted" />
             <Stat
-              label="True peak"
+              label={t("meters.truePeak")}
               value={dbtp(report.truePeakDbtp)}
               unit="dBTP"
               tone={peakOver ? "down" : "default"}

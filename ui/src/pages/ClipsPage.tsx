@@ -21,6 +21,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { autoApi } from "@/lib/autoApi";
 import { bytes, timestamp } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 
 interface Clip {
   name: string;
@@ -81,6 +82,7 @@ const clipDownloadUrl = (name: string) =>
  *  seconds is already in memory, so capturing it is a copy rather than a
  *  recording somebody has to have started in advance. */
 export function ClipsPage() {
+  const t = useT();
   const [view, setView] = useState<ClipsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [capturing, setCapturing] = useState(false);
@@ -96,15 +98,15 @@ export function ClipsPage() {
           if (v.buffer.buffer) setWindow(Math.round(v.buffer.buffer.windowSeconds));
         })
         .catch((err) => {
-          if (!quiet) toast.error(errText(err, "Could not load clips."));
+          if (!quiet) toast.error(errText(err, t("clips.couldNotLoadClips")));
         })
         .finally(() => setLoading(false)),
-    [],
+    [t],
   );
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, t]);
 
   // The buffer fills in real time and its depth is the only thing that says
   // whether a clip taken right now would be the full length asked for.
@@ -127,7 +129,7 @@ export function ClipsPage() {
       );
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not capture a clip."));
+      toast.error(errText(err, t("clips.couldNotCaptureAClip")));
     } finally {
       setCapturing(false);
     }
@@ -139,7 +141,7 @@ export function ClipsPage() {
       setView((v) => (v ? { ...v, buffer: st } : v));
       await load(true);
     } catch (err) {
-      toast.error(errText(err, "Could not change the clip buffer."));
+      toast.error(errText(err, t("clips.couldNotChangeTheClip")));
     }
   };
 
@@ -148,21 +150,21 @@ export function ClipsPage() {
   const remove = async (c: Clip) => {
     try {
       await autoApi.del(`/clips/${encodeURIComponent(c.name)}`);
-      toast.success("Clip deleted.");
+      toast.success(t("clips.deleted"));
       await load();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the clip."));
+      toast.error(errText(err, t("clips.couldNotDeleteTheClip")));
     }
   };
 
   return (
     <div className="p-3">
       <PageHeader
-        title="Clips"
-        subtitle="A rolling buffer of what just went out. Capture it after the fact — nothing has to be armed in advance."
+        title={t("clips.title")}
+        subtitle={t("clips.subtitle")}
         actions={
           <Badge variant={buffer?.running ? "live" : buffer?.enabled ? "warn" : "outline"}>
-            {buffer?.running ? "buffering" : buffer?.enabled ? "waiting for stream" : "off"}
+            {buffer?.running ? "buffering" : buffer?.enabled ? t("clips.waitingForStream") : t("clips.off")}
           </Badge>
         }
       />
@@ -195,7 +197,7 @@ export function ClipsPage() {
                   variant="secondary"
                   disabled={capturing || !buffer?.running}
                   onClick={() => capture(0)}
-                  title="Everything the buffer is holding"
+                  title={t("clips.everythingHeld")}
                 >
                   Whole buffer
                 </Button>
@@ -206,7 +208,7 @@ export function ClipsPage() {
                   max={view?.bounds.maxWindowSeconds ?? 300}
                   value={custom}
                   className="w-20"
-                  aria-label="Custom clip length in seconds"
+                  aria-label={t("clips.customLength")}
                   onChange={(e) => setCustom(Number(e.target.value))}
                 />
                 <Button
@@ -245,7 +247,7 @@ export function ClipsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Captured</CardTitle>
+              <CardTitle>{t("clips.captured")}</CardTitle>
             </CardHeader>
             <CardContent className="px-0 pb-0">
               {loading ? (
@@ -260,10 +262,10 @@ export function ClipsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>File</TableHead>
-                      <TableHead>Covers</TableHead>
-                      <TableHead className="text-right">Length</TableHead>
-                      <TableHead className="text-right">Size</TableHead>
+                      <TableHead>{t("clips.file")}</TableHead>
+                      <TableHead>{t("clips.covers")}</TableHead>
+                      <TableHead className="text-right">{t("clips.length")}</TableHead>
+                      <TableHead className="text-right">{t("clips.size")}</TableHead>
                       <TableHead className="w-20" />
                     </TableRow>
                   </TableHeader>
@@ -276,7 +278,7 @@ export function ClipsPage() {
                             <Badge
                               variant="warn"
                               className="ml-1.5"
-                              title={c.note || "The clip does not start on a keyframe."}
+                              title={c.note || t("clips.theClipDoesNotStart")}
                             >
                               rough start
                             </Badge>
@@ -296,7 +298,7 @@ export function ClipsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-0.5">
-                            <Button variant="ghost" size="icon-sm" asChild aria-label="Download">
+                            <Button variant="ghost" size="icon-sm" asChild aria-label={t("clips.download")}>
                               <a href={clipDownloadUrl(c.name)} download>
                                 <Download />
                               </a>
@@ -305,7 +307,7 @@ export function ClipsPage() {
                               variant="ghost"
                               size="icon-sm"
                               onClick={() => confirmDelete.ask(c)}
-                              aria-label="Delete"
+                              aria-label={t("clips.delete")}
                               className="text-muted-foreground hover:text-down"
                             >
                               <Trash2 />
@@ -325,17 +327,17 @@ export function ClipsPage() {
         <div className="flex flex-col gap-3">
           <Card>
             <CardHeader>
-              <CardTitle>Buffer</CardTitle>
+              <CardTitle>{t("clips.buffer")}</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-2">
-              <Stat label="Held" value={`${held.toFixed(0)}s`} tone={held > 0 ? "live" : "muted"} />
-              <Stat label="Window" value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
-              <Stat label="In memory" value={bytes(stats?.bytes ?? 0)} tone="muted" />
-              <Stat label="Ceiling" value={bytes(stats?.maxBytes ?? 0)} tone="muted" />
-              <Stat label="Bitrate" value={`${stats?.bitrateKbps ?? 0} kbps`} tone="muted" />
+              <Stat label={t("clips.held")} value={`${held.toFixed(0)}s`} tone={held > 0 ? "live" : "muted"} />
+              <Stat label={t("clips.window")} value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
+              <Stat label={t("clips.inMemory")} value={bytes(stats?.bytes ?? 0)} tone="muted" />
+              <Stat label={t("clips.ceiling")} value={bytes(stats?.maxBytes ?? 0)} tone="muted" />
+              <Stat label={t("clips.bitrate")} value={`${stats?.bitrateKbps ?? 0} kbps`} tone="muted" />
               <Stat
-                label="Keyframes"
-                value={stats?.videoFound ? "seen" : "none"}
+                label={t("clips.keyframes")}
+                value={stats?.videoFound ? t("clips.seen") : t("clips.none")}
                 tone={stats?.videoFound ? "default" : "warn"}
               />
             </CardContent>
@@ -343,11 +345,11 @@ export function ClipsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Settings</CardTitle>
+              <CardTitle>{t("clips.settings")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <Label htmlFor="clip-enabled">Keep a rolling buffer</Label>
+                <Label htmlFor="clip-enabled">{t("clips.keepBuffer")}</Label>
                 <Switch
                   id="clip-enabled"
                   checked={buffer?.enabled ?? false}
@@ -356,7 +358,7 @@ export function ClipsPage() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="clip-window">Window (seconds)</Label>
+                <Label htmlFor="clip-window">{t("clips.windowSeconds")}</Label>
                 <div className="flex gap-1.5">
                   <Input
                     id="clip-window"
@@ -382,8 +384,8 @@ export function ClipsPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <Stat label="Clips kept" value={view?.usage.count ?? 0} />
-                <Stat label="On disk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
+                <Stat label={t("clips.clipsKept")} value={view?.usage.count ?? 0} />
+                <Stat label={t("clips.onDisk")} value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
               <p className="text-[10px] text-muted-foreground">
                 Retention keeps at most {view?.usage.maxClips ?? 0} clips and{" "}
@@ -391,8 +393,7 @@ export function ClipsPage() {
                 every editor and every player opens.
               </p>
               <p className="text-[10px] text-subtle-foreground">
-                The buffer switch is a live toggle, not a saved setting: it is off again after a
-                restart.
+            {t("clips.bufferLiveNote")}
               </p>
             </CardContent>
           </Card>
@@ -403,8 +404,8 @@ export function ClipsPage() {
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
-        title="Delete this clip?"
-        description="A clip is usually the artifact you meant to keep. This removes the file; the recording it came from is untouched."
+        title={t("clips.deleteTitle")}
+        description={t("clips.deleteDescription")}
         requireTyping
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target);

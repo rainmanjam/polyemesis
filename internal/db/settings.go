@@ -18,7 +18,24 @@ import (
 type IngestMode string
 
 const (
-	// IngestSRT is the primary path: MPEG-TS over SRT, up to six AAC tracks.
+	// IngestUnset is a fresh install that has not been told how encoders will
+	// reach it yet.
+	//
+	// It exists so nothing is chosen on an operator's behalf. The two real
+	// options are not interchangeable and the difference is not recoverable by
+	// guessing. Both are now one port for any number of sources, addressed by
+	// the same publish token, so the count is no longer what separates them —
+	// TRACKS are: RTMP delivers a single audio track on any FFmpeg below 7.1,
+	// which includes the stock build on Ubuntu 24.04, while SRT carries all of
+	// them. Defaulting to either one silently hands a share of installs the
+	// wrong thing, and the RTMP failure is invisible: the stream works, and one
+	// of the six tracks arrives.
+	//
+	// The zero value on purpose, so a settings blob that has never been through
+	// the first-run choice reads as unset rather than as a real mode.
+	IngestUnset IngestMode = ""
+	// IngestSRT is the primary path: MPEG-TS over SRT. MPEG-TS imposes no
+	// track limit of its own, so the ceiling is routing.MaxTracks.
 	IngestSRT IngestMode = "srt"
 	// IngestRTMP is the fallback for encoders that cannot do SRT. Single
 	// audio track, by protocol.
@@ -42,15 +59,34 @@ type SRTSettings struct {
 	LatencyMS int `json:"latencyMs"`
 }
 
-// RTMPSettings configures the fallback RTMP ingest.
+// RTMPSettings configures the RTMP ingest.
 //
-// No port, for the same reason as SRT — but for a different mechanism. RTMP has
-// no token routing here, so the single RTMP listener serves at most ONE source;
-// a second is refused rather than left to fight over the socket.
+// No port, and now for the SAME reason as SRT rather than a different one:
+// every source is reached on the ONE RTMP listener and told apart by its
+// publish token, carried in the URL path. How many sources an install can run
+// no longer depends on which protocol the encoder speaks.
 type RTMPSettings struct {
+	// App is the first path element -- the "live" in rtmp://host/live/<token>.
+	// Cosmetic: rtmpserver.StreamKey discards it and will accept a publisher
+	// that omits it entirely. It is here because it is what goes in OBS's
+	// "Server" box, and a server URL without one does not look like one.
 	App string `json:"app"`
-	// StreamKey is matched against the publisher's playpath, so a stranger
-	// who finds the port still cannot publish.
+	// StreamKey NO LONGER ADDRESSES ANYTHING. The address is the source's
+	// publish token, which is 192 bits of crypto/rand, unique, rotatable with a
+	// grace window, and never logged -- none of which was ever true of this
+	// field. Every source created from the defaults used to get the identical
+	// key "stream", and nothing in the schema or the validator stopped two
+	// sources sharing one; as an address that is one programme silently
+	// answering for another, which is the failure the one-port work exists to
+	// remove.
+	//
+	// Kept in the struct so a settings blob written before the change round-
+	// trips byte-identically, and so an install upgrading with a live RTMP
+	// encoder keeps working: engine.Manager honours a stored key as a LEGACY
+	// address for the one source that claims it, so the operator's encoder does
+	// not go off air on restart. New sources get no key at all (see
+	// DefaultSettings), which is what stops that grandfather clause from
+	// becoming a way to collide on purpose.
 	StreamKey string `json:"streamKey"`
 }
 
@@ -98,6 +134,20 @@ func (i IngestSettings) problems() []string {
 	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
 
 	switch i.Mode {
+	case IngestUnset:
+		// Allowed to persist, deliberately.
+		//
+		// This is the state a fresh install is in before anyone has chosen, and
+		// the migration creates the "Main" source during DB open — so rejecting
+		// it here does not force a choice, it stops the database from opening at
+		// all and the server never starts. Storage has to be able to represent
+		// "not decided yet".
+		//
+		// What refuses unset is the API handler that saves an explicit settings
+		// change (nobody gets to choose "none" on purpose) and the engine, which
+		// will not spawn an ingest without a mode. The effect is the same as a
+		// hard error — nothing ingests until a choice is made — without taking
+		// the install down to get there.
 	case IngestSRT, IngestRTMP:
 	case IngestPull:
 		// The source only has to be dialable when it is actually the ingest;
@@ -123,8 +173,14 @@ func (i IngestSettings) problems() []string {
 	if i.SRT.LatencyMS < 20 || i.SRT.LatencyMS > 8000 {
 		add("srt latency %dms out of range (20-8000)", i.SRT.LatencyMS)
 	}
+	// Required, but say plainly what it does: the listener discards the app
+	// segment, so this gates nothing. It is required because it is half of the
+	// URL the operator pastes into their encoder, and an empty one yields
+	// rtmp://host:1935//<token> -- which does work, and which nobody would
+	// believe was meant.
 	if i.Mode == IngestRTMP && i.RTMP.App == "" {
-		add("rtmp app name is required")
+		add("rtmp app name is required (it is the /live in the publish URL; " +
+			"the source is addressed by its token, not by this)")
 	}
 	return probs
 }
@@ -730,18 +786,15 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 		add("backup srt latency %dms out of range (20-8000)", b.SRT.LatencyMS)
 	}
 	if b.Mode == IngestRTMP && b.RTMP.App == "" {
-		add("backup rtmp app name is required")
+		add("backup rtmp app name is required (it is the /live in the publish URL; " +
+			"the standby is addressed by <token>.backup, not by this)")
 	}
-	// No port collision to check any more. Primary and backup both arrive on
-	// the one SRT listener and are told apart by token, so "which socket does
-	// each bind" is no longer a question that can have a wrong answer.
-	//
-	// The RTMP backup is the exception: it would need the single RTMP listener
-	// that the primary may already hold. Refused here rather than at runtime.
-	if f.Enabled && b.Enabled && b.Mode == IngestRTMP && primary.Mode == IngestRTMP {
-		add("the backup ingest cannot also use RTMP: there is one RTMP listener " +
-			"and the primary has it. Use SRT for the backup, which is addressed by token")
-	}
+	// No collision to check any more, on either protocol. Primary and standby
+	// both arrive on their one listener and are told apart by token --
+	// `<token>` and `<token>.backup` -- so "which socket does each bind" is no
+	// longer a question that can have a wrong answer. RTMP used to be the
+	// exception, because there was one RTMP listener and the primary held it;
+	// there is still one listener, and it now carries both.
 	if err := f.Slate.SlateImageProblem(); err != nil {
 		add("%v", err)
 	}
@@ -1212,9 +1265,11 @@ func (p PostProdSettings) problems() []string {
 type ListenerSettings struct {
 	// SRTPort serves EVERY source, demultiplexed by publish token.
 	SRTPort int `json:"srtPort"`
-	// RTMPPort serves at most one source. RTMP has no token routing here, so
-	// a second RTMP source is refused at validation rather than left to
-	// discover at runtime that it never receives anything.
+	// RTMPPort serves EVERY source too, and in both directions: encoders
+	// publish to rtmp://host:PORT/live/<token> and this install's own FFmpeg
+	// subscribes to rtmp://127.0.0.1:PORT/live/<token> on the same socket. It
+	// used to serve at most one, which was an artifact of `ffmpeg -listen 1`
+	// being unable to demultiplex by path rather than a decision anyone made.
 	RTMPPort int `json:"rtmpPort"`
 }
 
@@ -1463,9 +1518,19 @@ func (a AlertSettings) problems() []string {
 func DefaultSettings() Settings {
 	return Settings{
 		Ingest: IngestSettings{
-			Mode: IngestSRT,
+			// Unset, so first run has to ask. See mergeBaseSettings for why the
+			// value used when reading an EXISTING blob is different.
+			Mode: IngestUnset,
 			SRT:  SRTSettings{LatencyMS: 200},
-			RTMP: RTMPSettings{App: "live", StreamKey: "stream"},
+			// No StreamKey. It used to default to "stream" for every source,
+			// which was harmless while it was a playpath FFmpeg checked and
+			// fatal the moment a key became an address: two sources from the
+			// defaults would have claimed the same one. A stored key is still
+			// honoured as a legacy address for an upgrading install (see
+			// RTMPSettings.StreamKey), and minting none here is what keeps that
+			// grandfather clause from ever colliding with a source created
+			// afterwards.
+			RTMP: RTMPSettings{App: "live"},
 			Pull: PullSettings{
 				ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
 				RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
@@ -1531,7 +1596,9 @@ func DefaultSettings() Settings {
 				Enabled: false,
 				Mode:    IngestSRT,
 				SRT:     SRTSettings{LatencyMS: 200},
-				RTMP:    RTMPSettings{App: "live", StreamKey: "backup"},
+				// No StreamKey, for the same reason as the primary. The standby
+				// is addressed by "<token>.backup" on the same listener.
+				RTMP: RTMPSettings{App: "live"},
 				Pull: PullSettings{
 					ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
 					RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
@@ -1717,6 +1784,15 @@ func (s Settings) Validate() error {
 	return nil
 }
 
+// mergeBaseSettings is DefaultSettings with the pre-first-run-choice ingest
+// mode filled in, for use as the base when decoding a blob that already exists.
+func mergeBaseSettings() Settings {
+	s := DefaultSettings()
+	s.Ingest.Mode = IngestSRT
+	s.Failover.Backup.Mode = IngestSRT
+	return s
+}
+
 // GetSettings returns the stored settings, seeding defaults on first run.
 func (d *DB) GetSettings() (Settings, error) {
 	var raw string
@@ -1730,7 +1806,14 @@ func (d *DB) GetSettings() (Settings, error) {
 	}
 	// Start from defaults so a settings blob written by an older build gains
 	// sane values for fields it has never heard of.
-	s := DefaultSettings()
+	//
+	// NOT DefaultSettings(): that leaves the ingest mode unset so first run has
+	// to ask, which is right for a new install and wrong here. A stored blob
+	// that predates the mode field, or that omits it, would inherit the unset
+	// value and the install would stop ingesting on upgrade — a silent
+	// regression on exactly the servers that were working. Existing installs
+	// keep the mode they have always had.
+	s := mergeBaseSettings()
 	if err := json.Unmarshal([]byte(raw), &s); err != nil {
 		return Settings{}, fmt.Errorf("decode settings: %w", err)
 	}

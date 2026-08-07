@@ -453,9 +453,12 @@ TLS on the web UI is not the whole story:
   and SRT encrypts the stream with AES. The dashboard renders the exact
   `srt://…?passphrase=…` URL to paste into OBS. Without one, your stream —
   including anything on screen — crosses the network unencrypted.
-- **RTMP ingest has no equivalent.** RTMP is authenticated by the stream key in
-  the URL and is otherwise in the clear. It is the fallback for encoders that
-  cannot do SRT; prefer SRT where you have the choice.
+- **RTMP ingest has no equivalent.** RTMP *is* authenticated — the stream key in
+  the URL is matched in constant time against every source's key, so an
+  unrecognised publisher is refused rather than guessed at — but that is a
+  string comparison, not encryption. The stream and the key itself both cross
+  the network in the clear. It is the fallback for encoders that cannot do SRT;
+  prefer SRT where you have the choice.
 - **Destinations can be `rtmps://`.** RTMP destination URLs accept both
   `rtmp://` and `rtmps://` and the URL is handed to FFmpeg verbatim, so where a
   platform publishes an RTMPS ingest address, paste that one. SRT destinations

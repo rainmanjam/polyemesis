@@ -26,6 +26,7 @@ hard or is the Go project's own code.
 | `golang.org/x/sys` | v0.47.0 | BSD-3-Clause | Process groups, disk stats, Windows job objects |
 | `github.com/shirou/gopsutil/v4` | v4.26.6 | BSD-3-Clause | Host CPU, memory and disk for the monitoring page |
 | `github.com/datarhei/gosrt` | v0.11.0 | MIT | Pure-Go SRT. Powers one-port token-addressed ingest |
+| `github.com/bluenviron/gortmplib` | v1.0.0 | MIT | Pure-Go RTMP. Powers one-port key-addressed ingest — message level only, never decoded media |
 | `github.com/eclipse/paho.golang` | v0.23.0 | EPL-2.0 (dual EDL-1.0) | MQTT 5 client for retained telemetry |
 | `gopkg.in/yaml.v3` | v3.0.1 | Apache-2.0 (dual MIT) | Reads `config.yaml` |
 
@@ -41,7 +42,9 @@ the rest are build-time or test-only for their parent.
 | `modernc.org/memory` | v1.11.0 | BSD-3-Clause | sqlite | ✅ |
 | `github.com/remyoudompheng/bigfft` | 20230129 | BSD-3-Clause | mathutil | ✅ |
 | `github.com/dustin/go-humanize` | v1.0.1 | MIT | sqlite | ✅ |
-| `github.com/google/uuid` | v1.6.0 | BSD-3-Clause | sqlite | ✅ |
+| `github.com/google/uuid` | v1.6.0 | BSD-3-Clause | sqlite, gortmplib | ✅ |
+| `github.com/abema/go-mp4` | v1.7.1 | MIT | gortmplib | ✅ |
+| `github.com/bluenviron/mediacommon/v2` | v2.9.2 | MIT | gortmplib | ✅ |
 | `github.com/ncruces/go-strftime` | v1.0.0 | MIT | sqlite | ✅ |
 | `github.com/mattn/go-isatty` | v0.0.24 | MIT | libc | ✅ |
 | `github.com/benburkert/openpgp` | 20160410 | see note | gosrt (AES key-wrap) | ✅ |

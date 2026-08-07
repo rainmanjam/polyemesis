@@ -53,3 +53,14 @@ server.key
 # not part of them. Regenerated freely and often half-finished, and a deck is
 # not something a reader of this repository needs in order to run polyemesis.
 presentation/
+
+# Playwright's own trace/video output from the capture harness. 18 MB of
+# .webm per run, regenerated every time, and it lands INSIDE docs/media
+# because that is where the harness writes — so it is one `git add -A` away
+# from history unless it is named here.
+docs/media/.playwright/
+
+# The built site. `/dist/` above is root-anchored and does not cover it, so
+# without this line web/dist ships a second copy of every screenshot and the
+# 1.4 MB tour video that web/public already holds.
+web/dist/

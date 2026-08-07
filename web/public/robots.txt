@@ -1,0 +1,6 @@
+# Everything here is public documentation for a self-hosted product. There is
+# nothing to hide from a crawler and no user content to protect.
+User-agent: *
+Allow: /
+
+Sitemap: https://polyemesis.com/sitemap-index.xml

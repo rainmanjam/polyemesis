@@ -40,6 +40,13 @@ RUN_USER="polyemesis"
 # rather than failing later in a way that looks like a bug.
 FFMPEG_MIN_MAJOR=6
 
+# What the Docker image ships, and what CI now tests against. Between the floor
+# and this the software runs correctly but not identically, so clearing the
+# floor is reported differently from being current -- an operator on 6.1.1 has
+# a working install that quietly cannot do things a 8.x install can, and the
+# old check told them only that they had passed.
+FFMPEG_RECOMMENDED_MAJOR=8
+
 HTTP_PORT=8080
 SRT_PORT=6000
 RTMP_PORT=1935
@@ -77,6 +84,58 @@ INSTALL_COMPLETE=false
 # see the scheme being pinned on the line doing the download -- and so can
 # static analysis, which cannot resolve "${ARRAY[@]}" and reported four
 # downloads as unpinned when every one of them was pinned.
+
+# fetch_https downloads one URL to one path, over https, refusing to be walked
+# down to plaintext by a redirect. Returns non-zero if no downloader is present.
+#
+# THREE IMPLEMENTATIONS, because the honest answer to "which of these is always
+# installed" is "none of them". A bare ubuntu:24.04 image has curl, wget AND
+# python3 all absent; Debian minimal has python3 and no curl; and the documented
+# way to run this script is `curl ... | sh`, which obviously implies curl. Any
+# single choice is wrong on some host somebody actually has.
+#
+# This used to be python3 alone, on the reasoning that "neither curl nor wget is
+# guaranteed present" — true, but it left urlretrieve following redirects with no
+# restriction on scheme, which made this the ONE fetch in the installer that
+# could be downgraded to http. It writes a binary into /usr/local/bin with
+# install -m 0755, to be run by a root service, so that is a code-execution path
+# and not a privacy question. All three branches below pin the scheme.
+#
+# Used only for this optional FFmpeg upgrade. The polyemesis binary and its
+# checksums keep their inline curl, for the reason given at the top of this file:
+# on the fetch that matters most, the reader piping this into a shell should see
+# the flags on the line doing the download.
+fetch_https() {
+  local url="$1" out="$2"
+  case "$url" in https://*) ;; *) return 1 ;; esac
+
+  if command -v curl >/dev/null 2>&1; then
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$out" "$url" 2>/dev/null
+    return $?
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    # --https-only is wget's --proto-redir: it refuses to follow a redirect to
+    # any other scheme rather than silently downgrading.
+    wget --https-only --secure-protocol=TLSv1_2 -q -O "$out" "$url" 2>/dev/null
+    return $?
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    # urlopen rather than urlretrieve, so the FINAL url after redirects can be
+    # checked. urlretrieve reports only the last response, never the chain, and
+    # will happily land on http.
+    python3 - "$url" "$out" <<'PYFETCH' 2>/dev/null
+import shutil, sys, urllib.request
+url, out = sys.argv[1], sys.argv[2]
+with urllib.request.urlopen(url) as r:
+    if not r.geturl().startswith("https://"):
+        sys.exit("redirected off https")
+    with open(out, "wb") as f:
+        shutil.copyfileobj(r, f)
+PYFETCH
+    return $?
+  fi
+  return 1
+}
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; NC=$'\033[0m'
@@ -268,6 +327,113 @@ require_systemd() {
   return 1
 }
 
+# offer_ffmpeg_upgrade installs a current static FFmpeg, with consent.
+#
+# The distro package is a dead end on the systems where this matters -- Ubuntu
+# 24.04 pins 6.1.1 and `apt upgrade` never moves off it -- so the only way
+# forward is a static build. That makes this a system-wide change to a binary
+# the operator may be using for other things, which is why it asks, states what
+# either answer costs, and never acts on its own under --yes.
+#
+# Installs to /usr/local/bin, ahead of /usr/bin on a default PATH, leaving the
+# distro copy in place. Nothing is deleted, so the way back is one rm.
+FFMPEG_UPGRADE=ask   # ask | skip | force
+
+ffmpeg_static_asset() {
+  # BtbN publishes per-architecture GPL tarballs. Only these two are built.
+  case "$ARCH" in
+    amd64) echo "ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz" ;;
+    arm64) echo "ffmpeg-n8.1-latest-linuxarm64-gpl-8.1.tar.xz" ;;
+    *)     echo "" ;;
+  esac
+}
+
+offer_ffmpeg_upgrade() {
+  local have="$1" asset answer tmp
+  asset="$(ffmpeg_static_asset)"
+
+  echo "     What you have keeps working: SRT carries every audio track on any"
+  echo "     version above the floor, and nothing about routing, recording or"
+  echo "     destinations depends on this."
+  echo "     What ${FFMPEG_RECOMMENDED_MAJOR}.x adds is multitrack FLV. Below 7.1 an Enhanced RTMP"
+  echo "     publisher sending several audio tracks arrives as ONE track, with no"
+  echo "     error on either end -- which is the part worth knowing, because it"
+  echo "     looks like the tracks were never sent."
+
+  if [ -z "$asset" ]; then
+    warn "no static build is published for $ARCH — staying on $have.x"
+    echo "     Use the docker mode, which bundles ${FFMPEG_RECOMMENDED_MAJOR}.x for every architecture."
+    return 0
+  fi
+
+  case "$FFMPEG_UPGRADE" in
+    skip)
+      echo "     Skipping the upgrade (--ffmpeg skip). Staying on $have.x."
+      return 0 ;;
+    force) answer=yes ;;
+    *)
+      if ! interactive; then
+        # Unattended. Installing a system binary nobody asked for is not a
+        # default worth taking silently.
+        warn "unattended: leaving FFmpeg at $have.x. Re-run with --ffmpeg force to upgrade."
+        return 0
+      fi
+      # Default "n", not "y". ask() returns the default whenever nothing can
+      # answer -- and interactive() can still be true on a host where /dev/tty
+      # is readable but no one is reading it, so a "y" default would replace a
+      # system binary on the strength of a question nobody saw. Someone who
+      # wants this either types y or passes --ffmpeg force.
+      ask_yn "Install FFmpeg ${FFMPEG_RECOMMENDED_MAJOR}.x to /usr/local/bin now?" "n" answer ;;
+  esac
+
+  if [ "$answer" != "yes" ]; then
+    echo "     Left at $have.x. Enhanced RTMP multitrack will arrive as a single"
+    echo "     track; everything else behaves the same. Re-run with --ffmpeg force"
+    echo "     to change this later."
+    return 0
+  fi
+
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+
+  echo "     Fetching $asset ..."
+  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$asset" \
+        "$tmp/ff.tar.xz"; then
+    warn "download failed — staying on $have.x. Nothing was changed."
+    warn "(needs one of curl, wget or python3; this host appears to have none)"
+    return 0
+  fi
+
+  mkdir -p "$tmp/x"
+  if ! tar xf "$tmp/ff.tar.xz" --strip-components=1 -C "$tmp/x" 2>/dev/null; then
+    warn "the archive did not extract — staying on $have.x. Nothing was changed."
+    return 0
+  fi
+
+  # Verify BEFORE displacing anything: a build without libsrt would be a
+  # downgrade in capability dressed as an upgrade in version.
+  if ! "$tmp/x/bin/ffmpeg" -hide_banner -protocols 2>/dev/null | tr ' ' '\n' | grep -qx srt; then
+    warn "the downloaded build has no libsrt — refusing it, staying on $have.x."
+    return 0
+  fi
+
+  install -m 0755 "$tmp/x/bin/ffmpeg"  /usr/local/bin/ffmpeg
+  install -m 0755 "$tmp/x/bin/ffprobe" /usr/local/bin/ffprobe
+  hash -r 2>/dev/null || true
+  # Report the binary that was just written, by path. Reading `ffmpeg` through
+  # PATH instead reports whatever PATH happens to resolve -- which on a host
+  # where /usr/local/bin is not first is the OLD build, so a successful upgrade
+  # announces the version it just replaced.
+  ok "installed $(/usr/local/bin/ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) to /usr/local/bin"
+  if [ "$(command -v ffmpeg)" != "/usr/local/bin/ffmpeg" ]; then
+    warn "PATH still resolves ffmpeg to $(command -v ffmpeg) — polyemesis will use that one."
+    echo "     Put /usr/local/bin ahead of it, or set the ffmpeg path in the config."
+  fi
+  echo "     The distro package is untouched at /usr/bin/ffmpeg. To go back:"
+  echo "     rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe"
+}
+
 # check_ffmpeg enforces the two separate things that go wrong, because they
 # fail differently and only one of them is fatal.
 check_ffmpeg() {
@@ -288,7 +454,13 @@ check_ffmpeg() {
   }
 
   local raw major
-  raw="$(ffmpeg -version 2>/dev/null | head -1 | sed -n 's/^ffmpeg version \([0-9][0-9]*\)\..*/\1/p')"
+  # [^0-9]* before the digits, because a release tarball from the very place
+  # this script recommends announces itself as "ffmpeg version n8.1.2-34-g...".
+  # The old pattern demanded a digit immediately after "version", so it failed
+  # to parse exactly the builds recommended below and reported them as unknown.
+  # A master build ("ffmpeg version N-119534-g...") still parses to nothing,
+  # which is correct -- it has no major to compare.
+  raw="$(ffmpeg -version 2>/dev/null | head -1 | sed -n 's/^ffmpeg version [^0-9]*\([0-9][0-9]*\)\..*/\1/p')"
   if [ -z "$raw" ]; then
     # A git build, or a distro that rewrites the version banner. Unknown is not
     # the same as too old, so this warns rather than refusing.
@@ -311,7 +483,13 @@ check_ffmpeg() {
       echo "     (https://github.com/BtbN/FFmpeg-Builds/releases), or the docker mode."
       return 1
     fi
-    ok "ffmpeg $major.x clears the ${FFMPEG_MIN_MAJOR}.0 floor"
+    if [ "$major" -lt "$FFMPEG_RECOMMENDED_MAJOR" ]; then
+      ok "ffmpeg $major.x clears the ${FFMPEG_MIN_MAJOR}.0 floor"
+      warn "ffmpeg $major.x is older than the ${FFMPEG_RECOMMENDED_MAJOR}.x the container ships."
+      offer_ffmpeg_upgrade "$major"
+    else
+      ok "ffmpeg $major.x matches the ${FFMPEG_RECOMMENDED_MAJOR}.x the container ships"
+    fi
   fi
 
   # -x, not a bare grep. Every build lists `srtp` — Secure RTP, an unrelated
@@ -908,6 +1086,8 @@ Options:
                          Pass --tls off explicitly if that is what you want.
   --hostname NAME        hostname for acme (sets DOMAIN_NAME)
   --email ADDR           contact address for acme
+  --ffmpeg MODE          ask (default), skip, or force an FFmpeg upgrade when
+                         the installed one is older than the container's
   --yes, -y              accept defaults; never prompt
   --check                run the preflight checks and exit, changing nothing
   --help, -h             this text
@@ -953,6 +1133,9 @@ parse_args() {
       --hostname=*) DOMAIN_NAME="${1#*=}"; shift ;;
       --email)      [ $# -ge 2 ] || die "missing value for --email"; ACME_EMAIL="$2"; shift 2 ;;
       --email=*)    ACME_EMAIL="${1#*=}"; shift ;;
+      --ffmpeg)     [ $# -ge 2 ] || die "missing value for --ffmpeg"
+                    case "$2" in ask|skip|force) FFMPEG_UPGRADE="$2" ;;
+                      *) die "--ffmpeg takes ask, skip or force" ;; esac; shift 2 ;;
       -y|--yes)     ASSUME_YES=true; shift ;;
       --check)      CHECK_ONLY=true; ASSUME_YES=true; shift ;;
       -h|--help)    usage; trap - EXIT INT TERM; exit 0 ;;
