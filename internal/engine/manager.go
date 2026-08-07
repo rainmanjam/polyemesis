@@ -498,7 +498,15 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 			Name:     s.Name + " (backup)",
 			Enabled:  s.Enabled,
 			Backup:   true,
-			Ready:    true,
+			// Asked of the listener, exactly as the primary above asks it. This
+			// was an unconditional `true` while the comment directly above
+			// described the opposite contract: the configuration says a backup
+			// subscriber SHOULD exist, never that one does. A backup ingest child
+			// that never spawned or is crash-looping left the standby address
+			// admitting publishers into a stream with no reader -- the same
+			// green-encoder-no-output failure Ready exists to prevent, fixed for
+			// the primary in this same change and missed here.
+			Ready: rtmp != nil && rtmp.HasSubscriber(s.ID, true),
 		}
 		for _, tok := range s.ValidTokens(now) {
 			targets[tok+backupTokenSuffix] = backup

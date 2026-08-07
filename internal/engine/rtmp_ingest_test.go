@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"os"
 	"strings"
@@ -155,6 +157,15 @@ func TestTheRTMPStandbyIsAddressedByTheTokenSuffix(t *testing.T) {
 	got, ok := m.lookupStreamKey(src.Token + backupTokenSuffix)
 	if !ok {
 		t.Fatal("the standby is unreachable: an RTMP failover encoder has nowhere to publish")
+	}
+	// The standby answers to the SAME contract as the primary, and used to be a
+	// hardcoded `true` while the comment above it described the opposite. The
+	// fixture's ffmpeg cannot exec, so no backup child ever dials the listener --
+	// which is precisely the crash-looping-backup case that must not be Ready.
+	if got.Ready {
+		t.Error("the standby reported Ready with nothing subscribed to it. " +
+			"Failover being CONFIGURED for RTMP says a backup subscriber should " +
+			"exist, never that one does; admitting a publisher here feeds nobody")
 	}
 	if !got.Backup || got.SourceID != src.ID {
 		t.Errorf("standby target = %+v, want the backup slot of source %d", got, src.ID)
@@ -339,17 +350,384 @@ func TestDestinationsAreNotPlannedAgainstAnUnprobedLayout(t *testing.T) {
 	// And the guard itself: reconcileOutputs must hold rather than plan when the
 	// layout is unmeasured and no silence tier is standing in with a real one.
 	src := readFile(t, "engine.go")
-	guard := "if !probed && silenceSig == \"\" {"
+	guard := "holdDests := !measured && silenceSig == \"\""
 	if !strings.Contains(src, guard) {
-		t.Error("reconcileOutputs no longer holds destination planning on an unprobed " +
+		t.Error("reconcileOutputs no longer holds destination planning on an unmeasured " +
 			"layout; a routing graph compiled from the placeholder can publish the " +
 			"wrong channels without erroring")
 	}
 	// It must read the flag, not infer it from the track count.
-	if !strings.Contains(src, "probed := e.probed") {
-		t.Error("reconcileOutputs no longer reads e.probed. Inferring 'unprobed' from " +
-			"len(tracks)==0 is the mistake this guard exists to avoid: the " +
+	if !strings.Contains(src, "measured := e.measured") {
+		t.Error("reconcileOutputs no longer reads e.measured. Inferring 'unmeasured' " +
+			"from len(tracks)==0 is the mistake this guard exists to avoid: the " +
 			"placeholder HAS six tracks")
+	}
+	// measured goes false ONLY where the placeholder goes back into e.source, so
+	// the two must appear the same number of times. Pinning a COUNT was the
+	// first version and it was wrong for the right reason: a second legitimate
+	// site appeared (invalidating a layout when the ingest mode changes) and the
+	// test failed on a correct change. The pairing is the actual invariant.
+	//
+	// It still forbids the mistake the flag was split out to fix: probeLoop's
+	// idle branch clears `probed` WITHOUT restoring the placeholder, because an
+	// encoder that stopped a moment ago still has a real layout. Clearing
+	// `measured` there too would strand any destination added during a failover
+	// until the primary returned.
+	clears := strings.Count(src, "e.measured = false")
+	resets := strings.Count(src, "e.source = routing.DefaultSource()")
+	if clears == 0 || clears != resets {
+		t.Errorf("e.measured is cleared %d times but the placeholder is restored %d "+
+			"times; they must be paired. Clearing measured without restoring the "+
+			"placeholder holds destinations over a layout that is still real; "+
+			"restoring it without clearing measured plans against the placeholder",
+			clears, resets)
+	}
+}
+
+// A stereo graph that happens to match the placeholder must not survive.
+//
+// stopDestinations KEEPS a destination whose running spec equals its planned
+// one. While the hold was planning against the placeholder, a destination
+// compiled from a real stereo layout produced the identical spec -- the
+// placeholder is six stereo tracks -- so it was kept, still running, over an
+// ingest nobody had measured. If the new stream was 5.1 it went on publishing
+// front L/R and discarding centre, which is the precise failure the hold exists
+// to prevent, reached through the hold itself.
+//
+// The fix is that a held pass plans NOTHING: an unmeasured layout means no
+// destination's graph can be vouched for, so none may keep running.
+func TestAPlaceholderShapedDestinationDoesNotSurviveAnUnmeasuredWindow(t *testing.T) {
+	e := failoverEngine(t)
+	e.settings = failoverOnSettings()
+	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
+
+	dest, err := e.store.CreateDestination(&db.Destination{
+		Name: "stereo", Kind: db.DestRTMP, Platform: db.PlatformCustom,
+		URL: "rtmp://127.0.0.1:1/rtmp", StreamKey: "key", Enabled: true,
+		AudioBitrate: 128, Profile: routing.DefaultProfile(),
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	if dest.SourceID == nil {
+		t.Fatal("the created destination has no source")
+	}
+	e.sourceID = *dest.SourceID
+
+	// Measured first, so the running spec is the one a real stereo layout
+	// produces -- the spec the placeholder would also produce.
+	e.mu.Lock()
+	e.measured, e.probed = true, true
+	e.source = routing.Source{Tracks: []routing.Track{{Index: 0, Channels: 2}}}
+	e.mu.Unlock()
+	if err := e.reconcileOutputs(); err != nil {
+		t.Fatalf("reconcileOutputs (measured): %v", err)
+	}
+	e.mu.RLock()
+	started := len(e.dests)
+	e.mu.RUnlock()
+	if started == 0 {
+		t.Skip("the fixture started no destination, so there is nothing for the " +
+			"unmeasured pass to wrongly keep")
+	}
+
+	// Now the ingest restarts: placeholder back, nothing measured.
+	e.mu.Lock()
+	e.measured, e.probed = false, false
+	e.source = routing.DefaultSource()
+	e.mu.Unlock()
+	if err := e.reconcileOutputs(); err != nil {
+		t.Fatalf("reconcileOutputs (unmeasured): %v", err)
+	}
+
+	e.mu.RLock()
+	left := len(e.dests)
+	e.mu.RUnlock()
+	if left != 0 {
+		t.Errorf("%d destination(s) survived an unmeasured window. Its spec matched "+
+			"a plan compiled from the PLACEHOLDER, which is stereo -- so a graph "+
+			"built for a real stereo stream looks identical and is kept. The next "+
+			"stream being 5.1 would then publish front L/R with centre discarded, "+
+			"no error anywhere", left)
+	}
+}
+
+// A layout belongs to the transport that delivered it.
+//
+// reconcileIngest returns early for SRT, for IngestUnset, and for an RTMP source
+// with no token -- all three before the reset that starting an ingest performs.
+// So switching a probed RTMP source to SRT left the RTMP stream's track list in
+// e.source, still flagged measured, and destinations were planned against the
+// previous transport's layout until the new probe landed.
+//
+// The tempting fix -- clear it in those early returns -- is worse than the bug:
+// the SRT branch runs on EVERY reconcile, so it would hold destinations forever
+// on the most common ingest there is. The invalidation has to be conditional on
+// the mode actually changing, which is what measuredMode records.
+func TestChangingTheIngestModeInvalidatesTheMeasuredLayout(t *testing.T) {
+	for _, to := range []db.IngestMode{db.IngestSRT, db.IngestUnset} {
+		t.Run(string(to), func(t *testing.T) {
+			e := failoverEngine(t)
+			real := routing.Source{Tracks: []routing.Track{
+				{Index: 0, Channels: 6}, {Index: 1, Channels: 2},
+			}}
+			s := db.DefaultSettings()
+			s.Ingest.Mode = db.IngestRTMP
+			e.settings = s
+
+			e.mu.Lock()
+			e.measured, e.probed = true, true
+			e.measuredMode = db.IngestRTMP
+			e.source = real
+			e.mu.Unlock()
+
+			next := db.DefaultSettings()
+			next.Ingest.Mode = to
+			e.settings = next
+			e.reconcileIngest(next, s)
+
+			e.mu.RLock()
+			measured, src := e.measured, e.source
+			e.mu.RUnlock()
+			if measured {
+				t.Errorf("still measured after switching from rtmp to %s. The layout "+
+					"belongs to the transport that delivered it; planning a routing "+
+					"graph against the old one maps tracks the new stream may not have", to)
+			}
+			if len(src.Tracks) == len(real.Tracks) && src.Tracks[0].Channels == 6 {
+				t.Error("e.source still holds the previous transport's layout")
+			}
+		})
+	}
+}
+
+// The silence tier's layout is a measured one, so it lifts the hold.
+//
+// `holdDests := !measured && silenceSig == ""` has two ways to be false and the
+// other tests only cover one of them. This is the second: nothing has ever been
+// probed, but a silence tier is standing in, and reconcileOutputs has already
+// substituted synthTrack() for e.source above the guard. That IS a real layout —
+// synthesised rather than observed, but exact and known — so there is nothing
+// for the placeholder to mislead and destinations must start normally.
+//
+// Without this, deleting `&& silenceSig == ""` from the guard would pass every
+// other test in this file: a video-only ingest would simply stop publishing
+// audio, silently, which is the failure mode the silence tier exists to prevent.
+func TestASilenceTierLiftsTheHoldOnAnUnmeasuredLayout(t *testing.T) {
+	e := failoverEngine(t)
+	s := failoverOnSettings()
+	// Slate off, so the selector is not the thing standing in; the silence tier
+	// is what this test is about.
+	s.Failover.Enabled = false
+	s.Failover.Slate.Enabled = false
+	e.settings = s
+	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
+
+	dest, err := e.store.CreateDestination(&db.Destination{
+		Name: "silent-src", Kind: db.DestRTMP, Platform: db.PlatformCustom,
+		URL: "rtmp://127.0.0.1:1/rtmp", StreamKey: "key", Enabled: true,
+		AudioBitrate: 128, Profile: routing.DefaultProfile(),
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	if dest.SourceID == nil {
+		t.Fatal("the created destination has no source; nothing would list it")
+	}
+	e.sourceID = *dest.SourceID
+
+	// Unmeasured, which on its own would hold. A video-only probe is what puts
+	// the silence tier on: no audio arriving, so one is synthesised.
+	e.mu.Lock()
+	e.measured = false
+	e.probed = true
+	e.source = routing.Source{}
+	e.videoInfo = &ffmpeg.VideoStream{Width: 1280, Height: 720}
+	e.mu.Unlock()
+
+	if err := e.reconcileOutputs(); err != nil {
+		t.Fatalf("reconcileOutputs: %v", err)
+	}
+
+	if e.wantSilence(e.settings) == "" {
+		t.Skip("this build does not raise a silence tier for a video-only source; " +
+			"the branch under test is unreachable from here")
+	}
+	if len(e.dests) == 0 {
+		t.Error("the hold was applied even though a silence tier was standing in. " +
+			"reconcileOutputs substitutes synthTrack() for e.source when silenceSig " +
+			"is set, and that is a measured layout — holding against it publishes " +
+			"nothing while a perfectly good synthesised bed is on air")
+	}
+}
+
+// Holding the START does not license skipping the STOP.
+//
+// The third bug in this guard, and the one no assertion caught. Everything below
+// the guard replaces hubs -- renditions, the silence tier, the selector -- and
+// stopDestinations is what takes a destination down BEFORE the hub it reads is
+// closed under it. Skip it and the destination stays in e.dests subscribed to a
+// hub that no longer delivers; closing a hub stops UDP, it does not end the
+// process. FFmpeg then sits there "started", never restarting because nothing
+// asked it to, receiving nothing.
+//
+// It cost a file destination its whole 76-second run: zero bytes, no error, and
+// a suite that stayed green because the only line that would have noticed was a
+// note rather than a check. It reproduced roughly one run in two, which is
+// exactly the frequency at which a bug gets called a flake and lives forever.
+//
+// Nothing about the placeholder argument justifies suspending the teardown
+// ordering: planning against an unmeasured layout is harmless, because the specs
+// it produces are only ever read by startDestinations.
+func TestAHeldPassStillStopsDestinations(t *testing.T) {
+	e := failoverEngine(t)
+	e.settings = failoverOnSettings()
+	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
+
+	// The premise: unmeasured, so the guard is in force for this pass.
+	if e.measured {
+		t.Fatal("fixture is already measured; this test needs the held path")
+	}
+
+	// A destination the engine believes is running, carrying a spec no plan can
+	// match -- which is what a destination looks like the moment its upstream
+	// changes. stopDestinations must take it down; a held pass that skips the
+	// call leaves it sitting on a hub about to be closed underneath it.
+	e.mu.Lock()
+	e.dests[7] = &destination{
+		row:  &db.Destination{ID: 7, Name: "stale"},
+		spec: "a-spec-no-plan-will-ever-match",
+	}
+	e.mu.Unlock()
+
+	if err := e.reconcileOutputs(); err != nil {
+		t.Fatalf("reconcileOutputs: %v", err)
+	}
+
+	e.mu.RLock()
+	_, still := e.dests[7]
+	e.mu.RUnlock()
+	if still {
+		t.Error("a destination with a stale spec survived a held reconcile. " +
+			"The hold is on starting destinations against an unmeasured layout, " +
+			"not on tearing them down: the tiers below still replace their hubs, " +
+			"and a destination left subscribed to a closed hub receives nothing " +
+			"for the rest of its life without ever erroring")
+	}
+}
+
+// An encoder that stopped a moment ago is not an encoder nobody has measured.
+//
+// probeLoop clears e.probed after three idle rounds, and that is right for what
+// probed means: nothing is arriving, so the UI must stop claiming tracks. But it
+// leaves e.source holding the last real layout, on purpose. Guarding
+// destinations on !probed therefore refused to plan against a layout that had
+// been measured perfectly well seconds earlier — so a destination added during
+// a failover, while the slate was on air, could not start until the primary came
+// back.
+//
+// The failover suite caught it as `no mismatch destination process was
+// reported; nothing was measured`: the destination did start, one millisecond
+// after the probe landed, roughly a minute after the step that added it had
+// already given up looking.
+//
+// The split is the fix: probed is "arriving now", measured is "ever measured for
+// this ingest", and only ingest start puts the placeholder back.
+func TestAnIdleButAlreadyMeasuredLayoutStillPlansDestinations(t *testing.T) {
+	e := failoverEngine(t)
+	e.settings = failoverOnSettings()
+	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
+
+	dest, err := e.store.CreateDestination(&db.Destination{
+		Name: "mismatch", Kind: db.DestRTMP, Platform: db.PlatformCustom,
+		URL: "rtmp://127.0.0.1:1/rtmp", StreamKey: "key", Enabled: true,
+		AudioBitrate: 128, Profile: routing.DefaultProfile(),
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	// CreateDestination attaches the row to the default source rather than to
+	// zero, and failoverEngine's sourceID is zero, so without this the engine
+	// lists no destinations at all and the assertion below passes or fails for a
+	// reason that has nothing to do with the guard.
+	if dest.SourceID == nil {
+		t.Fatal("the created destination has no source; nothing would list it")
+	}
+	e.sourceID = *dest.SourceID
+
+	// The state probeLoop leaves behind when a live encoder goes away: no layout
+	// arriving, but the one it sent is still on file and still true.
+	e.mu.Lock()
+	e.probed = false
+	e.measured = true
+	e.source = routing.Source{Tracks: []routing.Track{{Index: 0, Channels: 2}}}
+	e.mu.Unlock()
+
+	if err := e.reconcileOutputs(); err != nil {
+		t.Fatalf("reconcileOutputs: %v", err)
+	}
+
+	if len(e.dests) == 0 {
+		t.Error("no destination was planned against a layout that HAS been measured. " +
+			"probed=false only means nothing is arriving right now; e.source still " +
+			"holds the real layout, and a destination added during a failover has to " +
+			"be able to start and carry the slate")
+	}
+}
+
+// The hold is destinations-only, and this is the test that says so.
+//
+// The first version of the guard above returned from reconcileOutputs outright.
+// That reads as a small difference and is not: everything below the guard --
+// the silence tier, the SELECTOR, the renditions, playout -- stopped being
+// reconciled too, for as long as the layout was unmeasured.
+//
+// Which is not a rare window. probeLoop clears e.probed after three idle rounds
+// whenever the ingest stops delivering, so killing the primary encoder puts the
+// engine in exactly this state -- and the selector is the tier whose whole job
+// is to carry the slate through that moment. It never ran. The reconcile
+// arrived late, once the primary returned, and landed a backwards decode
+// timestamp in the destination's output: the discontinuity a receiving platform
+// drops the connection on. CI found it as `1 backwards DTS step(s)` in the
+// failover suite, on the commit that added the guard and no other.
+//
+// Asserted against selectorHub() rather than the source text because the shape
+// of the fix is not the point -- a later refactor may hold destinations some
+// other way, and this must still hold.
+func TestHoldingAnUnprobedLayoutDoesNotHoldTheSelector(t *testing.T) {
+	e := failoverEngine(t)
+	e.settings = failoverOnSettings()
+	// reconcileOutputs runs the playout tier on its way past, and failoverEngine
+	// leaves e.play nil because nothing else in that file reaches this far down
+	// the function. A nil *Manager dereferences inside Reconcile.
+	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
+
+	// The precondition the whole test rests on. Left unstated, a fixture that
+	// happened to arrive probed would make this pass without exercising
+	// anything.
+	if e.probed {
+		t.Fatal("fixture starts probed; this test is about the unprobed window")
+	}
+	if wantSelector(e.settings) == "" {
+		t.Fatal("settings do not ask for a selector; there would be nothing to hold")
+	}
+
+	if err := e.reconcileOutputs(); err != nil {
+		t.Fatalf("reconcileOutputs: %v", err)
+	}
+
+	if e.selectorHub() == nil {
+		t.Error("the selector was not reconciled while the layout was unprobed. " +
+			"Destinations are the only tier that compiles a routing graph against " +
+			"e.source, so they are the only tier the placeholder can mislead -- " +
+			"holding the rest takes the slate off air during exactly the outage " +
+			"the selector exists to cover")
+	}
+	// The other half: the hold must still be in force, or this test would pass
+	// on a build that simply deleted the guard.
+	if len(e.dests) != 0 {
+		t.Errorf("%d destination(s) planned against an unprobed layout; the hold "+
+			"is not in force and this test is no longer proving anything", len(e.dests))
 	}
 }
 

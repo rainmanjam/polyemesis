@@ -95,6 +95,18 @@ func main() {
 		}
 		login()
 		destFor(os.Args[3], os.Args[4], os.Args[5], os.Args[6])
+	case "deldest":
+		if len(os.Args) < 4 {
+			die("deldest needs <name>")
+		}
+		login()
+		delDest(os.Args[3])
+	case "rtmpdest":
+		if len(os.Args) < 7 {
+			die("rtmpdest needs <name> <url> <streamKey> <track>")
+		}
+		login()
+		rtmpDest(os.Args[3], os.Args[4], os.Args[5], os.Args[6])
 	case "oneport":
 		if len(os.Args) < 4 {
 			die("oneport needs a port")
@@ -343,6 +355,62 @@ func addSource(name string) {
 // destFor creates a file destination that belongs to one source and carries a
 // single ingest track. This is what proves separation: two destinations on two
 // sources, each mixing only its own programme's audio.
+// delDest removes a destination by name.
+//
+// 4c/4d need it because the destination they create points at a sink container
+// that is torn down with them. Left on the books, step 7's `startall` brings it
+// back up against a hostname that no longer resolves, and the crash-looping
+// FFmpeg that results is counted by the graceful-shutdown check as a child the
+// server failed to stop -- a test polluting a later test's measurement.
+func delDest(name string) {
+	// Same envelope listIDs reads: the list is objects WRAPPING a destination,
+	// not bare destinations. Parsing {id,name} at the top level silently yields
+	// zero-valued rows and "no destination named ...", which is how this first
+	// failed.
+	_, out := do(http.MethodGet, "/destinations", nil)
+	var rows []struct {
+		Destination struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"destination"`
+	}
+	_ = json.Unmarshal(out, &rows)
+	for _, r := range rows {
+		if r.Destination.Name == name {
+			code, body := do(http.MethodDelete, fmt.Sprintf("/destinations/%d", r.Destination.ID), nil)
+			if code != http.StatusOK && code != http.StatusNoContent {
+				die(fmt.Sprintf("delete %s failed: %d %s", name, code, body))
+			}
+			fmt.Println("DELDEST_OK")
+			return
+		}
+	}
+	die("no destination named " + name)
+}
+
+// rtmpDest creates a destination that PUBLISHES rather than writes a file.
+//
+// Every routing proof in this suite until now measured a file destination, so
+// the routed audio never went through an RTMP muxer on the way out. That is a
+// different code path -- a file destination writes what the routing graph
+// produced, an RTMP one re-encodes and publishes it -- and "the routing works"
+// was being inferred across it rather than measured through it.
+func rtmpDest(name, url, key, track string) {
+	tr, err := strconv.Atoi(track)
+	if err != nil {
+		die("bad track " + track)
+	}
+	code, out := do(http.MethodPost, "/destinations", map[string]any{
+		"name": name, "kind": "rtmp", "url": url, "streamKey": key,
+		"enabled": true, "audioBitrate": 160,
+		"profile": profile(tr),
+	})
+	if code != http.StatusOK && code != http.StatusCreated {
+		die(fmt.Sprintf("create %s failed: %d %s", name, code, out))
+	}
+	fmt.Println("RTMPDEST_OK")
+}
+
 func destFor(srcID, name, file, track string) {
 	sid, err := strconv.ParseInt(srcID, 10, 64)
 	if err != nil {

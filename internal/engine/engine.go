@@ -285,10 +285,34 @@ type Engine struct {
 	// happen without a reconcile either.
 	sourceToken string
 	probed      bool
-	videoInfo   *ffmpeg.VideoStream
-	levels      ffmpeg.Levels
-	levelsAt    time.Time
-	settings    db.Settings
+	// measured is whether e.source has EVER held a real layout for the current
+	// ingest, where probed is whether one is arriving right now.
+	//
+	// The two come apart the moment a stream stops. probeLoop clears probed
+	// after three idle rounds so the UI stops claiming tracks nobody is sending,
+	// and it leaves e.source alone on purpose — the last measured layout is
+	// still the truth about what this encoder sends. Only starting an ingest
+	// puts the PLACEHOLDER back, and that is the one state a routing graph must
+	// not be compiled against. Hence two flags: see the guard in
+	// reconcileOutputs, which asks this one.
+	measured bool
+	// measuredMode is the ingest mode e.source was measured under.
+	//
+	// reconcileIngest returns EARLY for SRT, for IngestUnset, and for an RTMP
+	// source with no token -- all before the reset that ingest start performs.
+	// So switching an RTMP source to SRT left `measured` true over a layout the
+	// previous transport delivered, and destinations compiled against it until
+	// the new probe landed seconds later.
+	//
+	// It cannot simply be cleared in those early returns: the SRT one runs on
+	// EVERY reconcile, so clearing there would hold destinations forever on the
+	// most common ingest of all. Recording the mode makes the invalidation
+	// conditional on an actual change, which is the thing that matters.
+	measuredMode db.IngestMode
+	videoInfo    *ffmpeg.VideoStream
+	levels       ffmpeg.Levels
+	levelsAt     time.Time
+	settings     db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
@@ -1016,6 +1040,23 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// made install-wide, and on a host whose FFmpeg lacks libsrt it hid behind
 	// "Protocol not found" rather than showing itself as a conflict.
 	//
+	// A LAYOUT BELONGS TO THE TRANSPORT THAT DELIVERED IT.
+	//
+	// Checked here, above every early return below, because three of them exit
+	// without reaching the reset that starting an ingest performs. Switching an
+	// RTMP source to SRT took the first of them and left the RTMP stream's
+	// layout in e.source, still flagged measured -- so reconcileOutputs planned
+	// destinations against the previous transport's track list until the new
+	// probe landed. A guard that refuses the placeholder and accepts a stale
+	// real layout is worth very little.
+	e.mu.Lock()
+	if e.measured && e.measuredMode != s.Ingest.Mode {
+		e.probed = false
+		e.measured = false
+		e.source = routing.DefaultSource()
+	}
+	e.mu.Unlock()
+
 	// RTMP IS NOT THE SAME CASE, even though it now has a one-port Go listener
 	// too. srtserver hands datagrams straight to a Sink, so an SRT source needs
 	// no child at all; rtmpserver has no Sink and re-publishes to subscribers,
@@ -1087,8 +1128,12 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	e.mu.Lock()
 	e.ingest = proc
 	e.ingestSig = sig
-	// A new ingest means the previous layout is stale.
+	// A new ingest means the previous layout is stale. This is THE place
+	// measured goes false, because it is the only place the placeholder goes
+	// back into e.source — the idle clear in probeLoop drops probed but keeps
+	// the layout, and a layout that was measured stays measured.
 	e.probed = false
+	e.measured = false
 	e.source = routing.DefaultSource()
 	e.mu.Unlock()
 
@@ -1640,7 +1685,7 @@ func (e *Engine) reconcileOutputs() error {
 
 	e.mu.RLock()
 	src := e.source
-	probed := e.probed
+	measured := e.measured
 	fps := probedFPS(e.videoInfo)
 	e.mu.RUnlock()
 
@@ -1696,15 +1741,68 @@ func (e *Engine) reconcileOutputs() error {
 	//
 	// A silence tier substitutes synthTrack() above, which IS a measured layout,
 	// so that case is known and proceeds normally.
-	if !probed && silenceSig == "" {
+	//
+	// TWO THINGS THIS GUARD GOT WRONG ON THE WAY IN, both found by the failover
+	// suite, and both worth stating because the wrong versions read as obviously
+	// correct.
+	//
+	// It is DESTINATIONS ONLY. The first version returned from reconcileOutputs
+	// outright, which also skipped the selector, the silence tier, the
+	// renditions and playout. Nothing below compiles a routing graph against
+	// e.source, so nothing below is exposed to the placeholder; holding them
+	// took the slate off air during the outage the selector exists to cover, and
+	// the late reconcile put a backwards DTS step in the output — the
+	// discontinuity a receiving platform drops the connection on.
+	//
+	// And it asks MEASURED, not probed. probed means "a layout is arriving right
+	// now", and probeLoop clears it after three idle rounds so the UI stops
+	// claiming tracks nobody is sending — but it deliberately leaves e.source
+	// alone. Only ingest start resets e.source to the placeholder. So an encoder
+	// that stopped a moment ago still has a real, measured layout on file, and
+	// holding on !probed refused to plan against it: a destination added during
+	// a failover could not start until the primary came back. The literal read
+	// of the probe is the same mistake holdSilence exists to prevent one tier
+	// down — see the comment there.
+	holdDests := !measured && silenceSig == ""
+	if holdDests {
 		e.noteReload("destinations", "all", reloadRestart,
 			"held: the ingest layout has not been probed yet, and a routing graph "+
 				"compiled against the placeholder would map tracks that may not exist")
-		return nil
 	}
 
-	plans := e.planDestinations(destRows, wantRends, src, srcSig)
-
+	// PLANNED AND STOPPED ALWAYS. ONLY THE START IS HELD.
+	//
+	// The obvious shape -- skip all three while held -- is wrong, and quietly
+	// so. Everything below still tears down and replaces hubs: renditions,
+	// the silence tier, the selector. Skipping stopDestinations leaves a
+	// destination subscribed to a hub that is then closed under it, and closing
+	// a hub only stops UDP delivery; it does not end the process. So FFmpeg sits
+	// there "started", never restarting because nothing asked it to, receiving
+	// nothing. It cost a file destination its entire 76-second run: zero bytes,
+	// no error, and a suite that stayed green because the only check that would
+	// have seen it was a note rather than an assertion.
+	//
+	// That ordering -- consumers stopped before their upstream is replaced -- is
+	// the invariant the comment above reconcileSilence already states. The hold
+	// has no business suspending it. Planning against the placeholder is
+	// harmless in itself: the specs it produces are only ever read by
+	// startDestinations, which is the one call that must not happen.
+	// While held, plans is EMPTY rather than placeholder-derived, and that is a
+	// second bug fixed in the same line. stopDestinations keeps a destination
+	// whose running spec equals its planned one -- so a destination compiled
+	// against a real stereo layout SURVIVED an unmeasured window, because the
+	// placeholder is also stereo and produced an identical spec. The next stream
+	// being 5.1 changed nothing: it kept running the old graph and published
+	// front L/R, silently discarding centre. Exactly the failure the hold exists
+	// to prevent, reached through the hold itself.
+	//
+	// Empty, not nil, and still passed: an unmeasured layout means no
+	// destination's graph can be vouched for, so none may keep running. They
+	// come back on the next reconcile once the probe lands.
+	plans := map[int64]destPlan{}
+	if !holdDests {
+		plans = e.planDestinations(destRows, wantRends, src, srcSig)
+	}
 	e.stopDestinations(plans)
 	for _, id := range stopRends {
 		e.mu.Lock()
@@ -1749,7 +1847,9 @@ func (e *Engine) reconcileOutputs() error {
 		e.log.Error("playout reconcile", "err", err)
 	}
 
-	e.startDestinations(plans)
+	if !holdDests {
+		e.startDestinations(plans)
+	}
 	return nil
 }
 
@@ -4681,6 +4781,8 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		probedFPS(e.videoInfo) != probedFPS(res.Video)
 	e.source = src
 	e.probed = true
+	e.measured = true
+	e.measuredMode = e.settings.Ingest.Mode
 	e.videoInfo = res.Video
 	e.mu.Unlock()
 
