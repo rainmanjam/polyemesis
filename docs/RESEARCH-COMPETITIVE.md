@@ -45,7 +45,7 @@ instead.
 | On-demand streaming | 4 (closed) | have | |
 | Decklink video output | 4 | **GAP** | |
 | Combined chat | 4 (closed) | have | Four platforms, one hub |
-| Playlist files | 4 (closed) | partial | Pull ingest takes `file://`, no playlist sequencing |
+| Playlist files | 4 (closed) | **have** | Ordered uploads through the concat demuxer, looped, normalised on import; scheduled via `playlist.start`. Rides the failover tier |
 | Add stream recording | 4 | have | Plus catalogue, clips, transcripts |
 | Overlay channel logo and name | 4 | **have** | Both halves: image watermark plus text overlay |
 | Scheduling | 3 (closed) | have | Schedules API |

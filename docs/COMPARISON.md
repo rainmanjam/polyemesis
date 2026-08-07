@@ -12,6 +12,13 @@ the code rather than assumed.
 > listed as missing, and LL-HLS had been deliberately declined rather than
 > merely absent. A comparison page drifts in whichever direction the project
 > moves, so the column is worth re-checking whenever this page is cited.
+>
+> **Re-verified again 2026-08-07** while surveying Castr, and the same drift had
+> happened twice more: both playlist rows still said "Partial — no sequencing"
+> long after `internal/playlistmedia`, `-stream_loop -1` and the scheduler's
+> `playlist.start` / `playlist.stop` actions shipped. Note the direction —
+> **every stale row so far has understated the product**, because the page is
+> written when a gap is found and nobody returns to it when the gap closes.
 
 ---
 
@@ -50,7 +57,7 @@ Ranked by how often it was asked for, which is the honest ordering.
 | **WebRTC / WHIP output** | 6 reactions, closed unimplemented | **Missing.** Sizeable subsystem; the real use case is sub-second self-monitoring |
 | **Decklink / SDI capture**, in and out | 4 + 2 reactions | **Missing.** Needs an FFmpeg built with `decklink`, so a third image variant |
 | **Deinterlacing** | 1 reaction | ✅ **Have.** `bwdif` with off / only-interlaced / every-frame, placed first in the filter chain because scaling interlaced content bakes the combing in |
-| **Playlist / scheduled file broadcast** | Five issues circling one capability | **Partial.** Pull ingest reads `file://` and schedules exist; no playlist sequencing |
+| **Playlist / scheduled file broadcast** | Five issues circling one capability | ✅ **Have, with one caveat.** An ordered list of uploads played through FFmpeg's concat demuxer under `-stream_loop -1`, and `playlist.start` / `playlist.stop` are scheduler actions. Every upload is normalised once on import to a single fixed profile ([playlistmedia](../internal/playlistmedia/playlistmedia.go)), because concat refuses a set whose codecs, timebase, resolution or channel layout disagree — and plays a drifting, tearing one if it does not refuse. **The caveat:** the playlist lives under `failover.playlist` and goes on air when no encoder is delivering. It is the fill tier, not a channel you can programme a day of content into |
 | **Multi-input compositing / video grid** | 1 reaction | **Missing.** Natural once multi-source is settled |
 | **MQTT** | Core tracker | ✅ **Have.** Retained telemetry with Home Assistant discovery, so the stream appears as entities in a dashboard the operator already runs. Alert webhooks exist alongside it — see [MQTT.md](MQTT.md) |
 | **HDR 10-bit HEVC** | 3 reactions, closed | **Partial.** `libx265` and `hevc_nvenc` exist; no HDR tone-map path |
@@ -72,7 +79,7 @@ is a billing artefact rather than a technical one.
 | restream.io feature | polyemesis |
 |---|---|
 | **Studio** — browser production, remote guests | **Missing.** Multi-source plus compositing is the closest path |
-| **Pre-recorded upload, go live later** | **Partial** — pull ingest reads `file://`, no scheduling of it |
+| **Pre-recorded upload, go live later** | ✅ **Have.** Upload the file, it is normalised on import, and a scheduled `playlist.start` puts it on air at a chosen time. Needs the failover tier on, since that is where the playlist lives |
 | **Teams, roles, multiple workspaces** | **Missing.** Exactly one admin identity |
 | Hosted chat across platforms | Have, self-hosted |
 | Live health monitor | Have |
