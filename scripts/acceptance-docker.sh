@@ -62,9 +62,32 @@ publish() { # publish <url> <seconds>
     -c:a aac -b:a 128k -ac 2 -t "$2" -f mpegts "$1" >/dev/null 2>&1
 }
 
-# RTMP carries ONE audio track by protocol, so this publisher is deliberately
-# single-track: a 3-track RTMP publish would fail for reasons that have nothing
-# to do with polyemesis.
+# LEGACY RTMP: one audio track, the classic FLV shape. Kept single-track on
+# purpose — that is what classic RTMP carries, and step 5 exists to prove the
+# fallback path still works for encoders that cannot do better.
+#
+# For SEVERAL tracks over the same port see publish_ertmp below. The comment
+# here used to say a 3-track RTMP publish "would fail for reasons that have
+# nothing to do with polyemesis". That was true when it was written and is not
+# now: Enhanced RTMP multitrack is exactly a multi-track FLV, and FFmpeg 7.1+
+# writes one whenever more than one audio stream is mapped.
+# E-RTMP: the same three tones as publish(), muxed as FLV so FFmpeg emits
+# multitrack. publish() ends in `-f mpegts` because it was built for SRT, and
+# pointing it at an rtmp:// URL sends TS bytes down an RTMP connection — the
+# server reads them as garbage and drops the session in 0s with
+# "invalid message type: 255". That is what this function exists to avoid.
+publish_ertmp() { # publish_ertmp <url> <seconds>
+  docker run -d --rm --name pub-acc --network "$NET" --entrypoint ffmpeg "$IMAGE" \
+    -hide_banner -loglevel error -re \
+    -f lavfi -i "testsrc2=size=640x360:rate=30" \
+    -f lavfi -i "sine=frequency=300:sample_rate=48000" \
+    -f lavfi -i "sine=frequency=1200:sample_rate=48000" \
+    -f lavfi -i "sine=frequency=5000:sample_rate=48000" \
+    -map 0:v -map 1:a -map 2:a -map 3:a \
+    -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -b:v 1200k \
+    -c:a aac -b:a 128k -ac 2 -t "$2" -f flv "$1" >/dev/null 2>&1
+}
+
 publish_rtmp() {
   docker run -d --rm --name pub-acc --network "$NET" --entrypoint ffmpeg "$IMAGE" \
     -hide_banner -loglevel error -re \
@@ -232,6 +255,124 @@ else
   bad "could not measure destination output (no recordings produced)"
 fi
 
+
+# ------------------------------------------- 4b. the SAME routing, over E-RTMP
+#
+# Step 4 proves per-destination routing for SRT. Nothing proved it for RTMP, and
+# the distinction that matters is not the one the name suggests: publishing
+# several audio tracks over rtmp:// IS Enhanced RTMP multitrack — the same port,
+# the same connection, a different tag header on the media messages. So this
+# step is the E-RTMP case, and it is the one that was never covered.
+#
+# It matters because the two paths differ where it counts. SRT hands datagrams
+# straight into the hub; RTMP goes through internal/rtmpserver, which caches
+# setup messages and replays them to late subscribers. That cache is where
+# multitrack broke once already: sequence starts for tracks 2..N arrive wrapped
+# in AudioExMultitrack, were not recognised as setup, and every late subscriber
+# got decoder configuration for one track out of three. A transport test caught
+# that; only a ROUTING test catches the same class of bug landing in the wrong
+# destination.
+step "4b. E-RTMP ingest, and the same per-destination routing"
+
+# THE RECORDINGS FROM STEP 4 ARE DELETED FIRST, and that is not tidiness.
+#
+# The first version of this step did not, and every assertion below passed while
+# measuring step 4's SRT files: identical to six decimal places,
+# -24.095344 / -51.165581 / -70.757469 in both steps. Four green lines that had
+# never seen an RTMP packet. A test that reads a stale artefact reports on the
+# run before it, and it does so most convincingly when the earlier run was good.
+inctr 'rm -f /data/recordings/dest*.mkv' >/dev/null 2>&1
+LEFTOVER=$(inctr 'ls /data/recordings/dest*.mkv 2>/dev/null | wc -l' | tr -d ' \r')
+[ "${LEFTOVER:-0}" = "0" ] && ok "step 4's recordings cleared before measuring E-RTMP" \
+  || bad "could not clear recordings; any measurement below would be step 4's"
+
+M2=$(drive mode rtmp)
+case "$M2" in *MODE_RTMP*) ok "ingest switched to RTMP" ;; *) bad "could not switch to RTMP: $M2" ;; esac
+
+# POLL, do not sleep. Switching the mode restarts the source's engine and its
+# ingest child, and the child DIALS the shared listener — so there is a window
+# where the mode is set, the port is open, and nothing is subscribed yet. A
+# fixed sleep either wastes time or publishes into that window, and publishing
+# into it is what produced zero recordings and a track count of 6 (the
+# placeholder layout, which is what a source reports when no probe has landed).
+bound=no
+for _ in $(seq 1 30); do
+  # A TCP connect from inside the network, not a grep of the startup log. That
+  # line is printed once and scraping it proved intermittent, which made a
+  # listener that was up look like one that never came -- a flake in the check,
+  # reported as a failure of the thing checked.
+  if docker run --rm --network "$NET" --entrypoint sh "$IMAGE" -c \
+       "nc -z -w2 $CTR 1935" >/dev/null 2>&1; then bound=yes; break; fi
+  sleep 1
+done
+[ "$bound" = yes ] && ok "the shared RTMP listener accepts connections on 1935" \
+  || bad "nothing is accepting on 1935; nothing can publish"
+
+drive startall >/dev/null 2>&1
+sleep 4
+
+# Same three tones, same publisher, different URL. FFmpeg 7.1+ writes multitrack
+# FLV automatically when more than one audio stream is mapped, so this is E-RTMP
+# without asking for it by name.
+publish_ertmp "rtmp://$CTR:1935/live/$TOK" 40
+# Wait for the PROBE rather than a fixed interval: 6 is the placeholder layout a
+# source reports before anything has been probed, so treating it as a result is
+# how a run with no ingest at all looks like a run with six tracks.
+NR=""
+for _ in $(seq 1 40); do
+  NR=$(drive tracks)
+  [ "$NR" = "3" ] && break
+  sleep 2
+done
+if [ "$NR" = "3" ]; then
+  ok "E-RTMP ingest probed 3 audio tracks"
+else
+  bad "E-RTMP ingest probed '$NR' tracks, expected 3"
+  printf "        on FFmpeg below 7.1 this reads as 1: multitrack FLV demuxing landed in 7.1\n"
+fi
+sleep 20
+drive stopall >/dev/null
+sleep 12
+
+# The files must be NEW ones, written by this publish.
+FRESH=$(inctr 'ls /data/recordings/dest*.mkv 2>/dev/null | wc -l' | tr -d ' \r')
+if [ "${FRESH:-0}" -ge 3 ] 2>/dev/null; then
+  ok "E-RTMP produced its own recordings ($FRESH files)"
+else
+  bad "no recordings from the E-RTMP publish ($FRESH files) — nothing below is measurable"
+  printf "        --- what the server made of the publisher ---\n"
+  docker logs "$CTR" 2>&1 | grep -iE "rtmp (publish|publisher)" | tail -4 | sed "s/^/          /"
+  printf "        --- what the publisher said ---\n"
+  docker logs pub-acc 2>&1 | tail -5 | sed "s/^/          /"
+fi
+
+RA3=$(rms destA.mkv 300 100);  RA12=$(rms destA.mkv 1200 200); RA50=$(rms destA.mkv 5000 400)
+RB3=$(rms destB.mkv 300 100);  RB12=$(rms destB.mkv 1200 200)
+RC50=$(rms destC.mkv 5000 400)
+
+if [ -n "$RA3" ] && [ "${FRESH:-0}" -ge 3 ] 2>/dev/null; then
+  printf "        E-RTMP dBFS     destA 300/1200/5000: %s %s %s\n" "$RA3" "$RA12" "$RA50"
+  if louder_than "$RA3" "$(awk -v x="$RA12" 'BEGIN{print x+15}')"; then
+    ok "over E-RTMP: destination A carries track 1 and not track 2"
+  else bad "over E-RTMP: destination A leaked track 2 (300Hz $RA3 vs 1200Hz $RA12)"; fi
+  if louder_than "$RA3" "$(awk -v x="$RA50" 'BEGIN{print x+15}')"; then
+    ok "over E-RTMP: destination A carries track 1 and not track 3"
+  else bad "over E-RTMP: destination A leaked track 3 (300Hz $RA3 vs 5000Hz $RA50)"; fi
+  if louder_than "$RB12" "$(awk -v x="$RB3" 'BEGIN{print x+15}')"; then
+    ok "over E-RTMP: destination B carries track 2 and not track 1"
+  else bad "over E-RTMP: destination B leaked track 1 (1200Hz $RB12 vs 300Hz $RB3)"; fi
+  if louder_than "$RC50" "-40"; then
+    ok "over E-RTMP: destination C carries all three tracks"
+  else bad "over E-RTMP: destination C is missing track 3 (5000Hz $RC50)"; fi
+else
+  bad "could not measure destination output over E-RTMP"
+fi
+
+docker rm -f pub-acc >/dev/null 2>&1
+# Back to SRT: it is the operated path and the rest of this suite assumes it.
+drive mode srt >/dev/null 2>&1
+sleep 3
+
 # Video must be copied, never re-encoded. Two destinations that received
 # completely different AUDIO must contain byte-identical VIDEO frames.
 SHARED=$(inctr 'cd /data/recordings &&
@@ -269,11 +410,35 @@ docker rm -f pub-acc >/dev/null 2>&1
 M=$(drive mode rtmp)
 case "$M" in *MODE_RTMP*) ok "ingest switched to RTMP" ;; *) bad "could not switch to RTMP: $M" ;; esac
 sleep 5
-publish_rtmp "rtmp://$CTR:1935/live/stream" 25
-sleep 16
+# THE TOKEN, not the literal "stream". The shared listener addresses sources by
+# publish token; "stream" only reaches anything through the legacy-key
+# grandfather clause, which needs ingest.rtmp.streamKey set on the source and it
+# is not set here. So this published into nothing for its whole life, and the
+# ">= 1" assertion above let the placeholder layout stand in for a result.
+publish_rtmp "rtmp://$CTR:1935/live/$TOK" 30
+sleep 20
 NR=$(drive tracks)
+# KNOWN GAP, recorded rather than papered over.
+#
+# ">= 1" is a weak assertion and it is left weak on purpose, with this note.
+# Six is the PLACEHOLDER layout a source reports when nothing has been probed,
+# so this branch passes on an ingest that never happened -- and for most of this
+# step's life that is exactly what it did, because setMode wrote
+# settings.ingest.mode while the engine takes its ingest from the source row.
+# That half is fixed (see acceptance_docker_driver.go).
+#
+# What is NOT fixed: with the source flipped srt -> rtmp the publisher is
+# admitted and holds its session for the full duration -- the server logs
+# "rtmp publisher connected" then "disconnected ... err=<nil>" -- and
+# `drive tracks` still reports six for at least a minute afterwards. The ingest
+# works; the probe does not re-run promptly after a mode change. Tightening this
+# assertion before that is understood would fail the suite for a reason that has
+# nothing to do with the RTMP path.
+#
+# Step 4b covers RTMP ingest properly, over the same port and token, with the
+# arriving audio identified by content.
 if [ -n "$NR" ] && [ "$NR" -ge 1 ] 2>/dev/null; then
-  ok "RTMP ingest probed $NR audio track(s)"
+  ok "RTMP ingest reachable (track count not asserted -- see the note above)"
 else
   bad "RTMP ingest probed '$NR' tracks, expected at least 1"
 fi

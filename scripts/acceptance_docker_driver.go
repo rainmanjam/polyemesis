@@ -391,20 +391,46 @@ func tokens() {
 	}
 }
 
+// setMode switches every source's ingest mode.
+//
+// THE SOURCE ROW, NOT THE SETTINGS SINGLETON. This wrote settings.ingest.mode
+// for most of its life, which does nothing: the engine reads its ingest from
+// the source (`settings.Ingest = src.Ingest` in engine.go), and both the
+// listener gate and rtmpserver's Target.Ready test `s.Ingest.Mode` on the row.
+// So "switch to RTMP" set a field nothing consults, every RTMP publish was
+// refused for having no ready target, and the suite's RTMP step still passed —
+// it asserted only that the probe reported at least one track, and an
+// un-probed source reports the six-track placeholder layout. Six is not zero,
+// so the step was green while never once ingesting RTMP.
 func setMode(mode string) {
-	_, out := do(http.MethodGet, "/settings", nil)
-	var s map[string]any
-	if err := json.Unmarshal(out, &s); err != nil {
-		die("settings unreadable: " + err.Error())
+	_, out := do(http.MethodGet, "/sources", nil)
+	var rows []map[string]any
+	if err := json.Unmarshal(out, &rows); err != nil {
+		die("sources unreadable: " + err.Error())
 	}
-	ing, _ := s["ingest"].(map[string]any)
-	if ing == nil {
-		die("settings carried no ingest block")
+	if len(rows) == 0 {
+		die("no sources to switch")
 	}
-	ing["mode"] = mode
-	code, body := do(http.MethodPut, "/settings", s)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("switch to %s failed: %d %s", mode, code, body))
+	for _, row := range rows {
+		src, _ := row["source"].(map[string]any)
+		if src == nil {
+			src = row // some builds return the row unwrapped
+		}
+		id, _ := src["id"].(float64)
+		ing, _ := src["ingest"].(map[string]any)
+		if ing == nil {
+			die("source carried no ingest block")
+		}
+		ing["mode"] = mode
+		// Only the ingest block. handleUpdateSource decodes over the stored row,
+		// so a partial body is the supported shape — and sending the whole view
+		// back fails, because /sources returns a row wrapped with fields like
+		// `destinations` that the source itself does not have.
+		code, body := do(http.MethodPut, fmt.Sprintf("/sources/%d", int64(id)),
+			map[string]any{"ingest": ing})
+		if code != http.StatusOK {
+			die(fmt.Sprintf("switch source %d to %s failed: %d %s", int64(id), mode, code, body))
+		}
 	}
 	fmt.Println("MODE_" + strings.ToUpper(mode))
 }
