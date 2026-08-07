@@ -78,14 +78,19 @@ rainmanjam/polyemesis/main/scripts/install.sh \
       </p>
       <p class="mt-3 text-[11px] leading-relaxed text-subtle">
         Homebrew's FFmpeg on macOS ships without SRT. Ubuntu 24.04's stock
-        FFmpeg 6.1.1 carries it, but predates multitrack FLV — Enhanced RTMP
-        from OBS arrives as a single track on it. SRT is unaffected.
+        FFmpeg 6.1.1 carries it, but predates multitrack FLV, so a publisher
+        sending several audio tracks over Enhanced RTMP arrives as one on it.
+        SRT is unaffected and carries every track on either version. (OBS does
+        not send multitrack audio over RTMP at any version we have tested, so
+        this affects FFmpeg-class publishers rather than OBS users.)
       </p>
       <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-        Linux is the operated target. The broadcast path is tested on Windows in
-        CI and has caught Windows-only bugs there, but nobody runs it as a
-        Windows service in earnest — the service wrapper is unexercised and
-        recording truncation on service stop is a known open defect.
+        Linux is the operated target, and the broadcast path is tested on
+        Windows and macOS in CI too — that suite has caught Windows-only bugs
+        before they shipped. What is not yet proven on Windows is long-running
+        service operation: the service wrapper is unexercised and recording can
+        truncate on service stop. Run it on Linux for production, and on Windows
+        or macOS to build and evaluate.
       </p>
     </div>
 

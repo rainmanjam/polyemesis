@@ -73,6 +73,39 @@ const pct = (l: number) => Math.max(0, Math.min(100, ((l - FLOOR) / -FLOOR) * 10
       ))
     }
 
+    {/* THE GRATICULE. Without it these are three bars of arbitrary length; with
+        it they are a reading. A broadcast engineer looks for the scale before
+        the value, and a meter that does not show what it is measured against
+        is a picture of a meter.
+
+        The stops are the ones this workflow actually aims at: the -40 floor
+        the bars are normalised to, -16 where loudnorm targets, and 0. The
+        intermediate marks are unlabelled so the row stays a scale rather than
+        becoming a second data display. */}
+    <div class="grid grid-cols-[5.5rem_1fr_4.5rem] items-center gap-3 pt-0.5 sm:gap-4">
+      <span aria-hidden="true" />
+      <div class="relative h-3" aria-hidden="true">
+        {[-40, -30, -20, -16, -10, -5, 0].map((db) => (
+          <span
+            class:list={[
+              "absolute top-0 w-px",
+              db === -16 || db === -40 || db === 0 ? "h-1.5 bg-line-strong" : "h-1 bg-line",
+            ]}
+            style={`left: ${pct(db)}%`}
+          />
+        ))}
+        {[-40, -16, 0].map((db) => (
+          <span
+            class="absolute top-2 -translate-x-1/2 font-mono text-[9px] leading-none text-subtle"
+            style={`left: ${pct(db)}%`}
+          >
+            {db}
+          </span>
+        ))}
+      </div>
+      <span class="text-right font-mono text-[9px] leading-none text-subtle">LUFS</span>
+    </div>
+
     <div class="grid grid-cols-[5.5rem_1fr_4.5rem] gap-3 pt-1 sm:gap-4">
       <span class="font-mono text-[10px] uppercase tracking-wider text-subtle">tracks</span>
       <span class="font-mono text-[10px] text-subtle">

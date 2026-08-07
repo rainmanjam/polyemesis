@@ -1541,7 +1541,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           </div>
 
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
-            <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
+            <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">
               <p className="text-xs font-medium">{t("dest.compliance")}</p>
               <span className="text-[10px] text-muted-foreground">
                 Not cosmetic. COPPA is a law for YouTube, Twitch requires labels for several

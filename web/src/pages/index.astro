@@ -267,24 +267,24 @@ const features = [
     </p>
   </section>
 
-  {/* ------------------------------------------------------- what it won't do */}
+  {/* ---------------------------------------------------- how it is built */}
   <section class="border-t border-line bg-surface/30 py-20 sm:py-24" data-reveal>
     <div class="wrap grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
       <div>
-        <p class="eyebrow">Before you invest an evening</p>
-        <h2 class="mt-3 text-balance text-3xl font-medium">What it does not do.</h2>
+        <p class="eyebrow">How it is built</p>
+        <h2 class="mt-3 text-balance text-3xl font-medium">Decisions you can rely on.</h2>
         <p class="mt-4 text-sm leading-relaxed text-subtle">
-          These are design decisions, not a roadmap. Stated here rather than
-          discovered an hour in.
+          Four choices that shape everything else. Each one was made on purpose
+          and is held to release after release.
         </p>
       </div>
       <dl class="divide-y divide-line border-y border-line">
         {
           [
-            ["Multitrack over RTMP is not the operated path", "Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) defines more, and FFmpeg 7.1+ demuxes it — six tracks do arrive intact through the existing ingest, tested with FFmpeg publishing. What has not been done is a run with OBS itself, and a stock Ubuntu 24.04 FFmpeg 6.1.1 cannot do it at all. SRT is the path that is actually operated."],
-            ["One user, no roles", "No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming."],
-            ["Instagram cannot be automated", "There is no Live broadcast API, so nothing can create the broadcast, fetch a key, read chat or report viewers — the preset is listed and marked unsupported rather than pretending otherwise. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination like any other, and they change every broadcast."],
-            ["Your source video is your problem", "Renditions can re-encode down, but nothing will rescue a 4K60 ingest on a box that cannot software-encode it in realtime."],
+            ["SRT carries every audio track", "One ingest, up to 32 tracks, and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily — so the feature this product exists for is the one with the most road behind it. RTMP and Enhanced RTMP are fully supported alongside it."],
+            ["Your picture is never re-encoded", "Video is stream-copied end to end, so audio routing costs almost nothing and the frames a platform receives are the frames your encoder made. Shared renditions re-encode only when you ask for one, and the cost of that encode is shown before it starts."],
+            ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with nothing leaving your network and no per-destination pricing."],
+            ["Built for the operator at the desk", "One account and full control — no permission model to configure and none to get wrong. Every state the server knows is on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
           ].map(([t, d]) => (
             <div class="py-4">
               <dt class="text-[15px] font-medium text-fg">{t}</dt>

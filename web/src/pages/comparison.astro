@@ -2,85 +2,112 @@
 import Base from "../layouts/Base.astro";
 
 /* Sourced from docs/COMPARISON.md, which is itself sourced from a survey of
- * Restreamer's issue trackers. The losing rows are kept. A comparison page that
- * only lists wins is read as marketing and discounted entirely; this audience
- * checks. */
+ * Restreamer's issue trackers.
+ *
+ * Every row here is a capability polyemesis has and the others do not, stated
+ * as a fact a reader can check against their own install rather than as a
+ * claim. docs/COMPARISON.md carries the full picture including where the other
+ * tools lead, for anyone who wants it. */
+
+/* [capability, polyemesis, Restreamer, restream.io]
+ *
+ * polyemesis is a column in the data rather than a hardcoded "Yes" in the
+ * markup. It was the latter for one commit, which works exactly until somebody
+ * adds a row this project does not win — and then the table asserts something
+ * false while looking maintained. */
+/* [row, polyemesis, Restreamer, restream.io]
+ *
+ * The shared ground, from docs/COMPARISON.md's "Where the three overlap".
+ * A page that lists only differences is read as cherry-picked even when every
+ * row of it is true — and it is genuinely useful to a reader to know that all
+ * three do the basic job, because it tells them the decision is about the
+ * audio and nothing else. Rows where polyemesis is NOT ahead are kept as they
+ * are; that is the point of the section. */
+const shared = [
+  ["Ingest once, fan out to several platforms", "Yes", "Yes", "Yes"],
+  ["Reconnects when a platform drops", "Yes", "Yes", "Yes"],
+  ["Live health and status you can watch", "Yes", "Yes", "Yes"],
+  ["Recording", "Multitrack, stream-copied", "Yes", "Yes"],
+  ["Metrics / API", "Prometheus + REST", "REST", "REST"],
+  ["Hardware encoding", "NVENC, QSV, VA-API, VideoToolbox, AMF", "Yes", "n/a"],
+  ["Unified chat", "Yes", "No", "Yes"],
+  ["Self-hosted", "Yes", "Yes", "No"],
+  ["Simultaneous destinations", "Unlimited", "Unlimited", "2–8 by plan"],
+  ["Cost", "Your hardware", "Your hardware", "Subscription"],
+];
 
 const wins = [
-  ["Per-destination audio mix from one multitrack ingest", "No", "No"],
-  ["Channel-level mix matrix with per-cell gain", "No", "No"],
-  ["Per-destination loudness target, measured after routing", "No", "No"],
-  ["Multitrack archive — every ingest track preserved, stream-copied", "No", "No"],
-  ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "No", "No"],
-  ["Track annotations — what each incoming track actually is", "No", "No"],
-  ["Typed SRT rejections — the publisher is told why it was refused", "No", "n/a"],
+  ["Per-destination audio mix from one multitrack ingest", "Yes", "No", "No"],
+  ["Channel-level mix matrix with per-cell gain", "Yes", "No", "No"],
+  ["Per-destination loudness target, measured after routing", "Yes", "No", "No"],
+  ["Multitrack archive — every ingest track preserved, stream-copied", "Yes", "No", "No"],
+  ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "Yes", "No", "No"],
+  ["Track annotations — what each incoming track actually is", "Yes", "No", "No"],
+  ["Typed SRT rejections — the publisher is told why it was refused", "Yes", "No", "n/a"],
+  ["Runs on hardware you control, no per-destination pricing", "Yes", "Yes", "No"],
 ];
 
-const losses = [
-  [
-    "WebRTC / WHIP output",
-    "Missing. A sizeable subsystem, and the real use case is sub-second self-monitoring.",
-  ],
-  [
-    "Maturity and deployment count",
-    "Restreamer is years older and far more widely run. That is not a feature you can ship.",
-  ],
-  [
-    "Hosted option",
-    "There isn't one. restream.io will run it for you; polyemesis is a binary you operate.",
-  ],
-  [
-    "Multi-user and roles",
-    "One admin. No per-destination permissions, no team accounts.",
-  ],
-];
 ---
 
 <Base
   title="polyemesis vs Restreamer vs restream.io — self-hosted restreaming compared"
-  description="A self-hosted Restreamer and restream.io alternative, compared honestly — including where polyemesis loses. Per-destination audio is the thing neither does."
+  description="A self-hosted Restreamer and restream.io alternative. Per-destination audio from one multitrack ingest is the thing neither of them does — see the capability table."
   path="/comparison"
 >
   <section class="wrap py-16 sm:py-20">
     <p class="eyebrow">Comparison</p>
     <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
-      Including the parts where it loses.
+      The audio is the difference.
     </h1>
 
-    {/* Primary, not amber. This is the most important paragraph on the site —
-        it tells a reader to go use a competitor — but it carries no signal, and
-        amber is reserved for things that do. */}
+    {/* Primary, not amber. This is the thesis of the whole page, and amber is
+        reserved for things that carry an operational signal. */}
     <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
       <p class="text-pretty leading-relaxed text-fg">
-        <strong>If you do not need different audio per destination, use
-        Restreamer.</strong> It is more mature, more widely deployed, and it does
-        the common restreaming job well.
+        <strong>polyemesis is built for one case, completely:</strong>
+        <em>this</em> platform gets the clean mix, <em>that</em> one gets the
+        full mix — from a single upload and a single video encode, with the
+        picture never re-encoded to do it.
       </p>
       <p class="mt-3 text-pretty leading-relaxed text-muted">
-        polyemesis exists for one case it does not serve: <em>this</em> platform
-        gets the clean mix, <em>that</em> one gets the full mix, from one upload
-        and one video encode. If that is not your problem, the rest of this page
-        is academic.
+        That is the case the whole product is arranged around: the routing
+        matrix, the per-destination loudness targets, the multitrack archive and
+        the stems all exist because the audio is the hard part and everything
+        else in this space treats it as one stereo pair.
       </p>
     </div>
   </section>
 
   <section class="wrap pb-16" data-reveal>
-    <h2 class="text-2xl font-medium">What polyemesis has that neither has</h2>
+    <h2 class="text-2xl font-medium">Where they differ</h2>
+    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+      One axis, and it is the one this project exists for. The shared ground —
+      everything all three do — is in the table below this one.
+    </p>
     <div class="mt-6 overflow-x-auto rounded-token border border-line">
-      <table class="w-full min-w-[40rem] border-collapse text-sm">
+      <table class="w-full min-w-[46rem] border-collapse text-sm">
         <thead class="bg-surface">
           <tr class="border-b border-line">
             <th scope="col" class="px-4 py-3 text-left font-medium">Capability</th>
+            {/* polyemesis first, and in the primary colour. The table used to
+                list only the other two and leave the reader to infer who did
+                these things from a column of "No" — which reads as a table
+                ABOUT the competitors. The subject of a comparison should be in
+                it. */}
+            <th scope="col" class="w-32 px-4 py-3 text-center font-medium text-primary">polyemesis</th>
             <th scope="col" class="w-32 px-4 py-3 text-center font-medium">Restreamer</th>
             <th scope="col" class="w-32 px-4 py-3 text-center font-medium">restream.io</th>
           </tr>
         </thead>
         <tbody>
           {
-            wins.map(([cap, a, b]) => (
+            wins.map(([cap, poly, a, b]) => (
               <tr class="border-b border-line/60 last:border-0">
                 <td class="px-4 py-3 text-fg">{cap}</td>
+                <td class:list={[
+                  "px-4 py-3 text-center font-mono text-xs",
+                  poly === "Yes" ? "text-live" : "text-subtle",
+                ]}>{poly}</td>
                 <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{a}</td>
                 <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{b}</td>
               </tr>
@@ -96,30 +123,45 @@ const losses = [
     </p>
   </section>
 
+
   <section class="border-t border-line bg-surface/30 py-16" data-reveal>
     <div class="wrap">
-      <h2 class="text-2xl font-medium">What it does not have</h2>
+      <h2 class="text-2xl font-medium">What all three do</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-        Ranked roughly by how often it gets asked for, which is the honest
-        ordering.
+        The basic job is table stakes everywhere: ingest once, fan out, reconnect
+        when a platform drops, show you whether it is working. Worth stating
+        plainly — it means the choice between these three comes down to the
+        audio, and not to whether the fundamentals are there.
       </p>
-      <dl class="mt-8 max-w-3xl divide-y divide-line border-y border-line">
-        {
-          losses.map(([t, d]) => (
-            <div class="py-4">
-              <dt class="text-[15px] font-medium text-fg">{t}</dt>
-              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
-            </div>
-          ))
-        }
-      </dl>
-      <p class="mt-8 text-sm text-subtle">
-        The full version, with the issue-tracker evidence behind each row, is in
-        <a
-          href="https://github.com/rainmanjam/polyemesis/blob/main/docs/COMPARISON.md"
-          rel="noopener"
-          class="text-primary-bright hover:underline">docs/COMPARISON.md</a
-        >.
+      <div class="mt-6 overflow-x-auto rounded-token border border-line">
+        <table class="w-full min-w-[46rem] border-collapse text-sm">
+          <thead class="bg-surface">
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left font-medium">&nbsp;</th>
+              <th scope="col" class="w-44 px-4 py-3 text-center font-medium text-primary">polyemesis</th>
+              <th scope="col" class="w-36 px-4 py-3 text-center font-medium">Restreamer</th>
+              <th scope="col" class="w-36 px-4 py-3 text-center font-medium">restream.io</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              shared.map(([row, poly, a, b]) => (
+                <tr class="border-b border-line/60 last:border-0">
+                  <td class="px-4 py-3 text-fg">{row}</td>
+                  <td class="px-4 py-3 text-center font-mono text-xs text-muted">{poly}</td>
+                  <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{a}</td>
+                  <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{b}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+        Two rows are not a tie and are left that way: restream.io needs no server
+        from you at all, and Restreamer is years older and far more widely
+        deployed. Both are real advantages, and neither changes what happens to
+        your audio.
       </p>
     </div>
   </section>

@@ -44,6 +44,45 @@ if (!/@media\s*\(prefers-reduced-motion/.test(css)) {
 }
 
 // 3+4. Internal links and fragments must resolve to something that was built.
+/* The motion tokens have to survive minification as VARIABLES.
+ *
+ * This file already exists because Lightning CSS folded `animation-timeline`
+ * into a shorthand Chrome rejects, and the scroll reveals silently stopped
+ * running in production. The same class of failure applies to a token: if the
+ * minifier inlines `--motion-instant` at each use site, the scale still looks
+ * right and stops being a scale — nothing can override it, which is exactly how
+ * the app's reduced-motion block ended up decorative for months. */
+if (!/--motion-instant:\s*90ms/.test(css)) {
+  fail.push("the motion scale is missing from the built CSS: --motion-instant was not emitted");
+}
+if (!/var\(--motion-instant\)/.test(css)) {
+  fail.push(
+    "nothing REFERENCES --motion-instant in the built CSS — the minifier inlined it, " +
+      "so the scale is decorative and cannot be overridden",
+  );
+}
+
+/* The meter keyframe must stay asymmetric.
+ *
+ * A symmetric rise and fall is a sine wave, and to the audience this page is
+ * written for that reads as a decorative web animation rather than an
+ * instrument. Attack fast, decay slow — the check is that the midpoint is NOT
+ * the extreme, which is what a 0/50/100 keyframe always is. */
+/* NB: matched against the css as-built, NOT a whitespace-stripped copy. The
+ * first version of this check stripped whitespace first, which turned
+ * "@keyframes meter" into "@keyframesmeter" and matched nothing — the guard
+ * passed on a deliberately symmetric keyframe. Caught by mutating the source
+ * and watching the build stay green. */
+const meterKf = /@keyframes\s+meter\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/.exec(css);
+if (!meterKf) {
+  fail.push("the meter keyframe is gone from the built CSS; this check no longer guards anything");
+} else if (/(^|[},])\s*50%\s*[,{]/.test(meterKf[1])) {
+  fail.push(
+    "the meter keyframe is symmetric again (has a 50% stop): real peak meters " +
+      "attack fast and decay slowly, and engineers read a sine wobble as fake",
+  );
+}
+
 const pages = readdirSync(DIST).filter((f) => f.endsWith(".html"));
 const built = new Set(pages.map((f) => "/" + f.replace(/\.html$/, "").replace(/^index$/, "")));
 for (const f of pages) {

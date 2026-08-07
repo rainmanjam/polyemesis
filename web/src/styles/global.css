@@ -69,6 +69,22 @@
   --color-down: #e25c5c;
 
   --radius-token: 0.5rem;
+
+  /* --- MOTION. The site had none of these: eleven ad-hoc timings spread
+     across the file, five of them within 70ms of each other and none named.
+     The app has carried a named scale from the start; this is the same scale,
+     so a duration means the same thing on both sides of the product.
+
+     A console animates to EXPLAIN a state change, never to decorate one. On
+     the marketing site the equivalent rule is that motion should look like
+     instrumentation behaving, not like a page being pleased with itself. --- */
+  --motion-instant: 90ms; /* hover, focus, press */
+  --motion-quick: 160ms; /* disclosure, hover reveal */
+  --motion-settle: 260ms; /* larger state change */
+  --motion-enter: 420ms; /* content arriving on scroll */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  /* Symmetric, for anything that breathes rather than arrives. */
+  --ease-breath: cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 @layer base {
@@ -194,7 +210,22 @@
     padding: 0.625rem 1.125rem;
     font-size: 0.9375rem;
     font-weight: 500;
-    transition: background-color 120ms, border-color 120ms, color 120ms;
+    transition:
+      background-color var(--motion-instant) var(--ease-out),
+      border-color var(--motion-instant) var(--ease-out),
+      color var(--motion-instant) var(--ease-out),
+      transform var(--motion-instant) var(--ease-out);
+  }
+  /* The same 1px of travel as the crosspoints, for the same reason. */
+  .btn:active { transform: translateY(1px); }
+  /* A HARD focus ring, not a soft glow. Two pixels, full contrast, square to
+     the control. Keyboard users on this site are disproportionately the people
+     evaluating it seriously, and a blurred halo reads as decoration — it is
+     also the first thing to disappear against a dark background. */
+  .btn:focus-visible,
+  .xpt:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
   }
   .btn-primary { background: var(--color-primary); color: var(--color-ink); }
   .btn-primary:hover { background: var(--color-primary-bright); }
@@ -225,9 +256,22 @@
     background: var(--color-ink);
     cursor: pointer;
     position: relative;
-    transition: background-color 100ms, border-color 100ms, box-shadow 100ms;
+    /* A top highlight and a floor shadow, one pixel each. This is what makes a
+       square read as a KEY rather than a filled rectangle — the same trick a
+       physical patchbay gets for free from having a lit cap sitting proud of
+       the panel. Kept to 1px: heavier bevels look like 2009. */
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.04),
+      inset 0 -1px 0 rgb(0 0 0 / 0.35);
+    transition:
+      background-color var(--motion-instant) var(--ease-out),
+      border-color var(--motion-instant) var(--ease-out),
+      box-shadow var(--motion-instant) var(--ease-out),
+      transform var(--motion-instant) var(--ease-out);
   }
   .xpt:hover { border-color: var(--color-primary); }
+  /* Travel. A key that does not move when pressed is a picture of a key. */
+  .xpt:active { transform: translateY(1px); }
   .xpt:checked {
     background: var(--color-cross-dim);
     border-color: var(--color-cross);
@@ -359,22 +403,52 @@
     0%, 100% { transform: scaleX(1); }
     50%      { transform: scaleX(0.985); }
   }
+  /* Loudness is NOT given the ballistics above, deliberately. Integrated LUFS
+     is a long moving average — it drifts, it does not chase transients — so a
+     fast attack here would be the wrong instrument entirely. Smooth and slow
+     is what an R128 readout actually does. */
   .loud-bar {
     transform-origin: left;
-    animation: loud 3.4s ease-in-out infinite;
+    animation: loud 3.4s var(--ease-breath) infinite;
   }
 
   /* 3. Levels moving. Meter bars breathe by a couple of percent so the hero
         reads as live rather than as a screenshot of a meter. Deliberately
         small: a bar swinging its whole width would be a lie about the
-        signal. */
+        signal.
+
+        BALLISTICS, NOT A SINE WAVE. The previous keyframe was symmetric with
+        ease-in-out — the bar took as long to rise as to fall. No meter behaves
+        that way, and an audience of broadcast engineers reads a symmetric
+        wobble as a decorative web animation, which is the one impression this
+        page cannot afford.
+
+        A real peak meter has a fast attack and a slow decay: programme
+        material arrives suddenly and the needle chases it, then falls back at
+        a fixed rate. So the rise is ~8% of the cycle and the fall is the rest,
+        and the curve is linear on the way down because a decay that eases out
+        looks like it is being animated rather than measured. */
   @keyframes meter {
-    0%, 100% { transform: scaleX(1); }
-    50%      { transform: scaleX(0.94); }
+    0%   { transform: scaleX(0.94); }
+    8%   { transform: scaleX(1); }      /* attack: fast */
+    70%  { transform: scaleX(0.955); }  /* decay: linear, unhurried */
+    100% { transform: scaleX(0.94); }
   }
   .meter-live {
     transform-origin: left;
-    animation: meter 2.4s ease-in-out infinite;
+    animation: meter 2.4s linear infinite;
+  }
+
+  /* Peak hold. A real meter leaves the highest recent peak marked while the
+     bar itself falls away — it is how you read a transient you did not catch.
+     Held near the top of the bar's travel and released on the same cycle. */
+  @keyframes peak-hold {
+    0%, 8%   { opacity: 0; transform: translateX(0); }
+    9%, 62%  { opacity: 1; transform: translateX(0); }
+    100%     { opacity: 0.25; transform: translateX(-6%); }
+  }
+  .meter-peak-tick {
+    animation: peak-hold 2.4s linear infinite;
   }
 
   /* The crosspoint's press used to be a `latch` keyframe here. It is now a
