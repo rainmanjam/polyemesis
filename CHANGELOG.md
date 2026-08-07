@@ -8,6 +8,36 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Changed
+
+- **Both ingest ports bind by default, and both are published by default.**
+  The RTMP listener used to bind only when some enabled source was configured
+  for it, while SRT bound unconditionally. That was not a policy — it was two
+  histories preserved side by side: `ffmpeg -listen 1` had held 1935 only while
+  an RTMP source existed, and the SRT listener had always been up. The asymmetry
+  showed on a fresh install that had chosen no ingest mode at all, which still
+  opened 6000 while refusing to open 1935 on the grounds that nothing there
+  spoke the protocol.
+
+  It also disagreed with this project's own instructions: `docs/HARDWARE.md` and
+  `docs/TROUBLESHOOTING.md` have always said to run
+  `-p 6000:6000/udp -p 1935:1935`, so we documented publishing a port that might
+  not be listening. datarhei Restreamer opens both, and so do we now.
+
+  `install.sh` matches: it asks for an RTMP port the way it asks for an SRT one
+  rather than a yes/no, defaults to publishing 1935, and takes `--rtmp-port 0`
+  to decline it. **The port is the switch on both sides** — the server treats 0
+  as off too — instead of a yes/no in the installer and a port in the settings
+  meaning the same thing two different ways.
+
+  What this adds is narrow: a host with **no firewall at all** now has 1935
+  reachable, where the source list used to close it by accident. Everywhere else
+  the ufw rule and the compose publish still decide, which is what they always
+  claimed to do. Both listeners refuse an unknown token or key in constant time,
+  both require the source to be ready before admitting anything, and a
+  connection that says nothing dies on the handshake timeout.
+
+
 ## [0.4.0] — 2026-08-07
 
 A minor bump. Nothing here breaks a stored config, but two behaviours change in

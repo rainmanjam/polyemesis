@@ -55,7 +55,10 @@ MODE=""            # docker | binary
 TLS_MODE="off"     # off | selfsigned | acme
 DOMAIN_NAME=""
 ACME_EMAIL=""
-ENABLE_RTMP="no"
+# Both ingest ports are published by default, matching what the server now
+# binds and what this project's own docs have always told people to run
+# (`-p 6000:6000/udp -p 1935:1935`). Set --rtmp-port 0 to decline it.
+ENABLE_RTMP="yes"
 CONFIGURE_FIREWALL="no"
 COMPOSE_CMD=""
 
@@ -571,7 +574,11 @@ gather_configuration() {
   header "=== Ports ==="
   [ "$HTTP_PORT_SET" = true ] || ask "Web UI port (tcp)" "$HTTP_PORT" HTTP_PORT
   [ "$SRT_PORT_SET" = true ]  || ask "SRT ingest port (UDP — this is the one people forget)" "$SRT_PORT" SRT_PORT
-  [ "$RTMP_SET" = true ]      || ask_yn "Also expose RTMP on ${RTMP_PORT}/tcp? Only needed for encoders that cannot do SRT" "n" ENABLE_RTMP
+  [ "$RTMP_SET" = true ]      || ask "RTMP ingest port (tcp — 0 to decline it)" "$RTMP_PORT" RTMP_PORT
+  # The port IS the switch, server-side too: internal/engine binds both
+  # listeners and treats 0 as off. Asking a yes/no here and a port there meant
+  # two different ways to say the same thing.
+  case "$RTMP_PORT" in 0|"") ENABLE_RTMP="no" ;; *) ENABLE_RTMP="yes" ;; esac
 
   warn_if_taken "$HTTP_PORT" tcp "web UI"
   warn_if_taken "$SRT_PORT"  udp "SRT ingest"
@@ -1079,7 +1086,8 @@ Options:
   --mode docker|binary   install mode (default: ask, then docker)
   --http-port N          web UI port (default 8080)
   --srt-port N           SRT ingest port, UDP (default 6000)
-  --rtmp                 also expose RTMP (default off)
+  --rtmp-port N          RTMP ingest port, tcp (default 1935; 0 declines it)
+  --rtmp                 accepted for compatibility; RTMP is published by default
   --tls off|selfsigned|acme
                          TLS mode. Not passing it takes the interactive
                          default, which is SELFSIGNED -- including under --yes.
@@ -1127,6 +1135,8 @@ parse_args() {
       --srt-port)   [ $# -ge 2 ] || die "missing value for --srt-port"; SRT_PORT="$2"; SRT_PORT_SET=true; shift 2 ;;
       --srt-port=*) SRT_PORT="${1#*=}"; SRT_PORT_SET=true; shift ;;
       --rtmp)       ENABLE_RTMP="yes"; RTMP_SET=true; shift ;;
+      --rtmp-port)  [ $# -ge 2 ] || die "missing value for --rtmp-port"; RTMP_PORT="$2"; RTMP_SET=true; shift 2 ;;
+      --rtmp-port=*) RTMP_PORT="${1#*=}"; RTMP_SET=true; shift ;;
       --tls)        [ $# -ge 2 ] || die "missing value for --tls"; TLS_MODE="$2"; TLS_SET=true; shift 2 ;;
       --tls=*)      TLS_MODE="${1#*=}"; TLS_SET=true; shift ;;
       --hostname)   [ $# -ge 2 ] || die "missing value for --hostname"; DOMAIN_NAME="$2"; shift 2 ;;
