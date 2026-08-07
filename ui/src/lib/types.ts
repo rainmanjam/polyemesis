@@ -387,6 +387,34 @@ export interface FontInfo {
 
 /** A rendition plus its usage. `enabledDestinations` is the ref count the
  *  engine acts on: at zero there is no process and no CPU burnt. */
+/** A platform's OWN published encoder guidance, served from
+ *  GET /platforms/presets. Advisory: it seeds a form and annotates a choice,
+ *  and never gates anything.
+ *
+ *  `source` and `checked` are not decoration. Once a bitrate is sitting in a
+ *  form field an operator cannot tell a researched number from a guess, so the
+ *  UI always shows where it came from and when it was last read. */
+export interface VideoGuidance {
+  width?: number;
+  height?: number;
+  fps?: number;
+  kbpsMin?: number;
+  kbpsMax?: number;
+  gopSeconds?: number;
+  note?: string;
+  source: string;
+  checked: string;
+}
+
+/** One entry of the server's platform catalogue. Only the fields the dialog
+ *  reads are typed here — the UI keeps its own preset list for the picker and
+ *  consults this for the researched data it must not duplicate. */
+export interface PlatformPresetInfo {
+  id: string;
+  name: string;
+  video?: VideoGuidance;
+}
+
 export interface RenditionView {
   rendition: Rendition;
   destinations: number;

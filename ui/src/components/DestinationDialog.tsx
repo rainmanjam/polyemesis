@@ -47,6 +47,7 @@ import type {
   Platform,
   PlatformAccount,
   Rendition,
+  PlatformPresetInfo,
   RenditionView,
 } from "@/lib/types";
 
@@ -598,6 +599,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // picking an encode starts a new one or joins a running one. That fact is
   // the entire argument for renditions existing, and the UI could not state it.
   const [renditions, setRenditions] = useState<RenditionView[]>([]);
+  const [guidance, setGuidance] = useState<PlatformPresetInfo[]>([]);
   const [busy, setBusy] = useState(false);
   // The variant form: an operator wanting "this tier but 4500 kbps for the
   // constrained uplink". Deliberately NOT a per-destination override of the
@@ -619,6 +621,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       .listRenditions()
       .then(setRenditions)
       .catch(() => setRenditions([]));
+    // Fetched, not mirrored. The UI keeps its own preset list so the picker
+    // renders before any request resolves, but the researched numbers carry a
+    // source and a date and a second copy of them here would drift silently —
+    // which is exactly what happened when they were added to the Go catalogue
+    // and nothing surfaced them.
+    api
+      .platformPresets()
+      .then((r) => setGuidance(r.presets))
+      .catch(() => setGuidance([]));
 
     setPickerOpen(false);
     setQuery("");
@@ -695,6 +706,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     const acct = accounts.find((a) => String(a.id) === accountId);
     return acct?.accountRef?.startsWith("page:") ?? false;
   }, [accounts, accountId]);
+
+  /** What this destination's platform says it wants. Null when the operator has
+   *  not picked a preset, or when the platform publishes nothing usable — which
+   *  is a real answer for TikTok and PeerTube and is shown as silence rather
+   *  than as an invented number. */
+  const platformVideo = useMemo(
+    () => guidance.find((g) => g.id === presetId)?.video ?? null,
+    [guidance, presetId],
+  );
 
   const selectedView = useMemo(
     () => renditions.find((v) => String(v.rendition.id) === renditionId) ?? null,
@@ -1308,6 +1328,34 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         />
                       </div>
                     </div>
+                    {/* One click to the platform's own numbers. The case this
+                        exists for is "make this fit Kick", and making someone
+                        transcribe four figures from the panel above into the
+                        four fields below is how they end up mistyping one. */}
+                    {platformVideo && (
+                      <button
+                        type="button"
+                        className="mt-2 text-left text-[10px] text-primary underline hover:opacity-80"
+                        onClick={() => {
+                          // The TOP of the range, not the bottom.
+                          //
+                          // Seeding kbpsMin looked reasonable and was wrong:
+                          // Kick publishes 1000-8000, and 1000 kbps at 1080p60
+                          // is a picture nobody would ship. Where a platform
+                          // gives a range it is a range of what it ACCEPTS, and
+                          // the useful end is the one that looks best — the
+                          // operator can lower it, and the field is right there.
+                          const kbps = platformVideo.kbpsMax || platformVideo.kbpsMin;
+                          if (kbps) setVariantBitrate(String(kbps));
+                          if (platformVideo.width) setVariantWidth(String(platformVideo.width));
+                          if (platformVideo.height) setVariantHeight(String(platformVideo.height));
+                          if (platformVideo.fps) setVariantFps(String(platformVideo.fps));
+                          setVariantErr("");
+                        }}
+                      >
+                        Fill from what this platform publishes
+                      </button>
+                    )}
                     {variantErr && (
                       <p className="mt-1.5 text-[10px] text-down">{variantErr}</p>
                     )}
@@ -1357,6 +1405,58 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     </Button>
                   </details>
                 )}
+              </div>
+            )}
+
+            {/* What the platform asks for, with its provenance attached.
+                Shown under BOTH cards rather than only under the encode one:
+                an operator on passthrough needs to know their 4K source is
+                above what Kick will take just as much as one who is already
+                encoding — arguably more, since nothing is going to reshape it
+                for them. */}
+            {platformVideo && (
+              <div className="rounded-md border border-border bg-background p-2">
+                <span className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-[11px] font-medium">
+                    {guidance.find((g) => g.id === presetId)?.name ?? "This platform"} publishes:
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {[
+                      platformVideo.width && platformVideo.height
+                        ? `${platformVideo.width}×${platformVideo.height}`
+                        : null,
+                      platformVideo.fps ? `${platformVideo.fps} fps` : null,
+                      platformVideo.kbpsMin
+                        ? platformVideo.kbpsMax && platformVideo.kbpsMax !== platformVideo.kbpsMin
+                          ? `${platformVideo.kbpsMin}–${platformVideo.kbpsMax} kbps`
+                          : `${platformVideo.kbpsMin} kbps`
+                        : null,
+                      platformVideo.gopSeconds ? `${platformVideo.gopSeconds}s keyframes` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+                {platformVideo.note && (
+                  <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    {platformVideo.note}
+                  </p>
+                )}
+                {/* The disclaimer this catalogue has always carried, applied to
+                    numbers rather than to hostnames. A figure whose provenance
+                    is not on screen is indistinguishable from a guess. */}
+                <p className="mt-1 text-[10px] text-subtle-foreground">
+                  Starting point, not a rule —{" "}
+                  <a
+                    href={platformVideo.source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-foreground"
+                  >
+                    published by the platform
+                  </a>
+                  , read {platformVideo.checked}. Verify before you go live.
+                </p>
               </div>
             )}
 

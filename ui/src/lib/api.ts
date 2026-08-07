@@ -47,6 +47,7 @@ import type {
   RenditionBounds,
   RenditionDeleted,
   RenditionPreset,
+  PlatformPresetInfo,
   RenditionView,
   RoutingProfile,
   RoutingResult,
@@ -349,6 +350,11 @@ export const api = {
   // A rendition is one shared video encode several destinations can select, so
   // N destinations wanting 1080p60 cost one encode rather than N. A destination
   // with no rendition is passthrough, which is the default and costs nothing.
+  /** The server's platform catalogue, including researched encoder guidance.
+   *  Fetched rather than mirrored: the numbers carry a source and a date, and
+   *  a second copy of them in the UI would drift silently. */
+  platformPresets: () =>
+    get<{ presets: PlatformPresetInfo[]; disclaimer: string }>("/platforms/presets"),
   listRenditions: () => get<RenditionView[]>("/renditions"),
   getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
   createRendition: (r: Partial<Rendition>) =>
