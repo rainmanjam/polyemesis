@@ -3,8 +3,25 @@
 
 Run:  python3 scripts/verify-ertmp-multitrack.py [runs]
 
-Builds a six-track FLV (MaxTracks), publishes it into the exact `ffmpeg -listen 1`
-command internal/ffmpeg/build.go:IngestArgs constructs, and checks what arrives.
+Builds a six-track FLV (MaxTracks), publishes it into an `ffmpeg -listen 1`
+receiver, and checks what arrives.
+
+WHAT THIS DOES AND DOES NOT COVER
+It is a conformance check on FFMPEG: can this build mux six E-RTMP tracks, and
+demux them again with the order intact. That is worth knowing on its own — the
+answer is no below 7.1 — and it is why the tone detection is here.
+
+It is NOT polyemesis's ingest path any more, and used to claim to be. IngestArgs
+passed `-listen 1` when FFmpeg was the RTMP server; the listener is now
+internal/rtmpserver and the ingest child DIALS it. The path that ships is covered
+by TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder, which publishes
+through the real server and identifies the tracks on arrival.
+
+Keeping that distinction straight matters: while this script was passing, late
+subscribers to a real multitrack stream were receiving decoder configuration for
+the legacy track only, because rtmpserver did not recognise a sequence start
+wrapped in AudioExMultitrack. This script cannot see that — there is no
+rtmpserver in it.
 
 WHY IT MEASURES TONES RATHER THAN COUNTING STREAMS
 Six tracks in and six tracks out looks identical whether or not they were
@@ -54,8 +71,9 @@ def tone_of(path, stream):
 
 def one_session(tag, flv):
     ts = f"rx-{tag}.ts"
-    # Exactly internal/ffmpeg/build.go IngestArgs, output to a file rather than
-    # the UDP relay -- same mpegts muxer, same -map 0 -c copy.
+    # The mpegts muxer and `-map 0 -c copy` that the destination side still uses,
+    # with `-listen 1` standing in for an RTMP server. Not IngestArgs: see the
+    # module docstring.
     listener = subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-listen", "1",
          "-fflags", "+genpts", "-i", f"rtmp://127.0.0.1:{PORT}/live/test",

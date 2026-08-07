@@ -637,3 +637,125 @@ func TestConcurrentStopsDoNotPanic(t *testing.T) {
 	wg.Wait()
 	<-done
 }
+
+/* ------------------------------------------------------ multitrack setup cache */
+
+// The setup a late joiner is replayed must cover EVERY track, not just the
+// legacy one.
+//
+// E-RTMP sends tracks 2..N wrapped: AudioExMultitrack carries a TrackID and the
+// real message inside it, so matching only the unwrapped types classified the
+// legacy track's config as setup and nothing else. A subscriber that attached
+// after the publisher then held data for tracks it had no configuration for, and
+// ffprobe hung rather than failing — which is worse, because a hang looks like a
+// slow network and a failure looks like a bug.
+func TestMultitrackSequenceStartsAreRecognisedAsSetup(t *testing.T) {
+	wrapped := &message.AudioExMultitrack{
+		MultitrackType: message.AudioExMultitrackTypeOneTrack,
+		TrackID:        1,
+		Wrapped:        &message.AudioExSequenceStart{},
+	}
+	if !isSetup(wrapped) {
+		t.Error("a wrapped AudioExSequenceStart is not treated as setup, so every track " +
+			"after the first is missing its decoder config for late subscribers")
+	}
+	// Media inside the same wrapper is NOT setup. Caching coded frames would
+	// replay stale audio at every new subscriber and grow without bound.
+	media := &message.AudioExMultitrack{
+		MultitrackType: message.AudioExMultitrackTypeOneTrack,
+		TrackID:        1,
+		Wrapped:        &message.AudioExCodedFrames{},
+	}
+	if isSetup(media) {
+		t.Error("wrapped coded frames are treated as setup; the replay list would grow " +
+			"for the life of the broadcast and every new subscriber would be sent stale audio")
+	}
+}
+
+// Two tracks' sequence starts are different setup. One slot for both would mean
+// the second track overwrote the first and only the last one ever reached a
+// subscriber.
+func TestEachTrackGetsItsOwnSetupSlot(t *testing.T) {
+	one, ok1 := setupSlot(&message.AudioExMultitrack{
+		TrackID: 0, Wrapped: &message.AudioExSequenceStart{},
+	})
+	two, ok2 := setupSlot(&message.AudioExMultitrack{
+		TrackID: 1, Wrapped: &message.AudioExSequenceStart{},
+	})
+	if !ok1 || !ok2 {
+		t.Fatalf("multitrack sequence starts are not slotted: %v %v", ok1, ok2)
+	}
+	if one == two {
+		t.Errorf("track 0 and track 1 share the setup slot %q, so one overwrites the other "+
+			"and a late subscriber can only ever decode whichever arrived last", one)
+	}
+}
+
+// A republished sequence start REPLACES its predecessor.
+//
+// Encoders resend configuration, so appending grew the replay list for the whole
+// broadcast: every new subscriber got a longer prologue, ending with superseded
+// configuration replayed ahead of the current one.
+func TestRepublishedSetupReplacesRatherThanAccumulates(t *testing.T) {
+	targets := map[string]Target{"k": {SourceID: 1, Name: "a", Enabled: true, Ready: true}}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(targets))
+	key := PublisherKey{SourceID: 1}
+	st := &stream{subs: map[*subscriber]struct{}{}, slots: map[string]int{}}
+	s.streams[key] = st
+
+	// Two of the same slot, then one of another.
+	msgs := []message.Message{
+		&message.AudioExMultitrack{TrackID: 0, Wrapped: &message.AudioExSequenceStart{}},
+		&message.AudioExMultitrack{TrackID: 0, Wrapped: &message.AudioExSequenceStart{}},
+		&message.AudioExMultitrack{TrackID: 1, Wrapped: &message.AudioExSequenceStart{}},
+	}
+	for _, m := range msgs {
+		st.cacheSetup(m)
+	}
+	if len(st.setup) != 2 {
+		t.Errorf("cached %d setup messages for two tracks; a resent config was appended "+
+			"rather than replacing the one it supersedes", len(st.setup))
+	}
+	// And the surviving entry is the NEWEST, not the first.
+	if got := st.setup[0]; got != msgs[1] {
+		t.Error("the replaced slot kept the older message; a subscriber would be configured " +
+			"with configuration the publisher has already superseded")
+	}
+}
+
+// A publisher reconnecting must not leave the setup cache inconsistent.
+//
+// setup and slots are one structure in two fields: slots holds indices INTO
+// setup. admitSession clears setup on reconnect — correctly, since the old
+// sequence headers describe an encode that has ended — and clearing only that
+// half left every index dangling. The next sequence start looked up its old
+// slot and wrote past the end of an empty slice, panicking the listener.
+//
+// This is the ordinary case, not an edge one: an encoder that drops and comes
+// back is what failover exists for, and it is what the failover acceptance
+// suite does deliberately. It found this.
+func TestReconnectClearsTheSetupCacheConsistently(t *testing.T) {
+	st := &stream{subs: map[*subscriber]struct{}{}, slots: map[string]int{}}
+
+	cache := st.cacheSetup
+
+	first := &message.AudioExMultitrack{TrackID: 0, Wrapped: &message.AudioExSequenceStart{}}
+	cache(first)
+	if len(st.setup) != 1 {
+		t.Fatalf("setup for the first session did not cache: %d", len(st.setup))
+	}
+
+	// The very call admitSession makes when the encoder comes back, rather than
+	// a copy of it — a copy would keep passing after admitSession was changed.
+	st.resetSetup()
+
+	// Must not panic, and must rebuild rather than index into nothing.
+	cache(&message.AudioExMultitrack{TrackID: 0, Wrapped: &message.AudioExSequenceStart{}})
+	if len(st.setup) != 1 {
+		t.Fatalf("after a reconnect the cache holds %d entries, want 1", len(st.setup))
+	}
+	if st.setup[0] == first {
+		t.Error("the reconnected session replayed the PREVIOUS encode's sequence header, " +
+			"which describes a stream that has ended")
+	}
+}
