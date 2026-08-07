@@ -8,6 +8,26 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-07
+
+A minor bump. Nothing here breaks a stored config, but two behaviours change in
+ways an existing install will notice: **ingest mode no longer has a default**, so
+a fresh install asks rather than choosing; and **RTMP ingest is now addressed by
+stream key** on one shared listener rather than by a port per source. Keys that
+already worked keep working through a grandfather clause.
+
+The headline is multi-source RTMP: how many programmes an install can carry no
+longer depends on which protocol the encoder speaks. Alongside it, the audio
+track ceiling goes from six to thirty-two, destinations gained per-platform
+encoder guidance sourced from what each platform publishes, and the project got
+a website.
+
+The fixes are worth reading in full. Three of them — a data race in the new RTMP
+listener, multitrack being unusable for any subscriber that joined late, and
+every SRT install reporting its ingest as offline — were found by tests written
+after the feature, which is the argument for writing them.
+
+
 ### Added
 
 - **Chat search.** `GET /api/v1/chat/search?q=` matches a message's text or its
@@ -35,6 +55,37 @@ its first tagged release.
   floor is the only limit that accounts for files polyemesis did not write. Click
   rather than hover, so it works on touch and under a screen reader, and the body
   is a catalogue key, so the explanation is translated too.
+- **Multi-source RTMP.** RTMP ingest was `ffmpeg -listen 1` — a single-connection
+  receiver that cannot demultiplex by path — so an install could carry exactly
+  one RTMP source while SRT carried as many as you liked. That asymmetry was an
+  artefact of the implementation rather than a decision. `internal/rtmpserver`
+  is now one listener on one port for every source, addressed by the stream key
+  in the publish URL, the same shape `internal/srtserver` already had. Publishers
+  push to it and this install's own FFmpeg processes subscribe to it on the same
+  socket. Media is never parsed: RTMP *messages* are relayed, so `-map 0 -c copy`
+  downstream is untouched and Enhanced RTMP multitrack passes through without the
+  server knowing what a track is. Existing keys keep working through a
+  grandfather clause.
+- **Thirty-two audio tracks, up from six.** `routing.MaxTracks` is 32, with a
+  Σchannels ≤ 64 guard because FFmpeg's `amerge` caps there and the failure past
+  it is a filter graph that will not build.
+- **A marketing website.** `web/` — Astro, static, its own container image, with
+  a build-time guard on the parts of it that have silently broken before.
+- **Per-platform encoder guidance.** Each preset carries the resolution, bitrate
+  and frame rate the platform itself publishes, with the source URL and the date
+  it was read attached — both required fields, because a figure whose provenance
+  is not on screen is indistinguishable from a guess. Cross-checked against OBS's
+  own `services.json`.
+- **An advanced section for customising a destination's encode.** A variant is
+  a second encode seeded from a shared one, so an operator can have "the same
+  tier but 4500 kbps for the constrained uplink" without editing the tier every
+  other destination is on.
+- **Alerts when a destination stops keeping up**, and security and configuration
+  events for Slack and Discord.
+- **An OBS acceptance suite.** `scripts/acceptance-obs-multitrack.sh` runs OBS
+  headless in Docker and publishes into a real polyemesis, which is the only way
+  to test OBS's own handshake and metadata rather than FFmpeg's.
+
 
 ### Changed
 
@@ -64,12 +115,68 @@ its first tagged release.
 - `vitest` runs in CI alongside `tsc` and `oxlint`, covering the pure logic the
   browser suite cannot practically enumerate — platform link construction across
   five platforms, and the translation catalogues themselves.
+- **Ingest mode is an explicit first-run choice, with no default.** The two
+  options are not interchangeable and the difference is not recoverable by
+  guessing: SRT carries every audio track, and RTMP delivers a single one on any
+  FFmpeg below 7.1 — which includes Ubuntu 24.04's stock build. Defaulting to
+  either silently hands a share of installs the wrong thing, and the RTMP failure
+  is invisible: the stream works, and one of the six tracks arrives.
+- **The video treatment on a destination is two cards, not a dropdown.** Copying
+  video is `-c:v copy` and costs nothing; a shared encode is the most expensive
+  thing on the page. A `<select>` presented them as the same kind of choice. The
+  picker now leads with what an encode *produces* rather than what someone named
+  it, and states the consequence of joining or leaving one — including what
+  happens to the encode you are leaving, which nothing else in this space tells
+  you.
+- **A motion scale that is actually wired.** `--motion-instant/quick/settle` and
+  `--ease-out` were declared and registered with Tailwind zero times, so all 27
+  `transition-colors` ran on its 150ms default — and the reduced-motion block
+  that set those tokens to `0ms` did nothing at all. The website, which had no
+  named timings, now shares the same scale.
+- **The E-RTMP multitrack harness is Go**, not Python. It was the repository's
+  only `.py` file; everything else that stands up a real stream and measures what
+  comes back is already a `//go:build ignore` main under `scripts/`.
+
 
 ### Fixed
 
 - Chat's `(i)` help buttons no longer all announce as "More information"; each
   names the setting it explains, so a screen-reader user can tell a dozen of them
   apart.
+- **A data race in the RTMP listener.** `serveSubscriber` assigned `sub.conn`
+  after publishing the subscriber into the stream table, so `Stop` could read the
+  field while it was being written. Found by CI's `-race`; no local run had ever
+  used it.
+- **Enhanced RTMP multitrack was unusable for any subscriber that joined late.**
+  Tracks 2..N arrive wrapped in `AudioExMultitrack`, and the setup cache did not
+  unwrap them — so a late subscriber held coded frames for tracks it had no
+  decoder configuration for, and `ffprobe` hung rather than failing. Late is the
+  normal case: the ingest child subscribes when the source is enabled, and the
+  operator starts their encoder whenever they like.
+- **Every healthy SRT install reported its ingest as offline.** The header read
+  `status.ingest.state`, and SRT deliberately has no ingest child — `srtserver`
+  delivers straight into the hub — so the most prominent status in the
+  application contradicted the meters, the LIVE badge and the API. It now asks
+  the question the rest of the app asks: are bytes arriving.
+- **The reconnecting indicator faded itself.** `live` pulsed a separate halo and
+  kept its core opaque; `warn` pulsed the core, dropping the only indicator to
+  35% opacity twice a second. The state that most needs attention was the one
+  rendered hardest to see.
+- **Twenty-one raw Tailwind colours collided with the semantic tones**, and the
+  guard whitelisted them: `red-500` is ΔE 8.11 from `--down`, which is to say
+  indistinguishable.
+- **Recordings were truncated on stop rather than finalised**, on every platform
+  and not only Windows as first recorded.
+- **`--tls acme --yes` spun forever, and a re-install never restarted.**
+- **The default Docker install reported unhealthy forever.**
+- **An unmatched `/api` path answered 200 with the UI instead of a 404.**
+- **The Docker upgrade backup archived an empty volume and exited 0.**
+- **A short window drew two scrollbars**, one of which scrolled 14px of nothing.
+- **A fresh install logged an ERROR about an RTMP port nobody had set.**
+- **The installer's FFmpeg download could be walked down to plaintext HTTP.**
+  Every other fetch in `install.sh` pins the scheme; this one went through
+  `urllib.request.urlretrieve`, which follows redirects without restricting it —
+  and it writes a binary into `/usr/local/bin` that a root service executes.
 
 ## [0.3.0] — 2026-08-05
 
@@ -797,7 +904,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rainmanjam/polyemesis/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rainmanjam/polyemesis/releases/tag/v0.1.0
