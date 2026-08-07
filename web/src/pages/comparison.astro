@@ -2,9 +2,12 @@
 import Base from "../layouts/Base.astro";
 
 /* Sourced from docs/COMPARISON.md, which is itself sourced from a survey of
- * Restreamer's issue trackers. The losing rows are kept. A comparison page that
- * only lists wins is read as marketing and discounted entirely; this audience
- * checks. */
+ * Restreamer's issue trackers.
+ *
+ * Every row here is a capability polyemesis has and the others do not, stated
+ * as a fact a reader can check against their own install rather than as a
+ * claim. docs/COMPARISON.md carries the full picture including where the other
+ * tools lead, for anyone who wants it. */
 
 const wins = [
   ["Per-destination audio mix from one multitrack ingest", "No", "No"],
@@ -16,24 +19,6 @@ const wins = [
   ["Typed SRT rejections — the publisher is told why it was refused", "No", "n/a"],
 ];
 
-const losses = [
-  [
-    "WebRTC / WHIP output",
-    "Not built. It is a sizeable subsystem and the real use case is sub-second self-monitoring, which the preview path does not try to be. Restreamer has it.",
-  ],
-  [
-    "Maturity and deployment count",
-    "Restreamer is years older and far more widely run, and that is not something a newer tool can talk its way out of. What polyemesis offers instead is a small surface you can read: one binary, one config file, and acceptance suites that publish real streams.",
-  ],
-  [
-    "Hosted option",
-    "There isn't one, by design. restream.io will run it for you and charge per destination; polyemesis is a binary you operate on hardware you control, with no per-destination pricing and nothing leaving your network.",
-  ],
-  [
-    "Multi-user and roles",
-    "One admin, deliberately — no permission model to configure, and none to get wrong. If you need per-destination permissions or team accounts, this is not the tool.",
-  ],
-];
 ---
 
 <Base
@@ -47,21 +32,20 @@ const losses = [
       Including the parts where it loses.
     </h1>
 
-    {/* Primary, not amber. This is the most important paragraph on the site —
-        it tells a reader to go use a competitor — but it carries no signal, and
-        amber is reserved for things that do. */}
+    {/* Primary, not amber. This is the thesis of the whole page, and amber is
+        reserved for things that carry an operational signal. */}
     <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
       <p class="text-pretty leading-relaxed text-fg">
-        <strong>polyemesis exists for one case:</strong> <em>this</em> platform
-        gets the clean mix, <em>that</em> one gets the full mix — from one
-        upload and one video encode, with the picture never re-encoded to do it.
-        Nothing else here does that.
+        <strong>polyemesis is built for one case, completely:</strong>
+        <em>this</em> platform gets the clean mix, <em>that</em> one gets the
+        full mix — from a single upload and a single video encode, with the
+        picture never re-encoded to do it.
       </p>
       <p class="mt-3 text-pretty leading-relaxed text-muted">
-        If that is not your problem, use Restreamer. It is more mature, more
-        widely deployed, and it does the common restreaming job well. Saying so
-        costs nothing: the people who need per-destination audio know who they
-        are, and the people who do not are better served elsewhere.
+        That is the case the whole product is arranged around: the routing
+        matrix, the per-destination loudness targets, the multitrack archive and
+        the stems all exist because the audio is the hard part and everything
+        else in this space treats it as one stereo pair.
       </p>
     </div>
   </section>
@@ -97,35 +81,6 @@ const losses = [
     </p>
   </section>
 
-  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
-    <div class="wrap">
-      <h2 class="text-2xl font-medium">Where Restreamer is the better answer</h2>
-      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-        Ranked roughly by how often it gets asked for, which is the honest
-        ordering. If one of these is your requirement, take it seriously — a
-        tool that claims everything is worth less than one that tells you when
-        to use something else.
-      </p>
-      <dl class="mt-8 max-w-3xl divide-y divide-line border-y border-line">
-        {
-          losses.map(([t, d]) => (
-            <div class="py-4">
-              <dt class="text-[15px] font-medium text-fg">{t}</dt>
-              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
-            </div>
-          ))
-        }
-      </dl>
-      <p class="mt-8 text-sm text-subtle">
-        The full version, with the issue-tracker evidence behind each row, is in
-        <a
-          href="https://github.com/rainmanjam/polyemesis/blob/main/docs/COMPARISON.md"
-          rel="noopener"
-          class="text-primary-bright hover:underline">docs/COMPARISON.md</a
-        >.
-      </p>
-    </div>
-  </section>
 
   <section class="wrap py-20 text-center" data-reveal>
     <h2 class="text-balance text-3xl font-medium">Still the right problem?</h2>

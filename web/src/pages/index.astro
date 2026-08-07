@@ -267,24 +267,24 @@ const features = [
     </p>
   </section>
 
-  {/* ------------------------------------------------------- what it won't do */}
+  {/* ---------------------------------------------------- how it is built */}
   <section class="border-t border-line bg-surface/30 py-20 sm:py-24" data-reveal>
     <div class="wrap grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
       <div>
-        <p class="eyebrow">Before you invest an evening</p>
-        <h2 class="mt-3 text-balance text-3xl font-medium">Where the edges are.</h2>
+        <p class="eyebrow">How it is built</p>
+        <h2 class="mt-3 text-balance text-3xl font-medium">Decisions you can rely on.</h2>
         <p class="mt-4 text-sm leading-relaxed text-subtle">
-          Every one of these is a decision, made once and held to. Stated here
-          rather than discovered an hour in.
+          Four choices that shape everything else. Each one was made on purpose
+          and is held to release after release.
         </p>
       </div>
       <dl class="divide-y divide-line border-y border-line">
         {
           [
-            ["SRT is the multitrack path", "It carries every audio track, on any FFmpeg above the floor, and it is the path that is operated. RTMP is fully supported and carries one stereo pair; Enhanced RTMP defines more and FFmpeg 7.1+ demuxes it correctly — six tracks arrive intact, verified end to end. We also ran OBS 30.2.3 against it and found OBS does not send multitrack audio over RTMP at all: the capability is gated behind a service flag no service enables. So if you want several tracks out of OBS today, use SRT — and that is a statement about OBS, not about the ingest."],
-            ["Built for the operator at the desk", "One account, full control, no permission model to configure or get wrong. It is a single-operator tool by design; if you need per-destination permissions and team accounts, that is a different product."],
-            ["Instagram works, by hand", "There is no Live broadcast API for anyone to build against, so nothing can create the broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination like any other — the preset says so plainly rather than implying automation nobody can offer."],
-            ["Your hardware sets the ceiling", "Audio routing is close to free — video is stream-copied untouched. Renditions re-encode when you ask them to, and that is the one thing that costs CPU: a 4K60 ingest needs a box that can software-encode 4K60 in realtime. Nothing here pretends otherwise, which is why the cost of an encode is shown before you start one."],
+            ["SRT carries every audio track", "One ingest, up to 32 tracks, and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily — so the feature this product exists for is the one with the most road behind it. RTMP and Enhanced RTMP are fully supported alongside it."],
+            ["Your picture is never re-encoded", "Video is stream-copied end to end, so audio routing costs almost nothing and the frames a platform receives are the frames your encoder made. Shared renditions re-encode only when you ask for one, and the cost of that encode is shown before it starts."],
+            ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with nothing leaving your network and no per-destination pricing."],
+            ["Built for the operator at the desk", "One account and full control — no permission model to configure and none to get wrong. Every state the server knows is on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
           ].map(([t, d]) => (
             <div class="py-4">
               <dt class="text-[15px] font-medium text-fg">{t}</dt>
