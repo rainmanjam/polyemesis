@@ -40,6 +40,22 @@ type Manager struct {
 	bus   *events.Broker
 	alloc *relay.PortAllocator
 
+	// syncMu serialises Sync and reconcileSharedIngest end to end, the way
+	// Engine.reconcileMu does for a single engine's Reconcile.
+	//
+	// It is NOT mu. mu guards the fields and is dropped in the middle of both
+	// functions on purpose, because building an engine or binding a listener
+	// takes far too long to hold a lock the status endpoints need. That gap is
+	// the bug: Manager.Reconcile is reached from several HTTP handlers, so two
+	// passes could both observe a source with no engine, both build and Start
+	// one, and both write m.engines[id]. The second overwrote the first, and
+	// the loser stayed RUNNING -- hub, ingest child and relay ports -- with
+	// nothing holding a reference that could stop it. reconcileSharedIngest has
+	// the same shape around the listener sockets.
+	//
+	// Always taken OUTSIDE mu. Nothing may acquire it while holding mu.
+	syncMu sync.Mutex
+
 	mu sync.RWMutex
 	// srt and rtmp are the one-port listeners, one per protocol, each shared by
 	// every source. Nil when the port could not be bound, which is logged
@@ -131,6 +147,12 @@ func (m *Manager) Start(ctx context.Context) error {
 // Sync makes the set of running engines match the sources table, starting
 // engines for new sources and stopping those whose source has gone.
 func (m *Manager) Sync() error {
+	// One at a time, for the whole of it. See Manager.syncMu: the window
+	// between deciding an engine is missing and publishing the one we built is
+	// wide enough for a second caller to decide the same thing.
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+
 	rows, err := m.store.ListSources()
 	if err != nil {
 		return err
@@ -211,6 +233,12 @@ func (m *Manager) Sync() error {
 // They live on the manager because each is ONE listener for every source: an
 // engine could not own one without owning the other engines' traffic.
 func (m *Manager) reconcileSharedIngest() {
+	// Same lock as Sync, for the same reason: the read of m.srt/m.rtmp and the
+	// write back are separated by an actual bind, and two callers racing there
+	// each start a listener while only one survives in the field.
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+
 	st, err := m.store.GetSettings()
 	if err != nil {
 		m.log.Warn("cannot read shared-ingest settings", "err", err)

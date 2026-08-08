@@ -920,7 +920,22 @@ func (e *Engine) onStorage(st recording.StorageState) {
 	} else {
 		e.log.Info("free space recovered; restarting recorder")
 	}
+	// UNDER reconcileMu, like every other production caller.
+	//
+	// This was the last one that skipped it, and free-space recovery is exactly
+	// when a reconcile is likely to be in flight: the sweeper that frees the
+	// space also fires onChange. Two passes then reached reconcileRecorder at
+	// once, both read e.recorderSig unlocked, and both concluded the recorder
+	// needed starting -- two FFmpegs writing the same segment pattern, one of
+	// them an orphan holding a relay port that Stop cannot reach because only
+	// the second is in e.recorder.
+	//
+	// Safe to take here: the guard fires from the recording manager's own
+	// 30-second sweep goroutine, and nothing on the Reconcile path calls into
+	// it, so this can never be re-entered from inside a reconcile.
+	e.reconcileMu.Lock()
 	e.reconcileRecorder(e.Settings())
+	e.reconcileMu.Unlock()
 	e.publishStatus()
 }
 
@@ -3667,15 +3682,48 @@ func (e *Engine) feedUpstreamSig(s db.Settings, kind sourceKind, silenceSig stri
 		// turned every other kind away. Left as a default rather than written
 		// as `case sourcePrimary` so the compiler still sees a total function,
 		// but the set it stands for is now one kind wide instead of open.
-		return primaryFeedSig(silenceSig)
+		return primaryFeedSig(silenceSig, e.sourceHubPort())
 	}
 }
 
 // primaryFeedSig is the primary feed's upstream signature. The silence tier is
 // between the ingest and this feed, so the feed has to be rebuilt onto the
 // tier's hub when one appears and back off it when it goes.
-func primaryFeedSig(silenceSig string) string {
-	return hashStrings([]string{"primary", silenceSig})
+//
+// Two ingredients, and the second is the fix for a feed that ran forever
+// carrying nothing.
+//
+// silenceSig is what the tier is SUPPOSED to be, derived from settings. port is
+// what the feed is actually reading. In the steady state they agree and the
+// port contributes nothing. They come apart in one window: reconcileOutputs
+// calls detachFeedForSilence, which drops selMu, and only then reconcileSilence
+// swaps the hub while holding e.mu alone. A 500ms selector sweep landing in
+// that gap computed the NEW silenceSig -- it comes from settings, which have
+// already changed -- while downstreamFeedInput handed it the OLD hub, and
+// detachFeedForSilence had just zeroed feedAt so the respawn backoff did not
+// stop it. The feed started, tagged with a signature that matched what
+// reconcileSelector was about to ask for.
+//
+// So reconcileSelector then found cur.upstream == want and a running process,
+// and left it alone. Permanently: the selector's hub carried zero bytes, every
+// destination reported running, nothing published, and no error was raised
+// anywhere, because from each layer's own point of view nothing had failed.
+//
+// Folding the port in makes the signature describe the hub the feed IS reading
+// rather than the one it was meant to. A feed left on a closed tier can no
+// longer match, so the next sweep rebuilds it. This is the same reasoning the
+// playlist case already applies to playlistSig, one level more literal.
+func primaryFeedSig(silenceSig string, port int) string {
+	return hashStrings([]string{"primary", silenceSig, strconv.Itoa(port)})
+}
+
+// sourceHubPort is the port of the relay the primary feed reads: the silence
+// tier's when one is up, the ingest's otherwise. Zero when neither exists.
+func (e *Engine) sourceHubPort() int {
+	if h := e.sourceHub(); h != nil {
+		return h.Port()
+	}
+	return 0
 }
 
 // detachFeedForSilence stops the primary feed when the silence tier under it is
@@ -3689,7 +3737,11 @@ func (e *Engine) detachFeedForSilence(silenceSig string) {
 	e.selMu.Lock()
 	defer e.selMu.Unlock()
 
-	want := primaryFeedSig(silenceSig)
+	// The port is the CURRENT one, which is the tier about to be closed. That
+	// is deliberate: this compares the feed against what it would be if only
+	// the settings had moved, so a feed already on the right tier is left
+	// alone and one facing a tier that is being replaced is torn down.
+	want := primaryFeedSig(silenceSig, e.sourceHubPort())
 	e.mu.Lock()
 	var feed *sourceFeed
 	if e.sel != nil && e.sel.feed != nil &&
