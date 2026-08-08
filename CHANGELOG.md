@@ -8,6 +8,20 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-08
+
+The first release with the core review in it, and the version number is
+deliberately 0.5.0 rather than 0.6.0.
+
+0.5.0 was written up in this file on 2026-08-07 and then never tagged, so its
+contents have never been in anyone's hands — a heading that looked released
+above work that was not. Folding this release into it closes that rather than
+shipping 0.6.0 over a hole in the version line, or retroactively tagging a
+release nobody could have installed.
+
+So everything below is one release: the four-reviewer core review worked end to
+end, plus the two operator-visible changes the never-cut 0.5.0 had described.
+
 ### Fixed
 
 Nine more defects from the same core review, in the transport and concurrency
@@ -15,8 +29,8 @@ layers. Every one is the shape the whole review turned out to be: a protection
 that is present in name and absent in effect.
 
 - **An RTMP publisher for an SRT source is refused immediately again.** The
-  readiness grace added in 0.5.0 claimed in its own comment that it could not be
-  used to hold connections open. It could: a target is registered for every
+  readiness grace described further down this same release claimed in its own
+  comment that it could not be used to hold connections open. It could: a target is registered for every
   source whatever its ingest mode, so any valid token for an SRT-mode source was
   found, enabled, and permanently not ready — the one verdict the grace waits
   on. Every connect burned the full six seconds, in parallel, for a state no
@@ -120,11 +134,10 @@ FFmpeg actually produced rather than by reading the filtergraph.
   are still the operator's to change — rescaling them silently would be the same
   category of mistake — but the drop is now stated in dB.
 
-## [0.5.0] — 2026-08-07
+### Changed — the two from the never-cut 0.5.0
 
-Two changes an operator can actually observe, and a great many they cannot.
-
-### Changed
+Written up on 2026-08-07 against a tag that was never pushed. Both are still
+accurate and both ship here for the first time.
 
 - **An RTMP publisher is now admitted only when something is subscribed to read
   it.** `Target.Ready` used to mean "an engine exists for this source and its

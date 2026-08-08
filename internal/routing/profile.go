@@ -40,7 +40,7 @@ const MaxTracks = 32
 //
 // It bounds a channel INDEX, not a track's real width: a cell naming a channel
 // the ingest does not carry is still dropped at compile time with a warning, and
-// since 0.6.0 the level that drop costs is reported in dB.
+// the level that drop costs is reported in dB.
 const MaxChannels = 16
 
 // MaxMeterChannels is FFmpeg's amerge ceiling, and the reason MaxTracks is 32
