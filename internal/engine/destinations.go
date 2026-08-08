@@ -764,7 +764,6 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	if prev == nil || prev.row == nil {
 		return
 	}
-	want := backupSpecOf(prev.row, compiled, upstream)
 	// The toggle-on-but-no-endpoint case is included in "not wanted": it is a
 	// real state between enabling the setting and the next broadcast being
 	// created, and it is reported rather than left blank.
@@ -772,7 +771,14 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	if !wantsBackup(prev.row) && prev.row.BackupIngestWanted && prev.row.BackupURL == "" {
 		reason = backupPending
 	}
+	// want is computed ONLY on the branch that reads it. backupSpecOf renders a
+	// whole destination argv and takes a SHA-256 of it, and it used to run above
+	// this switch -- so every destination without redundancy, on every reconcile,
+	// paid for a hash of a command line that was then discarded by the early
+	// return below. That is the common case, not an edge one.
+	var want string
 	if wantsBackup(prev.row) {
+		want = backupSpecOf(prev.row, compiled, upstream)
 		if prev.backup != nil && prev.backupSpec == want {
 			return
 		}

@@ -6284,6 +6284,16 @@ func (e *Engine) Status() Status {
 		names[r.ID] = r.Name
 	}
 
+	// Indexed once instead of scanned twice per row. destByID is linear, and it
+	// was called with the same argument twice for every destination on a
+	// function that runs per WebSocket push and per telemetry tick.
+	byID := make(map[int64]*destination, len(dests))
+	for _, d := range dests {
+		if d.row != nil {
+			byID[d.row.ID] = d
+		}
+	}
+
 	// Every destination row appears, running or not, so the dashboard shows a
 	// disabled destination rather than silently omitting it.
 	rows, err := e.store.ListDestinations()
@@ -6298,11 +6308,15 @@ func (e *Engine) Status() Status {
 				ds.RenditionName = names[*row.RenditionID]
 			}
 			ds.FacebookBroadcastID = row.Facebook.BroadcastID
-			if live := e.destByID(dests, row.ID); live != nil {
+			// Looked up ONCE. This was two identical linear scans of the same
+			// list with the same argument, per row, on a function that runs per
+			// WebSocket push and per telemetry tick.
+			live := byID[row.ID]
+			if live != nil {
 				ds.BackupProcess = procStatus(live.backup)
 				ds.BackupError = live.backupErr
 			}
-			if live := e.destByID(dests, row.ID); live != nil {
+			if live != nil {
 				ds.Summary = live.compiled.Summary
 				ds.Tracks = live.compiled.Tracks
 				ds.FilterComplex = live.compiled.FilterComplex

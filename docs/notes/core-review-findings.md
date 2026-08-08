@@ -63,7 +63,11 @@ track of that layout, and a 2.1 source whose FL/FR are digital silence and whose
 LFE carries a 60 Hz tone now measures **−91.0 dB** at the output (silence)
 where it previously carried the tone at −7.7 dB.
 
-## Tier 2 — silently absent protections
+## Tier 2 — silently absent protections — **ALL FIXED**
+
+All nine fixed across `52efbff`, `5eac880` and `662202c`. Finding 8 was confirmed
+the same way Tier 1 was: the lock removed again, and `-race` naming both
+`c.last[pid]` and `subscriber.sendErrors`.
 
 | # | Where | Defect | Consequence |
 |---|---|---|---|
@@ -77,16 +81,16 @@ where it previously carried the tone at −7.7 dB.
 | 12 | `rtmpserver.go:836` | `HasSubscriber` counts map entries; a subscriber whose FFmpeg died while nothing was publishing stays parked in `serveSubscriber`'s select forever | `Ready` reads true for a stream with only a dead reader — the green-encoder-no-output failure, narrowed but not closed |
 | 13 | `srtserver.go:369` | `handlePublish` re-resolves the token but never re-checks `Enabled` the way `handleConnect` did | A source disabled in the connect-to-publish window is still admitted and delivers into the hub |
 
-## Tier 3 — performance, all quantified
+## Tier 3 — performance — **4 of 6 fixed, 2 declined with reasons**
 
-| Where | Cost |
-|---|---|
-| `relay.go:347` | `fanout` allocates a fresh `[]*subscriber` **per datagram** — ~1,900 allocations/sec per hub at 20 Mbit/s, × hub count, on the hottest path in the process |
-| `rtmpserver.go:696` | `pump` takes the server-wide `s.mu` per RTMP message and sends to every subscriber under it — one busy multitrack publisher degrades admission latency for all sources |
-| `rtmpserver.go:827` | `awaitReady` polls `lookup` at 10 Hz, and production `lookup` does a full `ListSources()` + map rebuild — ~60 DB reads per held publisher per grace window |
-| `engine.go:6361` | `onState` → `publishStatus` → `Status()` costs 3 DB queries plus a `routing.Compile` per non-running destination; a reconcile starting N destinations rebuilds the whole snapshot N times |
-| `engine.go:6217` | `Status` calls the linear `destByID` twice per row with the same argument |
-| `destinations.go:767` | `reconcileBackup` renders a full argv + SHA-256 above an early return that never reads it |
+| Where | Cost | Outcome |
+|---|---|---|
+| `relay.go:347` | `fanout` allocates a fresh `[]*subscriber` **per datagram** — ~1,900 allocations/sec per hub at 20 Mbit/s | **Fixed**, and the claim was **overstated**. Measured: Go's escape analysis kept that slice on the stack at 1, 4, 8 and 12 subscribers, and allocated only at 16 (128 B). The per-datagram *lock* was real at every count; both are now gone via a copy-on-write `atomic.Pointer` list |
+| `rtmpserver.go:827` | `awaitReady` polls `lookup` at 10 Hz, and production `lookup` does a full `ListSources()` + map rebuild — ~60 DB reads per held publisher per grace window | **Fixed.** Woken by the subscriber-attach event instead, with a 1 s backstop tick for the parts of `Ready` this package cannot observe. ~60 lookups → ~1–6, and the publisher is admitted the instant its ingest child arrives rather than up to a poll late |
+| `engine.go:6217` | `Status` calls the linear `destByID` twice per row with the same argument | **Fixed.** Indexed once into a map |
+| `destinations.go:767` | `reconcileBackup` renders a full argv + SHA-256 above an early return that never reads it | **Fixed.** Computed only on the branch that reads it — the discarded case was every destination without redundancy, on every reconcile |
+| `rtmpserver.go:696` | `pump` takes the server-wide `s.mu` per RTMP message | **Declined.** Real in shape, small in magnitude: an uncontended mutex is tens of nanoseconds and the lock is held for a map iterate plus non-blocking channel sends, against a few hundred messages a second. Fixing it properly means moving `subs`/`setup`/`slots`/`dropped` behind a per-stream lock across nine sites in the ingest admission path — a lock-order change on the hot path, for a win too small to justify it in the same pass as four correctness fixes to the same file. Worth doing on its own, with its own review |
+| `engine.go:6361` | `onState` → `publishStatus` → `Status()` costs 3 DB queries plus a `routing.Compile` per non-running destination; a reconcile starting N destinations rebuilds the whole snapshot N times | **Declined for now.** The `destByID` fix takes a bite out of it, but the real fix is coalescing status pushes, which changes when the UI sees updates. That is a behaviour change wearing a performance costume and belongs in its own change with its own way of being judged |
 
 ## Tier 4 — structure, behaviour-preserving
 

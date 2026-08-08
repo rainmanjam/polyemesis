@@ -45,6 +45,16 @@ type Hub struct {
 
 	mu   sync.RWMutex
 	subs map[string]*subscriber
+	// targets is the same set as subs, as a slice, for fanout to walk without
+	// taking a lock or allocating.
+	//
+	// fanout used to build a fresh []*subscriber under mu.RLock for EVERY
+	// datagram, which at 20 Mbit/s is around 1,900 allocations a second per
+	// hub, on the hottest path in the process, to produce a list that changes
+	// perhaps twice an hour. Replaced wholesale on each membership change and
+	// never mutated in place, so a reader holding the previous slice keeps
+	// reading a consistent one.
+	targets atomic.Pointer[[]*subscriber]
 
 	rxPackets atomic.Uint64
 	rxBytes   atomic.Uint64
@@ -211,6 +221,7 @@ func (h *Hub) SubscribeAddr(name string, ip net.IP, port int) string {
 		name: name,
 		addr: &net.UDPAddr{IP: ip, Port: port},
 	}
+	h.rebuildTargets()
 	h.log.Debug("relay subscriber added", "name", name, "addr", ip, "port", port, "total", len(h.subs))
 	return udpURL(ip, port)
 }
@@ -220,7 +231,21 @@ func (h *Hub) Unsubscribe(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.subs, name)
+	h.rebuildTargets()
 	h.log.Debug("relay subscriber removed", "name", name, "total", len(h.subs))
+}
+
+// rebuildTargets republishes the fanout list. Caller must hold mu for writing.
+//
+// A NEW slice every time, never an edit of the live one: fanout reads it with
+// no lock at all, so the slice it is walking has to stay valid for as long as
+// it holds it.
+func (h *Hub) rebuildTargets() {
+	next := make([]*subscriber, 0, len(h.subs))
+	for _, s := range h.subs {
+		next = append(next, s)
+	}
+	h.targets.Store(&next)
 }
 
 // Subscribers returns the current consumer names.
@@ -369,14 +394,14 @@ func (h *Hub) measure(dgram []byte) {
 }
 
 func (h *Hub) fanout(pkt []byte) {
-	h.mu.RLock()
-	targets := make([]*subscriber, 0, len(h.subs))
-	for _, s := range h.subs {
-		targets = append(targets, s)
+	// No lock and no allocation: the list is republished by rebuildTargets on
+	// the rare occasions it changes. Nil until the first subscriber.
+	tp := h.targets.Load()
+	if tp == nil {
+		return
 	}
-	h.mu.RUnlock()
 
-	for _, s := range targets {
+	for _, s := range *tp {
 		if _, err := h.conn.WriteToUDP(pkt, s.addr); err != nil {
 			h.dropped.Add(1)
 			// ECONNREFUSED on loopback just means the consumer has not bound

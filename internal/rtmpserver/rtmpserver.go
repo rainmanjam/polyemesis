@@ -303,7 +303,11 @@ type Server struct {
 	// waiters counts connections currently sitting in the readiness grace, per
 	// publisher slot. See maxWaitersPerKey.
 	waiters map[PublisherKey]int
-	done    chan struct{}
+	// subChange is closed and replaced whenever the subscriber set changes, so
+	// awaitReady is woken by the event it is waiting for rather than polling
+	// for it. See subscriberChanged.
+	subChange chan struct{}
+	done      chan struct{}
 }
 
 // New builds a server. It binds nothing until Start.
@@ -677,6 +681,8 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 	}
 	st.subs[sub] = struct{}{}
 	replay := append([]message.Message(nil), st.setup...)
+	// This is the event a held publisher is waiting for.
+	s.noteSubscriberChange()
 	s.mu.Unlock()
 
 	// No play-response sequence is written here, and that is deliberate.
@@ -703,6 +709,7 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 			if len(cur.subs) == 0 && s.live[key] == nil {
 				delete(s.streams, key)
 			}
+			s.noteSubscriberChange()
 		}
 		// Read under the lock that guards the writes, then log outside it.
 		// This is safe either way — the delete above means pump can no longer
@@ -961,14 +968,66 @@ func (s *Server) leaveWait(k PublisherKey) {
 // a stream start and far above the cost of a map lookup.
 func (s *Server) awaitReady(key string, grace time.Duration) (Target, bool) {
 	deadline := time.Now().Add(grace)
-	for time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-		fresh, found := s.lookup(key)
-		if found && fresh.Ready {
+	for {
+		// Taken BEFORE the lookup, so a subscriber attaching between the two is
+		// still seen: the channel is already closed by the time we select.
+		changed := s.subscriberChanged()
+
+		if fresh, found := s.lookup(key); found && fresh.Ready {
 			return fresh, true
 		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return Target{}, false
+		}
+		// Woken by the event, not by a clock. The thing being waited for is a
+		// subscriber attaching to THIS listener, which this package knows the
+		// moment it happens -- so the common case is one further lookup rather
+		// than sixty, and the publisher is admitted as soon as its ingest child
+		// arrives instead of up to a poll interval later.
+		//
+		// The slow tick stays as a backstop. Ready is computed by the engine
+		// from things this package cannot observe -- whether an engine exists,
+		// what the ingest mode is -- and none of those raise an event here.
+		if remaining > readyRecheck {
+			remaining = readyRecheck
+		}
+		timer := time.NewTimer(remaining)
+		select {
+		case <-changed:
+		case <-timer.C:
+		case <-s.done:
+			timer.Stop()
+			return Target{}, false
+		}
+		timer.Stop()
 	}
-	return Target{}, false
+}
+
+// readyRecheck bounds how long awaitReady sleeps between lookups when nothing
+// signals it. The event covers the case that actually happens; this covers the
+// rest at 1/10th the old rate.
+const readyRecheck = time.Second
+
+// subscriberChanged returns a channel closed the next time the subscriber set
+// changes. Taken before the caller's own check, so no change is missed.
+func (s *Server) subscriberChanged() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subChange == nil {
+		s.subChange = make(chan struct{})
+	}
+	return s.subChange
+}
+
+// noteSubscriberChange wakes everything waiting on the subscriber set. Caller
+// must hold s.mu.
+func (s *Server) noteSubscriberChange() {
+	if s.subChange != nil {
+		close(s.subChange)
+		s.subChange = nil
+	}
 }
 
 func (s *Server) HasSubscriber(sourceID int64, backup bool) bool {
