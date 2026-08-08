@@ -258,6 +258,19 @@ func (m *Manager) reconcileSharedIngest() {
 		(*rtmpserver.Server).Stop,
 		func(addr string) (*rtmpserver.Server, error) {
 			s := rtmpserver.New(m.log, addr, m.lookupStreamKey)
+			// PUBLISHED BEFORE Start, because Start begins accepting and the
+			// Ready gate in lookupStreamKey reads m.rtmp: between Start and the
+			// assignment below, a publisher that arrived would find rtmp == nil,
+			// score Ready false, and be refused by a listener that was up. The
+			// window is microseconds, but before Ready consulted the listener it
+			// did not exist at all.
+			//
+			// Setting it early is safe if Start fails: reconcileListener returns
+			// nil for the server on error and the assignment below overwrites
+			// this with that nil.
+			m.mu.Lock()
+			m.rtmp = s
+			m.mu.Unlock()
 			return s, s.Start()
 		})
 

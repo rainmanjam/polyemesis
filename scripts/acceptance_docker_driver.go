@@ -324,8 +324,16 @@ func listIDs() []int64 {
 func count() { fmt.Println(len(listIDs())) }
 
 func all(action string) {
+	// The status is CHECKED. This used to discard it and print _OK regardless,
+	// so a 500 on start-all was reported to the shell as success -- and steps
+	// 4c/4d call `drive startall` with its output redirected to /dev/null, so
+	// the only thing between that and a green run was a downstream byte-count
+	// assertion that not every caller has.
 	for _, id := range listIDs() {
-		do(http.MethodPost, fmt.Sprintf("/destinations/%d/%s", id, action), nil)
+		code, out := do(http.MethodPost, fmt.Sprintf("/destinations/%d/%s", id, action), nil)
+		if code != http.StatusOK && code != http.StatusNoContent && code != http.StatusAccepted {
+			die(fmt.Sprintf("%s destination %d failed: %d %s", action, id, code, out))
+		}
 	}
 	fmt.Println(strings.ToUpper(action) + "_OK")
 }

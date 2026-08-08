@@ -309,10 +309,30 @@ type Engine struct {
 	// most common ingest of all. Recording the mode makes the invalidation
 	// conditional on an actual change, which is the thing that matters.
 	measuredMode db.IngestMode
-	videoInfo    *ffmpeg.VideoStream
-	levels       ffmpeg.Levels
-	levelsAt     time.Time
-	settings     db.Settings
+	// sourceGen increments every time e.source is reset to the placeholder --
+	// ingest start, and an ingest-mode change. It exists because a probe is not
+	// instantaneous: ffmpeg.Probe runs with a 10s timeout, and probeOnce commits
+	// its result long after it read the stream.
+	//
+	// Without it, the mode-change invalidation above is defeated by the very
+	// race it was added for. Switch a probed RTMP source to SRT while a probe of
+	// the old RTMP data is in flight: reconcileIngest clears measured and
+	// restores the placeholder, then the stale probe lands, writes the RTMP
+	// track list into e.source, and stamps measuredMode from the CURRENT
+	// settings -- SRT. The guard is then permanently satisfied by a layout the
+	// dead transport delivered, and destinations compile against it.
+	//
+	// So probeOnce captures this before it reads and discards its own result if
+	// it changed underneath. Same protection for a same-mode ingest restart,
+	// which measuredMode alone cannot see at all.
+	sourceGen uint64
+	// probeFailed is set while probes are failing, so the warning is logged on
+	// the transition rather than on every 3s retry.
+	probeFailed atomic.Bool
+	videoInfo   *ffmpeg.VideoStream
+	levels      ffmpeg.Levels
+	levelsAt    time.Time
+	settings    db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
@@ -1053,7 +1073,9 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	if e.measured && e.measuredMode != s.Ingest.Mode {
 		e.probed = false
 		e.measured = false
+		e.measuredMode = db.IngestUnset
 		e.source = routing.DefaultSource()
+		e.sourceGen++
 	}
 	e.mu.Unlock()
 
@@ -1128,13 +1150,20 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	e.mu.Lock()
 	e.ingest = proc
 	e.ingestSig = sig
-	// A new ingest means the previous layout is stale. This is THE place
-	// measured goes false, because it is the only place the placeholder goes
-	// back into e.source — the idle clear in probeLoop drops probed but keeps
-	// the layout, and a layout that was measured stays measured.
+	// A new ingest means the previous layout is stale. One of two places the
+	// placeholder goes back into e.source (the other invalidates on an
+	// ingest-mode change, above); both bump sourceGen and both clear measured.
+	// probeLoop's idle branch does NEITHER on purpose -- it drops probed but
+	// keeps the layout, because a layout that was measured stays measured.
 	e.probed = false
 	e.measured = false
+	// Cleared with it, so "measuredMode is the mode e.source was measured
+	// under" holds at every instant rather than only while measured is true.
+	// Leaving it set is inert -- the guard is gated on measured -- but a stale
+	// value here is what made the probe-resurrection race hard to see.
+	e.measuredMode = db.IngestUnset
 	e.source = routing.DefaultSource()
+	e.sourceGen++
 	e.mu.Unlock()
 
 	proc.Start()
@@ -4702,9 +4731,26 @@ func (e *Engine) probeLoop(ctx context.Context) {
 				// derived from it. The recorder is in this list only when it
 				// is writing stems, which are planned one per probed track —
 				// its signature is unchanged otherwise, so this costs nothing.
+				//
+				// UNDER reconcileMu, which this used to skip. Reconcile holds it
+				// end to end (see the field comment); this path is the only other
+				// production caller of reconcileOutputs, and unserialised the two
+				// now DISAGREE where they used to agree. `measured` flips inside
+				// the probeOnce just above, so a Reconcile that snapshotted
+				// measured=false is still mid-pass holding an empty plan set
+				// while this pass sees measured=true and starts every
+				// destination -- then that pass reaches stopDestinations({}) and
+				// tears down everything this one just started. Nothing restarts
+				// them: the layout is stable so no later probe reports `changed`,
+				// and Reconcile is event-driven with no ticker.
+				//
+				// Taken HERE, not inside reconcileOutputs: Reconcile already
+				// holds it when it calls that, and the mutex is not reentrant.
+				e.reconcileMu.Lock()
 				e.reconcileMeters(e.Settings())
 				e.reconcileRecorder(e.Settings())
 				_ = e.reconcileOutputs()
+				e.reconcileMu.Unlock()
 				e.publishStatus()
 			}
 			e.mu.RLock()
@@ -4744,12 +4790,34 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	url := e.hub.Subscribe(name, port)
 	defer e.hub.Unsubscribe(name)
 
+	// Captured BEFORE the read, checked before the write. Everything between is
+	// up to ten seconds during which the ingest can be restarted or switched to
+	// another transport; see sourceGen.
+	e.mu.RLock()
+	gen := e.sourceGen
+	e.mu.RUnlock()
+
 	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	res, err := ffmpeg.Probe(pctx, e.tools.FFprobe, url, 3)
 	if err != nil {
+		// SAY SO. This used to return silently, and silence here is expensive:
+		// destinations are held until a probe lands, so a probe that can never
+		// land (missing ffprobe, an unusable stream) leaves every destination
+		// down with nothing anywhere explaining why.
+		//
+		// Logged once per run of failures rather than every time. probeLoop
+		// retries on a 3s cadence while bytes are flowing, and an unconditional
+		// line here would bury the rest of the log within minutes.
+		if !e.probeFailed.Swap(true) {
+			e.log.Warn("ingest probe failed; destinations are held until a layout is measured",
+				"err", err, "source", e.sourceID)
+		}
 		return false
+	}
+	if e.probeFailed.Swap(false) {
+		e.log.Info("ingest probe recovered", "source", e.sourceID)
 	}
 	// A probe that succeeded and found no audio is a RESULT, not a failure, and
 	// it used to be thrown away here. It is the only evidence that an ingest is
@@ -4779,6 +4847,14 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	// started before the first probe is running on the assumed rate.
 	changed := !sameSource(e.source, src) || !e.probed ||
 		probedFPS(e.videoInfo) != probedFPS(res.Video)
+	if e.sourceGen != gen {
+		// The ingest was restarted or switched while this probe was reading, so
+		// what it measured belongs to a stream that is no longer arriving.
+		// Committing it would mark a dead transport's layout `measured` under
+		// the new mode and satisfy the guard permanently.
+		e.mu.Unlock()
+		return false
+	}
 	e.source = src
 	e.probed = true
 	e.measured = true

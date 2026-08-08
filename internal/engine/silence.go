@@ -62,18 +62,28 @@ func synthTrack() routing.Source {
 
 // wantSilence reports whether the tier should be running, and its signature.
 //
-// An empty signature means "not wanted". The probe must have SUCCEEDED and
-// reported zero tracks: `probed` false covers an ingest nobody has streamed to
-// yet and a probe that could not run, and neither is evidence of anything. That
+// An empty signature means "not wanted". A probe must have SUCCEEDED and
+// reported zero tracks: unmeasured covers an ingest nobody has streamed to yet
+// and a probe that could not run, and neither is evidence of anything. That
 // asymmetry is the whole safety argument for this tier.
+//
+// MEASURED, not probed, and the difference is a bug this used to have. `probed`
+// means "a layout is arriving right now", and probeLoop clears it a few rounds
+// after a stream stops while deliberately leaving e.source alone. So a
+// video-only source that went idle stopped wanting silence, the tier was torn
+// down, and reconcileOutputs then planned against e.source's ZERO tracks with
+// no synthTrack() substitution -- routing.Compile answers ErrNoAudio for that,
+// and every destination on the source was torn down for as long as the encoder
+// was quiet. `measured` is set only by a successful probe, so it carries the
+// same evidence while surviving the idle gap.
 func (e *Engine) wantSilence(s db.Settings) string {
 	if !s.Synth.SilenceOnVideoOnly {
 		return ""
 	}
 	e.mu.RLock()
-	probed, tracks := e.probed, len(e.source.Tracks)
+	measured, tracks := e.measured, len(e.source.Tracks)
 	e.mu.RUnlock()
-	if !probed || tracks != 0 {
+	if !measured || tracks != 0 {
 		return ""
 	}
 	// Nothing configurable feeds the command line yet, so the signature is a
