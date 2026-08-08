@@ -59,7 +59,7 @@ func TestAMeasuredLayoutSurvivesTheEncoderGoingQuiet(t *testing.T) {
 // is reporting DefaultSource(), and compiling that into a command line asks
 // FFmpeg to map streams that do not exist.
 func TestAnUnmeasuredLayoutIsStillUnknown(t *testing.T) {
-	e := &Engine{source: routing.DefaultSource()}
+	e := &Engine{sourceState: sourceState{source: routing.DefaultSource()}}
 	if _, known := e.effectiveSourceKnown(); known {
 		t.Error("the placeholder layout was reported as known; every process built " +
 			"from it maps streams the ingest does not carry, and FFmpeg refuses to start")

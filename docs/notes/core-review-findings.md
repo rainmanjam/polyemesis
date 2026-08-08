@@ -92,17 +92,30 @@ the same way Tier 1 was: the lock removed again, and `-race` naming both
 | `rtmpserver.go:696` | `pump` takes the server-wide `s.mu` per RTMP message | **Declined.** Real in shape, small in magnitude: an uncontended mutex is tens of nanoseconds and the lock is held for a map iterate plus non-blocking channel sends, against a few hundred messages a second. Fixing it properly means moving `subs`/`setup`/`slots`/`dropped` behind a per-stream lock across nine sites in the ingest admission path — a lock-order change on the hot path, for a win too small to justify it in the same pass as four correctness fixes to the same file. Worth doing on its own, with its own review |
 | `engine.go:6361` | `onState` → `publishStatus` → `Status()` costs 3 DB queries plus a `routing.Compile` per non-running destination; a reconcile starting N destinations rebuilds the whole snapshot N times | **Declined for now.** The `destByID` fix takes a bite out of it, but the real fix is coalescing status pushes, which changes when the UI sees updates. That is a behaviour change wearing a performance costume and belongs in its own change with its own way of being judged |
 
-## Tier 4 — structure, behaviour-preserving
+## Tier 4 — structure, behaviour-preserving — **ALL DONE**
 
-The strongest is the second: findings 9 and at least three already fixed are all
-*"this reader picked the wrong one of these five fields."* Today that discipline
-is fifty lines of comment.
+All five landed with no behaviour change: the full suite and `go test -race ./...`
+are green before and after. `engine.go` went from **6,530 to 3,881 lines**.
 
-1. **`sourceState` type** — move `source/probed/measured/measuredMode/sourceGen/videoInfo` behind `layoutForProcessBuilding() (Source, bool)` and `layoutForDisplay()`, plus `commitProbe/invalidateForMode/clearProbed`. Makes the wrong read **unspellable**.
-2. **`selector.go`** — extract the selector/failover tier from `engine.go` (~2400–3700). Finding 6 is invisible only because both tiers live in one file; a boundary forces "who holds `selMu` across the silence swap" into a signature.
-3. **`status.go`** — `Status`/`Renditions`/`SourceInfo`/`destByID` take `e.mu` five separate times and the DB three, so the snapshot is not internally consistent.
-4. **`setup.go`** (rtmpserver) — the setup cache is a self-contained value type; extracting it lets the E-RTMP multitrack slotting be tested without a Server or a handshake.
-5. **`ports.go`** (relay) — `PortAllocator` shares no state or concept with `Hub`.
+1. **`sourceState` type** — `source/probed/measured/measuredMode/sourceGen/videoInfo` are now one type with `layoutForProcessBuilding() (Source, bool)`, `layoutForDisplay()`, `arrivingNow()`, `commitProbe`, `invalidate` and `clearProbed`. Embedded anonymously, so all ~100 existing reads still compile and only composite literals needed touching. **Every raw mutation site in production is gone.**
+2. **`selector.go`** — 2,346 lines: the selector, backup listener, playlist tier and operator failover controls.
+3. **`status.go`** — 320 lines: `Status`/`Renditions`/`SourceInfo`/`destByID`/`Processes`. The file comment states the un-fixed part plainly — the snapshot is still assembled from several instants, and this is where that gets fixed when something needs it to be atomic.
+4. **`setup.go`** (rtmpserver) — 180 lines, and it is now a pure value type: nothing in it touches a socket, a lock or a `Server`.
+5. **`ports.go`** (relay) — `PortAllocator`, which shared no state or concept with `Hub`.
+
+**A correction to my own framing.** #1 was written as "makes the wrong read
+**unspellable**". Go cannot do that: anything in the package can still write
+`e.probed`. What the type actually delivers is one place that owns the invariant,
+two questions with names that cannot be mistaken for each other, and the correct
+read being the shorter one to write. The file says so rather than claiming the
+guarantee.
+
+The refactor did buy one real guarantee, though. `TestDestinationsAreNotPlanned…`
+used to assert the measured/placeholder pairing by **counting text occurrences**
+in `engine.go` — a proxy that had already broken once when a second legitimate
+invalidation site appeared. It is now structural: `invalidate()` is the only
+thing in the package that does either half, it does both, and the test fails if
+any other file assigns either on its own.
 
 ## Verified clean
 
