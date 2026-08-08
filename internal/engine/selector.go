@@ -1127,7 +1127,23 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	respawn := active == want
 
 	e.teardownFeed(cur)
-	feed := e.startFeed(s, want, upstream, silenceSig, now)
+	// AFTER the teardown, not before it. teardownFeed blocks on proc.Stop for
+	// as long as the outgoing process takes to exit -- up to stopTimeout, which
+	// is 12 seconds.
+	//
+	// The feed's offset becomes -output_ts_offset, which pins its timeline to
+	// that number rather than to when its frames actually appear. So a time
+	// captured before the teardown starts the incoming feed BEHIND where the
+	// outgoing one's timestamps had reached, by exactly the length of the stop.
+	// That is a backwards DTS at the seam, and a platform answers a backwards
+	// jump by dropping the connection -- the failover tier failing at the one
+	// thing it exists to do.
+	//
+	// `now` is still what the bookkeeping below records: feedAt and switchedAt
+	// describe when the DECISION was taken, which is the right thing for a
+	// backoff and for what the UI shows. Only the timeline needs the later one.
+	startedAt := time.Now()
+	feed := e.startFeed(s, want, upstream, silenceSig, startedAt)
 
 	e.mu.Lock()
 	if e.sel != nil {
@@ -1303,6 +1319,21 @@ func (e *Engine) sourceHubPort() int {
 		return h.Port()
 	}
 	return 0
+}
+
+// feedOffset is a feed's -output_ts_offset: how far into the tier's own life it
+// is starting.
+//
+// Isolated so the seam arithmetic can be tested without processes. `at` must be
+// the moment the feed ACTUALLY starts, not the moment the swap was decided --
+// see ensureFeed, where the difference between those two is the length of a
+// blocking teardown and therefore the size of a backwards step at the seam.
+func feedOffset(tierStart, at time.Time) float64 {
+	o := at.Sub(tierStart).Seconds()
+	if o < 0 {
+		return 0
+	}
+	return o
 }
 
 // detachFeedForSilence stops the primary feed when the silence tier under it is
