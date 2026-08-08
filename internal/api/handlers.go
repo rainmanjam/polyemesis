@@ -298,6 +298,15 @@ type versionInfo struct {
 	Comparable  bool   `json:"comparable"`
 	CheckedAt   string `json:"checkedAt,omitempty"`
 	CheckFailed bool   `json:"checkFailed,omitempty"`
+	// OnAir is what a restart would interrupt, reported alongside the version so
+	// the answer to "should I upgrade now" arrives with the answer to "is there
+	// an upgrade". Two round trips would let a UI show an enabled button while
+	// a broadcast was starting between them.
+	OnAir engine.OnAir `json:"onAir"`
+	// OnAirSummary is the sentence to show, empty when nothing is at stake. The
+	// server owns the wording because the same refusal has to reach a terminal
+	// as well as a browser, and two phrasings is how they come to disagree.
+	OnAirSummary string `json:"onAirSummary,omitempty"`
 }
 
 // handleVersion reports the running build plus whatever a previous check found.
@@ -343,6 +352,14 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) versionInfo() versionInfo {
 	info := versionInfo{Version: s.version}
+	// Surveyed on EVERY call, including the ones that return before the cache
+	// is consulted. What is on air changes minute to minute; the release feed
+	// changes weekly, and caching them together would let a stale "nothing is
+	// live" outlive the broadcast it described.
+	if s.mgr != nil {
+		info.OnAir = s.mgr.OnAir()
+		info.OnAirSummary = info.OnAir.Summary()
+	}
 
 	updateCache.Lock()
 	defer updateCache.Unlock()

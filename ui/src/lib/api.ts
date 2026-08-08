@@ -70,7 +70,8 @@ import type {
   HookDelivery,
   HookTestResult,
   HookCreated,
-  HookTrigger
+  HookTrigger,
+  VersionInfo,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -227,6 +228,13 @@ export const api = {
   media: () => get<MediaFile[]>("/media"),
   deleteMedia: (name: string) => del<void>(`/media/${encodeURIComponent(name)}`),
   uploadMedia,
+
+  // --- version ---
+  /** The cached answer. Never triggers a network call to GitHub on its own. */
+  version: () => get<VersionInfo>("/version"),
+  /** Asks the server to consult the release feed. Rate-limited server-side by a
+   *  6h TTL, so calling this on a click is safe. */
+  checkUpdate: () => post<VersionInfo>("/version/check"),
 
   // --- setup & auth ---
   setupStatus: () =>
