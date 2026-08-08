@@ -127,11 +127,36 @@ on all four cases; srtserver admission throughout (per-`PublisherKey` slots,
 takeover re-checked under lock, passphrase both directions); `destinations.go`
 spec-hash discipline; lock order `previewMu → selMu → mu` consistent at every site.
 
-## Deferred — the standing list, verified 2026-08-07
+## Deferred — the standing list — **ALL NINE FIXED**
 
-Everything below was checked against the code on this branch, not copied from an
-earlier note. Nine of the eleven items in `review-2026-08-07.md` are now fixed;
-that document's status column is stale and this table supersedes it.
+Fixed in `a54d4a3`, then corrected in `da69fba` after codex and agy reviewed it
+adversarially. **Both led with the same finding: the headline fix did not work.**
+probeLoop reconciles only on a layout CHANGE, and a probe failure is not one, so
+the hold's exit flipped its state, logged that destinations were starting, and
+planned nothing. A fix for a permanent outage that was itself permanently inert.
+
+Four more real defects came out of that review — an identified-nothing probe
+resetting the counter it should have incremented, a failure history carried
+across an ingest-mode change, a matrix collapsed to its largest cell gain, and a
+mid-session grace three seconds clear of the token-rotation stop deadline. Two
+things they raised I had already fixed while they ran. One claim was **refuted**
+by compiling the case rather than reading it: a fully-muted matrix track is not
+un-muted provisionally, because zero-gain cells are dropped before the gain is
+ever consulted.
+
+D1 and D8 turned out to be one fix, and it is the interesting one. The hold
+existed because a guessed channel matrix is SILENTLY wrong. `aformat=channel_layouts=stereo`
+asks libswresample to negotiate the fold against the layout that actually
+arrives, so the guess stops being silent — and once it is audible, running beats
+not running. Measured on a 5.1 source with a tone only on centre: the guessed
+matrix delivers **−91.0 dB**, digital silence; the provisional graph delivers
+**−28.7 dB**, which is the tone times the BS.775 centre coefficient.
+
+The first version of that test built its fixture with a bare `join`, which
+silently put the tone on FR — so it passed while measuring the wrong channel and
+its failure message would have been a lie.
+
+Below is the list as it stood before any of this, for the record.
 
 | # | Where | What | Severity | Why deferred |
 |---|---|---|---|---|
