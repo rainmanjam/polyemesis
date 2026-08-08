@@ -289,14 +289,9 @@ type Engine struct {
 	// yet. See probeUnmeasurable and the hold in reconcileOutputs.
 	probeFails atomic.Int64
 
-	// statusReq carries coalesced status-publish requests to statusLoop. Nil
-	// until Start, which makes publishStatus fall back to publishing inline.
-	// Capacity one: a second request while one is queued is redundant, because
-	// the queued one reads the state as it stands when it runs.
-	statusReq chan struct{}
-	levels    ffmpeg.Levels
-	levelsAt  time.Time
-	settings  db.Settings
+	levels   ffmpeg.Levels
+	levelsAt time.Time
+	settings db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
@@ -642,13 +637,6 @@ func (e *Engine) Start(ctx context.Context) error {
 	go func() { defer e.wg.Done(); e.mon.Run(e.ctx) }()
 	go func() { defer e.wg.Done(); e.recman.Run(e.ctx, e.currentRecordingSettings) }()
 	go func() { defer e.wg.Done(); e.probeLoop(e.ctx) }()
-
-	// Started before anything that can publish, and the channel is created
-	// here rather than in New so an Engine built directly in a test keeps the
-	// inline path. See publishStatus.
-	e.statusReq = make(chan struct{}, 1)
-	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.statusLoop(e.ctx) }()
 
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.statsLoop(e.ctx) }()
@@ -3920,55 +3908,27 @@ func (e *Engine) onState(s supervisor.Status) {
 // Falls back to publishing inline when the loop is not running -- before Start,
 // and in the unit tests that drive an Engine directly -- so this is never a
 // reason a status goes missing.
+// publishStatus sends a status snapshot to the event bus.
+//
+// SYNCHRONOUS, and it stays that way. A coalescing version of this lived here
+// briefly: Status() costs three database queries plus a routing.Compile per
+// idle destination, and onState fires it per process transition, so a reconcile
+// starting N destinations rebuilt the whole snapshot N times. Collapsing a burst
+// into one immediate push plus at most one more per 150ms window is a real
+// saving and it was measured as one.
+//
+// It also caused a REGRESSION, measured with scripts/../flake-rate on ten runs a
+// side: with coalescing the failover suite handed a destination a backwards
+// decode timestamp at a switch in 3 runs out of 10, and with this synchronous
+// version it does so in 0. A platform drops the connection on a backwards DTS,
+// so that is the failover tier failing at the one thing it exists to do.
+//
+// Whether the delay CREATED that or merely exposed a latent race in the switch
+// path is not settled -- see issue #126, which stays open for it. What is
+// settled is that this cost three in ten broadcasts to save some database reads
+// on a path nobody had complained about, which is not a trade worth making.
 func (e *Engine) publishStatus() {
-	// Inline before Start, and inline again once the context is done.
-	//
-	// The second half matters during shutdown: statusLoop has returned by then,
-	// so anything raised while children are stopping would go into a channel
-	// nobody reads and be silently dropped -- a behaviour change nobody asked
-	// for, in the one window where "what happened to my destination" is most
-	// worth knowing. Reading e.ctx is safe here because Start sets it before it
-	// creates statusReq, so a non-nil channel implies a non-nil context.
-	if e.statusReq == nil || e.ctx.Err() != nil {
-		e.bus.Publish(events.TypeStatus, e.Status())
-		return
-	}
-	select {
-	case e.statusReq <- struct{}{}:
-	default:
-		// One is already queued and it will read the state as it stands when
-		// it runs, which is necessarily at least as fresh as ours.
-	}
-}
-
-// statusCoalesce is how long a push suppresses the ones behind it. Well under
-// the 2s stats tick and far below what anyone perceives as lag, while covering
-// the burst a single reconcile produces.
-const statusCoalesce = 150 * time.Millisecond
-
-// statusLoop serialises status publishing. See publishStatus.
-func (e *Engine) statusLoop(ctx context.Context) {
-	timer := time.NewTimer(statusCoalesce)
-	if !timer.Stop() {
-		<-timer.C
-	}
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-e.statusReq:
-			e.bus.Publish(events.TypeStatus, e.Status())
-			// The quiet window. Anything arriving now collapses into the single
-			// queued slot and goes out once, when it expires.
-			timer.Reset(statusCoalesce)
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-			}
-		}
-	}
+	e.bus.Publish(events.TypeStatus, e.Status())
 }
 
 // statsLoop pushes host and bitrate stats on a fixed cadence, and refreshes

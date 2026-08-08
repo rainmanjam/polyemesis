@@ -108,6 +108,13 @@ that is present in name and absent in effect.
   attaching instead of polling the database sixty times, and the status snapshot
   no longer scans its destination list twice per row.
 
+  One optimisation was tried and **withdrawn**. Coalescing status pushes onto a
+  150 ms window is a genuine saving, and it cost three broadcasts in ten: with it
+  the failover suite handed a destination a backwards decode timestamp at a
+  switch in 3 runs out of 10, measured against 0 in 10 without it. A platform
+  drops the connection on a backwards DTS, which is the failover tier failing at
+  the one thing it exists to do. See issue #126.
+
 Earlier in the same review, four defects in the per-destination audio routing:
 
 Four defects in the per-destination audio routing, all of them audible, all
