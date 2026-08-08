@@ -97,6 +97,26 @@ The ones with operator-visible consequences:
 - A probe that could never succeed — a missing ffprobe, an unidentifiable
   stream — held every destination down and said nothing at all. It now says so.
 
+### Installer
+
+- **The installer now offers to serve HTTPS on 443, and opens it.** The port was
+  asked for before the TLS mode was chosen, so an operator picked one without
+  yet knowing they would be serving HTTPS at all — and the default 8080 gave a
+  working but unlovely install where every link carried a port and nothing
+  listened on the one people try first. Offered only when the port is still the
+  untouched default; a port given on the command line or typed at the prompt is
+  a decision and is left alone. The firewall rule follows the chosen port rather
+  than opening 443 unconditionally, because a port nothing binds looks like
+  working TLS and serves nothing.
+
+- **`CAP_NET_BIND_SERVICE` is granted for any privileged port, not only for
+  ACME.** It used to be gated on `tls.mode: acme`, which covered the `:80`
+  challenge and missed the web UI itself: selfsigned is the DEFAULT choice, so
+  an operator taking the 443 offer would have got a unit that could not bind the
+  port the installer had just written into its own `ExecStart` — `bind:
+  permission denied`, on a fresh install, from following the prompts.
+
+
 ### Testing
 
 - The cross-platform smoke test now publishes over **E-RTMP and SRT** as well as
