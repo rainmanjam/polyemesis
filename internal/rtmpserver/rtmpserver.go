@@ -403,6 +403,33 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	target, found := s.lookup(key)
+	// A "not ready" verdict gets a GRACE WAIT before it is believed.
+	//
+	// Ready means a subscriber is attached, and the ingest child that provides
+	// one is a supervised FFmpeg with no reconnect flags: it EXITS whenever its
+	// publisher does, and the supervisor respawns it on a 500ms-5s backoff. So
+	// the ordinary case of an encoder reconnecting after a network blip arrives
+	// exactly while there is no subscriber -- and refusing it there turns a
+	// recoverable hiccup into a dropped broadcast, because RTMP carries no
+	// typed rejection and the encoder just sees a failed connect.
+	//
+	// Waiting costs a held TCP connection for at most readyGrace. Refusing
+	// costs an operator their stream. The wait only happens on the one verdict
+	// it can help: an unknown key or a disabled source is answered immediately,
+	// so this cannot be used to hold connections open against the listener.
+	if verdict := admit(target, found); verdict == refuseNotReady {
+		// The handshake deadline has to be pushed out first. It is set before
+		// the handshake and not cleared until admission succeeds, so waiting
+		// here spends the SAME budget the handshake already drew on: a slow
+		// handshake plus a full grace would blow it, and the session would be
+		// admitted and then fail its first read with i/o timeout. Extended by
+		// the grace rather than cleared, so a publisher that never becomes
+		// ready is still bounded.
+		_ = conn.SetDeadline(time.Now().Add(handshakeTimeout + readyGrace))
+		if t2, ok := s.awaitReady(key, readyGrace); ok {
+			target, found = t2, true
+		}
+	}
 	if verdict := admit(target, found); verdict != admitPublish {
 		if verdict == refuseUnknownKey {
 			// Deliberately says nothing about WHY, and never logs the key nor
@@ -781,6 +808,31 @@ func setupSlot(msg message.Message) (string, bool) {
 // SAFE TO CALL FROM A Lookup. The lookup runs before this server takes s.mu on
 // both the publish and the subscribe path, so re-entering here does not
 // deadlock. Anything that changes that ordering has to revisit this.
+// readyGrace bounds how long a publisher holding a valid key is held while its
+// ingest child comes back. Chosen to cover the supervisor's MaxBackoff of 5s
+// for the ingest process, plus a moment for the subscriber to attach.
+const readyGrace = 6 * time.Second
+
+// awaitReady re-asks the lookup until the target reports Ready or the grace
+// expires. It returns the fresh target, because Ready is computed by the engine
+// and a stale copy would say nothing new.
+//
+// Polls rather than waits on a condition: the state it is watching is owned by
+// the engine, not by this package, and a channel here would mean the engine had
+// to know a listener was waiting on it. 100ms is far below human perception of
+// a stream start and far above the cost of a map lookup.
+func (s *Server) awaitReady(key string, grace time.Duration) (Target, bool) {
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		fresh, found := s.lookup(key)
+		if found && fresh.Ready {
+			return fresh, true
+		}
+	}
+	return Target{}, false
+}
+
 func (s *Server) HasSubscriber(sourceID int64, backup bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
