@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
+
+import { UpdateBanner } from "./UpdateBanner";
 import {
   Activity,
   AudioLines,
@@ -121,6 +123,8 @@ export function AppLayout({
   return (
     <div className="flex h-dvh flex-col bg-surface">
       {/* ---- top bar: the always-visible answer to "am I on air?" ---- */}
+      <UpdateBanner />
+
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
         <Button
           variant="ghost"

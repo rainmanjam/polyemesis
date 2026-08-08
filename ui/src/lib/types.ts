@@ -1117,6 +1117,24 @@ export interface ApiToken {
   lastUsedAt: string;
 }
 
+/** What GET /version and POST /version/check return.
+ *
+ *  `latest`, `releaseUrl` and `checkedAt` stay empty until a check has actually
+ *  run: the server never contacts GitHub on its own, which is deliberate for
+ *  self-hosted software and is a property worth not breaking from this side. */
+export interface VersionInfo {
+  version: string;
+  latest?: string;
+  releaseUrl?: string;
+  updateAvailable: boolean;
+  /** False when either side is not a semantic version -- a dev build or a
+   *  commit hash. The tag found is still reported, because "there is a v1.4.0,
+   *  work out whether you have it" beats saying nothing. */
+  comparable: boolean;
+  checkedAt?: string;
+  checkFailed?: boolean;
+}
+
 export interface FFmpegTools {
   ffmpeg: string;
   ffprobe: string;
