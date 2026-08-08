@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -14,14 +16,61 @@ import (
 // fakeFFprobe is a tiny executable rather than a mock: probeOnce deliberately
 // owns the process boundary, and these regressions need to hold a probe in
 // flight on the far side of that boundary.
-func fakeFFprobe(t *testing.T, script string) string {
+//
+// COMPILED, not written as a shell script. The first version wrote `#!/bin/sh`
+// with no extension, which every Unix runs and Windows cannot exec at all --
+// both tests failed there with "timed out waiting for the probe", which reads
+// like a race that only manifests on Windows rather than a fixture that never
+// ran. The behaviour is driven by environment variables so one binary serves
+// both tests:
+//
+//	FAKE_PROBE_JSON     what to print on stdout
+//	FAKE_PROBE_ENTERED  a file to create on entry, if set
+//	FAKE_PROBE_RELEASE  a file to wait for before printing, if set
+func fakeFFprobe(t *testing.T, src string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "ffprobe")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o700); err != nil {
-		t.Fatalf("write fake ffprobe: %v", err)
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(srcPath, []byte(src), 0o600); err != nil {
+		t.Fatalf("write fake ffprobe source: %v", err)
 	}
-	return path
+	bin := filepath.Join(dir, "ffprobe")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	out, err := exec.Command("go", "build", "-o", bin, srcPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("build fake ffprobe: %v\n%s", err, out)
+	}
+	return bin
 }
+
+// fakeProbeSource is the one program both tests compile. Kept here rather than
+// in a testdata file so the behaviour and the tests that rely on it are read
+// together.
+const fakeProbeSource = `package main
+
+import (
+	"fmt"
+	"os"
+	"time"
+)
+
+func main() {
+	if p := os.Getenv("FAKE_PROBE_ENTERED"); p != "" {
+		_ = os.WriteFile(p, []byte("x"), 0o600)
+	}
+	if p := os.Getenv("FAKE_PROBE_RELEASE"); p != "" {
+		for {
+			if _, err := os.Stat(p); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	fmt.Println(os.Getenv("FAKE_PROBE_JSON"))
+}
+`
 
 const stereoProbeJSON = `{"streams":[{"codec_name":"h264","codec_type":"video","width":1280,"height":720,"avg_frame_rate":"30/1"},{"codec_name":"aac","codec_type":"audio","channels":2,"channel_layout":"stereo","sample_rate":"48000"}]}`
 
@@ -53,7 +102,8 @@ func TestProbeLoopQueuesItsOutputReconcileBehindAnOlderEmptyPlan(t *testing.T) {
 		t.Fatalf("CreateDestination: %v", err)
 	}
 
-	e.tools.FFprobe = fakeFFprobe(t, "printf '%s\\n' '"+stereoProbeJSON+"'\n")
+	e.tools.FFprobe = fakeFFprobe(t, fakeProbeSource)
+	t.Setenv("FAKE_PROBE_JSON", stereoProbeJSON)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -140,11 +190,10 @@ func TestProbeOnceDiscardsAResultFromBeforeAnIngestModeChange(t *testing.T) {
 	entered := filepath.Join(t.TempDir(), "probe-entered")
 	release := filepath.Join(t.TempDir(), "probe-release")
 	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
-	e.tools.FFprobe = fakeFFprobe(t, "touch \"$PROBE_ENTERED\"\n"+
-		"while [ ! -f \"$PROBE_RELEASE\" ]; do sleep 0.01; done\n"+
-		"printf '%s\\n' '"+stereoProbeJSON+"'\n")
-	t.Setenv("PROBE_ENTERED", entered)
-	t.Setenv("PROBE_RELEASE", release)
+	e.tools.FFprobe = fakeFFprobe(t, fakeProbeSource)
+	t.Setenv("FAKE_PROBE_JSON", stereoProbeJSON)
+	t.Setenv("FAKE_PROBE_ENTERED", entered)
+	t.Setenv("FAKE_PROBE_RELEASE", release)
 
 	old := db.DefaultSettings()
 	old.Ingest.Mode = db.IngestRTMP
