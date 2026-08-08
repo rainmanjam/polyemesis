@@ -13,7 +13,11 @@ import (
 type ProbeResult struct {
 	Video *VideoStream  `json:"video"`
 	Audio []AudioStream `json:"audio"`
-	Raw   string        `json:"-"`
+	// DurationSeconds is the container's own duration, and is 0 for a live
+	// input -- a relay that never ends has no duration to report, which is the
+	// case this type was written for. It is meaningful for a file.
+	DurationSeconds float64 `json:"durationSeconds"`
+	Raw             string  `json:"-"`
 }
 
 // VideoStream describes the (single) video track, which polyemesis only ever
@@ -53,6 +57,9 @@ type ffprobeOutput struct {
 		AvgFrameRate  string            `json:"avg_frame_rate"`
 		Tags          map[string]string `json:"tags"`
 	} `json:"streams"`
+	Format struct {
+		Duration string `json:"duration"`
+	} `json:"format"`
 }
 
 // Probe inspects a live input and reports its track layout. It is what turns
@@ -77,6 +84,42 @@ func Probe(ctx context.Context, ffprobeBin, input string, timeoutSeconds int) (*
 	return ParseProbe(out)
 }
 
+// ProbeFile inspects a file on disk rather than a live relay.
+//
+// Separate from Probe because ProbeArgs is built for the ingest: it runs the
+// input through RelayInputURL, which appends "?fifo_size=…&overrun_nonfatal=1".
+// On a UDP URL those are options; on a path they become part of the filename,
+// and ffprobe goes looking for a file whose name ends in a query string. It
+// also inflates -analyzeduration for a stream that has to be watched before it
+// will admit what it carries, which a file does not.
+//
+// The error is returned verbatim rather than folded into a generic "could not
+// read this". Somebody who uploaded the wrong thing is best served by ffprobe's
+// own words about it.
+func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, error) {
+	cmd := exec.CommandContext(ctx, ffprobeBin,
+		"-hide_banner",
+		"-loglevel", "error",
+		"-print_format", "json",
+		"-show_streams",
+		"-show_format",
+		"-i", path,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		stderr := ""
+		if ok := asExitError(err, &ee); ok {
+			stderr = strings.TrimSpace(string(ee.Stderr))
+		}
+		if stderr != "" {
+			return nil, fmt.Errorf("%s", truncate(stderr, 300))
+		}
+		return nil, err
+	}
+	return ParseProbe(out)
+}
+
 // ParseProbe converts ffprobe JSON into a ProbeResult. Split out so it can be
 // tested against captured fixtures without a live stream.
 func ParseProbe(raw []byte) (*ProbeResult, error) {
@@ -86,6 +129,13 @@ func ParseProbe(raw []byte) (*ProbeResult, error) {
 	}
 
 	res := &ProbeResult{Raw: string(raw), Audio: []AudioStream{}}
+	// Absent, empty and "N/A" all mean the same thing here and all parse to
+	// zero, which is the honest answer for a live input. A caller that needs to
+	// distinguish "no duration" from "zero-length" has a file and should check
+	// for a stream instead.
+	if d, err := strconv.ParseFloat(strings.TrimSpace(p.Format.Duration), 64); err == nil && d > 0 {
+		res.DurationSeconds = d
+	}
 	audioIdx := 0
 	for _, s := range p.Streams {
 		switch s.CodecType {

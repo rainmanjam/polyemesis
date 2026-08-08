@@ -2195,6 +2195,25 @@ export interface MediaFile {
   /** Paste into a pull source. Relative to the data directory, which is what
    *  ffmpeg's file:// handling resolves against. */
   pullUrl: string;
+  /** What ffprobe found when the file was accepted. Absent for anything stored
+   *  before uploads were probed, so render nothing rather than zeroes. */
+  media?: MediaInfo;
+}
+
+/** MediaInfo is a stored upload's probe result, as the Library shows it. */
+export interface MediaInfo {
+  durationSeconds: number;
+  videoCodec: string;
+  width: number;
+  height: number;
+  frameRate: number;
+  /** The count routing cares about: selecting track 3 of a file that carries
+   *  one is silence on air, and the Library is where to notice beforehand. */
+  audioTracks: number;
+  audioCodec: string;
+  audioChannels: number;
+  audioLayout: string;
+  probedAt: string;
 }
 
 /* --------------------------------------------------------------- automod --
