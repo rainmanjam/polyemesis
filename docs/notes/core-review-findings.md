@@ -126,3 +126,21 @@ duck *trigger* never reaches `[aout]` — executed and confirmed; `continuity.ad
 on all four cases; srtserver admission throughout (per-`PublisherKey` slots,
 takeover re-checked under lock, passphrase both directions); `destinations.go`
 spec-hash discipline; lock order `previewMu → selMu → mu` consistent at every site.
+
+## Deferred — the standing list, verified 2026-08-07
+
+Everything below was checked against the code on this branch, not copied from an
+earlier note. Nine of the eleven items in `review-2026-08-07.md` are now fixed;
+that document's status column is stale and this table supersedes it.
+
+| # | Where | What | Severity | Why deferred |
+|---|---|---|---|---|
+| D1 | `engine.go:1785`, `silence.go:86` | **The hold has no exit when a probe can never succeed.** `holdDests := !measured && silenceSig == ""`, and `wantSilence` itself requires `measured` — so a broken or missing ffprobe leaves every destination down permanently, with the silence tier unable to lift it | **High** | The silence tier closed the video-only half. This half needs a distinct answer — a probe-failure state that is neither "measured" nor "unknown" — and that is a design decision, not a patch |
+| D2 | `manager.go`, `rtmpserver.go` | **`Ready` is never enforced mid-session.** Checked once at admission; if the ingest child dies afterwards, `pump` drops every message into an empty subscriber set for the rest of the session | Medium | `watchPeer` narrowed it again this pass — a dead reader is now reaped. What remains needs the publisher to be *dropped* mid-session, which is a policy call about whose stream gets cut |
+| D3 | `rtmpserver.go:657` | **An empty `stream` is not reaped on publisher disconnect**, only when a subscriber leaves. Bounded at one entry per `PublisherKey` | Low | Bounded and reused by any future subscriber on the same key. Fable already downgraded this from the claimed unbounded leak |
+| D4 | `routing/profile.go:30` | **`MaxChannels = 8` bounds matrix cell indices but not simple mode**, so a width you can route is a width you cannot address cell-by-cell | Low | Raising it is a UI change — the channel grid is built against it. The audible half is closed |
+| D5 | `rtmpserver.go` `pump` | **Server-wide lock per RTMP message** | Low | Real in shape, small in magnitude. Fixing it properly is a lock-order change across nine sites in the ingest admission path |
+| D6 | `status.go` | **`onState` → `publishStatus` → `Status()` costs 3 DB queries plus a `routing.Compile` per non-running destination**, N times per reconcile | Low | The real fix is coalescing status pushes, which changes when the UI updates — a behaviour change wearing a performance costume |
+| D7 | `status.go` | **The status snapshot is assembled from several instants**, not one: `Status`/`Renditions`/`SourceInfo` each take `e.mu` separately and each hit the database | Low | Nothing observed has needed it to be atomic. Recorded in the file comment so the next person does not have to rediscover it |
+| D8 | `cold-start-hold-solutions.md` | **Solution C: build fallback graphs with a BS.775 fold** rather than `c0=c0\|c1=c1`, so a wrong layout guess degrades audibly instead of silently dropping dialogue | Medium | agy's recommendation, still sound. Tier 1 fixed the *real* layouts; this is about the placeholder path |
+| D9 | SonarCloud | **`S2068` fires on 37 i18n strings** and will fail the next locale PR | Low | Needs a project-level exclusion, which is a settings change outside this repo |
