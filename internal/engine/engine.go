@@ -1282,8 +1282,17 @@ func stemPlanSig(plan []recording.Stem) string {
 // `0:a` wholesale, which is correct whatever arrives, and an operator who
 // switched recording on wants the programme captured from the first frame
 // -- waiting for a probe would lose the opening seconds for nothing.
-func stemPlanFor(rec db.RecordingSettings, src routing.Source, probed bool) []recording.Stem {
-	if !rec.Stems || !probed {
+// stemPlanFor derives the per-track stem outputs from the ingest layout.
+//
+// known means e.source is a measurement rather than the placeholder, which is
+// the only thing that makes PlanStems' output real. It used to be `probed`,
+// which asks whether a stream is arriving right now — so an encoder going quiet
+// for a few seconds emptied the plan, changed the recorder signature, and
+// restarted the recorder WITHOUT stems mid-outage, then restarted it a second
+// time when the probe came back. Two segment splits and a hole in the stems for
+// every blip, from a layout that never actually changed.
+func stemPlanFor(rec db.RecordingSettings, src routing.Source, known bool) []recording.Stem {
+	if !rec.Stems || !known {
 		return nil
 	}
 	return recording.PlanStems(src, rec.StemCodec)
@@ -1295,7 +1304,10 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	// Read here rather than through e.Source(): that takes the same RLock, and
 	// this function holds it again further down.
 	src := e.source
-	probed := e.probed
+	// The recorder reads e.hub — the INGEST relay, not the downstream one — so
+	// the layout that matters is the ingest's own, and the silence tier never
+	// stands in for it here. measured is what says e.source holds one.
+	measured := e.measured
 	e.mu.RUnlock()
 	src = e.annotate(src)
 
@@ -1307,7 +1319,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		}
 		return
 	}
-	plan := stemPlanFor(s.Recording, src, probed)
+	plan := stemPlanFor(s.Recording, src, measured)
 	sig := strconv.Itoa(s.Recording.SegmentSeconds) + "|" +
 		strconv.FormatBool(s.Recording.Stems) + "|" + string(s.Recording.StemCodec) + "|" +
 		stemPlanSig(plan)

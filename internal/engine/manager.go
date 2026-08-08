@@ -500,11 +500,20 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 		// serveSubscriber about subscribe-before-publish being the normal order.
 		eng := m.Engine(s.ID)
 		subscribed := rtmp != nil && rtmp.HasSubscriber(s.ID, false)
+		// Pending is the same expression WITHOUT the subscriber: an engine
+		// exists and the mode says reconcileIngest will dial this listener, so
+		// a missing subscriber is a child in the middle of respawning rather
+		// than a permanent state. That distinction is the listener's whole
+		// basis for deciding a not-ready verdict is worth waiting on -- an
+		// SRT-mode source is registered here too, and waiting for one to become
+		// RTMP-ready is waiting forever.
+		expected := eng != nil && s.Ingest.Mode == db.IngestRTMP
 		primary := rtmpserver.Target{
 			SourceID: s.ID,
 			Name:     s.Name,
 			Enabled:  s.Enabled,
-			Ready:    eng != nil && s.Ingest.Mode == db.IngestRTMP && subscribed,
+			Ready:    expected && subscribed,
+			Pending:  expected,
 		}
 		primaries[s.ID] = primary
 		for _, tok := range s.ValidTokens(now) {
@@ -537,6 +546,11 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 			// green-encoder-no-output failure Ready exists to prevent, fixed for
 			// the primary in this same change and missed here.
 			Ready: rtmp != nil && rtmp.HasSubscriber(s.ID, true),
+			// Reaching here already means the engine exists and failover is
+			// configured to use RTMP, which are exactly the conditions under
+			// which a backup subscriber gets spawned. The two `continue`s above
+			// are what would otherwise have made this false.
+			Pending: true,
 		}
 		for _, tok := range s.ValidTokens(now) {
 			targets[tok+backupTokenSuffix] = backup

@@ -143,7 +143,19 @@ func (e *Engine) effectiveSource() routing.Source {
 func (e *Engine) effectiveSourceKnown() (routing.Source, bool) {
 	e.mu.RLock()
 	src, live := e.source, e.silence != nil && e.silence.hub != nil
-	probed := e.probed
+	// MEASURED, not probed. The question here is whether e.source is a
+	// measurement or the placeholder, and that is exactly what measured
+	// answers: the two invalidation sites put DefaultSource() back and clear
+	// measured together, so one is true if and only if the other is.
+	//
+	// probed asks something different -- is a stream arriving RIGHT NOW -- and
+	// probeLoop's idle branch clears it after three quiet rounds while
+	// deliberately leaving the layout alone, because a layout that was measured
+	// stays measured. Reading it here meant that roughly nine seconds into any
+	// outage the meters were torn down, the captioner was rebuilt against an
+	// unknown layout, and the API's routing preview started calling a real
+	// measured layout placeholder-derived.
+	known := e.measured
 	e.mu.RUnlock()
 	if live {
 		src = synthTrack()
@@ -153,7 +165,7 @@ func (e *Engine) effectiveSourceKnown() (routing.Source, bool) {
 	// layout gets them too: a single tier track can still be labelled, and
 	// dropping them would make a role exclusion silently stop applying the
 	// moment the ingest lost its video.
-	return e.annotate(src), probed || live
+	return e.annotate(src), known || live
 }
 
 // reconcileSilence starts, stops or leaves the tier alone.

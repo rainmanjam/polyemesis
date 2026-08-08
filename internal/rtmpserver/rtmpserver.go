@@ -90,6 +90,20 @@ type Target struct {
 	// OBS and no output with nothing anywhere saying why. Refusing is the worse
 	// experience and the better diagnosis.
 	Ready bool
+
+	// Pending says a subscriber is EXPECTED here, so a false Ready may be
+	// transient and is worth waiting on. It is what makes the readiness grace
+	// safe to have at all.
+	//
+	// Without it the grace applied to every not-ready verdict, and a target is
+	// registered for every source whatever its ingest mode. So any valid token
+	// for an SRT-mode source was found, enabled, and permanently not ready --
+	// which meant every RTMP connect to it burned the full grace before being
+	// refused, in parallel, for a state that could never change. The comment on
+	// the grace claimed this could not be used to hold connections open. It
+	// could, and this is what makes the claim true: only a target whose
+	// subscriber is actually on its way is ever waited for.
+	Pending bool
 }
 
 // PublisherKey is a publisher slot on this listener: one per (source, role).
@@ -251,6 +265,9 @@ type Server struct {
 	ln      net.Listener
 	live    map[PublisherKey]*session
 	streams map[PublisherKey]*stream
+	// waiters counts connections currently sitting in the readiness grace, per
+	// publisher slot. See maxWaitersPerKey.
+	waiters map[PublisherKey]int
 	done    chan struct{}
 }
 
@@ -262,6 +279,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		lookup:  lookup,
 		live:    map[PublisherKey]*session{},
 		streams: map[PublisherKey]*stream{},
+		waiters: map[PublisherKey]int{},
 		done:    make(chan struct{}),
 	}
 }
@@ -414,10 +432,16 @@ func (s *Server) handle(conn net.Conn) {
 	// typed rejection and the encoder just sees a failed connect.
 	//
 	// Waiting costs a held TCP connection for at most readyGrace. Refusing
-	// costs an operator their stream. The wait only happens on the one verdict
-	// it can help: an unknown key or a disabled source is answered immediately,
-	// so this cannot be used to hold connections open against the listener.
-	if verdict := admit(target, found); verdict == refuseNotReady {
+	// costs an operator their stream.
+	//
+	// Three things keep that from being a way to hold connections open. An
+	// unknown key or a disabled source is answered immediately. Target.Pending
+	// means only a source whose RTMP subscriber is genuinely on its way is ever
+	// waited for -- an SRT-mode source's token is refused at once, because no
+	// amount of waiting will make it ready. And waiters are capped per
+	// publisher slot, so the one legitimate reconnect gets its grace while a
+	// flood against the same key does not multiply it.
+	if verdict := admit(target, found); verdict == refuseNotReady && target.Pending && s.enterWait(target.Key()) {
 		// The handshake deadline has to be pushed out first. It is set before
 		// the handshake and not cleared until admission succeeds, so waiting
 		// here spends the SAME budget the handshake already drew on: a slow
@@ -426,7 +450,9 @@ func (s *Server) handle(conn net.Conn) {
 		// the grace rather than cleared, so a publisher that never becomes
 		// ready is still bounded.
 		_ = conn.SetDeadline(time.Now().Add(handshakeTimeout + readyGrace))
-		if t2, ok := s.awaitReady(key, readyGrace); ok {
+		t2, ok := s.awaitReady(key, readyGrace)
+		s.leaveWait(target.Key())
+		if ok {
 			target, found = t2, true
 		}
 	}
@@ -812,6 +838,46 @@ func setupSlot(msg message.Message) (string, bool) {
 // ingest child comes back. Chosen to cover the supervisor's MaxBackoff of 5s
 // for the ingest process, plus a moment for the subscriber to attach.
 const readyGrace = 6 * time.Second
+
+// maxWaitersPerKey bounds how many connections may sit in the readiness grace
+// for the same publisher slot at once.
+//
+// The grace exists for one encoder reconnecting into the window where its
+// ingest child is respawning, which needs exactly one waiter -- two allows for
+// an encoder that retried before its first attempt gave up. Past that the extra
+// connections are not a reconnect, and holding them multiplies one valid key
+// into an arbitrary number of held sockets. Beyond the cap the old behaviour
+// applies: refused immediately, which is what happened to every connection
+// before the grace existed.
+const maxWaitersPerKey = 2
+
+// enterWait claims a waiter slot for a publisher key, reporting whether one was
+// available. Every true must be paired with a leaveWait.
+func (s *Server) enterWait(k PublisherKey) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.waiters == nil {
+		s.waiters = map[PublisherKey]int{}
+	}
+	if s.waiters[k] >= maxWaitersPerKey {
+		return false
+	}
+	s.waiters[k]++
+	return true
+}
+
+func (s *Server) leaveWait(k PublisherKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.waiters[k] <= 1 {
+		// Deleted rather than left at zero: the map is keyed by source and a
+		// long-lived install would otherwise accumulate one entry per source
+		// that ever reconnected.
+		delete(s.waiters, k)
+		return
+	}
+	s.waiters[k]--
+}
 
 // awaitReady re-asks the lookup until the target reports Ready or the grace
 // expires. It returns the fresh target, because Ready is computed by the engine
