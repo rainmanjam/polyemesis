@@ -66,16 +66,49 @@ func TestProvisionalStillAppliesPerTrackGain(t *testing.T) {
 	}
 }
 
-func TestTrackGainPicksTheLargestMatrixCell(t *testing.T) {
-	p := Profile{Mode: ModeMatrix, SampleRate: 48000, Matrix: []Cell{
-		{Track: 0, Channel: 0, Out: OutL, Gain: 0.4},
+// Matrix mode gets UNITY, not a scalar stand-in for the matrix.
+//
+// The first version used the largest cell gain, reasoning that overstating is
+// safer than understating. Both reviewers rejected it for the same reason, and
+// they were right: a matrix of "c0 to L at 0.25" and "c1 to R at 1.5" is not
+// "the track at 1.5". Collapsing it boosts the intended left contribution
+// six-fold and leaks each channel into the opposite leg -- a different mix, not
+// an approximate one. Unity plus a warning that says what is not being applied
+// is the honest version.
+func TestMatrixModeGetsUnityGainProvisionally(t *testing.T) {
+	p := Profile{Mode: ModeMatrix, Normalize: NormOff, SampleRate: 48000, Matrix: []Cell{
+		{Track: 0, Channel: 0, Out: OutL, Gain: 0.25},
 		{Track: 0, Channel: 1, Out: OutR, Gain: 1.5},
-		{Track: 1, Channel: 0, Out: OutL, Gain: 0.9},
 	}}
-	if got := trackGain(p, 0); got != 1.5 {
-		t.Errorf("trackGain(track 0) = %v, want 1.5", got)
+	if got := trackGain(p, 0); got != 1 {
+		t.Errorf("trackGain(track 0) = %v, want 1: no scalar can stand in for a matrix", got)
 	}
-	if got := trackGain(p, 9); got != 1 {
+
+	res, err := CompileProvisional(p, DefaultSource())
+	if err != nil {
+		t.Fatalf("CompileProvisional: %v", err)
+	}
+	if strings.Contains(res.FilterComplex, "volume=") {
+		t.Errorf("a matrix profile emitted a stand-in gain:\n%s", res.FilterComplex)
+	}
+	// And the operator is told exactly what is not happening.
+	joined := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{"matrix is NOT being applied", "per-channel routing"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the matrix warning does not mention %q; got:\n%s", want, joined)
+		}
+	}
+}
+
+// Simple mode DOES have a per-track gain, and it means the same thing whatever
+// the layout, so it carries through.
+func TestSimpleModeGainCarriesThroughProvisionally(t *testing.T) {
+	p := simple(NormOff, 0)
+	p.Tracks[0].Gain = 0.5
+	if got := trackGain(p, 0); got != 0.5 {
+		t.Errorf("trackGain = %v, want 0.5", got)
+	}
+	if got := trackGain(p, 99); got != 1 {
 		t.Errorf("trackGain of an unmentioned track = %v, want 1", got)
 	}
 }
@@ -158,4 +191,70 @@ func TestProvisionalKeepsCentreUnderRealFFmpeg(t *testing.T) {
 			got, guessed, res.FilterComplex)
 	}
 	t.Logf("5.1, tone on centre only: guessed matrix %.1f dB, provisional %.1f dB", guessed, got)
+}
+
+// The duck's key tap must get the SAME fold as the mix legs.
+//
+// duckGraph builds a separate tap for a trigger track that is not itself in the
+// mix, and it built that tap from the guessed matrix even in provisional mode --
+// so on a wide track the detector listened to channels 0 and 1 while the mix
+// heard a proper fold. Two different signals, one ducking the other.
+func TestProvisionalDuckTapGetsTheSameFoldAsTheMix(t *testing.T) {
+	p := simple(NormOff, 1)
+	p.Ducking = &Ducking{Trigger: []int{0}, Target: []int{1}}
+
+	res, err := CompileProvisional(p, DefaultSource())
+	if err != nil {
+		t.Fatalf("CompileProvisional: %v", err)
+	}
+	if strings.Contains(res.FilterComplex, "pan=stereo") {
+		t.Errorf("the duck key tap still uses a guessed pan matrix:\n%s", res.FilterComplex)
+	}
+	// Both the mix leg and the key tap present.
+	if n := strings.Count(res.FilterComplex, ProvisionalFilter); n < 2 {
+		t.Errorf("expected a runtime downmix on both the mix leg and the key tap, got %d:\n%s",
+			n, res.FilterComplex)
+	}
+	if !strings.Contains(res.FilterComplex, "sidechaincompress") {
+		t.Errorf("ducking was lost in the provisional path:\n%s", res.FilterComplex)
+	}
+}
+
+// Warnings about a matrix that is not being applied are noise, and they would
+// bury the one warning that is true.
+func TestProvisionalDropsWarningsAboutTheUnusedMatrix(t *testing.T) {
+	// A saved 5.1 matrix meeting the placeholder, which claims two channels.
+	p := Profile{Mode: ModeMatrix, Normalize: NormAuto, SampleRate: 48000}
+	p.Matrix = CellsForTrack(0, Track{Index: 0, Channels: 6, Layout: "5.1"}, 1.0)
+
+	res, err := CompileProvisional(p, DefaultSource())
+	if err != nil {
+		t.Fatalf("CompileProvisional: %v", err)
+	}
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "is ignored") || strings.Contains(w, "quieter") {
+			t.Errorf("a warning about the unused matrix survived: %q", w)
+		}
+	}
+	if len(res.Warnings) != 1 {
+		t.Errorf("expected exactly the provisional warning, got %d: %v",
+			len(res.Warnings), res.Warnings)
+	}
+}
+
+// Role exclusion is a decision about TRACKS, so it must still apply.
+func TestProvisionalStillHonoursRoleExclusion(t *testing.T) {
+	src := annotate(DefaultSource(), TrackAnnotation{Track: 1, Role: RoleMusic})
+	p := simple(NormOff, 0, 1)
+	p.ExcludeRoles = []TrackRole{RoleMusic}
+
+	res, err := CompileProvisional(p, src)
+	if err != nil {
+		t.Fatalf("CompileProvisional: %v", err)
+	}
+	if strings.Contains(res.FilterComplex, "[0:a:1]") {
+		t.Errorf("an excluded track reached a provisional graph -- this is the DMCA "+
+			"switch, and it must not stop working because a probe failed:\n%s",
+			res.FilterComplex)
+	}
 }

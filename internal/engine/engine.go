@@ -1079,6 +1079,12 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 			// and it has to be told its result is stale.
 			e.sourceGen++
 		}
+		// The failure history belongs to the OLD transport. Without this, five
+		// failed RTMP probes followed by a switch to SRT started destinations
+		// provisionally on the very next reconcile, before a single SRT probe
+		// had been attempted -- and the SRT path returns early without
+		// replacing the ingest child, so the reset at ingest start never runs.
+		e.probeFails.Store(0)
 	}
 	e.mu.Unlock()
 
@@ -2505,7 +2511,18 @@ func (e *Engine) probeLoop(ctx context.Context) {
 		next := fast
 		if flowing {
 			idleRounds = 0
-			if changed := e.probeOnce(ctx); changed {
+			// The hold's exit is a STATE TRANSITION, not a layout change, and
+			// reconciling only on `changed` left the exit inert.
+			//
+			// probeOnce returns false on every failure, so the fifth one -- the
+			// one that declares the layout unmeasurable -- looked identical to
+			// the four before it. The log line went out, and nothing re-planned:
+			// destinations stayed held until some unrelated HTTP request
+			// happened to call Reconcile, which on an unattended box is never.
+			// The fix for a permanent outage that was itself permanently inert.
+			wasUnmeasurable := e.probeUnmeasurable()
+			changed := e.probeOnce(ctx)
+			if changed || e.probeUnmeasurable() != wasUnmeasurable {
 				// Layout changed: the meters process and every destination
 				// graph were built against the old one, and a rendition that
 				// inherits the source frame rate has a keyframe interval
@@ -2603,7 +2620,6 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		}
 		return false
 	}
-	e.probeFails.Store(0)
 	if e.probeFailed.Swap(false) {
 		e.log.Info("ingest probe recovered", "source", e.sourceID)
 	}
@@ -2618,8 +2634,20 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	if res.Video == nil && len(res.Audio) == 0 {
 		// Neither video nor audio is not a video-only stream, it is a probe that
 		// read a few packets of something it could not identify yet.
+		//
+		// COUNTS TOWARD GIVING UP. A probe that ran and identified nothing is
+		// exactly as unmeasurable as one that could not run, and this is the
+		// "unidentifiable stream" case the hold's exit was written for. The
+		// reset used to sit above this return, so this branch cleared the
+		// counter on every attempt and it could never reach probeGiveUp --
+		// which left the one shape the exit most needed to cover wedged in the
+		// hold forever. Both reviewers found it independently.
+		e.probeFails.Add(1)
 		return false
 	}
+	// Reset only once there is a real result to commit. Anything that returns
+	// before this point failed to measure the layout, whatever the reason.
+	e.probeFails.Store(0)
 
 	src := routing.Source{}
 	for _, a := range res.Audio {
@@ -3893,7 +3921,15 @@ func (e *Engine) onState(s supervisor.Status) {
 // and in the unit tests that drive an Engine directly -- so this is never a
 // reason a status goes missing.
 func (e *Engine) publishStatus() {
-	if e.statusReq == nil {
+	// Inline before Start, and inline again once the context is done.
+	//
+	// The second half matters during shutdown: statusLoop has returned by then,
+	// so anything raised while children are stopping would go into a channel
+	// nobody reads and be silently dropped -- a behaviour change nobody asked
+	// for, in the one window where "what happened to my destination" is most
+	// worth knowing. Reading e.ctx is safe here because Start sets it before it
+	// creates statusReq, so a non-nil channel implies a non-nil context.
+	if e.statusReq == nil || e.ctx.Err() != nil {
 		e.bus.Publish(events.TypeStatus, e.Status())
 		return
 	}

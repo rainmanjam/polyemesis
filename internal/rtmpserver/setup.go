@@ -76,10 +76,21 @@ func (st *stream) resetSetup() {
 	defer st.mu.Unlock()
 	st.setup = nil
 	st.slots = map[string]int{}
+	// The empty-subscriber clock belongs to a SESSION, not to the slot.
+	//
+	// A stream that sat with no subscriber for a while keeps its emptySince, and
+	// resetSetup runs as a publisher is admitted. Left alone, a publisher whose
+	// subscriber dropped a moment after admission would be disconnected on its
+	// very first message against a clock that started before it existed, instead
+	// of getting the fifteen seconds the grace is for.
+	st.emptySince = time.Time{}
 }
 
 // cacheSetup records a stream-configuration message for replay to late
 // subscribers, replacing any earlier message occupying the same slot.
+//
+// CALLER MUST HOLD st.mu. Unlike resetSetup, which locks internally, this runs
+// on the per-message path where pump already holds the lock for the fan-out.
 func (st *stream) cacheSetup(msg message.Message) {
 	slot, ok := setupSlot(msg)
 	if !ok || !isSetup(msg) {

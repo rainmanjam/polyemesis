@@ -813,10 +813,17 @@ const readyGrace = 6 * time.Second
 // it is disconnected. See the mid-session readiness check in pump.
 //
 // Longer than readyGrace on purpose. That one is a publisher waiting to be let
-// in and costs a held socket; this one ends a broadcast that is already on air,
-// so it waits out a full ingest respawn and then some before concluding that
-// nothing is coming back.
-const subscriberGrace = 15 * time.Second
+// in and costs a held socket; this one ends a broadcast that is already on air.
+//
+// Sized against the SLOWEST legitimate gap, which is a token rotation, not an
+// ordinary respawn. Rotating a token changes the ingest signature, so the engine
+// stops the old child on a 12-second deadline and only then starts its
+// replacement, which must boot and subscribe. At 15 seconds that left about
+// three seconds of margin and a slow stop would have disconnected a perfectly
+// healthy encoder for an administrative change nobody thought was risky. 45
+// seconds clears the whole sequence with room, and still turns "streaming into
+// the void forever" into something bounded.
+const subscriberGrace = 45 * time.Second
 
 // maxWaitersPerKey bounds how many connections may sit in the readiness grace
 // for the same publisher slot at once.

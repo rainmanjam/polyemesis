@@ -89,6 +89,19 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	res := Result{OutLabel: OutLabel}
 
 	cells, warns := resolveCells(p, src)
+	if provisional {
+		// Those warnings describe a matrix that is NOT being applied. Against
+		// the placeholder every track claims two channels, so a saved 5.1
+		// profile produces four "channel N is ignored" lines and a level drop
+		// in dB -- all of it about coefficients this compile is replacing with a
+		// runtime downmix. Reporting them would bury the one warning that is
+		// true under four that are not.
+		//
+		// Which TRACKS contribute is still decided by the cells above, and that
+		// part survives: the placeholder carries every track, so a track is
+		// dropped here only if the profile never selected it.
+		warns = nil
+	}
 	selected := len(cells)
 	cells, exWarns := applyRolePolicy(p, src, cells)
 	warns = dedupe(append(warns, exWarns...))
@@ -130,7 +143,7 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	// trigger down along with everything else.
 	legs := make([]string, 0, len(tracks))
 	if d, ok := p.EffectiveDucking(); ok {
-		duckChains, duckLegs, duckWarns := duckGraph(d, src, tracks, label)
+		duckChains, duckLegs, duckWarns := duckGraph(d, src, tracks, label, provisional)
 		chains = append(chains, duckChains...)
 		legs = duckLegs
 		if len(duckWarns) > 0 {
@@ -191,31 +204,40 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	res.Summary = summarize(tracks)
 	if provisional {
 		res.Provisional = true
-		res.Warnings = dedupe(append(res.Warnings,
-			"the ingest layout could not be measured, so each track is being downmixed by FFmpeg at runtime instead of by this profile's matrix; levels and channel assignment are approximate until a probe succeeds"))
+		note := "the ingest layout could not be measured, so each track is being downmixed by FFmpeg at runtime; levels are approximate until a probe succeeds"
+		if p.Mode == ModeMatrix {
+			// Sharper, because more is being given up. A matrix says which
+			// CHANNEL goes where, and with the layout unknown none of that can
+			// be honoured -- a track carrying two languages is summed rather
+			// than separated. An operator has to be told that specifically.
+			note = "the ingest layout could not be measured, so this destination's mix matrix is NOT being applied: each track is downmixed to stereo by FFmpeg at runtime, per-channel routing and per-cell gains are ignored, and a track carrying different content on left and right is summed"
+		}
+		res.Warnings = dedupe(append(res.Warnings, note))
 	}
 	return res, nil
 }
 
-// trackGain is the per-track gain a provisional chain has to apply by hand,
-// because it is not folding it into a matrix.
+// trackGain is the per-track gain a provisional chain applies by hand, because
+// it is not folding one into a matrix.
 //
-// Matrix mode has no single per-track gain -- it has a gain per cell -- so the
-// largest is used. Overstating is the safer direction: the limiter is downstream
-// and NormAuto now looks at the peak, whereas understating would quietly attenuate
-// a destination for as long as the probe kept failing.
+// Simple mode HAS a per-track gain and it means the same thing whatever the
+// layout, so it carries through unchanged.
+//
+// Matrix mode does not, and no scalar can stand in for one. The first version
+// used the largest cell gain on the reasoning that overstating is safer, and
+// both reviewers rejected it for the same reason: a matrix of `c0 to L at 0.25`
+// and `c1 to R at 1.5` is not "the track at 1.5". Collapsing it boosts the
+// intended left contribution six-fold AND leaks each channel into the opposite
+// leg, which is a different mix rather than an approximate one.
+//
+// So matrix mode gets unity, and the warning says the per-cell routing is not
+// being applied. Channel isolation genuinely cannot survive here -- a dual-mono
+// track carrying English left and Spanish right WILL be summed while the layout
+// is unknown -- and the honest thing is to say so rather than to pick a number
+// that makes it look considered.
 func trackGain(p Profile, track int) float64 {
 	if p.Mode == ModeMatrix {
-		g := 0.0
-		for _, c := range p.Matrix {
-			if c.Track == track && c.Gain > g {
-				g = c.Gain
-			}
-		}
-		if g == 0 {
-			return 1
-		}
-		return g
+		return 1
 	}
 	for _, sel := range p.Tracks {
 		if sel.Track == track {
@@ -303,7 +325,7 @@ const DenoiseFilter = "afftdn=nr=12:nf=-25:tn=1"
 // legs. Returning no legs means nothing was ducked and the caller should mix as
 // usual; that is the deliberate response to a duck that cannot be built, since
 // an un-ducked mix is still the operator's audio and a broken graph is silence.
-func duckGraph(d Ducking, src Source, tracks []int, label map[int]string) (chains, legs, warns []string) {
+func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provisional bool) (chains, legs, warns []string) {
 	inMix := map[int]bool{}
 	for _, t := range tracks {
 		inMix[t] = true
@@ -350,7 +372,16 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string) (chain
 		// sidechaincompress inputs always agree on channel layout, and denoise
 		// it if it is annotated: room noise opening the duck is precisely the
 		// failure the annotation exists to prevent.
-		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, trackChain(src, t, CellsForTrack(t, tr, 1.0)), keyLbl))
+		// The same fold the mix legs get. In provisional mode that is the
+		// runtime downmix, not a guessed matrix: building the key from
+		// placeholder channel counts would take channels 0 and 1 of a wide
+		// track where the mix takes a proper fold, so the detector would be
+		// listening to a different signal than the one being ducked.
+		tap := trackChain(src, t, CellsForTrack(t, tr, 1.0))
+		if provisional {
+			tap = provisionalChain(src, t, 1)
+		}
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, tap, keyLbl))
 		keys = append(keys, keyLbl)
 	}
 
