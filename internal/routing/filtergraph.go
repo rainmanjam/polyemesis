@@ -30,6 +30,10 @@ type Result struct {
 	// Warnings are non-fatal mismatches between the profile and the live
 	// source (e.g. the profile wants track 4 but the ingest sends three).
 	Warnings []string `json:"warnings"`
+	// Provisional reports that this graph was built WITHOUT a measured layout,
+	// so each track is folded to stereo by FFmpeg at runtime rather than by the
+	// matrix the operator drew. See CompileProvisional.
+	Provisional bool `json:"provisional,omitempty"`
 	// VideoDelayMS is how long the *video* must be held back, in milliseconds,
 	// to satisfy a negative Profile.DelayMS. Audio cannot be moved earlier than
 	// it arrives, so pulling audio ahead of picture is only expressible as
@@ -58,6 +62,26 @@ type Result struct {
 // (or, for denoise, the source annotation) asked for it, so a profile that uses
 // none of them produces the string above byte for byte.
 func Compile(p Profile, src Source) (Result, error) {
+	return compile(p, src, false)
+}
+
+// CompileProvisional builds the same graph for a layout that has NOT been
+// measured, replacing every guessed pan matrix with a runtime downmix.
+//
+// It exists so that "we cannot probe this ingest" stops being a permanent
+// outage. The layout guard refuses to plan destinations against the placeholder
+// because a guessed matrix is silently wrong, not because it is wrong -- see
+// ProvisionalFilter. Once the wrongness is audible instead of silent, running is
+// better than not running.
+//
+// Result.Provisional is set, and every caller that surfaces warnings will show
+// one, because an operator has to know the mix is being decided by FFmpeg at
+// runtime rather than by the matrix they drew.
+func CompileProvisional(p Profile, src Source) (Result, error) {
+	return compile(p, src, true)
+}
+
+func compile(p Profile, src Source, provisional bool) (Result, error) {
 	if err := p.Validate(); err != nil {
 		return Result{}, err
 	}
@@ -95,7 +119,11 @@ func Compile(p Profile, src Source) (Result, error) {
 	label := make(map[int]string, len(tracks))
 	for _, t := range tracks {
 		label[t] = fmt.Sprintf("a_t%d", t)
-		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, trackChain(src, t, byTrack[t]), label[t]))
+		chain := trackChain(src, t, byTrack[t])
+		if provisional {
+			chain = provisionalChain(src, t, trackGain(p, t))
+		}
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, chain, label[t]))
 	}
 
 	// Duck before summing: a duck applied to the finished mix would pull the
@@ -161,19 +189,90 @@ func Compile(p Profile, src Source) (Result, error) {
 
 	res.FilterComplex = strings.Join(chains, ";")
 	res.Summary = summarize(tracks)
+	if provisional {
+		res.Provisional = true
+		res.Warnings = dedupe(append(res.Warnings,
+			"the ingest layout could not be measured, so each track is being downmixed by FFmpeg at runtime instead of by this profile's matrix; levels and channel assignment are approximate until a probe succeeds"))
+	}
 	return res, nil
+}
+
+// trackGain is the per-track gain a provisional chain has to apply by hand,
+// because it is not folding it into a matrix.
+//
+// Matrix mode has no single per-track gain -- it has a gain per cell -- so the
+// largest is used. Overstating is the safer direction: the limiter is downstream
+// and NormAuto now looks at the peak, whereas understating would quietly attenuate
+// a destination for as long as the probe kept failing.
+func trackGain(p Profile, track int) float64 {
+	if p.Mode == ModeMatrix {
+		g := 0.0
+		for _, c := range p.Matrix {
+			if c.Track == track && c.Gain > g {
+				g = c.Gain
+			}
+		}
+		if g == 0 {
+			return 1
+		}
+		return g
+	}
+	for _, sel := range p.Tracks {
+		if sel.Track == track {
+			return sel.Gain
+		}
+	}
+	return 1
 }
 
 // trackChain renders the filter chain for one contributing track: the pan that
 // selects and downmixes its channels, plus noise suppression when the source
 // says the track needs it.
 func trackChain(src Source, track int, cells []Cell) string {
-	chain := PanFilter(cells)
+	return denoised(src, track, PanFilter(cells))
+}
+
+// ProvisionalFilter is the per-track chain used when the ingest layout has NOT
+// been measured, so the channel count the cells were built from is a guess.
+//
+// The hazard the whole layout guard exists for is that a guess is not an error.
+// A profile compiled against the six-stereo placeholder emits
+// `pan=stereo|c0=c0|c1=c1`, which is a perfectly valid graph against a real 5.1
+// track -- it publishes front left and right and discards centre, where dialogue
+// lives, and nothing anywhere reports a fault.
+//
+// aformat asks libswresample to do the downmix instead, and it negotiates
+// against the layout that ACTUALLY ARRIVES rather than the one we assumed. A
+// 5.1 track folds with the ITU-R BS.775 coefficients and the same normalization
+// downmix.go reproduces by hand; a stereo track passes through; a mono track is
+// centred. The guess stops being silent, which is the only property that made
+// it dangerous.
+//
+// What this deliberately does NOT do is guess how many TRACKS there are. A
+// profile selecting a track the ingest does not carry still emits [0:a:N] and
+// FFmpeg still refuses to start. That failure is loud and diagnosable, and it
+// was never the one worth protecting against.
+const ProvisionalFilter = "aformat=channel_layouts=stereo"
+
+// provisionalChain is trackChain for an unmeasured layout: the same optional
+// stages, with the guessed pan matrix replaced by a runtime downmix.
+//
+// Gain is still applied, because a per-track gain is the operator's decision and
+// does not depend on the layout. It goes after the fold so it scales the stereo
+// result rather than one arbitrary channel.
+func provisionalChain(src Source, track int, gain float64) string {
+	chain := ProvisionalFilter
+	if gain != 1 {
+		chain += "," + fmt.Sprintf("volume=%s", fmtCoeff(gain))
+	}
+	return denoised(src, track, chain)
+}
+
+func denoised(src Source, track int, chain string) string {
 	if src.DenoiseTrack(track) {
-		// After the pan, not before: denoising the two channels that survive a
-		// 5.1 downmix costs a third of what denoising all six would, and the
-		// pan only ever selects and scales, so it cannot hide noise from the
-		// denoiser or create any.
+		// After the fold, not before: denoising the two channels that survive a
+		// 5.1 downmix costs a third of what denoising all six would, and neither
+		// the pan nor aformat can hide noise from the denoiser or create any.
 		chain += "," + DenoiseFilter
 	}
 	return chain

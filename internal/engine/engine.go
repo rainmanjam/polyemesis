@@ -284,9 +284,19 @@ type Engine struct {
 	// probeFailed is set while probes are failing, so the warning is logged on
 	// the transition rather than on every 3s retry.
 	probeFailed atomic.Bool
-	levels      ffmpeg.Levels
-	levelsAt    time.Time
-	settings    db.Settings
+	// probeFails counts CONSECUTIVE probe failures, so a layout that cannot be
+	// measured can be told apart from one that has merely not been measured
+	// yet. See probeUnmeasurable and the hold in reconcileOutputs.
+	probeFails atomic.Int64
+
+	// statusReq carries coalesced status-publish requests to statusLoop. Nil
+	// until Start, which makes publishStatus fall back to publishing inline.
+	// Capacity one: a second request while one is queued is redundant, because
+	// the queued one reads the state as it stands when it runs.
+	statusReq chan struct{}
+	levels    ffmpeg.Levels
+	levelsAt  time.Time
+	settings  db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
@@ -632,6 +642,13 @@ func (e *Engine) Start(ctx context.Context) error {
 	go func() { defer e.wg.Done(); e.mon.Run(e.ctx) }()
 	go func() { defer e.wg.Done(); e.recman.Run(e.ctx, e.currentRecordingSettings) }()
 	go func() { defer e.wg.Done(); e.probeLoop(e.ctx) }()
+
+	// Started before anything that can publish, and the channel is created
+	// here rather than in New so an Engine built directly in a test keeps the
+	// inline path. See publishStatus.
+	e.statusReq = make(chan struct{}, 1)
+	e.wg.Add(1)
+	go func() { defer e.wg.Done(); e.statusLoop(e.ctx) }()
 
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.statsLoop(e.ctx) }()
@@ -1142,6 +1159,10 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// probeLoop's idle branch does NEITHER on purpose -- it drops probed but
 	// keeps the layout, because a layout that was measured stays measured.
 	e.invalidate()
+	// A new ingest gets a fresh hold. The failure count is about THIS stream,
+	// so carrying it across a restart would start the next one provisionally
+	// before anything had been tried.
+	e.probeFails.Store(0)
 	e.mu.Unlock()
 
 	proc.Start()
@@ -1260,6 +1281,23 @@ func stemPlanFor(rec db.RecordingSettings, src routing.Source, known bool) []rec
 		return nil
 	}
 	return recording.PlanStems(src, rec.StemCodec)
+}
+
+// probeGiveUp is how many consecutive probe failures mean the layout is not
+// going to be measured.
+//
+// probeLoop retries every 3 seconds while bytes are flowing, so this is about
+// fifteen seconds of trying. Long enough that a transient failure -- a relay
+// port not yet bound, a stream whose first packets are not yet decodable -- rides
+// through it and destinations are never planned on a guess they did not need.
+// Short enough that a genuinely broken ffprobe does not take a broadcast off air
+// for the length of an event.
+const probeGiveUp = 5
+
+// probeUnmeasurable reports that probing has failed enough times in a row to
+// stop waiting for it.
+func (e *Engine) probeUnmeasurable() bool {
+	return e.probeFails.Load() >= probeGiveUp
 }
 
 func (e *Engine) reconcileRecorder(s db.Settings) {
@@ -1782,11 +1820,35 @@ func (e *Engine) reconcileOutputs() error {
 	// a failover could not start until the primary came back. The literal read
 	// of the probe is the same mistake holdSilence exists to prevent one tier
 	// down — see the comment there.
-	holdDests := !measured && silenceSig == ""
-	if holdDests {
+	//
+	// THE HOLD HAS AN EXIT, and needing one is not hypothetical. wantSilence
+	// itself requires `measured`, so a probe that can NEVER succeed -- a missing
+	// or broken ffprobe, an unidentifiable stream -- left silenceSig empty and
+	// measured false forever. Every destination stayed down permanently, with
+	// the one tier that could have lifted the hold structurally unable to.
+	//
+	// So after enough consecutive failures the layout is declared unmeasurable
+	// and destinations are planned PROVISIONALLY: the guessed pan matrices are
+	// replaced by a runtime downmix, so a wrong layout folds audibly instead of
+	// discarding dialogue in silence. That is the property the hold existed to
+	// protect, and once it holds by construction the hold is no longer earning
+	// its cost. See routing.CompileProvisional.
+	//
+	// A timeout was the other candidate and is worse: it reintroduces the
+	// original bug on a schedule, because it fires just as readily while a probe
+	// is merely slow. This fires only when probing has actually failed, and it
+	// reverts the instant one succeeds.
+	unmeasurable := !measured && e.probeUnmeasurable()
+	holdDests := !measured && silenceSig == "" && !unmeasurable
+	switch {
+	case holdDests:
 		e.noteReload("destinations", "all", reloadRestart,
 			"held: the ingest layout has not been probed yet, and a routing graph "+
 				"compiled against the placeholder would map tracks that may not exist")
+	case unmeasurable:
+		e.noteReload("destinations", "all", reloadRestart,
+			"the ingest layout cannot be measured, so each track is downmixed by "+
+				"FFmpeg at runtime rather than by its profile's matrix")
 	}
 
 	// PLANNED AND STOPPED ALWAYS. ONLY THE START IS HELD.
@@ -1820,7 +1882,7 @@ func (e *Engine) reconcileOutputs() error {
 	// come back on the next reconcile once the probe lands.
 	plans := map[int64]destPlan{}
 	if !holdDests {
-		plans = e.planDestinations(destRows, wantRends, src, srcSig)
+		plans = e.planDestinations(destRows, wantRends, src, srcSig, unmeasurable)
 	}
 	e.stopDestinations(plans)
 	for _, id := range stopRends {
@@ -2529,12 +2591,19 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		// Logged once per run of failures rather than every time. probeLoop
 		// retries on a 3s cadence while bytes are flowing, and an unconditional
 		// line here would bury the rest of the log within minutes.
-		if !e.probeFailed.Swap(true) {
+		if n := e.probeFails.Add(1); !e.probeFailed.Swap(true) {
 			e.log.Warn("ingest probe failed; destinations are held until a layout is measured",
 				"err", err, "source", e.sourceID)
+		} else if n == probeGiveUp {
+			// The transition out of the hold, said once and plainly. An operator
+			// whose destinations just came up carrying an approximate mix needs
+			// to be able to find out why from the log alone.
+			e.log.Warn("ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices",
+				"failures", n, "err", err, "source", e.sourceID)
 		}
 		return false
 	}
+	e.probeFails.Store(0)
 	if e.probeFailed.Swap(false) {
 		e.log.Info("ingest probe recovered", "source", e.sourceID)
 	}
@@ -2676,18 +2745,32 @@ type SourceInfo struct {
 // is the probe's unless the silence tier is standing in for it.
 func (e *Engine) SourceInfo() SourceInfo {
 	e.mu.RLock()
-	probed, src, video := e.probed, e.source, e.videoInfo
-	name := e.sourceName
-	synthetic := e.silence != nil && e.silence.hub != nil
-	e.mu.RUnlock()
+	defer e.mu.RUnlock()
+	return e.sourceInfoLocked()
+}
 
+// sourceInfoLocked is SourceInfo for a caller that already holds e.mu.
+//
+// It exists so Status can read the process states and the source layout under
+// ONE acquisition instead of two. Between two acquisitions a reconcile can land,
+// and the snapshot then pairs the ingest's state with a layout from a different
+// instant -- "running" beside a track list that has just been invalidated, which
+// reads to an operator as a fault that is not there.
+//
+// It does not make the WHOLE snapshot atomic, and that is deliberate rather than
+// forgotten: Renditions, Loudness, ClipBuffer and Failover go to the database or
+// to subsystems with their own mutexes, and holding e.mu across a database query
+// to tidy a display inconsistency would be a bad trade. See status.go.
+func (e *Engine) sourceInfoLocked() SourceInfo {
+	src, video := e.source, e.videoInfo
+	synthetic := e.silence != nil && e.silence.hub != nil
 	if synthetic {
 		src = synthTrack()
 	}
 	return SourceInfo{
-		ID: e.sourceID, Name: name,
-		Probed: probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
-		Annotations: e.Settings().Ingest.Annotations,
+		ID: e.sourceID, Name: e.sourceName,
+		Probed: e.probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
+		Annotations: e.settings.Ingest.Annotations,
 	}
 }
 
@@ -3793,8 +3876,63 @@ func (e *Engine) onState(s supervisor.Status) {
 	e.publishStatus()
 }
 
+// publishStatus asks for a status snapshot to go out. COALESCING: a burst of
+// callers produces one immediate push and at most one more per window.
+//
+// Status() costs three database queries plus a routing.Compile for every
+// destination that is not running, and onState fires it per process transition
+// -- so a reconcile starting N destinations rebuilt the whole snapshot N times,
+// each one describing state that the next was about to replace.
+//
+// Leading edge, deliberately. The first request publishes immediately, so a
+// single event still reaches the UI with no added latency; only the ones piling
+// up behind it are collapsed. A trailing-edge debounce would have made every
+// isolated change feel slow, which is the trade this was NOT worth making.
+//
+// Falls back to publishing inline when the loop is not running -- before Start,
+// and in the unit tests that drive an Engine directly -- so this is never a
+// reason a status goes missing.
 func (e *Engine) publishStatus() {
-	e.bus.Publish(events.TypeStatus, e.Status())
+	if e.statusReq == nil {
+		e.bus.Publish(events.TypeStatus, e.Status())
+		return
+	}
+	select {
+	case e.statusReq <- struct{}{}:
+	default:
+		// One is already queued and it will read the state as it stands when
+		// it runs, which is necessarily at least as fresh as ours.
+	}
+}
+
+// statusCoalesce is how long a push suppresses the ones behind it. Well under
+// the 2s stats tick and far below what anyone perceives as lag, while covering
+// the burst a single reconcile produces.
+const statusCoalesce = 150 * time.Millisecond
+
+// statusLoop serialises status publishing. See publishStatus.
+func (e *Engine) statusLoop(ctx context.Context) {
+	timer := time.NewTimer(statusCoalesce)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-e.statusReq:
+			e.bus.Publish(events.TypeStatus, e.Status())
+			// The quiet window. Anything arriving now collapses into the single
+			// queued slot and goes out once, when it expires.
+			timer.Reset(statusCoalesce)
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			}
+		}
+	}
 }
 
 // statsLoop pushes host and bitrate stats on a fixed cadence, and refreshes

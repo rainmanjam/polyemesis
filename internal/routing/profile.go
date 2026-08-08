@@ -26,8 +26,22 @@ import (
 // and a six-track ingest produces byte-identical commands to before.
 const MaxTracks = 32
 
-// MaxChannels is the largest per-track channel count we build a downmix for.
-const MaxChannels = 8
+// MaxChannels is the highest per-track channel a matrix cell may ADDRESS.
+//
+// It never was what its old name said -- "the largest per-track channel count we
+// build a downmix for". DownmixMatrix has always handled any width, and simple
+// mode passes the probed count straight through, so a nine-channel track routed
+// perfectly well while its ninth channel could not be named in a matrix. A width
+// you can route and cannot address is an inconsistency with no reason behind it.
+//
+// 16 covers every layout libavutil names, including the immersive ones (7.1.4 is
+// twelve channels, 9.1.6 is sixteen). Raising it only WIDENS what validates, so
+// no profile that was accepted before is rejected now.
+//
+// It bounds a channel INDEX, not a track's real width: a cell naming a channel
+// the ingest does not carry is still dropped at compile time with a warning, and
+// since 0.6.0 the level that drop costs is reported in dB.
+const MaxChannels = 16
 
 // MaxMeterChannels is FFmpeg's amerge ceiling, and the reason MaxTracks is 32
 // rather than 256.

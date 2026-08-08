@@ -325,9 +325,11 @@ func (s *Server) Stop() {
 	// subscriber goroutine parked on a channel nothing would ever close.
 	subs := []*subscriber{}
 	for _, st := range s.streams {
+		st.mu.Lock()
 		for sub := range st.subs {
 			subs = append(subs, sub)
 		}
+		st.mu.Unlock()
 	}
 	s.live = map[PublisherKey]*session{}
 	s.streams = map[PublisherKey]*stream{}
@@ -565,6 +567,17 @@ func (s *Server) admitSession(sc *gortmplib.ServerConn, target Target, peer, str
 	s.mu.Lock()
 	if cur, ok := s.live[sess.key]; ok && cur == sess {
 		delete(s.live, sess.key)
+		// Reap the stream slot too, if nothing is reading it.
+		//
+		// Only serveSubscriber's defer did this, so a publisher that
+		// disconnected with no subscriber attached left its stream struct --
+		// and the setup messages cached in it -- until the process restarted.
+		// Bounded at one entry per PublisherKey and reused by any later
+		// subscriber on the same key, so this was small; it was also a stale
+		// onMetaData waiting to be replayed to whoever attached next.
+		if st := s.streams[sess.key]; st != nil && st.subscriberCount() == 0 {
+			delete(s.streams, sess.key)
+		}
 	}
 	s.mu.Unlock()
 
@@ -626,8 +639,10 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 		st = &stream{subs: map[*subscriber]struct{}{}, slots: map[string]int{}}
 		s.streams[key] = st
 	}
+	st.mu.Lock()
 	st.subs[sub] = struct{}{}
 	replay := append([]message.Message(nil), st.setup...)
+	st.mu.Unlock()
 	// This is the event a held publisher is waiting for.
 	s.noteSubscriberChange()
 	s.mu.Unlock()
@@ -647,24 +662,28 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 
 	defer func() {
 		sub.close()
+		var lost int
 		s.mu.Lock()
 		if cur := s.streams[key]; cur != nil {
+			// stream.mu inside Server.mu, which is the order everything that
+			// needs both uses. Read `dropped` here too: it is written by pump
+			// under this same lock.
+			cur.mu.Lock()
 			delete(cur.subs, sub)
+			empty := len(cur.subs) == 0
+			lost = sub.dropped
+			cur.mu.Unlock()
 			// Reap an idle slot. Without this every rotated-out token left a
 			// permanent entry holding its cached setup messages, so the table
 			// grew for the life of the process.
-			if len(cur.subs) == 0 && s.live[key] == nil {
+			if empty && s.live[key] == nil {
 				delete(s.streams, key)
 			}
 			s.noteSubscriberChange()
 		}
-		// Read under the lock that guards the writes, then log outside it.
-		// This is safe either way — the delete above means pump can no longer
-		// reach this subscriber — but that argument spans two functions, and
-		// the copy costs nothing. Logging is I/O and does not belong under a
-		// mutex the publisher needs for every message.
-		lost := sub.dropped
 		s.mu.Unlock()
+		// Logged outside both locks: it is I/O, and it does not belong under a
+		// mutex the publisher needs for every message.
 		if lost > 0 {
 			s.log.Warn("rtmp subscriber fell behind and lost messages",
 				"component", "rtmp-ingest", "peer", peer, "dropped", lost)
@@ -712,10 +731,48 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 			return err
 		}
 
+		// The server lock is held only to FIND the stream; the fan-out runs
+		// under the stream's own. See stream.mu for why.
 		s.mu.Lock()
 		st := s.streams[key]
+		s.mu.Unlock()
 		if st != nil {
+			st.mu.Lock()
 			st.cacheSetup(msg)
+			// READINESS, ENFORCED MID-SESSION.
+			//
+			// Ready was checked once, at admission, and never again -- so an
+			// ingest child that died a second later left this loop dropping
+			// every message into an empty subscriber set for the rest of the
+			// session. The encoder stays green, the bytes go nowhere, and
+			// nothing reports a fault: the green-encoder-no-output failure that
+			// Ready exists to prevent, reached after Ready had already said yes.
+			//
+			// A grace first, because an empty set is ordinary and transient --
+			// the ingest child exits whenever its publisher does and is
+			// respawned on a 500ms-5s backoff, and a reconcile restarts it on
+			// any settings change. Only a sustained absence means nobody is
+			// coming.
+			//
+			// The policy call, stated plainly: the publisher is DROPPED rather
+			// than left running. RTMP carries no way to tell an encoder "keep
+			// sending, nobody is listening yet", so the alternatives were to
+			// stream into the void indefinitely or to disconnect and let the
+			// encoder retry into the readiness grace, which is built for exactly
+			// this. A disconnect is visible in the encoder and recoverable
+			// without anyone intervening; silence is neither.
+			if len(st.subs) == 0 {
+				if st.emptySince.IsZero() {
+					st.emptySince = time.Now()
+				} else if time.Since(st.emptySince) > subscriberGrace {
+					st.mu.Unlock()
+					s.log.Warn("rtmp publisher dropped: nothing has been reading this stream",
+						"component", "rtmp-ingest", "for", subscriberGrace)
+					return nil
+				}
+			} else {
+				st.emptySince = time.Time{}
+			}
 			for sub := range st.subs {
 				// Non-blocking: a subscriber that cannot keep up is dropped
 				// rather than allowed to stall the publisher. One slow consumer
@@ -727,8 +784,8 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 					sub.dropped++
 				}
 			}
+			st.mu.Unlock()
 		}
-		s.mu.Unlock()
 	}
 }
 
@@ -751,6 +808,15 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 // ingest child comes back. Chosen to cover the supervisor's MaxBackoff of 5s
 // for the ingest process, plus a moment for the subscriber to attach.
 const readyGrace = 6 * time.Second
+
+// subscriberGrace is how long a live publisher may have NOBODY reading it before
+// it is disconnected. See the mid-session readiness check in pump.
+//
+// Longer than readyGrace on purpose. That one is a publisher waiting to be let
+// in and costs a held socket; this one ends a broadcast that is already on air,
+// so it waits out a full ingest respawn and then some before concluding that
+// nothing is coming back.
+const subscriberGrace = 15 * time.Second
 
 // maxWaitersPerKey bounds how many connections may sit in the readiness grace
 // for the same publisher slot at once.
@@ -868,7 +934,7 @@ func (s *Server) HasSubscriber(sourceID int64, backup bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.streams[PublisherKey{SourceID: sourceID, Backup: backup}]
-	return st != nil && len(st.subs) > 0
+	return st != nil && st.subscriberCount() > 0
 }
 
 // LinkStats is one live publisher, for the API.

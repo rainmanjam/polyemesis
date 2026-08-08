@@ -9,6 +9,8 @@ package rtmpserver
 
 import (
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/bluenviron/gortmplib/pkg/message"
 )
@@ -25,6 +27,20 @@ import (
 // out to nobody. A refusal would have been better, because a refusal shows red
 // in OBS.
 type stream struct {
+	// mu guards everything below, so the per-message forwarding path does not
+	// have to take the SERVER-WIDE lock.
+	//
+	// pump took s.mu for every RTMP message and fanned out under it, which put
+	// a few hundred acquisitions a second of the admission lock on the video
+	// path. The contention was small -- an uncontended mutex is tens of
+	// nanoseconds -- but it coupled two things that have nothing to do with
+	// each other: whether a new publisher can be admitted should not queue
+	// behind an existing one's frames.
+	//
+	// LOCK ORDER: Server.mu then stream.mu, never the reverse. Everything that
+	// needs both looks the stream up under s.mu and then takes this.
+	mu sync.Mutex
+
 	// setup is replayed, in order, to every new subscriber. Order matters:
 	// metadata before sequence headers is what a decoder expects.
 	setup []message.Message
@@ -34,6 +50,18 @@ type stream struct {
 	// the broadcast and ended with stale configuration ahead of current.
 	slots map[string]int
 	subs  map[*subscriber]struct{}
+	// emptySince is when subs last became empty, or the zero time while
+	// something is reading. See the mid-session readiness check in pump.
+	emptySince time.Time
+}
+
+// subscriberCount is how many consumers are reading this stream. Callers hold
+// Server.mu; this takes the stream's own lock inside it, which is the order
+// everything that needs both uses.
+func (st *stream) subscriberCount() int {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return len(st.subs)
 }
 
 // resetSetup forgets the previous session's stream configuration.
@@ -44,6 +72,8 @@ type stream struct {
 // wrote past the end of an empty slice, panicking the whole listener on the
 // ordinary event of an encoder reconnecting.
 func (st *stream) resetSetup() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	st.setup = nil
 	st.slots = map[string]int{}
 }

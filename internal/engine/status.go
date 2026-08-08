@@ -164,16 +164,22 @@ func (e *Engine) Renditions() []RenditionStatus {
 
 // Status assembles the current snapshot.
 func (e *Engine) Status() Status {
+	// ONE acquisition for everything e.mu owns. Status used to take it here and
+	// again inside SourceInfo, and a reconcile landing between the two paired
+	// the ingest's state with a layout from a different instant -- "running"
+	// beside a track list that had just been invalidated, which reads as a
+	// fault that is not there.
 	e.mu.RLock()
 	ingest, recorder, preview, meters := e.ingest, e.recorder, e.preview, e.meters
 	dests := make([]*destination, 0, len(e.dests))
 	for _, d := range e.dests {
 		dests = append(dests, d)
 	}
+	source := e.sourceInfoLocked()
 	e.mu.RUnlock()
 
 	st := Status{
-		Source:       e.SourceInfo(),
+		Source:       source,
 		Relay:        e.hub.Stats(),
 		Renditions:   e.Renditions(),
 		Destinations: []DestStatus{},

@@ -41,7 +41,7 @@ type destPlan struct {
 
 // planDestinations works out the desired state of every enabled destination,
 // including which upstream it reads and whether it can run at all.
-func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source, silenceSig string) map[int64]destPlan {
+func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source, silenceSig string, provisional bool) map[int64]destPlan {
 	plans := map[int64]destPlan{}
 	for _, row := range rows {
 		if !row.Enabled {
@@ -68,7 +68,16 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 			upstream = sig
 		}
 
-		compiled, cerr := routing.Compile(row.Profile, src)
+		// provisional means the ingest could not be probed at all, so src is the
+		// placeholder and its channel counts are a guess. CompileProvisional
+		// replaces the guessed pan matrices with a runtime downmix, which is
+		// what makes running on a guess defensible: a wrong layout then folds
+		// audibly rather than discarding dialogue in silence.
+		compile := routing.Compile
+		if provisional {
+			compile = routing.CompileProvisional
+		}
+		compiled, cerr := compile(row.Profile, src)
 		if cerr != nil {
 			p.err = cerr.Error()
 		} else {
