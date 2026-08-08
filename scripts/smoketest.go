@@ -63,7 +63,7 @@ func main() {
 	fmt.Printf("     relay hub listening on udp://127.0.0.1:%d\n", relayPort)
 
 	step("push synthetic 3-track MPEG-TS stream (300 / 900 / 2000 Hz)")
-	src := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+	src := exec.Command(ffmpegPath(), "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
 		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
 		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
@@ -243,7 +243,7 @@ func ertmpPhase() bool {
 	// "invalid message type: 255". FFmpeg 7.1+ writes multitrack FLV whenever
 	// more than one audio stream is mapped, so this is E-RTMP without asking
 	// for it by name.
-	pub := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+	pub := exec.Command(ffmpegPath(), "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
 		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
 		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
@@ -379,7 +379,7 @@ func srtPhase() bool {
 
 	// FFmpeg muxes TS to STDOUT -- no protocol support required -- and this
 	// copies it into the SRT connection.
-	mux := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+	mux := exec.Command(ffmpegPath(), "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
 		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
 		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
@@ -545,7 +545,7 @@ func verify(file, label string, want map[int]bool) bool {
 // bandEnergy returns overall RMS dBFS after a narrow bandpass at f.
 // astats logs at info level, so -v error would silently suppress it.
 func bandEnergy(path string, f int) float64 {
-	out, err := exec.Command("ffmpeg", "-v", "info", "-i", path,
+	out, err := exec.Command(ffmpegPath(), "-v", "info", "-i", path,
 		"-af", fmt.Sprintf("bandpass=frequency=%d:width_type=h:width=50,astats=metadata=0:measure_perchannel=none", f),
 		"-f", "null", "-").CombinedOutput()
 	if err != nil {
@@ -653,6 +653,21 @@ func doGet(path string) map[string]any {
 		fail("GET %s: decode: %v (%s)", path, err, raw)
 	}
 	return out
+}
+
+// ffmpegPath resolves the binary ONCE, to an absolute path.
+//
+// exec.Command("ffmpeg", ...) leaves resolution to PATH at exec time, which
+// SonarCloud flags under go:S4036 and is right to: this program is run by CI
+// and by operators, and a writable directory earlier in PATH than the real
+// ffmpeg is a way to have something else entirely run with their privileges.
+// LookPath resolves it here, once, and every later call names the result.
+func ffmpegPath() string {
+	p, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		fail("ffmpeg is not on PATH: %v", err)
+	}
+	return p
 }
 
 func step(s string) { fmt.Printf("\n>> %s\n", s) }
