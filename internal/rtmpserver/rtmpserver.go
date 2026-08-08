@@ -739,40 +739,6 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 		if st != nil {
 			st.mu.Lock()
 			st.cacheSetup(msg)
-			// READINESS, ENFORCED MID-SESSION.
-			//
-			// Ready was checked once, at admission, and never again -- so an
-			// ingest child that died a second later left this loop dropping
-			// every message into an empty subscriber set for the rest of the
-			// session. The encoder stays green, the bytes go nowhere, and
-			// nothing reports a fault: the green-encoder-no-output failure that
-			// Ready exists to prevent, reached after Ready had already said yes.
-			//
-			// A grace first, because an empty set is ordinary and transient --
-			// the ingest child exits whenever its publisher does and is
-			// respawned on a 500ms-5s backoff, and a reconcile restarts it on
-			// any settings change. Only a sustained absence means nobody is
-			// coming.
-			//
-			// The policy call, stated plainly: the publisher is DROPPED rather
-			// than left running. RTMP carries no way to tell an encoder "keep
-			// sending, nobody is listening yet", so the alternatives were to
-			// stream into the void indefinitely or to disconnect and let the
-			// encoder retry into the readiness grace, which is built for exactly
-			// this. A disconnect is visible in the encoder and recoverable
-			// without anyone intervening; silence is neither.
-			if len(st.subs) == 0 {
-				if st.emptySince.IsZero() {
-					st.emptySince = time.Now()
-				} else if time.Since(st.emptySince) > subscriberGrace {
-					st.mu.Unlock()
-					s.log.Warn("rtmp publisher dropped: nothing has been reading this stream",
-						"component", "rtmp-ingest", "for", subscriberGrace)
-					return nil
-				}
-			} else {
-				st.emptySince = time.Time{}
-			}
 			for sub := range st.subs {
 				// Non-blocking: a subscriber that cannot keep up is dropped
 				// rather than allowed to stall the publisher. One slow consumer
