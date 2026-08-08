@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -202,4 +203,66 @@ func TestSlackSummaryCountsEveryAlertIncludingTheOverflow(t *testing.T) {
 	if got := slackSummary(d); !strings.Contains(got, "5 alerts") {
 		t.Errorf("slackSummary = %q, want it to count the 2 shown plus the 3 that were not", got)
 	}
+}
+
+// The encoders cap their own item count, and must ACCOUNT for what they cut.
+//
+// TestEncodeSaysHowManyAlertsDidNotFit covers an overflow the caller already
+// counted. This covers the other source of one: more items than the service
+// accepts, where the encoder truncates and adds the remainder to the overflow
+// itself. Discord rejects a payload carrying more than 10 embeds outright, so a
+// regression here is a 400 on every alert once a burst gets big enough --
+// exactly when alerts matter most.
+func TestEachEncoderCapsItsItemsAndCountsWhatItCut(t *testing.T) {
+	// One more than Discord's limit, and well over it for Slack's, so the same
+	// delivery exercises both caps.
+	const items = 25
+
+	fill := func(d *Delivery) {
+		first := d.Items[0]
+		for len(d.Items) < items {
+			d.Items = append(d.Items, first)
+		}
+	}
+
+	t.Run("discord stops at 10 embeds and says so", func(t *testing.T) {
+		body, _, err := Encode(sampleDelivery(FormatDiscord, fill))
+		if err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		var p discordPayload
+		if err := json.Unmarshal(body, &p); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(p.Embeds) > discordMaxEmbeds {
+			t.Errorf("%d embeds, want at most %d; Discord rejects the whole payload "+
+				"above that, so every alert in a burst would be lost",
+				len(p.Embeds), discordMaxEmbeds)
+		}
+		// The ones it dropped have to be admitted, or a burst silently shrinks
+		// to its first ten and looks like a quiet period.
+		want := items - discordMaxEmbeds
+		if !strings.Contains(p.Content, fmt.Sprintf("%d more", want)) {
+			t.Errorf("content = %q, want it to admit the %d alerts it cut", p.Content, want)
+		}
+	})
+
+	t.Run("slack stops at its attachment cap and says so", func(t *testing.T) {
+		body, _, err := Encode(sampleDelivery(FormatSlack, fill))
+		if err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		var p slackPayload
+		if err := json.Unmarshal(body, &p); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(p.Attachments) > slackMaxAttachments {
+			t.Errorf("%d attachments, want at most %d", len(p.Attachments), slackMaxAttachments)
+		}
+		want := items - slackMaxAttachments
+		if !strings.Contains(p.Text, fmt.Sprintf("%d", want)) &&
+			!strings.Contains(p.Text, fmt.Sprintf("%d alerts", items)) {
+			t.Errorf("text = %q, want it to account for the %d alerts it cut", p.Text, want)
+		}
+	})
 }

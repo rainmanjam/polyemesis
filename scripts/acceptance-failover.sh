@@ -832,6 +832,25 @@ fi
 # The damage the restart count cannot show. One header, two geometries: this
 # reports 1920x1080 (the filler's, seen first) at 60 fps (the publisher's),
 # describing a file that is neither for half its length.
+# AN ASSERTION, NOT A NOTE. A destination that runs its whole life and writes
+# nothing is the failure this step is least able to see: the restart counter
+# above reads 0 (correct -- it never restarted), every other check passes, and
+# the suite goes green over a file with no bytes in it.
+#
+# That is not hypothetical. A guard that skipped stopDestinations left this
+# destination subscribed to a hub that was closed under it; closing a hub stops
+# delivery without ending the process, so FFmpeg sat there started and idle for
+# 76 seconds. It reproduced about one run in two, and the only thing that showed
+# it was the geometry line below coming back BLANK -- a note nobody would fail a
+# build over.
+MIS_BYTES=$(wc -c < "$WORK/data/recordings/mismatch.mkv" 2>/dev/null | tr -d ' ')
+if [ "${MIS_BYTES:-0}" -gt 10000 ] 2>/dev/null; then
+  ok "the mismatch destination actually wrote its output ($MIS_BYTES bytes)"
+else
+  bad "the mismatch destination wrote ${MIS_BYTES:-0} bytes across the whole run"
+  note "it never restarted, so the count above is 0 and every other check passed."
+  note "a destination on a hub that was closed under it looks exactly like this."
+fi
 note "the mismatch recording declares: $(ffprobe -v error -select_streams v \
   -show_entries stream=width,height,r_frame_rate -of csv=p=0 \
   data/recordings/mismatch.mkv 2>/dev/null) -- for content that is 1280x720@60 for half its length"

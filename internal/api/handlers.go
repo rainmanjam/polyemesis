@@ -1013,7 +1013,7 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
-	src := s.eng().Source()
+	src, srcKnown := s.eng().SourceKnown()
 
 	// Each row is returned with its compiled routing, so the UI can render the
 	// "Tracks 1, 2, 4 → stereo" summary and the generated filter string
@@ -1023,6 +1023,18 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 		item := map[string]any{"destination": row}
 		if c, err := routing.Compile(row.Profile, src); err == nil {
 			item["routing"] = c
+			// PROVISIONAL until something has been measured. Until then this is
+			// compiled from the placeholder -- six stereo tracks that exist so
+			// the editor has something to draw -- and reconcileOutputs refuses
+			// to run that very graph. Handing it over unlabelled made the screen
+			// and the process disagree, in the direction that makes the
+			// placeholder look authoritative.
+			//
+			// Flagged, not withheld: configuring a destination before going live
+			// is when most people configure them (see refuseIfSilent below).
+			if !srcKnown {
+				item["routingProvisional"] = true
+			}
 		} else {
 			item["routingError"] = err.Error()
 		}
@@ -1043,8 +1055,12 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]any{"destination": row}
-	if c, err := routing.Compile(row.Profile, s.eng().Source()); err == nil {
+	getSrc, getKnown := s.eng().SourceKnown()
+	if c, err := routing.Compile(row.Profile, getSrc); err == nil {
 		resp["routing"] = c
+		if !getKnown {
+			resp["routingProvisional"] = true
+		}
 	} else {
 		resp["routingError"] = err.Error()
 	}
@@ -1228,8 +1244,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := map[string]any{"destination": updated}
-	if c, err := routing.Compile(updated.Profile, s.eng().Source()); err == nil {
+	updSrc, updKnown := s.eng().SourceKnown()
+	if c, err := routing.Compile(updated.Profile, updSrc); err == nil {
 		resp["routing"] = c
+		if !updKnown {
+			resp["routingProvisional"] = true
+		}
 	}
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings

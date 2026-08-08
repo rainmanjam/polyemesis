@@ -8,7 +8,45 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-07
+
+Two changes an operator can actually observe, and a great many they cannot.
+
 ### Changed
+
+- **An RTMP publisher is now admitted only when something is subscribed to read
+  it.** `Target.Ready` used to mean "an engine exists for this source and its
+  mode is rtmp", which says a subscriber SHOULD exist, never that one does. A
+  publisher whose ingest child never spawned, or was crash-looping, was admitted
+  into a stream with no reader: the encoder goes green, the bytes are fanned out
+  to nobody, and the operator has a healthy OBS and no output with nothing
+  saying why. It is now asked of the listener directly. The same fix was applied
+  to the failover standby, which had been a hardcoded `true` sitting directly
+  below a comment describing the opposite contract.
+
+  **What you may notice.** The ingest child carries no reconnect flags — it
+  exits whenever its publisher does and is respawned on a 500 ms–5 s backoff —
+  so an encoder reconnecting after a network blip arrives while nothing is
+  subscribed. Rather than refuse it, the listener now HOLDS such a connection
+  for up to 6 seconds and admits it if a subscriber attaches. Only that one
+  verdict waits; an unknown key or a disabled source is still answered at once.
+
+- **Destinations are not planned until the ingest layout has been measured.**
+  Before a probe lands, the layout is a placeholder of six stereo tracks that
+  exists so the routing editor has something to draw. Compiling a real routing
+  graph against it fails in two ways, and the second is why this is a guard
+  rather than a warning: a profile naming a track the stream lacks emits
+  `[0:a:5]` and FFmpeg refuses to start — loud, and diagnosable — but the
+  placeholder also claims two channels on every track, so a real 5.1 track
+  compiles to `pan=stereo|c0=c0|c1=c1`, which is perfectly valid FFmpeg. The
+  destination starts, stays up, and publishes front L/R only, with centre —
+  where dialogue lives — discarded and no error anywhere.
+
+- **A routing preview compiled from the placeholder now says so.** Every
+  destination endpoint returns a compiled `filterComplex` so the editor can show
+  the mix without a second round trip. Those compiled against an unmeasured
+  layout are marked `routingProvisional`. They are flagged, never withheld:
+  configuring a destination before going live is when most people configure them.
 
 - **Both ingest ports bind by default, and both are published by default.**
   The RTMP listener used to bind only when some enabled source was configured
@@ -18,18 +56,15 @@ its first tagged release.
   showed on a fresh install that had chosen no ingest mode at all, which still
   opened 6000 while refusing to open 1935 on the grounds that nothing there
   spoke the protocol.
-
   It also disagreed with this project's own instructions: `docs/HARDWARE.md` and
   `docs/TROUBLESHOOTING.md` have always said to run
   `-p 6000:6000/udp -p 1935:1935`, so we documented publishing a port that might
   not be listening. datarhei Restreamer opens both, and so do we now.
-
   `install.sh` matches: it asks for an RTMP port the way it asks for an SRT one
   rather than a yes/no, defaults to publishing 1935, and takes `--rtmp-port 0`
   to decline it. **The port is the switch on both sides** — the server treats 0
   as off too — instead of a yes/no in the installer and a port in the settings
   meaning the same thing two different ways.
-
   What this adds is narrow: a host with **no firewall at all** now has 1935
   reachable, where the source list used to close it by accident. Everywhere else
   the ufw rule and the compose publish still decide, which is what they always
@@ -37,6 +72,65 @@ its first tagged release.
   both require the source to be ready before admitting anything, and a
   connection that says nothing dies on the handshake timeout.
 
+### Fixed
+
+Twelve defects in the work above, found across four independent review passes.
+The ones with operator-visible consequences:
+
+- A probe takes up to ten seconds and used to commit its result unconditionally.
+  One in flight across an ingest restart or a mode change re-certified the
+  previous transport's track layout under the new mode — and stamped it in a way
+  that satisfied the guard permanently, so destinations compiled against a dead
+  stream's layout until something else changed.
+- The guard held every tier below it, not just destinations. Killing the primary
+  encoder clears the probe state, so it fired for exactly the window the failover
+  selector exists to cover: the selector stopped being reconciled and the late
+  catch-up put a backwards decode timestamp in the output — the discontinuity a
+  receiving platform drops the connection on.
+- A destination could be left subscribed to a relay hub that was then closed
+  underneath it. Closing a hub stops delivery without ending the process, so
+  FFmpeg sat there running and receiving nothing: 76 seconds, zero bytes, no
+  error. It reproduced about one run in two.
+- A video-only source going idle tore down its silence tier, after which every
+  destination on that source was torn down too, for as long as the encoder was
+  quiet.
+- A probe that could never succeed — a missing ffprobe, an unidentifiable
+  stream — held every destination down and said nothing at all. It now says so.
+
+### Installer
+
+- **The installer now offers to serve HTTPS on 443, and opens it.** The port was
+  asked for before the TLS mode was chosen, so an operator picked one without
+  yet knowing they would be serving HTTPS at all — and the default 8080 gave a
+  working but unlovely install where every link carried a port and nothing
+  listened on the one people try first. Offered only when the port is still the
+  untouched default; a port given on the command line or typed at the prompt is
+  a decision and is left alone. The firewall rule follows the chosen port rather
+  than opening 443 unconditionally, because a port nothing binds looks like
+  working TLS and serves nothing.
+
+- **`CAP_NET_BIND_SERVICE` is granted for any privileged port, not only for
+  ACME.** It used to be gated on `tls.mode: acme`, which covered the `:80`
+  challenge and missed the web UI itself: selfsigned is the DEFAULT choice, so
+  an operator taking the 443 offer would have got a unit that could not bind the
+  port the installer had just written into its own `ExecStart` — `bind:
+  permission denied`, on a fresh install, from following the prompts.
+
+
+### Testing
+
+- The cross-platform smoke test now publishes over **E-RTMP and SRT** as well as
+  injecting into the relay hub, and measures per-destination audio for each.
+  Both publishers are pure Go — `gortmplib` and `datarhei/gosrt` — so the one-port
+  listener, the readiness gate and multitrack FLV demux are exercised on macOS
+  and Windows too, not only on the Linux acceptance suites. FFmpeg is left doing
+  only what every build can do: muxing.
+- The container suite gained two steps that publish routed audio to a real RTMP
+  sink, from an E-RTMP ingest and from an SRT ingest, closing a coverage gap
+  where each half had been proven and the combination never had.
+- A destination that runs its whole life and writes nothing now fails the
+  failover suite. It used to be a note, and a note is why the 76-second silent
+  destination above stayed green.
 
 ## [0.4.0] — 2026-08-07
 

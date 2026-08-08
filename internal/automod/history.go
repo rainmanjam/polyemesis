@@ -84,6 +84,20 @@ func DefaultHistoryLimits() HistoryLimits {
 type entry struct {
 	at   time.Time
 	norm string
+	// links counted from the RAW message, at insert.
+	//
+	// It cannot be counted later from norm, and that is not a preference:
+	// Normalise collapses runs of repeated letters -- the same step that folds
+	// "sssspam" to "spam" -- so "http://" becomes "htp://", "https://" becomes
+	// "htps://" and "www." becomes "w.". None of the three strings countLinks
+	// searches for can survive it. Counting on norm returned 0 for every
+	// message ever sent, which meant MaxLinks (3 by default) never fired: a
+	// limit every operator had configured and none of them had.
+	//
+	// An int rather than keeping the raw text beside norm, because this package
+	// bounds its memory under a raid on purpose and a second string per message
+	// would double the cost of the thing it is defending against.
+	links int
 }
 
 type authorLog struct {
@@ -143,7 +157,7 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 		log = &authorLog{}
 		h.authors[key] = log
 	}
-	log.entries = append(log.entries, entry{at: now, norm: norm})
+	log.entries = append(log.entries, entry{at: now, norm: norm, links: countLinks(text)})
 	log.last = now
 	if len(log.entries) > h.limits.Retain {
 		log.entries = log.entries[len(log.entries)-h.limits.Retain:]
@@ -189,7 +203,7 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 	if h.limits.MaxLinks > 0 {
 		links := 0
 		for _, e := range inWindow {
-			links += countLinks(e.norm)
+			links += e.links
 		}
 		if links > h.limits.MaxLinks {
 			add(fmt.Sprintf("%d links in %s", links, h.limits.Window))
