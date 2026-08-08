@@ -4918,6 +4918,23 @@ func (e *Engine) Source() routing.Source {
 	return e.effectiveSource()
 }
 
+// SourceKnown is Source plus whether that layout is a MEASUREMENT or the
+// placeholder, so a caller can say which it is showing.
+//
+// Source() alone discards the bit, and every API path that compiles a routing
+// preview used it. The result was that an unprobed engine handed the operator a
+// filterComplex containing [0:a:5] and 2-channel pans, labelled as their
+// destination's routing, while reconcileOutputs was refusing to run that very
+// graph -- the screen and the process disagreeing, in the direction that makes
+// the placeholder look authoritative.
+//
+// Deliberately NOT a refusal. Configuring destinations before any stream has
+// connected is the normal order (see the refuseIfSilent reasoning in the API),
+// so the preview stays; it just has to admit what it is compiled from.
+func (e *Engine) SourceKnown() (routing.Source, bool) {
+	return e.effectiveSourceKnown()
+}
+
 // SourceInfo is the ingest layout as the API reports it.
 type SourceInfo struct {
 	// ID and Name identify the programme this snapshot belongs to. They are
