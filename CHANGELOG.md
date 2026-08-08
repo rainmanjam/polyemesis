@@ -10,6 +10,73 @@ its first tagged release.
 
 ### Fixed
 
+Nine more defects from the same core review, in the transport and concurrency
+layers. Every one is the shape the whole review turned out to be: a protection
+that is present in name and absent in effect.
+
+- **An RTMP publisher for an SRT source is refused immediately again.** The
+  readiness grace added in 0.5.0 claimed in its own comment that it could not be
+  used to hold connections open. It could: a target is registered for every
+  source whatever its ingest mode, so any valid token for an SRT-mode source was
+  found, enabled, and permanently not ready — the one verdict the grace waits
+  on. Every connect burned the full six seconds, in parallel, for a state no
+  amount of waiting could change. The listener now waits only where a subscriber
+  is genuinely on its way, and caps waiters per publisher slot so one reconnect
+  gets its grace while a flood does not multiply it.
+
+- **A measured layout survives the encoder going quiet.** Roughly nine seconds
+  into any outage the engine began reporting a real measured layout as the
+  placeholder, because the check asked "is a stream arriving now" where it meant
+  "has one ever been measured". The meters were torn down, the captioner rebuilt
+  against an unknown source, and the routing preview stopped describing the graph
+  its destinations were running. The stem plan had the same mistake from the
+  other end: an encoder going quiet emptied it and restarted the recorder
+  **without stems** mid-outage, then restarted it again when the probe returned.
+
+- **A genuine data race in the relay's loss measurement.** `Deliver` runs on the
+  SRT read loop, and a publisher takeover deliberately overlaps two of them —
+  closing the incumbent's connection wakes its `Read`, which is not the same as
+  it having finished. Two goroutines wrote the continuity counters and the
+  send-error tally with nothing between them, corrupting the TSLost figure that
+  the "UDP on loopback is defensible because it is measured" argument rests on.
+
+- **A dead subscriber no longer counts as a reader.** A subscriber whose FFmpeg
+  exited while nothing was publishing was never noticed — there are no writes to
+  fail — so readiness kept reporting a closed socket as a live reader and
+  admitted publishers into a stream nobody was reading.
+
+- **A mid-stream cue point no longer replaces the cached metadata.** Every AMF0
+  data message shared one setup slot, so a cue point evicted `onMetaData` and
+  every subscriber attaching afterwards got the cue point replayed where its
+  metadata should have been.
+
+- **A source disabled between connect and publish is now refused.** The SRT
+  publish callback re-checked the token and the pipeline but not whether the
+  source was still enabled, so an operator's "off" did nothing until the session
+  ended by itself.
+
+- **Two recorders can no longer start on the same segment pattern**, and **two
+  engines can no longer start for one source.** Free-space recovery reconciled
+  the recorder without the lock every other caller takes, and the manager's
+  engine sync had no such lock at all while being reached from several HTTP
+  handlers — leaving a running engine that nothing held a reference to.
+
+- **A destination can no longer report "running" while publishing nothing.** The
+  primary feed's signature named what the failover tier was supposed to be rather
+  than what the feed was reading, so a feed started during a hub swap matched the
+  signature the next reconcile asked for and was left alone permanently: the hub
+  carried zero bytes, every destination read healthy, and nothing raised an
+  error.
+
+### Changed
+
+- Faster on the paths that run constantly: the relay fan-out takes no lock and
+  allocates nothing per datagram, a held publisher is woken by its subscriber
+  attaching instead of polling the database sixty times, and the status snapshot
+  no longer scans its destination list twice per row.
+
+Earlier in the same review, four defects in the per-destination audio routing:
+
 Four defects in the per-destination audio routing, all of them audible, all
 found by a four-reviewer pass over the compiler and confirmed by measuring what
 FFmpeg actually produced rather than by reading the filtergraph.

@@ -95,7 +95,7 @@ the same way Tier 1 was: the lock removed again, and `-race` naming both
 ## Tier 4 — structure, behaviour-preserving — **ALL DONE**
 
 All five landed with no behaviour change: the full suite and `go test -race ./...`
-are green before and after. `engine.go` went from **6,530 to 3,881 lines**.
+are green before and after. `engine.go` went from **6,530 to 3,869 lines**.
 
 1. **`sourceState` type** — `source/probed/measured/measuredMode/sourceGen/videoInfo` are now one type with `layoutForProcessBuilding() (Source, bool)`, `layoutForDisplay()`, `arrivingNow()`, `commitProbe`, `invalidate` and `clearProbed`. Embedded anonymously, so all ~100 existing reads still compile and only composite literals needed touching. **Every raw mutation site in production is gone.**
 2. **`selector.go`** — 2,346 lines: the selector, backup listener, playlist tier and operator failover controls.
