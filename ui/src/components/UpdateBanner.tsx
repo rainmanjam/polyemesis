@@ -61,6 +61,15 @@ export function UpdateBanner() {
       <span className="min-w-0 flex-1 truncate">
         {t("chrome.updateAvailable", { latest: info.latest, current: info.version })}
       </span>
+      {info.onAirSummary && (
+        // Shown WITH the offer, not instead of it. An operator who learns a
+        // release exists is going to act on it eventually, and the useful moment
+        // to tell them what is live is while they are deciding -- not after they
+        // have clicked something that turned out to end a broadcast.
+        <span className="hidden shrink-0 text-muted-foreground sm:inline">
+          {t("chrome.updateOnAir", { what: info.onAirSummary })}
+        </span>
+      )}
       {info.releaseUrl && (
         <a
           href={info.releaseUrl}

@@ -143,6 +143,7 @@
   "chrome.socketOfflineHint": "Live updates are disconnected; retrying",
   "chrome.toggleNav": "Toggle navigation",
   "chrome.updateAvailable": "polyemesis {latest} is available. You are running {current}.",
+  "chrome.updateOnAir": "Not now: {what}.",
   "clipedit.back33": "Back 33 ms",
   "clipedit.clickLine": "Click a line to jump there. Select across several and the in and out points move to the words you highlighted.",
   "clipedit.clipThisLine": "Clip this line",

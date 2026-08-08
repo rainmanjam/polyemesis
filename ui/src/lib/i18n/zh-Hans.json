@@ -143,6 +143,7 @@
   "chrome.socketOfflineHint": "直播更新已断开；正在重试",
   "chrome.toggleNav": "切换导航",
   "chrome.updateAvailable": "polyemesis {latest} 已发布。您当前运行的是 {current}。",
+  "chrome.updateOnAir": "暂不建议：{what}。",
   "clipedit.back33": "后退 33 毫秒",
   "clipedit.clickLine": "点击某一行即可跳转到该处。跨多行选中，入点和出点会移动到你高亮的词语上。",
   "clipedit.clipThisLine": "剪出这一行",

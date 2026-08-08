@@ -143,6 +143,7 @@
   "chrome.socketOfflineHint": "Canlı güncellemeler bağlantısı kesildi; yeniden deneniyor",
   "chrome.toggleNav": "Navigasyonu aç/kapat",
   "chrome.updateAvailable": "polyemesis {latest} kullanılabilir. {current} sürümünü çalıştırıyorsunuz.",
+  "chrome.updateOnAir": "Şimdi değil: {what}.",
   "clipedit.back33": "33 ms geri",
   "clipedit.clickLine": "Oraya atlamak için bir satıra tıklayın. Birkaçını birden seçtiğinizde giriş ve çıkış noktaları vurguladığınız sözcüklere taşınır.",
   "clipedit.clipThisLine": "Bu satırdan klip al",

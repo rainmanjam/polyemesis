@@ -1133,6 +1133,18 @@ export interface VersionInfo {
   comparable: boolean;
   checkedAt?: string;
   checkFailed?: boolean;
+  /** What a restart would interrupt, surveyed fresh on every call. */
+  onAir: OnAir;
+  /** The sentence to show, empty when nothing is at stake. The server owns the
+   *  wording so a browser and a terminal cannot disagree about a refusal. */
+  onAirSummary?: string;
+}
+
+export interface OnAir {
+  publishers: number;
+  destinations: number;
+  recording: boolean;
+  names?: string[] | null;
 }
 
 export interface FFmpegTools {

@@ -143,6 +143,7 @@
   "chrome.socketOfflineHint": "Live-Aktualisierung getrennt, Verbindung wird wiederhergestellt",
   "chrome.toggleNav": "Navigation umschalten",
   "chrome.updateAvailable": "polyemesis {latest} ist verfügbar. Sie verwenden {current}.",
+  "chrome.updateOnAir": "Nicht jetzt: {what}.",
   "clipedit.back33": "33 ms zurück",
   "clipedit.clickLine": "Klicken Sie auf eine Zeile, um dorthin zu springen. Markieren Sie mehrere, und In- und Out-Punkt wandern zu den hervorgehobenen Wörtern.",
   "clipedit.clipThisLine": "Clip aus dieser Zeile",

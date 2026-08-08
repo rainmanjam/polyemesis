@@ -143,6 +143,7 @@
   "chrome.socketOfflineHint": "ライブ更新が切断されました。再試行します。",
   "chrome.toggleNav": "ナビゲーションの表示/非表示を切り替え",
   "chrome.updateAvailable": "polyemesis {latest} が利用可能です。現在のバージョンは {current} です。",
+  "chrome.updateOnAir": "今は不可: {what}。",
   "clipedit.back33": "33 ms 戻る",
   "clipedit.clickLine": "行をクリックするとその位置へ移動します。複数行にまたがって選択すると、イン点とアウト点が選択した語に合わせて移動します。",
   "clipedit.clipThisLine": "この行を切り出す",

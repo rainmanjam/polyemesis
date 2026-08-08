@@ -143,6 +143,7 @@
   "chrome.socketOfflineHint": "З’єднання з сервером оновлень втрачено; повторна спроба",
   "chrome.toggleNav": "Показати/сховати навігацію",
   "chrome.updateAvailable": "polyemesis {latest} доступний. У вас встановлено {current}.",
+  "chrome.updateOnAir": "Не зараз: {what}.",
   "clipedit.back33": "Назад на 33 мс",
   "clipedit.clickLine": "Клацніть рядок, щоб перейти до нього. Виділіть кілька рядків — точки входу та виходу перейдуть до виділених слів.",
   "clipedit.clipThisLine": "Вирізати цей рядок",
