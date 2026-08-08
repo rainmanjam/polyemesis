@@ -367,9 +367,19 @@ func (s *Server) handleSubscribe(conn srt.Conn) {
 func (s *Server) handlePublish(conn srt.Conn) {
 	peer := conn.RemoteAddr().String()
 	target, ok := s.lookup(strings.TrimSpace(conn.StreamId()))
-	if !ok || target.Sink == nil {
-		// The token was valid at connect and is not now: rotated, or the source
-		// was deleted in between. Nothing to deliver into.
+	// Every gate handleConnect applied, applied again.
+	//
+	// This is a SECOND resolution, not a cached verdict: connect and publish are
+	// separate callbacks and the source can change in between. It re-checked
+	// the token and the sink but not Enabled, so a source disabled in that
+	// window was still admitted and delivered into the hub -- the encoder stays
+	// green and the operator's "off" does nothing until the session ends by
+	// itself. Silently ignoring the one control an operator has is the failure
+	// mode; keep the three checks in the same order as handleConnect so a
+	// future gate added there is visibly missing here.
+	if !ok || !target.Enabled || target.Sink == nil {
+		// Valid at connect and not now: rotated, disabled, or the source was
+		// deleted in between. Nothing to deliver into, or nothing that should be.
 		_ = conn.Close()
 		return
 	}

@@ -180,6 +180,41 @@ type subscriber struct {
 	conn net.Conn
 }
 
+// watchPeer closes the subscriber when its socket does. Run as a goroutine for
+// the life of the subscription; returns as soon as the subscriber is closed by
+// anything else.
+//
+// done closes on server Stop and when serveSubscriber's loop exits, which
+// leaves the one case that happens on its own: the subscriber's FFmpeg exits
+// while NOTHING IS PUBLISHING. There are no writes to fail, so the loop parks
+// forever -- and HasSubscriber counts map entries, so Ready stayed true for a
+// stream whose only reader was a closed socket, and a publisher was admitted
+// into it. That is the green-encoder-no-output failure Ready exists to prevent,
+// reached through the one door Ready cannot see.
+//
+// A read is the signal. Nothing else on a subscriber connection ever reads it
+// -- serveSubscriber only writes -- so consuming what the client sends costs
+// nothing, and an EOF or a reset is the peer saying it has gone. The bytes are
+// discarded: they are window acknowledgements nothing here acts on, and today
+// they simply sit unread in the receive buffer.
+func (sub *subscriber) watchPeer() {
+	if sub.conn == nil {
+		return
+	}
+	buf := make([]byte, 512)
+	for {
+		if _, err := sub.conn.Read(buf); err != nil {
+			sub.close()
+			return
+		}
+		select {
+		case <-sub.done:
+			return
+		default:
+		}
+	}
+}
+
 // close wakes the subscriber and drops its socket. Safe to call twice: Stop and
 // the subscriber's own defer race on shutdown.
 func (sub *subscriber) close() {
@@ -682,6 +717,10 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 		}
 	}()
 
+	// The select below can only notice a dead peer through a FAILED WRITE, and
+	// with no publisher live there are no writes. See watchPeer.
+	go sub.watchPeer()
+
 	// Catch the late joiner up before anything live: metadata and sequence
 	// headers first, in the order the publisher sent them.
 	for _, msg := range replay {
@@ -796,7 +835,15 @@ func isSetup(msg message.Message) bool {
 func setupSlot(msg message.Message) (string, bool) {
 	switch m := msg.(type) {
 	case *message.DataAMF0:
-		return "meta", true
+		// Per NAME, not one shared "meta" slot.
+		//
+		// Every AMF0 data message landed in the same slot, so any mid-stream
+		// one REPLACED the cached onMetaData -- and a cue point is an ordinary
+		// thing for an encoder to send. Every subscriber attaching afterwards
+		// then got that cue point replayed where its metadata should have been,
+		// including the engine's own FFmpeg, whose first act on connecting is
+		// to identify the streams.
+		return "meta-" + dataAMF0Name(m), true
 	case *message.Video:
 		return "video", true
 	case *message.Audio:
@@ -817,6 +864,31 @@ func setupSlot(msg message.Message) (string, bool) {
 		return fmt.Sprintf("video-mt-%d-%s", m.TrackID, inner), ok
 	}
 	return "", false
+}
+
+// dataAMF0Name is the event an AMF0 data message carries: "onMetaData",
+// "onCuePoint", "onTextData".
+//
+// The payload is a name followed by its arguments, except that publishers
+// conventionally wrap it: OBS sends ["@setDataFrame", "onMetaData", {...}].
+// The wrapper is a delivery instruction rather than the event, so it is skipped
+// and the next string is the answer.
+//
+// An unnamed or empty payload gets a stable slot of its own rather than being
+// folded in with onMetaData, because the one thing that must not happen is two
+// different events sharing a slot.
+func dataAMF0Name(m *message.DataAMF0) string {
+	for _, v := range m.Payload {
+		s, ok := v.(string)
+		if !ok || s == "" {
+			continue
+		}
+		if s == "@setDataFrame" {
+			continue
+		}
+		return s
+	}
+	return "unnamed"
 }
 
 // HasSubscriber reports whether anything is currently reading this source's

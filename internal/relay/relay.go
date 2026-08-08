@@ -55,8 +55,26 @@ type Hub struct {
 	// the only evidence left that it happened.
 	empty atomic.Uint64
 
-	// cc is touched only by run, so it needs no lock; the totals it feeds are
-	// atomic because Stats reads them from the HTTP goroutine.
+	// deliverMu serialises one datagram's whole trip through the hub.
+	//
+	// "cc is touched only by run, so it needs no lock" was false. Deliver is the
+	// SRT ingest path and runs on srtserver's per-session read loop, and a
+	// takeover deliberately overlaps two of those: closing the incumbent's
+	// connection wakes its Read, but waking it is not the same as it having
+	// LEFT Deliver, so the outgoing session can still be inside inspect() while
+	// the new one enters it. Two goroutines then write c.last[pid] and
+	// s.sendErrors with nothing between them.
+	//
+	// Held across fanout AND measure rather than around cc alone, because
+	// continuity counting is order-dependent: two datagrams measured out of
+	// order report discontinuities that never happened, and TSLost is the
+	// figure the whole "UDP on loopback is defensible because it is measured"
+	// argument rests on. One datagram at a time through a hub is also what the
+	// single-reader run() already provided; this extends the same guarantee to
+	// the injected path.
+	deliverMu sync.Mutex
+	// cc is guarded by deliverMu; the totals it feeds are atomic because Stats
+	// reads them from the HTTP goroutine.
 	cc              continuity
 	tsPackets       atomic.Uint64
 	tsLost          atomic.Uint64
@@ -103,6 +121,8 @@ type subscriber struct {
 	addr *net.UDPAddr
 	// sendErrors counts consecutive failures. A consumer that has gone away
 	// leaves an unreachable port behind; we notice and stop shouting at it.
+	//
+	// Written only in fanout, which runs under Hub.deliverMu.
 	sendErrors int
 }
 
@@ -300,8 +320,12 @@ func (h *Hub) run() {
 		h.rxPackets.Add(1)
 		h.rxBytes.Add(uint64(n))
 		// Fan out first: measurement must never sit in front of delivery.
+		// Under the same lock as Deliver: a hub reached by both its UDP socket
+		// and in-process injection has two writers, not one.
+		h.deliverMu.Lock()
 		h.fanout(buf[:n])
 		h.measure(buf[:n])
+		h.deliverMu.Unlock()
 	}
 }
 
@@ -326,6 +350,8 @@ func (h *Hub) Deliver(pkt []byte) {
 	h.rxBytes.Add(uint64(len(pkt)))
 	// Same order as run(): fan out before measuring, because measurement must
 	// never sit in front of delivery.
+	h.deliverMu.Lock()
+	defer h.deliverMu.Unlock()
 	h.fanout(pkt)
 	h.measure(pkt)
 }
