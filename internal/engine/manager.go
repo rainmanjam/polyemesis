@@ -395,11 +395,28 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 				for _, t := range valid {
 					suffixed = append(suffixed, t+backupTokenSuffix)
 				}
+				// THE BACKUP'S OWN PASSPHRASE, not the primary's.
+				//
+				// failover.backup.srt.passphrase is operator-settable and
+				// VALIDATED (db.Settings, the same 10..79 rule SRT imposes), so
+				// setting it looks exactly like configuring a distinct secret
+				// for the standby. Enforcing s.Ingest.SRT.Passphrase here meant
+				// it was stored, validated, reported applied -- and checked
+				// against the wrong secret. A backup encoder holding the
+				// passphrase the operator gave it was refused, and one holding
+				// the PRIMARY's was admitted.
+				//
+				// Falls back to the primary when unset, which is what an install
+				// that never configured a separate one already relies on.
+				pass := s.Ingest.SRT.Passphrase
+				if bp := eng.Settings().Failover.Backup.SRT.Passphrase; bp != "" {
+					pass = bp
+				}
 				targets = append(targets, srtserver.Target{
 					SourceID:   s.ID,
 					Name:       s.Name + " (backup)",
 					Enabled:    s.Enabled,
-					Passphrase: s.Ingest.SRT.Passphrase,
+					Passphrase: pass,
 					Sink:       bh,
 					Backup:     true,
 				})

@@ -1069,13 +1069,27 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// destinations against the previous transport's track list until the new
 	// probe landed. A guard that refuses the placeholder and accepts a stale
 	// real layout is worth very little.
+	// TWO SEPARATE CONCERNS, and tangling them left a door open.
+	//
+	// Invalidating the layout only makes sense if there IS one, so that half is
+	// rightly gated on measured. Bumping the generation is not: it exists to
+	// discard a probe that is ALREADY IN FLIGHT, and a probe in flight is
+	// precisely the state where measured is still false. Gating the bump on
+	// measured meant a mode switch made before the first probe committed bumped
+	// nothing -- so that probe passed its generation check and committed the
+	// OLD transport's layout stamped with the NEW mode. measured=true over the
+	// wrong track list, and the guard permanently satisfied: the exact failure
+	// the comment above describes, reached through the one door it did not
+	// close.
 	e.mu.Lock()
-	if e.measured && e.measuredMode != s.Ingest.Mode {
-		e.probed = false
-		e.measured = false
-		e.measuredMode = db.IngestUnset
-		e.source = routing.DefaultSource()
+	if e.measuredMode != s.Ingest.Mode {
 		e.sourceGen++
+		if e.measured {
+			e.probed = false
+			e.measured = false
+			e.measuredMode = db.IngestUnset
+			e.source = routing.DefaultSource()
+		}
 	}
 	e.mu.Unlock()
 
