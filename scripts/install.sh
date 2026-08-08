@@ -637,6 +637,26 @@ gather_configuration() {
   elif [ "$TLS_MODE" = "selfsigned" ]; then
     ask "Hostname or LAN IP you will browse to (goes in the certificate)" "$(hostname -f 2>/dev/null || hostname)" DOMAIN_NAME
   fi
+  # 443 IS THE POINT OF TURNING TLS ON, and the port was asked for above --
+  # before the operator knew they would be serving HTTPS at all. Left alone,
+  # the default 8080 gives a working but unlovely install: the :80 redirect
+  # correctly sends browsers to https://host:8080, every link carries the port,
+  # and nothing listens on the port people actually try first.
+  #
+  # Only offered when the port is still the untouched default. A port given on
+  # the command line, or typed at the prompt, is a decision and is left alone.
+  if [ "$TLS_MODE" != "off" ] && [ "$HTTP_PORT_SET" != true ] && [ "$HTTP_PORT" = "8080" ]; then
+    echo
+    echo "  HTTPS is normally served on 443, so browsers reach it without a port."
+    echo "  The service unit already grants CAP_NET_BIND_SERVICE, so an"
+    echo "  unprivileged process can bind it."
+    ask_yn "Serve HTTPS on 443 instead of 8080?" "y" USE_443
+    if [ "$USE_443" = yes ]; then
+      HTTP_PORT=443
+      warn_if_taken "$HTTP_PORT" tcp "web UI"
+    fi
+  fi
+
   ok "tls: $TLS_MODE${DOMAIN_NAME:+ ($DOMAIN_NAME)}"
 
   header "=== Data ==="
@@ -841,12 +861,21 @@ install_binary_mode() {
   } > "$CONFIG_DIR/config.yaml"
 
   local caps=""
-  if [ "$TLS_MODE" = "acme" ]; then
-    # Ports below 1024 are privileged and this unit runs unprivileged, so
-    # without this the :80 bind fails, polyemesis warns and keeps serving
-    # HTTPS, and ACME issuance never completes.
-    caps=$'AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE'
-  fi
+  # Ports below 1024 are privileged and this unit runs unprivileged. TWO ports
+  # can need it, and gating on acme alone covered only one:
+  #
+  #   :80  -- the ACME http-01 challenge. Without the capability the bind fails,
+  #           polyemesis warns and keeps serving HTTPS, and issuance never
+  #           completes.
+  #   :443 -- the web UI itself, whenever the operator took the 443 offer. That
+  #           is reachable with mode selfsigned, which is the DEFAULT choice, so
+  #           gating on acme meant the service could not bind the port the
+  #           installer had just written into its own ExecStart.
+  case "$TLS_MODE:$HTTP_PORT" in
+    acme:*|*:443|*:80)
+      caps=$'AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE'
+      ;;
+  esac
 
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
@@ -904,6 +933,10 @@ EOF
 configure_firewall() {
   [ "$CONFIGURE_FIREWALL" = yes ] || return 0
   if command -v ufw >/dev/null 2>&1; then
+    # HTTP_PORT is 443 whenever the operator took the offer above, so this is
+    # what opens HTTPS. It is deliberately not a separate `ufw allow 443` --
+    # opening a port nothing binds would look like working TLS and serve
+    # nothing, which is harder to diagnose than a closed port.
     ufw allow "${HTTP_PORT}/tcp"  >/dev/null 2>&1 || true
     ufw allow "${SRT_PORT}/udp"   >/dev/null 2>&1 || true
     [ "$ENABLE_RTMP" = yes ] && ufw allow "${RTMP_PORT}/tcp" >/dev/null 2>&1 || true
