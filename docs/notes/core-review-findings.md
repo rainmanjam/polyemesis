@@ -27,14 +27,41 @@ thing that is loudly wrong.
 | Backup SRT passphrase enforced the **primary's** secret | `manager.go:402` |
 | `sourceGen++` gated on `measured`, so a mode switch before the first probe bumped nothing | `engine.go:1072` |
 
-## Tier 1 — audible, in the differentiator
+## Tier 1 — audible, in the differentiator — **ALL FIXED**
 
-| # | Where | Defect | Consequence |
-|---|---|---|---|
-| 1 | `routing/filtergraph.go:421` | `resolveNorm` assumes only *summing* creates clipping, so a single-track profile is left at `Normalization: off`. But `PanFilter` sums unbounded cells per output channel and `Validate` caps only the **per-cell** gain, never the row sum | A one-track matrix compiles to `pan=stereo\|c0=2*c0+2*c2+2*c4` — up to 6× full scale. Hard clipping, with NormAuto's protection silently absent. **Executed and confirmed** |
-| 2 | `routing/filtergraph.go:330` | A saved matrix whose track has since lost channels drops the missing cells and never rescales the survivors; the warning names only the dropped channels | A 5.1 matrix against a now-stereo ingest yields `c0=0.4143*c0` — the destination goes **7.7 dB quiet**, a valid graph rather than an error, with nothing saying the level moved. **Executed and confirmed** |
-| 3 | `routing/downmix.go:12` | `DownmixMatrix` keys only on channel *count* and never reads `Track.Layout`, which `ffmpeg/probe.go:112` does populate | A 2.1 track (FL FR LFE) compiles to `c0=0.5858*c0+0.4142*c2` — LFE folded into both legs, directly contradicting the file header's claim that LFE is excluded. **Executed and confirmed** |
-| 4 | `routing/profile.go:30` | `MaxChannels = 8` is enforced only against matrix cells; simple mode passes the probed count straight into `DownmixMatrix`'s unbounded default branch | A >8-channel track routes through a guard that does nothing, and an **odd** wide count normalises the two rows by different sums — 9ch gives a permanent **1.94 dB stereo imbalance**. **Executed and confirmed** |
+Fixed on this branch. Before touching anything, the package was reverted to
+`ac03f84` and a throwaway probe measured each defect, so the numbers below are
+what the pre-fix compiler actually emitted rather than what reading it suggested:
+
+```
+F1 matrix: norm="off" limiter=false
+   [0:a:0]pan=stereo|c0=2*c0+2*c2+2*c4|c1=1*c1[a_t0];...
+F1 simple: norm="off"
+   [0:a:0]pan=stereo|c0=2*c0|c1=2*c1[a_t0];...
+F2 narrowed: warnings=[track 1 has 2 channel(s); channel 3 is ignored ...]
+   [0:a:0]pan=stereo|c0=0.4143*c0|c1=0.4143*c1[a_t0];...      (-7.7 dB)
+F3 2.1 as 3 channels: L=[0.5858 0 0.4142] R=[0 0.5858 0.4142]  (ch 2 is LFE)
+F4 9ch: perChannel L=0.2000 R=0.2500 -> -1.94 dB imbalance
+```
+
+| # | Where | Defect | Consequence | Fix |
+|---|---|---|---|---|
+| 1 | `routing/filtergraph.go:421` | `resolveNorm` assumes only *summing* creates clipping, so a single-track profile is left at `Normalization: off`. But `PanFilter` sums unbounded cells per output channel and `Validate` caps only the **per-cell** gain, never the row sum | A one-track matrix compiles to `pan=stereo\|c0=2*c0+2*c2+2*c4` — up to 6× full scale. Hard clipping, with NormAuto's protection silently absent | `resolveNorm` also takes `peakGain(cells)`. Widened, never narrowed: nothing that has a limiter today loses one |
+| 2 | `routing/filtergraph.go:330` | A saved matrix whose track has since lost channels drops the missing cells and never rescales the survivors; the warning names only the dropped channels | A 5.1 matrix against a now-stereo ingest yields `c0=0.4143*c0` — the destination goes **7.7 dB quiet**, a valid graph rather than an error, with nothing saying the level moved | `levelWarning` states the drop in dB. Deliberately *not* auto-rescaled: silently rewriting the operator's coefficients is the same category of sin as silently changing the level |
+| 3 | `routing/downmix.go:12` | `DownmixMatrix` keys only on channel *count* and never reads `Track.Layout`, which `ffmpeg/probe.go:112` does populate | A 2.1 track (FL FR LFE) compiles to `c0=0.5858*c0+0.4142*c2` — LFE folded into both legs, directly contradicting the file header's claim that LFE is excluded | Coefficients assigned by channel *name* from libavutil's layout table; count table kept as the fallback. Reproduces the old table exactly for every layout that was already right |
+| 4 | `routing/profile.go:30` | `MaxChannels = 8` is enforced only against matrix cells; simple mode passes the probed count straight into `DownmixMatrix`'s unbounded default branch | A >8-channel track routes through a guard that does nothing, and an **odd** wide count normalises the two rows by different sums — 9ch gives a permanent **1.94 dB stereo imbalance** | `normalizeRows` divides both legs by the same figure. The `MaxChannels` inconsistency itself is *not* fixed — see below |
+
+**Left open, deliberately.** `MaxChannels = 8` still bounds matrix cell indices
+while simple mode routes a 9-channel track happily, so a width you can route is
+a width you cannot address cell-by-cell. That is a validation bound the UI's
+channel grid is built against; raising it is a UI change, not a bug fix, and the
+audible half of finding 4 is closed without it.
+
+**Verification.** `levels_test.go` — 14 tests including two that go through real
+FFmpeg: all 27 named layouts compile to graphs FFmpeg accepts against a real
+track of that layout, and a 2.1 source whose FL/FR are digital silence and whose
+LFE carries a 60 Hz tone now measures **−91.0 dB** at the output (silence)
+where it previously carried the tone at −7.7 dB.
 
 ## Tier 2 — silently absent protections
 

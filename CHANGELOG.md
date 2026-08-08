@@ -8,6 +8,51 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+Four defects in the per-destination audio routing, all of them audible, all
+found by a four-reviewer pass over the compiler and confirmed by measuring what
+FFmpeg actually produced rather than by reading the filtergraph.
+
+- **The downmix now reads the track's channel layout, not just its channel
+  count.** Every 3-channel track was treated as 3.0 = FL FR FC. A 2.1 track is
+  FL FR LFE, so its LFE was folded into both legs at −7.7 dB — precisely what
+  the file promised in its header never happened. The same mistake dropped a
+  real channel from `hexagonal` and `6.1(back)`, which have no LFE at the index
+  where 5.1 and 7.1 keep theirs. Coefficients are now assigned by channel name
+  from libavutil's own layout table, with the old count-keyed table kept as the
+  fallback for a layout ffprobe could not name.
+
+  **What you may notice.** The layouts that were already correct — mono, stereo,
+  3.0, quad, 5.0, 5.1, 5.1(side), 6.1, 7.1 — compile to byte-identical graphs
+  and their destinations do not restart. A destination fed a 2.1, 3.1, 4.1,
+  hexagonal or 6.1(back) track will restart once on upgrade, and will sound
+  different afterwards, because it was wrong before.
+
+- **`auto` clip protection now looks at the gain, not only the track count.**
+  The rule was "only summing across tracks can clip, so one track needs no
+  limiter". But `pan` sums too, per output channel, and validation caps each
+  cell at 2.0 and never the row. A one-track matrix with three cells at maximum
+  gain on one leg compiled to `c0=2*c0+2*c2+2*c4` — six times full scale, hard
+  clipping, with `auto` having decided no protection was needed. The track count
+  keeps its say and the peak per-output gain gets one as well. This only ever
+  adds a limiter: nothing that has one today loses it, and any profile peaking
+  at or below unity compiles to the string it always did.
+
+- **A wide track of unknown layout no longer sits off-centre.** The fallback
+  splits even channels left and odd channels right, then normalised each leg by
+  its own sum — so an odd channel count, which puts one more channel on the
+  left, scaled the two sides by different divisors. Nine channels gave a
+  permanent 1.94 dB image shift. Both legs are now divided by the same figure.
+
+- **A matrix whose ingest has narrowed now says the level moved.** A saved 5.1
+  matrix meeting a stereo ingest drops the cells addressing the missing channels
+  and keeps coefficients that were scaled for the old width, leaving the
+  destination 7.7 dB down. It warned about the channel numbers and never about
+  the volume, which is the part anyone would actually notice. The coefficients
+  are still the operator's to change — rescaling them silently would be the same
+  category of mistake — but the drop is now stated in dB.
+
 ## [0.5.0] — 2026-08-07
 
 Two changes an operator can actually observe, and a great many they cannot.

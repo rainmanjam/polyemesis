@@ -125,7 +125,7 @@ func Compile(p Profile, src Source) (Result, error) {
 		cur = "a_mix"
 	}
 
-	norm := resolveNorm(p.Normalize, len(tracks))
+	norm := resolveNorm(p.Normalize, len(tracks), peakGain(cells))
 	loud, loudOK := p.EffectiveLoudness()
 	if loudOK {
 		// A destination that names a loudness target has asked for loudness
@@ -251,7 +251,7 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string) (chain
 		// sidechaincompress inputs always agree on channel layout, and denoise
 		// it if it is annotated: room noise opening the duck is precisely the
 		// failure the annotation exists to prevent.
-		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, trackChain(src, t, CellsForTrack(t, tr.Channels, 1.0)), keyLbl))
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, trackChain(src, t, CellsForTrack(t, tr, 1.0)), keyLbl))
 		keys = append(keys, keyLbl)
 	}
 
@@ -318,9 +318,16 @@ func resolveCells(p Profile, src Source) ([]Cell, []string) {
 
 	switch p.Mode {
 	case ModeMatrix:
+		// Track the level a cell would have contributed even when it is dropped,
+		// so a narrowed ingest can be reported as the volume change it is rather
+		// than only as a list of channel numbers.
+		var wanted, kept [OutChannels]float64
 		for _, c := range p.Matrix {
 			if c.Gain <= 0 {
 				continue
+			}
+			if c.Out >= 0 && c.Out < OutChannels {
+				wanted[c.Out] += c.Gain
 			}
 			t, ok := src.TrackByIndex(c.Track)
 			if !ok {
@@ -331,7 +338,13 @@ func resolveCells(p Profile, src Source) ([]Cell, []string) {
 				warns = append(warns, fmt.Sprintf("track %d has %d channel(s); channel %d is ignored", c.Track+1, t.Channels, c.Channel+1))
 				continue
 			}
+			if c.Out >= 0 && c.Out < OutChannels {
+				kept[c.Out] += c.Gain
+			}
 			out = append(out, c)
+		}
+		if w := levelWarning(wanted, kept); w != "" {
+			warns = append(warns, w)
 		}
 
 	default: // ModeSimple
@@ -344,12 +357,51 @@ func resolveCells(p Profile, src Source) ([]Cell, []string) {
 				warns = append(warns, fmt.Sprintf("track %d is selected but not present on the ingest; it is ignored", sel.Track+1))
 				continue
 			}
-			out = append(out, CellsForTrack(sel.Track, t.Channels, sel.Gain)...)
+			// Simple mode recomputes the downmix against the live layout every
+			// time, so it cannot be left holding coefficients scaled for a width
+			// the ingest no longer has.
+			out = append(out, CellsForTrack(sel.Track, t, sel.Gain)...)
 		}
 	}
 
 	warns = dedupe(warns)
 	return out, warns
+}
+
+// levelWarning reports how much quieter dropping cells made the mix.
+//
+// A saved matrix outlives the ingest it was drawn against. When a track
+// narrows, the cells addressing the missing channels are dropped and the
+// survivors keep coefficients that were scaled for the old width — so a 5.1
+// matrix meeting a stereo ingest still compiles, still runs, and sits 7.7 dB
+// down with nothing anywhere saying the level moved. The coefficients are the
+// operator's to change, not ours to rescale behind their back; what was
+// missing was anyone saying it happened.
+func levelWarning(wanted, kept [OutChannels]float64) string {
+	// The quietest surviving leg, in dB relative to what the profile asked for.
+	worst := 0.0
+	silent := false
+	for out := range wanted {
+		if wanted[out] <= 0 {
+			continue
+		}
+		if kept[out] <= 0 {
+			silent = true
+			continue
+		}
+		if d := 20 * math.Log10(kept[out]/wanted[out]); d < worst {
+			worst = d
+		}
+	}
+	switch {
+	case silent:
+		return "the ingest no longer carries the channels one side of this matrix was routing; that side is silent"
+	case worst < -0.5:
+		// Below half a dB is not worth a line in the UI; it is the rounding on
+		// a single trimmed cell, not something anyone can hear.
+		return fmt.Sprintf("the ingest no longer carries every channel this matrix was routing, so the mix is %.1f dB quieter than the profile intends", -worst)
+	}
+	return ""
 }
 
 // applyRolePolicy drops every cell belonging to a track whose role this
@@ -416,13 +468,24 @@ func PanFilter(cells []Cell) string {
 	return "pan=stereo|" + strings.Join(exprs, "|")
 }
 
-// resolveNorm turns NormAuto into a concrete stage. Summing is the only thing
-// that creates new clipping, so a single-track profile stays untouched.
-func resolveNorm(m NormMode, trackCount int) NormMode {
+// resolveNorm turns NormAuto into a concrete stage.
+//
+// The original rule was "summing across tracks is the only thing that creates
+// clipping, so a single-track profile stays untouched". Half true: pan sums
+// too, per output channel, and Validate caps only the per-cell gain. A
+// one-track matrix with three cells at MaxGain on one leg compiles to
+// c0=2*c0+2*c2+2*c4 — six times full scale, with NormAuto having decided no
+// protection was needed.
+//
+// So the track count keeps its say, and peak — the largest total gain any one
+// output channel applies — gets a say as well. Widening rather than replacing
+// is deliberate: no profile that has a limiter today loses it, and every
+// profile that peaks at or below unity compiles to the string it always did.
+func resolveNorm(m NormMode, trackCount int, peak float64) NormMode {
 	if m != NormAuto {
 		return m
 	}
-	if trackCount >= 2 {
+	if trackCount >= 2 || peak > 1 {
 		return NormLimiter
 	}
 	return NormOff
