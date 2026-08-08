@@ -188,7 +188,7 @@ func TestTheMeterThrottleReadsTheCurrentIntervalRatherThanTheOneItSpawnedWith(t 
 // or lowering it on a box whose ingest has not probed yet would be lost -- and
 // the operator would have to change it twice.
 func TestTheMeterIntervalIsAppliedEvenWhenTheMetersCannotRun(t *testing.T) {
-	e := &Engine{log: testLogger(), source: routing.DefaultSource()}
+	e := &Engine{log: testLogger(), sourceState: sourceState{source: routing.DefaultSource()}}
 	e.reconcileMeters(db.Settings{Meters: db.MeterSettings{Enabled: false, IntervalMS: 250}})
 
 	if got := e.meterInterval.Load(); got != int64(250*time.Millisecond) {

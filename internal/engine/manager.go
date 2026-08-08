@@ -40,6 +40,22 @@ type Manager struct {
 	bus   *events.Broker
 	alloc *relay.PortAllocator
 
+	// syncMu serialises Sync and reconcileSharedIngest end to end, the way
+	// Engine.reconcileMu does for a single engine's Reconcile.
+	//
+	// It is NOT mu. mu guards the fields and is dropped in the middle of both
+	// functions on purpose, because building an engine or binding a listener
+	// takes far too long to hold a lock the status endpoints need. That gap is
+	// the bug: Manager.Reconcile is reached from several HTTP handlers, so two
+	// passes could both observe a source with no engine, both build and Start
+	// one, and both write m.engines[id]. The second overwrote the first, and
+	// the loser stayed RUNNING -- hub, ingest child and relay ports -- with
+	// nothing holding a reference that could stop it. reconcileSharedIngest has
+	// the same shape around the listener sockets.
+	//
+	// Always taken OUTSIDE mu. Nothing may acquire it while holding mu.
+	syncMu sync.Mutex
+
 	mu sync.RWMutex
 	// srt and rtmp are the one-port listeners, one per protocol, each shared by
 	// every source. Nil when the port could not be bound, which is logged
@@ -131,6 +147,12 @@ func (m *Manager) Start(ctx context.Context) error {
 // Sync makes the set of running engines match the sources table, starting
 // engines for new sources and stopping those whose source has gone.
 func (m *Manager) Sync() error {
+	// One at a time, for the whole of it. See Manager.syncMu: the window
+	// between deciding an engine is missing and publishing the one we built is
+	// wide enough for a second caller to decide the same thing.
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+
 	rows, err := m.store.ListSources()
 	if err != nil {
 		return err
@@ -211,6 +233,12 @@ func (m *Manager) Sync() error {
 // They live on the manager because each is ONE listener for every source: an
 // engine could not own one without owning the other engines' traffic.
 func (m *Manager) reconcileSharedIngest() {
+	// Same lock as Sync, for the same reason: the read of m.srt/m.rtmp and the
+	// write back are separated by an actual bind, and two callers racing there
+	// each start a listener while only one survives in the field.
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+
 	st, err := m.store.GetSettings()
 	if err != nil {
 		m.log.Warn("cannot read shared-ingest settings", "err", err)
@@ -395,11 +423,28 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 				for _, t := range valid {
 					suffixed = append(suffixed, t+backupTokenSuffix)
 				}
+				// THE BACKUP'S OWN PASSPHRASE, not the primary's.
+				//
+				// failover.backup.srt.passphrase is operator-settable and
+				// VALIDATED (db.Settings, the same 10..79 rule SRT imposes), so
+				// setting it looks exactly like configuring a distinct secret
+				// for the standby. Enforcing s.Ingest.SRT.Passphrase here meant
+				// it was stored, validated, reported applied -- and checked
+				// against the wrong secret. A backup encoder holding the
+				// passphrase the operator gave it was refused, and one holding
+				// the PRIMARY's was admitted.
+				//
+				// Falls back to the primary when unset, which is what an install
+				// that never configured a separate one already relies on.
+				pass := s.Ingest.SRT.Passphrase
+				if bp := eng.Settings().Failover.Backup.SRT.Passphrase; bp != "" {
+					pass = bp
+				}
 				targets = append(targets, srtserver.Target{
 					SourceID:   s.ID,
 					Name:       s.Name + " (backup)",
 					Enabled:    s.Enabled,
-					Passphrase: s.Ingest.SRT.Passphrase,
+					Passphrase: pass,
 					Sink:       bh,
 					Backup:     true,
 				})
@@ -483,11 +528,20 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 		// serveSubscriber about subscribe-before-publish being the normal order.
 		eng := m.Engine(s.ID)
 		subscribed := rtmp != nil && rtmp.HasSubscriber(s.ID, false)
+		// Pending is the same expression WITHOUT the subscriber: an engine
+		// exists and the mode says reconcileIngest will dial this listener, so
+		// a missing subscriber is a child in the middle of respawning rather
+		// than a permanent state. That distinction is the listener's whole
+		// basis for deciding a not-ready verdict is worth waiting on -- an
+		// SRT-mode source is registered here too, and waiting for one to become
+		// RTMP-ready is waiting forever.
+		expected := eng != nil && s.Ingest.Mode == db.IngestRTMP
 		primary := rtmpserver.Target{
 			SourceID: s.ID,
 			Name:     s.Name,
 			Enabled:  s.Enabled,
-			Ready:    eng != nil && s.Ingest.Mode == db.IngestRTMP && subscribed,
+			Ready:    expected && subscribed,
+			Pending:  expected,
 		}
 		primaries[s.ID] = primary
 		for _, tok := range s.ValidTokens(now) {
@@ -520,6 +574,11 @@ func (m *Manager) lookupStreamKey(key string) (rtmpserver.Target, bool) {
 			// green-encoder-no-output failure Ready exists to prevent, fixed for
 			// the primary in this same change and missed here.
 			Ready: rtmp != nil && rtmp.HasSubscriber(s.ID, true),
+			// Reaching here already means the engine exists and failover is
+			// configured to use RTMP, which are exactly the conditions under
+			// which a backup subscriber gets spawned. The two `continue`s above
+			// are what would otherwise have made this false.
+			Pending: true,
 		}
 		for _, tok := range s.ValidTokens(now) {
 			targets[tok+backupTokenSuffix] = backup

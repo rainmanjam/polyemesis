@@ -424,8 +424,8 @@ func TestRelayFeedArgsCopyEverythingAndCarryTheTimelineForward(t *testing.T) {
 // sees a format change it may refuse.
 func TestSlateSpecFollowsTheProbedIngestRatherThanAForm(t *testing.T) {
 	e := &Engine{
-		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		videoInfo: &ffmpeg.VideoStream{Width: 1920, Height: 1080, FrameRate: 50},
+		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		sourceState: sourceState{videoInfo: &ffmpeg.VideoStream{Width: 1920, Height: 1080, FrameRate: 50}},
 	}
 	s := db.DefaultSettings()
 	s.Failover.Slate.Color = "0x101014"
@@ -512,18 +512,7 @@ func failoverEngine(t *testing.T) *Engine {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	return &Engine{
-		log:       log,
-		store:     store,
-		bus:       events.NewBroker(),
-		hub:       hub,
-		alloc:     relay.NewPortAllocator(relayPortBase+relayPortSpan, 64),
-		tools:     &ffmpeg.Tools{FFmpeg: "polyemesis-no-such-binary"},
-		dests:     map[int64]*destination{},
-		rends:     map[int64]*rendition{},
-		playProcs: map[string]*supervisor.Process{},
-		source:    routing.DefaultSource(),
-	}
+	return &Engine{log: log, store: store, bus: events.NewBroker(), hub: hub, alloc: relay.NewPortAllocator(relayPortBase+relayPortSpan, 64), tools: &ffmpeg.Tools{FFmpeg: "polyemesis-no-such-binary"}, dests: map[int64]*destination{}, rends: map[int64]*rendition{}, playProcs: map[string]*supervisor.Process{}, sourceState: sourceState{source: routing.DefaultSource()}}
 }
 
 func failoverOnSettings() db.Settings {

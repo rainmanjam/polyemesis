@@ -23,6 +23,13 @@ Tracks with more than two channels are stereo-downmixed first, using FFmpeg's
 normalized ITU coefficients — a 5.1 track folds down with LFE dropped, scaled so
 that a fully correlated source cannot clip.
 
+Which channel is which comes from the layout ffprobe reports, not from the
+channel count: a 2.1 track is FL FR LFE and a 3.0 track is FL FR FC, and only
+one of those has a centre channel to fold in. A layout polyemesis does not
+recognise falls back to FFmpeg's native ordering for that width, and a width
+with no canonical ordering is split even-channels-left, odd-channels-right at
+matched gain so nothing is dropped and the image stays centred.
+
 ## Mix matrix
 
 A grid mapping every channel of every track onto L and R, with a gain per cell
@@ -37,10 +44,15 @@ Summing tracks can exceed full scale. The options:
 
 | Mode | Behaviour |
 |---|---|
-| `auto` (default) | A limiter is inserted whenever two or more tracks are combined, and omitted for a single track |
+| `auto` (default) | A limiter is inserted whenever two or more tracks are combined, or whenever any one output channel's coefficients total more than unity. Omitted for a single track that cannot reach full scale |
 | `off` | No limiter. You are responsible for the gain staging |
 | `limiter` | Always inserted |
 | `loudnorm` | EBU R128 loudness normalization instead of a limiter |
+
+The second clause matters because `pan` sums too. Validation caps each cell at
+2.0, never the row, so a single track with three cells at 2.0 on one leg reaches
+six times full scale — and `auto` used to reason that one track cannot clip and
+insert nothing.
 
 **A loudness target changes what `auto` does.** Naming a target on the
 destination is itself a request for loudness normalization, so `auto` arms
