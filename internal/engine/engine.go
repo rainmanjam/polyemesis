@@ -646,10 +646,6 @@ func (e *Engine) Start(ctx context.Context) error {
 	// Started before anything that can publish, and the channel is created
 	// here rather than in New so an Engine built directly in a test keeps the
 	// inline path. See publishStatus.
-	e.statusReq = make(chan struct{}, 1)
-	e.wg.Add(1)
-	go func() { defer e.wg.Done(); e.statusLoop(e.ctx) }()
-
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.statsLoop(e.ctx) }()
 
@@ -3893,46 +3889,7 @@ func (e *Engine) onState(s supervisor.Status) {
 // and in the unit tests that drive an Engine directly -- so this is never a
 // reason a status goes missing.
 func (e *Engine) publishStatus() {
-	if e.statusReq == nil {
-		e.bus.Publish(events.TypeStatus, e.Status())
-		return
-	}
-	select {
-	case e.statusReq <- struct{}{}:
-	default:
-		// One is already queued and it will read the state as it stands when
-		// it runs, which is necessarily at least as fresh as ours.
-	}
-}
-
-// statusCoalesce is how long a push suppresses the ones behind it. Well under
-// the 2s stats tick and far below what anyone perceives as lag, while covering
-// the burst a single reconcile produces.
-const statusCoalesce = 150 * time.Millisecond
-
-// statusLoop serialises status publishing. See publishStatus.
-func (e *Engine) statusLoop(ctx context.Context) {
-	timer := time.NewTimer(statusCoalesce)
-	if !timer.Stop() {
-		<-timer.C
-	}
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-e.statusReq:
-			e.bus.Publish(events.TypeStatus, e.Status())
-			// The quiet window. Anything arriving now collapses into the single
-			// queued slot and goes out once, when it expires.
-			timer.Reset(statusCoalesce)
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-			}
-		}
-	}
+	e.bus.Publish(events.TypeStatus, e.Status())
 }
 
 // statsLoop pushes host and bitrate stats on a fixed cadence, and refreshes
