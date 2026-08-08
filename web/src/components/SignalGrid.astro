@@ -1,35 +1,88 @@
 ---
 /**
- * The background grid, with a lens that follows the pointer.
+ * The background grid, with a lens that genuinely warps it under the pointer.
  *
- * A component rather than a bare div because the two instances on the home page
- * were already duplicating the markup, and the lens adds a child that has to be
- * present in both or the effect appears on one hero and not the other.
+ * A REAL DISPLACEMENT, not a phase trick. An earlier version faked it with a
+ * second grid at a different pitch: cheap, compositor-only, and not actually
+ * bending anything. This one runs feDisplacementMap over a copy of the grid, so
+ * the lines really are pushed out of place.
+ *
+ * THE COST IS REAL AND IT IS BOUNDED ON PURPOSE.
+ *
+ * Filters run on the main thread and re-rasterise what they cover every time
+ * their input changes. That is the whole objection to filtering a background,
+ * and it is correct -- for a filter over the whole hero. The mitigation is not
+ * to avoid the filter, it is to stop pointing it at a full-viewport element:
+ * the filter here covers a 420px square that carries its own copy of the grid,
+ * and the hero underneath is never filtered at all.
+ *
+ * So the per-frame cost is a fixed 420x420 raster rather than one that grows
+ * with the viewport, and it does not change when someone opens the page on a
+ * 5K display. Moving the lens is still a transform on the compositor; only the
+ * displacement itself is main-thread work, over an area chosen to make that
+ * affordable.
  */
 interface Props { class?: string }
 const { class: className = "absolute inset-0" } = Astro.props;
 ---
 
 <div class:list={["signal-grid", className]} aria-hidden="true" data-signal-grid>
-  <div class="signal-grid__warp"></div>
+  <div class="signal-grid__warp" style="filter: url(#grid-warp)"></div>
+
+  <!--
+    The filter lives in the document rather than in a data: URL because Safari
+    will not apply a filter referenced from a stylesheet's url() across an
+    external SVG in every version, and a lens that silently does nothing on one
+    browser is worse than one that is not there.
+
+    Zero-sized and absolutely positioned: an <svg> in flow would occupy space and
+    push the hero's content down by its intrinsic height.
+  -->
+  <svg class="signal-grid__defs" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="grid-warp" x="-20%" y="-20%" width="140%" height="140%"
+              color-interpolation-filters="sRGB">
+        <!--
+          Low baseFrequency and two octaves: a broad, slow undulation rather
+          than noise. High frequencies here read as static on a 1px line, which
+          is what makes a filtered grid look broken rather than bent.
+
+          fractalNoise, not turbulence: turbulence's absolute-value folding puts
+          hard creases in the field, and a crease across a straight line looks
+          like a rendering fault.
+        -->
+        <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012"
+                      numOctaves="2" seed="7" result="noise" />
+        <!--
+          scale is in pixels of maximum displacement. 18 against a 56px grid
+          pitch is roughly a third of a cell: enough that a line visibly leaves
+          true, short of the point where lines cross each other and the grid
+          stops reading as a grid.
+        -->
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="18"
+                           xChannelSelector="R" yChannelSelector="G" />
+      </filter>
+    </defs>
+  </svg>
 </div>
 
 <script>
-  // Pointer tracking, written to a custom property and applied by transform.
+  // Pointer tracking, coalesced into one rAF.
   //
-  // ONE rAF, COALESCED. pointermove fires far faster than the display refreshes
-  // -- a high-polling-rate mouse can deliver several hundred events a second --
-  // and writing a style property on each one does that work several times per
-  // frame for a single visible result. Storing the last position and writing it
-  // once per frame collapses that to what the compositor can actually use.
+  // pointermove fires far faster than the display refreshes -- a high-polling
+  // mouse delivers several hundred events a second -- and each one that reaches
+  // a style write does the work again for a single visible result. Storing the
+  // last position and writing once per frame collapses that to what the
+  // compositor can use.
   //
-  // The property carries PIXELS and is consumed by translate3d, so the write is
-  // compositor-only: no layout, no paint, no main-thread raster. That is the
-  // same constraint the bus sweep in global.css is built around, for the same
-  // reason -- this page's audience opens devtools.
+  // The write is a transform, so MOVING the lens stays compositor-only. The
+  // displacement is main-thread, but it is over a fixed 420px square and does
+  // not grow with the page.
   const grids = document.querySelectorAll<HTMLElement>("[data-signal-grid]");
-  if (grids.length && window.matchMedia("(hover: hover) and (pointer: fine)").matches
-      && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  const fine = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  if (grids.length && fine && !still) {
     grids.forEach((grid) => {
       const lens = grid.querySelector<HTMLElement>(".signal-grid__warp");
       if (!lens) return;
@@ -43,9 +96,8 @@ const { class: className = "absolute inset-0" } = Astro.props;
       };
 
       grid.addEventListener("pointermove", (e) => {
-        // Coordinates relative to the grid, because the lens is absolutely
-        // positioned inside it. Client coordinates would drift by the hero's
-        // offset and by however far the page is scrolled.
+        // Relative to the grid: the lens is absolutely positioned inside it, so
+        // client coordinates would drift by the hero's offset and by scroll.
         const r = grid.getBoundingClientRect();
         x = e.clientX - r.left;
         y = e.clientY - r.top;
@@ -55,10 +107,9 @@ const { class: className = "absolute inset-0" } = Astro.props;
         }
       }, { passive: true });
 
-      // Parked off-screen on leave rather than left where it was. The lens
-      // fades out on hover loss, but a fade leaves it sitting under the cursor's
-      // last position for the length of the transition, and re-entering
-      // elsewhere would show it snap across.
+      // Parked off-screen on leave. The lens fades out, but a fade leaves it
+      // under the cursor's last position for the length of the transition, and
+      // re-entering elsewhere would show it snap across.
       grid.addEventListener("pointerleave", () => {
         lens.style.setProperty("--warp-x", "-9999px");
         lens.style.setProperty("--warp-y", "-9999px");
