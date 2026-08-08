@@ -185,6 +185,39 @@ locked out of your own tool.
 
 Turn it on when you have a publicly trusted certificate and intend to keep one.
 
+## I forgot the admin password. How do I get back in?
+
+With shell access to the box, set a new one and exit:
+
+```bash
+sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml
+```
+
+It asks for the new password twice, without echoing it, then signs out every
+existing session. Run it as the user that owns the database — root will work but
+leaves files that user can no longer write.
+
+It is safe to run while the service is up: it touches only the database and
+never binds a port. To script it, pipe the password twice:
+
+```bash
+printf '%s\n%s\n' "$NEW" "$NEW" | sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml
+```
+
+**Not as a command-line flag, deliberately.** A password in argv is visible in
+`ps` to every other user on the machine, lands in shell history, and appears in
+any audit log that records command lines.
+
+**Do not delete the row from the database to force first-run setup.** It works —
+`needsSetup` is just "the users table is empty" — but `POST /api/v1/setup` is
+unauthenticated, and the only thing stopping it taking over a configured install
+is that an account already exists. Deleting the account removes that guard, so
+until you finish setup, anyone who can reach the port can claim your install.
+`-reset-admin` never opens that window: the account keeps existing throughout.
+
+Sessions are ended on purpose. Someone resetting a forgotten password may be
+locking an intruder out, and leaving that intruder signed in would defeat it.
+
 ## Can I use my own FFmpeg build?
 
 Yes: `ffmpeg.binary` and `ffmpeg.probe` in the config, or `-ffmpeg` / `-ffprobe`

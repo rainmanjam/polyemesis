@@ -8,11 +8,155 @@ its first tagged release.
 
 ## [Unreleased]
 
-## [0.5.0] — 2026-08-07
+## [0.5.0] — 2026-08-08
 
-Two changes an operator can actually observe, and a great many they cannot.
+The first release with the core review in it, and the version number is
+deliberately 0.5.0 rather than 0.6.0.
+
+0.5.0 was written up in this file on 2026-08-07 and then never tagged, so its
+contents have never been in anyone's hands — a heading that looked released
+above work that was not. Folding this release into it closes that rather than
+shipping 0.6.0 over a hole in the version line, or retroactively tagging a
+release nobody could have installed.
+
+So everything below is one release: the four-reviewer core review worked end to
+end, plus the two operator-visible changes the never-cut 0.5.0 had described.
+
+### Added
+
+- **`polyemesis -reset-admin`** — set a new admin password from the box the
+  database lives on, for an operator who has shell access and no way in through
+  the UI. Asks twice without echoing, signs out every existing session, and
+  exits without binding a port, so it is safe to run against a live server. Pipe
+  the password twice to script it.
+
+  The password is deliberately **not** a flag: argv is visible in `ps` to every
+  other user on the machine, lands in shell history, and appears in any audit log
+  that records command lines.
+
+  It also replaces advice nobody should follow. Deleting the row from the users
+  table does restore first-run setup — `needsSetup` is just "the table is empty"
+  — but `POST /api/v1/setup` is unauthenticated and the only guard on it is that
+  an account already exists. Deleting the account removes that guard, so until
+  setup is finished anyone who can reach the port can claim the install.
+  `-reset-admin` never opens that window.
+
+### Fixed
+
+Nine more defects from the same core review, in the transport and concurrency
+layers. Every one is the shape the whole review turned out to be: a protection
+that is present in name and absent in effect.
+
+- **An RTMP publisher for an SRT source is refused immediately again.** The
+  readiness grace described further down this same release claimed in its own
+  comment that it could not be used to hold connections open. It could: a target is registered for every
+  source whatever its ingest mode, so any valid token for an SRT-mode source was
+  found, enabled, and permanently not ready — the one verdict the grace waits
+  on. Every connect burned the full six seconds, in parallel, for a state no
+  amount of waiting could change. The listener now waits only where a subscriber
+  is genuinely on its way, and caps waiters per publisher slot so one reconnect
+  gets its grace while a flood does not multiply it.
+
+- **A measured layout survives the encoder going quiet.** Roughly nine seconds
+  into any outage the engine began reporting a real measured layout as the
+  placeholder, because the check asked "is a stream arriving now" where it meant
+  "has one ever been measured". The meters were torn down, the captioner rebuilt
+  against an unknown source, and the routing preview stopped describing the graph
+  its destinations were running. The stem plan had the same mistake from the
+  other end: an encoder going quiet emptied it and restarted the recorder
+  **without stems** mid-outage, then restarted it again when the probe returned.
+
+- **A genuine data race in the relay's loss measurement.** `Deliver` runs on the
+  SRT read loop, and a publisher takeover deliberately overlaps two of them —
+  closing the incumbent's connection wakes its `Read`, which is not the same as
+  it having finished. Two goroutines wrote the continuity counters and the
+  send-error tally with nothing between them, corrupting the TSLost figure that
+  the "UDP on loopback is defensible because it is measured" argument rests on.
+
+- **A dead subscriber no longer counts as a reader.** A subscriber whose FFmpeg
+  exited while nothing was publishing was never noticed — there are no writes to
+  fail — so readiness kept reporting a closed socket as a live reader and
+  admitted publishers into a stream nobody was reading.
+
+- **A mid-stream cue point no longer replaces the cached metadata.** Every AMF0
+  data message shared one setup slot, so a cue point evicted `onMetaData` and
+  every subscriber attaching afterwards got the cue point replayed where its
+  metadata should have been.
+
+- **A source disabled between connect and publish is now refused.** The SRT
+  publish callback re-checked the token and the pipeline but not whether the
+  source was still enabled, so an operator's "off" did nothing until the session
+  ended by itself.
+
+- **Two recorders can no longer start on the same segment pattern**, and **two
+  engines can no longer start for one source.** Free-space recovery reconciled
+  the recorder without the lock every other caller takes, and the manager's
+  engine sync had no such lock at all while being reached from several HTTP
+  handlers — leaving a running engine that nothing held a reference to.
+
+- **A destination can no longer report "running" while publishing nothing.** The
+  primary feed's signature named what the failover tier was supposed to be rather
+  than what the feed was reading, so a feed started during a hub swap matched the
+  signature the next reconcile asked for and was left alone permanently: the hub
+  carried zero bytes, every destination read healthy, and nothing raised an
+  error.
 
 ### Changed
+
+- Faster on the paths that run constantly: the relay fan-out takes no lock and
+  allocates nothing per datagram, a held publisher is woken by its subscriber
+  attaching instead of polling the database sixty times, and the status snapshot
+  no longer scans its destination list twice per row.
+
+Earlier in the same review, four defects in the per-destination audio routing:
+
+Four defects in the per-destination audio routing, all of them audible, all
+found by a four-reviewer pass over the compiler and confirmed by measuring what
+FFmpeg actually produced rather than by reading the filtergraph.
+
+- **The downmix now reads the track's channel layout, not just its channel
+  count.** Every 3-channel track was treated as 3.0 = FL FR FC. A 2.1 track is
+  FL FR LFE, so its LFE was folded into both legs at −7.7 dB — precisely what
+  the file promised in its header never happened. The same mistake dropped a
+  real channel from `hexagonal` and `6.1(back)`, which have no LFE at the index
+  where 5.1 and 7.1 keep theirs. Coefficients are now assigned by channel name
+  from libavutil's own layout table, with the old count-keyed table kept as the
+  fallback for a layout ffprobe could not name.
+
+  **What you may notice.** The layouts that were already correct — mono, stereo,
+  3.0, quad, 5.0, 5.1, 5.1(side), 6.1, 7.1 — compile to byte-identical graphs
+  and their destinations do not restart. A destination fed a 2.1, 3.1, 4.1,
+  hexagonal or 6.1(back) track will restart once on upgrade, and will sound
+  different afterwards, because it was wrong before.
+
+- **`auto` clip protection now looks at the gain, not only the track count.**
+  The rule was "only summing across tracks can clip, so one track needs no
+  limiter". But `pan` sums too, per output channel, and validation caps each
+  cell at 2.0 and never the row. A one-track matrix with three cells at maximum
+  gain on one leg compiled to `c0=2*c0+2*c2+2*c4` — six times full scale, hard
+  clipping, with `auto` having decided no protection was needed. The track count
+  keeps its say and the peak per-output gain gets one as well. This only ever
+  adds a limiter: nothing that has one today loses it, and any profile peaking
+  at or below unity compiles to the string it always did.
+
+- **A wide track of unknown layout no longer sits off-centre.** The fallback
+  splits even channels left and odd channels right, then normalised each leg by
+  its own sum — so an odd channel count, which puts one more channel on the
+  left, scaled the two sides by different divisors. Nine channels gave a
+  permanent 1.94 dB image shift. Both legs are now divided by the same figure.
+
+- **A matrix whose ingest has narrowed now says the level moved.** A saved 5.1
+  matrix meeting a stereo ingest drops the cells addressing the missing channels
+  and keeps coefficients that were scaled for the old width, leaving the
+  destination 7.7 dB down. It warned about the channel numbers and never about
+  the volume, which is the part anyone would actually notice. The coefficients
+  are still the operator's to change — rescaling them silently would be the same
+  category of mistake — but the drop is now stated in dB.
+
+### Changed — the two from the never-cut 0.5.0
+
+Written up on 2026-08-07 against a tag that was never pushed. Both are still
+accurate and both ship here for the first time.
 
 - **An RTMP publisher is now admitted only when something is subscribed to read
   it.** `Target.Ready` used to mean "an engine exists for this source and its

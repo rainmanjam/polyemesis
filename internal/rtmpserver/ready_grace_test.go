@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -118,12 +119,26 @@ func TestTheGraceIsWiredIntoTheAdmissionPath(t *testing.T) {
 			"awaitReady exists but nothing calls it, so a reconnecting encoder is " +
 			"refused for the length of its ingest child's respawn")
 	}
-	// ONLY on refuseNotReady. An unknown key or a disabled source must be
-	// answered at once, or the grace becomes a way to hold connections open
-	// against the listener with any well-formed key.
-	if !strings.Contains(src, "verdict == refuseNotReady {") {
-		t.Error("the wait is no longer gated on refuseNotReady alone; every refusal " +
-			"would now hold a connection open for the grace")
+	// ONLY on refuseNotReady, and only for a target whose subscriber is actually
+	// expected, and only within the per-key waiter cap. An unknown key, a
+	// disabled source, or a source that is not on RTMP at all must be answered
+	// at once, or the grace becomes a way to hold connections open against the
+	// listener with any well-formed key.
+	for _, clause := range []string{
+		"verdict == refuseNotReady",
+		"target.Pending",
+		"s.enterWait(target.Key())",
+	} {
+		if !strings.Contains(src, clause) {
+			t.Errorf("the wait is no longer gated on %s; a refusal that can never "+
+				"become an admission would hold a connection open for the grace", clause)
+		}
+	}
+	// Every claimed waiter slot must be given back, or the cap leaks shut and
+	// the grace stops working entirely after maxWaitersPerKey reconnects.
+	if !strings.Contains(src, "s.leaveWait(target.Key())") {
+		t.Error("the waiter slot is never released; after maxWaitersPerKey reconnects " +
+			"the grace would be permanently unavailable for that source")
 	}
 	// The handshake deadline must be pushed out first. It is set before the
 	// handshake and not cleared until admission succeeds, so waiting spends the
@@ -131,7 +146,7 @@ func TestTheGraceIsWiredIntoTheAdmissionPath(t *testing.T) {
 	// grace blows it, and the session is admitted and then fails its first read
 	// with i/o timeout -- worse than the refusal being fixed.
 	wait := strings.Index(src, "s.awaitReady(key, readyGrace)")
-	gate := strings.Index(src, "verdict == refuseNotReady {")
+	gate := strings.Index(src, "verdict == refuseNotReady")
 	deadline := strings.Index(src, "handshakeTimeout + readyGrace")
 	if deadline < 0 {
 		t.Error("the handshake deadline is no longer extended before the wait; a slow " +
@@ -168,7 +183,7 @@ func TestARealPublisherSurvivesAnIngestChildRespawn(t *testing.T) {
 	// ingest child coming back on its 500ms-5s backoff.
 	var ready atomic.Bool
 	s := New(quiet(), "127.0.0.1:0", func(string) (Target, bool) {
-		return Target{SourceID: 1, Name: "Main", Enabled: true, Ready: ready.Load()}, true
+		return Target{SourceID: 1, Name: "Main", Enabled: true, Ready: ready.Load(), Pending: true}, true
 	})
 	if err := s.Start(); err != nil {
 		t.Fatalf("start: %v", err)
@@ -204,5 +219,99 @@ func TestARealPublisherSurvivesAnIngestChildRespawn(t *testing.T) {
 	// ignored: the flag really did start false.
 	if !ready.Load() {
 		t.Error("the publisher was admitted without the target ever becoming ready")
+	}
+}
+
+// An SRT-mode source's token must be refused AT ONCE, not held for the grace.
+//
+// This is the hole the grace shipped with. A target is registered for every
+// source whatever its ingest mode, so any valid token for an SRT source was
+// found, enabled, and not ready -- the one verdict the grace waits on -- for a
+// state no amount of waiting could change. Every connect burned the full six
+// seconds, in parallel, against a listener whose comment claimed this could not
+// happen. Target.Pending is what tells the two apart.
+func TestASourceThatWillNeverBecomeReadyIsRefusedImmediately(t *testing.T) {
+	srt := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: false, Pending: false}
+	if admit(srt, true) != refuseNotReady {
+		t.Fatalf("precondition: an SRT-mode source's token still lands on refuseNotReady")
+	}
+	if srt.Pending {
+		t.Error("a source with no RTMP subscriber on its way must not be marked Pending; " +
+			"the listener would wait out the full grace for it on every connect")
+	}
+}
+
+// The waiter cap: one reconnect gets its grace, a flood does not multiply it.
+func TestTheGraceIsCappedPerPublisherSlot(t *testing.T) {
+	s := New(quiet(), "127.0.0.1:0", nil)
+	k := PublisherKey{SourceID: 7}
+
+	for i := 0; i < maxWaitersPerKey; i++ {
+		if !s.enterWait(k) {
+			t.Fatalf("waiter %d was refused a slot inside the cap", i+1)
+		}
+	}
+	if s.enterWait(k) {
+		t.Errorf("a %dth concurrent waiter was admitted; the cap is %d, and past it "+
+			"one valid key multiplies into arbitrarily many held sockets",
+			maxWaitersPerKey+1, maxWaitersPerKey)
+	}
+
+	// A different slot is unaffected: one source's flood must not starve another.
+	if !s.enterWait(PublisherKey{SourceID: 8}) {
+		t.Error("a different source was refused a waiter slot; the cap is per-slot")
+	}
+	// And the backup is a different slot from its own primary.
+	if !s.enterWait(PublisherKey{SourceID: 7, Backup: true}) {
+		t.Error("the backup slot was refused because its primary was full; they are " +
+			"two independent sessions and exist in order to run at the same time")
+	}
+
+	s.leaveWait(k)
+	if !s.enterWait(k) {
+		t.Error("a slot released by leaveWait was not reusable")
+	}
+}
+
+// The counter must not leak, in either direction.
+func TestWaiterSlotsAreReturnedExactly(t *testing.T) {
+	s := New(quiet(), "127.0.0.1:0", nil)
+	k := PublisherKey{SourceID: 1}
+
+	for i := 0; i < 50; i++ {
+		if !s.enterWait(k) {
+			t.Fatalf("iteration %d: a slot was refused after every prior one was returned", i)
+		}
+		s.leaveWait(k)
+	}
+	s.mu.Lock()
+	n, present := s.waiters[k]
+	s.mu.Unlock()
+	if present {
+		t.Errorf("the waiters map still holds an entry for a drained slot (count %d); "+
+			"a long-lived install accumulates one per source that ever reconnected", n)
+	}
+}
+
+// enterWait and leaveWait are called from separate connection goroutines.
+func TestWaiterAccountingIsRaceFree(t *testing.T) {
+	s := New(quiet(), "127.0.0.1:0", nil)
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			k := PublisherKey{SourceID: int64(i % 4)}
+			if s.enterWait(k) {
+				s.leaveWait(k)
+			}
+		}(i)
+	}
+	wg.Wait()
+	s.mu.Lock()
+	left := len(s.waiters)
+	s.mu.Unlock()
+	if left != 0 {
+		t.Errorf("%d waiter entries survived a balanced run", left)
 	}
 }

@@ -2,14 +2,15 @@ package engine
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/routing"
-	"os"
-	"strings"
 )
 
 // The one-port RTMP listener is addressed by the source's publish TOKEN, the
@@ -362,26 +363,83 @@ func TestDestinationsAreNotPlannedAgainstAnUnprobedLayout(t *testing.T) {
 			"from len(tracks)==0 is the mistake this guard exists to avoid: the " +
 			"placeholder HAS six tracks")
 	}
-	// measured goes false ONLY where the placeholder goes back into e.source, so
-	// the two must appear the same number of times. Pinning a COUNT was the
-	// first version and it was wrong for the right reason: a second legitimate
-	// site appeared (invalidating a layout when the ingest mode changes) and the
-	// test failed on a correct change. The pairing is the actual invariant.
+	// measured goes false ONLY where the placeholder goes back into e.source.
+	//
+	// This used to be a text count over engine.go, which was a proxy for the
+	// invariant rather than the invariant itself -- and it broke the moment a
+	// second legitimate invalidation site appeared. It is now structural:
+	// sourceState.invalidate is the ONLY thing in the package that does either
+	// half, and it does both, so the pairing cannot be broken by adding a site.
 	//
 	// It still forbids the mistake the flag was split out to fix: probeLoop's
-	// idle branch clears `probed` WITHOUT restoring the placeholder, because an
-	// encoder that stopped a moment ago still has a real layout. Clearing
-	// `measured` there too would strand any destination added during a failover
-	// until the primary returned.
-	clears := strings.Count(src, "e.measured = false")
-	resets := strings.Count(src, "e.source = routing.DefaultSource()")
-	if clears == 0 || clears != resets {
-		t.Errorf("e.measured is cleared %d times but the placeholder is restored %d "+
-			"times; they must be paired. Clearing measured without restoring the "+
-			"placeholder holds destinations over a layout that is still real; "+
-			"restoring it without clearing measured plans against the placeholder",
-			clears, resets)
+	// idle branch calls clearProbed, which drops `probed` WITHOUT restoring the
+	// placeholder, because an encoder that stopped a moment ago still has a real
+	// layout. Clearing `measured` there too would strand any destination added
+	// during a failover until the primary returned.
+	stateSrc := readEngineFile(t, "sourcestate.go")
+	inv := funcBody(t, stateSrc, "func (s *sourceState) invalidate() {")
+	for _, half := range []string{"s.measured = false", "s.source = routing.DefaultSource()"} {
+		if !strings.Contains(inv, half) {
+			t.Errorf("sourceState.invalidate no longer does %q. Clearing measured "+
+				"without restoring the placeholder holds destinations over a layout "+
+				"that is still real; restoring it without clearing measured plans "+
+				"against the placeholder", half)
+		}
 	}
+
+	// And nowhere else may do either half on its own.
+	for _, name := range engineGoFiles(t) {
+		body := readEngineFile(t, name)
+		if name == "sourcestate.go" {
+			continue
+		}
+		for _, half := range []string{"measured = false", "source = routing.DefaultSource()"} {
+			if strings.Contains(body, half) {
+				t.Errorf("%s assigns %q directly. Both halves belong to "+
+					"sourceState.invalidate, which is what keeps them paired", name, half)
+			}
+		}
+	}
+}
+
+// readEngineFile reads one of this package's source files.
+func readEngineFile(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
+}
+
+// engineGoFiles lists the package's non-test source files.
+func engineGoFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !strings.HasSuffix(e, "_test.go") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// funcBody returns the source of the function whose signature line is given.
+func funcBody(t *testing.T, src, signature string) string {
+	t.Helper()
+	at := strings.Index(src, signature)
+	if at < 0 {
+		t.Fatalf("cannot find %q", signature)
+	}
+	rest := src[at:]
+	if end := strings.Index(rest, "\n}\n"); end > 0 {
+		return rest[:end]
+	}
+	return rest
 }
 
 // A stereo graph that happens to match the placeholder must not survive.

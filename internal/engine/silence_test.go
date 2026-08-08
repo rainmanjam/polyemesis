@@ -21,7 +21,7 @@ func silenceEngine(measured bool, tracks int) *Engine {
 	for i := 0; i < tracks; i++ {
 		src.Tracks = append(src.Tracks, routing.Track{Index: i, Channels: 2, Codec: "aac"})
 	}
-	return &Engine{measured: measured, source: src}
+	return &Engine{sourceState: sourceState{measured: measured, source: src}}
 }
 
 func silenceSettings(on bool) db.Settings {

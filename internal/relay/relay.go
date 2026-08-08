@@ -45,6 +45,16 @@ type Hub struct {
 
 	mu   sync.RWMutex
 	subs map[string]*subscriber
+	// targets is the same set as subs, as a slice, for fanout to walk without
+	// taking a lock or allocating.
+	//
+	// fanout used to build a fresh []*subscriber under mu.RLock for EVERY
+	// datagram, which at 20 Mbit/s is around 1,900 allocations a second per
+	// hub, on the hottest path in the process, to produce a list that changes
+	// perhaps twice an hour. Replaced wholesale on each membership change and
+	// never mutated in place, so a reader holding the previous slice keeps
+	// reading a consistent one.
+	targets atomic.Pointer[[]*subscriber]
 
 	rxPackets atomic.Uint64
 	rxBytes   atomic.Uint64
@@ -55,8 +65,26 @@ type Hub struct {
 	// the only evidence left that it happened.
 	empty atomic.Uint64
 
-	// cc is touched only by run, so it needs no lock; the totals it feeds are
-	// atomic because Stats reads them from the HTTP goroutine.
+	// deliverMu serialises one datagram's whole trip through the hub.
+	//
+	// "cc is touched only by run, so it needs no lock" was false. Deliver is the
+	// SRT ingest path and runs on srtserver's per-session read loop, and a
+	// takeover deliberately overlaps two of those: closing the incumbent's
+	// connection wakes its Read, but waking it is not the same as it having
+	// LEFT Deliver, so the outgoing session can still be inside inspect() while
+	// the new one enters it. Two goroutines then write c.last[pid] and
+	// s.sendErrors with nothing between them.
+	//
+	// Held across fanout AND measure rather than around cc alone, because
+	// continuity counting is order-dependent: two datagrams measured out of
+	// order report discontinuities that never happened, and TSLost is the
+	// figure the whole "UDP on loopback is defensible because it is measured"
+	// argument rests on. One datagram at a time through a hub is also what the
+	// single-reader run() already provided; this extends the same guarantee to
+	// the injected path.
+	deliverMu sync.Mutex
+	// cc is guarded by deliverMu; the totals it feeds are atomic because Stats
+	// reads them from the HTTP goroutine.
 	cc              continuity
 	tsPackets       atomic.Uint64
 	tsLost          atomic.Uint64
@@ -103,6 +131,8 @@ type subscriber struct {
 	addr *net.UDPAddr
 	// sendErrors counts consecutive failures. A consumer that has gone away
 	// leaves an unreachable port behind; we notice and stop shouting at it.
+	//
+	// Written only in fanout, which runs under Hub.deliverMu.
 	sendErrors int
 }
 
@@ -191,6 +221,7 @@ func (h *Hub) SubscribeAddr(name string, ip net.IP, port int) string {
 		name: name,
 		addr: &net.UDPAddr{IP: ip, Port: port},
 	}
+	h.rebuildTargets()
 	h.log.Debug("relay subscriber added", "name", name, "addr", ip, "port", port, "total", len(h.subs))
 	return udpURL(ip, port)
 }
@@ -200,7 +231,21 @@ func (h *Hub) Unsubscribe(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.subs, name)
+	h.rebuildTargets()
 	h.log.Debug("relay subscriber removed", "name", name, "total", len(h.subs))
+}
+
+// rebuildTargets republishes the fanout list. Caller must hold mu for writing.
+//
+// A NEW slice every time, never an edit of the live one: fanout reads it with
+// no lock at all, so the slice it is walking has to stay valid for as long as
+// it holds it.
+func (h *Hub) rebuildTargets() {
+	next := make([]*subscriber, 0, len(h.subs))
+	for _, s := range h.subs {
+		next = append(next, s)
+	}
+	h.targets.Store(&next)
 }
 
 // Subscribers returns the current consumer names.
@@ -300,8 +345,12 @@ func (h *Hub) run() {
 		h.rxPackets.Add(1)
 		h.rxBytes.Add(uint64(n))
 		// Fan out first: measurement must never sit in front of delivery.
+		// Under the same lock as Deliver: a hub reached by both its UDP socket
+		// and in-process injection has two writers, not one.
+		h.deliverMu.Lock()
 		h.fanout(buf[:n])
 		h.measure(buf[:n])
+		h.deliverMu.Unlock()
 	}
 }
 
@@ -326,6 +375,8 @@ func (h *Hub) Deliver(pkt []byte) {
 	h.rxBytes.Add(uint64(len(pkt)))
 	// Same order as run(): fan out before measuring, because measurement must
 	// never sit in front of delivery.
+	h.deliverMu.Lock()
+	defer h.deliverMu.Unlock()
 	h.fanout(pkt)
 	h.measure(pkt)
 }
@@ -343,14 +394,14 @@ func (h *Hub) measure(dgram []byte) {
 }
 
 func (h *Hub) fanout(pkt []byte) {
-	h.mu.RLock()
-	targets := make([]*subscriber, 0, len(h.subs))
-	for _, s := range h.subs {
-		targets = append(targets, s)
+	// No lock and no allocation: the list is republished by rebuildTargets on
+	// the rare occasions it changes. Nil until the first subscriber.
+	tp := h.targets.Load()
+	if tp == nil {
+		return
 	}
-	h.mu.RUnlock()
 
-	for _, s := range targets {
+	for _, s := range *tp {
 		if _, err := h.conn.WriteToUDP(pkt, s.addr); err != nil {
 			h.dropped.Add(1)
 			// ECONNREFUSED on loopback just means the consumer has not bound
@@ -470,61 +521,4 @@ func (c *continuity) advance(pid uint16, p []byte) uint8 {
 		return 0
 	}
 	return (cc - prev - 1) & 0x0F
-}
-
-// PortAllocator hands out loopback ports for subscribers.
-//
-// It verifies each port is actually free by binding it, which closes the
-// obvious race where two subscribers are handed the same number and one of
-// them silently receives the other's stream.
-type PortAllocator struct {
-	mu    sync.Mutex
-	next  int
-	base  int
-	limit int
-	held  map[int]bool
-}
-
-// NewPortAllocator allocates from [base, base+span).
-func NewPortAllocator(base, span int) *PortAllocator {
-	return &PortAllocator{next: base, base: base, limit: base + span, held: map[int]bool{}}
-}
-
-// Allocate returns a free loopback UDP port.
-func (a *PortAllocator) Allocate() (int, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	for tried := 0; tried < a.limit-a.base; tried++ {
-		p := a.next
-		a.next++
-		if a.next >= a.limit {
-			a.next = a.base
-		}
-		if a.held[p] {
-			continue
-		}
-		if !portFree(p) {
-			continue
-		}
-		a.held[p] = true
-		return p, nil
-	}
-	return 0, fmt.Errorf("relay: no free UDP port in range %d-%d", a.base, a.limit-1)
-}
-
-// Release returns a port to the pool.
-func (a *PortAllocator) Release(p int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	delete(a.held, p)
-}
-
-func portFree(p int) bool {
-	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: p})
-	if err != nil {
-		return false
-	}
-	c.Close()
-	return true
 }

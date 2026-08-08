@@ -360,12 +360,14 @@ func buildExceptMusic(id string, c presetCtx) (Profile, error) {
 // things simple mode cannot — e.g. delete the front channels and keep only the
 // rears.
 func buildSurround(_ string, c presetCtx) (Profile, error) {
-	ch := 6
+	// The 5.1 assumption is only a starting point for an ingest that has not
+	// been probed yet; a real track brings its own width and layout.
+	tr := Track{Index: c.opts.SurroundTrack, Channels: 6, Layout: "5.1"}
 	if t, ok := c.src.TrackByIndex(c.opts.SurroundTrack); ok && t.Channels > 0 {
-		ch = t.Channels
+		tr = t
 	}
 	p := Profile{Mode: ModeMatrix, Normalize: NormAuto, SampleRate: 48000}
-	p.Matrix = CellsForTrack(c.opts.SurroundTrack, ch, 1.0)
+	p.Matrix = CellsForTrack(c.opts.SurroundTrack, tr, 1.0)
 	for i := 0; i < MaxTracks; i++ {
 		p.Tracks = append(p.Tracks, TrackSel{Track: i, Gain: 1.0, Enabled: i == c.opts.SurroundTrack})
 	}

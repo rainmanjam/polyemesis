@@ -90,6 +90,20 @@ type Target struct {
 	// OBS and no output with nothing anywhere saying why. Refusing is the worse
 	// experience and the better diagnosis.
 	Ready bool
+
+	// Pending says a subscriber is EXPECTED here, so a false Ready may be
+	// transient and is worth waiting on. It is what makes the readiness grace
+	// safe to have at all.
+	//
+	// Without it the grace applied to every not-ready verdict, and a target is
+	// registered for every source whatever its ingest mode. So any valid token
+	// for an SRT-mode source was found, enabled, and permanently not ready --
+	// which meant every RTMP connect to it burned the full grace before being
+	// refused, in parallel, for a state that could never change. The comment on
+	// the grace claimed this could not be used to hold connections open. It
+	// could, and this is what makes the claim true: only a target whose
+	// subscriber is actually on its way is ever waited for.
+	Pending bool
 }
 
 // PublisherKey is a publisher slot on this listener: one per (source, role).
@@ -166,6 +180,41 @@ type subscriber struct {
 	conn net.Conn
 }
 
+// watchPeer closes the subscriber when its socket does. Run as a goroutine for
+// the life of the subscription; returns as soon as the subscriber is closed by
+// anything else.
+//
+// done closes on server Stop and when serveSubscriber's loop exits, which
+// leaves the one case that happens on its own: the subscriber's FFmpeg exits
+// while NOTHING IS PUBLISHING. There are no writes to fail, so the loop parks
+// forever -- and HasSubscriber counts map entries, so Ready stayed true for a
+// stream whose only reader was a closed socket, and a publisher was admitted
+// into it. That is the green-encoder-no-output failure Ready exists to prevent,
+// reached through the one door Ready cannot see.
+//
+// A read is the signal. Nothing else on a subscriber connection ever reads it
+// -- serveSubscriber only writes -- so consuming what the client sends costs
+// nothing, and an EOF or a reset is the peer saying it has gone. The bytes are
+// discarded: they are window acknowledgements nothing here acts on, and today
+// they simply sit unread in the receive buffer.
+func (sub *subscriber) watchPeer() {
+	if sub.conn == nil {
+		return
+	}
+	buf := make([]byte, 512)
+	for {
+		if _, err := sub.conn.Read(buf); err != nil {
+			sub.close()
+			return
+		}
+		select {
+		case <-sub.done:
+			return
+		default:
+		}
+	}
+}
+
 // close wakes the subscriber and drops its socket. Safe to call twice: Stop and
 // the subscriber's own defer race on shutdown.
 func (sub *subscriber) close() {
@@ -177,59 +226,6 @@ func (sub *subscriber) close() {
 	if sub.conn != nil {
 		_ = sub.conn.Close()
 	}
-}
-
-// stream is one SOURCE SLOT: the live publisher's setup messages and everyone
-// currently reading it.
-//
-// Keyed by PublisherKey, NOT by the string the publisher typed. A source has
-// several valid keys at once — the current token, the previous one during a
-// rotation grace window, and any grandfathered legacy key — and they all mean
-// the same programme. Keying this table by the raw string put a publisher who
-// used a still-valid old key into a different bucket from the FFmpeg subscribed
-// under the new one: admitted, counted as publishing, UI green, bytes fanned
-// out to nobody. A refusal would have been better, because a refusal shows red
-// in OBS.
-type stream struct {
-	// setup is replayed, in order, to every new subscriber. Order matters:
-	// metadata before sequence headers is what a decoder expects.
-	setup []message.Message
-	// slots maps a setup message's identity to its position in setup, so a
-	// republished sequence start overwrites the one it supersedes rather than
-	// being appended after it. Without this the replay list grew for the life of
-	// the broadcast and ended with stale configuration ahead of current.
-	slots map[string]int
-	subs  map[*subscriber]struct{}
-}
-
-// resetSetup forgets the previous session's stream configuration.
-//
-// setup and slots are ONE structure in two fields — slots holds indices into
-// setup — so they are cleared together, here, rather than at the call site.
-// Clearing only setup left every index dangling and the next sequence start
-// wrote past the end of an empty slice, panicking the whole listener on the
-// ordinary event of an encoder reconnecting.
-func (st *stream) resetSetup() {
-	st.setup = nil
-	st.slots = map[string]int{}
-}
-
-// cacheSetup records a stream-configuration message for replay to late
-// subscribers, replacing any earlier message occupying the same slot.
-func (st *stream) cacheSetup(msg message.Message) {
-	slot, ok := setupSlot(msg)
-	if !ok || !isSetup(msg) {
-		return
-	}
-	if st.slots == nil {
-		st.slots = map[string]int{}
-	}
-	if at, seen := st.slots[slot]; seen {
-		st.setup[at] = msg
-		return
-	}
-	st.slots[slot] = len(st.setup)
-	st.setup = append(st.setup, msg)
 }
 
 // session is one live publisher.
@@ -251,7 +247,14 @@ type Server struct {
 	ln      net.Listener
 	live    map[PublisherKey]*session
 	streams map[PublisherKey]*stream
-	done    chan struct{}
+	// waiters counts connections currently sitting in the readiness grace, per
+	// publisher slot. See maxWaitersPerKey.
+	waiters map[PublisherKey]int
+	// subChange is closed and replaced whenever the subscriber set changes, so
+	// awaitReady is woken by the event it is waiting for rather than polling
+	// for it. See subscriberChanged.
+	subChange chan struct{}
+	done      chan struct{}
 }
 
 // New builds a server. It binds nothing until Start.
@@ -262,6 +265,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		lookup:  lookup,
 		live:    map[PublisherKey]*session{},
 		streams: map[PublisherKey]*stream{},
+		waiters: map[PublisherKey]int{},
 		done:    make(chan struct{}),
 	}
 }
@@ -321,9 +325,11 @@ func (s *Server) Stop() {
 	// subscriber goroutine parked on a channel nothing would ever close.
 	subs := []*subscriber{}
 	for _, st := range s.streams {
+		st.mu.Lock()
 		for sub := range st.subs {
 			subs = append(subs, sub)
 		}
+		st.mu.Unlock()
 	}
 	s.live = map[PublisherKey]*session{}
 	s.streams = map[PublisherKey]*stream{}
@@ -414,10 +420,16 @@ func (s *Server) handle(conn net.Conn) {
 	// typed rejection and the encoder just sees a failed connect.
 	//
 	// Waiting costs a held TCP connection for at most readyGrace. Refusing
-	// costs an operator their stream. The wait only happens on the one verdict
-	// it can help: an unknown key or a disabled source is answered immediately,
-	// so this cannot be used to hold connections open against the listener.
-	if verdict := admit(target, found); verdict == refuseNotReady {
+	// costs an operator their stream.
+	//
+	// Three things keep that from being a way to hold connections open. An
+	// unknown key or a disabled source is answered immediately. Target.Pending
+	// means only a source whose RTMP subscriber is genuinely on its way is ever
+	// waited for -- an SRT-mode source's token is refused at once, because no
+	// amount of waiting will make it ready. And waiters are capped per
+	// publisher slot, so the one legitimate reconnect gets its grace while a
+	// flood against the same key does not multiply it.
+	if verdict := admit(target, found); verdict == refuseNotReady && target.Pending && s.enterWait(target.Key()) {
 		// The handshake deadline has to be pushed out first. It is set before
 		// the handshake and not cleared until admission succeeds, so waiting
 		// here spends the SAME budget the handshake already drew on: a slow
@@ -426,7 +438,9 @@ func (s *Server) handle(conn net.Conn) {
 		// the grace rather than cleared, so a publisher that never becomes
 		// ready is still bounded.
 		_ = conn.SetDeadline(time.Now().Add(handshakeTimeout + readyGrace))
-		if t2, ok := s.awaitReady(key, readyGrace); ok {
+		t2, ok := s.awaitReady(key, readyGrace)
+		s.leaveWait(target.Key())
+		if ok {
 			target, found = t2, true
 		}
 	}
@@ -553,6 +567,17 @@ func (s *Server) admitSession(sc *gortmplib.ServerConn, target Target, peer, str
 	s.mu.Lock()
 	if cur, ok := s.live[sess.key]; ok && cur == sess {
 		delete(s.live, sess.key)
+		// Reap the stream slot too, if nothing is reading it.
+		//
+		// Only serveSubscriber's defer did this, so a publisher that
+		// disconnected with no subscriber attached left its stream struct --
+		// and the setup messages cached in it -- until the process restarted.
+		// Bounded at one entry per PublisherKey and reused by any later
+		// subscriber on the same key, so this was small; it was also a stale
+		// onMetaData waiting to be replayed to whoever attached next.
+		if st := s.streams[sess.key]; st != nil && st.subscriberCount() == 0 {
+			delete(s.streams, sess.key)
+		}
 	}
 	s.mu.Unlock()
 
@@ -614,8 +639,12 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 		st = &stream{subs: map[*subscriber]struct{}{}, slots: map[string]int{}}
 		s.streams[key] = st
 	}
+	st.mu.Lock()
 	st.subs[sub] = struct{}{}
 	replay := append([]message.Message(nil), st.setup...)
+	st.mu.Unlock()
+	// This is the event a held publisher is waiting for.
+	s.noteSubscriberChange()
 	s.mu.Unlock()
 
 	// No play-response sequence is written here, and that is deliberate.
@@ -633,28 +662,37 @@ func (s *Server) serveSubscriber(sc *gortmplib.ServerConn, streamKey, peer strin
 
 	defer func() {
 		sub.close()
+		var lost int
 		s.mu.Lock()
 		if cur := s.streams[key]; cur != nil {
+			// stream.mu inside Server.mu, which is the order everything that
+			// needs both uses. Read `dropped` here too: it is written by pump
+			// under this same lock.
+			cur.mu.Lock()
 			delete(cur.subs, sub)
+			empty := len(cur.subs) == 0
+			lost = sub.dropped
+			cur.mu.Unlock()
 			// Reap an idle slot. Without this every rotated-out token left a
 			// permanent entry holding its cached setup messages, so the table
 			// grew for the life of the process.
-			if len(cur.subs) == 0 && s.live[key] == nil {
+			if empty && s.live[key] == nil {
 				delete(s.streams, key)
 			}
+			s.noteSubscriberChange()
 		}
-		// Read under the lock that guards the writes, then log outside it.
-		// This is safe either way — the delete above means pump can no longer
-		// reach this subscriber — but that argument spans two functions, and
-		// the copy costs nothing. Logging is I/O and does not belong under a
-		// mutex the publisher needs for every message.
-		lost := sub.dropped
 		s.mu.Unlock()
+		// Logged outside both locks: it is I/O, and it does not belong under a
+		// mutex the publisher needs for every message.
 		if lost > 0 {
 			s.log.Warn("rtmp subscriber fell behind and lost messages",
 				"component", "rtmp-ingest", "peer", peer, "dropped", lost)
 		}
 	}()
+
+	// The select below can only notice a dead peer through a FAILED WRITE, and
+	// with no publisher live there are no writes. See watchPeer.
+	go sub.watchPeer()
 
 	// Catch the late joiner up before anything live: metadata and sequence
 	// headers first, in the order the publisher sent them.
@@ -693,10 +731,48 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 			return err
 		}
 
+		// The server lock is held only to FIND the stream; the fan-out runs
+		// under the stream's own. See stream.mu for why.
 		s.mu.Lock()
 		st := s.streams[key]
+		s.mu.Unlock()
 		if st != nil {
+			st.mu.Lock()
 			st.cacheSetup(msg)
+			// READINESS, ENFORCED MID-SESSION.
+			//
+			// Ready was checked once, at admission, and never again -- so an
+			// ingest child that died a second later left this loop dropping
+			// every message into an empty subscriber set for the rest of the
+			// session. The encoder stays green, the bytes go nowhere, and
+			// nothing reports a fault: the green-encoder-no-output failure that
+			// Ready exists to prevent, reached after Ready had already said yes.
+			//
+			// A grace first, because an empty set is ordinary and transient --
+			// the ingest child exits whenever its publisher does and is
+			// respawned on a 500ms-5s backoff, and a reconcile restarts it on
+			// any settings change. Only a sustained absence means nobody is
+			// coming.
+			//
+			// The policy call, stated plainly: the publisher is DROPPED rather
+			// than left running. RTMP carries no way to tell an encoder "keep
+			// sending, nobody is listening yet", so the alternatives were to
+			// stream into the void indefinitely or to disconnect and let the
+			// encoder retry into the readiness grace, which is built for exactly
+			// this. A disconnect is visible in the encoder and recoverable
+			// without anyone intervening; silence is neither.
+			if len(st.subs) == 0 {
+				if st.emptySince.IsZero() {
+					st.emptySince = time.Now()
+				} else if time.Since(st.emptySince) > subscriberGrace {
+					st.mu.Unlock()
+					s.log.Warn("rtmp publisher dropped: nothing has been reading this stream",
+						"component", "rtmp-ingest", "for", subscriberGrace)
+					return nil
+				}
+			} else {
+				st.emptySince = time.Time{}
+			}
 			for sub := range st.subs {
 				// Non-blocking: a subscriber that cannot keep up is dropped
 				// rather than allowed to stall the publisher. One slow consumer
@@ -708,89 +784,9 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 					sub.dropped++
 				}
 			}
+			st.mu.Unlock()
 		}
-		s.mu.Unlock()
 	}
-}
-
-// isSetup reports whether a message is stream setup that a subscriber joining
-// later cannot do without.
-//
-// A subscriber that arrives mid-stream has missed the metadata and the codec
-// sequence headers, and without them it has a byte stream it cannot interpret.
-// Caching these and replaying them on subscribe is what makes the order of
-// "encoder connects" and "FFmpeg connects" not matter — and it WILL vary, since
-// an encoder reconnecting mid-session is routine.
-//
-// Deliberately generous: replaying a message that was not strictly needed costs
-// a few bytes once, while missing one costs a subscriber that never decodes.
-func isSetup(msg message.Message) bool {
-	switch m := msg.(type) {
-	case *message.DataAMF0:
-		return true // onMetaData and friends
-	case *message.Video:
-		return m.Type == message.VideoTypeConfig
-	case *message.Audio:
-		return m.AACType == message.AudioAACTypeConfig
-	case *message.VideoExSequenceStart, *message.AudioExSequenceStart,
-		*message.AudioExMultichannelConfig:
-		return true // Enhanced RTMP setup, including multitrack channel config
-	// THE WRAPPER, which is how every track after the first one arrives.
-	//
-	// E-RTMP multitrack does not send a bare AudioExSequenceStart per track: it
-	// sends AudioExMultitrack carrying a TrackID and a Wrapped message, and the
-	// sequence start for tracks 2..N is inside that. Matching only the unwrapped
-	// types cached the LEGACY track's config and nothing else, so a late-joining
-	// subscriber got decoder config for one track and never for the rest — and
-	// ffprobe, which is exactly such a subscriber, hung forever instead of
-	// failing, because it was still waiting to identify streams it had the data
-	// for but no configuration for.
-	//
-	// That is the whole multitrack feature failing for anything that attaches
-	// after the publisher, which is the normal case: the engine's ingest child
-	// subscribes when the source is enabled, and the operator hits Start in OBS
-	// whenever they like.
-	case *message.AudioExMultitrack:
-		return isSetup(m.Wrapped)
-	case *message.VideoExMultitrack:
-		return isSetup(m.Wrapped)
-	}
-	return false
-}
-
-// setupSlot identifies WHICH piece of setup a message is, so a republished one
-// replaces its predecessor instead of being appended beside it.
-//
-// Encoders resend configuration: OBS repeats sequence starts, and any publisher
-// that changes a track mid-stream sends a fresh one. Appending blindly grew the
-// replay list for the lifetime of the broadcast and handed every new subscriber
-// a longer and longer prologue, ending with stale configuration replayed BEFORE
-// the current one. Slot-keyed, the list stays at one entry per track per kind
-// and always holds the newest.
-func setupSlot(msg message.Message) (string, bool) {
-	switch m := msg.(type) {
-	case *message.DataAMF0:
-		return "meta", true
-	case *message.Video:
-		return "video", true
-	case *message.Audio:
-		return "audio", true
-	case *message.VideoExSequenceStart:
-		return "video-ex", true
-	case *message.AudioExSequenceStart:
-		return "audio-ex", true
-	case *message.AudioExMultichannelConfig:
-		return "audio-ex-channels", true
-	// Per TRACK, which is the point: two tracks' sequence starts are different
-	// setup, not the same setup sent twice.
-	case *message.AudioExMultitrack:
-		inner, ok := setupSlot(m.Wrapped)
-		return fmt.Sprintf("audio-mt-%d-%s", m.TrackID, inner), ok
-	case *message.VideoExMultitrack:
-		inner, ok := setupSlot(m.Wrapped)
-		return fmt.Sprintf("video-mt-%d-%s", m.TrackID, inner), ok
-	}
-	return "", false
 }
 
 // HasSubscriber reports whether anything is currently reading this source's
@@ -813,6 +809,62 @@ func setupSlot(msg message.Message) (string, bool) {
 // for the ingest process, plus a moment for the subscriber to attach.
 const readyGrace = 6 * time.Second
 
+// subscriberGrace is how long a live publisher may have NOBODY reading it before
+// it is disconnected. See the mid-session readiness check in pump.
+//
+// Longer than readyGrace on purpose. That one is a publisher waiting to be let
+// in and costs a held socket; this one ends a broadcast that is already on air.
+//
+// Sized against the SLOWEST legitimate gap, which is a token rotation, not an
+// ordinary respawn. Rotating a token changes the ingest signature, so the engine
+// stops the old child on a 12-second deadline and only then starts its
+// replacement, which must boot and subscribe. At 15 seconds that left about
+// three seconds of margin and a slow stop would have disconnected a perfectly
+// healthy encoder for an administrative change nobody thought was risky. 45
+// seconds clears the whole sequence with room, and still turns "streaming into
+// the void forever" into something bounded.
+const subscriberGrace = 45 * time.Second
+
+// maxWaitersPerKey bounds how many connections may sit in the readiness grace
+// for the same publisher slot at once.
+//
+// The grace exists for one encoder reconnecting into the window where its
+// ingest child is respawning, which needs exactly one waiter -- two allows for
+// an encoder that retried before its first attempt gave up. Past that the extra
+// connections are not a reconnect, and holding them multiplies one valid key
+// into an arbitrary number of held sockets. Beyond the cap the old behaviour
+// applies: refused immediately, which is what happened to every connection
+// before the grace existed.
+const maxWaitersPerKey = 2
+
+// enterWait claims a waiter slot for a publisher key, reporting whether one was
+// available. Every true must be paired with a leaveWait.
+func (s *Server) enterWait(k PublisherKey) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.waiters == nil {
+		s.waiters = map[PublisherKey]int{}
+	}
+	if s.waiters[k] >= maxWaitersPerKey {
+		return false
+	}
+	s.waiters[k]++
+	return true
+}
+
+func (s *Server) leaveWait(k PublisherKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.waiters[k] <= 1 {
+		// Deleted rather than left at zero: the map is keyed by source and a
+		// long-lived install would otherwise accumulate one entry per source
+		// that ever reconnected.
+		delete(s.waiters, k)
+		return
+	}
+	s.waiters[k]--
+}
+
 // awaitReady re-asks the lookup until the target reports Ready or the grace
 // expires. It returns the fresh target, because Ready is computed by the engine
 // and a stale copy would say nothing new.
@@ -823,21 +875,73 @@ const readyGrace = 6 * time.Second
 // a stream start and far above the cost of a map lookup.
 func (s *Server) awaitReady(key string, grace time.Duration) (Target, bool) {
 	deadline := time.Now().Add(grace)
-	for time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-		fresh, found := s.lookup(key)
-		if found && fresh.Ready {
+	for {
+		// Taken BEFORE the lookup, so a subscriber attaching between the two is
+		// still seen: the channel is already closed by the time we select.
+		changed := s.subscriberChanged()
+
+		if fresh, found := s.lookup(key); found && fresh.Ready {
 			return fresh, true
 		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return Target{}, false
+		}
+		// Woken by the event, not by a clock. The thing being waited for is a
+		// subscriber attaching to THIS listener, which this package knows the
+		// moment it happens -- so the common case is one further lookup rather
+		// than sixty, and the publisher is admitted as soon as its ingest child
+		// arrives instead of up to a poll interval later.
+		//
+		// The slow tick stays as a backstop. Ready is computed by the engine
+		// from things this package cannot observe -- whether an engine exists,
+		// what the ingest mode is -- and none of those raise an event here.
+		if remaining > readyRecheck {
+			remaining = readyRecheck
+		}
+		timer := time.NewTimer(remaining)
+		select {
+		case <-changed:
+		case <-timer.C:
+		case <-s.done:
+			timer.Stop()
+			return Target{}, false
+		}
+		timer.Stop()
 	}
-	return Target{}, false
+}
+
+// readyRecheck bounds how long awaitReady sleeps between lookups when nothing
+// signals it. The event covers the case that actually happens; this covers the
+// rest at 1/10th the old rate.
+const readyRecheck = time.Second
+
+// subscriberChanged returns a channel closed the next time the subscriber set
+// changes. Taken before the caller's own check, so no change is missed.
+func (s *Server) subscriberChanged() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subChange == nil {
+		s.subChange = make(chan struct{})
+	}
+	return s.subChange
+}
+
+// noteSubscriberChange wakes everything waiting on the subscriber set. Caller
+// must hold s.mu.
+func (s *Server) noteSubscriberChange() {
+	if s.subChange != nil {
+		close(s.subChange)
+		s.subChange = nil
+	}
 }
 
 func (s *Server) HasSubscriber(sourceID int64, backup bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.streams[PublisherKey{SourceID: sourceID, Backup: backup}]
-	return st != nil && len(st.subs) > 0
+	return st != nil && st.subscriberCount() > 0
 }
 
 // LinkStats is one live publisher, for the API.
