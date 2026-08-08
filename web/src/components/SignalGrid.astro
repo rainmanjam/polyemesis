@@ -1,0 +1,68 @@
+---
+/**
+ * The background grid, with a lens that follows the pointer.
+ *
+ * A component rather than a bare div because the two instances on the home page
+ * were already duplicating the markup, and the lens adds a child that has to be
+ * present in both or the effect appears on one hero and not the other.
+ */
+interface Props { class?: string }
+const { class: className = "absolute inset-0" } = Astro.props;
+---
+
+<div class:list={["signal-grid", className]} aria-hidden="true" data-signal-grid>
+  <div class="signal-grid__warp"></div>
+</div>
+
+<script>
+  // Pointer tracking, written to a custom property and applied by transform.
+  //
+  // ONE rAF, COALESCED. pointermove fires far faster than the display refreshes
+  // -- a high-polling-rate mouse can deliver several hundred events a second --
+  // and writing a style property on each one does that work several times per
+  // frame for a single visible result. Storing the last position and writing it
+  // once per frame collapses that to what the compositor can actually use.
+  //
+  // The property carries PIXELS and is consumed by translate3d, so the write is
+  // compositor-only: no layout, no paint, no main-thread raster. That is the
+  // same constraint the bus sweep in global.css is built around, for the same
+  // reason -- this page's audience opens devtools.
+  const grids = document.querySelectorAll<HTMLElement>("[data-signal-grid]");
+  if (grids.length && window.matchMedia("(hover: hover) and (pointer: fine)").matches
+      && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    grids.forEach((grid) => {
+      const lens = grid.querySelector<HTMLElement>(".signal-grid__warp");
+      if (!lens) return;
+
+      let x = 0, y = 0, queued = false;
+
+      const apply = () => {
+        queued = false;
+        lens.style.setProperty("--warp-x", `${x}px`);
+        lens.style.setProperty("--warp-y", `${y}px`);
+      };
+
+      grid.addEventListener("pointermove", (e) => {
+        // Coordinates relative to the grid, because the lens is absolutely
+        // positioned inside it. Client coordinates would drift by the hero's
+        // offset and by however far the page is scrolled.
+        const r = grid.getBoundingClientRect();
+        x = e.clientX - r.left;
+        y = e.clientY - r.top;
+        if (!queued) {
+          queued = true;
+          requestAnimationFrame(apply);
+        }
+      }, { passive: true });
+
+      // Parked off-screen on leave rather than left where it was. The lens
+      // fades out on hover loss, but a fade leaves it sitting under the cursor's
+      // last position for the length of the transition, and re-entering
+      // elsewhere would show it snap across.
+      grid.addEventListener("pointerleave", () => {
+        lens.style.setProperty("--warp-x", "-9999px");
+        lens.style.setProperty("--warp-y", "-9999px");
+      }, { passive: true });
+    });
+  }
+</script>
