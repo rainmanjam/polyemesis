@@ -22,6 +22,25 @@ release nobody could have installed.
 So everything below is one release: the four-reviewer core review worked end to
 end, plus the two operator-visible changes the never-cut 0.5.0 had described.
 
+### Added
+
+- **`polyemesis -reset-admin`** — set a new admin password from the box the
+  database lives on, for an operator who has shell access and no way in through
+  the UI. Asks twice without echoing, signs out every existing session, and
+  exits without binding a port, so it is safe to run against a live server. Pipe
+  the password twice to script it.
+
+  The password is deliberately **not** a flag: argv is visible in `ps` to every
+  other user on the machine, lands in shell history, and appears in any audit log
+  that records command lines.
+
+  It also replaces advice nobody should follow. Deleting the row from the users
+  table does restore first-run setup — `needsSetup` is just "the table is empty"
+  — but `POST /api/v1/setup` is unauthenticated and the only guard on it is that
+  an account already exists. Deleting the account removes that guard, so until
+  setup is finished anyone who can reach the port can claim the install.
+  `-reset-admin` never opens that window.
+
 ### Fixed
 
 Nine more defects from the same core review, in the transport and concurrency

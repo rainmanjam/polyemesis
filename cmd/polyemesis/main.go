@@ -110,6 +110,7 @@ func run(h *hooks) error {
 		ffprobePath = flag.String("ffprobe", "", "path to the ffprobe binary (overrides config)")
 		logLevel    = flag.String("log", "info", "log level: debug, info, warn, error")
 		showVersion = flag.Bool("version", false, "print the version and exit")
+		resetPass   = flag.Bool("reset-admin", false, "set a new admin password and sign out every session, then exit")
 	)
 	flag.Parse()
 
@@ -144,6 +145,15 @@ func run(h *hooks) error {
 	}
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
+	}
+
+	// BEFORE anything is started. A reset touches only the database and then
+	// exits, so it must not bind a port, spawn a child or write a log file --
+	// this is run on a box where the real server is usually already running, and
+	// a second instance racing it for the listener would fail for a reason that
+	// has nothing to do with the password.
+	if *resetPass {
+		return resetAdmin(cfg, os.Stdin, os.Stdout)
 	}
 	// Text overlays need a font FILE, and the image polyemesis ships has no
 	// system fonts at all -- fontconfig is installed and finds nothing. The
