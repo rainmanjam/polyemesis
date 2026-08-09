@@ -147,8 +147,11 @@ const sections = [
         What only polyemesis does.
       </h2>
       <p class="mt-4 max-w-2xl text-sm leading-relaxed text-muted">
-        Against the two tools people actually weigh it against: datarhei
-        Restreamer, the self-hosted standard, and restream.io, the hosted one.
+        Against the two servers people weigh it against: datarhei Restreamer,
+        the self-hosted standard, and restream.io, the hosted one. The OBS
+        plugins most readers already have — obs-multi-rtmp, Aitum Multistream —
+        and MistServer are on the full comparison, where the distinction is that
+        they select an audio track per destination rather than mix one.
       </p>
 
       <div class="mt-8 overflow-x-auto">
@@ -177,7 +180,12 @@ const sections = [
                 ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "Yes", "No", "No"],
                 ["Track annotations — what each incoming track actually is", "Yes", "No", "No"],
                 ["Typed SRT rejections — the publisher is told why it was refused", "Yes", "No", "n/a"],
-                ["Runs on your hardware, no per-destination pricing", "Yes", "Yes", "No"],
+                /* Label kept character-for-character identical to the copy in
+                   comparison.astro. It used to read "Runs on your hardware"
+                   here and "Runs on hardware you control" there, which is the
+                   drift this table has already produced twice — and
+                   check-build.mjs now fails the build if the two disagree. */
+                ["Runs on hardware you control, no per-destination pricing", "Yes", "Yes", "No"],
               ].map(([cap, poly, rs, ri]) => (
                 <tr class="border-b border-line">
                   <td class="py-3 pr-4 leading-relaxed text-fg">{cap}</td>

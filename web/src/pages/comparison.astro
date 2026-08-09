@@ -27,7 +27,13 @@ const shared = [
   ["Ingest once, fan out to several platforms", "Yes", "Yes", "Yes"],
   ["Reconnects when a platform drops", "Yes", "Yes", "Yes"],
   ["Live health and status you can watch", "Yes", "Yes", "Yes"],
-  ["Recording", "Multitrack, stream-copied", "Yes", "Yes"],
+  // Restreamer's cell said "Yes" until 2026-08-09 and was wrong: recording is
+  // an open feature request on their own tracker (datarhei/restreamer#692,
+  // opened 2024-02-14, still open when checked). "No built-in" rather than a
+  // bare "No" because datarhei Core underneath it can write files — the
+  // Restreamer product simply does not put recording in front of you, which is
+  // why the request exists. See docs/COMPARISON.md for the full footnote.
+  ["Recording", "Multitrack, stream-copied", "No built-in", "Yes"],
   ["Metrics / API", "Prometheus + REST", "REST", "REST"],
   ["Hardware encoding", "NVENC, QSV, VA-API, VideoToolbox, AMF", "Yes", "n/a"],
   ["Unified chat", "Yes", "No", "Yes"],
@@ -51,11 +57,44 @@ const wins = [
   ["Runs on hardware you control, no per-destination pricing", "Yes", "Yes", "No"],
 ];
 
+/* The tools a reader is most likely to already have installed, and the one
+ * distinction that holds against all of them.
+ *
+ * These get a section rather than three more table columns. Seven columns does
+ * not survive a phone even inside overflow-x-auto, and the argument against a
+ * plugin is not row-shaped anyway: it is a single sentence about select versus
+ * mix, and it is worth more with the line of source that proves it attached.
+ *
+ * Every `src` below was read in that project's own repository on 2026-08-09.
+ * Sourced from docs/COMPARISON.md, "They select a track. polyemesis mixes." */
+const selectors = [
+  {
+    name: "obs-multi-rtmp",
+    what: "An OBS plugin, around 4,975 stars. Each destination is another output from the stream PC, so N destinations is N uploads off one connection.",
+    src: "struct AudioTrackConfig { int mixer_track; int output_track; };",
+    file: "src/output-config.h",
+    note: "Two integers: this mixer track goes in that output slot. No gain, no sum.",
+  },
+  {
+    name: "Aitum Multistream",
+    what: "An OBS plugin, around 250 stars. The destination's audio is picked in its output settings and stored as one number.",
+    src: 'obs_audio_encoder_create(…, obs_data_get_int(settings, "audio_track"), …)',
+    file: "multistream.cpp",
+    note: "One mixer index per destination.",
+  },
+  {
+    name: "MistServer",
+    what: "A media server, and the one here that genuinely can pick tracks per push target — by index, by codec, or all of them.",
+    src: "Util::wouldSelect() resolves audio= off the target's query string",
+    file: "lib/stream.cpp",
+    note: "It selects, and selects well. It has no amix, no loudnorm, no ebur128.",
+  },
+];
 ---
 
 <Base
-  title="polyemesis vs Restreamer vs restream.io — self-hosted restreaming compared"
-  description="A self-hosted Restreamer and restream.io alternative. Per-destination audio from one multitrack ingest is the thing neither of them does — see the capability table."
+  title="polyemesis vs Restreamer, obs-multi-rtmp and MistServer"
+  description="Restreamer, restream.io, obs-multi-rtmp, Aitum and MistServer compared. They select an audio track per destination; polyemesis mixes one."
   path="/comparison"
 >
   <section class="wrap py-16 sm:py-20">
@@ -130,6 +169,42 @@ const wins = [
     </p>
   </section>
 
+  {/* --------------------------------------------- select versus mix ------ */}
+  <section class="wrap pb-16" data-reveal>
+    <h2 class="text-2xl font-medium">They select a track. polyemesis mixes.</h2>
+    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+      Most people weighing this up already have one of these installed. The
+      distinction against every one of them is the same narrow one, and it is
+      narrow enough to be worth checking rather than believing: they decide
+      <em>which</em> track leaves for a destination. None of them decides what
+      is in it.
+    </p>
+    <div class="mt-6 grid gap-4 lg:grid-cols-3">
+      {
+        selectors.map((s) => (
+          <div class="card p-5">
+            <p class="font-medium text-fg">{s.name}</p>
+            <p class="mt-2 text-sm leading-relaxed text-muted">{s.what}</p>
+            <pre class="mt-4 overflow-x-auto rounded-token border border-line bg-surface/60 p-3 font-mono text-[11px] leading-relaxed text-fg"><code>{s.src}</code></pre>
+            <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>
+            <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
+          </div>
+        ))
+      }
+    </div>
+    <p class="mt-6 max-w-3xl text-sm leading-relaxed text-muted">
+      polyemesis sums instead: the tracks you chose, with a gain per
+      input-channel-to-output-channel cell, and a loudness target measured after
+      the routing rather than before it. That is a different operation, which is
+      why per-destination audio is not a small patch to an OBS plugin.
+    </p>
+    <p class="mt-3 max-w-3xl text-sm leading-relaxed text-subtle">
+      It costs something, and the cost belongs on this page too. Selecting a
+      track is a copy; mixing means decoding the audio and encoding it again on
+      every destination. Only the video is copied straight through. If one mix
+      for everyone is fine, a plugin is free and you should use one.
+    </p>
+  </section>
 
   <section class="border-t border-line bg-surface/30 py-16" data-reveal>
     <div class="wrap">
@@ -169,10 +244,20 @@ const wins = [
         from you at all, and Restreamer has a far longer public release history.
         Both are real advantages, and neither changes what happens to your audio.
       </p>
+      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+        The recording row said “Yes” for Restreamer until 9 August 2026 and was
+        wrong. Recording is an open request on
+        <a href="https://github.com/datarhei/restreamer/issues/692" rel="noopener"
+          class="underline underline-offset-2 hover:text-fg">their own tracker</a>,
+        opened February 2024 and still open when it was checked. The datarhei
+        Core underneath can write files; the Restreamer product does not put
+        recording in front of you, which is why the request exists.
+      </p>
       <p class="mt-3 max-w-3xl text-xs leading-relaxed text-subtle">
-        Everything stated here about the other two was surveyed in July 2026.
-        Their plans and features move independently of this page — check them
-        before deciding on the strength of a row.
+        Everything stated here about the other tools was surveyed in July 2026
+        and re-checked against their own sources on 9 August 2026. They move
+        independently of this page — check them before deciding on the strength
+        of a row.
       </p>
     </div>
   </section>
