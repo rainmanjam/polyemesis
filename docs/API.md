@@ -247,9 +247,16 @@ file an operator deliberately put there. Every file carries an `origin` of
 `uploaded`, `recorded` or `clip`, derived from which store it came out of rather
 than stored beside it.
 
-These sit behind the session, like every other mutation, which means **an API
-token cannot upload**. Tokens are for automation, and writing arbitrary bytes to
-the server's disk is not something a leaked one should reach.
+`POST /media` and `DELETE /media/{name}` are **session-only**: a browser session
+reaches them and **an API token does not**. Writing arbitrary bytes to the
+server's disk is not something a leaked automation credential should reach.
+`GET /media` is not restricted — a token can list what is stored, which is the
+half of this endpoint automation actually wants.
+
+Until this was fixed, the sentence above was the only thing enforcing it: the
+routes were in the ordinary authenticated group, and a token-only `POST`
+succeeded. They now sit in a session-only router group, which is what makes the
+statement checkable rather than aspirational.
 
 Refusals worth knowing: `413` over the size limit, `507` when the volume lacks
 room — checked *before* the write, because a filled disk takes the database and

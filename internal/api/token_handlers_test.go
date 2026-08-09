@@ -226,6 +226,30 @@ func TestABearerTokenCannotMintOrRevokeTokens(t *testing.T) {
 	}
 }
 
+// The account password is not something a machine credential gets to touch.
+//
+// handleChangePassword demands the current password, so this was never
+// exploitable with a token alone; the route joined the session-only group
+// anyway, because after #140 "no code enforces it but the handler happens to
+// ask for something else" is not a security property this package states out
+// loud. The 403 comes from the router, before the handler reads a body.
+func TestABearerTokenCannotChangeThePassword(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	plaintext := createToken(t, h, sign, "ci runner")
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/auth/password",
+		map[string]string{"current": testPassword, "new": "a whole new password"})
+	r.Header.Set("Authorization", "Bearer "+plaintext)
+	if w := do(t, h, r); w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body %s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+
+	// And the password genuinely did not change: the old one still signs in.
+	// Asserting the status alone would pass even if the handler had run.
+	login(t, h)
+}
+
 func TestRevokedTokenStopsWorkingImmediately(t *testing.T) {
 	_, h, _ := testServer(t, config.Config{})
 	sign := login(t, h)

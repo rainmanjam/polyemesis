@@ -75,8 +75,17 @@ the software actually promises.
   existing one by guessing it. The separator check tests both `/` and `\` on
   every platform rather than `os.PathSeparator`, whose meaning changes with the
   build target — that exact bug once let a forward slash through on Windows.
-  Uploads are behind the session, so an API token cannot write bytes to the
-  disk, and an oversized, empty or cancelled upload leaves nothing behind.
+  Uploading and deleting media are session-only, so an API token cannot write
+  bytes to the disk; a token can still `GET /api/v1/media` to list what is
+  stored. An oversized, empty or cancelled upload leaves nothing behind.
+
+  This paragraph claimed the session requirement before anything enforced it.
+  The routes sat in the ordinary authenticated group, and the CSRF middleware
+  passes token-authenticated requests through on purpose — nothing attaches an
+  `Authorization` header on its own, so there is no cross-site forgery left to
+  stop — which meant a token-only `POST` stored a file for as long as the claim
+  went unchallenged. The routes now sit in a session-only router group, so the
+  route table states the rule instead of the prose doing it alone.
 - **Inbound webhooks.** Kick's chat webhook is verified against Kick's published
   RSA public key before its body is read, and the handler refuses the request
   outright when no verifier is configured. An unverifiable webhook endpoint is

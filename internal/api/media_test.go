@@ -417,3 +417,74 @@ func TestAPermittedDeletionRemovesEveryDerivativeVersion(t *testing.T) {
 		}
 	}
 }
+
+// The media writes are session-only, and this is the test that says so by
+// executing the router rather than by reading the comment above the routes.
+//
+// SECURITY.md, docs/API.md and the header comment in media.go all claimed an
+// API token could not upload, while the routes carried requireAuth and
+// requireCSRF and nothing else -- and requireCSRF waves a token principal
+// through by design, because nothing attaches an Authorization header on its
+// own. The claim was therefore enforced by no code at all, and a token-only
+// POST stored a file. Reading the disk rather than only the status is the
+// point: a 403 with the bytes already written would still be the bug.
+func TestAPITokenCannotUploadOrDeleteMedia(t *testing.T) {
+	h, dataDir, sign := mediaServer(t)
+	plaintext := createToken(t, h, sign, "ci runner")
+
+	upload := uploadRequest(t, "file", "smuggled.mp4", "pretend media bytes")
+	upload.Header.Set("Authorization", "Bearer "+plaintext)
+	if w := do(t, h, upload); w.Code != http.StatusForbidden {
+		t.Errorf("token upload status = %d, want %d, body %s",
+			w.Code, http.StatusForbidden, w.Body.String())
+	}
+
+	// Nothing on disk. The uploads directory is created lazily, so its absence
+	// is as good an answer as its emptiness.
+	entries, err := os.ReadDir(filepath.Join(dataDir, uploads.Dir))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read uploads dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("token upload left %d file(s) on disk: %v", len(entries), entries)
+	}
+
+	// A file a session put there, so the delete probe addresses something real
+	// and cannot pass merely by being a 404.
+	seed := uploadRequest(t, "file", "real.mp4", "data")
+	sign(seed)
+	sw := do(t, h, seed)
+	if sw.Code != http.StatusCreated {
+		t.Fatalf("seed upload: status %d, body %s", sw.Code, sw.Body.String())
+	}
+	var seeded uploads.File
+	if err := json.Unmarshal(sw.Body.Bytes(), &seeded); err != nil {
+		t.Fatalf("decode seed: %v", err)
+	}
+
+	del := httptest.NewRequest(http.MethodDelete, "/api/v1/media/"+seeded.Name, nil)
+	del.RemoteAddr = "203.0.113.5:44444"
+	del.Header.Set("Authorization", "Bearer "+plaintext)
+	if w := do(t, h, del); w.Code != http.StatusForbidden {
+		t.Errorf("token delete status = %d, want %d, body %s",
+			w.Code, http.StatusForbidden, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, uploads.Dir, seeded.Name)); err != nil {
+		t.Errorf("token delete removed the file anyway: %v", err)
+	}
+}
+
+// The read stays reachable. A token is for automation, and listing what is
+// already stored is exactly the kind of thing automation is for; narrowing the
+// docs to "list, not write" is only honest if the list genuinely still works.
+func TestAPITokenCanStillListMedia(t *testing.T) {
+	h, _, sign := mediaServer(t)
+	plaintext := createToken(t, h, sign, "ci runner")
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/media", nil)
+	r.RemoteAddr = "203.0.113.5:44444"
+	r.Header.Set("Authorization", "Bearer "+plaintext)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("token list status = %d, want 200, body %s", w.Code, w.Body.String())
+	}
+}

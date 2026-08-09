@@ -314,11 +314,71 @@ func (s *Server) Handler() http.Handler {
 
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
-			r.Post("/auth/password", s.handleChangePassword)
 
-			r.Get("/auth/tokens", s.handleListAPITokens)
-			r.Post("/auth/tokens", s.handleCreateAPIToken)
-			r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
+			// --- session only ---
+			//
+			// A signed-in browser reaches these; an API token does not, and the
+			// group is where that is enforced rather than merely described.
+			//
+			// #140 is why it exists. The media writes below used to sit in the
+			// plain authenticated group under a comment stating that a token
+			// could not reach them, which was false the day it was written:
+			// requireCSRF passes token principals through on purpose, so the
+			// only thing standing between a leaked token and an arbitrary file
+			// on the server's disk was a sentence. The three token routes were
+			// genuinely enforced, by an `if !requireSession(...)` at the top of
+			// each handler -- a pattern that protects the handlers that
+			// remember it and nothing else, which is precisely how the media
+			// routes came to be added without one.
+			//
+			// So membership of this group is now the whole statement. Adding a
+			// route here makes it session-only; adding one outside does not
+			// silently make it token-reachable-but-documented-otherwise,
+			// because there is no longer a claim anywhere except this block.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireSession)
+
+				// Minting and revoking. A token that can mint tokens makes
+				// revocation meaningless -- the operator deletes the one they
+				// know about while the holder has quietly issued three more.
+				// The list is here too: it is the operator's inventory of
+				// credentials, and automation has no reason to enumerate it.
+				r.Get("/auth/tokens", s.handleListAPITokens)
+				r.Post("/auth/tokens", s.handleCreateAPIToken)
+				r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
+
+				// The password. handleChangePassword already demands the
+				// CURRENT password, so a token alone could never have changed
+				// it, but that is an incidental defence sitting inside a
+				// handler rather than a stated rule: the account credential is
+				// not something a machine credential gets to touch, and after
+				// #140 the difference between "cannot in practice" and "is
+				// refused by the router" is one this file takes seriously.
+				r.Post("/auth/password", s.handleChangePassword)
+
+				// Media WRITES. The bytes and the filename both come from the
+				// caller, which is the shape SECURITY.md's path-confinement
+				// section exists for, and a credential built for unattended
+				// automation should not be able to fill the volume the database
+				// and the recorder live on.
+				//
+				// GET /media is deliberately NOT here. Listing what is already
+				// stored is exactly what automation is for, and it is the read
+				// the narrowed wording in SECURITY.md and docs/API.md now
+				// promises: a token can list media, and cannot write it.
+				r.Post("/media", s.handleUploadMedia)
+				r.Delete("/media/{name}", s.handleDeleteMedia)
+
+				// PUT /settings/automod-key is deliberately NOT here, and the
+				// question was asked rather than skipped. It seals a
+				// third-party API key, which sounds like credential management
+				// until you notice that PUT /platforms/credentials/{platform}
+				// does the same thing for every streaming platform and stays
+				// token-reachable. Sealing a key an operator pasted is a
+				// settings write like the others; what should gate it is the
+				// token's scope (#104), not this group, and pulling one of the
+				// two in here would leave a rule no reader could restate.
+			})
 
 			r.Get("/system", s.handleSystem)
 			// Authenticated on purpose: the build number is a fingerprint, and
@@ -395,10 +455,6 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/sources/{id}", s.handleDeleteSource)
 			r.Post("/sources/{id}/token", s.handleRotateSourceToken)
 
-			// Media uploads. Inside the session+CSRF group like every other
-			// mutation, which also means an API token cannot reach them: a
-			// token is for automation, and writing arbitrary bytes to the
-			// server's disk is not something a leaked one should be able to do.
 			// Automod. Its CONFIG rides inside Settings, so GET/PUT /settings
 			// already carries the matrix, rules and model options; only the
 			// derived matrix, model spend and the sealed key need endpoints.
@@ -406,9 +462,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/automod/stats", s.handleAutomodStats)
 			r.Put("/settings/automod-key", s.handlePutAutomodKey)
 
-			r.Post("/media", s.handleUploadMedia)
+			// The read half of media. POST /media and DELETE /media/{name} are
+			// in the session-only group above, which is the fix for #140; this
+			// listing stays reachable by an API token on purpose.
 			r.Get("/media", s.handleListMedia)
-			r.Delete("/media/{name}", s.handleDeleteMedia)
 
 			r.Get("/renditions", s.handleListRenditions)
 			r.Post("/renditions", s.handleCreateRendition)

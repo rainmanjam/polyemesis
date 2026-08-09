@@ -5,29 +5,47 @@ import (
 	"net/http"
 )
 
-// requireSession rejects token-authenticated callers.
+// requireSession rejects token-authenticated callers, and it is MIDDLEWARE
+// rather than a call each handler makes because the difference is what #140
+// turned out to be.
 //
-// A leaked token already grants everything the admin can do, but letting it
-// mint further tokens would make revocation useless: the operator deletes the
-// one they know about while the holder has quietly issued three more. Minting
-// stays behind the password.
-func requireSession(w http.ResponseWriter, r *http.Request) bool {
-	p, ok := principalFrom(r.Context())
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "not signed in")
-		return false
-	}
-	if p.token != nil {
-		writeError(w, http.StatusForbidden, "API tokens cannot manage API tokens; sign in to do this")
-		return false
-	}
-	return true
+// It began as `if !requireSession(w, r) { return }` at the top of the three
+// handlers below. That worked for those three and enforced nothing anywhere
+// else, so when the media routes were added with a comment stating that a token
+// could not reach them, the comment was the only thing that said so: the routes
+// carried requireAuth and requireCSRF, and requireCSRF passes a token principal
+// through deliberately, because nothing attaches an Authorization header on its
+// own. A token-only POST therefore uploaded a file, for as long as the claim
+// stood in SECURITY.md unchallenged by any code.
+//
+// A per-handler check would have fixed those two handlers and left the next
+// session-only route to remember for itself. Mounted on a router group instead,
+// the route table IS the claim -- a handler is session-only exactly when it is
+// registered inside the group, and forgetting to add it there denies nothing
+// that was already denied, while forgetting a per-handler call silently permits.
+//
+// What is being protected differs by route and the reason does not. A leaked
+// token already grants everything the admin can do, but minting further tokens
+// would make revocation useless -- the operator deletes the one they know about
+// while the holder has quietly issued three more -- and writing arbitrary bytes
+// to the server's disk is not something a credential meant for automation
+// should reach at all.
+func (s *Server) requireSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFrom(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		if p.token != nil {
+			writeError(w, http.StatusForbidden, "API tokens cannot reach this endpoint; sign in to do this")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
-	if !requireSession(w, r) {
-		return
-	}
 	tokens, err := s.store.ListAPITokens()
 	if err != nil {
 		writeStoreError(w, err)
@@ -37,9 +55,6 @@ func (s *Server) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
-	if !requireSession(w, r) {
-		return
-	}
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -70,9 +85,6 @@ func (s *Server) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
-	if !requireSession(w, r) {
-		return
-	}
 	id, err := idParam(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
