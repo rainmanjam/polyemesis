@@ -190,6 +190,19 @@ func PreviousPath(binary string) string { return binary + ".previous" }
 // exists because something went wrong, it is not advertised by PlanFor, and
 // restoring it is a decision a person makes rather than a button. Also outside
 // the temp prefixes, so the stale sweep leaves it alone.
+//
+// ONE FIXED NAME, so a second rescue replaces the first. That is deliberate and
+// it was argued: a unique name per rescue would keep every older version, but
+// nothing would ever remove them, and the sweep cannot -- this name is excluded
+// from it precisely so a rescued binary survives. An install directory that
+// silently accumulates binary-sized files forever is a worse fault than the one
+// it would fix.
+//
+// Nothing valuable is lost. What is rescued is always the version that was
+// running immediately before the current one, which is the same thing
+// PreviousPath holds and the only version a recovery would sensibly target. A
+// second half-failure means the box moved on again, and the copy worth keeping
+// moved with it.
 func RescuedPath(binary string) string { return binary + ".previous-rescued" }
 
 // PlanFor builds the plan for this box.

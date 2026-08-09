@@ -348,6 +348,51 @@ func TestAHalfFailedInstallKeepsTheOutgoingBinarySomewhere(t *testing.T) {
 	}
 }
 
+// A SECOND RESCUE REPLACES THE FIRST, ON PURPOSE.
+//
+// A unique name per rescue would keep every older version, but nothing would
+// ever remove them: this name is excluded from the stale sweep precisely so a
+// rescued binary survives, so an install directory would accumulate
+// binary-sized files forever. What is rescued is always the version that was
+// running immediately before the current one -- the same thing .previous holds,
+// and the only version a recovery would sensibly target.
+//
+// Pinned here so the behaviour is a decision rather than something that happens
+// to be true.
+func TestASecondRescueReplacesTheFirstRatherThanAccumulating(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	// A directory at .previous makes every install half-fail, the same way a
+	// persistent permissions or disk fault would.
+	os.Mkdir(PreviousPath(bin), 0o755)
+	os.WriteFile(filepath.Join(PreviousPath(bin), "occupied"), []byte("x"), 0o644)
+
+	for _, v := range []string{"v2", "v3"} {
+		staged := filepath.Join(dir, "staged-"+v)
+		os.WriteFile(staged, []byte(v), 0o644)
+		if err := Stage(bin, staged, hashOf(t, staged)); err == nil {
+			t.Fatalf("Stage(%s) reported success though the rollback point could not be written", v)
+		}
+	}
+
+	if b, _ := os.ReadFile(RescuedPath(bin)); string(b) != "v2" {
+		t.Errorf("rescued copy is %q, want v2 — it must hold the version that was running "+
+			"immediately before the current one", b)
+	}
+	// One rescued file, not a growing pile.
+	n := 0
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "rescued") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d rescued files in the install directory; nothing ever removes them", n)
+	}
+}
+
 // AND WHAT WAS RESCUED MUST NOT BE SWEPT AWAY LATER.
 //
 // The branch above keeps the outgoing binary rather than deleting it. If it kept
