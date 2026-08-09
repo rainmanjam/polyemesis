@@ -617,6 +617,15 @@ else
   back=$(printf '%s\n' "$dtsreport" | awk '/^COUNT /{print $2}')
   if [ "${back:-1}" -eq 0 ]; then
     ok "no backwards decode timestamp across any switch in the run"
+    # THE NEAR MISS PRINTS HERE TOO, and printing it only on failure defeated
+    # the whole point of measuring it. #126's leading explanation is that a
+    # small backward step exists at the seam all the time and a widened offset
+    # merely pushes it over 1ms -- which can only be confirmed or refuted from
+    # runs that PASS. Emitting it exclusively in the failure branch meant
+    # waiting for the very event the line was added to avoid waiting for.
+    printf '%s\n' "$dtsreport" | grep '^NEARMISS ' | while IFS= read -r line; do
+      note "$line"
+    done
   else
     bad "$back backwards DTS step(s) — a platform drops the connection on these"
     printf '%s\n' "$dtsreport" | grep -v '^COUNT ' | while IFS= read -r line; do

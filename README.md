@@ -122,7 +122,8 @@ is a different and smaller claim than it used to be.
 
 ### Project status
 
-**Pre-release.** No version has been tagged. The test suites are extensive and
+**Pre-release.** Tagged releases exist from v0.1.0, and the API and config
+format may still change between minor versions. The test suites are extensive and
 green, and the software has been run in earnest — but it has one maintainer, no
 production installs beyond that, and no compatibility promises yet. The
 [changelog](CHANGELOG.md) records what a first release will contain.
