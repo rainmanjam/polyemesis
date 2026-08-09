@@ -602,6 +602,20 @@ jobs:
       # The logs are where a measurement failure is actually diagnosed: the RMS
       # figures, the process output, what FFmpeg said. Losing them turns a red
       # check into a guess.
+      #
+      # THE TIMELINE EVIDENCE GOES WITH THEM, and #126 is why. The only occurrence
+      # of that bug anybody has seen outside a deliberate measurement happened
+      # here, in CI, and it left nothing behind but a count in the step output --
+      # no recording to re-probe, no packet list, no ledger. So the derived
+      # artifacts travel too: dts.csv is the packet list both halves of the check
+      # read, seams.txt is the engine's handover ledger, and onair.mkv is the
+      # recording, which is the only one of the three that can answer a question
+      # nobody thought to ask before the run.
+      #
+      # The mkv was 13 MB on a full local run of the failover suite, measured
+      # rather than guessed. That is the price of not waiting another three weeks
+      # for the next occurrence. Only that suite writes one; the others match
+      # nothing here and if-no-files-found already covers it.
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -610,5 +624,8 @@ jobs:
           path: |
             /tmp/polyemesis-acceptance*/**/*.log
             /tmp/polyemesis-acceptance*/**/server.log
+            /tmp/polyemesis-acceptance*/dts.csv
+            /tmp/polyemesis-acceptance*/seams.txt
+            /tmp/polyemesis-acceptance*/data/recordings/onair.mkv
           if-no-files-found: ignore
           retention-days: 7
