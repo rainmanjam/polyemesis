@@ -87,10 +87,26 @@ func Detect(env func(string) string, exists func(string) bool) Method {
 	if exists("/run/.containerenv") {
 		return MethodDocker
 	}
-	// systemd sets INVOCATION_ID for every unit it starts, and nothing else
-	// does. Far more reliable than looking for the binary in /usr/local/bin,
-	// which says where a file is and nothing about what runs it.
-	if env("INVOCATION_ID") != "" {
+	// Kubernetes injects this into every container and does not write either of
+	// the files above; containerd and CRI-O on their own write neither. Same
+	// conclusion as Docker: the image decides what comes back.
+	if env("KUBERNETES_SERVICE_HOST") != "" {
+		return MethodDocker
+	}
+	// systemd sets INVOCATION_ID for every unit it starts -- but BOTH halves are
+	// required, and the second is the one that matters.
+	//
+	// INVOCATION_ID is an ordinary environment variable: it is inherited by
+	// every child of a unit, so a shell spawned from `systemctl status`, a
+	// script run out of a timer, or a manually launched binary that inherited a
+	// unit's environment all carry it while being supervised by nothing.
+	// Treating that as systemd means Automatic:true, which means this process
+	// will replace a binary on the promise that a service manager it cannot see
+	// will restart onto it.
+	//
+	// /run/systemd/system is what sd_booted(3) checks, and it exists only when
+	// systemd is the running init. It is the fact; INVOCATION_ID is the hint.
+	if env("INVOCATION_ID") != "" && exists("/run/systemd/system") {
 		return MethodSystemd
 	}
 	return MethodManual
@@ -225,8 +241,8 @@ func ChecksumFor(sums, artefact string) (string, error) {
 // Does not restart anything. The caller decides when, having asked whether
 // anything is on air.
 func Stage(binary, staged, wantHex string) error {
-	if err := Verify(staged, wantHex); err != nil {
-		return err
+	if strings.TrimSpace(wantHex) == "" {
+		return errors.New("no expected checksum was supplied; refusing to install an unverified binary")
 	}
 	// PRESERVE THE MODE THE INSTALL ALREADY HAD, rather than asserting one.
 	//
@@ -234,14 +250,40 @@ func Stage(binary, staged, wantHex string) error {
 	// wrong: an operator who deliberately installed the binary 0o750 does not
 	// expect an upgrade to widen it to world-executable. The live file is the
 	// authority on what mode this install uses, so the replacement inherits it.
-	//
-	// Applied before the rename, so the instant after it is one in which the
-	// service could actually start.
 	mode, err := liveMode(binary)
 	if err != nil {
 		return err
 	}
-	if err := os.Chmod(staged, mode); err != nil {
+
+	// THE FILE THAT IS HASHED MUST BE THE FILE THAT IS INSTALLED.
+	//
+	// Verifying `staged` by path and then renaming `staged` by path are two
+	// separate lookups, and anything that can write to the staging directory can
+	// swap the file between them. Downloads land in a temp directory, which on a
+	// normal box is world-writable, so this is not a theoretical window: the
+	// checksum would pass on one file and a different one would be installed.
+	//
+	// So the bytes are copied into the INSTALL directory and hashed on the way
+	// past, and it is that copy -- reachable only by a name this process just
+	// created -- that gets renamed into place. There is no second lookup of an
+	// attacker-reachable path.
+	//
+	// It also fixes a plainer bug: renaming from a temp directory to /usr/local/bin
+	// crosses a filesystem on most installs, and os.Rename fails with EXDEV.
+	tmp, sum, err := copyIntoDirAndHash(staged, filepath.Dir(binary))
+	if err != nil {
+		return err
+	}
+	// Harmless once the rename below has consumed it; the point is the paths out
+	// of here that did not.
+	defer os.Remove(tmp)
+
+	if !strings.EqualFold(sum, strings.TrimSpace(wantHex)) {
+		return fmt.Errorf("%w: got %s, want %s", ErrChecksumMismatch, sum, wantHex)
+	}
+	// Executable before it is in place, so the instant after the rename is one
+	// in which the service could actually start.
+	if err := os.Chmod(tmp, mode); err != nil {
 		return err
 	}
 	prev := PreviousPath(binary)
@@ -250,10 +292,46 @@ func Stage(binary, staged, wantHex string) error {
 	if err := copyFile(binary, prev); err != nil {
 		return fmt.Errorf("could not keep the outgoing binary for rollback: %w", err)
 	}
-	if err := os.Rename(staged, binary); err != nil {
-		return err
+	return os.Rename(tmp, binary)
+}
+
+// copyIntoDirAndHash writes src into dir under a fresh name and returns that
+// name with the sha256 of what was actually written.
+//
+// One pass. Hashing a second read of the same path would reintroduce exactly
+// the gap this exists to close.
+func copyIntoDirAndHash(src, dir string) (string, string, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", "", err
 	}
-	return nil
+	defer in.Close()
+
+	// 0o600 from CreateTemp: an unverified binary should not be executable by
+	// anyone, least of all during the seconds it sits beside the live one.
+	out, err := os.CreateTemp(dir, ".polyemesis-incoming-*")
+	if err != nil {
+		return "", "", err
+	}
+	name := out.Name()
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(out, h), in); err != nil {
+		out.Close()
+		os.Remove(name)
+		return "", "", err
+	}
+	// Durable before it is named: the whole point of staging is that a crash
+	// leaves either the old install or a complete new one.
+	if err := out.Sync(); err != nil {
+		out.Close()
+		os.Remove(name)
+		return "", "", err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(name)
+		return "", "", err
+	}
+	return name, hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // Rollback puts the previous binary back. The caller restarts.
@@ -288,14 +366,6 @@ func Rollback(binary string) error {
 	return os.Rename(tmp, prev)
 }
 
-// copyFile duplicates src to dst, owner-only.
-//
-// 0o700, NOT 0o755. Only the LIVE binary needs to be executable by anyone other
-// than its owner, and it gets that mode explicitly at the moment it becomes
-// live. A backup sitting beside it is read by exactly one thing -- a rollback,
-// running as the same user -- so world read and execute on it buys nothing and
-// widens what a local account can reach. Sonar's S2612 flagged this and it was
-// right to.
 // liveMode is the permission bits the installed binary currently carries, with
 // a floor of owner-executable.
 //
@@ -312,19 +382,63 @@ func liveMode(binary string) (os.FileMode, error) {
 	return m | 0o100, nil
 }
 
+// copyFile duplicates src to dst, owner-only, and never leaves dst half-written.
+//
+// A BACKUP THAT MIGHT BE PARTIAL IS WORSE THAN NO BACKUP. Writing straight to
+// dst with O_TRUNC destroys the previous backup before the new one exists, so a
+// kill or a full disk mid-copy leaves a truncated file at .previous -- and
+// nothing downstream can tell. PlanFor sees a file and advertises
+// RollbackAvailable; Rollback renames it over the live binary; systemd is handed
+// a fragment of an executable and the box has no runnable polyemesis at the one
+// moment someone was reaching for the escape hatch.
+//
+// So: write a fresh temp file in the same directory, fsync it, and rename it
+// over dst. Rename within a directory is atomic, so dst is at every instant
+// either the old complete backup or the new complete one.
+//
+// 0o700, NOT 0o755. Only the LIVE binary needs to be executable by anyone other
+// than its owner, and it gets that mode explicitly at the moment it becomes
+// live. A backup sitting beside it is read by exactly one thing -- a rollback,
+// running as the same user -- so world read and execute on it buys nothing and
+// widens what a local account can reach. Sonar's S2612 flagged this and it was
+// right to.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
+
+	out, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".partial-*")
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	name := out.Name()
+	// Every failure from here removes the temp file. Leaving it would litter the
+	// install directory with near-copies of the binary, which is both confusing
+	// and a slow disk leak across repeated upgrades.
+	fail := func(err error) error {
 		out.Close()
+		os.Remove(name)
 		return err
 	}
-	return out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return fail(err)
+	}
+	if err := out.Sync(); err != nil {
+		return fail(err)
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Chmod(name, 0o700); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, dst); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return nil
 }

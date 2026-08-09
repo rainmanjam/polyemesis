@@ -24,23 +24,50 @@ func TestDetectPrefersContainerOverSystemd(t *testing.T) {
 
 func TestDetect(t *testing.T) {
 	none := func(string) bool { return false }
+	booted := func(p string) bool { return p == "/run/systemd/system" }
 	for _, tc := range []struct {
 		name   string
-		env    string
+		env    func(string) string
 		exists func(string) bool
 		want   Method
 	}{
-		{"docker", "", func(p string) bool { return p == "/.dockerenv" }, MethodDocker},
-		{"podman", "", func(p string) bool { return p == "/run/.containerenv" }, MethodDocker},
-		{"systemd", "abc123", none, MethodSystemd},
-		{"bare binary", "", none, MethodManual},
+		{"docker", constEnv(""), func(p string) bool { return p == "/.dockerenv" }, MethodDocker},
+		{"podman", constEnv(""), func(p string) bool { return p == "/run/.containerenv" }, MethodDocker},
+		{"kubernetes writes neither file", envVar("KUBERNETES_SERVICE_HOST", "10.0.0.1"), none, MethodDocker},
+		{"systemd", envVar("INVOCATION_ID", "abc123"), booted, MethodSystemd},
+		{"bare binary", constEnv(""), none, MethodManual},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Detect(func(string) string { return tc.env }, tc.exists)
+			got := Detect(tc.env, tc.exists)
 			if got != tc.want {
 				t.Errorf("Detect = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func constEnv(v string) func(string) string { return func(string) string { return v } }
+
+func envVar(key, val string) func(string) string {
+	return func(k string) string {
+		if k == key {
+			return val
+		}
+		return ""
+	}
+}
+
+// INVOCATION_ID is inherited by every child of a unit. A shell spawned from
+// `systemctl status`, or a binary launched by hand out of that shell, carries it
+// while being supervised by nothing at all.
+//
+// Believing it there means reporting Automatic:true -- replacing the live binary
+// on the promise that a service manager will restart onto it. Nothing will, and
+// the operator is left on a version they did not choose with no restart coming.
+func TestSystemdNeedsMoreThanAnInheritedInvocationID(t *testing.T) {
+	got := Detect(envVar("INVOCATION_ID", "inherited-by-a-child-shell"), func(string) bool { return false })
+	if got != MethodManual {
+		t.Errorf("Detect = %q, want %q: systemd was not the running init, so nothing will restart onto a staged binary", got, MethodManual)
 	}
 }
 
@@ -142,6 +169,104 @@ func TestStageLeavesTheInstallAloneWhenVerificationFails(t *testing.T) {
 		t.Error("a failed verification still set a rollback point, so a later rollback " +
 			"would restore something that was never running")
 	}
+	// Verification now happens on a copy made inside the install directory, so a
+	// rejected download has something to leave behind. Repeated failed upgrades
+	// would fill the directory with near-copies of the binary.
+	assertNoLitter(t, dir, "polyemesis", "staged")
+}
+
+// assertNoLitter fails if the install directory holds anything but the files
+// named. Temp files this package makes are all dot-prefixed.
+func assertNoLitter(t *testing.T, dir string, allowed ...string) {
+	t.Helper()
+	ok := map[string]bool{}
+	for _, a := range allowed {
+		ok[a] = true
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if !ok[e.Name()] {
+			t.Errorf("left %q behind in the install directory", e.Name())
+		}
+	}
+}
+
+// THE BYTES THAT WERE HASHED MUST BE THE BYTES THAT ARE INSTALLED.
+//
+// Verifying a path and then renaming that same path are two lookups, and
+// anything able to write to the staging directory -- world-writable /tmp, where
+// downloads land -- can swap the file between them. Stage closes the window by
+// copying into the install directory and hashing on the way past, so what it
+// renames into place is a file only this process has a name for.
+//
+// Observable here as: the staged file is not what gets installed. It is still
+// sitting there afterwards, untouched, and the live binary is a different file.
+func TestStageInstallsItsOwnCopyRatherThanTheStagedPath(t *testing.T) {
+	dir := t.TempDir()
+	stagingDir := t.TempDir() // as in real life: a different directory, often a different mount
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("old"), 0o755)
+	staged := filepath.Join(stagingDir, "download")
+	os.WriteFile(staged, []byte("new"), 0o644)
+
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if b, err := os.ReadFile(staged); err != nil || string(b) != "new" {
+		t.Errorf("the staged download was consumed (%q, %v); Stage must not depend on that path after hashing it", b, err)
+	}
+	if b, _ := os.ReadFile(bin); string(b) != "new" {
+		t.Errorf("binary is %q, want new", b)
+	}
+	// A rename out of a temp directory crosses a filesystem on a normal install
+	// and fails with EXDEV. Copying is what makes a cross-device stage work.
+	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous")
+}
+
+// A BACKUP THAT MIGHT BE PARTIAL IS WORSE THAN NO BACKUP.
+//
+// Writing straight to .previous with O_TRUNC destroys the old backup before the
+// new one exists: a kill or a full disk mid-copy leaves a truncated file that
+// PlanFor still advertises and Rollback still installs, handing systemd a
+// fragment of an executable.
+//
+// Checked by identity rather than by killing the process: a file written in
+// place is still the same file afterwards, one renamed into position is not.
+// os.SameFile asks exactly that, and portably.
+func TestTheBackupIsReplacedAtomicallyNotTruncatedInPlace(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	prev := PreviousPath(bin)
+	os.WriteFile(prev, []byte("a complete earlier backup"), 0o700)
+	before := statOf(t, prev)
+
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("v2"), 0o644)
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	if os.SameFile(before, statOf(t, prev)) {
+		t.Error("the backup was written in place; a kill mid-copy would leave a truncated file " +
+			"that PlanFor advertises and Rollback installs")
+	}
+	if b, _ := os.ReadFile(prev); string(b) != "v1" {
+		t.Errorf("previous is %q, want v1", b)
+	}
+	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "staged")
+}
+
+func statOf(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat %s: %v", path, err)
+	}
+	return fi
 }
 
 func TestStageThenRollbackRoundTrips(t *testing.T) {
