@@ -557,8 +557,12 @@ func copyIntoDir(src, dir, prefix string, mode os.FileMode) (string, string, err
 //
 // Split out from copyIntoDir because an incoming binary must not be executable
 // until its checksum has passed, so its final mode is set later than its bytes.
+// Opened O_RDWR rather than read-only because of the Sync: Windows implements
+// it as FlushFileBuffers, which needs write access to the handle and fails with
+// "Access is denied" on one opened for reading. Nothing is written through this
+// descriptor -- the mode is the only change -- but the handle has to be able to.
 func setModeDurably(path string, mode os.FileMode) error {
-	f, err := os.Open(path)
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
