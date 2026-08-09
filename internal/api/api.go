@@ -729,10 +729,28 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// Preview playlist and segments. hls.js cannot attach headers, so this
-	// relies on the session cookie, same-origin.
+	// relies on the session cookie, same-origin -- and now SAYS SO IN THE ROUTE
+	// TABLE rather than only in this comment.
+	//
+	// Two things were wrong with the previous registration, and neither was
+	// visible from the handler. It carried requireAuth but NOT requireScope,
+	// making it the one authenticated group in the table with no scope check at
+	// all -- so a read token reached it, and any request whose path ends
+	// .m3u8 calls PreviewRequested, which starts the on-demand preview encoder
+	// and keeps it alive for as long as the polling continues. And it was
+	// registered with r.Handle, so it answered EVERY method, including the ones
+	// the scope rule refuses everywhere else.
+	//
+	// Session-only closes the encoder-pinning for read AND admin bearers, at no
+	// cost to the dashboard: the browser is the only thing that has ever
+	// fetched these, and it has the cookie. GET and HEAD only, so the method
+	// surface matches what a media element actually issues.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
-		r.Handle("/hls/*", s.hlsHandler())
+		r.Use(s.requireSession)
+		hls := s.hlsHandler()
+		r.Get("/hls/*", hls.ServeHTTP)
+		r.Head("/hls/*", hls.ServeHTTP)
 	})
 
 	// --- the public origin ---
@@ -860,10 +878,61 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 // is denied to read tokens, so the failure mode of forgetting to maintain it is
 // a monitoring script getting a 403 that somebody notices, never a write
 // getting through unannounced.
+// The expert preview route USED TO BE ON THIS LIST and is deliberately not any
+// more. Its response is the resolved FFmpeg argv, which contains the
+// destination's stream key in the output target -- so a read token reached the
+// credential through a POST this list was hand-built to permit. The comment
+// above reasons entirely about whether each candidate WRITES; it never asks
+// what the route RETURNS, which is the method-shaped rule's blind spot
+// reproduced inside its own exception list. The argv is not masked, because
+// expert mode's contract is that the command shown is the command that runs;
+// the route is denied to read tokens instead. See readScopeDeniedPatterns.
 var readScopeWritePatterns = map[string]bool{
-	"/api/v1/version/check":                    true,
-	"/api/v1/routing/compile":                  true,
-	"/api/v1/destinations/{id}/expert/preview": true,
+	"/api/v1/version/check":   true,
+	"/api/v1/routing/compile": true,
+}
+
+// readScopeDeniedPatterns are the GETs a read-scoped token may NOT make.
+//
+// The method rule says a GET is a read. For these five it is false, in one of
+// two ways, and both were found by enumerating the route table rather than by
+// sampling it:
+//
+//	THE RESPONSE IS A CREDENTIAL. GET /destinations/{id}/expert returns the
+//	resolved argv, whose output target is rtmps://host/app/<streamKey>. Every
+//	other egress of an argv in this process is masked by alerts.Redact inside
+//	supervisor; this one is deliberately raw because expert mode's whole
+//	promise is that the command an operator approves is the command that runs.
+//	Masking it would break that approval, so the route is denied instead.
+//
+//	THE GET IS NOT A READ. /clipper/.../keyframes spawns one ffprobe per
+//	overlapping timeline part, with no cap on requests.
+//	/platforms/accounts/{id}/stats and /metadata/broadcast-window each call a
+//	third party and can REFRESH AND PERSIST an OAuth token -- GETs that write
+//	the database and burn somebody else's quota, one call per connected account
+//	in the broadcast-window case.
+//
+// Keyed by chi's route PATTERN for the same reason the allowlist is: an id in
+// the URL must not be able to smuggle a request past the check.
+//
+// This list is SUBTRACTIVE, which is the opposite safety property to the
+// allowlist above, and that asymmetry is deliberate rather than sloppy:
+// forgetting to add a route here leaves a read token reaching something it
+// perhaps should not, so the recurrence guard for this half is a TEST that
+// drives every route and counts spawns, dials and writes, not a promise to
+// maintain a list. See TestReadTokenGETsCauseNoSideEffects.
+//
+// GET /playout/poster.jpg is considered and deliberately ABSENT. It does exec
+// FFmpeg, but it is self-throttled -- a 10-second cache under a mutex and an
+// 8-second timeout, so ~6 execs a minute however many callers ask -- and it is
+// already reachable with no credential at all when the operator sets
+// protection=open. Denying a read token buys nothing there.
+var readScopeDeniedPatterns = map[string]bool{
+	"/api/v1/destinations/{id}/expert":          true,
+	"/api/v1/destinations/{id}/expert/preview":  true,
+	"/api/v1/clipper/recordings/{id}/keyframes": true,
+	"/api/v1/platforms/accounts/{id}/stats":     true,
+	"/api/v1/metadata/broadcast-window":         true,
 }
 
 // requireScope enforces what a token is ALLOWED to do, once requireAuth has
@@ -893,6 +962,15 @@ func (s *Server) requireScope(next http.Handler) http.Handler {
 		// scope string this build does not recognise. A value that arrived
 		// from a newer schema or a hand-edited row should narrow what a
 		// credential can do, never widen it.
+		//
+		// The denials are checked BEFORE the method, because their whole point
+		// is that the method is the wrong question for them.
+		if rc := chi.RouteContext(r.Context()); rc != nil && readScopeDeniedPatterns[rc.RoutePattern()] {
+			writeError(w, http.StatusForbidden,
+				"this API token is read-only; this endpoint returns a credential or "+
+					"does real work, so it needs a token with the \"admin\" scope")
+			return
+		}
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			next.ServeHTTP(w, r)
 			return

@@ -223,12 +223,16 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		// No RTMPAddress. Only PublicIngestURL is read below, and that renders
 		// the server half alone -- the address is per source and belongs on the
 		// Sources page, next to the button that rotates it.
-		// Verbatim, userinfo and all. An rtsp://user:pass@cam/ source does
-		// carry a credential, but this endpoint is authenticated and the same
-		// caller can read the identical string out of GET /settings, so
-		// redacting only here would be theatre — and it would leave the
-		// operator unable to see which source is actually being dialled, which
-		// is the entire reason this field exists.
+		// Verbatim for an operator, masked for a read-scoped token below.
+		//
+		// An rtsp://user:pass@cam/ source carries a credential in its userinfo,
+		// and the operator has to see which source is actually being dialled --
+		// that is the entire reason this field exists. What used to stand here
+		// was an argument that redacting it would be theatre "because the same
+		// caller can read the identical string out of GET /settings". Scopes
+		// falsified that premise: both readers are now a read-scoped bearer, so
+		// the two disclosures reinforced each other rather than excusing each
+		// other. Both are masked now.
 		PullURL: settings.Ingest.Pull.URL,
 	}
 	host := r.Host
@@ -236,6 +240,20 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		host = h
 	}
 
+	// The one field on this endpoint that is a credential, and it is a
+	// CONSTRUCTED one, which is why struct tags could never have covered it:
+	// PublicIngestURL renders srt://host:port?...&passphrase=<cleartext> in SRT
+	// mode and returns the pull URL verbatim, userinfo and all, in pull mode.
+	// alerts.RedactURL masks both shapes, and it is the same function
+	// supervisor already runs over every FFmpeg argv -- which is exactly why
+	// GET /processes was clean through this whole review and this route was
+	// not.
+	ingestURL := spec.PublicIngestURL(host)
+	if readScopeCannotSeePublishTokens(r) {
+		ingestURL = maskURL(ingestURL)
+	}
+
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version": s.version,
 		"ffmpeg":  s.eng().Tools(),
@@ -245,7 +263,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		// editor offer NVENC on an AMD box in the first place. Cached after the
 		// first scan, so this stays a cheap endpoint.
 		"gpu":        machineGPUs(r.Context()),
-		"ingestUrl":  spec.PublicIngestURL(host),
+		"ingestUrl":  ingestURL,
 		"ingestMode": settings.Ingest.Mode,
 		"maxTracks":  routing.MaxTracks,
 		"tlsEnabled": s.cfg.ServesTLS(),
@@ -714,6 +732,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.log.Warn("cannot tell whether an automod model key is stored", "err", err)
 	}
+	// The ingest credentials are sealed the same way the MQTT password and the
+	// automod key already were, except that they cannot be moved out of the
+	// blob -- the settings page reads and writes them -- so they are blanked on
+	// the way out for a read-scoped token instead. See internal/api/redact.go.
+	if readScopeCannotSeePublishTokens(r) {
+		settings = readSafeSettings(settings)
+	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, settings)
 }
 
@@ -1035,9 +1061,22 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 	// Each row is returned with its compiled routing, so the UI can render the
 	// "Tracks 1, 2, 4 → stereo" summary and the generated filter string
 	// without a second round trip.
+	// A read-scoped token gets the destination with its publish credentials
+	// blanked. db.Destination has no MarshalJSON, so `{"destination": row}` is
+	// a raw dump of every leaf -- streamKey, backupStreamKey, and for an audio
+	// destination a url whose icecast://user:pass@ userinfo IS the credential.
+	// See internal/api/redact.go for why this is a copy at the handler rather
+	// than a property of the type.
+	hide := readScopeCannotSeePublishTokens(r)
+
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		item := map[string]any{"destination": row}
+		shown := row
+		if hide {
+			safe := readSafeDestination(*row)
+			shown = &safe
+		}
+		item := map[string]any{"destination": shown}
 		if c, err := routing.Compile(row.Profile, src); err == nil {
 			item["routing"] = c
 			// PROVISIONAL until something has been measured. Until then this is
@@ -1057,6 +1096,7 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 		}
 		out = append(out, item)
 	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1071,8 +1111,16 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	resp := map[string]any{"destination": row}
+	shown := row
+	if readScopeCannotSeePublishTokens(r) {
+		safe := readSafeDestination(*row)
+		shown = &safe
+	}
+	resp := map[string]any{"destination": shown}
 	getSrc, getKnown := s.eng().SourceKnown()
+	// Compiled off the ORIGINAL row, not the redacted copy: the routing profile
+	// carries no credential and compiling the copy would only invite a future
+	// reader to wonder whether it differs.
 	if c, err := routing.Compile(row.Profile, getSrc); err == nil {
 		resp["routing"] = c
 		if !getKnown {
@@ -1081,6 +1129,7 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 	} else {
 		resp["routingError"] = err.Error()
 	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, resp)
 }
 

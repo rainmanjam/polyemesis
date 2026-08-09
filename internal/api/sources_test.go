@@ -267,7 +267,23 @@ func TestDegradedSRTListenerIsReportedOnTheSourceCard(t *testing.T) {
 // Both shapes are asserted, because the publish URLs embed the token and
 // blanking only the field would hand the same secret back in a different form.
 func TestReadScopedTokenCannotReadAPublishToken(t *testing.T) {
-	h, _, sign := sourceServer(t)
+	h, store, sign := sourceServer(t)
+
+	// The fixture used to leave the ingest block empty, and that made this test
+	// a FALSE POSITIVE: it asserted on Source.Token alone, over a body that
+	// carried an empty passphrase and an empty legacy RTMP key, so it passed
+	// happily while both of those credentials were being handed to a read token
+	// on any real install. Plant them, so the assertion below is made against a
+	// response that has something to leak.
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("fixture source: %v", err)
+	}
+	src.Ingest.SRT.Passphrase = "fixture-srt-passphrase-1234"
+	src.Ingest.RTMP.StreamKey = "fixture-legacy-rtmp-key"
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("plant ingest credentials: %v", err)
+	}
 
 	// What the operator's own session sees, which must be unchanged: the
 	// console needs the token to show it.
@@ -287,6 +303,18 @@ func TestReadScopedTokenCannotReadAPublishToken(t *testing.T) {
 	// secret does not appear ANYWHERE in what left the process.
 	if strings.Contains(w.Body.String(), seen.Token) {
 		t.Errorf("the publish token reached a read-scoped token: %s", w.Body.String())
+	}
+	// And neither does the stored ingest block the embedded *db.Source carries.
+	// The legacy RTMP key is the sharper of the two: engine.Manager honours a
+	// stored one as a publish address on an install upgraded from a pre-one-port
+	// build, so it is a working ingest credential, and the redaction that only
+	// blanked the DERIVED legacyRtmpKey field was handing back the identical
+	// string two JSON fields away.
+	for _, secret := range []string{"fixture-srt-passphrase-1234", "fixture-legacy-rtmp-key"} {
+		if strings.Contains(w.Body.String(), secret) {
+			t.Errorf("the ingest credential %q reached a read-scoped token: %s",
+				secret, w.Body.String())
+		}
 	}
 
 	var rows []sourceRow

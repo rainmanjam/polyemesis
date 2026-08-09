@@ -665,9 +665,18 @@ type playoutAdminView struct {
 	// second call to /settings.
 	Settings   db.PlayoutSettings `json:"settings"`
 	Protection playoutProtection  `json:"protection"`
-	// Token is the playback secret in the clear. This endpoint is behind the
-	// administrator's session; there is exactly one person entitled to see it,
-	// and hiding it from them would only mean they could not share the link.
+	// Token is the playback secret in the clear, for an operator.
+	//
+	// What used to stand here asserted that "this endpoint is behind the
+	// administrator's session". It is not, and never was: the route is
+	// registered in the plain authenticated group, so any bearer reaches it,
+	// and the method rule waves a GET through. The claim was written in prose
+	// beside the type instead of enforced at the route, which is the exact
+	// failure the session-only group was created to end.
+	//
+	// It is now blanked for a read-scoped token, along with the three URLs
+	// below -- each of which re-embeds the same secret, so blanking the field
+	// alone would hand it straight back in a different shape.
 	Token       string      `json:"token"`
 	Title       string      `json:"title"`
 	Description string      `json:"description"`
@@ -706,6 +715,17 @@ func (s *Server) handleGetPlayout(w http.ResponseWriter, r *http.Request) {
 			Format:  set.Format,
 		}
 	}
+	if readScopeCannotSeePublishTokens(r) {
+		// The token is a WATCH credential: with it a read-scoped holder can
+		// pull the media of a stream the operator has not made public. There
+		// is no read-safe shape to fall back to that keeps it, so all four
+		// carriers go -- the field, and the master, watch and embed URLs that
+		// each contain it. playoutPublicView is what a caller without the
+		// operator's authority is meant to read.
+		view.Token = ""
+		view.URLs = playoutURLs{}
+	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, view)
 }
 

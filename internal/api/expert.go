@@ -300,11 +300,18 @@ func quoteArgv(bin string, args []string) string {
 // telling them it is. That is a worse failure than the disclosure: it breaks
 // the approval this screen exists to obtain.
 //
-// The exposure is bounded by the same boundary the rest of the console has.
-// This route is inside the requireAuth+requireCSRF group, and the same caller
-// can already read streamKey and backupStreamKey in cleartext from
-// GET /destinations, so redacting here would remove nothing an authenticated
-// operator cannot already fetch.
+// The exposure is bounded instead BY WHO CAN ASK. What used to stand here
+// argued that redaction would remove nothing, "because the same caller can
+// already read streamKey and backupStreamKey in cleartext from
+// GET /destinations". Token scopes falsified that premise: a read-scoped bearer
+// is now a lower-privileged principal inside the same requireAuth boundary, and
+// it is refused both streamKey on /destinations and these routes outright --
+// GET /destinations/{id}/expert and POST /destinations/{id}/expert/preview are
+// in readScopeDeniedPatterns. A session and an admin token, which can rotate
+// the key anyway, still get the exact command.
+//
+// Do not "fix" this by masking the argv. The next reader who is tempted should
+// read that list's comment first.
 func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []string, live bool, note string, err error) {
 	bin = s.eng().Tools().FFmpeg
 

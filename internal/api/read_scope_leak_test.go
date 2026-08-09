@@ -1,0 +1,523 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
+)
+
+// The recurrence guard for #150's disclosure findings.
+//
+// Everything in this file drives the REAL chi router with a REAL bearer token
+// minted through POST /auth/tokens, and asserts on the BYTES that left the
+// process. Nothing here reads production source text (#107): a grep would have
+// passed just as happily against the code that shipped the leak, because every
+// one of those leaks was a correct-looking handler serialising a struct whose
+// name says nothing about what is inside it.
+//
+// The previous audit missed three credentials by SAMPLING handlers. This test
+// enumerates the router instead, and refuses to pass while a GET route exists
+// that it has neither driven nor been told, in writing, to skip.
+
+// Sentinels. Improbable enough that a substring match is a real match, and
+// distinct per field so a failure names which credential escaped rather than
+// just that one did.
+const (
+	sentinelSourceSRT     = "SENTINEL-source-srt-passphrase-9f3a"
+	sentinelSourceRTMP    = "SENTINEL-source-rtmp-streamkey-9f3a"
+	sentinelSourcePullPwd = "SENTINEL-source-pull-password-9f3a"
+	sentinelSetSRT        = "SENTINEL-settings-srt-passphrase-9f3a"
+	sentinelSetRTMP       = "SENTINEL-settings-rtmp-streamkey-9f3a"
+	sentinelSetPullPwd    = "SENTINEL-settings-pull-password-9f3a"
+	sentinelBackupSRT     = "SENTINEL-backup-srt-passphrase-9f3a"
+	sentinelBackupRTMP    = "SENTINEL-backup-rtmp-streamkey-9f3a"
+	sentinelBackupPullPwd = "SENTINEL-backup-pull-password-9f3a"
+	sentinelMQTTPwd       = "SENTINEL-mqtt-broker-password-9f3a"
+	sentinelDestKey       = "SENTINEL-destination-streamkey-9f3a"
+	sentinelDestBackupKey = "SENTINEL-destination-backupkey-9f3a"
+	sentinelIcecastPwd    = "SENTINEL-icecast-password-9f3a"
+	sentinelPlayoutToken  = "SENTINEL-playout-watch-token-9f3a"
+)
+
+// allSentinels is what every response body is swept for. One list, so a
+// credential added to the fixture is automatically checked on every route
+// rather than only on the route whose author remembered it.
+func allSentinels() []string {
+	return []string{
+		sentinelSourceSRT, sentinelSourceRTMP, sentinelSourcePullPwd,
+		sentinelSetSRT, sentinelSetRTMP, sentinelSetPullPwd,
+		sentinelBackupSRT, sentinelBackupRTMP, sentinelBackupPullPwd,
+		sentinelMQTTPwd, sentinelDestKey, sentinelDestBackupKey,
+		sentinelIcecastPwd, sentinelPlayoutToken,
+	}
+}
+
+// plantedServer is the leak harness: a real engine-backed server whose every
+// credential-bearing column holds a sentinel.
+//
+// Engine-backed rather than store-only on purpose. A store-only fixture cannot
+// serve /system, /status or the destination routes at all, and a harness that
+// silently 500s on the routes under test would report a clean sweep — which is
+// the fail-open shape this whole exercise exists to refuse.
+func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request), int64) {
+	t.Helper()
+	h, store, sign := sourceServer(t)
+
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("fixture source: %v", err)
+	}
+	src.Ingest.SRT.Passphrase = sentinelSourceSRT
+	src.Ingest.RTMP.StreamKey = sentinelSourceRTMP
+	src.Ingest.Pull.URL = "rtsp://camuser:" + sentinelSourcePullPwd + "@10.0.0.9/stream1"
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("plant source credentials: %v", err)
+	}
+
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Ingest.SRT.Passphrase = sentinelSetSRT
+	st.Ingest.RTMP.StreamKey = sentinelSetRTMP
+	st.Ingest.Pull.URL = "rtsp://camuser:" + sentinelSetPullPwd + "@10.0.0.9/stream1"
+	st.Failover.Backup.SRT.Passphrase = sentinelBackupSRT
+	st.Failover.Backup.RTMP.StreamKey = sentinelBackupRTMP
+	st.Failover.Backup.Pull.URL = "rtsp://camuser:" + sentinelBackupPullPwd + "@10.0.0.9/stream1"
+	// MQTT stays DISABLED, and that is the point rather than a convenience:
+	// MQTTSettings.problems returns nil when it is off, so the validator's
+	// explicit "no credentials in the broker URL" rule never runs and a URL
+	// carrying userinfo can be stored and then round-tripped straight back out
+	// of GET /settings. The masking has to cover that gap without leaning on
+	// the validator.
+	st.MQTT.Enabled = false
+	st.MQTT.BrokerURL = "mqtt://mqttuser:" + sentinelMQTTPwd + "@broker.example:1883"
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("plant settings credentials: %v", err)
+	}
+
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "twitch", Kind: db.DestRTMP, URL: "rtmp://ingest.example/app",
+		StreamKey:       sentinelDestKey,
+		BackupURL:       "rtmp://backup.example/app",
+		BackupStreamKey: sentinelDestBackupKey,
+		AudioBitrate:    160, Enabled: false,
+	})
+	if err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "radio", Kind: db.DestAudio,
+		URL:          "icecast://source:" + sentinelIcecastPwd + "@radio.example:8000/live",
+		AudioBitrate: 128, Enabled: false,
+	}); err != nil {
+		t.Fatalf("create audio destination: %v", err)
+	}
+
+	s := serverUnderTest(t, h)
+	if _, err := s.playoutStore().save(playoutPublish{
+		Protection: PlayoutProtectToken,
+		Token:      sentinelPlayoutToken,
+		Title:      "private",
+	}); err != nil {
+		t.Fatalf("plant playout token: %v", err)
+	}
+	// Public, so playoutURLsFor actually embeds the token in the three URLs. A
+	// fixture that left it unpublished would exercise the branch where there is
+	// nothing to leak.
+	set := st.Playout
+	set.Enabled = true
+	set.Public = true
+	st2, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st2.Playout = set
+	if err := store.PutSettings(st2); err != nil {
+		t.Fatalf("enable playout: %v", err)
+	}
+	// GET /system answers from the ENGINE's settings snapshot rather than from
+	// the store, so a fixture that only wrote the row would leave that route
+	// serving the defaults and the sweep would pass over a URL that never had a
+	// passphrase in it to begin with.
+	if err := s.mgr.Reconcile(); err != nil {
+		t.Fatalf("reconcile so the engine sees the planted settings: %v", err)
+	}
+
+	return h, store, sign, dest.ID
+}
+
+// bearer stamps a token onto a request the way a script would.
+func bearer(tok string) func(*http.Request) {
+	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+tok) }
+}
+
+// leakRoutes are the GET routes a read-scoped token reaches in this fixture,
+// each of which must come back 200 AND carry no sentinel.
+//
+// A 200 is REQUIRED, not merely accepted. A sweep that shrugged at a 404 would
+// pass on a fixture where nothing was ever built, and would keep passing after
+// a refactor silently broke the route it was meant to be watching. That is the
+// fail-open bug this list's contract exists to refuse.
+func leakRoutes() []string {
+	return []string{
+		"/api/v1/sources",
+		"/api/v1/sources/1",
+		"/api/v1/settings",
+		"/api/v1/system",
+		"/api/v1/status",
+		"/api/v1/source",
+		"/api/v1/destinations",
+		"/api/v1/destinations/1",
+		"/api/v1/destinations/2",
+		"/api/v1/playout",
+		"/api/v1/failover/playlist",
+		"/api/v1/processes",
+		"/api/v1/metadata",
+		"/api/v1/renditions",
+		"/api/v1/encoders",
+		"/api/v1/stats",
+		"/api/v1/levels",
+		"/api/v1/metrics",
+		"/api/v1/version",
+		"/api/v1/automod/matrix",
+		"/api/v1/media",
+		"/api/v1/recordings",
+		"/api/v1/clips",
+		"/api/v1/hooks",
+		"/api/v1/alerts/rules",
+		"/api/v1/platforms/credentials",
+		"/api/v1/platforms/accounts",
+		"/api/v1/platforms/capabilities",
+		"/api/v1/platforms/guides",
+		"/api/v1/platforms/presets",
+		"/api/v1/library",
+		"/api/v1/alerts/meta",
+		"/api/v1/auth/me",
+		"/api/v1/automod/stats",
+		"/api/v1/chat",
+		"/api/v1/chat/messages",
+		"/api/v1/chat/search?q=hello",
+		"/api/v1/chat/users?platform=twitch&authorId=1",
+		"/api/v1/fonts",
+		"/api/v1/hooks/meta",
+		"/api/v1/loudness",
+		"/api/v1/recordings/stems",
+		"/api/v1/recordings/usage",
+		"/api/v1/renditions/presets",
+		"/api/v1/routing/presets",
+		"/api/v1/schedules",
+		"/api/v1/schedules/runs",
+		"/api/v1/tls",
+	}
+}
+
+// TestReadTokenReceivesNoCredentialOnAnyRoute is the disclosure guard.
+func TestReadTokenReceivesNoCredentialOnAnyRoute(t *testing.T) {
+	h, _, sign, _ := plantedServer(t)
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+
+	for _, path := range leakRoutes() {
+		r := jsonRequest(t, http.MethodGet, path, nil)
+		bearer(read)(r)
+		w := do(t, h, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("GET %s returned %d to a read token; a route this sweep claims to "+
+				"cover must actually answer, or the sweep is proving nothing about it: %s",
+				path, w.Code, strings.TrimSpace(w.Body.String()))
+			continue
+		}
+		body := w.Body.String()
+		for _, secret := range allSentinels() {
+			if strings.Contains(body, secret) {
+				t.Errorf("GET %s handed a read-scoped token the credential %s.\n"+
+					"body: %s", path, secret, body)
+			}
+		}
+	}
+}
+
+// TestReadTokenSweepCoversEveryReachableGET is the reconciliation half.
+//
+// Without it the sweep above is a list somebody has to remember to extend, and
+// the failure of the previous audit was exactly that nobody did. This walks the
+// router chi actually built and requires every /api/v1 GET pattern to be either
+// swept or explicitly excused. A route added tomorrow fails this test on the
+// day it lands, which is when its author is still holding the context to
+// classify it.
+func TestReadTokenSweepCoversEveryReachableGET(t *testing.T) {
+	h, _, _, _ := plantedServer(t)
+	s := serverUnderTest(t, h)
+
+	// Reasons, not just names. An entry with no reason is how a list like this
+	// rots into a way of silencing the test.
+	excused := map[string]string{
+		// Denied to read tokens outright; TestReadTokenIsDeniedTheRoutesThatAreNotReads
+		// asserts the 403 instead of a body.
+		"/api/v1/destinations/{id}/expert":          "denied to read tokens",
+		"/api/v1/clipper/recordings/{id}/keyframes": "denied to read tokens",
+		"/api/v1/platforms/accounts/{id}/stats":     "denied to read tokens",
+		"/api/v1/metadata/broadcast-window":         "denied to read tokens",
+
+		// Session-only: no bearer of either scope reaches these.
+		"/api/v1/auth/tokens":               "session-only",
+		"/hls/*":                            "session-only",
+		"/api/v1/oauth/{platform}/start":    "session-only",
+		"/api/v1/oauth/{platform}/callback": "session-only",
+
+		// Not an HTTP response body at all.
+		"/api/v1/ws":            "a WebSocket upgrade; its frames are asserted in ws_test.go",
+		"/api/v1/jobs":          "503 without a job queue wired; carries no stored credential",
+		"/api/v1/jobs/overview": "503 without a job queue wired; carries no stored credential",
+		"/api/v1/jobs/policy":   "503 without a job queue wired; carries no stored credential",
+		"/api/v1/chat/kick/{secret}": "unauthenticated by necessity; the path segment IS " +
+			"the credential and a mismatch is a bare 404",
+
+		// Unauthenticated by design and carrying nothing stored.
+		"/api/v1/health":         "unauthenticated liveness probe",
+		"/api/v1/setup":          "unauthenticated; needsSetup and a password length",
+		"/api/v1/tls/ca":         "unauthenticated; the PUBLIC half of the local CA",
+		"/api/v1/playout/public": "unauthenticated; the read-safe playout view",
+		"/playout/*":             "the public media origin, guarded per-request",
+		"/watch":                 "the player SPA bundle",
+		"/watch/*":               "the player SPA bundle",
+
+		// Reached with a row id this fixture does not create. Each was traced
+		// to leaf fields and carries no stored credential: recordings, clips,
+		// jobs, library sessions and transcripts are media and text.
+		"/api/v1/recordings/{id}/download":             "needs a recording row",
+		"/api/v1/recordings/stems/{name}/download":     "needs a stem file",
+		"/api/v1/clips/{name}/download":                "needs a clip file",
+		"/api/v1/clipper/recordings/{id}":              "needs a recording row",
+		"/api/v1/clipper/recordings/{id}/transcript":   "needs a recording row",
+		"/api/v1/clipper/jobs/{id}/download":           "needs an export job",
+		"/api/v1/library/recordings/{id}/transcript":   "needs a recording row",
+		"/api/v1/library/recordings/{id}/media/{file}": "needs derived media",
+		"/api/v1/jobs/{id}":                            "needs a job row",
+		"/api/v1/metadata/push/{id}":                   "needs a push id",
+		"/api/v1/alerts/rules/{id}":                    "needs a rule row",
+		"/api/v1/hooks/{id}":                           "needs a hook row",
+		"/api/v1/hooks/{id}/deliveries":                "needs a hook row",
+		"/api/v1/schedules/{id}":                       "needs a schedule row",
+		"/api/v1/processes/{name}/logs":                "needs a running child process",
+		"/api/v1/renditions/{id}":                      "covered by GET /renditions",
+		"/api/v1/playout/poster.jpg":                   "renders a JPEG from media this fixture has none of",
+		"/api/v1/library/search":                       "an FTS query over an empty index",
+		"/api/v1/library/sessions/{id}":                "needs a session row",
+		"/api/v1/library/recordings/{id}":              "needs a recording row",
+	}
+
+	swept := map[string]bool{}
+	for _, p := range leakRoutes() {
+		swept[patternOf(t, s, p)] = true
+	}
+
+	var uncovered []string
+	walked := map[string]bool{}
+	err := chi.Walk(s.Handler().(chi.Routes),
+		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+			if method != http.MethodGet {
+				return nil
+			}
+			route = strings.TrimSuffix(route, "/")
+			if route == "" {
+				return nil
+			}
+			walked[route] = true
+			if swept[route] || excused[route] != "" {
+				return nil
+			}
+			uncovered = append(uncovered, route)
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("walk the router: %v", err)
+	}
+
+	for _, route := range uncovered {
+		t.Errorf("GET %s is reachable and neither swept for credentials nor excused. "+
+			"Add it to leakRoutes() if a read token may call it, or to the excused map "+
+			"with the reason it cannot leak.", route)
+	}
+
+	// The excuses have to name real routes, or the map becomes a place stale
+	// entries go to die and the next reader cannot tell which of them are still
+	// load-bearing.
+	for route := range excused {
+		if !walked[route] {
+			t.Errorf("the excused map names GET %s, which the router does not serve. "+
+				"Delete the entry rather than leaving a dead excuse in place.", route)
+		}
+	}
+	if len(walked) < 60 {
+		t.Errorf("the walk found only %d GET routes, which is far fewer than this API "+
+			"has; the reconciliation is looking at the wrong router", len(walked))
+	}
+}
+
+// patternOf resolves a concrete path back to the chi pattern it matches, so
+// leakRoutes can stay readable as URLs while the reconciliation compares
+// patterns.
+func patternOf(t *testing.T, s *Server, path string) string {
+	t.Helper()
+	rctx := chi.NewRouteContext()
+	// The sweep drives some routes with a query string, because the handler
+	// refuses without one; chi matches on the path alone.
+	path, _, _ = strings.Cut(path, "?")
+	if !s.Handler().(chi.Routes).Match(rctx, http.MethodGet, path) {
+		t.Fatalf("GET %s matches no route; the sweep is driving a URL that does not exist", path)
+	}
+	return rctx.RoutePattern()
+}
+
+// TestSessionAndAdminStillReceiveEveryCredential is the other half of the fix.
+//
+// Redaction that also blinded the console would be a regression wearing a
+// security fix's clothes: the operator opens the Sources page precisely to copy
+// the key into OBS, and an admin token can rotate every one of these secrets
+// anyway, so withholding them from it is a lock with the key taped to the
+// front. Both principals are asserted, because they take different code paths
+// -- a session has no token at all, an admin has one whose scope is checked.
+func TestSessionAndAdminStillReceiveEveryCredential(t *testing.T) {
+	h, _, sign, _ := plantedServer(t)
+	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
+
+	want := []struct {
+		path   string
+		secret string
+	}{
+		{"/api/v1/sources", sentinelSourceSRT},
+		{"/api/v1/sources", sentinelSourceRTMP},
+		{"/api/v1/sources/1", sentinelSourcePullPwd},
+		{"/api/v1/settings", sentinelSetSRT},
+		{"/api/v1/settings", sentinelSetRTMP},
+		{"/api/v1/settings", sentinelBackupSRT},
+		{"/api/v1/settings", sentinelBackupRTMP},
+		{"/api/v1/settings", sentinelMQTTPwd},
+		{"/api/v1/destinations", sentinelDestKey},
+		{"/api/v1/destinations", sentinelDestBackupKey},
+		{"/api/v1/destinations", sentinelIcecastPwd},
+		{"/api/v1/destinations/1", sentinelDestKey},
+		{"/api/v1/playout", sentinelPlayoutToken},
+	}
+
+	for _, principal := range []struct {
+		name string
+		sign func(*http.Request)
+	}{
+		{"session", sign},
+		{"admin token", bearer(admin)},
+	} {
+		for _, c := range want {
+			r := jsonRequest(t, http.MethodGet, c.path, nil)
+			principal.sign(r)
+			w := do(t, h, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s: GET %s returned %d: %s",
+					principal.name, c.path, w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), c.secret) {
+				t.Errorf("%s was denied %s on GET %s; the redaction is meant to be "+
+					"principal-dependent and this principal is entitled to it",
+					principal.name, c.secret, c.path)
+			}
+		}
+	}
+}
+
+// TestSystemIngestURLIsMaskedForReadTokensOnly pins the one CONSTRUCTED
+// credential, which no struct tag could ever have covered: PublicIngestURL
+// builds srt://host:port?...&passphrase=<cleartext> out of settings that are
+// themselves redacted elsewhere.
+func TestSystemIngestURLIsMaskedForReadTokensOnly(t *testing.T) {
+	h, store, sign, _ := plantedServer(t)
+
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Ingest.Mode = db.IngestSRT
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("choose SRT: %v", err)
+	}
+
+	ingestURL := func(sign func(*http.Request)) string {
+		t.Helper()
+		r := jsonRequest(t, http.MethodGet, "/api/v1/system", nil)
+		sign(r)
+		w := do(t, h, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /system: %d %s", w.Code, w.Body.String())
+		}
+		var body struct {
+			IngestURL string `json:"ingestUrl"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode /system: %v", err)
+		}
+		return body.IngestURL
+	}
+
+	// The passphrase in this URL comes from the SOURCE's ingest block, not the
+	// settings singleton: effectiveSettings overlays the source's ingest onto
+	// the install-wide document, and that is the value the listener enforces.
+	operator := ingestURL(sign)
+	if !strings.Contains(operator, sentinelSourceSRT) {
+		t.Fatalf("the operator's own ingest URL lost its passphrase, so this test "+
+			"cannot prove anything about the read token's: %q", operator)
+	}
+
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+	masked := ingestURL(bearer(read))
+	if strings.Contains(masked, sentinelSourceSRT) {
+		t.Errorf("GET /system handed a read token the SRT passphrase in its ingest URL: %q", masked)
+	}
+	// Still useful: the point of masking rather than blanking is that a
+	// monitoring script can still see WHICH endpoint is meant.
+	if !strings.HasPrefix(masked, "srt://") {
+		t.Errorf("the masked ingest URL is no longer recognisable as an endpoint: %q", masked)
+	}
+}
+
+// TestPrincipalVaryingResponsesAreNotCacheable.
+//
+// These bodies now differ by principal on the SAME url, which is a new property
+// and one a shared cache in front of the server gets wrong in the worst
+// direction: a session's response, stored under the URL alone, replayed to the
+// read token the redaction exists for.
+func TestPrincipalVaryingResponsesAreNotCacheable(t *testing.T) {
+	h, _, sign, _ := plantedServer(t)
+
+	for _, path := range []string{
+		"/api/v1/sources", "/api/v1/sources/1", "/api/v1/settings",
+		"/api/v1/system", "/api/v1/destinations", "/api/v1/destinations/1",
+		"/api/v1/playout",
+	} {
+		r := jsonRequest(t, http.MethodGet, path, nil)
+		sign(r)
+		w := do(t, h, r)
+		if got := w.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
+			t.Errorf("GET %s: Cache-Control = %q, want no-store — this body depends on "+
+				"who asked", path, got)
+		}
+		if got := w.Header().Values("Vary"); !containsFold(got, "Authorization") {
+			t.Errorf("GET %s: Vary = %v, want Authorization", path, got)
+		}
+	}
+}
+
+func containsFold(hay []string, needle string) bool {
+	for _, h := range hay {
+		for _, part := range strings.Split(h, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), needle) {
+				return true
+			}
+		}
+	}
+	return false
+}

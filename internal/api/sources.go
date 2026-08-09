@@ -160,6 +160,17 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 		// own update path -- a source whose credential has been erased.
 		redacted := *src
 		redacted.Token = ""
+		// And the STORED ingest block, which is the half this originally
+		// missed. sourceView embeds *db.Source, so every leaf of db.Source
+		// marshals at the top level of the response -- including
+		// ingest.srt.passphrase, ingest.rtmp.streamKey and an
+		// ingest.pull.url carrying rtsp://user:pass@ userinfo.
+		//
+		// Blanking legacyRtmpKey below without this was measurably a NO-OP:
+		// engine.legacyRTMPKeys computes that key as exactly
+		// src.Ingest.RTMP.StreamKey, so the identical string came straight
+		// back two JSON fields away. See internal/api/redact.go.
+		redacted = readSafeSource(redacted)
 		src = &redacted
 		// PrevToken is NOT blanked here, and deliberately so: it carries
 		// `json:"-"` and has never left the process, so clearing it would
@@ -319,6 +330,7 @@ func (s *Server) handleListSources(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		out = append(out, s.viewSource(r, row, defaultID))
 	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -334,6 +346,7 @@ func (s *Server) handleGetSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defaultID, _ := s.store.DefaultSourceID()
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 
