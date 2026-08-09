@@ -596,9 +596,14 @@ else
   # outgoing feed arriving after the incoming one has started is a small step at
   # a switch, and a feed republishing from zero is a large one at the same
   # place. One line per step turns the next occurrence into evidence.
-  dtsreport=$(ffprobe -v error -select_streams v -show_entries packet=dts_time \
-         -of csv=p=0 "$OUTFILE" 2>/dev/null |
-         awk -F, 'BEGIN{prev=-1e9;n=0;i=0}
+  # THE PACKET LIST IS CAPTURED ONCE, to a file. The threshold assertion below
+  # and the per-seam table under it both read it, and probing the file twice
+  # would let the two halves of one report disagree about what they measured.
+  # It is also the artifact a failed CI run needs: the mkv is uploaded now, but
+  # this is the derived form anybody actually reads.
+  ffprobe -v error -select_streams v -show_entries packet=dts_time \
+         -of csv=p=0 "$OUTFILE" 2>/dev/null > dts.csv
+  dtsreport=$(awk -F, 'BEGIN{prev=-1e9;n=0;i=0}
            {if ($1=="N/A") next; i++; t=$1+0;
             if (t < prev - 0.001) {
               n++
@@ -613,7 +618,7 @@ else
             }
             prev=t}
            END{printf "COUNT %d\n", n+0
-               if (worst > 0) printf "NEARMISS at packet %d: %.6f -> %.6f, back %.6fs\n", worsti, worstp, worstt, worst}')
+               if (worst > 0) printf "NEARMISS at packet %d: %.6f -> %.6f, back %.6fs\n", worsti, worstp, worstt, worst}' dts.csv)
   back=$(printf '%s\n' "$dtsreport" | awk '/^COUNT /{print $2}')
   if [ "${back:-1}" -eq 0 ]; then
     ok "no backwards decode timestamp across any switch in the run"
@@ -633,14 +638,116 @@ else
     done
   fi
 
+  # THE SEAM TABLE, AND IT PRINTS ON PASS AS WELL AS FAIL.
+  #
+  # The count above is one number for the whole file, and #126 has now been
+  # looked at through that number for several weeks without it settling
+  # anything. It cannot distinguish "one sub-millisecond step somewhere" from "a
+  # sub-millisecond step at EVERY switch", and those two are the leading
+  # hypothesis and its refutation: if a small backward step is present at every
+  # seam all the time, then a timing change that widens it merely pushes an
+  # existing step over the threshold, and the offset was never the cause.
+  #
+  # So each switch gets a row, from the ledger the engine now writes
+  # (internal/engine/selector.go, logSeam). Every row is available on a run that
+  # PASSES, which is the whole point -- there is no need to wait for another
+  # failure to collect it.
+  #
+  # THE TWO AXES ARE NOT CALIBRATED, AND THIS TABLE DOES NOT PRETEND THEY ARE.
+  #
+  # The first version of this block assigned each backward step to the last seam
+  # at or before it, treating a packet's DTS in the file and a feed's offset on
+  # the tier as one axis. Six runs later one of them FAILED -- a 30ms step at file
+  # DTS 25.898 -- and the assignment was wrong. The audio says where the step
+  # really was: the slate's silence in that file ended at 25.703, so the step sits
+  # 195ms after the slate handed back to the primary, which is seam 3 at tier
+  # 29.837. The identity mapping had blamed seam 2, at tier 14.339, a whole
+  # switch earlier.
+  #
+  # The two axes are not a constant apart either. In that run the slate held the
+  # air for 15.498s of tier time and occupies 16.706s of the file, so the offset
+  # implied by the start of the silence (5.34s) and by its end (4.13s) disagree
+  # by more than a second. A destination rebases the hub's timeline to its own
+  # first packet, and the feeds do not publish at exactly tier rate -- the same
+  # ahead-of-realtime effect this whole investigation is about.
+  #
+  # So the table reports FACTS FROM EACH SIDE and no join: the ledger's rows, the
+  # steps with their positions in the file, and the slate window as an anchor a
+  # reader can line the two up with by hand. A wrong attribution is worse than
+  # none here, because it would send the next person to the wrong switch with a
+  # number that looks authoritative.
+  grep 'msg="feed seam"' server.log > seams.txt 2>/dev/null
+  epoch=$(awk '/msg="source selector started"/{
+            for (i=1;i<=NF;i++) if ($i ~ /^tierEpoch=/) { print substr($i,11); exit }}' server.log)
+  [ -n "${epoch:-}" ] && note "tier epoch $epoch (every seam offset below is seconds from here)"
+  # THE ANCHOR. Only the slate is silent -- the publisher sends a 1 kHz tone and
+  # the filler a 2 kHz one -- so the long silence in the file is the slate's time
+  # on air, and it is the one landmark visible on BOTH axes. The check below
+  # reads the same pass, so the two cannot disagree.
+  ffmpeg -hide_banner -nostats -i "$OUTFILE" \
+         -af "silencedetect=n=-50dB:d=1" -f null - > silence.txt 2>&1
+  awk '{for (i=1;i<=NF;i++) {
+          if ($i=="silence_start:") st=$(i+1)+0
+          else if ($i=="silence_end:")
+            printf "anchor: the file is silent from %.3f to %.3f (%.3fs) -- only the slate is\n",
+                   st, $(i+1)+0, $(i+1)-st }}' silence.txt | while IFS= read -r line; do
+    note "$line"
+  done
+  awk '
+      # First file: one line per handover, as slog key=value.
+      #
+      # Selected by FILENAME and NOT by the usual FNR==NR idiom, which is wrong
+      # in exactly the case that matters here: when the ledger is EMPTY, NR and
+      # FNR agree on the second file too, and every packet timestamp is read as
+      # a handover. A run with no seam lines then reported thirteen switches from
+      # a thirteen-packet fixture. Caught by the seeded fixture this awk was
+      # checked against before it went anywhere near CI.
+      FILENAME=="seams.txt" {
+        split("", kv)
+        for (i=1;i<=NF;i++) { p=index($i,"="); if (p>1) kv[substr($i,1,p-1)]=substr($i,p+1) }
+        n++
+        at[n]=kv["inOffset"]+0; wall[n]=kv["time"]
+        from[n]=kv["outKind"]; to[n]=kv["inKind"]
+        tear[n]=kv["teardownMs"]+0; pred[n]=kv["predictedStepMs"]+0
+        dead[n]=kv["stopDeadline"]
+        next
+      }
+      # Second file: the packet DTS list, one value per line.
+      $1=="N/A" { next }
+      { t=$1+0
+        # EVERY backward step, at any magnitude. The threshold belongs to the
+        # assertion; a table that applied it too would answer the question it
+        # was written to answer with the number it was written to replace.
+        if (have && t<prev) { s++; spos[s]=prev; sto_[s]=t; ssize[s]=prev-t }
+        prev=t; have=1 }
+      END {
+        if (n==0) { print "SEAMS none in server.log -- either no switch happened or the build predates the ledger"; exit }
+        printf "SEAMS %d handover(s); %d backward DTS step(s) of any magnitude in the file\n", n, s+0
+        for (j=1;j<=n;j++) {
+          printf "  seam %d %s->%s at tier %.3fs (%s): teardown %.3fms, predicted %+.3fms",
+                 j, from[j], to[j], at[j], wall[j], tear[j], pred[j]
+          if (dead[j]=="true") printf ", STOP DEADLINE -- the old feed may still have been writing"
+          printf "\n"
+        }
+        # The steps are listed on the FILE axis, next to the seams on the TIER
+        # axis, and deliberately not joined. See the note above the awk: the two
+        # are not a constant apart, and a wrong attribution reads as an answer.
+        for (j=1;j<=s;j++)
+          printf "  step %d at file dts %.6f -> %.6f, back %.6fs\n", j, spos[j], sto_[j], ssize[j]
+      }' seams.txt dts.csv | while IFS= read -r line; do
+    note "$line"
+  done
+
   # The switch must be visible IN THE BYTES, not only in the status field. The
   # publisher sends a 1 kHz tone and the slate is silent, so a file that carries
   # both means the destination really was fed from two different sources. Only
   # the SLATE period can produce silence -- the filler in steps 6 and 7 carries a
   # 2 kHz tone of its own -- so this stays a check on the slate specifically even
   # though the file now spans the filler switches too.
-  quiet=$(ffmpeg -hide_banner -nostats -i "$OUTFILE" \
-          -af "silencedetect=n=-50dB:d=1" -f null - 2>&1 | grep -c "silence_start" || true)
+  # Read from the pass captured above rather than probing the file again: the
+  # seam table prints the same windows as its anchor, and two passes could
+  # disagree about where the slate was.
+  quiet=$(grep -c "silence_start" silence.txt || true)
   if [ "${quiet:-0}" -ge 1 ]; then
     ok "the slate period is present in the audio (tone -> silence -> tone)"
   else
