@@ -339,20 +339,46 @@ func TestAHalfFailedInstallKeepsTheOutgoingBinarySomewhere(t *testing.T) {
 		t.Errorf("binary is %q, want v2: the install itself succeeded and must be reported as done", b)
 	}
 	// v1 must still exist somewhere, and the error must say where.
-	found := ""
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), backupPrefix) {
-			if b, _ := os.ReadFile(filepath.Join(dir, e.Name())); string(b) == "v1" {
-				found = e.Name()
-			}
-		}
+	if b, _ := os.ReadFile(RescuedPath(bin)); string(b) != "v1" {
+		t.Fatalf("the rescued copy is %q, want v1: there is now no copy of the version "+
+			"that was running", b)
 	}
-	if found == "" {
-		t.Fatal("the outgoing binary was deleted; there is now no copy of the version that was running")
-	}
-	if !strings.Contains(err.Error(), found) {
+	if !strings.Contains(err.Error(), RescuedPath(bin)) {
 		t.Errorf("the error does not name the file holding the previous version: %v", err)
+	}
+}
+
+// AND WHAT WAS RESCUED MUST NOT BE SWEPT AWAY LATER.
+//
+// The branch above keeps the outgoing binary rather than deleting it. If it kept
+// it under a temp name, the stale sweep would remove it an hour later -- and a
+// later upgrade that fails its OWN checksum, changing nothing else, would still
+// have quietly destroyed the only copy of the version that was running. The two
+// fixes would have cancelled each other out.
+func TestARescuedBinarySurvivesALaterUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	os.Mkdir(PreviousPath(bin), 0o755)
+	os.WriteFile(filepath.Join(PreviousPath(bin), "occupied"), []byte("x"), 0o644)
+
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("v2"), 0o644)
+	if err := Stage(bin, staged, hashOf(t, staged)); err == nil {
+		t.Fatal("Stage reported success though the rollback point could not be written")
+	}
+	if b, _ := os.ReadFile(RescuedPath(bin)); string(b) != "v1" {
+		t.Fatalf("rescued copy is %q, want v1", b)
+	}
+	// Age everything, then run an upgrade that fails: it must change nothing.
+	old := time.Now().Add(-48 * time.Hour)
+	os.Chtimes(RescuedPath(bin), old, old)
+	if err := Stage(bin, staged, strings.Repeat("0", 64)); !errors.Is(err, ErrChecksumMismatch) {
+		t.Fatalf("Stage = %v, want ErrChecksumMismatch", err)
+	}
+	if b, _ := os.ReadFile(RescuedPath(bin)); string(b) != "v1" {
+		t.Errorf("rescued copy is now %q; a later failed upgrade swept away the only copy of "+
+			"the version that was running", b)
 	}
 }
 

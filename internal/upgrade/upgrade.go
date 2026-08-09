@@ -183,6 +183,15 @@ func supervisedByAUnit(env func(string) string, exists func(string) bool) bool {
 // after a restart that went badly.
 func PreviousPath(binary string) string { return binary + ".previous" }
 
+// RescuedPath is where a binary ends up when it could not be filed as the
+// rollback point but must not be thrown away. See install.
+//
+// A separate name from PreviousPath on purpose. It is NOT a rollback point: it
+// exists because something went wrong, it is not advertised by PlanFor, and
+// restoring it is a decision a person makes rather than a button. Also outside
+// the temp prefixes, so the stale sweep leaves it alone.
+func RescuedPath(binary string) string { return binary + ".previous-rescued" }
+
 // PlanFor builds the plan for this box.
 //
 // version is the tag being offered, used only to render a command an operator
@@ -423,11 +432,21 @@ func install(binary, incoming, dir string) (bool, error) {
 		// only copy of the version that was running a moment ago -- deleting it
 		// because the rename failed would destroy the very thing it exists to
 		// preserve, which for a rollback means the operator can no longer undo
-		// what they just did. Left on disk, and named in the error so a person
-		// can put it back by hand.
+		// what they just did.
+		//
+		// But it cannot stay under a temp name either. sweepStaleTemps removes
+		// anything carrying these prefixes once it is an hour old, so the next
+		// upgrade -- including one that then fails its own checksum and changes
+		// nothing -- would quietly delete the copy this branch went out of its
+		// way to keep. It gets a name the sweep does not touch and a human can
+		// recognise.
+		kept := backup
+		if err := os.Rename(backup, RescuedPath(binary)); err == nil {
+			kept = RescuedPath(binary)
+		}
 		return true, fmt.Errorf("the new binary is installed but the rollback point could not be "+
 			"written: the previous version is at %s, move it to %s to restore it: %w",
-			backup, PreviousPath(binary), err)
+			kept, PreviousPath(binary), err)
 	}
 	return true, syncDir(dir)
 }
