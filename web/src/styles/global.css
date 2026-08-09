@@ -183,25 +183,21 @@
     70%, 100% { transform: translate3d(55%, 0, 0); }
   }
 
-  /* THE WARP. A lens that follows the pointer and shows the same grid at a
-     different pitch, so the lines appear to bend as it passes.
+  /* THE WARP. A lens that follows the pointer and genuinely displaces the grid
+     under it, via feDisplacementMap. See SignalGrid.astro for the filter.
 
-     WHY A SECOND GRID AND NOT A FILTER. An SVG displacement filter is the
-     obvious way to warp a background and it is the wrong one here: filters run
-     on the main thread, re-rasterise the element under them every frame, and
-     the element under them is the whole hero. The comment above this block is
-     emphatic that a background showing up in a paint-flashing trace is worse
-     than no background, and a filter chasing a pointer is that trace.
+     WHY THE FILTER IS SCOPED TO THIS ELEMENT AND NOT THE HERO. Filters run on
+     the main thread and re-rasterise what they cover whenever their input
+     changes, which is the standing objection to filtering a background -- and
+     it is correct for a filter over a full-viewport element. The fix is not to
+     avoid the filter but to stop pointing it at the viewport: this is a fixed
+     420px square carrying its own copy of the grid, so the raster cost is
+     constant and does not grow when the page is opened on a 5K display. The
+     .signal-grid underneath is never filtered.
 
-     So the lens is a plain element carrying the grid at a slightly larger
-     pitch, soft-masked to a circle, moved with transform alone. Where it sits,
-     its lines fall between the ones underneath; the eye reads the disagreement
-     as displacement. It costs one composited layer and nothing per frame.
-
-     64px against the base 56px is deliberate. Far apart and the two grids read
-     as two grids; identical and there is no effect at all. A 14% difference
-     drifts in and out of phase across the lens, which is what makes it look
-     like bending rather than like a second layer switched on. */
+     Moving it is still transform-only, so the compositor does the chasing and
+     the main thread only does the displacement, over an area chosen to make
+     that affordable. */
   .signal-grid__warp {
     position: absolute;
     top: 0;
@@ -211,26 +207,49 @@
     margin: -210px 0 0 -210px;
     pointer-events: none;
     opacity: 0;
+    /* The same pitch and colour as the grid underneath. It is the SAME grid --
+       displaced -- not a second one, which is what makes this a warp rather
+       than the phase trick it replaced. */
     background-image:
-      linear-gradient(to right, rgb(160 190 240 / 0.10) 1px, transparent 1px),
-      linear-gradient(to bottom, rgb(160 190 240 / 0.10) 1px, transparent 1px);
-    background-size: 64px 64px;
-    /* Soft to the edge. A hard rim would draw a circle on the page, which is a
-       cursor decoration; the effect has to be the bending, not the lens. */
-    mask-image: radial-gradient(circle at 50% 50%, #000 0%, rgb(0 0 0 / 0.55) 45%, transparent 72%);
+      linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    /* filter is set INLINE on the element, not here. A url(#fragment) in an
+       external stylesheet is resolved against the STYLESHEET's URL by some
+       engines rather than the document's, so the reference silently finds
+       nothing and the lens renders as an undisplaced square. Setting it on the
+       element removes the ambiguity: there the fragment can only mean this
+       document. */
+    /* Soft to the edge, so the displaced copy blends into the true grid instead
+       of ending at a visible rim. A hard edge would draw a circle on the page,
+       and the effect has to be the bending rather than the lens. */
+    mask-image: radial-gradient(circle at 50% 50%, #000 0%, rgb(0 0 0 / 0.6) 42%, transparent 70%);
+    /* isolation keeps the filtered layer from being promoted together with the
+       hero's own stacking context, which is what would drag the unfiltered
+       background into the filter's raster. */
+    isolation: isolate;
     will-change: transform, opacity;
     /* Opacity eases; position does NOT. A transition on transform makes the
-       lens lag the cursor, which reads as jank rather than as smoothing --
-       the pointer is already the smoothing. */
+       lens lag the cursor, which reads as jank -- the pointer is already the
+       smoothing. */
     transition: opacity 220ms ease-out;
     transform: translate3d(var(--warp-x, -9999px), var(--warp-y, -9999px), 0);
   }
 
   .signal-grid:hover .signal-grid__warp { opacity: 1; }
 
+  /* The filter definition carries no visual weight of its own. */
+  .signal-grid__defs {
+    position: absolute;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+
   /* Fine pointers only. On a touch screen there is no hover, the lens would
-     stick wherever the last tap landed, and a static bright patch is a defect
-     rather than an effect. */
+     stick wherever the last tap landed, and a static warped patch is a defect
+     rather than an effect -- and it would leave a filter rasterising for no
+     reason on the hardware least able to afford it. */
   @media (hover: none), (pointer: coarse) {
     .signal-grid__warp { display: none; }
   }
