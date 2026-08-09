@@ -532,7 +532,7 @@ func (p *playoutProc) Start() {
 	p.Process.Start()
 }
 
-func (p *playoutProc) Stop(ctx context.Context) {
+func (p *playoutProc) Stop(ctx context.Context) error {
 	p.e.mu.Lock()
 	// Only if it is still ours: a restarted variant registers its replacement
 	// under the same name before the old one is torn down.
@@ -540,7 +540,7 @@ func (p *playoutProc) Stop(ctx context.Context) {
 		delete(p.e.playProcs, p.name)
 	}
 	p.e.mu.Unlock()
-	p.Process.Stop(ctx)
+	return p.Process.Stop(ctx)
 }
 
 // Hub exposes the relay for the monitoring endpoint.

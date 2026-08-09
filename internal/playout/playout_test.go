@@ -93,10 +93,13 @@ func (p *fakeProc) Start() {
 	p.runs++
 }
 
-func (p *fakeProc) Stop(context.Context) {
+func (p *fakeProc) Stop(context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.dead = true
+	// Always a clean stop. The deadline path is supervisor.Process's, and
+	// playout has no behaviour that depends on which one happened.
+	return nil
 }
 
 func (p *fakeProc) stopped() bool {

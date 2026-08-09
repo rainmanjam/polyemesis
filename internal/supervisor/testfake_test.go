@@ -14,8 +14,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -51,6 +53,18 @@ func runFakeChild(mode string, args []string) int {
 		// No signal handlers: the default disposition is what a supervised
 		// FFmpeg would have, and it is what the stop path must be tested
 		// against.
+		time.Sleep(d)
+		return 0
+
+	case "deaf":
+		// IGNORES SIGTERM, which is the case Stop's deadline exists for and the
+		// only way to reach it without waiting out a real timeout. An FFmpeg
+		// wedged on a stuck output socket behaves this way.
+		signal.Ignore(syscall.SIGTERM)
+		d, err := time.ParseDuration(args[0])
+		if err != nil {
+			return 2
+		}
 		time.Sleep(d)
 		return 0
 
@@ -91,6 +105,9 @@ func fakeExit(code int) fake { return newFake("exit", strconv.Itoa(code)) }
 
 // fakeSleep spawns a child that stays up until it is signalled.
 func fakeSleep(d time.Duration) fake { return newFake("sleep", d.String()) }
+
+// fakeDeaf spawns a child that ignores SIGTERM, so only SIGKILL ends it.
+func fakeDeaf(d time.Duration) fake { return newFake("deaf", d.String()) }
 
 // fakeStderr spawns a child that writes n lines to stderr and exits cleanly.
 func fakeStderr(n int) fake { return newFake("stderr", strconv.Itoa(n)) }

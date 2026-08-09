@@ -1491,8 +1491,32 @@ func (e *Engine) teardownFeed(f *sourceFeed) {
 	}
 	if f.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		f.proc.Stop(ctx)
+		err := f.proc.Stop(ctx)
 		cancel()
+		// A KILLED CHILD IS NOT A STOPPED ONE, and this is the caller that has
+		// to care. ensureFeed starts the replacement into the same hub the
+		// moment this returns, so a feed that ignored SIGTERM for twelve
+		// seconds and was killed may still be writing when the new one begins:
+		// two publishers on one input, which is a corrupted timeline rather
+		// than a missing one.
+		//
+		// Reported rather than obeyed. Refusing to start the replacement would
+		// leave the tier with no feed at all, which is worse than a seam, and
+		// waiting longer would hold the switch open past the deadline that was
+		// already chosen. So the switch proceeds and the operator is told --
+		// this is the "degrade visibly rather than corrupt quietly" rule the
+		// slate fallback follows, applied to the case where the corruption is
+		// possible rather than certain.
+		if err != nil {
+			e.log.Error("outgoing feed did not exit before the deadline; the "+
+				"replacement starts while it may still be writing",
+				"source", string(f.kind), "err", err)
+			e.mu.Lock()
+			if e.sel != nil {
+				e.sel.err = err.Error()
+			}
+			e.mu.Unlock()
+		}
 	}
 	if f.subName != "" && f.in != nil {
 		f.in.Unsubscribe(f.subName)
