@@ -1,5 +1,8 @@
 # Website copy review — 2026-08-08
 
+**Status:** the factual errors (D1, D3, D6, D8–D17, D21) were fixed in PR #133.
+The consistency and SEO items (D2, D4, D5, D18–D20, D22, D23) are open.
+
 Reviewed `web/src/` against the code and docs after the 0.5.0 cycle and PRs
 #129–#131. Claims were checked against the repository, not taken on trust.
 
