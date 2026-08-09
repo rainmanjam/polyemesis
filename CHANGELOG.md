@@ -46,6 +46,19 @@ respawn stopped ignoring its own backoff.
 
 ### Fixed
 
+- **A supervised child that had to be killed is no longer reported as one that
+  stopped.** `Stop` gives a wedged process a deadline and then sends SIGKILL,
+  but it returned at that point without waiting and recorded the fact only in a
+  log line — and both outcomes then reported the same state, so nothing could
+  tell "the child exited" from "the child was killed and may still be running".
+
+  The failover tier is where that matters: it starts a replacement feed into the
+  same hub the moment the teardown returns, so a child still alive and still
+  writing is two publishers on one input. The condition is now surfaced on the
+  tier and logged. The switch still proceeds — leaving the tier with no feed at
+  all is worse than a seam — so this is a thing you are told about rather than a
+  thing that blocks a switch.
+
 - **The failover respawn backoff is measured from the feed's start, not from the
   decision to switch.** The timestamp recorded as a feed's start time was taken
   before a teardown that blocks for as long as the outgoing process needs to
