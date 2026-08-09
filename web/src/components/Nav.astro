@@ -12,8 +12,11 @@ const active = (href: string) => here === href || here.startsWith(href + "/");
 <header class="sticky top-0 z-40 border-b border-line/80 bg-ink/85 backdrop-blur">
   <nav class="wrap flex h-14 items-center gap-6" aria-label="Main">
     <a href="/" class="flex items-center gap-2.5 font-medium" aria-label="polyemesis home">
-      {/* The mark is the product: six ingest tracks, unequal, summing left to
-          right. Inline SVG so it costs no request and inherits currentColor. */}
+      {/* The mark is the product: ingest tracks at unequal levels, summing left
+          to right. Five bars, not the six the page's example uses — a sixth at
+          this spacing falls outside the 22-wide viewBox, and the mark reads as
+          "several tracks" rather than counting them. Inline SVG so it costs no
+          request and inherits currentColor. */}
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
         <rect x="1" y="8" width="2.5" height="6" rx="1.25" fill="#5b7fc7" />
         <rect x="5" y="4" width="2.5" height="14" rx="1.25" fill="#5b7fc7" />

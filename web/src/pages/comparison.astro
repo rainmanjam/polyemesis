@@ -32,7 +32,11 @@ const shared = [
   ["Hardware encoding", "NVENC, QSV, VA-API, VideoToolbox, AMF", "Yes", "n/a"],
   ["Unified chat", "Yes", "No", "Yes"],
   ["Self-hosted", "Yes", "Yes", "No"],
-  ["Simultaneous destinations", "Unlimited", "Unlimited", "2–8 by plan"],
+  // "No configured cap", not "Unlimited". There is no limit in the software,
+  // but upload bandwidth and CPU are real: measured at roughly 4% of one core
+  // per destination, a 4-core box runs out somewhere near 96. Claiming
+  // "unlimited" invites the one support thread nobody can answer.
+  ["Simultaneous destinations", "No configured cap", "Unlimited", "2–8 by plan"],
   ["Cost", "Your hardware", "Your hardware", "Subscription"],
 ];
 
@@ -118,8 +122,11 @@ const wins = [
     </div>
     <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
       The multitrack ask is not hypothetical. “Multiple audio tracks for Twitch”
-      is an open request on Restreamer's own tracker — users asking it for the
-      thing polyemesis was built to be.
+      was an open request on
+      <a href="https://github.com/datarhei/restreamer/issues" rel="noopener"
+        class="underline underline-offset-2 hover:text-fg">Restreamer's own tracker</a>
+      when this was surveyed in July 2026 — users asking it for the thing
+      polyemesis was built to be.
     </p>
   </section>
 
@@ -159,9 +166,13 @@ const wins = [
       </div>
       <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
         Two rows are not a tie and are left that way: restream.io needs no server
-        from you at all, and Restreamer is years older and far more widely
-        deployed. Both are real advantages, and neither changes what happens to
-        your audio.
+        from you at all, and Restreamer has a far longer public release history.
+        Both are real advantages, and neither changes what happens to your audio.
+      </p>
+      <p class="mt-3 max-w-3xl text-xs leading-relaxed text-subtle">
+        Everything stated here about the other two was surveyed in July 2026.
+        Their plans and features move independently of this page — check them
+        before deciding on the strength of a row.
       </p>
     </div>
   </section>
