@@ -21,11 +21,45 @@ Create tokens in the UI under **Settings → API tokens**, or via
 creation, and cannot be recovered. Revoke individually with
 `DELETE /auth/tokens/{id}`.
 
-**A token cannot manage other tokens.** That is deliberate: a leaked token
-should not be able to mint replacements for itself or lock you out.
+**A token cannot manage other tokens**, change the account password, upload or
+delete media, or complete an OAuth connect flow. Those are session-only: a
+leaked token should not be able to mint replacements for itself, lock you out,
+write arbitrary bytes to the server's disk, or attach a platform account.
 
 Bearer requests need no CSRF token — nothing attaches an `Authorization` header
 on its own, so there is no cross-site request to forge.
+
+#### Token scopes
+
+Every token carries a scope, chosen when it is created:
+
+| Scope | Reaches |
+|---|---|
+| `read` (default) | `GET` and `HEAD`, plus `POST /version/check`, `POST /routing/compile` and `POST /destinations/{id}/expert/preview` — the three POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
+
+```sh
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name":"prometheus","scope":"read"}' \
+  https://host:8080/api/v1/auth/tokens
+```
+
+**Omitting `scope` mints a `read` token.** A client that has never heard of
+scopes gets the credential that cannot change anything, which is the only
+default that protects anyone who has not already read this page.
+
+The rule is shaped by HTTP method rather than by a list of routes, and that is
+deliberate: a route added to this API tomorrow is refused to `read` tokens by
+construction, with no table anyone has to remember to update. The small
+allowlist above is additive, so forgetting to extend it denies a request that
+should have been allowed — never the reverse. `POST
+/destinations/{id}/expert/dry-run` is deliberately *not* on it, despite writing
+nothing to the database: it spawns FFmpeg with a caller-supplied argument list.
+
+**Tokens created before scopes existed are `admin`.** They could already do
+everything, so the upgrade grandfathers them rather than silently narrowing a
+credential some running script is holding — the failure would otherwise land as
+a `403` inside unattended automation. Revoke and re-mint to narrow one.
 
 ### 2. Session cookie (what the browser uses)
 

@@ -1,5 +1,6 @@
 import type {
   ApiToken,
+  TokenScope,
   AutomodMatrixView,
   AutomodModelStats,
   BitrateSample,
@@ -275,8 +276,8 @@ export const api = {
    * `plaintext` is the only time the secret exists — nothing stores it, so a
    * caller that drops it has to mint a new token.
    */
-  createToken: (name: string) =>
-    post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name }),
+  createToken: (name: string, scope: TokenScope) =>
+    post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name, scope }),
   revokeToken: (id: number) => del<{ status: string }>(`/auth/tokens/${id}`),
 
   // --- system & telemetry ---

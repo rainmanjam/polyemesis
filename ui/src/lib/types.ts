@@ -1109,10 +1109,22 @@ export interface StorageState {
 }
 
 /** A long-lived automation credential. The secret exists only at creation. */
+/** What a token is allowed to do.
+ *
+ *  `read` reaches GET and HEAD plus a short list of POSTs that compute an
+ *  answer and write nothing; everything else is refused with a 403. `admin` is
+ *  everything the signed-in operator can do, which is what every token was
+ *  before scopes existed — tokens created before the upgrade are all `admin`,
+ *  because narrowing a credential a running script is holding would break it
+ *  without anyone being told.
+ */
+export type TokenScope = "read" | "admin";
+
 export interface ApiToken {
   id: number;
   name: string;
   prefix: string;
+  scope: TokenScope;
   createdAt: string;
   lastUsedAt: string;
 }

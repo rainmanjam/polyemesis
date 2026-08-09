@@ -41,6 +41,20 @@ the software actually promises.
   the change stops working immediately — a stolen cookie does not outlive the
   password it was obtained under. The check fails closed: a token whose epoch
   cannot be established is refused rather than admitted.
+- **Scoped API tokens.** A token is created `read` or `admin`, and omitting the
+  choice gives `read`. A `read` token reaches `GET` and `HEAD` plus three POSTs
+  that compute an answer and write nothing; anything else is refused with a 403.
+  The rule is by HTTP method rather than by a list of routes, so a route added
+  later is refused by construction instead of by somebody remembering to
+  classify it, and the small allowlist is additive — forgetting to extend it
+  denies, never permits.
+
+  No token of either scope can manage tokens, change the password, upload or
+  delete media, or complete an OAuth connect flow. Those are session-only.
+
+  Tokens that predate scopes are `admin`, because they already could do
+  everything and narrowing them on upgrade would break a running script without
+  telling anyone. Revoke and re-mint to narrow one.
 - **Login brute force.** Five free attempts per client address, then a delay
   doubling from 2s, capped at 5 minutes, with `Retry-After` on the 429. The cap
   and the one-hour idle reset are deliberate: an uncapped lockout is a

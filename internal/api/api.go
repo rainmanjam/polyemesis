@@ -310,6 +310,10 @@ func (s *Server) Handler() http.Handler {
 		// --- authenticated ---
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			// After requireAuth, which is what puts the principal in the
+			// context, and before everything else: a read-scoped token is
+			// refused here rather than in any handler. See requireScope.
+			r.Use(s.requireScope)
 			r.Use(s.requireCSRF)
 
 			r.Post("/auth/logout", s.handleLogout)
@@ -666,14 +670,29 @@ func (s *Server) Handler() http.Handler {
 		// handleMetrics says why.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.requireScope)
 			r.Get("/metrics", s.handleMetrics)
 		})
 
 		// OAuth redirects are top-level browser navigations, so they carry the
 		// session cookie but cannot carry a CSRF header. The OAuth `state`
 		// parameter is the CSRF defence for these two routes.
+		//
+		// Session-only, and this is the one place the method-shaped scope rule
+		// in requireScope would have been wrong. Its premise is that GET does
+		// not change anything, and GET /oauth/{platform}/callback does: it
+		// stores a connected platform account. The `state` it demands is held
+		// in the DATABASE rather than in a cookie, so a caller holding only a
+		// bearer token could walk both halves of the flow and attach an account
+		// to somebody else's server -- a write, reached by a credential this
+		// release is otherwise promising is read-only.
+		//
+		// Requiring a session costs nothing real, because completing an OAuth
+		// consent screen is something only a browser does, and a browser doing
+		// it is signed in by definition.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.requireSession)
 			r.Get("/oauth/{platform}/start", s.handleOAuthStart)
 			r.Get("/oauth/{platform}/callback", s.handleOAuthCallback)
 		})
@@ -688,12 +707,17 @@ func (s *Server) Handler() http.Handler {
 		// the upgrade request, so CSRF middleware would reject it.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			// A read-scoped token is welcome here: the socket's read pump
+			// discards whatever the client sends, so this is telemetry out and
+			// nothing in. See the read pump in ws.go.
+			r.Use(s.requireScope)
 			r.Get("/ws", s.handleWS)
 		})
 
 		// Downloads are top-level navigations for the same reason.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.requireScope)
 			r.Get("/recordings/{id}/download", s.handleDownloadRecording)
 			r.Get("/recordings/stems/{name}/download", s.handleDownloadStem)
 			// Addressed by the JOB rather than by a filename: the export's
@@ -815,6 +839,71 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 		return nil, err
 	}
 	return &principal{username: claims.Username}, nil
+}
+
+// readScopeWritePatterns are the POST routes a read-scoped token may still
+// reach: the ones that answer a question rather than change anything.
+//
+// They are POSTs because they carry a body or make an outbound call, not
+// because they write. Each was read before it was listed, and one candidate did
+// not survive that reading: POST /destinations/{id}/expert/dry-run SPAWNS
+// FFMPEG with an argument list the caller supplied, which is the opposite of
+// writing nothing whatever its route name suggests. POST
+// /platforms/credentials/{platform}/check is absent for the same kind of
+// reason -- it handles stored credentials.
+//
+// Keyed by chi's route PATTERN rather than the request path, so an id in the
+// URL cannot smuggle a request onto the list and no string matching has to be
+// invented for the {id} segment.
+//
+// The list is additive and that is its safety property: a route missing from it
+// is denied to read tokens, so the failure mode of forgetting to maintain it is
+// a monitoring script getting a 403 that somebody notices, never a write
+// getting through unannounced.
+var readScopeWritePatterns = map[string]bool{
+	"/api/v1/version/check":                    true,
+	"/api/v1/routing/compile":                  true,
+	"/api/v1/destinations/{id}/expert/preview": true,
+}
+
+// requireScope enforces what a token is ALLOWED to do, once requireAuth has
+// settled who it is. It must run after requireAuth, which is what puts the
+// principal in the context.
+//
+// The rule is shaped by METHOD, not by a table of routes: a read-scoped token
+// gets GET and HEAD plus the short allowlist above, and everything else is 403.
+// The alternative considered and rejected was classifying every route in the
+// API as monitor/admin/session, which is a large diff whose real cost is
+// permanent -- every route added afterwards has to be classified correctly by
+// whoever adds it, and a route someone forgets to classify would default to
+// reachable. Here a route added tomorrow is denied to read tokens by
+// construction, with no list to remember to update.
+//
+// Session principals pass untouched. Scopes describe a token; the operator
+// signed in at the console is not one, and the session-only group is a
+// different question asked in a different place.
+func (s *Server) requireScope(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFrom(r.Context())
+		if !ok || p.token == nil || p.token.Scope == db.ScopeAdmin {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Anything that is not admin is treated as read-only, including a
+		// scope string this build does not recognise. A value that arrived
+		// from a newer schema or a hand-edited row should narrow what a
+		// credential can do, never widen it.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if rc := chi.RouteContext(r.Context()); rc != nil && readScopeWritePatterns[rc.RoutePattern()] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeError(w, http.StatusForbidden,
+			"this API token is read-only; mint a token with the \"admin\" scope to make changes")
+	})
 }
 
 func (s *Server) requireCSRF(next http.Handler) http.Handler {

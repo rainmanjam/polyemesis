@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // requireSession rejects token-authenticated callers, and it is MIDDLEWARE
@@ -57,17 +59,29 @@ func (s *Server) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
+		// Scope is optional, and omitting it mints a read-only token.
+		//
+		// The weaker default is the point of #104. A caller that does not
+		// mention scopes -- an older UI build, a curl line copied from a blog
+		// post, a script written before this field existed -- gets the
+		// credential that can only read. Defaulting to admin would mean the
+		// feature protected nobody who did not already know about it.
+		Scope string `json:"scope"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if req.Scope != "" && !db.ValidScope(req.Scope) {
+		writeError(w, http.StatusBadRequest, "unknown token scope; use \"read\" or \"admin\"")
+		return
+	}
 
-	token, plaintext, err := s.store.CreateAPIToken(req.Name)
+	token, plaintext, err := s.store.CreateAPIToken(req.Name, req.Scope)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.log.Info("api token created", "name", token.Name, "prefix", token.Prefix)
+	s.log.Info("api token created", "name", token.Name, "prefix", token.Prefix, "scope", token.Scope)
 	// Loud, because this is the credential that survives the response to a
 	// compromise. Minting is already behind the password rather than behind a
 	// token -- see requireSession -- so somebody reaching here is somebody who
