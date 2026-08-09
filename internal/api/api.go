@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
+	"github.com/rainmanjam/polyemesis/internal/upgrade"
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
@@ -90,6 +92,23 @@ type Server struct {
 	version string
 	// startedAt is the process start, which is what the uptime metric reports.
 	startedAt time.Time
+
+	// upgradeMethod and execPath are how this install was put on the box and
+	// what an upgrade would replace. Both are settled ONCE, in New, because
+	// both are properties of the process rather than of a request: Detect reads
+	// the environment and /proc/self/cgroup, os.Executable reads the same
+	// argv-derived path every time, and neither answer can change without this
+	// process ending. Deciding them per request would put file stats in a
+	// handler and buy nothing.
+	//
+	// PLAIN FIELDS, not an interface or an Options entry, so a test can build
+	// &Server{upgradeMethod: ..., execPath: ...} the way version_check_test.go
+	// already builds a server for the version endpoints. Their zero values are
+	// safe: an empty Method makes upgrade.PlanFor report "unrecognised install
+	// method", which is a refusal, and a refusal is the correct answer from a
+	// server that never established how it was installed.
+	upgradeMethod upgrade.Method
+	execPath      string
 
 	// The post-production tier. Every one of these is optional and every
 	// handler that reads one checks first, because a build that has not wired
@@ -244,6 +263,17 @@ func New(o Options) *Server {
 			o.DB.TokenEpoch,
 		),
 	}
+	// nil for both probes means "ask the real environment and the real
+	// filesystem", which is what a running server wants; the parameters exist
+	// for internal/upgrade's own tests.
+	s.upgradeMethod = upgrade.Detect(nil, nil)
+	// An error here is not fatal and must not be. os.Executable fails on a few
+	// exotic platforms and on a process whose binary has been unlinked, and
+	// neither is a reason to refuse to serve — it is a reason to refuse to
+	// UPGRADE, which is exactly what an empty path makes upgrade.PlanFor do.
+	if p, err := os.Executable(); err == nil {
+		s.execPath = p
+	}
 	return s
 }
 
@@ -297,6 +327,19 @@ func (s *Server) Handler() http.Handler {
 			// can reach out to GitHub on the operator's behalf.
 			r.Get("/version", s.handleVersion)
 			r.Post("/version/check", s.handleCheckUpdate)
+			// Acting on what the check found. Separate from /version on
+			// purpose: the plan probes whether the install directory is
+			// writable BY CREATING A FILE IN IT, and /version is read by the
+			// update banner on every page load. See handleUpgradePlan.
+			//
+			// The two mutating routes call requireSession themselves. Being
+			// inside this group is NOT enough — requireCSRF passes a
+			// token-authenticated request straight through, by design, so a
+			// leaked API token would otherwise be able to replace the server's
+			// own binary. See upgrade.go.
+			r.Get("/upgrade/plan", s.handleUpgradePlan)
+			r.Post("/upgrade/stage", s.handleUpgradeStage)
+			r.Post("/upgrade/rollback", s.handleUpgradeRollback)
 			r.Get("/status", s.handleStatus)
 			r.Get("/source", s.handleSource)
 			// What each incoming track is. Per-ingest, not per-destination:
