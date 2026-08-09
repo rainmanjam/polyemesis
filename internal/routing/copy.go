@@ -1,6 +1,35 @@
 package routing
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// CopySummary is what a destination card says about a destination that copies
+// its audio.
+//
+// It exists because Result.Summary would otherwise LIE to that card. summarize
+// ends every line with "-> stereo", which is true of the mix path and false
+// here: nothing is folded, nothing is summed, and a 5.1 track stays 5.1. The
+// summary is the one sentence an operator reads to check a destination is
+// carrying what they think it is, so it has to describe the mode it is in.
+//
+// The track numbers are 1-based for the same reason summarize's are: the UI
+// counts tracks from 1 everywhere an operator can see them.
+func CopySummary(tracks []int) string {
+	if len(tracks) == 0 {
+		return "No audio"
+	}
+	parts := make([]string, len(tracks))
+	for i, t := range tracks {
+		parts[i] = strconv.Itoa(t + 1)
+	}
+	if len(tracks) == 1 {
+		return "Track " + parts[0] + " → copied bit-exact"
+	}
+	return "Tracks " + strings.Join(parts, ", ") + " → copied bit-exact"
+}
 
 // CopyMixProblems reports every level and channel-routing instruction in p that
 // a destination copying its audio bit-for-bit cannot honour.

@@ -249,6 +249,18 @@ func (e *Engine) Status() Status {
 			} else {
 				ds.Error = cerr.Error()
 			}
+			// The compiled summary describes the MIX, and for a destination
+			// that copies its audio the mix does not happen: its line would end
+			// "→ stereo" about tracks that are being forwarded untouched, at
+			// whatever width they arrived. Rewritten here rather than inside
+			// Compile because copy is a property of the destination and Compile
+			// is only shown the profile. FilterComplex is left as compiled and
+			// not blanked -- it is what the graph WOULD be, the expert preview
+			// already shows the real argv, and an empty box on the card would
+			// read as a failure to compile rather than as a mode.
+			if row.Audio.Copy && ds.Error == "" {
+				ds.Summary = routing.CopySummary(ds.Tracks)
+			}
 			st.Destinations = append(st.Destinations, ds)
 		}
 	}
