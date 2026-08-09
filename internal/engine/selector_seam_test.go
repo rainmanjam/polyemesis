@@ -186,6 +186,60 @@ func TestASwitchWritesOneSeamLineNamingBothFeeds(t *testing.T) {
 	}
 }
 
+// TestAFailedReplacementIsNotWrittenAsASeam guards the shape of the ledger, not
+// just its contents.
+//
+// A teardown whose replacement never started has no incoming timeline, and the
+// obvious way to record that -- the same message with a stand-in value for
+// inOffset -- would poison the acceptance script: it buckets every backward step
+// by the seam offsets in order, so a row sorting before all the real ones would
+// quietly collect steps belonging to each of them. It is a different message, and
+// this is the test that keeps it one.
+func TestAFailedReplacementIsNotWrittenAsASeam(t *testing.T) {
+	e := failoverEngine(t)
+	var buf syncBuffer
+	e.log = slog.New(slog.NewTextHandler(&buf, nil))
+
+	s := failoverOnSettings()
+	setSettings(e, s)
+	e.reconcileSelector(s, wantSelector(s), "")
+	hub := e.selectorHub()
+	if hub == nil {
+		t.Fatal("the selector tier did not start")
+	}
+	t.Cleanup(func() {
+		e.selMu.Lock()
+		defer e.selMu.Unlock()
+		_ = e.teardownFeed(e.sel.feed)
+		_ = hub.Close()
+	})
+
+	// The backup is a kind the feed layer knows how to build, so ensureFeed does
+	// NOT refuse it up front -- it tears the running feed down first and only
+	// then discovers there is no backup hub to read. That gap is the case under
+	// test, and it is reachable in production whenever the backup listener is
+	// gone by the time the switch to it is carried out.
+	buf.Reset()
+	e.selMu.Lock()
+	e.ensureFeed(s, "", sourceBackup, "the backup was chosen", time.Now())
+	e.selMu.Unlock()
+
+	e.mu.RLock()
+	feed := e.sel.feed
+	e.mu.RUnlock()
+	if feed != nil {
+		t.Fatalf("a backup feed started with no backup hub (%v); the case under test did not happen", feed.kind)
+	}
+	logged := buf.String()
+	if got := seamLines(logged); len(got) != 0 {
+		t.Errorf("a switch with no incoming feed was written as a seam: %v\n"+
+			"the acceptance script buckets steps by inOffset and would mis-attribute every one of them", got)
+	}
+	if !strings.Contains(logged, "feed seam incomplete") {
+		t.Errorf("the failed switch left no record at all: %s", logged)
+	}
+}
+
 // TestEveryHandoverInACycleIsLedgered is the half that keeps the test above from
 // being satisfied by a ledger that fires once and stops.
 //

@@ -1226,10 +1226,14 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 // measurement: it is where the outgoing feed's last published timestamp is
 // believed to be (its offset plus how far FFmpeg said it had got) minus where
 // the incoming feed's timeline starts. The leading hypothesis for #126 is that
-// the copy hop, which has no -re, drains a queued hub faster than realtime and
-// so runs AHEAD of the tier clock; if that is right this number is positive at
-// a seam that produces a backwards step. A failing run with predictedStepMs
-// near zero kills the hypothesis outright.
+// the copy hop, which has no -re where the slate has one, publishes as fast as
+// bytes arrive and so runs AHEAD of the tier clock its offset was computed from.
+// Measured offline at about 30x realtime given a burst; where a burst would come
+// from in production is NOT established, because relay.Hub is a pure fanout and
+// queues nothing, so it would have to be a socket buffer or FFmpeg's own fifo.
+// If the hypothesis is right this number is positive at a seam that produces a
+// backwards step, and a failing run with predictedStepMs near zero kills it
+// outright.
 //
 // It rests on one assumption -- that FFmpeg's out_time does not already include
 // -output_ts_offset -- which is exactly what relayfeed_offset_integration_test.go
@@ -1265,21 +1269,28 @@ func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64,
 		outTimeMs, progressDone = st.Progress.OutTimeMS, st.Progress.Done
 	}
 
-	inGen, inOffset := uint64(0), -1.0
-	inKind := "none"
-	if in != nil {
-		inGen, inOffset, inKind = in.gen, in.offset, string(in.kind)
+	// A SWITCH WITH NO INCOMING FEED IS A DIFFERENT RECORD, and it gets a
+	// different message rather than sentinel values in the same one. The script
+	// buckets backward steps by each seam's inOffset, so a row carrying a
+	// stand-in for "there is no incoming timeline" would sort before every real
+	// seam and silently collect steps belonging to all of them. Warn, because a
+	// teardown that was not followed by a start is a tier with nothing on air.
+	if in == nil {
+		e.log.Warn("feed seam incomplete: the outgoing feed was stopped and the replacement did not start",
+			"outGen", out.gen, "outKind", string(out.kind), "outOffset", out.offset,
+			"outTimeMs", outTimeMs, "outProgressDone", progressDone,
+			"teardownMs", teardownMs, "stopDeadline", errors.Is(stopErr, supervisor.ErrStopDeadline),
+			"reason", reason)
+		return
 	}
-	predicted := -1.0
-	if in != nil {
-		predicted = (out.offset + float64(outTimeMs)/1000 - in.offset) * 1000
-	}
+
+	predicted := (out.offset + float64(outTimeMs)/1000 - in.offset) * 1000
 
 	e.log.Info("feed seam",
 		"outGen", out.gen, "outKind", string(out.kind), "outOffset", out.offset,
 		"outTimeMs", outTimeMs, "outProgressDone", progressDone,
 		"teardownMs", teardownMs, "stopDeadline", errors.Is(stopErr, supervisor.ErrStopDeadline),
-		"inGen", inGen, "inKind", inKind, "inOffset", inOffset,
+		"inGen", in.gen, "inKind", string(in.kind), "inOffset", in.offset,
 		"predictedStepMs", predicted, "reason", reason)
 }
 
