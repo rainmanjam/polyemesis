@@ -602,10 +602,18 @@ else
            {if ($1=="N/A") next; i++; t=$1+0;
             if (t < prev - 0.001) {
               n++
-              printf "step %d at packet %d: %.3f -> %.3f, back %.3fs\n", n, i, prev, t, prev-t
+              printf "step %d at packet %d: %.3f -> %.3f, back %.6fs\n", n, i, prev, t, prev-t
+            } else if (t < prev && prev-t > worst) {
+              # BELOW THE THRESHOLD IS STILL EVIDENCE. See #126: the leading
+              # explanation is that a small backward step exists all the time
+              # and a change that widens the offset at the seam merely pushes it
+              # over 1ms. If that is right, this line is non-empty on runs that
+              # PASS, and the question is settled without waiting for a failure.
+              worst=prev-t; worsti=i; worstp=prev; worstt=t
             }
             prev=t}
-           END{printf "COUNT %d\n", n+0}')
+           END{printf "COUNT %d\n", n+0
+               if (worst > 0) printf "NEARMISS at packet %d: %.6f -> %.6f, back %.6fs\n", worsti, worstp, worstt, worst}')
   back=$(printf '%s\n' "$dtsreport" | awk '/^COUNT /{print $2}')
   if [ "${back:-1}" -eq 0 ]; then
     ok "no backwards decode timestamp across any switch in the run"
