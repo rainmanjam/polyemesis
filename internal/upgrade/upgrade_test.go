@@ -61,14 +61,125 @@ func envVar(key, val string) func(string) string {
 // `systemctl status`, or a binary launched by hand out of that shell, carries it
 // while being supervised by nothing at all.
 //
-// Believing it there means reporting Automatic:true -- replacing the live binary
-// on the promise that a service manager will restart onto it. Nothing will, and
-// the operator is left on a version they did not choose with no restart coming.
+// Believing it means reporting Automatic:true -- replacing the live binary on
+// the promise that a service manager will restart onto it. Nothing will, and the
+// operator is left on a version they did not choose with no restart coming.
+//
+// THE HOST HERE IS A REAL SYSTEMD HOST. Testing this against a box with no
+// systemd would be testing the easy half: /run/systemd/system exists on every
+// machine this ships to, so it cannot be what separates the two cases. Only the
+// cgroup can.
 func TestSystemdNeedsMoreThanAnInheritedInvocationID(t *testing.T) {
-	got := Detect(envVar("INVOCATION_ID", "inherited-by-a-child-shell"), func(string) bool { return false })
-	if got != MethodManual {
-		t.Errorf("Detect = %q, want %q: systemd was not the running init, so nothing will restart onto a staged binary", got, MethodManual)
+	systemdHost := func(p string) bool { return p == "/run/systemd/system" }
+	for _, tc := range []struct {
+		name   string
+		cgroup string
+		want   Method
+	}{
+		{
+			// A login session. Note "user@1000.service" in the path: the string
+			// ".service" appears, which is why only the LAST component counts.
+			name:   "a shell that inherited the variable",
+			cgroup: "0::/user.slice/user-1000.slice/user@1000.service/session-3.scope\n",
+			want:   MethodManual,
+		},
+		{
+			name:   "systemd-run, which is a scope and not a unit we can be restarted as",
+			cgroup: "0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-r123.scope\n",
+			want:   MethodManual,
+		},
+		{
+			name:   "the service itself, cgroup v2",
+			cgroup: "0::/system.slice/polyemesis.service\n",
+			want:   MethodSystemd,
+		},
+		{
+			name:   "the service itself, cgroup v1",
+			cgroup: "1:name=systemd:/system.slice/polyemesis.service\n2:cpu:/system.slice/polyemesis.service\n",
+			want:   MethodSystemd,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withCgroup(t, tc.cgroup)
+			got := Detect(envVar("INVOCATION_ID", "abc123"), systemdHost)
+			if got != tc.want {
+				t.Errorf("Detect = %q, want %q", got, tc.want)
+			}
+		})
 	}
+}
+
+// An unreadable cgroup falls back to the weaker signals rather than refusing:
+// treating a genuine unit as manual leaves an operator with no upgrade path.
+func TestAnUnreadableCgroupFallsBackRatherThanRefusing(t *testing.T) {
+	procSelfCgroup = filepath.Join(t.TempDir(), "does-not-exist")
+	t.Cleanup(func() { procSelfCgroup = "/proc/self/cgroup" })
+	got := Detect(envVar("INVOCATION_ID", "abc123"), func(p string) bool { return p == "/run/systemd/system" })
+	if got != MethodSystemd {
+		t.Errorf("Detect = %q, want %q", got, MethodSystemd)
+	}
+}
+
+func withCgroup(t *testing.T, body string) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "cgroup")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	procSelfCgroup = p
+	t.Cleanup(func() { procSelfCgroup = "/proc/self/cgroup" })
+}
+
+// A FAILED UPGRADE MUST NOT SPEND THE ROLLBACK POINT.
+//
+// Writing .previous before the new binary is in place means an install that
+// fails part way -- EIO, a full disk -- has already overwritten the way back
+// with a copy of the version that is still running. The operator asked to
+// upgrade, the upgrade failed, and the release they could have returned to is
+// gone. So the outgoing binary is copied aside first but promoted last.
+//
+// Forced here by handing install() an incoming file that does not exist, which
+// is the one rename it can be made to fail on demand.
+func TestAFailedInstallLeavesTheRollbackPointAlone(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	prev := PreviousPath(bin)
+	os.WriteFile(prev, []byte("v0"), 0o700)
+
+	installed, err := install(bin, filepath.Join(dir, ".polyemesis-incoming-vanished"), dir)
+	if err == nil {
+		t.Fatal("install succeeded with no incoming file")
+	}
+	if installed {
+		t.Error("install reported the live binary was replaced when the rename failed; " +
+			"the caller would delete a file it does not own")
+	}
+	if b, _ := os.ReadFile(prev); string(b) != "v0" {
+		t.Errorf("previous is %q, want v0 — a failed upgrade spent the rollback point", b)
+	}
+	if b, _ := os.ReadFile(bin); string(b) != "v1" {
+		t.Errorf("binary is %q, want v1", b)
+	}
+	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous")
+}
+
+// Nothing in-process can clean up after SIGKILL, so the next run does it.
+// Otherwise an install directory grows a near-copy of the binary for every
+// upgrade that was interrupted.
+func TestStageClearsTempFilesAKilledRunLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	os.WriteFile(filepath.Join(dir, incomingPrefix+"123"), []byte("half a download"), 0o600)
+	os.WriteFile(filepath.Join(dir, backupPrefix+"456"), []byte("an orphaned backup"), 0o700)
+
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("v2"), 0o644)
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "staged")
 }
 
 // Only systemd may act. The others must produce a COMMAND, because acting on

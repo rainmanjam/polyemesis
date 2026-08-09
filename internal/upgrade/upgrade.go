@@ -93,23 +93,73 @@ func Detect(env func(string) string, exists func(string) bool) Method {
 	if env("KUBERNETES_SERVICE_HOST") != "" {
 		return MethodDocker
 	}
-	// systemd sets INVOCATION_ID for every unit it starts -- but BOTH halves are
-	// required, and the second is the one that matters.
-	//
-	// INVOCATION_ID is an ordinary environment variable: it is inherited by
-	// every child of a unit, so a shell spawned from `systemctl status`, a
-	// script run out of a timer, or a manually launched binary that inherited a
-	// unit's environment all carry it while being supervised by nothing.
-	// Treating that as systemd means Automatic:true, which means this process
-	// will replace a binary on the promise that a service manager it cannot see
-	// will restart onto it.
-	//
-	// /run/systemd/system is what sd_booted(3) checks, and it exists only when
-	// systemd is the running init. It is the fact; INVOCATION_ID is the hint.
-	if env("INVOCATION_ID") != "" && exists("/run/systemd/system") {
+	if supervisedByAUnit(env, exists) {
 		return MethodSystemd
 	}
 	return MethodManual
+}
+
+// procSelfCgroup is a variable so a test can point it at a fixture. There is no
+// portable way to ask this question and no reason to: it is a Linux file, and
+// systemd is a Linux program.
+var procSelfCgroup = "/proc/self/cgroup"
+
+// supervisedByAUnit reports whether THIS process is the process of a systemd
+// service -- not merely running on a systemd box, and not merely descended from
+// something that was.
+//
+// The distinction is the whole point. Saying "systemd" sets Plan.Automatic,
+// which is a promise that after this package replaces the binary, something
+// will restart onto it. If nothing supervises this process, that promise is
+// false: the operator is left running a version that no longer exists on disk,
+// with no restart coming and no sign anything is wrong.
+//
+// Three signals, each covering the previous one's gap:
+//
+//   - INVOCATION_ID is set by systemd for every unit it starts. On its own it
+//     proves nothing, because it is an ordinary environment variable and every
+//     child inherits it -- a shell spawned from `systemctl status`, a script in
+//     a timer, a binary launched by hand from any of those.
+//   - /run/systemd/system is what sd_booted(3) checks; it exists only when
+//     systemd is the running init. That rules out the variable being set on a
+//     box with no systemd at all, and nothing more. On a systemd host -- which
+//     is the normal case -- it is always true and settles nothing.
+//   - The cgroup is the one that answers the actual question. A unit's own
+//     process sits in a cgroup whose last component is its unit, so the path
+//     ends in ".service". A login shell sits in a session ".scope", and so does
+//     anything it launches, INVOCATION_ID inherited or not.
+func supervisedByAUnit(env func(string) string, exists func(string) bool) bool {
+	if env("INVOCATION_ID") == "" {
+		return false
+	}
+	if !exists("/run/systemd/system") {
+		return false
+	}
+	b, err := os.ReadFile(procSelfCgroup)
+	if err != nil {
+		// Unreadable: a hardened container, a kernel without cgroups, a system
+		// that is not Linux. Fall back to the two weaker signals rather than
+		// refusing -- the previous line already established systemd is init, and
+		// treating a genuine unit as manual would leave an operator with no
+		// upgrade path at all. Wrong in the safe direction is the other branch's
+		// job; this one has already cleared the cheap tests.
+		return true
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		// "0::/system.slice/polyemesis.service" (v2), or
+		// "1:name=systemd:/system.slice/polyemesis.service" (v1).
+		path := line
+		if i := strings.LastIndex(line, ":"); i >= 0 {
+			path = line[i+1:]
+		}
+		// The LAST component, not the whole path. A user session lives under
+		// "user@1000.service", so any process a person starts by hand has
+		// ".service" somewhere in its cgroup -- but its own leaf is a ".scope".
+		if strings.HasSuffix(filepath.Base(path), ".service") {
+			return true
+		}
+	}
+	return false
 }
 
 // PreviousPath is where the outgoing binary is kept so a rollback can find it.
@@ -270,62 +320,154 @@ func Stage(binary, staged, wantHex string) error {
 	//
 	// It also fixes a plainer bug: renaming from a temp directory to /usr/local/bin
 	// crosses a filesystem on most installs, and os.Rename fails with EXDEV.
-	tmp, sum, err := copyIntoDirAndHash(staged, filepath.Dir(binary))
+	dir := filepath.Dir(binary)
+	sweepStaleTemps(dir)
+
+	incoming, sum, err := copyIntoDir(staged, dir, incomingPrefix, 0o600)
 	if err != nil {
 		return err
 	}
-	// Harmless once the rename below has consumed it; the point is the paths out
-	// of here that did not.
-	defer os.Remove(tmp)
+	installed := false
+	defer func() {
+		// Only if it is still ours. Once the rename below consumes this name the
+		// path is free, and on a directory another principal can write to,
+		// removing it blind would delete whatever they put there next.
+		if !installed {
+			os.Remove(incoming)
+		}
+	}()
 
 	if !strings.EqualFold(sum, strings.TrimSpace(wantHex)) {
 		return fmt.Errorf("%w: got %s, want %s", ErrChecksumMismatch, sum, wantHex)
 	}
-	// Executable before it is in place, so the instant after the rename is one
-	// in which the service could actually start.
-	if err := os.Chmod(tmp, mode); err != nil {
+	// Made executable BEFORE it is in place, and not before it is verified. The
+	// instant after the rename has to be one in which the service could start,
+	// and no instant before the checksum passes may be one in which an
+	// unverified download is executable by anybody.
+	if err := setModeDurably(incoming, mode); err != nil {
 		return err
 	}
-	prev := PreviousPath(binary)
-	// Copied, not renamed: a rename would leave the live binary path empty for
-	// an instant, and something restarting in that instant finds nothing.
-	if err := copyFile(binary, prev); err != nil {
-		return fmt.Errorf("could not keep the outgoing binary for rollback: %w", err)
-	}
-	return os.Rename(tmp, binary)
+	installed, err = install(binary, incoming, dir)
+	return err
 }
 
-// copyIntoDirAndHash writes src into dir under a fresh name and returns that
-// name with the sha256 of what was actually written.
+// install makes incoming the live binary and the outgoing one the rollback
+// point, and reports whether the live binary was actually replaced.
 //
-// One pass. Hashing a second read of the same path would reintroduce exactly
-// the gap this exists to close.
-func copyIntoDirAndHash(src, dir string) (string, string, error) {
+// THE ORDER IS CHOSEN SO THAT EVERY INTERMEDIATE STATE IS A RUNNABLE BOX. This
+// process can be killed between any two lines here, and a power cut can discard
+// anything not yet synced, so "what is on disk if we stop right now" has to have
+// a good answer at every point rather than at the end.
+//
+// The outgoing binary is copied aside FIRST but promoted to .previous LAST. That
+// ordering is the fix for two separate faults:
+//
+//   - Writing .previous before the install means a failed install (EIO, a full
+//     disk) has already overwritten the rollback point with a copy of the
+//     version that is still running. The operator asked to upgrade, the upgrade
+//     failed, and the way back to the version before THAT is now gone.
+//   - Renaming the outgoing binary aside, rather than copying it, leaves the
+//     binary path empty for an instant. Anything restarting in that instant
+//     finds nothing at all.
+//
+// A kill between the two renames leaves the new binary live and complete, with
+// .previous still pointing at the version before the last one. The rollback
+// target is one release stale; nothing on disk is broken. That is the worst
+// state this function can be interrupted into, and it is an acceptable one.
+func install(binary, incoming, dir string) (bool, error) {
+	// 0o700: only the LIVE binary needs to be executable by whoever runs the
+	// service. A backup beside it is read by exactly one thing -- a rollback,
+	// running as the same user -- so group and world access on it buys nothing
+	// and widens what a local account can reach. Sonar's S2612 flagged this.
+	backup, _, err := copyIntoDir(binary, dir, backupPrefix, 0o700)
+	if err != nil {
+		return false, fmt.Errorf("could not keep the outgoing binary for rollback: %w", err)
+	}
+	// Both files are now complete and synced, but the DIRECTORY entries that
+	// name them are not. Without this, a power cut after the renames below can
+	// come back to a directory that never learned either file existed.
+	if err := syncDir(dir); err != nil {
+		os.Remove(backup)
+		return false, err
+	}
+	if err := os.Rename(incoming, binary); err != nil {
+		os.Remove(backup)
+		return false, err
+	}
+	// Past this point the upgrade has happened and must be reported as such,
+	// even if keeping the rollback point fails: the caller has to know the live
+	// binary changed.
+	if err := os.Rename(backup, PreviousPath(binary)); err != nil {
+		os.Remove(backup)
+		return true, err
+	}
+	return true, syncDir(dir)
+}
+
+const (
+	incomingPrefix = ".polyemesis-incoming-"
+	backupPrefix   = ".polyemesis-outgoing-"
+)
+
+// sweepStaleTemps clears temp files a killed run left behind.
+//
+// Nothing in-process can clean up after SIGKILL, so the next run does it.
+// Without this an install directory accumulates a near-copy of the binary for
+// every upgrade that was interrupted.
+//
+// Safe only because two upgrades never run at once on one box; if one somehow
+// did, the loser's rename fails and its install is left untouched, which is the
+// right way round to lose.
+func sweepStaleTemps(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		n := e.Name()
+		if strings.HasPrefix(n, incomingPrefix) || strings.HasPrefix(n, backupPrefix) {
+			os.Remove(filepath.Join(dir, n))
+		}
+	}
+}
+
+// copyIntoDir writes src into dir under a fresh private name, at mode, durably,
+// and returns that name with the sha256 of what was written.
+//
+// ONE PASS. The hash is taken of the bytes as they are written, so the file that
+// was hashed is necessarily the file that exists afterwards. Hashing a second
+// read of the same path would reintroduce exactly the gap this exists to close.
+//
+// The mode is applied through the open descriptor and before the sync, so the
+// permissions are as durable as the contents. A file that comes back from a
+// power cut with the right bytes and the wrong mode is still a binary the
+// service cannot start.
+func copyIntoDir(src, dir, prefix string, mode os.FileMode) (string, string, error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return "", "", err
 	}
 	defer in.Close()
 
-	// 0o600 from CreateTemp: an unverified binary should not be executable by
-	// anyone, least of all during the seconds it sits beside the live one.
-	out, err := os.CreateTemp(dir, ".polyemesis-incoming-*")
+	out, err := os.CreateTemp(dir, prefix+"*")
 	if err != nil {
 		return "", "", err
 	}
 	name := out.Name()
-	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(out, h), in); err != nil {
+	fail := func(err error) (string, string, error) {
 		out.Close()
 		os.Remove(name)
 		return "", "", err
 	}
-	// Durable before it is named: the whole point of staging is that a crash
-	// leaves either the old install or a complete new one.
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(out, h), in); err != nil {
+		return fail(err)
+	}
+	if err := out.Chmod(mode); err != nil {
+		return fail(err)
+	}
 	if err := out.Sync(); err != nil {
-		out.Close()
-		os.Remove(name)
-		return "", "", err
+		return fail(err)
 	}
 	if err := out.Close(); err != nil {
 		os.Remove(name)
@@ -334,10 +476,54 @@ func copyIntoDirAndHash(src, dir string) (string, string, error) {
 	return name, hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// setModeDurably changes a file's mode and makes that change survive a crash.
+//
+// Split out from copyIntoDir because an incoming binary must not be executable
+// until its checksum has passed, so its final mode is set later than its bytes.
+func setModeDurably(path string, mode os.FileMode) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Chmod(mode); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// syncDir makes the directory's own entries durable.
+//
+// fsync on a file promises the CONTENTS survive a power cut. It promises
+// nothing about the name: a rename is a change to the directory, and the
+// directory has to be synced for it to be guaranteed too. Skipping this is the
+// classic way an atomic-rename install turns out not to be.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		// No directory handle to fsync on Windows, and nothing to emulate it
+		// with. NTFS journals the metadata operation instead.
+		return nil
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
+}
+
 // Rollback puts the previous binary back. The caller restarts.
+//
+// The same swap as Stage, with .previous as the source and no checksum -- these
+// bytes were verified when they were installed. Sharing install() is deliberate:
+// a rollback is the operation that runs when something has already gone wrong,
+// and it must not have crash-safety weaker than the upgrade that led to it.
+//
+// The CURRENT binary becomes the new .previous, so a rollback taken by mistake
+// can be undone by a second rollback. Nobody should need the release page at 3am.
 func Rollback(binary string) error {
-	// Read before anything moves: after the swap the live path holds the file
-	// that was owner-only, and its mode is not the one to restore.
+	// Read before anything moves: afterwards the live path holds the file that
+	// was being kept owner-only, and its mode is not the one to restore.
 	mode, err := liveMode(binary)
 	if err != nil {
 		return err
@@ -346,24 +532,31 @@ func Rollback(binary string) error {
 	if _, err := os.Stat(prev); err != nil {
 		return errors.New("there is no previous binary to roll back to")
 	}
-	// The CURRENT one is kept as the previous, so a rollback can be undone by a
-	// second rollback. An operator who rolls back by mistake at 3am should not
-	// need the release page to get out of it.
-	tmp := binary + ".rollback-tmp"
-	if err := copyFile(binary, tmp); err != nil {
+	dir := filepath.Dir(binary)
+	sweepStaleTemps(dir)
+
+	// COPIED out of .previous rather than renamed. Renaming it away means a kill
+	// before the swap completes leaves the rollback point gone and the only copy
+	// of the outgoing version in a temp file nothing knows how to find -- which
+	// is how a rollback ends with a box that can neither go back nor forward.
+	incoming, _, err := copyIntoDir(prev, dir, incomingPrefix, 0o600)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(prev, binary); err != nil {
-		os.Remove(tmp)
+	installed := false
+	defer func() {
+		if !installed {
+			os.Remove(incoming)
+		}
+	}()
+	// Executable before it is live, not after. Doing it afterwards leaves a
+	// window in which the binary path holds a file the service cannot execute,
+	// and the version being rolled back TO is the one that must work.
+	if err := setModeDurably(incoming, mode); err != nil {
 		return err
 	}
-	// Back to the live mode. The backup was kept owner-only, so the file now at
-	// the binary path would not be executable by whoever runs the service --
-	// and the version being rolled back TO is the one moment that must work.
-	if err := os.Chmod(binary, mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp, prev)
+	installed, err = install(binary, incoming, dir)
+	return err
 }
 
 // liveMode is the permission bits the installed binary currently carries, with
@@ -380,65 +573,4 @@ func liveMode(binary string) (os.FileMode, error) {
 	}
 	m := fi.Mode().Perm()
 	return m | 0o100, nil
-}
-
-// copyFile duplicates src to dst, owner-only, and never leaves dst half-written.
-//
-// A BACKUP THAT MIGHT BE PARTIAL IS WORSE THAN NO BACKUP. Writing straight to
-// dst with O_TRUNC destroys the previous backup before the new one exists, so a
-// kill or a full disk mid-copy leaves a truncated file at .previous -- and
-// nothing downstream can tell. PlanFor sees a file and advertises
-// RollbackAvailable; Rollback renames it over the live binary; systemd is handed
-// a fragment of an executable and the box has no runnable polyemesis at the one
-// moment someone was reaching for the escape hatch.
-//
-// So: write a fresh temp file in the same directory, fsync it, and rename it
-// over dst. Rename within a directory is atomic, so dst is at every instant
-// either the old complete backup or the new complete one.
-//
-// 0o700, NOT 0o755. Only the LIVE binary needs to be executable by anyone other
-// than its owner, and it gets that mode explicitly at the moment it becomes
-// live. A backup sitting beside it is read by exactly one thing -- a rollback,
-// running as the same user -- so world read and execute on it buys nothing and
-// widens what a local account can reach. Sonar's S2612 flagged this and it was
-// right to.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".partial-*")
-	if err != nil {
-		return err
-	}
-	name := out.Name()
-	// Every failure from here removes the temp file. Leaving it would litter the
-	// install directory with near-copies of the binary, which is both confusing
-	// and a slow disk leak across repeated upgrades.
-	fail := func(err error) error {
-		out.Close()
-		os.Remove(name)
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		return fail(err)
-	}
-	if err := out.Sync(); err != nil {
-		return fail(err)
-	}
-	if err := out.Close(); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Chmod(name, 0o700); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Rename(name, dst); err != nil {
-		os.Remove(name)
-		return err
-	}
-	return nil
 }
