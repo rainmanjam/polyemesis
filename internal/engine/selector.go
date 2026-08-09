@@ -162,6 +162,12 @@ type selector struct {
 // sourceFeed is the one process publishing into the selector's hub.
 type sourceFeed struct {
 	kind sourceKind
+	// gen is this feed's engine-wide serial number, from Engine.feedGen. It is
+	// carried only so the seam ledger can say WHICH feed handed over to which:
+	// a run performs several switches between the same two kinds, and "primary
+	// -> slate" on its own does not identify one of them. Nothing decides
+	// anything on it.
+	gen  uint64
 	proc *supervisor.Process
 	// in is the hub this feed READS, nil for the slate, which reads nothing.
 	in      *relay.Hub
@@ -738,7 +744,16 @@ func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
 
 	e.log.Info("source selector started",
 		"reason", "failover is enabled, so destinations subscribe to one stable relay for their whole life",
-		"relayPort", hub.Port())
+		"relayPort", hub.Port(),
+		// THE TIER EPOCH, and it is here so two records can share an axis. Every
+		// feed offset in the seam ledger is seconds since this instant, while the
+		// recorded output's decode timestamps are seconds on the published
+		// timeline and a log line's own timestamp is wall clock. Without the
+		// origin written down once, a backward step in the mkv cannot be attributed
+		// to a particular seam -- which is the gap that has made every occurrence
+		// of #126 so far unusable as evidence.
+		"tierEpoch", now.Format(time.RFC3339Nano),
+		"tierEpochUnixMs", now.UnixMilli())
 
 	e.reconcileBackupIngest(s)
 	e.reconcilePlaylist(s)
@@ -1126,7 +1141,10 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	}
 	respawn := active == want
 
-	e.teardownFeed(cur)
+	teardownFrom := time.Now()
+	stopErr := e.teardownFeed(cur)
+	teardownMs := float64(time.Since(teardownFrom).Microseconds()) / 1000
+
 	// THE OFFSET TAKES THE DECISION TIME, AND A MEASUREMENT SAYS SO.
 	//
 	// This block used to take time.Now() here, after the teardown, on the
@@ -1153,6 +1171,7 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	// 0 of 12 with it kept and the offset reverted.
 	startedAt := time.Now()
 	feed := e.startFeed(s, want, upstream, silenceSig, now)
+	e.logSeam(cur, feed, reason, teardownMs, stopErr)
 
 	e.mu.Lock()
 	if e.sel != nil {
@@ -1190,6 +1209,78 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	}
 	e.bus.Publish(eventFailover, e.Failover())
 	e.publishStatus()
+}
+
+// logSeam writes the one line per handover that issue #126 is missing.
+//
+// THE SEAM IS WHERE THE TIMELINE IS JOINED AND NOTHING RECORDED THE JOIN. The
+// bug is a backwards decode timestamp at a switch, seen in 3 runs of 12 under
+// one timing change and 0 of 12 under another, and every occurrence so far has
+// been a single number in an acceptance script's output -- which cannot say
+// WHICH switch produced it, how far the outgoing feed's timeline had actually
+// reached, or how long the teardown took. Those three facts are what separate
+// the surviving explanations, so they are written down at the moment they are
+// known and nowhere else can know them.
+//
+// predictedStepMs is the falsifiable part, and it is a PREDICTION rather than a
+// measurement: it is where the outgoing feed's last published timestamp is
+// believed to be (its offset plus how far FFmpeg said it had got) minus where
+// the incoming feed's timeline starts. The leading hypothesis for #126 is that
+// the copy hop, which has no -re, drains a queued hub faster than realtime and
+// so runs AHEAD of the tier clock; if that is right this number is positive at
+// a seam that produces a backwards step. A failing run with predictedStepMs
+// near zero kills the hypothesis outright.
+//
+// It rests on one assumption -- that FFmpeg's out_time does not already include
+// -output_ts_offset -- which is exactly what relayfeed_offset_integration_test.go
+// measures offline rather than argues about. The three inputs are logged
+// separately as well as combined, so a reader who finds the assumption wrong can
+// recompute the prediction from the same line without rerunning anything.
+//
+// Info rather than Debug on purpose: the acceptance suite runs the server at
+// -log info, and turning it up to debug to see this would also turn on the
+// per-packet churn logging, which changes the timing of the very thing being
+// measured. One line per switch is roughly five lines per run.
+//
+// Called ONLY from ensureFeed, immediately after the replacement is started.
+// Anywhere earlier and the incoming feed has no offset yet; anywhere later and
+// the outgoing process has been collected.
+func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64, stopErr error) {
+	// No outgoing feed is not a seam -- there is no timeline to join to -- and a
+	// line for it would put rows in the ledger the script would have to filter
+	// back out.
+	if out == nil {
+		return
+	}
+
+	var outTimeMs int64
+	var progressDone bool
+	if out.proc != nil {
+		// The final -progress block, still there because runOnce clears progress
+		// when it STARTS a child and never on the way out, and Stop waits for the
+		// stdout parser to drain before it returns. A child killed on the deadline
+		// may not have emitted one; progressDone says which case this is rather
+		// than leaving a zero to be misread as a feed that published nothing.
+		st := out.proc.Status()
+		outTimeMs, progressDone = st.Progress.OutTimeMS, st.Progress.Done
+	}
+
+	inGen, inOffset := uint64(0), -1.0
+	inKind := "none"
+	if in != nil {
+		inGen, inOffset, inKind = in.gen, in.offset, string(in.kind)
+	}
+	predicted := -1.0
+	if in != nil {
+		predicted = (out.offset + float64(outTimeMs)/1000 - in.offset) * 1000
+	}
+
+	e.log.Info("feed seam",
+		"outGen", out.gen, "outKind", string(out.kind), "outOffset", out.offset,
+		"outTimeMs", outTimeMs, "outProgressDone", progressDone,
+		"teardownMs", teardownMs, "stopDeadline", errors.Is(stopErr, supervisor.ErrStopDeadline),
+		"inGen", inGen, "inKind", inKind, "inOffset", inOffset,
+		"predictedStepMs", predicted, "reason", reason)
 }
 
 // feedRunning reports whether the feed's process is still up. A feed is not
@@ -1388,7 +1479,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		offset = 0
 	}
 
-	feed := &sourceFeed{kind: kind, upstream: upstream, offset: offset, startedAt: now}
+	feed := &sourceFeed{kind: kind, gen: e.feedGen.Add(1), upstream: upstream, offset: offset, startedAt: now}
 	var args []string
 
 	// Switched on the kind exhaustively rather than "slate, or else the primary
@@ -1485,14 +1576,25 @@ func (e *Engine) downstreamFeedInput(kind sourceKind) *relay.Hub {
 		"the backup and the playlist do, and startFeed must not ask about any other kind", kind))
 }
 
-func (e *Engine) teardownFeed(f *sourceFeed) {
+// teardownFeed stops one feed and gives back everything it held.
+//
+// RETURNS THE STOP ERROR as well as logging it, because ensureFeed needs the
+// same fact in a second place: the seam ledger it writes for #126 has to record
+// whether the outgoing feed exited or was killed on the deadline, and a switch
+// where the old process may still have been writing is not comparable with one
+// where it definitely was not. Every other caller ignores it -- a shutdown path
+// has nothing better to do with it -- which is why this reports rather than
+// refusing to proceed.
+func (e *Engine) teardownFeed(f *sourceFeed) error {
 	if f == nil {
-		return
+		return nil
 	}
+	var stopErr error
 	if f.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 		err := f.proc.Stop(ctx)
 		cancel()
+		stopErr = err
 		// A KILLED CHILD IS NOT A STOPPED ONE, and this is the caller that has
 		// to care. ensureFeed starts the replacement into the same hub the
 		// moment this returns, so a feed that ignored SIGTERM for twelve
@@ -1524,6 +1626,7 @@ func (e *Engine) teardownFeed(f *sourceFeed) {
 	if f.port != 0 {
 		e.alloc.Release(f.port)
 	}
+	return stopErr
 }
 
 // relayFeedArgs builds the copy hop that carries one ingest into the selector.
