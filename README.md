@@ -6,7 +6,7 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
 A self-hosted restreaming server with **per-destination multichannel audio
-routing**.
+routing** — multistream from one upload, with a different mix per platform.
 
 You stream once. polyemesis fans it out to as many destinations as you like —
 and each destination gets its *own* audio mix, chosen from the audio tracks your
@@ -21,14 +21,19 @@ OBS ──SRT, 6 audio tracks──► polyemesis ──┼── Twitch     tra
 
 ## The problem it solves
 
-You run OBS with several audio tracks — track 1 is the full mix including
-copyrighted music, track 2 is the clean mix without it, track 3 is your mic.
+You run OBS with split audio tracks — track 1 is the full mix including
+copyrighted music, track 2 is the clean feed without it, track 3 is your mic.
 Every live platform accepts exactly **one stereo audio stream**, so normally you
 must choose one mix for everyone, or run several encoders and several uploads.
+Choosing wrong is what gets the Twitch VOD muted or the YouTube stream struck,
+and running several uploads is what multistreaming from the stream PC costs you.
+
+OBS can send one extra track — the VOD track — but only to a service that
+supports it, and it is a track it *selects*, not a mix it builds.
 
 polyemesis ingests once and lets you pick, per destination, which tracks get
 summed into the stereo feed that destination receives. YouTube gets the clean
-mix; your local archive keeps everything; your Discord restream keeps the mic
+feed; your local archive keeps everything; your Discord restream keeps the mic
 hot. One upload, one video encode, different audio per platform.
 
 ## What it does
