@@ -98,13 +98,18 @@ when a platform drops, show you whether it is working.
 | | polyemesis | Restreamer | restream.io |
 |---|---|---|---|
 | Self-hosted | Yes | Yes | No |
-| Simultaneous destinations | Unlimited | Unlimited | 2–8 by plan tier |
+| Simultaneous destinations | No configured cap<sup>1</sup> | Unlimited | 2–8 by plan tier |
 | Video re-encoded per destination | **No** (`-c:v copy`) | Optional | Yes, server-side |
 | Recording | Multitrack, stream-copied | Yes | Yes |
 | Unified chat | Yes | No | Yes |
 | Metrics / API | Prometheus + REST | REST | REST |
 | Hardware encoding | NVENC, QSV, VA-API, VideoToolbox, AMF | Yes | n/a |
 | Cost | Your hardware | Your hardware | Subscription |
+
+<sup>1</sup> No limit in the software. Upload bandwidth and CPU are the real
+ones: measured at roughly 4% of one core per destination on a 6-core VPS, so a
+4-core box runs out somewhere near 96. "Unlimited" was the previous wording and
+it was not defensible.
 
 ---
 

@@ -49,8 +49,10 @@ hot. One upload, one video encode, different audio per platform.
   [→ OBS.md](docs/OBS.md)
 - **Live audio meters** for every channel of every track — how you verify the
   clean track really is clean, *before* going live.
-- **Unlimited destinations**: RTMP(S), SRT, or local file, each independently
-  startable with auto-reconnect and exponential backoff.
+- **No configured cap on destinations**: RTMP(S), SRT, or local file, each
+  independently startable with auto-reconnect and exponential backoff. There is
+  no limit in the software; upload bandwidth and CPU are the real ones, at
+  roughly 4% of one core per destination.
 - **Platform sign-in** for YouTube, Twitch, Facebook and Kick, with chat and
   metadata push where the API allows it. [→ PLATFORMS.md](docs/PLATFORMS.md)
 - **Chat moderation on all four** — delete, ban, timeout, and a moderator user
