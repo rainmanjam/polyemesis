@@ -236,7 +236,12 @@
     transform: translate3d(var(--warp-x, -9999px), var(--warp-y, -9999px), 0);
   }
 
-  .signal-grid:hover .signal-grid__warp { opacity: 1; }
+  /* Driven by a class from the pointer handler, NOT by :hover on the grid.
+     The grid is `absolute inset-0` with the section's content stacked on top
+     of it, so it is never itself the hovered element -- a :hover rule here
+     matched nowhere on the page and the lens stayed at opacity 0 for good.
+     See SignalGrid.astro, which listens on the section for the same reason. */
+  .signal-grid.is-warping .signal-grid__warp { opacity: 1; }
 
   /* The filter definition carries no visual weight of its own. */
   .signal-grid__defs {

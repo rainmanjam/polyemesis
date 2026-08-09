@@ -87,6 +87,20 @@ const { class: className = "absolute inset-0" } = Astro.props;
       const lens = grid.querySelector<HTMLElement>(".signal-grid__warp");
       if (!lens) return;
 
+      // LISTEN ON THE SECTION, NOT ON THE GRID.
+      //
+      // The grid is `absolute inset-0` and the section's content sits on top of
+      // it as a positioned sibling, so the grid is completely covered: a sweep
+      // across the hero hits the content at every single point and never once
+      // reaches the grid. Bound to the grid, neither the pointermove listener
+      // nor the :hover rule could fire ANYWHERE on the page, and the effect was
+      // dead rather than subtle.
+      //
+      // The section is the common ancestor of both, so it sees the move
+      // wherever the pointer is. Nothing here captures or cancels, so the
+      // content's own buttons and links are unaffected.
+      const host = grid.parentElement ?? grid;
+
       let x = 0, y = 0, queued = false;
 
       const apply = () => {
@@ -95,12 +109,14 @@ const { class: className = "absolute inset-0" } = Astro.props;
         lens.style.setProperty("--warp-y", `${y}px`);
       };
 
-      grid.addEventListener("pointermove", (e) => {
-        // Relative to the grid: the lens is absolutely positioned inside it, so
-        // client coordinates would drift by the hero's offset and by scroll.
+      host.addEventListener("pointermove", (e) => {
+        // Relative to the GRID, which is what the lens is positioned inside --
+        // the host's box can differ from it, and client coordinates would drift
+        // by that offset and by scroll.
         const r = grid.getBoundingClientRect();
         x = e.clientX - r.left;
         y = e.clientY - r.top;
+        grid.classList.add("is-warping");
         if (!queued) {
           queued = true;
           requestAnimationFrame(apply);
@@ -110,7 +126,8 @@ const { class: className = "absolute inset-0" } = Astro.props;
       // Parked off-screen on leave. The lens fades out, but a fade leaves it
       // under the cursor's last position for the length of the transition, and
       // re-entering elsewhere would show it snap across.
-      grid.addEventListener("pointerleave", () => {
+      host.addEventListener("pointerleave", () => {
+        grid.classList.remove("is-warping");
         lens.style.setProperty("--warp-x", "-9999px");
         lens.style.setProperty("--warp-y", "-9999px");
       }, { passive: true });
