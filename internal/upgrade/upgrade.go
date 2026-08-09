@@ -262,16 +262,30 @@ func Rollback(binary string) error {
 		os.Remove(tmp)
 		return err
 	}
+	// Back to the live mode. The backup was kept owner-only; the thing now at
+	// the binary path has to be executable by whoever runs the service, which
+	// is not necessarily the account that took the backup.
+	if err := os.Chmod(binary, 0o755); err != nil {
+		return err
+	}
 	return os.Rename(tmp, prev)
 }
 
+// copyFile duplicates src to dst, owner-only.
+//
+// 0o700, NOT 0o755. Only the LIVE binary needs to be executable by anyone other
+// than its owner, and it gets that mode explicitly at the moment it becomes
+// live. A backup sitting beside it is read by exactly one thing -- a rollback,
+// running as the same user -- so world read and execute on it buys nothing and
+// widens what a local account can reach. Sonar's S2612 flagged this and it was
+// right to.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
 	if err != nil {
 		return err
 	}

@@ -195,3 +195,65 @@ func hashOf(t *testing.T, path string) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
+
+// The backup is owner-only; the live binary is not.
+//
+// Only the thing at the binary path needs to be executable by whoever runs the
+// service. A backup beside it is read by exactly one thing -- a rollback,
+// running as the same user -- so world read and execute on it buys nothing and
+// widens what a local account can reach. Sonar's S2612 caught this.
+func TestTheBackupIsOwnerOnlyAndTheLiveBinaryIsNot(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("old"), 0o755)
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("new"), 0o644)
+
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	prev, err := os.Stat(PreviousPath(bin))
+	if err != nil {
+		t.Fatalf("stat previous: %v", err)
+	}
+	if m := prev.Mode().Perm(); m&0o077 != 0 {
+		t.Errorf("the backup is mode %o; it must not be readable or executable by "+
+			"group or other, because nothing but a same-user rollback ever reads it", m)
+	}
+
+	live, err := os.Stat(bin)
+	if err != nil {
+		t.Fatalf("stat binary: %v", err)
+	}
+	if m := live.Mode().Perm(); m&0o111 == 0 {
+		t.Errorf("the live binary is mode %o and not executable; the service could "+
+			"not start it", m)
+	}
+}
+
+// And a rollback has to put the live mode back, since the file it promotes was
+// being kept owner-only.
+func TestRollbackRestoresTheExecutableMode(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("old"), 0o755)
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("new"), 0o644)
+
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if err := Rollback(bin); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	st, err := os.Stat(bin)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if m := st.Mode().Perm(); m&0o111 == 0 {
+		t.Errorf("after a rollback the binary is mode %o and not executable -- the "+
+			"service would fail to start on the version being rolled back TO, which "+
+			"is the one moment that must work", m)
+	}
+}
