@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 )
 
 func newManager(t *testing.T) (*Manager, string, *db.DB) {
@@ -19,11 +20,7 @@ func newManager(t *testing.T) (*Manager, string, *db.DB) {
 
 func newManagerIn(t *testing.T, dir string) (*Manager, string, *db.DB) {
 	t.Helper()
-	store, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	store := dbtest.Open(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return New(log, store, dir, nil), dir, store
 }
@@ -520,11 +517,7 @@ func TestSweepRefusesToDeleteThroughAnEscapingFilename(t *testing.T) {
 
 func TestScanAndSweepNotifiesOnChangeAfterRetentionDeletes(t *testing.T) {
 	dir := t.TempDir()
-	store, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	store := dbtest.Open(t)
 	notified := 0
 	m := New(slog.New(slog.NewTextHandler(io.Discard, nil)), store, dir, func() { notified++ })
 
