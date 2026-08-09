@@ -653,18 +653,46 @@ else
   # PASSES, which is the whole point -- there is no need to wait for another
   # failure to collect it.
   #
-  # THE ONE ASSUMPTION, stated rather than hidden: a step's DTS is read on the
-  # same axis as a feed's offset, both being seconds since the tier epoch that
-  # "source selector started" now records. That holds while the destination
-  # carries the selector's timeline through unchanged, which is exactly what
-  # -output_ts_offset is for and what the assertion above is testing. If the
-  # attribution ever looks impossible -- steps landing before the first seam, or
-  # tier offsets nowhere near the file's own span -- suspect this first, and note
-  # that the TOTAL count in the header does not depend on it.
+  # THE TWO AXES ARE NOT CALIBRATED, AND THIS TABLE DOES NOT PRETEND THEY ARE.
+  #
+  # The first version of this block assigned each backward step to the last seam
+  # at or before it, treating a packet's DTS in the file and a feed's offset on
+  # the tier as one axis. Six runs later one of them FAILED -- a 30ms step at file
+  # DTS 25.898 -- and the assignment was wrong. The audio says where the step
+  # really was: the slate's silence in that file ended at 25.703, so the step sits
+  # 195ms after the slate handed back to the primary, which is seam 3 at tier
+  # 29.837. The identity mapping had blamed seam 2, at tier 14.339, a whole
+  # switch earlier.
+  #
+  # The two axes are not a constant apart either. In that run the slate held the
+  # air for 15.498s of tier time and occupies 16.706s of the file, so the offset
+  # implied by the start of the silence (5.34s) and by its end (4.13s) disagree
+  # by more than a second. A destination rebases the hub's timeline to its own
+  # first packet, and the feeds do not publish at exactly tier rate -- the same
+  # ahead-of-realtime effect this whole investigation is about.
+  #
+  # So the table reports FACTS FROM EACH SIDE and no join: the ledger's rows, the
+  # steps with their positions in the file, and the slate window as an anchor a
+  # reader can line the two up with by hand. A wrong attribution is worse than
+  # none here, because it would send the next person to the wrong switch with a
+  # number that looks authoritative.
   grep 'msg="feed seam"' server.log > seams.txt 2>/dev/null
   epoch=$(awk '/msg="source selector started"/{
             for (i=1;i<=NF;i++) if ($i ~ /^tierEpoch=/) { print substr($i,11); exit }}' server.log)
-  [ -n "${epoch:-}" ] && note "tier epoch $epoch (feed offsets and packet DTS are both seconds from here)"
+  [ -n "${epoch:-}" ] && note "tier epoch $epoch (every seam offset below is seconds from here)"
+  # THE ANCHOR. Only the slate is silent -- the publisher sends a 1 kHz tone and
+  # the filler a 2 kHz one -- so the long silence in the file is the slate's time
+  # on air, and it is the one landmark visible on BOTH axes. The check below
+  # reads the same pass, so the two cannot disagree.
+  ffmpeg -hide_banner -nostats -i "$OUTFILE" \
+         -af "silencedetect=n=-50dB:d=1" -f null - > silence.txt 2>&1
+  awk '{for (i=1;i<=NF;i++) {
+          if ($i=="silence_start:") st=$(i+1)+0
+          else if ($i=="silence_end:")
+            printf "anchor: the file is silent from %.3f to %.3f (%.3fs) -- only the slate is\n",
+                   st, $(i+1)+0, $(i+1)-st }}' silence.txt | while IFS= read -r line; do
+    note "$line"
+  done
   awk '
       # First file: one line per handover, as slog key=value.
       #
@@ -690,27 +718,22 @@ else
         # EVERY backward step, at any magnitude. The threshold belongs to the
         # assertion; a table that applied it too would answer the question it
         # was written to answer with the number it was written to replace.
-        if (have && t<prev) {
-          b=0
-          for (j=1;j<=n;j++) if (at[j]<=prev) b=j
-          cnt[b]++
-          if (prev-t > worst[b]) { worst[b]=prev-t; wat[b]=prev }
-        }
+        if (have && t<prev) { s++; spos[s]=prev; sto_[s]=t; ssize[s]=prev-t }
         prev=t; have=1 }
       END {
         if (n==0) { print "SEAMS none in server.log -- either no switch happened or the build predates the ledger"; exit }
-        for (j=0;j<=n;j++) tot+=cnt[j]
-        printf "SEAMS %d handover(s); %d backward DTS step(s) of any magnitude in the file\n", n, tot+0
-        if (cnt[0]>0) printf "  before seam 1: %d step(s), worst %.6fs at dts %.3f\n", cnt[0], worst[0], wat[0]
+        printf "SEAMS %d handover(s); %d backward DTS step(s) of any magnitude in the file\n", n, s+0
         for (j=1;j<=n;j++) {
-          printf "  seam %d %s->%s at tier %.3fs (%s): teardown %.3fms, predicted %+.3fms, %d step(s)",
-                 j, from[j], to[j], at[j], wall[j], tear[j], pred[j], cnt[j]+0
-          if (cnt[j]>0)
-            printf ", worst %.6fs at dts %.3f, observed-predicted %+.3fms",
-                   worst[j], wat[j], worst[j]*1000 - pred[j]
+          printf "  seam %d %s->%s at tier %.3fs (%s): teardown %.3fms, predicted %+.3fms",
+                 j, from[j], to[j], at[j], wall[j], tear[j], pred[j]
           if (dead[j]=="true") printf ", STOP DEADLINE -- the old feed may still have been writing"
           printf "\n"
         }
+        # The steps are listed on the FILE axis, next to the seams on the TIER
+        # axis, and deliberately not joined. See the note above the awk: the two
+        # are not a constant apart, and a wrong attribution reads as an answer.
+        for (j=1;j<=s;j++)
+          printf "  step %d at file dts %.6f -> %.6f, back %.6fs\n", j, spos[j], sto_[j], ssize[j]
       }' seams.txt dts.csv | while IFS= read -r line; do
     note "$line"
   done
@@ -721,8 +744,10 @@ else
   # the SLATE period can produce silence -- the filler in steps 6 and 7 carries a
   # 2 kHz tone of its own -- so this stays a check on the slate specifically even
   # though the file now spans the filler switches too.
-  quiet=$(ffmpeg -hide_banner -nostats -i "$OUTFILE" \
-          -af "silencedetect=n=-50dB:d=1" -f null - 2>&1 | grep -c "silence_start" || true)
+  # Read from the pass captured above rather than probing the file again: the
+  # seam table prints the same windows as its anchor, and two passes could
+  # disagree about where the slate was.
+  quiet=$(grep -c "silence_start" silence.txt || true)
   if [ "${quiet:-0}" -ge 1 ]; then
     ok "the slate period is present in the audio (tone -> silence -> tone)"
   else
