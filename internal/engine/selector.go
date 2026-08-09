@@ -1139,9 +1139,20 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	// jump by dropping the connection -- the failover tier failing at the one
 	// thing it exists to do.
 	//
-	// `now` is still what the bookkeeping below records: feedAt and switchedAt
-	// describe when the DECISION was taken, which is the right thing for a
-	// backoff and for what the UI shows. Only the timeline needs the later one.
+	// feedAt takes the LATER time too, and the comment that used to sit here
+	// claiming otherwise was wrong.
+	//
+	// It said the decision time was "the right thing for a backoff". It is the
+	// opposite. feedAt is what ensureFeed measures feedRespawn against, so
+	// recording a moment BEFORE a twelve-second teardown means the backoff has
+	// already expired by the time the feed is started. A replacement that then
+	// fails to start is retried on the very next 500ms sweep, and every sweep
+	// after it -- which is precisely the spawn-twice-a-second loop the backoff
+	// exists to prevent, reachable whenever a teardown is slow.
+	//
+	// switchedAt keeps the decision time. That one is shown to an operator as
+	// when the switch happened, and the honest answer to that is when it was
+	// decided rather than when the outgoing process finally exited.
 	startedAt := time.Now()
 	feed := e.startFeed(s, want, upstream, silenceSig, startedAt)
 
@@ -1149,7 +1160,7 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	if e.sel != nil {
 		e.sel.feed = feed
 		e.sel.active = want
-		e.sel.feedAt = now
+		e.sel.feedAt = startedAt
 		if feed != nil {
 			e.sel.err = ""
 		}

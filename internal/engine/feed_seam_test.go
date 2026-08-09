@@ -78,3 +78,34 @@ func TestTheFeedOffsetIsTakenAfterTheTeardown(t *testing.T) {
 			"took, and that is a backwards DTS at every switch")
 	}
 }
+
+// The respawn backoff measures from when the feed was STARTED, not from when
+// the switch was decided.
+//
+// feedAt used to take the pre-teardown time, with a comment claiming that was
+// "the right thing for a backoff". It is the opposite. teardownFeed blocks for
+// as long as the outgoing process takes to exit -- up to stopTimeout, which is
+// 12 seconds -- so recording a moment before it means feedRespawn has already
+// elapsed by the time the replacement is started. A feed that then fails to
+// start is retried on the very next 500ms sweep, and every sweep after it:
+// exactly the spawn-twice-a-second loop the backoff exists to prevent.
+func TestTheRespawnBackoffMeasuresFromTheStartNotTheDecision(t *testing.T) {
+	src := readEngineFile(t, "selector.go")
+	body := funcBody(t, src, "func (e *Engine) ensureFeed(")
+
+	if !strings.Contains(body, "e.sel.feedAt = startedAt") {
+		t.Error("feedAt is not the post-teardown time. After a slow teardown the " +
+			"backoff window has already expired when the feed starts, so a failing " +
+			"feed respawns on every sweep")
+	}
+	if strings.Contains(body, "e.sel.feedAt = now\n") {
+		t.Error("feedAt still takes the pre-teardown decision time")
+	}
+	// switchedAt is deliberately the decision time: it is shown to an operator
+	// as when the switch happened, and that is when it was decided rather than
+	// when the outgoing process finally exited.
+	if !strings.Contains(body, "e.sel.switchedAt = now") {
+		t.Error("switchedAt no longer records the decision time, which is what an " +
+			"operator is shown as the moment of the switch")
+	}
+}
