@@ -11,8 +11,8 @@ its first tagged release.
 ## [0.6.0] — 2026-08-09
 
 An operator-facing release: the server now tells you an update exists and what a
-restart would cost, a rendition stopped doing work it threw away, and two
-failover faults at the same seam are fixed.
+restart would cost, a rendition stopped doing work it threw away, and a failover
+respawn stopped ignoring its own backoff.
 
 ### Added
 
@@ -46,23 +46,27 @@ failover faults at the same seam are fixed.
 
 ### Fixed
 
-Two faults at the failover switch seam, found by reading the code rather than by
-a failing test, and both the same mistake in opposite directions: a timestamp
-taken before a blocking call and used as though it described what happened after.
+- **The failover respawn backoff is measured from the feed's start, not from the
+  decision to switch.** The timestamp recorded as a feed's start time was taken
+  before a teardown that blocks for as long as the outgoing process needs to
+  exit — up to twelve seconds. After a slow teardown the backoff interval had
+  therefore already elapsed before the replacement had run for a single second,
+  so a feed that failed immediately was respawned on every 500 ms sweep instead
+  of backing off.
 
-- **A feed's timeline offset is taken after the teardown, not before it.**
-  `-output_ts_offset` was computed at the moment the switch was decided, then
-  applied to a process that only started once the outgoing feed had finished
-  tearing down — up to twelve seconds later on a slow teardown. The new feed
-  therefore began life describing a moment that had already passed, and the
-  destination was handed a timeline that did not match the one it was already
-  receiving.
+  Nothing else at that seam changed in this release. A second change was made
+  alongside this one — moving `-output_ts_offset` from the switch decision to
+  the feed's actual start, on the same reasoning — and was **reverted before
+  release** after measurement showed it caused the fault it was meant to
+  prevent: a backwards decode timestamp at the seam in 3 runs of 12, against 0
+  in 12 both before the change and after reverting it. A platform drops the
+  connection on a backwards DTS, which is the failover tier failing at the one
+  thing it exists for.
 
-- **The respawn backoff is measured from the start, not from the decision.** The
-  same pre-teardown timestamp was being used as the feed's start time for backoff
-  purposes, so after a long teardown the backoff interval had already elapsed
-  before the feed had run for a single second. A feed that failed immediately was
-  respawned on every 500 ms sweep instead of backing off.
+  The bug that change described had never been observed; it was derived from
+  reading the code. The real one behind issue #126 is still open, and the seam
+  now carries the measurements alongside the code so the next attempt starts
+  from numbers rather than from an argument.
 
 ### Internal
 
