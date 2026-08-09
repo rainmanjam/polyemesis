@@ -14,6 +14,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
@@ -64,11 +65,7 @@ func renditionServer(t *testing.T, tools *ffmpeg.Tools) (http.Handler, *db.DB, f
 	t.Helper()
 
 	dir := t.TempDir()
-	store, err := db.Open(filepath.Join(dir, "polyemesis.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}

@@ -35,10 +35,21 @@
 #   step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 #   cleanup() { poly_watchdog_disarm; poly_cleanup "$PORT" "$WORK"; }
 
-# Seconds before the watchdog fires. 900 against ci.yml's timeout-minutes: 20,
-# leaving five minutes for the report itself and for the suite's teardown trap
-# to run -- teardown kills FFmpeg children and can take a dozen seconds per
-# child, and a report that is itself cancelled would be no better than none.
+# Seconds before the watchdog fires. 900 leaves room for the report itself and
+# for the suite's teardown trap to run -- teardown kills FFmpeg children and
+# can take a dozen seconds per child, and a report that is itself cancelled
+# would be no better than none.
+#
+# THIS DEFAULT IS FOR A LAPTOP, and the comment that used to be here derived it
+# "against ci.yml's timeout-minutes: 20, leaving five minutes". That subtraction
+# is wrong, because the two clocks do not start together: the job's begins at
+# checkout, this one at poly_watchdog_arm, and between them sit setup-go,
+# setup-node, an apt install and `make build`. Measured across the successful
+# acceptance jobs in a dozen runs, that gap is 58-102s -- so 900 here is 16-17
+# minutes of JOB time, and the ceiling gets there first often enough that five
+# of the six suite cancellations in the last 100 runs were the ceiling, not
+# this. ci.yml sets POLY_WATCHDOG_SECS: 600 for that reason; a run under CI
+# should not be relying on this number.
 POLY_WATCHDOG_SECS="${POLY_WATCHDOG_SECS:-900}"
 
 # How often the watchdog wakes. It checks two things -- the deadline, and
