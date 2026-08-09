@@ -513,6 +513,18 @@ type DestSpec struct {
 	// Audio is the optional output-encoding choice. Its zero value is AAC
 	// stereo, which is what every destination emitted before this existed.
 	Audio AudioSpec
+
+	// CopyAudio forwards the selected ingest tracks with `-c:a copy` instead of
+	// decoding them through FilterComplex and re-encoding. False for every
+	// destination that has not opted in, which produces byte-for-byte the
+	// command it produced before this field existed.
+	CopyAudio bool
+	// AudioTracks are the 0-based ingest track indices to map when CopyAudio is
+	// set, and are ignored otherwise. This is routing.Result.Tracks passed
+	// straight through: the compiler has already applied the profile's
+	// selection and removed the roles the destination excludes, so this list is
+	// the answer to "which tracks does this destination carry", copy or not.
+	AudioTracks []int
 }
 
 // Audio codec names, spelled the way FFmpeg spells them because these strings
@@ -740,6 +752,13 @@ func StripExtraArgs(argv, in, out []string) []string {
 // decoded, re-mixed through the routing graph, and re-encoded to the single
 // stereo track the platform will accept.
 //
+// CopyAudio is the one destination that opts out of the audio half of that, for
+// the outputs where the platform is not the constraint: an SRT contribution feed
+// or a local file can take the ingest's own tracks untouched. See copyAudioArgs,
+// which is a separate function rather than a set of conditionals threaded
+// through this one, because it shares only the input arguments -- everything
+// after them differs.
+//
 // DestAudio is the same command with the video half deleted rather than a
 // second code path: same relay, same filter graph, same explicit maps. What it
 // drops is the video map and the video codec flag, and what it gains is a
@@ -763,10 +782,22 @@ func DestinationArgs(s DestSpec) []string {
 		// jitter that would otherwise show up as dropped frames.
 		"-thread_queue_size", "1024",
 	)
-	args = append(args,
-		"-i", RelayInputURL(s.RelayURL),
-		"-filter_complex", s.FilterComplex,
-	)
+	args = append(args, "-i", RelayInputURL(s.RelayURL))
+
+	// The copy path branches BEFORE -filter_complex, and it has to. A graph
+	// that is compiled and never mapped is not ignored: FFmpeg 8.1.2 answers
+	// it with
+	//
+	//	Filter 'anull:default' has output 0 (aout) unconnected
+	//	Error binding filtergraph inputs/outputs: Invalid argument
+	//
+	// and exits 234 having written nothing. Leaving the graph in as a harmless
+	// leftover would mean a copy destination that never starts.
+	if s.CopyAudio && s.Kind != DestAudio {
+		return copyAudioArgs(s, args)
+	}
+
+	args = append(args, "-filter_complex", s.FilterComplex)
 
 	// Explicit maps only. Without them FFmpeg's default stream selection would
 	// pick one arbitrary audio track and quietly ignore the routing graph
@@ -785,6 +816,59 @@ func DestinationArgs(s DestSpec) []string {
 
 	args = append(args, audioCodecArgs(s)...)
 	args = append(args, transportOutputArgs(s)...)
+	switch s.Kind {
+	case DestRTMP:
+		args = append(args, "-f", "flv")
+	case DestSRT:
+		args = append(args, "-f", "mpegts")
+	case DestFile:
+		args = append(args, "-f", fileFormat(s.Target))
+	}
+	args = append(args, s.Target)
+	return SpliceExtraArgs(args, s.ExtraInputArgs, s.ExtraOutputArgs)
+}
+
+// copyAudioArgs finishes the command for a destination that forwards its audio
+// bit-for-bit: no filter graph, no decoder, no encoder, just maps and copies.
+//
+// IT SELECTS, IT DOES NOT FORWARD EVERYTHING. `-map 0 -c copy` is the shorter
+// spelling and it is the wrong one. It would take every track the ingest
+// carries, which destroys the two things a destination is FOR: the profile's
+// track selection, and ExcludeRoles -- the DMCA switch that marks the licensed
+// music track and keeps it out of the archive. A copy destination that silently
+// re-admitted the music track would be a compliance failure that looks like a
+// working feature, so the maps stay explicit and come from the compiled result.
+//
+// The maps carry no '?' suffix. An optional map would turn "the track the
+// operator selected is not on this ingest" into silence; routing.Compile has
+// already dropped every track that is not present in the measured layout, so a
+// track named here and missing at runtime means the layout changed under us and
+// is worth failing loudly over.
+//
+// audioCodecArgs is omitted rather than adapted. -b:a, -ac and -ar are encoder
+// options and there is no encoder; FFmpeg warns about each of them next to a
+// copy, and -ac in particular reads as an instruction the output will not obey.
+func copyAudioArgs(s DestSpec, args []string) []string {
+	args = append(args, "-map", "0:v:0", "-c:v", "copy")
+	// Kept on this path for the same reason it exists on the other: the field
+	// means "hold the picture back by this much" and must not mean two
+	// different things depending on how the audio travels. Unreachable today,
+	// because a destination that copies its audio is refused at save time if it
+	// carries any delay at all.
+	args = append(args, videoDelayArgs(s)...)
+
+	for _, t := range s.AudioTracks {
+		args = append(args, "-map", "0:a:"+strconv.Itoa(t))
+	}
+	args = append(args, "-c:a", "copy")
+
+	args = append(args, transportOutputArgs(s)...)
+	// Every kind that reaches here names its container, RTMP included. Copy is
+	// refused on an RTMP destination at save time -- see AudioEncoding.copyProblems
+	// -- so this case should be unreachable, and it is spelled out anyway rather
+	// than left to fall through to no -f at all. A builder that silently drops
+	// the muxer for one kind is how a validation gap turns into an unreadable
+	// FFmpeg error instead of a refused save.
 	switch s.Kind {
 	case DestRTMP:
 		args = append(args, "-f", "flv")
