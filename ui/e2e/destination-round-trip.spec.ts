@@ -71,6 +71,7 @@ interface DestinationEnvelope {
 interface Destination {
   id: number;
   name: string;
+  streamKey?: string;
   compliance?: { facebookPrivacy?: string };
   facebook?: {
     crosspost?: { pageId: string; createPost?: boolean }[];
@@ -137,6 +138,19 @@ test.describe("the destination editor preserves what it loaded", () => {
         "the rename did not persist, so this test never exercised a save at all",
       ).toBe("e2e round trip renamed");
 
+      // The publish credential, which the console is entitled to see and the
+      // operator is about to paste into OBS.
+      //
+      // Added when read-scoped tokens started having it withheld from
+      // GET /destinations. That redaction runs on a COPY, for a bearer token
+      // only, precisely so this path is untouched -- and the failure it guards
+      // against is the worst one available: a redaction that reached the store
+      // would blank the operator's stream key on the next save, taking the
+      // destination off air with nothing in the log to say why.
+      expect(
+        after.streamKey,
+        "the stream key did not survive a rename from the console",
+      ).toBe("e2e-key");
       expect(
         after.compliance?.facebookPrivacy,
         "the audience the operator chose did not survive an unrelated save",
