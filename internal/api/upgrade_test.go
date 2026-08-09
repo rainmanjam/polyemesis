@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -339,8 +340,8 @@ func TestInstallsThatCannotUpgradeThemselvesAreToldWhatToRun(t *testing.T) {
 	cases := []struct {
 		name   string
 		method upgrade.Method
-		// unwritable replaces the install with one in a directory this process
-		// cannot create files in, which is the STOCK systemd install:
+		// unwritable points the install at a directory this process cannot
+		// create files in, which is the STOCK systemd install:
 		// deploy/polyemesis.service sets ProtectSystem=strict with
 		// ReadWritePaths=/var/lib/polyemesis, so /usr/local/bin is read-only to
 		// the service. The refusal is the feature working.
@@ -348,7 +349,7 @@ func TestInstallsThatCannotUpgradeThemselvesAreToldWhatToRun(t *testing.T) {
 	}{
 		{name: "docker", method: upgrade.MethodDocker},
 		{name: "manual", method: upgrade.MethodManual},
-		{name: "systemd with a read-only install directory", method: upgrade.MethodSystemd, unwritable: true},
+		{name: "systemd with an install directory it cannot write", method: upgrade.MethodSystemd, unwritable: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -357,16 +358,42 @@ func TestInstallsThatCannotUpgradeThemselvesAreToldWhatToRun(t *testing.T) {
 			s.upgradeMethod = c.method
 			s.execPath = path
 			if c.unwritable {
-				if err := os.Chmod(filepath.Dir(path), 0o500); err != nil {
-					t.Fatalf("chmod install dir: %v", err)
-				}
-				// Restored so t.TempDir's own cleanup can remove it.
-				t.Cleanup(func() { _ = os.Chmod(filepath.Dir(path), 0o700) })
+				// A directory that is not there, rather than
+				// os.Chmod(dir, 0o500). Mode bits are not a portable way to say
+				// "this process cannot create a file here" and this case was
+				// built on them:
+				//
+				//   - On Windows syscall.Chmod reads no bit but S_IWRITE and
+				//     only toggles FILE_ATTRIBUTE_READONLY, which NTFS ignores
+				//     when a file is created INSIDE a directory. The chmod
+				//     succeeded, the directory stayed writable, and this case
+				//     silently installed the release it was written to prove
+				//     gets refused.
+				//   - As uid 0 -- any container-based runner -- 0o500 does not
+				//     stop root either, so the same hole is one CI change away
+				//     on Linux.
+				//
+				// Nobody can create a file in a directory that does not exist,
+				// on any OS as any user, which is the idiom
+				// upgrade.TestSystemdRefusesAnUnwritableDirectory already uses.
+				s.execPath = filepath.Join(filepath.Dir(path), "read-only", filepath.Base(path))
 			}
 			sign := login(t, h)
 			seedUpdateCache(t, releaseTag)
 			stubOnAir(t, engine.OnAir{})
 			hits := stubReleaseDownloads(t, releaseTag, releasedBytes, "")
+
+			// THE PREMISE, ASSERTED RATHER THAN ASSUMED. Every assertion below
+			// is about what the server does with an install it cannot upgrade,
+			// and all of them pass vacuously against an install it CAN. When
+			// the precondition stopped holding on windows-latest this case did
+			// not go quiet, it went green-then-red for a reason nobody could
+			// read off the failure. Ask the product itself, before asking the
+			// endpoint.
+			if plan := s.upgradePlan(releaseTag); plan.Automatic {
+				t.Fatalf("precondition not built: this install still reports as automatically "+
+					"upgradable (%+v); the rest of this case would prove nothing", plan.Plan)
+			}
 
 			raw := send(t, h, sign, http.MethodPost, "/api/v1/upgrade/stage",
 				upgradeAction{Version: releaseTag}, http.StatusConflict)
@@ -375,11 +402,23 @@ func TestInstallsThatCannotUpgradeThemselvesAreToldWhatToRun(t *testing.T) {
 			if refusal.Automatic {
 				t.Fatal("reported automatic for an install that is not")
 			}
-			// The operator has to leave with something they can act on: either
-			// the command for their install method, or the reason this one
-			// cannot be written to.
-			if refusal.Command == "" && refusal.Reason == "" {
-				t.Error("refused with neither a command nor a reason; a dead end")
+			// The operator has to leave with something they can act on, and
+			// WHICH of the two depends on why this install was refused: a
+			// method that upgrades elsewhere gets the command to run, a systemd
+			// install that cannot write its own directory gets that directory
+			// named, because "upgrade with sudo" is useless without it.
+			switch {
+			case c.unwritable:
+				if refusal.Command != "" {
+					t.Errorf("offered a command for an install that has no working one: %q", refusal.Command)
+				}
+				if !strings.Contains(refusal.Reason, filepath.Dir(s.execPath)) {
+					t.Errorf("the reason does not name the directory that cannot be written: %q", refusal.Reason)
+				}
+			default:
+				if refusal.Command == "" {
+					t.Error("refused with no command for an install method that has one; a dead end")
+				}
 			}
 			if refusal.Error == "" {
 				t.Error("refused with no sentence")
