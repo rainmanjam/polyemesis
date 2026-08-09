@@ -3,20 +3,87 @@ package db
 import (
 	"bytes"
 	"database/sql"
-	"golang.org/x/crypto/bcrypt"
+	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
+// templateOnce guards building the one migrated database every testDB copies.
+//
+// Open is not cheap: it executes the whole of schema.sql and then six
+// migrations, and that DDL -- not the queries the tests actually run -- is
+// where this package spent its time. 181 call sites paid for it once each. So
+// we pay it once for the package instead, snapshot the resulting file, and
+// hand every test a byte copy.
+//
+// The copy is still opened through Open rather than handed to the test as a
+// live handle, which is what keeps this a pure speed change: the options a
+// caller passes (WithPasswordCost) still apply, and schema.sql plus the six
+// migrations still run -- they are simply no-ops now, because every CREATE is
+// IF NOT EXISTS and every migration first checks for the column it adds. A
+// test cannot tell the difference except by the clock.
+//
+// An in-memory database was the obvious alternative and it was measured and
+// rejected: 15.4ms/op against 3.27ms/op for the file copy. The cost being
+// removed here is the DDL, which :memory: still has to execute in full on
+// every open, while a copied template has already done it.
+var (
+	templateOnce  sync.Once
+	templateBytes []byte
+	templateErr   error
+)
+
+// testTemplate returns the bytes of a freshly migrated database file.
+func testTemplate() ([]byte, error) {
+	templateOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "polyemesis-db-template")
+		if err != nil {
+			templateErr = fmt.Errorf("template tempdir: %w", err)
+			return
+		}
+		// Removed as soon as the bytes are in hand; nothing reopens this path.
+		defer os.RemoveAll(dir)
+
+		path := filepath.Join(dir, "polyemesis.db")
+		d, err := Open(path)
+		if err != nil {
+			templateErr = fmt.Errorf("template open: %w", err)
+			return
+		}
+		// Closed before reading, and that ordering is load-bearing rather than
+		// tidiness: Open runs in WAL mode, so until the last connection closes
+		// and checkpoints, the committed schema lives in polyemesis.db-wal and
+		// the file we are about to read is empty.
+		if err := d.Close(); err != nil {
+			templateErr = fmt.Errorf("template close: %w", err)
+			return
+		}
+		templateBytes, templateErr = os.ReadFile(path)
+	})
+	return templateBytes, templateErr
+}
+
 func testDB(t *testing.T) *DB {
 	t.Helper()
-	d, err := Open(filepath.Join(t.TempDir(), "polyemesis.db"), WithPasswordCost(bcrypt.MinCost))
+	tmpl, err := testTemplate()
+	if err != nil {
+		t.Fatalf("build template: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "polyemesis.db")
+	if err := os.WriteFile(path, tmpl, 0o600); err != nil {
+		t.Fatalf("write template copy: %v", err)
+	}
+	d, err := Open(path, WithPasswordCost(bcrypt.MinCost))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

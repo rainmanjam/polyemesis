@@ -17,6 +17,7 @@ package scheduler
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +44,29 @@ const (
 	// ActionPlaylistStop disables it.
 	ActionPlaylistStop Action = "playlist.stop"
 )
+
+// AllActions is every action a schedule may carry, in the order the operator's
+// dropdown offers them.
+//
+// Validate ranges over this rather than repeating the four names in a switch,
+// which makes it the single place an action becomes real. That matters because
+// of what the alternative cost: the test that used to guard this list read
+// scheduler.go with a regexp and compared what it found against a list written
+// out again in the test file. It could not see an action declared in a sibling
+// file, it could not see one written `Action("pause")`, and it never executed
+// Validate at all -- so it would have passed on a fifth action that Validate
+// rejected, and passed again on one Validate accepted but nothing implemented.
+//
+// A variable the production path consumes has none of those holes: a test that
+// ranges over AllActions and calls Validate is asking the real question, and
+// an action added to the const block but not to this slice fails Validate the
+// first time anybody uses it rather than silently taking the destination path.
+var AllActions = []Action{
+	ActionStart,
+	ActionStop,
+	ActionPlaylistStart,
+	ActionPlaylistStop,
+}
 
 // Kind is how a schedule recurs.
 type Kind string
@@ -208,9 +232,7 @@ func (s Schedule) Validate() error {
 	if len(s.Name) > MaxNameLen {
 		return fmt.Errorf("schedule name is longer than %d characters", MaxNameLen)
 	}
-	switch s.Action {
-	case ActionStart, ActionStop, ActionPlaylistStart, ActionPlaylistStop:
-	default:
+	if !slices.Contains(AllActions, s.Action) {
 		return fmt.Errorf("schedule %q has an unknown action %q", s.Name, s.Action)
 	}
 	if len(s.DestinationIDs) > MaxTargets {

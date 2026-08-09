@@ -112,6 +112,16 @@ type Engine struct {
 	// editing it a silent no-op.
 	meterInterval atomic.Int64
 
+	// feedGen numbers every source feed this engine has ever started, so the
+	// seam ledger can name the outgoing and incoming feed of one switch without
+	// ambiguity. Deliberately NOT a field on the selector: a tier that is torn
+	// down and rebuilt would restart its own counter, and two feeds sharing a
+	// number is precisely the confusion the ledger exists to remove when a run
+	// is read back hours later. Atomic rather than under e.mu because it is
+	// incremented inside startFeed, which already runs under selMu, and a second
+	// lock ordering for a counter would be all cost.
+	feedGen atomic.Uint64
+
 	// reloadRec is the note collector for the reconcile currently in flight,
 	// nil the rest of the time. Atomic because it is read from teardown paths
 	// that hold e.mu.
