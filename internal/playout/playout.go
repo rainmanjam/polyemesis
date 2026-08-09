@@ -78,9 +78,15 @@ type Ports interface {
 }
 
 // Runner is one supervised child. supervisor.Process satisfies it.
+//
+// Stop returns an error when it had to kill the child rather than watch it
+// exit -- see supervisor.ErrStopDeadline. Playout does not act on it (a stopped
+// item is being replaced by the next one, and there is no hub for a straggler
+// to corrupt), but the signature has to carry it or supervisor.Process no
+// longer satisfies this interface.
 type Runner interface {
 	Start()
-	Stop(ctx context.Context)
+	Stop(ctx context.Context) error
 }
 
 // Spawner builds a supervised child from a command line. The engine supplies

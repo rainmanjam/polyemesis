@@ -9,6 +9,7 @@ package supervisor
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -420,11 +421,22 @@ func (p *Process) Start() {
 // Stop terminates the child and stops supervising. It blocks until the child
 // is gone or ctx expires.
 //
+// RETURNS AN ERROR WHEN THE CHILD HAD TO BE KILLED ON THE DEADLINE, because
+// "stopped" and "sent SIGKILL and stopped waiting" are different facts and a
+// caller cannot tell them apart from the state alone. Both end at StateStopped.
+// The one caller that most needs the difference is the selector: it starts a
+// replacement feed into the same hub the moment this returns, so a child that
+// is still alive and still writing is two publishers on one input.
+//
+// Ignoring the error is fine and most callers do -- a shutdown path has nothing
+// better to do with it -- which is why this returns rather than blocking longer
+// or panicking.
+//
 // Stop is TERMINAL. It retires the process even when there is nothing running
 // to terminate, so a Start that was already on its way -- built, published,
 // about to be called -- cannot bring a child up behind the shutdown that just
 // released its port and its subscription.
-func (p *Process) Stop(ctx context.Context) { p.stop(ctx, true) }
+func (p *Process) Stop(ctx context.Context) error { return p.stop(ctx, true) }
 
 // Restart stops and starts the process. Used when a routing profile changes:
 // only the affected destination is cycled, never the ingest.
@@ -433,18 +445,26 @@ func (p *Process) Stop(ctx context.Context) { p.stop(ctx, true) }
 // lands in the gap, its latch makes the Start below a no-op, which is the
 // outcome the caller of Stop asked for.
 func (p *Process) Restart(ctx context.Context) {
-	p.stop(ctx, false)
+	// Deliberately discarded: a restart that had to kill the old child still
+	// wants the new one, and the caller of Restart has no different action to
+	// take. The selector, which does, calls Stop directly.
+	_ = p.stop(ctx, false)
 	p.Start()
 }
 
-func (p *Process) stop(ctx context.Context, retire bool) {
+// ErrStopDeadline reports that Stop gave up waiting and killed the child. Its
+// own error because the caller's question is "can I reuse what it was holding
+// yet", and that has a different answer from any other stop failure.
+var ErrStopDeadline = errors.New("process did not exit before the stop deadline")
+
+func (p *Process) stop(ctx context.Context, retire bool) error {
 	p.runMu.Lock()
 	if retire {
 		p.retired = true
 	}
 	if !p.running {
 		p.runMu.Unlock()
-		return
+		return nil
 	}
 	cancel, done := p.cancel, p.done
 	p.running = false
@@ -453,13 +473,21 @@ func (p *Process) stop(ctx context.Context, retire bool) {
 	cancel()
 	p.terminate()
 
+	var err error
 	select {
 	case <-done:
 	case <-ctx.Done():
+		// SIGKILL is issued and this returns; it does NOT wait for the child to
+		// die. It cannot: the deadline is already spent, and blocking past it
+		// would hold whatever the caller is holding for an unbounded time. So
+		// the honest thing is to say so rather than to report a clean stop.
 		p.log.Warn("timed out waiting for process to exit; killing")
 		p.kill()
+		err = fmt.Errorf("%w after %s: the child was sent SIGKILL and may still be running",
+			ErrStopDeadline, p.Name())
 	}
 	p.setState(StateStopped, "")
+	return err
 }
 
 func (p *Process) supervise(ctx context.Context, done chan struct{}) {
