@@ -1058,9 +1058,6 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 	}
 	src, srcKnown := s.eng().SourceKnown()
 
-	// Each row is returned with its compiled routing, so the UI can render the
-	// "Tracks 1, 2, 4 → stereo" summary and the generated filter string
-	// without a second round trip.
 	// A read-scoped token gets the destination with its publish credentials
 	// blanked. db.Destination has no MarshalJSON, so `{"destination": row}` is
 	// a raw dump of every leaf -- streamKey, backupStreamKey, and for an audio
@@ -1069,6 +1066,9 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 	// than a property of the type.
 	hide := readScopeCannotSeePublishTokens(r)
 
+	// Each row is returned with its compiled routing, so the UI can render the
+	// "Tracks 1, 2, 4 → stereo" summary and the generated filter string
+	// without a second round trip.
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		shown := row

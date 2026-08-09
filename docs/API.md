@@ -35,7 +35,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | `GET` and `HEAD`, plus `POST /version/check`, `POST /routing/compile` and `POST /destinations/{id}/expert/preview` — the three POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | `GET` and `HEAD`, minus the five denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 
 ```sh
@@ -56,11 +56,48 @@ should have been allowed — never the reverse. `POST
 /destinations/{id}/expert/dry-run` is deliberately *not* on it, despite writing
 nothing to the database: it spawns FFmpeg with a caller-supplied argument list.
 
-A `read` token also has the **source publish tokens withheld** from `GET
-/sources` and `GET /sources/{id}` — the `token` field comes back empty and
-`publishUrls` is omitted, because the publish token is the ingest address and
-every publish URL embeds it. Read-only has to mean it cannot publish. A session
-and an `admin` token see them as before.
+#### What the method rule cannot see
+
+A rule about the HTTP verb cannot tell that one `GET`'s **response body is
+itself a credential**, and it cannot tell that another `GET` **does real work**.
+Both are handled explicitly, because both were real:
+
+**Credentials are blanked or masked in the response.** For a `read` token — and
+only for a `read` token — these come back empty or with the secret part
+replaced by `[redacted]`, while the surrounding field is left readable:
+
+| Route | Withheld from a `read` token |
+|---|---|
+| `GET /sources`, `GET /sources/{id}` | `token`, `publishUrls`, `legacyRtmpKey`, `ingest.srt.passphrase`, `ingest.rtmp.streamKey`, `ingest.pull.url` |
+| `GET /settings` | the same `ingest.*` fields, `failover.backup.{srt.passphrase,rtmp.streamKey,pull.url}`, `mqtt.brokerUrl` |
+| `GET /system` | the credential parts of `ingestUrl` — the SRT `passphrase` parameter, and a pull URL's `user:pass@` |
+| `GET /destinations`, `GET /destinations/{id}` | `streamKey`, `backupStreamKey`, and the userinfo in `url` / `backupUrl` (an Icecast mount's password) |
+| `GET /playout` | `token` and all three `urls`, each of which embeds it |
+
+The **field set never changes** — values are blanked, not removed — so a client
+that reads, edits and PUTs the document straight back still works. These
+responses carry `Vary: Authorization` and `Cache-Control: private, no-store`,
+because their body now depends on who asked.
+
+**Five routes are refused outright.** Masking would have been wrong for the
+first two (expert mode's contract is that the command shown is the command that
+runs) and pointless for the rest, which are `403` because of what they *do*:
+
+| Route | Why |
+|---|---|
+| `GET /destinations/{id}/expert` | returns the resolved FFmpeg argv, stream key and all |
+| `POST /destinations/{id}/expert/preview` | the same argv |
+| `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
+| `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
+| `GET /metadata/broadcast-window` | the same, once per connected account |
+
+`GET /encoders` stays available, but `?redetect=` needs `admin`: it runs a test
+encode per candidate encoder and rewrites the install's capability cache.
+
+`/hls/*`, the dashboard's preview playlist, is now **session-only** — no bearer
+of either scope. Requesting a playlist starts the on-demand preview encoder and
+polling keeps it running, and hls.js in the console authenticates with the
+session cookie anyway.
 
 **Tokens created before scopes existed are `admin`.** They could already do
 everything, so the upgrade grandfathers them rather than silently narrowing a

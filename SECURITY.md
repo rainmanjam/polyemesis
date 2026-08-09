@@ -42,7 +42,7 @@ the software actually promises.
   password it was obtained under. The check fails closed: a token whose epoch
   cannot be established is refused rather than admitted.
 - **Scoped API tokens.** A token is created `read` or `admin`, and omitting the
-  choice gives `read`. A `read` token reaches `GET` and `HEAD` plus three POSTs
+  choice gives `read`. A `read` token reaches `GET` and `HEAD` plus two POSTs
   that compute an answer and write nothing; anything else is refused with a 403.
   The rule is by HTTP method rather than by a list of routes, so a route added
   later is refused by construction instead of by somebody remembering to
@@ -52,13 +52,32 @@ the software actually promises.
   No token of either scope can manage tokens, change the password, upload or
   delete media, or complete an OAuth connect flow. Those are session-only.
 
-  A `read` token is additionally refused the SOURCE PUBLISH TOKENS, in the
-  response body rather than by hiding the route. The publish token *is* the
-  ingest address on both listeners, so a credential that could read it could
-  publish with it — and "read-only" has to mean it cannot put video into your
-  programme. `GET /sources` still lists everything else. Client secrets and the
-  MQTT password were already never serialised outward, and platform OAuth
-  secrets carry `json:"-"`.
+  **A rule about the HTTP verb cannot see what a response contains.** That is a
+  real limit rather than a theoretical one, and it is the second half of this
+  feature. A `read` token is additionally refused every stored CREDENTIAL, in
+  the response body rather than by hiding the route: the source publish tokens
+  and publish URLs, the SRT passphrase and legacy RTMP stream key on both the
+  primary and the standby ingest, pull URLs carrying `user:pass@`, the MQTT
+  broker URL, destination stream keys and an Icecast mount's password, the
+  constructed ingest URL on `/system`, and the playout playback token together
+  with the three URLs that embed it. Each of those *is* a publish or watch
+  credential, so a credential that could read one could use it — and "read-only"
+  has to mean it cannot put video into your programme or watch a private one.
+  The listings still work: values are blanked or masked, never removed, and a
+  session or `admin` token sees exactly what it saw before.
+
+  **Five GETs are not reads, and a `read` token is refused them outright.** The
+  two expert-command endpoints return the FFmpeg argv with the stream key in it,
+  and masking that would break the operator's guarantee that the command shown
+  is the command that runs. `/clipper/.../keyframes` spawns `ffprobe`;
+  `/platforms/accounts/{id}/stats` and `/metadata/broadcast-window` call the
+  platform and can refresh **and persist** an OAuth token. `?redetect=` on
+  `/encoders` needs `admin` for the same reason. The dashboard's `/hls/*`
+  preview is session-only: fetching a playlist starts an encoder and polling
+  keeps it running.
+
+  Client secrets and the MQTT password were already never serialised outward,
+  and platform OAuth secrets carry `json:"-"`.
 
   Tokens that predate scopes are `admin`, because they already could do
   everything and narrowing them on upgrade would break a running script without
