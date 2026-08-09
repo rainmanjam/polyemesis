@@ -265,14 +265,34 @@ jobs:
       # consumers actually ask for: SPDX for licence and provenance review,
       # CycloneDX for vulnerability tooling.
       #
-      # Scanned from the SOURCE TREE, not the binaries, and that is the point:
-      # `make release` embeds the web UI into every binary, so a scan of the
-      # compiled artefact would report the Go modules and silently omit every
-      # npm dependency that shipped inside it.
+      # Scanned from the SOURCE TREE as well as the binaries. The source tree
+      # is the part that matters and the reason the scan is not pointed at
+      # dist/ alone: `make release` embeds the web UI into every binary, so a
+      # scan of the compiled artefact would report the Go modules and silently
+      # omit every npm dependency that shipped inside it.
       #
-      # Measured on this repository at the time of writing: 437 packages --
-      # 216 npm, 168 Go, and 52 pinned GitHub Actions. One document per format
-      # covers all three, which no per-manifest scanner produces in one file.
+      # Re-measured with syft 1.50.0 against the tree in the state this step
+      # sees it -- after the cross-compile above, so dist/ and ui/node_modules
+      # both exist. 764 packages: 523 npm, 211 Go, 27 GitHub Actions.
+      #
+      # Those numbers replace "437 packages -- 216 npm, 168 Go, and 52 pinned
+      # GitHub Actions", which was wrong in three ways worth naming, because
+      # each one is a way of misreading a scanner:
+      #
+      #   - 52 was never a package count; it is how many times `uses:` appears
+      #     in .github/workflows. syft catalogues one package per action per
+      #     workflow FILE, so the same pinned checkout across seven workflows
+      #     is 7 packages. Deduped that way the real figure is 27.
+      #   - "not the binaries" described an intent, not this command. syft is
+      #     pointed at `.` and the cross-compile ran first, so the six binaries
+      #     are in scope and their buildinfo IS the Go figure: 32 packages
+      #     without dist/, 211 with it.
+      #   - npm counts both lockfiles. ui/ contributes 108, because syft reads
+      #     the lock and skips its 161 dev entries; web/package-lock.json marks
+      #     nothing dev and contributes all 415 of its own.
+      #
+      # One document per format covers all three ecosystems, which no
+      # per-manifest scanner produces in one file.
       #
       # The released binary, verified against a SHA-256 pinned here, rather
       # than anchore/sbom-action -- every action in this repository is
@@ -331,22 +351,23 @@ jobs:
             -o spdx-json=dist/polyemesis-sbom.spdx.json \
             -o cyclonedx-json=dist/polyemesis-sbom.cdx.json
           # A BOM that describes nothing is worse than no BOM: it parses
-          # cleanly and tells a consumer this release has no dependencies. So
-          # assert a floor rather than merely non-empty. 437 packages were
-          # measured here; 100 is low enough never to false-positive and high
-          # enough to catch a scan that found one manifest and missed the rest,
-          # which is the realistic failure -- a moved go.mod or a UI directory
-          # rename would halve it, not empty it.
-          for f in dist/polyemesis-sbom.spdx.json dist/polyemesis-sbom.cdx.json; do
-            test -s "$f" || { echo "$f is empty"; exit 1; }
-          done
-          spdx=$(jq '.packages | length' dist/polyemesis-sbom.spdx.json)
-          cdx=$(jq '.components | length' dist/polyemesis-sbom.cdx.json)
-          echo "SPDX packages: $spdx   CycloneDX components: $cdx"
-          if [ "$spdx" -lt 100 ] || [ "$cdx" -lt 100 ]; then
-            echo "SBOM looks truncated -- expected several hundred packages across Go, npm and actions"
-            exit 1
-          fi
+          # cleanly and tells a consumer this release has no dependencies.
+          #
+          # This used to be `packages >= 100` against a document with 437 in
+          # it, and the comment above it named the failure it was catching: a
+          # scan that found one manifest and missed the rest, which "would
+          # halve it, not empty it". 437 halved is 218, so the check could not
+          # fail on its own stated scenario -- and measurement was worse than
+          # the arithmetic. Moving ui/ and web/ aside and rescanning leaves
+          # 232 packages, every npm dependency gone, comfortably over 100.
+          #
+          # The guard is now per ecosystem plus an anchor package for each, and
+          # it lives in a script so it can be run without cutting a release.
+          # That is the actual defect #96 records: not that the number was
+          # wrong, but that nothing could exercise it, so it stayed wrong.
+          ./scripts/sbom-guard.sh \
+            dist/polyemesis-sbom.spdx.json \
+            dist/polyemesis-sbom.cdx.json
 
       # Checksums so someone can verify a download they did not build.
       - name: Checksums

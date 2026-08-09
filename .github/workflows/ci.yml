@@ -157,6 +157,14 @@ jobs:
       # in it does not merely fail to report -- it becomes the hang.
       - run: ./scripts/test-lib-watchdog.sh
 
+      # The SBOM guard, which only ever runs for real inside a release. That is
+      # exactly how it came to be wrong: it asserted a floor of 100 against a
+      # document containing 437, so it could not fail on the scenario its own
+      # comment described, and no one could discover that without cutting a
+      # release. Running its tests on every PR is the part that makes the fix
+      # a fix rather than a better guess. Pure jq and shell, about a second.
+      - run: ./scripts/test-sbom-guard.sh
+
       # The acceptance suites' shared teardown. Same argument as the guard
       # above, and a sharper one: this teardown was silently leaking the ingest
       # port on every run, which made acceptance-failover fail 10 times out of
