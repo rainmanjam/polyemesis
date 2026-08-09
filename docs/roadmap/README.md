@@ -22,7 +22,7 @@ claim is often more instructive than the right one.
 | **3** | [MQTT](MQTT.md) | **5–6 d** telemetry only | **shipped** | Exactly one net-new module. Retained telemetry has no existing path at all |
 | **4** | Selector generalisation | **~3–5 d** | ✅ **done** | The prerequisite 5 and 7 both needed. `chooseSource` now ranks an ordered candidate list, and a playlist is the fourth candidate. Provably behaviour-preserving up to the point it changed on purpose: a 1024-row exhaustive table froze every reachable decision first, and all 1024 are byte-identical today |
 | **5** | [Playlist — full](PLAYLIST-AND-COMPOSITING.md#sequencing-take-the-concat-demuxer) | **17–22 d** | ✅ **done** | Most-requested by volume; lower technical risk than compositing. Built as three sub-projects: A gave the playlist its own hub, B1 made every item a normalised derivative, B2 sequenced them, C added `playlist.start` / `playlist.stop` schedules. Playlist settings are install-wide, so C needed no `source_id`; per-source filler is deferred, not rejected |
-| **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **v0.5 shipped · full deferred** | The most-repeated unmet request. Deferred 2026-08-02 — see below |
+| **6** | [Overlays](OVERLAYS.md) | **6 d** v0.5 · **16 d** full | **image + text shipped · rest deferred** | The most-repeated unmet request. The image watermark shipped in v0.5, and burned-in **text** shipped with it (`e00805e`, released in 0.5.0). What is deferred is the remainder, 2026-08-02 — see below |
 | **7** | [Compositing](PLAYLIST-AND-COMPOSITING.md#compositing-multi-source-landed-but-as-isolation) | **21–26 d** | **deferred** | Largest, riskiest, and the one that puts the audio differentiator in play. Deferred 2026-08-02 — see below |
 | **8** | [WebRTC — WHEP](WEBRTC.md) | **8–12 d** | **deferred** | The sub-second preview tier. Independent of everything else; slots in whenever latency becomes the priority |
 | **9** | [Teams and roles](TEAMS-AND-ROLES.md) | **20–30 d** | ready | A security boundary retrofitted across ~120 routes. Do it when it is the priority, not alongside other work |
@@ -39,14 +39,29 @@ anything. They are deferred as a priority call, and recorded here rather than
 left as an unexplained gap in the sequence — the next person to read this table
 should not have to guess whether they were forgotten.
 
-**6 — Overlays (full).** The v0.5 image watermark shipped. The remaining ~16 days
-buys text, dynamic data, multiple overlays per rendition, a preview endpoint and
-the editor. The design in [OVERLAYS.md](OVERLAYS.md) stands as written, and three
-of its decisions are already foreclosed by code rather than by opinion: image
-overlays must be real `-i` inputs and never `movie=` (paths routinely contain
-filtergraph separators — `internal/engine/synth.go`), text must use `textfile=`
-and never `text=` for the same escaping reason, and the acknowledgement idiom
-should be borrowed from `Destination.ExpertAckReencode` rather than reinvented.
+**6 — Overlays (full).** The v0.5 image watermark shipped, and so did **burned-in
+text** — `e00805e`, 2026-07-29, released in 0.5.0, with content, font, anchor,
+size, colour, margins and a background box. This paragraph sold text as part of
+the deferred remainder for a week after it was on air; what is actually left is
+dynamic data, multiple overlays per rendition, a preview endpoint and the editor,
+so the ~16 days in the table overstates it by however long text was worth.
+
+The design in [OVERLAYS.md](OVERLAYS.md) otherwise stands, and two of its
+decisions were foreclosed by code rather than by opinion: image overlays must be
+real `-i` inputs and never `movie=`, because paths routinely contain filtergraph
+separators (`internal/ffmpeg/synth.go` — this said `internal/engine/synth.go`,
+which has never existed), and the acknowledgement idiom should be borrowed from
+`Destination.ExpertAckReencode` rather than reinvented.
+
+Its third foreclosed decision was **overtaken by the implementation**, and that is
+worth more than quietly deleting it: the design said text must use `textfile=`
+and never `text=`, for the same escaping reason as the image path. The shipped
+filter uses `text=` with an escaper and `expansion=none`
+(`internal/ffmpeg/text.go`), and the reason is measured rather than argued —
+with `expansion=none` removed, "100% LIVE" renders zero pixels and drawtext exits
+0, because it consumes the `%` as an expansion sequence. The escaping problem was
+real; the remedy the design named was not the one that solved it.
+
 The part that still has to be got right first is the `-filter_complex`
 restructure: `-vf` with link labels is proven by `blurredPadFilter`, but a
 SECOND INPUT has never been done in this codebase.
