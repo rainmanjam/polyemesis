@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -203,6 +204,13 @@ func hashOf(t *testing.T, path string) string {
 // running as the same user -- so world read and execute on it buys nothing and
 // widens what a local account can reach. Sonar's S2612 caught this.
 func TestTheBackupIsOwnerOnlyAndTheLiveBinaryIsNot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows has no Unix mode bits: os.Chmod honours only the read-only
+		// flag and every file reports 0666 whatever was asked for. Asserting
+		// 0700 against 0755 there tests the operating system rather than this
+		// package, and it fails for a reason that says nothing about the code.
+		t.Skip("Unix permission bits")
+	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "polyemesis")
 	os.WriteFile(bin, []byte("old"), 0o755)
@@ -235,6 +243,13 @@ func TestTheBackupIsOwnerOnlyAndTheLiveBinaryIsNot(t *testing.T) {
 // And a rollback has to put the live mode back, since the file it promotes was
 // being kept owner-only.
 func TestRollbackRestoresTheExecutableMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows has no Unix mode bits: os.Chmod honours only the read-only
+		// flag and every file reports 0666 whatever was asked for. Asserting
+		// 0700 against 0755 there tests the operating system rather than this
+		// package, and it fails for a reason that says nothing about the code.
+		t.Skip("Unix permission bits")
+	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "polyemesis")
 	os.WriteFile(bin, []byte("old"), 0o755)
@@ -264,6 +279,13 @@ func TestRollbackRestoresTheExecutableMode(t *testing.T) {
 // world-executable after the first upgrade. The live file is the authority on
 // what this install uses.
 func TestAnUpgradePreservesTheInstalledMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows has no Unix mode bits: os.Chmod honours only the read-only
+		// flag and every file reports 0666 whatever was asked for. Asserting
+		// 0700 against 0755 there tests the operating system rather than this
+		// package, and it fails for a reason that says nothing about the code.
+		t.Skip("Unix permission bits")
+	}
 	for _, mode := range []os.FileMode{0o755, 0o750, 0o700} {
 		t.Run(mode.String(), func(t *testing.T) {
 			dir := t.TempDir()
@@ -291,6 +313,13 @@ func TestAnUpgradePreservesTheInstalledMode(t *testing.T) {
 // that is also not executable: the install is already broken, and refusing to
 // make the new binary runnable turns that into an outage.
 func TestAnUnexecutableInstallStillYieldsARunnableBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows has no Unix mode bits: os.Chmod honours only the read-only
+		// flag and every file reports 0666 whatever was asked for. Asserting
+		// 0700 against 0755 there tests the operating system rather than this
+		// package, and it fails for a reason that says nothing about the code.
+		t.Skip("Unix permission bits")
+	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "polyemesis")
 	os.WriteFile(bin, []byte("old"), 0o600)
