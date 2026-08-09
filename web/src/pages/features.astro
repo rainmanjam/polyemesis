@@ -13,7 +13,7 @@ const sections = [
     eyebrow: "Audio routing",
     title: "Choose the tracks, per destination",
     body: [
-      "Checkbox-per-track in simple mode, or a full channel-to-output mix matrix with a gain per cell when you need one input channel in one output channel at a specific level.",
+      "The clean feed to one platform, the full mix to the next, from the same ingest. Checkbox-per-track in simple mode, or a full channel-to-output mix matrix with a gain per cell when you need one input channel in one output channel at a specific level.",
       "Nothing is filtered until a destination asks for it. Track annotations describe the ingest — what track 3 actually is — and save on their own, independent of any destination.",
     ],
     shot: "02-routing.png",
@@ -57,7 +57,8 @@ const sections = [
     eyebrow: "Recording and post",
     title: "The full multitrack archive, stream-copied",
     body: [
-      "Segmented recording that preserves every ingest audio track, with retention by age, total size, and a free-space floor that accounts for files polyemesis did not write.",
+      "Segmented recording that preserves every one of the split audio tracks your encoder sent, with retention by age, total size, and a free-space floor that accounts for files polyemesis did not write.",
+      "That archive is where your own VOD track comes from. Every track is kept unmixed, so the upload you cut afterwards need not carry the music that went out live.",
       "Then a job queue that yields to the live stream: Whisper transcription with full-text search, proxies, thumbnails, and a clipper. A dropped frame is unrecoverable; a transcript arriving an hour later costs only the wait.",
     ],
     shot: "15-recordings.png",
@@ -79,7 +80,7 @@ const sections = [
 
 <Base
   title="Features — SRT multitrack ingest, mix matrix, renditions | polyemesis"
-  description="Per-destination audio routing, a channel-level mix matrix, shared renditions, multitrack recording, and chat moderation across YouTube, Twitch, Kick, Facebook."
+  description="Per-destination routing of your OBS split audio tracks, a channel-level mix matrix, shared renditions, multitrack recording and chat moderation across four platforms."
   path="/features"
 >
   <section class="wrap py-16 sm:py-20">
