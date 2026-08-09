@@ -1122,6 +1122,7 @@
   "sources.ingest": "Wejście",
   "sources.lastSourceTitle": "Ostatniego źródła nie można usunąć — instalacja potrzebuje jednego wejścia",
   "sources.latencyMs": "Opóźnienie (ms)",
+  "sources.listenerDegraded": "Częściowo powiązany",
   "sources.loadFailed": "Nie udało się wczytać źródeł",
   "sources.loading": "Wczytywanie źródeł…",
   "sources.loss": "straty",

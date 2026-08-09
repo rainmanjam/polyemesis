@@ -62,6 +62,7 @@ const (
 	fieldFailures     = "Failures"
 	fieldFailuresPrev = "Failures before"
 	fieldTokenName    = "Token name"
+	fieldTokenScope   = "Scope"
 	fieldSections     = "Sections"
 	fieldClipName     = "Clip"
 )
@@ -240,15 +241,24 @@ func auditClipCaptured(name, address string) alerts.Event {
 		WithField(fieldAddress, address)
 }
 
-func auditAPITokenCreated(name, address string) alerts.Event {
+func auditAPITokenCreated(name, scope, address string) alerts.Event {
 	return alerts.Event{
 		Type:     alerts.TypeAPITokenCreated,
 		Severity: alerts.SeverityCritical,
 		Title:    "API token created",
-		Text: "A new API token was minted. It acts as the admin, is limited to no " +
-			"part of the API, and does not expire.",
+		// The scope travels because it is now the difference between a
+		// credential that can read the dashboard and one that can delete a
+		// destination, and this alert is read by somebody deciding whether the
+		// token they are looking at is the one they expected. The old text
+		// asserted every token "acts as the admin, is limited to no part of the
+		// API", which stopped being true when scopes shipped -- and an audit
+		// trail that describes the wrong power is worse than one that says
+		// nothing.
+		Text: "A new API token was minted. It does not expire, and it keeps " +
+			"working after the password is changed.",
 	}.
 		WithField(fieldTokenName, name).
+		WithField(fieldTokenScope, scope).
 		WithField(fieldAddress, address)
 }
 

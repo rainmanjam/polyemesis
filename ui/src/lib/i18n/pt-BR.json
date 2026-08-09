@@ -1122,6 +1122,7 @@
   "sources.ingest": "Entrada",
   "sources.lastSourceTitle": "A última fonte não pode ser excluída — uma instalação precisa de uma entrada",
   "sources.latencyMs": "Latência (ms)",
+  "sources.listenerDegraded": "Parcialmente vinculado",
   "sources.loadFailed": "Não foi possível carregar as fontes",
   "sources.loading": "Carregando fontes…",
   "sources.loss": "perda",

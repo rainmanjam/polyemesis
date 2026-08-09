@@ -301,6 +301,14 @@ function SourceCard({
             <Badge variant={source.running ? "live" : "warn"}>
               {source.running ? t("sources.running") : t("sources.notRunning")}
             </Badge>
+            {/* Beside the running badge rather than replacing it, because both
+                are true at once: the source IS running, and it is reachable on
+                only some of the addresses it was asked to listen on. Showing
+                one without the other is how a half-bound listener looked
+                perfectly healthy for as long as it did. */}
+            {source.listenerHealth?.state === "degraded" && (
+              <Badge variant="warn">{t("sources.listenerDegraded")}</Badge>
+            )}
           </CardTitle>
           <CardDescription>
             {source.isDefault
@@ -333,6 +341,20 @@ function SourceCard({
           <p className="flex items-start gap-1.5 text-[11px] text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             {t("sources.noEngine")}
+          </p>
+        )}
+
+        {/* The detail, not just the badge. "Degraded" on its own sends an
+            operator to the logs; the server already knows which address failed
+            and why, and that sentence is the whole difference between noticing
+            and fixing. */}
+        {source.listenerHealth?.state === "degraded" && source.listenerHealth.detail && (
+          <p className="flex items-start gap-1.5 text-[11px] text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              <strong className="font-semibold">{t("sources.listenerDegraded")}</strong>{" "}
+              {source.listenerHealth.detail}
+            </span>
           </p>
         )}
 

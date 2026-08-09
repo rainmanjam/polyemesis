@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -956,5 +957,67 @@ func (m *Manager) ListenerBound(mode db.IngestMode) bool {
 		// to be enforced by, and saying "yes" would tell an operator a token
 		// gates an ingest that no publisher ever reaches.
 		return false
+	}
+}
+
+// ListenerHealth describes HOW WELL a listener is bound, where ListenerBound
+// answers only whether it is.
+//
+// The two are separate because the boolean cannot be fixed without lying. A
+// wildcard SRT listener binds one socket per address family and survives one of
+// them failing on purpose -- see srtserver.Start -- so "bound" is true for a
+// listener serving half the encoders pointed at it. Making ListenerBound answer
+// false there would report a working IPv4 ingest as absent, which is worse.
+// This reports the third state that actually exists.
+type ListenerHealth struct {
+	// State is "ok", "degraded", or "" when there is no listener at all. The
+	// vocabulary is internal/chat's, deliberately: the UI already knows how to
+	// render a degraded badge with a detail beside it, and a second set of
+	// words for the same idea would be two things to keep in step.
+	State string `json:"state,omitempty"`
+	// Detail is why, in the operator's language, and is always set when State
+	// is degraded. A bare "degraded" tells nobody what to do.
+	Detail string `json:"detail,omitempty"`
+}
+
+// Degraded state values, matching internal/chat's State vocabulary.
+const (
+	listenerOK       = "ok"
+	listenerDegraded = "degraded"
+)
+
+// ListenerHealth reports how completely the listener for a mode came up.
+func (m *Manager) ListenerHealth(mode db.IngestMode) ListenerHealth {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	switch mode {
+	case db.IngestSRT:
+		if m.srt == nil {
+			return ListenerHealth{}
+		}
+		rep := m.srt.Report()
+		if !rep.Degraded() {
+			return ListenerHealth{State: listenerOK}
+		}
+		// The errno matters more than the word: "address already in use" and
+		// "address family not supported" are different problems with different
+		// fixes, and only the first is worth waking up for.
+		f := rep.Failed[0]
+		return ListenerHealth{
+			State: listenerDegraded,
+			Detail: fmt.Sprintf(
+				"listening on %s but not %s (%s); encoders reaching this server over that address family will not connect",
+				strings.Join(rep.Bound, ", "), f.Addr, f.Err),
+		}
+	case db.IngestRTMP:
+		if m.rtmp == nil {
+			return ListenerHealth{}
+		}
+		// RTMP has no half-bound state to report: it is a single TCP listener,
+		// so it either came up or it did not, and "did not" is already the nil
+		// above. Re-checked against rtmpserver.Start rather than assumed.
+		return ListenerHealth{State: listenerOK}
+	default:
+		return ListenerHealth{}
 	}
 }

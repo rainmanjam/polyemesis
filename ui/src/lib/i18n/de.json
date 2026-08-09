@@ -1122,6 +1122,7 @@
   "sources.ingest": "Eingang",
   "sources.lastSourceTitle": "Die letzte Quelle kann nicht gelöscht werden — eine Installation braucht einen Eingang",
   "sources.latencyMs": "Latenz (ms)",
+  "sources.listenerDegraded": "Teilweise gebunden",
   "sources.loadFailed": "Quellen konnten nicht geladen werden",
   "sources.loading": "Quellen werden geladen…",
   "sources.loss": "Verlust",

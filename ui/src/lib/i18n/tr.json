@@ -1122,6 +1122,7 @@
   "sources.ingest": "Giriş",
   "sources.lastSourceTitle": "Son kaynak silinemez — bir kurulumun bir girişe ihtiyacı vardır",
   "sources.latencyMs": "Gecikme (ms)",
+  "sources.listenerDegraded": "Kısmen bağlandı",
   "sources.loadFailed": "Kaynaklar yüklenemedi",
   "sources.loading": "Kaynaklar yükleniyor…",
   "sources.loss": "kayıp",

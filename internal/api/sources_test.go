@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,14 +37,19 @@ func sourceServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 }
 
 type sourceRow struct {
-	ID            int64             `json:"id"`
-	Name          string            `json:"name"`
-	Token         string            `json:"token"`
-	Enabled       bool              `json:"enabled"`
-	Publishing    bool              `json:"publishing"`
-	IsDefault     bool              `json:"isDefault"`
-	TokenEnforced bool              `json:"tokenEnforced"`
-	PublishURLs   map[string]string `json:"publishUrls"`
+	ID             int64             `json:"id"`
+	Name           string            `json:"name"`
+	Token          string            `json:"token"`
+	Enabled        bool              `json:"enabled"`
+	Publishing     bool              `json:"publishing"`
+	IsDefault      bool              `json:"isDefault"`
+	TokenEnforced  bool              `json:"tokenEnforced"`
+	PublishURLs    map[string]string `json:"publishUrls"`
+	Running        bool              `json:"running"`
+	ListenerHealth *struct {
+		State  string `json:"state"`
+		Detail string `json:"detail"`
+	} `json:"listenerHealth"`
 }
 
 func listSources(t *testing.T, h http.Handler, sign func(*http.Request)) []sourceRow {
@@ -179,6 +185,77 @@ func TestTokenEnforcedCoversRTMPSources(t *testing.T) {
 		t.Error("tokenEnforced is false for an RTMP source while its listener is bound")
 	}
 }
+
+// #105: a half-bound SRT listener has to reach the operator, not just the log.
+//
+// srtserver.Start binds one socket per address family for a wildcard and
+// survives one of them failing, deliberately -- a container without IPv6 is a
+// legitimate deployment. What it did not do was tell anything downstream, so
+// the source card showed running, token-enforced and healthy while every
+// encoder on the family that never bound could not connect.
+//
+// The test occupies the IPv6 wildcard on a real port first, then points the
+// install's SRT listener at it and reconciles, so what is asserted is the
+// response of the production handler to a genuinely degraded listener.
+func TestDegradedSRTListenerIsReportedOnTheSourceCard(t *testing.T) {
+	occupied, err := net.ListenPacket("udp6", "[::]:0")
+	if err != nil {
+		t.Skipf("SKIPPING: this host cannot bind udp6 at all (%v), so a "+
+			"partial bind cannot be staged here", err)
+	}
+	defer occupied.Close()
+	_, portStr, err := net.SplitHostPort(occupied.LocalAddr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("port %q: %v", portStr, err)
+	}
+
+	h, store, sign := sourceServer(t)
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Listeners.SRTPort = port
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+
+	srv := serverUnderTest(t, h)
+	if srv.mgr == nil {
+		t.Fatal("no manager in the fixture")
+	}
+	if err := srv.mgr.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !srv.mgr.ListenerBound(db.IngestSRT) {
+		t.Skip("the SRT listener bound no family at all here; nothing to assert")
+	}
+
+	row := listSources(t, h, sign)[0]
+	if row.ListenerHealth == nil {
+		t.Fatal("the source card carried no listenerHealth for a half-bound listener")
+	}
+	if row.ListenerHealth.State != "degraded" {
+		t.Errorf("listenerHealth.state = %q, want %q", row.ListenerHealth.State, "degraded")
+	}
+	// A bare "degraded" sends the operator to the logs, which is the situation
+	// this field exists to end.
+	if !strings.Contains(row.ListenerHealth.Detail, "::") {
+		t.Errorf("the detail does not name the address family that failed: %q",
+			row.ListenerHealth.Detail)
+	}
+	// And the source is still running and still enforcing its token, because
+	// both are true. Folding this into those booleans would answer a different
+	// question wrongly.
+	if !row.Running {
+		t.Error("a half-bound listener reported the source as not running; the " +
+			"IPv4 half is serving and its publishers are fine")
+	}
+}
+
 func TestUpdatingASourceWithoutATokenKeepsTheStoredOne(t *testing.T) {
 	h, _, sign := sourceServer(t)
 

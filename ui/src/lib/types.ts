@@ -730,6 +730,18 @@ export interface SourceView extends Source {
    *  is stored but not running, and that is the answer to "why is nothing
    *  arriving". */
   running: boolean;
+  /** How completely the listener bound, when there is one to describe.
+   *
+   *  `running` and `tokenEnforced` are both booleans over a listener that can
+   *  be HALF up: a wildcard SRT listener binds one socket per address family
+   *  and deliberately survives one of them failing, so a source can be running,
+   *  token-enforced, and unreachable for every encoder on the family that did
+   *  not bind. `detail` is always set when the state is degraded — a bare
+   *  "degraded" tells an operator nothing they can act on. */
+  listenerHealth?: {
+    state: "ok" | "degraded";
+    detail?: string;
+  };
 }
 
 export interface Settings {

@@ -124,10 +124,59 @@ type Server struct {
 	// address family -- see Start.
 	srvs []*srt.Server
 
+	// report is what Start managed to bind, written once by Start and read by
+	// anything that wants to describe the listener. Guarded by reportMu rather
+	// than by mu, which belongs to the session map and is taken on every
+	// accept: a status read must not queue behind a publisher connecting.
+	reportMu sync.RWMutex
+	report   BindReport
+
 	mu   sync.Mutex
 	live map[PublisherKey]*session // by (source id, role)
 
 	started atomic.Bool
+}
+
+// BindReport is which address families the listener asked for and which it got.
+//
+// It exists because "the listener is up" and "the listener is doing its job"
+// stopped being the same sentence the moment a wildcard started binding two
+// sockets. Start survives one family failing on purpose -- a container with no
+// IPv6 is a legitimate deployment, and refusing to boot there would trade a
+// missing feature for an outage -- but survival was previously the whole of the
+// record: a Warn in the log, and every programmatic answer afterwards saying
+// the listener was bound. An encoder pointed at the family that did not come up
+// then fails to connect to a server reporting itself healthy.
+type BindReport struct {
+	// Requested is every address Start tried, in order.
+	Requested []string
+	// Bound is the subset that came up.
+	Bound []string
+	// Failed pairs each address that did not come up with why, so the operator
+	// gets the errno rather than a bare "degraded".
+	Failed []BindFailure
+}
+
+// BindFailure is one address family that did not come up.
+type BindFailure struct {
+	Addr string
+	Err  string
+}
+
+// Degraded reports whether some but not all of the requested addresses bound.
+//
+// Not an error: the server is serving. It is the difference between "serving
+// everything it was asked to" and "serving what it could", which is a
+// distinction only the operator can act on.
+func (r BindReport) Degraded() bool {
+	return len(r.Failed) > 0 && len(r.Bound) > 0
+}
+
+// Report returns what Start bound. The zero value means Start has not run.
+func (s *Server) Report() BindReport {
+	s.reportMu.RLock()
+	defer s.reportMu.RUnlock()
+	return s.report
 }
 
 // session is one established publisher.
@@ -175,21 +224,38 @@ func (s *Server) Start() error {
 	if s.lookup == nil {
 		return errors.New("srtserver: no lookup configured")
 	}
-	var bound []string
-	for _, addr := range s.bindAddrs() {
+	report := BindReport{Requested: s.bindAddrs()}
+	for _, addr := range report.Requested {
 		srv, err := s.listenOn(addr)
 		if err != nil {
 			// One family failing is survivable and common: a host with IPv6
 			// disabled cannot bind [::], and refusing to start there would
 			// trade a macOS bug for a Linux outage. Both failing is fatal,
 			// which is checked after the loop.
-			s.log.Warn("srt ingest could not bind one address family",
-				"addr", addr, "err", err)
+			//
+			// ERROR RATHER THAN WARN, which is the part #105 was about. The
+			// severity was chosen for the common case -- a container without
+			// IPv6, where nothing is wrong -- but the log level is read by
+			// whoever is trying to work out why an encoder will not connect,
+			// and for them this line IS the answer. A half-bound listener is
+			// also a half-enforced one: everything downstream reported the
+			// listener as up, because "up" was a nil check on a slice that had
+			// one entry in it. Recorded in the report as well as logged, so
+			// something other than a human tailing stderr can act on it.
+			s.log.Error("srt ingest could not bind one address family",
+				"addr", addr, "err", err,
+				"consequence", "encoders reaching this server over that family will not connect")
+			report.Failed = append(report.Failed, BindFailure{Addr: addr, Err: err.Error()})
 			continue
 		}
 		s.srvs = append(s.srvs, srv)
-		bound = append(bound, addr)
+		report.Bound = append(report.Bound, addr)
 	}
+
+	s.reportMu.Lock()
+	s.report = report
+	s.reportMu.Unlock()
+
 	if len(s.srvs) == 0 {
 		return fmt.Errorf("srt listen on %s: no address family could be bound", s.addr)
 	}
@@ -202,7 +268,8 @@ func (s *Server) Start() error {
 			}
 		}(srv)
 	}
-	s.log.Info("one-port srt ingest listening", "addr", s.addr, "bound", bound)
+	s.log.Info("one-port srt ingest listening",
+		"addr", s.addr, "bound", report.Bound, "degraded", report.Degraded())
 	return nil
 }
 

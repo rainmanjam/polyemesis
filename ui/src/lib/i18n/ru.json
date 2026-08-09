@@ -1122,6 +1122,7 @@
   "sources.ingest": "Вход",
   "sources.lastSourceTitle": "Последний источник удалить нельзя — установке нужен один вход",
   "sources.latencyMs": "Задержка (мс)",
+  "sources.listenerDegraded": "Привязан частично",
   "sources.loadFailed": "Не удалось загрузить источники",
   "sources.loading": "Загрузка источников…",
   "sources.loss": "потери",

@@ -88,7 +88,7 @@ func (s *Server) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 	// has the password, and a token they mint keeps working after the password
 	// is changed. The alert carries the name and not the prefix; see
 	// auditAPITokenCreated.
-	s.publishAudit(auditAPITokenCreated(token.Name, s.clientIP(r)))
+	s.publishAudit(auditAPITokenCreated(token.Name, token.Scope, s.clientIP(r)))
 
 	// The only response that ever carries the plaintext. Nothing stores it,
 	// so a client that drops this field has to start over.

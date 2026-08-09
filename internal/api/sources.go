@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
@@ -77,6 +78,17 @@ type sourceView struct {
 	// a UI that showed it as configured-and-fine would be lying about why
 	// nothing arrives.
 	Running bool `json:"running"`
+	// ListenerHealth is the THIRD state between bound and absent, and it is
+	// here because TokenEnforced and Running are both booleans derived from a
+	// listener that can be half up.
+	//
+	// A wildcard SRT listener binds one socket per address family and survives
+	// one of them failing -- deliberately, because a container without IPv6 is
+	// a legitimate deployment. Everything on this card then reported the source
+	// as running with its token enforced, which is true for the family that
+	// bound and a flat lie to the operator whose encoder is on the other one.
+	// Omitted from the JSON when there is nothing to say. See #105.
+	ListenerHealth *engine.ListenerHealth `json:"listenerHealth,omitempty"`
 }
 
 func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
@@ -94,6 +106,15 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 	// being held by something else says nothing about 6000.
 	tokenEnforced := (src.Ingest.Mode == db.IngestSRT || src.Ingest.Mode == db.IngestRTMP) &&
 		s.mgr != nil && s.mgr.ListenerBound(src.Ingest.Mode)
+	// Reported beside tokenEnforced rather than folded into it: a half-bound
+	// listener DOES enforce the token for everyone who can reach it, so turning
+	// that boolean off would answer a different question wrongly. See #105.
+	var health *engine.ListenerHealth
+	if s.mgr != nil {
+		if h := s.mgr.ListenerHealth(src.Ingest.Mode); h.State != "" {
+			health = &h
+		}
+	}
 	// The ports are install-wide, so the publish URL comes from the settings
 	// rather than from the source. Defaults on a read failure: a URL with the
 	// wrong port is more useful than no URL at all, and the Sources page is
@@ -109,15 +130,16 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
 	return sourceView{
-		Publishing:    publishing,
-		Link:          link,
-		RTMPLink:      rtmpLink,
-		Source:        src,
-		PublishURLs:   publishURLs(src, listeners),
-		IsDefault:     src.ID == defaultID,
-		TokenEnforced: tokenEnforced,
-		LegacyRTMPKey: legacyKey,
-		Running:       s.mgr != nil && s.mgr.Engine(src.ID) != nil,
+		Publishing:     publishing,
+		Link:           link,
+		RTMPLink:       rtmpLink,
+		Source:         src,
+		PublishURLs:    publishURLs(src, listeners),
+		IsDefault:      src.ID == defaultID,
+		TokenEnforced:  tokenEnforced,
+		LegacyRTMPKey:  legacyKey,
+		Running:        s.mgr != nil && s.mgr.Engine(src.ID) != nil,
+		ListenerHealth: health,
 	}
 }
 
