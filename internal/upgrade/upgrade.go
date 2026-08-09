@@ -228,9 +228,20 @@ func Stage(binary, staged, wantHex string) error {
 	if err := Verify(staged, wantHex); err != nil {
 		return err
 	}
-	// Executable before it is in place, so the moment after the rename is a
-	// moment in which the service could actually start.
-	if err := os.Chmod(staged, 0o755); err != nil {
+	// PRESERVE THE MODE THE INSTALL ALREADY HAD, rather than asserting one.
+	//
+	// Hardcoding 0o755 was both a Sonar S2612 finding and, more importantly,
+	// wrong: an operator who deliberately installed the binary 0o750 does not
+	// expect an upgrade to widen it to world-executable. The live file is the
+	// authority on what mode this install uses, so the replacement inherits it.
+	//
+	// Applied before the rename, so the instant after it is one in which the
+	// service could actually start.
+	mode, err := liveMode(binary)
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod(staged, mode); err != nil {
 		return err
 	}
 	prev := PreviousPath(binary)
@@ -247,6 +258,12 @@ func Stage(binary, staged, wantHex string) error {
 
 // Rollback puts the previous binary back. The caller restarts.
 func Rollback(binary string) error {
+	// Read before anything moves: after the swap the live path holds the file
+	// that was owner-only, and its mode is not the one to restore.
+	mode, err := liveMode(binary)
+	if err != nil {
+		return err
+	}
 	prev := PreviousPath(binary)
 	if _, err := os.Stat(prev); err != nil {
 		return errors.New("there is no previous binary to roll back to")
@@ -262,10 +279,10 @@ func Rollback(binary string) error {
 		os.Remove(tmp)
 		return err
 	}
-	// Back to the live mode. The backup was kept owner-only; the thing now at
-	// the binary path has to be executable by whoever runs the service, which
-	// is not necessarily the account that took the backup.
-	if err := os.Chmod(binary, 0o755); err != nil {
+	// Back to the live mode. The backup was kept owner-only, so the file now at
+	// the binary path would not be executable by whoever runs the service --
+	// and the version being rolled back TO is the one moment that must work.
+	if err := os.Chmod(binary, mode); err != nil {
 		return err
 	}
 	return os.Rename(tmp, prev)
@@ -279,6 +296,22 @@ func Rollback(binary string) error {
 // running as the same user -- so world read and execute on it buys nothing and
 // widens what a local account can reach. Sonar's S2612 flagged this and it was
 // right to.
+// liveMode is the permission bits the installed binary currently carries, with
+// a floor of owner-executable.
+//
+// The floor exists because the alternative is an upgrade that silently produces
+// a binary the service cannot start. If the live file is somehow not executable
+// the install is already broken, and refusing to make the replacement runnable
+// would turn that into an outage at exactly the wrong moment.
+func liveMode(binary string) (os.FileMode, error) {
+	fi, err := os.Stat(binary)
+	if err != nil {
+		return 0, err
+	}
+	m := fi.Mode().Perm()
+	return m | 0o100, nil
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {

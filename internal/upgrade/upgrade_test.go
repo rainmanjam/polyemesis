@@ -257,3 +257,52 @@ func TestRollbackRestoresTheExecutableMode(t *testing.T) {
 			"is the one moment that must work", m)
 	}
 }
+
+// An upgrade must not WIDEN the mode an operator chose.
+//
+// Hardcoding 0o755 meant an install deliberately locked to 0o750 came back
+// world-executable after the first upgrade. The live file is the authority on
+// what this install uses.
+func TestAnUpgradePreservesTheInstalledMode(t *testing.T) {
+	for _, mode := range []os.FileMode{0o755, 0o750, 0o700} {
+		t.Run(mode.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "polyemesis")
+			os.WriteFile(bin, []byte("old"), 0o644)
+			if err := os.Chmod(bin, mode); err != nil {
+				t.Fatal(err)
+			}
+			staged := filepath.Join(dir, "staged")
+			os.WriteFile(staged, []byte("new"), 0o644)
+
+			if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+				t.Fatalf("Stage: %v", err)
+			}
+			st, _ := os.Stat(bin)
+			if got := st.Mode().Perm(); got != mode {
+				t.Errorf("after an upgrade the binary is %o, want the installed %o -- "+
+					"an upgrade must not change who can run it", got, mode)
+			}
+		})
+	}
+}
+
+// A live file that is somehow not executable must not produce a replacement
+// that is also not executable: the install is already broken, and refusing to
+// make the new binary runnable turns that into an outage.
+func TestAnUnexecutableInstallStillYieldsARunnableBinary(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("old"), 0o600)
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("new"), 0o644)
+
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	st, _ := os.Stat(bin)
+	if st.Mode().Perm()&0o100 == 0 {
+		t.Errorf("binary is %o and not owner-executable; the service could not start it",
+			st.Mode().Perm())
+	}
+}
