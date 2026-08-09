@@ -586,13 +586,34 @@ else
   # DECODE timestamps are the ones that must never go backwards, and they are
   # what a receiving platform's demuxer trips over. Measured against the same
   # file: 268 backwards PTS steps, 0 backwards DTS steps.
-  back=$(ffprobe -v error -select_streams v -show_entries packet=dts_time \
+  # REPORT THE STEP, NOT ONLY THE COUNT.
+  #
+  # This check used to print a bare number, and issue #126 is the cost of that:
+  # the fault has appeared under two unrelated timing changes over several weeks
+  # and every occurrence recorded the same single digit, so no run could be
+  # compared with any other. Where the step lands and how big it is are the two
+  # facts that separate the candidate mechanisms -- a straggler from the
+  # outgoing feed arriving after the incoming one has started is a small step at
+  # a switch, and a feed republishing from zero is a large one at the same
+  # place. One line per step turns the next occurrence into evidence.
+  dtsreport=$(ffprobe -v error -select_streams v -show_entries packet=dts_time \
          -of csv=p=0 "$OUTFILE" 2>/dev/null |
-         awk -F, 'BEGIN{prev=-1e9;n=0} {if ($1=="N/A") next; t=$1+0; if (t < prev - 0.001) n++; prev=t} END{print n+0}')
+         awk -F, 'BEGIN{prev=-1e9;n=0;i=0}
+           {if ($1=="N/A") next; i++; t=$1+0;
+            if (t < prev - 0.001) {
+              n++
+              printf "step %d at packet %d: %.3f -> %.3f, back %.3fs\n", n, i, prev, t, prev-t
+            }
+            prev=t}
+           END{printf "COUNT %d\n", n+0}')
+  back=$(printf '%s\n' "$dtsreport" | awk '/^COUNT /{print $2}')
   if [ "${back:-1}" -eq 0 ]; then
     ok "no backwards decode timestamp across any switch in the run"
   else
     bad "$back backwards DTS step(s) — a platform drops the connection on these"
+    printf '%s\n' "$dtsreport" | grep -v '^COUNT ' | while IFS= read -r line; do
+      note "$line"
+    done
   fi
 
   # The switch must be visible IN THE BYTES, not only in the status field. The
