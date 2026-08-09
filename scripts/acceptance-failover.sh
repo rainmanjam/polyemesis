@@ -596,9 +596,14 @@ else
   # outgoing feed arriving after the incoming one has started is a small step at
   # a switch, and a feed republishing from zero is a large one at the same
   # place. One line per step turns the next occurrence into evidence.
-  dtsreport=$(ffprobe -v error -select_streams v -show_entries packet=dts_time \
-         -of csv=p=0 "$OUTFILE" 2>/dev/null |
-         awk -F, 'BEGIN{prev=-1e9;n=0;i=0}
+  # THE PACKET LIST IS CAPTURED ONCE, to a file. The threshold assertion below
+  # and the per-seam table under it both read it, and probing the file twice
+  # would let the two halves of one report disagree about what they measured.
+  # It is also the artifact a failed CI run needs: the mkv is uploaded now, but
+  # this is the derived form anybody actually reads.
+  ffprobe -v error -select_streams v -show_entries packet=dts_time \
+         -of csv=p=0 "$OUTFILE" 2>/dev/null > dts.csv
+  dtsreport=$(awk -F, 'BEGIN{prev=-1e9;n=0;i=0}
            {if ($1=="N/A") next; i++; t=$1+0;
             if (t < prev - 0.001) {
               n++
@@ -613,7 +618,7 @@ else
             }
             prev=t}
            END{printf "COUNT %d\n", n+0
-               if (worst > 0) printf "NEARMISS at packet %d: %.6f -> %.6f, back %.6fs\n", worsti, worstp, worstt, worst}')
+               if (worst > 0) printf "NEARMISS at packet %d: %.6f -> %.6f, back %.6fs\n", worsti, worstp, worstt, worst}' dts.csv)
   back=$(printf '%s\n' "$dtsreport" | awk '/^COUNT /{print $2}')
   if [ "${back:-1}" -eq 0 ]; then
     ok "no backwards decode timestamp across any switch in the run"
@@ -632,6 +637,83 @@ else
       note "$line"
     done
   fi
+
+  # THE SEAM TABLE, AND IT PRINTS ON PASS AS WELL AS FAIL.
+  #
+  # The count above is one number for the whole file, and #126 has now been
+  # looked at through that number for several weeks without it settling
+  # anything. It cannot distinguish "one sub-millisecond step somewhere" from "a
+  # sub-millisecond step at EVERY switch", and those two are the leading
+  # hypothesis and its refutation: if a small backward step is present at every
+  # seam all the time, then a timing change that widens it merely pushes an
+  # existing step over the threshold, and the offset was never the cause.
+  #
+  # So each switch gets a row, from the ledger the engine now writes
+  # (internal/engine/selector.go, logSeam). Every row is available on a run that
+  # PASSES, which is the whole point -- there is no need to wait for another
+  # failure to collect it.
+  #
+  # THE ONE ASSUMPTION, stated rather than hidden: a step's DTS is read on the
+  # same axis as a feed's offset, both being seconds since the tier epoch that
+  # "source selector started" now records. That holds while the destination
+  # carries the selector's timeline through unchanged, which is exactly what
+  # -output_ts_offset is for and what the assertion above is testing. If the
+  # attribution ever looks impossible -- steps landing before the first seam, or
+  # tier offsets nowhere near the file's own span -- suspect this first, and note
+  # that the TOTAL count in the header does not depend on it.
+  grep 'msg="feed seam"' server.log > seams.txt 2>/dev/null
+  epoch=$(awk '/msg="source selector started"/{
+            for (i=1;i<=NF;i++) if ($i ~ /^tierEpoch=/) { print substr($i,11); exit }}' server.log)
+  [ -n "${epoch:-}" ] && note "tier epoch $epoch (feed offsets and packet DTS are both seconds from here)"
+  awk '
+      # First file: one line per handover, as slog key=value.
+      #
+      # Selected by FILENAME and NOT by the usual FNR==NR idiom, which is wrong
+      # in exactly the case that matters here: when the ledger is EMPTY, NR and
+      # FNR agree on the second file too, and every packet timestamp is read as
+      # a handover. A run with no seam lines then reported thirteen switches from
+      # a thirteen-packet fixture. Caught by the seeded fixture this awk was
+      # checked against before it went anywhere near CI.
+      FILENAME=="seams.txt" {
+        split("", kv)
+        for (i=1;i<=NF;i++) { p=index($i,"="); if (p>1) kv[substr($i,1,p-1)]=substr($i,p+1) }
+        n++
+        at[n]=kv["inOffset"]+0; wall[n]=kv["time"]
+        from[n]=kv["outKind"]; to[n]=kv["inKind"]
+        tear[n]=kv["teardownMs"]+0; pred[n]=kv["predictedStepMs"]+0
+        dead[n]=kv["stopDeadline"]
+        next
+      }
+      # Second file: the packet DTS list, one value per line.
+      $1=="N/A" { next }
+      { t=$1+0
+        # EVERY backward step, at any magnitude. The threshold belongs to the
+        # assertion; a table that applied it too would answer the question it
+        # was written to answer with the number it was written to replace.
+        if (have && t<prev) {
+          b=0
+          for (j=1;j<=n;j++) if (at[j]<=prev) b=j
+          cnt[b]++
+          if (prev-t > worst[b]) { worst[b]=prev-t; wat[b]=prev }
+        }
+        prev=t; have=1 }
+      END {
+        if (n==0) { print "SEAMS none in server.log -- either no switch happened or the build predates the ledger"; exit }
+        for (j=0;j<=n;j++) tot+=cnt[j]
+        printf "SEAMS %d handover(s); %d backward DTS step(s) of any magnitude in the file\n", n, tot+0
+        if (cnt[0]>0) printf "  before seam 1: %d step(s), worst %.6fs at dts %.3f\n", cnt[0], worst[0], wat[0]
+        for (j=1;j<=n;j++) {
+          printf "  seam %d %s->%s at tier %.3fs (%s): teardown %.3fms, predicted %+.3fms, %d step(s)",
+                 j, from[j], to[j], at[j], wall[j], tear[j], pred[j], cnt[j]+0
+          if (cnt[j]>0)
+            printf ", worst %.6fs at dts %.3f, observed-predicted %+.3fms",
+                   worst[j], wat[j], worst[j]*1000 - pred[j]
+          if (dead[j]=="true") printf ", STOP DEADLINE -- the old feed may still have been writing"
+          printf "\n"
+        }
+      }' seams.txt dts.csv | while IFS= read -r line; do
+    note "$line"
+  done
 
   # The switch must be visible IN THE BYTES, not only in the status field. The
   # publisher sends a 1 kHz tone and the slate is silent, so a file that carries
