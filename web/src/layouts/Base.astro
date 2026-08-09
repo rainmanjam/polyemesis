@@ -54,10 +54,11 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
       license: "https://spdx.org/licenses/MIT.html",
       softwareRequirements: "FFmpeg 6.0 or newer, built with libsrt for multitrack SRT ingest",
       description:
-        "Self-hosted live restreaming server with per-destination multichannel " +
-        "audio routing. One SRT ingest carrying multiple audio tracks; each " +
-        "destination receives its own mix. Video is stream-copied by default; " +
-        "optional shared renditions re-encode it.",
+        "Self-hosted live restreaming and multistreaming server with " +
+        "per-destination multichannel audio routing. One SRT ingest carrying " +
+        "the split audio tracks from OBS; each destination receives its own " +
+        "mix, built here rather than selected upstream. Video is stream-copied " +
+        "by default; optional shared renditions re-encode it.",
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       isAccessibleForFree: true,
     })} />
