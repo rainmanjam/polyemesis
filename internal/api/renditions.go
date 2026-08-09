@@ -353,7 +353,7 @@ func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 		// two behaviours share a URL and only one of them is the problem.
 		// Renaming it to a POST would be the tidier shape and is a UI change
 		// this security fix has no business making.
-		if readScopeCannotSeePublishTokens(r) {
+		if isReadScopedToken(r) {
 			writeError(w, http.StatusForbidden,
 				"re-detecting hardware runs test encodes and rewrites this install's "+
 					"encoder capabilities; that needs a token with the \"admin\" scope")

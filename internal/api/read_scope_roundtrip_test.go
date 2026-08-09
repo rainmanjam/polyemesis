@@ -26,7 +26,7 @@ import (
 // which is why blanking VALUES rather than reshaping the body is safe.
 
 func TestSettingsSurviveAReadModifyWriteFromTheConsole(t *testing.T) {
-	h, _, sign, _ := plantedServer(t)
+	h, _, sign := plantedServer(t)
 
 	get := func() map[string]any {
 		t.Helper()
@@ -81,8 +81,7 @@ func TestSettingsSurviveAReadModifyWriteFromTheConsole(t *testing.T) {
 }
 
 func TestDestinationSurvivesAReadModifyWriteFromTheConsole(t *testing.T) {
-	h, _, sign, destID := plantedServer(t)
-	_ = destID
+	h, _, sign := plantedServer(t)
 
 	get := func() map[string]any {
 		t.Helper()

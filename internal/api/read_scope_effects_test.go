@@ -36,11 +36,10 @@ import (
 //	OAuth token, so they are GETs that write the database and spend somebody
 //	else's quota.
 func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
-	h, _, sign, destID := plantedServer(t)
+	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
 	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
 
-	_ = destID
 	cases := []struct {
 		method string
 		path   string
@@ -98,7 +97,7 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 // The two POSTs that remain on the allowlist are asserted alongside, so a
 // change that emptied the list to make this pass would fail here instead.
 func TestExpertPreviewIsNoLongerOnTheReadScopeAllowlist(t *testing.T) {
-	h, _, sign, _ := plantedServer(t)
+	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
 
 	r := jsonRequest(t, http.MethodPost, "/api/v1/routing/compile",
@@ -133,7 +132,7 @@ func TestExpertPreviewIsNoLongerOnTheReadScopeAllowlist(t *testing.T) {
 // segments on disk -- because it proves the request reached the file server
 // rather than being turned away at the door.
 func TestHLSPreviewIsSessionOnly(t *testing.T) {
-	h, _, sign, _ := plantedServer(t)
+	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
 	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
 
@@ -180,7 +179,7 @@ func TestHLSPreviewIsSessionOnly(t *testing.T) {
 // this needs its own test: the route-level denial list would not have caught a
 // regression here.
 func TestEncoderRedetectNeedsAdmin(t *testing.T) {
-	h, _, sign, _ := plantedServer(t)
+	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
 
 	plain := jsonRequest(t, http.MethodGet, "/api/v1/encoders", nil)

@@ -51,6 +51,22 @@ import (
 // throughout this review precisely because it calls it, and GET /system was not
 // because it did not.
 
+// isReadScopedToken reports whether this request's principal is a bearer token
+// that is not admin -- the one principal any of this applies to.
+//
+// The same predicate as readScopeCannotSeePublishTokens, under the name that
+// says what it TESTS rather than what its first caller did with the answer. It
+// is used where the consequence is not about publish tokens at all: the
+// hardware re-detect gate on GET /encoders, for one, which is about spawning
+// processes.
+//
+// Anything that is not admin counts, including a scope string this build does
+// not recognise. A value from a newer schema or a hand-edited row must narrow
+// what a credential can do, never widen it.
+func isReadScopedToken(r *http.Request) bool {
+	return readScopeCannotSeePublishTokens(r)
+}
+
 // maskURL masks the credential parts of a URL, leaving an empty string empty.
 //
 // The empty check is not cosmetic: alerts.RedactURL turns "" into "[redacted]",

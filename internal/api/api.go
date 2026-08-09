@@ -878,6 +878,7 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 // is denied to read tokens, so the failure mode of forgetting to maintain it is
 // a monitoring script getting a 403 that somebody notices, never a write
 // getting through unannounced.
+//
 // The expert preview route USED TO BE ON THIS LIST and is deliberately not any
 // more. Its response is the resolved FFmpeg argv, which contains the
 // destination's stream key in the output target -- so a read token reached the
@@ -919,8 +920,10 @@ var readScopeWritePatterns = map[string]bool{
 // allowlist above, and that asymmetry is deliberate rather than sloppy:
 // forgetting to add a route here leaves a read token reaching something it
 // perhaps should not, so the recurrence guard for this half is a TEST that
-// drives every route and counts spawns, dials and writes, not a promise to
-// maintain a list. See TestReadTokenGETsCauseNoSideEffects.
+// drives each of these through the real router and asserts the 403 -- paired
+// with the same route reaching an admin, so a change that merely broke the
+// route for everybody cannot pass. See
+// TestReadTokenIsDeniedTheRoutesThatAreNotReads.
 //
 // GET /playout/poster.jpg is considered and deliberately ABSENT. It does exec
 // FFmpeg, but it is self-throttled -- a 10-second cache under a mutex and an

@@ -64,7 +64,7 @@ func allSentinels() []string {
 // serve /system, /status or the destination routes at all, and a harness that
 // silently 500s on the routes under test would report a clean sweep — which is
 // the fail-open shape this whole exercise exists to refuse.
-func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request), int64) {
+func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	t.Helper()
 	h, store, sign := sourceServer(t)
 
@@ -111,12 +111,23 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request), int
 	if err != nil {
 		t.Fatalf("create destination: %v", err)
 	}
-	if _, err := store.CreateDestination(&db.Destination{
+	radio, err := store.CreateDestination(&db.Destination{
 		Name: "radio", Kind: db.DestAudio,
 		URL:          "icecast://source:" + sentinelIcecastPwd + "@radio.example:8000/live",
 		AudioBitrate: 128, Enabled: false,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("create audio destination: %v", err)
+	}
+	// The sweep and the round-trip tests address these by literal URL, because
+	// the reconciliation below compares chi PATTERNS and a path built from a
+	// variable is harder to read against the route table. Assert the ids rather
+	// than assume them, so a fixture change that renumbers them fails here
+	// instead of turning every /destinations/{id} assertion into a 404 nobody
+	// reads carefully.
+	if dest.ID != 1 || radio.ID != 2 {
+		t.Fatalf("fixture destinations are %d and %d, but the tests address 1 and 2",
+			dest.ID, radio.ID)
 	}
 
 	s := serverUnderTest(t, h)
@@ -149,7 +160,7 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request), int
 		t.Fatalf("reconcile so the engine sees the planted settings: %v", err)
 	}
 
-	return h, store, sign, dest.ID
+	return h, store, sign
 }
 
 // bearer stamps a token onto a request the way a script would.
@@ -219,7 +230,7 @@ func leakRoutes() []string {
 
 // TestReadTokenReceivesNoCredentialOnAnyRoute is the disclosure guard.
 func TestReadTokenReceivesNoCredentialOnAnyRoute(t *testing.T) {
-	h, _, sign, _ := plantedServer(t)
+	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
 
 	for _, path := range leakRoutes() {
@@ -251,7 +262,7 @@ func TestReadTokenReceivesNoCredentialOnAnyRoute(t *testing.T) {
 // day it lands, which is when its author is still holding the context to
 // classify it.
 func TestReadTokenSweepCoversEveryReachableGET(t *testing.T) {
-	h, _, _, _ := plantedServer(t)
+	h, _, _ := plantedServer(t)
 	s := serverUnderTest(t, h)
 
 	// Reasons, not just names. An entry with no reason is how a list like this
@@ -384,7 +395,7 @@ func patternOf(t *testing.T, s *Server, path string) string {
 // front. Both principals are asserted, because they take different code paths
 // -- a session has no token at all, an admin has one whose scope is checked.
 func TestSessionAndAdminStillReceiveEveryCredential(t *testing.T) {
-	h, _, sign, _ := plantedServer(t)
+	h, _, sign := plantedServer(t)
 	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
 
 	want := []struct {
@@ -435,7 +446,7 @@ func TestSessionAndAdminStillReceiveEveryCredential(t *testing.T) {
 // builds srt://host:port?...&passphrase=<cleartext> out of settings that are
 // themselves redacted elsewhere.
 func TestSystemIngestURLIsMaskedForReadTokensOnly(t *testing.T) {
-	h, store, sign, _ := plantedServer(t)
+	h, store, sign := plantedServer(t)
 
 	st, err := store.GetSettings()
 	if err != nil {
@@ -491,7 +502,7 @@ func TestSystemIngestURLIsMaskedForReadTokensOnly(t *testing.T) {
 // direction: a session's response, stored under the URL alone, replayed to the
 // read token the redaction exists for.
 func TestPrincipalVaryingResponsesAreNotCacheable(t *testing.T) {
-	h, _, sign, _ := plantedServer(t)
+	h, _, sign := plantedServer(t)
 
 	for _, path := range []string{
 		"/api/v1/sources", "/api/v1/sources/1", "/api/v1/settings",
