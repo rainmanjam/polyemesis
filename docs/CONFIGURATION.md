@@ -54,7 +54,15 @@ without editing anything.
 -ffprobe   path to the ffprobe binary
 -log       debug | info | warn | error   (default "info")
 -version   print the version and exit
+
+-reset-admin  set a new admin password and sign out every session, then exit
 ```
+
+`-reset-admin` is for an operator who has shell access and no way in through the
+UI. It asks twice without echoing, and it is safe to run against a live server:
+it touches only the database and exits before anything binds a port. Piping the
+password twice scripts it. See the FAQ for why deleting the row from the users
+table is the wrong way to do this.
 
 `-log debug` is the one to reach for when something is wrong. It logs each
 child's full command line as it spawns, which is usually the fastest route to
