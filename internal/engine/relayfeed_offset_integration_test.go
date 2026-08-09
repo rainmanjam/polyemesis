@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,17 @@ func offsetBenchTools(t *testing.T) (ffmpegBin, ffprobeBin string) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("binds UDP and encodes real video")
+	}
+	// NOT ON WINDOWS, for two independent reasons and neither of them is
+	// squeamishness about the platform. Process.Signal cannot deliver SIGTERM
+	// there, so every hop would fall through to the kill path and the clean-exit
+	// half of the measurement would be untestable. And the Windows job is already
+	// the one at its timeout ceiling -- see #103 -- so adding half a minute of
+	// video encoding to it buys a duplicate answer at the cost of the build
+	// everyone else is waiting on. What this measures is FFmpeg's behaviour, and
+	// FFmpeg is the same binary line on all three.
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGTERM is not deliverable on Windows and that job is already at its ceiling (#103)")
 	}
 	var err error
 	if ffmpegBin, err = exec.LookPath("ffmpeg"); err != nil {
@@ -200,8 +212,12 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	_ = feed.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-progDone:
-	case <-time.After(5 * time.Second):
-		t.Log("the hop did not exit on SIGTERM within 5s; killing it")
+	// Two seconds rather than the supervisor's own deadline: the measured
+	// behaviour is that it does not exit at all on this input, so a longer wait
+	// only makes the suite slower. The wait exists so that a future FFmpeg which
+	// DOES exit is seen doing it rather than killed before it can.
+	case <-time.After(2 * time.Second):
+		t.Log("the hop did not exit on SIGTERM within 2s; killing it")
 		_ = feed.Process.Kill()
 		<-progDone
 	}
