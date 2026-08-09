@@ -187,7 +187,7 @@ import SignalGrid from "../components/SignalGrid.astro";
           track 3 is your microphone.
         </p>
         <p>
-          Every live platform accepts exactly one stereo audio stream. So
+          Every live platform accepts exactly one stereo pair. So
           normally you must choose one mix for everyone — and take a copyright
           strike on YouTube, or send Twitch a broadcast with no music — or run
           several encoders and several uploads off one machine and one
@@ -283,9 +283,9 @@ import SignalGrid from "../components/SignalGrid.astro";
         {
           [
             ["SRT carries every audio track", "One ingest, up to 32 tracks, and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily — so the feature this product exists for is the one with the most road behind it. RTMP and Enhanced RTMP are fully supported alongside it."],
-            ["Your picture is never re-encoded", "Video is stream-copied end to end, so audio routing costs almost nothing and the frames a platform receives are the frames your encoder made. Shared renditions re-encode only when you ask for one, and the cost of that encode is shown before it starts."],
-            ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with nothing leaving your network and no per-destination pricing."],
-            ["Built for the operator at the desk", "One account and full control — no permission model to configure and none to get wrong. Every state the server knows is on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
+            ["Routing audio never touches your picture", "Video is stream-copied end to end, so the frames a platform receives are the frames your encoder made, and the cost of routing scales with audio rather than resolution. Shared renditions re-encode video only when you ask for one, and the cost of that encode is shown before it starts."],
+            ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with no hosted service behind it and no per-destination pricing — the only connections it makes are the ones you configure."],
+            ["Built for the operator at the desk", "One account and full control — no permission model to configure and none to get wrong. Live ingest, destination and process state are on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
           ].map(([t, d]) => (
             <div class="py-4">
               <dt class="text-[15px] font-medium text-fg">{t}</dt>

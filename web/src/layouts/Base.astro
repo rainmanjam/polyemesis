@@ -47,7 +47,7 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
       name: "polyemesis",
       applicationCategory: "MultimediaApplication",
       applicationSubCategory: "Live video streaming server",
-      operatingSystem: "Linux, macOS, Windows, Docker",
+      operatingSystem: "Linux, macOS, Windows",
       url: "https://polyemesis.com",
       downloadUrl: "https://github.com/rainmanjam/polyemesis/releases/latest",
       codeRepository: "https://github.com/rainmanjam/polyemesis",
@@ -56,7 +56,8 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
       description:
         "Self-hosted live restreaming server with per-destination multichannel " +
         "audio routing. One SRT ingest carrying multiple audio tracks; each " +
-        "destination receives its own mix. Video is copied, never re-encoded.",
+        "destination receives its own mix. Video is stream-copied by default; " +
+        "optional shared renditions re-encode it.",
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       isAccessibleForFree: true,
     })} />
