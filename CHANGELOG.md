@@ -57,16 +57,19 @@ respawn stopped ignoring its own backoff.
   Nothing else at that seam changed in this release. A second change was made
   alongside this one — moving `-output_ts_offset` from the switch decision to
   the feed's actual start, on the same reasoning — and was **reverted before
-  release** after measurement showed it caused the fault it was meant to
-  prevent: a backwards decode timestamp at the seam in 3 runs of 12, against 0
-  in 12 both before the change and after reverting it. A platform drops the
-  connection on a backwards DTS, which is the failover tier failing at the one
-  thing it exists for.
+  release**. With it, the failover suite reported a backwards decode timestamp
+  at a switch in 3 runs of 12; without it, 0 in 12, both before the change and
+  after reverting it. A platform drops the connection on a backwards DTS, which
+  is the failover tier failing at the one thing it exists for, so the
+  configuration with none of them is the one that ships.
 
-  The bug that change described had never been observed; it was derived from
-  reading the code. The real one behind issue #126 is still open, and the seam
-  now carries the measurements alongside the code so the next attempt starts
-  from numbers rather than from an argument.
+  Whether that change CREATED those steps or merely made existing ones large
+  enough to cross the suite's one-millisecond threshold is not settled, and the
+  distinction matters: one is a bug introduced, the other a bug revealed. Issue
+  #126 stays open for it and the check now reports the size of every step,
+  including the ones too small to fail on. What is settled is the direction, and
+  the bug the reverted change described — a backwards step caused by a slow
+  teardown — was never observed at all.
 
 ### Internal
 
