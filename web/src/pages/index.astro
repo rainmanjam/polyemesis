@@ -30,7 +30,6 @@ const features = [
     d: "A source selector that switches without restarting a single destination. Off by default: with it off the pipeline is byte-for-byte what it was before.",
   },
 ];
-import SignalGrid from "../components/SignalGrid.astro";
 ---
 
 <Base
@@ -40,7 +39,7 @@ import SignalGrid from "../components/SignalGrid.astro";
 >
   {/* ---------------------------------------------------------------- hero */}
   <section class="relative overflow-hidden border-b border-line">
-    <SignalGrid />
+    <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
     <div class="wrap relative grid gap-12 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
       <div class="max-w-xl">
         <span class="chip rise rise-1">
@@ -300,7 +299,7 @@ import SignalGrid from "../components/SignalGrid.astro";
   {/* ----------------------------------------------------------------- cta */}
   <section class="wrap py-20 sm:py-28" data-reveal>
     <div class="card relative overflow-hidden px-6 py-14 text-center sm:px-12">
-      <SignalGrid />
+      <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
       <div class="relative">
         <h2 class="text-balance text-3xl font-medium sm:text-4xl">
           One binary. One config file. Your hardware.
