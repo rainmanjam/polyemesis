@@ -8,6 +8,84 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-09
+
+An operator-facing release: the server now tells you an update exists and what a
+restart would cost, a rendition stopped doing work it threw away, and a failover
+respawn stopped ignoring its own backoff.
+
+### Added
+
+- **The server tells you when there is a newer release, and what stopping would
+  interrupt.** A banner in the UI, translated across all fifteen locales, and a
+  version endpoint behind it.
+
+  The second half is the part that matters. polyemesis is not a tool you run and
+  close; it is the thing carrying a broadcast, and restarting it drops every
+  destination mid-stream. So the check reports what is **on air** — how many
+  encoders are publishing, how many destinations are live, whether a recording is
+  running, and which programmes those belong to — rather than a yes/no on whether
+  an upgrade is allowed. "Cannot upgrade" is useless on its own; "3 destinations
+  are live and a recording is running" lets an operator decide it is fine.
+
+  A destination that is reconnecting counts as live, because from the desk it is
+  mid-broadcast, and restarting underneath it turns a recoverable blip into a
+  dropped show.
+
+### Changed
+
+- **A rendition that drops frames now drops them before scaling, not after.**
+  `-r` decimates at the encoder, which is after the filter graph, so a 60→30
+  rendition scaled all sixty frames of the source and then discarded half of
+  them. Every one of those scales was work spent on a frame that never reached
+  the encoder.
+
+  Measured on a 6-core Haswell VPS, 4K60 → 1080p30 at veryfast/6000k: 2.13×
+  realtime before, 2.49× after — **17% more headroom** on the case that needed it
+  most.
+
+### Fixed
+
+- **The failover respawn backoff is measured from the feed's start, not from the
+  decision to switch.** The timestamp recorded as a feed's start time was taken
+  before a teardown that blocks for as long as the outgoing process needs to
+  exit — up to twelve seconds. After a slow teardown the backoff interval had
+  therefore already elapsed before the replacement had run for a single second,
+  so a feed that failed immediately was respawned on every 500 ms sweep instead
+  of backing off.
+
+  Nothing else at that seam changed in this release. A second change was made
+  alongside this one — moving `-output_ts_offset` from the switch decision to
+  the feed's actual start, on the same reasoning — and was **reverted before
+  release**. With it, the failover suite reported a backwards decode timestamp
+  at a switch in 3 runs of 12; without it, 0 in 12, both before the change and
+  after reverting it. A platform drops the connection on a backwards DTS, which
+  is the failover tier failing at the one thing it exists for, so the
+  configuration with none of them is the one that ships.
+
+  Whether that change CREATED those steps or merely made existing ones large
+  enough to cross the suite's one-millisecond threshold is not settled, and the
+  distinction matters: one is a bug introduced, the other a bug revealed. Issue
+  #126 stays open for it and the check now reports the size of every step,
+  including the ones too small to fail on. What is settled is the direction, and
+  the bug the reverted change described — a backwards step caused by a slow
+  teardown — was never observed at all.
+
+### Internal
+
+- **Groundwork for in-place upgrades, not yet reachable.** A new `internal/upgrade`
+  package works out how an install was made — container, systemd unit, or a
+  binary someone runs themselves — and refuses to act where acting is useless or
+  reckless. For the one case it can act on it stages a checksum-verified binary
+  beside the running one, keeping the outgoing one for rollback, ordered so that
+  every state the process can be killed into leaves a runnable box.
+
+  Nothing calls it yet. There is no endpoint and no button, so this release
+  changes no upgrade behaviour; it is listed here because it exists in the tree
+  and because the next release is expected to wire it. Four adversarial review
+  rounds went into it, which is the appropriate amount for code whose failure
+  mode is a server with no runnable binary.
+
 ## [0.5.0] — 2026-08-08
 
 The first release with the core review in it, and the version number is
@@ -1179,7 +1257,9 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rainmanjam/polyemesis/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rainmanjam/polyemesis/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...v0.2.0
