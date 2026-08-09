@@ -132,6 +132,114 @@ for (const f of pages) {
   }
 }
 
+/* 6. The comparison table is published three times and the copies must agree.
+ *
+ * docs/COMPARISON.md, /comparison and /features each carry their own copy of
+ * the capability rows, and that duplication has now drifted three separate
+ * times: the destination cap was corrected on the site and left wrong in the
+ * two documents, the recording row said Restreamer records when their own
+ * tracker says otherwise, and the same row was worded "Runs on your hardware"
+ * in one copy and "Runs on hardware you control" in another. Prose asking
+ * people to keep them in step has not worked once.
+ *
+ * This compares SHIPPED TEXT to SHIPPED TEXT: the rows a visitor's browser
+ * actually renders, against the document those rows claim to come from. It is
+ * deliberately not the anti-pattern in #107 — nothing here greps source code to
+ * infer behaviour, and there is no assertion that passes because a string
+ * happens to appear in a file nobody executes. If the built page says it, this
+ * check reads it from the built page. */
+const COMPARISON_MD = new URL("../../docs/COMPARISON.md", import.meta.url).pathname;
+
+const ENTITIES = {
+  amp: "&", lt: "<", gt: ">", quot: '"', nbsp: " ",
+  mdash: "—", ndash: "–", hellip: "…",
+  lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", "#39": "'",
+};
+
+/* Typography is the whole difficulty here. The Markdown says `**Multitrack
+ * archive** — every…`, the built HTML says `Multitrack archive &#8212; every…`,
+ * and the smart-quote transform turns "Yes" into “Yes” on the way. Normalise
+ * both sides to the same plain lowercase text or this check false-positives on
+ * its first run and gets deleted by the next person. */
+const norm = (s) =>
+  s
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&([a-z]+|#\d+);/gi, (_, e) => ENTITIES[e.toLowerCase()] ?? " ")
+    .replace(/[*`]/g, "")
+    .replace(/[‐-―−]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+const tablesIn = (html) => html.match(/<table[\s\S]*?<\/table>/g) || [];
+const rowsIn = (table) => table.match(/<tr[\s\S]*?<\/tr>/g) || [];
+const cellsIn = (row) => (row.match(/<t[dh][\s\S]*?<\/t[dh]>/g) || []).map(norm);
+
+const comparisonMd = norm(readFileSync(COMPARISON_MD, "utf8"));
+
+/* Rows that exist on the site and deliberately NOT in docs/COMPARISON.md.
+ * The document's capability table is headed "what polyemesis has that none of
+ * them have", and this row is not one of those — Restreamer scores Yes on it
+ * too. It earns its place in the site's table as the reason a reader who does
+ * not care about audio might still be here. Adding a row to this list is fine;
+ * doing it without saying why is not. */
+const siteOnlyRows = new Set([
+  "runs on hardware you control, no per-destination pricing",
+]);
+
+let capabilityRowsChecked = 0;
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  for (const table of tablesIn(html)) {
+    const rows = rowsIn(table);
+    if (!rows.length || !cellsIn(rows[0]).includes("capability")) continue;
+    for (const row of rows.slice(1)) {
+      const label = cellsIn(row)[0];
+      if (!label || siteOnlyRows.has(label)) continue;
+      capabilityRowsChecked++;
+      if (!comparisonMd.includes(label)) {
+        fail.push(
+          `${f}: capability row "${label}" does not appear in docs/COMPARISON.md.\n` +
+          `    The page and the document have drifted. Reword whichever one is wrong ` +
+          `— or, if the row is site-only on purpose, add it to siteOnlyRows here and say why.`,
+        );
+      }
+    }
+  }
+}
+if (!capabilityRowsChecked) {
+  fail.push("no capability table found in the built pages; the COMPARISON.md parity check no longer guards anything");
+}
+
+/* Restreamer's recording cell specifically, because it shipped as a bare "Yes"
+ * for months while datarhei/restreamer#692 — their own open request for exactly
+ * this — sat open since February 2024. A row that is confidently wrong about a
+ * competitor is the one that costs the page its credibility. */
+let recordingRowChecked = false;
+for (const table of tablesIn(readFileSync(join(DIST, "comparison.html"), "utf8"))) {
+  const rows = rowsIn(table);
+  if (!rows.length) continue;
+  const column = cellsIn(rows[0]).indexOf("restreamer");
+  if (column < 0) continue;
+  for (const row of rows.slice(1)) {
+    const cells = cellsIn(row);
+    if (cells[0] !== "recording") continue;
+    recordingRowChecked = true;
+    if (cells[column] === "yes") {
+      fail.push(
+        `comparison.html: Restreamer's recording cell renders as a bare "Yes". ` +
+        `It is an open feature request on their tracker (datarhei/restreamer#692) — ` +
+        `see the footnote in docs/COMPARISON.md.`,
+      );
+    }
+  }
+}
+if (!recordingRowChecked) {
+  fail.push("no Recording row found on the built comparison page; that check no longer guards anything");
+}
+
 if (fail.length) {
   console.error("build checks FAILED:\n" + fail.map((f) => "  - " + f).join("\n"));
   process.exit(1);

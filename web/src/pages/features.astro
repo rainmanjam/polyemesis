@@ -13,7 +13,7 @@ const sections = [
     eyebrow: "Audio routing",
     title: "Choose the tracks, per destination",
     body: [
-      "Checkbox-per-track in simple mode, or a full channel-to-output mix matrix with a gain per cell when you need one input channel in one output channel at a specific level.",
+      "The clean feed to one platform, the full mix to the next, from the same ingest. Checkbox-per-track in simple mode, or a full channel-to-output mix matrix with a gain per cell when you need one input channel in one output channel at a specific level.",
       "Nothing is filtered until a destination asks for it. Track annotations describe the ingest — what track 3 actually is — and save on their own, independent of any destination.",
     ],
     shot: "02-routing.png",
@@ -57,7 +57,8 @@ const sections = [
     eyebrow: "Recording and post",
     title: "The full multitrack archive, stream-copied",
     body: [
-      "Segmented recording that preserves every ingest audio track, with retention by age, total size, and a free-space floor that accounts for files polyemesis did not write.",
+      "Segmented recording that preserves every one of the split audio tracks your encoder sent, with retention by age, total size, and a free-space floor that accounts for files polyemesis did not write.",
+      "That archive is where your own VOD track comes from. Every track is kept unmixed, so the upload you cut afterwards need not carry the music that went out live.",
       "Then a job queue that yields to the live stream: Whisper transcription with full-text search, proxies, thumbnails, and a clipper. A dropped frame is unrecoverable; a transcript arriving an hour later costs only the wait.",
     ],
     shot: "15-recordings.png",
@@ -79,7 +80,7 @@ const sections = [
 
 <Base
   title="Features — SRT multitrack ingest, mix matrix, renditions | polyemesis"
-  description="Per-destination audio routing, a channel-level mix matrix, shared renditions, multitrack recording, and chat moderation across YouTube, Twitch, Kick, Facebook."
+  description="Per-destination routing of your OBS split audio tracks, a channel-level mix matrix, shared renditions, multitrack recording and chat moderation across four platforms."
   path="/features"
 >
   <section class="wrap py-16 sm:py-20">
@@ -146,8 +147,11 @@ const sections = [
         What only polyemesis does.
       </h2>
       <p class="mt-4 max-w-2xl text-sm leading-relaxed text-muted">
-        Against the two tools people actually weigh it against: datarhei
-        Restreamer, the self-hosted standard, and restream.io, the hosted one.
+        Against the two servers people weigh it against: datarhei Restreamer,
+        the self-hosted standard, and restream.io, the hosted one. The OBS
+        plugins most readers already have — obs-multi-rtmp, Aitum Multistream —
+        and MistServer are on the full comparison, where the distinction is that
+        they select an audio track per destination rather than mix one.
       </p>
 
       <div class="mt-8 overflow-x-auto">
@@ -176,7 +180,12 @@ const sections = [
                 ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "Yes", "No", "No"],
                 ["Track annotations — what each incoming track actually is", "Yes", "No", "No"],
                 ["Typed SRT rejections — the publisher is told why it was refused", "Yes", "No", "n/a"],
-                ["Runs on your hardware, no per-destination pricing", "Yes", "Yes", "No"],
+                /* Label kept character-for-character identical to the copy in
+                   comparison.astro. It used to read "Runs on your hardware"
+                   here and "Runs on hardware you control" there, which is the
+                   drift this table has already produced twice — and
+                   check-build.mjs now fails the build if the two disagree. */
+                ["Runs on hardware you control, no per-destination pricing", "Yes", "Yes", "No"],
               ].map(([cap, poly, rs, ri]) => (
                 <tr class="border-b border-line">
                   <td class="py-3 pr-4 leading-relaxed text-fg">{cap}</td>
