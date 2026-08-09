@@ -91,7 +91,31 @@ type sourceView struct {
 	ListenerHealth *engine.ListenerHealth `json:"listenerHealth,omitempty"`
 }
 
-func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
+// readScopeCannotSeePublishTokens reports whether this request's principal must
+// have the source's publish credential withheld.
+//
+// A read-scoped token is promised to be read-only, and a source's token is the
+// one piece of readable state that breaks that promise: the token IS the
+// address on both listeners, so anything holding it can PUBLISH -- inject video
+// into somebody's live programme -- using nothing but a GET it was explicitly
+// allowed to make. "Read-only" would then mean "read-only, plus it can take
+// over your broadcast", which is not a sentence worth shipping.
+//
+// The scope model refuses writes by HTTP method, and that is the right shape
+// for a rule about routes; it cannot see that one GET's response body is itself
+// a credential. This is the exception, and it is handled where the credential
+// is serialised rather than by carving GET /sources out of the read scope --
+// the listing is genuinely useful to a monitoring script, and it stays useful
+// with the secret removed.
+//
+// Session principals and admin tokens are unaffected: the console needs the
+// token to show the operator, and an admin token could rotate it anyway.
+func readScopeCannotSeePublishTokens(r *http.Request) bool {
+	p, ok := principalFrom(r.Context())
+	return ok && p.token != nil && p.token.Scope != db.ScopeAdmin
+}
+
+func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) sourceView {
 	var link *srtserver.LinkStats
 	var rtmpLink *rtmpserver.LinkStats
 	legacyKey := ""
@@ -129,12 +153,30 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 		rtmpLink = rtmpLinkForCard(s.mgr.RTMPLinks(), src.ID)
 		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
+	urls := publishURLs(src, listeners)
+	if readScopeCannotSeePublishTokens(r) {
+		// A COPY, because src points at the caller's row and blanking the
+		// token in place would hand the next reader -- including the store's
+		// own update path -- a source whose credential has been erased.
+		redacted := *src
+		redacted.Token = ""
+		src = &redacted
+		// PrevToken is NOT blanked here, and deliberately so: it carries
+		// `json:"-"` and has never left the process, so clearing it would
+		// suggest to the next reader that it once did.
+		// The URLs go too, and they are the reason this cannot be a one-line
+		// blanking of the token field: every publish URL has the token EMBEDDED
+		// in it, because the token is the address. Leaving them would hand back
+		// the same secret in a different shape.
+		urls = nil
+		legacyKey = ""
+	}
 	return sourceView{
 		Publishing:     publishing,
 		Link:           link,
 		RTMPLink:       rtmpLink,
 		Source:         src,
-		PublishURLs:    publishURLs(src, listeners),
+		PublishURLs:    urls,
 		IsDefault:      src.ID == defaultID,
 		TokenEnforced:  tokenEnforced,
 		LegacyRTMPKey:  legacyKey,
@@ -275,7 +317,7 @@ func (s *Server) handleListSources(w http.ResponseWriter, r *http.Request) {
 	defaultID, _ := s.store.DefaultSourceID()
 	out := make([]sourceView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, s.viewSource(row, defaultID))
+		out = append(out, s.viewSource(r, row, defaultID))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -292,7 +334,7 @@ func (s *Server) handleGetSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(row, defaultID))
+	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 
 func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +369,7 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("reconcile after source create", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusCreated, s.viewSource(&row, defaultID))
+	writeJSON(w, http.StatusCreated, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
@@ -356,7 +398,7 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("reconcile after source update", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(&row, defaultID))
+	writeJSON(w, http.StatusOK, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
@@ -398,7 +440,7 @@ func (s *Server) handleRotateSourceToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(row, defaultID))
+	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 
 func sourceStatus(err error) int {

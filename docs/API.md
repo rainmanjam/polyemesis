@@ -56,6 +56,12 @@ should have been allowed — never the reverse. `POST
 /destinations/{id}/expert/dry-run` is deliberately *not* on it, despite writing
 nothing to the database: it spawns FFmpeg with a caller-supplied argument list.
 
+A `read` token also has the **source publish tokens withheld** from `GET
+/sources` and `GET /sources/{id}` — the `token` field comes back empty and
+`publishUrls` is omitted, because the publish token is the ingest address and
+every publish URL embeds it. Read-only has to mean it cannot publish. A session
+and an `admin` token see them as before.
+
 **Tokens created before scopes existed are `admin`.** They could already do
 everything, so the upgrade grandfathers them rather than silently narrowing a
 credential some running script is holding — the failure would otherwise land as

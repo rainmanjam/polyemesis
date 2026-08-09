@@ -256,6 +256,60 @@ func TestDegradedSRTListenerIsReportedOnTheSourceCard(t *testing.T) {
 	}
 }
 
+// A read-scoped token must not be able to read its way to publishing.
+//
+// The scope model refuses writes by HTTP method, which is the right shape for a
+// rule about routes and blind to a GET whose RESPONSE is a credential. A
+// source's publish token is exactly that: the token IS the address on both
+// listeners, so a monitoring credential that could read it could inject video
+// into a live programme using only a GET it was explicitly allowed to make.
+//
+// Both shapes are asserted, because the publish URLs embed the token and
+// blanking only the field would hand the same secret back in a different form.
+func TestReadScopedTokenCannotReadAPublishToken(t *testing.T) {
+	h, _, sign := sourceServer(t)
+
+	// What the operator's own session sees, which must be unchanged: the
+	// console needs the token to show it.
+	seen := listSources(t, h, sign)[0]
+	if seen.Token == "" {
+		t.Fatal("the fixture source has no token, so this test proves nothing")
+	}
+
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+	r := jsonRequest(t, http.MethodGet, "/api/v1/sources", nil)
+	r.Header.Set("Authorization", "Bearer "+read)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("read token could not list sources: %d %s", w.Code, w.Body.String())
+	}
+	// Against the raw body, not the decoded struct: the point is that the
+	// secret does not appear ANYWHERE in what left the process.
+	if strings.Contains(w.Body.String(), seen.Token) {
+		t.Errorf("the publish token reached a read-scoped token: %s", w.Body.String())
+	}
+
+	var rows []sourceRow
+	decodeInto(t, w.Body.Bytes(), &rows)
+	if rows[0].Token != "" {
+		t.Errorf("token field = %q, want empty for a read-scoped principal", rows[0].Token)
+	}
+	// The listing still has to be worth making, or the redaction has just
+	// broken the use case the read scope exists for.
+	if rows[0].Name == "" {
+		t.Error("redaction emptied the source listing; a monitoring token still needs to see its sources")
+	}
+
+	// An admin token keeps the old behaviour: it can rotate the token anyway,
+	// so withholding it would be a lock with the key taped to it.
+	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
+	ra := jsonRequest(t, http.MethodGet, "/api/v1/sources", nil)
+	ra.Header.Set("Authorization", "Bearer "+admin)
+	if wa := do(t, h, ra); !strings.Contains(wa.Body.String(), seen.Token) {
+		t.Error("an admin token was denied the publish token it can already rotate")
+	}
+}
+
 func TestUpdatingASourceWithoutATokenKeepsTheStoredOne(t *testing.T) {
 	h, _, sign := sourceServer(t)
 

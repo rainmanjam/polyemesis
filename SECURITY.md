@@ -52,6 +52,14 @@ the software actually promises.
   No token of either scope can manage tokens, change the password, upload or
   delete media, or complete an OAuth connect flow. Those are session-only.
 
+  A `read` token is additionally refused the SOURCE PUBLISH TOKENS, in the
+  response body rather than by hiding the route. The publish token *is* the
+  ingest address on both listeners, so a credential that could read it could
+  publish with it — and "read-only" has to mean it cannot put video into your
+  programme. `GET /sources` still lists everything else. Client secrets and the
+  MQTT password were already never serialised outward, and platform OAuth
+  secrets carry `json:"-"`.
+
   Tokens that predate scopes are `admin`, because they already could do
   everything and narrowing them on upgrade would break a running script without
   telling anyone. Revoke and re-mint to narrow one.
