@@ -250,6 +250,16 @@ jobs:
       # on a Windows runner than on a developer machine: ~6s locally against
       # ~265-300s there.
       #
+      # What that cost actually WAS, measured since: schema DDL plus six
+      # migrations, executed once per test rather than once per package. The
+      # test helpers now build one migrated database and copy the file, which
+      # took internal/db from 6.1s to 1.9s locally on an unchanged suite (695
+      # tests, same count before and after). The Windows figure above is
+      # therefore expected to fall by a similar factor and is UNVERIFIED until
+      # this branch has had a run on a Windows runner -- so the numbers stay
+      # written down as measured, and the 15m ceiling stays where it is until
+      # something replaces them.
+      #
       # 15m is ~3x the typical Windows run for the slowest package, and it is
       # deliberately BELOW this job's timeout-minutes. Go's timeout panics with
       # a goroutine dump naming the running test; the job timeout just kills the
