@@ -340,13 +340,18 @@ else
   # THE FIRST CLAIM: separate tracks, not a mix. Every other destination in
   # this suite folds its selection into ONE stereo pair; this is the only one
   # that must not, and a count of 1 would mean the mix path ran after all.
-  # Deduped by stream index because ffprobe lists a stream twice for some
-  # containers (once inside its program), which would report a plausible
-  # multiple rather than an obvious error.
+  # Deduped by stream index (the sort -u): for containers with a program
+  # layer (MPEG-TS/SRT) ffprobe lists each stream again inside its program,
+  # so a plain line count reports 6 for 3 tracks. Stream indexes are unique
+  # within a file, so deduping them is exact. Matroska has no program layer,
+  # so this is a no-op for the .mkv asserted here -- the dedup matters the
+  # moment the copy destination points at TS/SRT, the container family #144
+  # is about. NA is also the loop bound below, so an inflated count would
+  # probe track indexes that do not exist.
   NA=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$C" \
-        | tr -d ' ' | grep -c '[0-9]')
+        | tr -d ' ' | sort -u | grep -c '[0-9]')
   NV=$(ffprobe -v error -select_streams v -show_entries stream=index -of csv=p=0 "$C" \
-        | tr -d ' ' | grep -c '[0-9]')
+        | tr -d ' ' | sort -u | grep -c '[0-9]')
   [ "$NA" = "2" ] && ok "two separate audio tracks survived the copy" \
                   || bad "expected 2 separate audio tracks, found $NA (a mix would give 1)"
   [ "$NV" = "1" ] && ok "video is still there and still copied" \

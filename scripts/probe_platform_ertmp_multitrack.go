@@ -148,6 +148,16 @@ func main() {
 
 // ------------------------------------------------------------------ preflight
 
+// Resolved once in preflightFFmpeg and reused everywhere. The preflight
+// version-checks a specific binary; re-resolving the bare name later would
+// mean the binary that passed the >= 7.1 check need not be the binary that
+// runs. ffprobeBin may legitimately stay empty: a run without -hls-url
+// never probes, so its absence is only an error where it is needed.
+var (
+	ffmpegBin  string
+	ffprobeBin string
+)
+
 // preflightFFmpeg refuses to proceed below 7.1.
 //
 // Not politeness. Below 7.1 FFmpeg writes a legacy single-track FLV whatever it
@@ -159,6 +169,7 @@ func preflightFFmpeg() error {
 	if err != nil {
 		return errors.New("ffmpeg is not installed")
 	}
+	ffmpegBin = bin
 	out, err := exec.Command(bin, "-hide_banner", "-version").Output()
 	if err != nil {
 		return fmt.Errorf("ffmpeg -version failed: %v", err)
@@ -176,6 +187,13 @@ func preflightFFmpeg() error {
 			"a result about a question it never asked", major, minor)
 	}
 	fmt.Printf("ffmpeg %d.%d: can mux E-RTMP multitrack\n", major, minor)
+	// Non-fatal on purpose. ffprobe is only needed by checkPlayback, which a
+	// -selftest run returns before ever reaching, so refusing here would break
+	// a mode that works today on a machine without it. checkPlayback names the
+	// absence itself, where it actually matters.
+	if p, err := exec.LookPath("ffprobe"); err == nil {
+		ffprobeBin = p
+	}
 	return nil
 }
 
@@ -556,7 +574,7 @@ func publishMultitrack(local string, dur time.Duration) (*exec.Cmd, error) {
 		"-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-g", "60",
 		"-c:a", "aac", "-b:a", "128k", "-ar", "48000",
 		"-f", "flv", local}
-	cmd := exec.Command("ffmpeg", argv...)
+	cmd := exec.Command(ffmpegBin, argv...)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -602,7 +620,11 @@ func report(c *counts) {
 // checkPlayback is the only step that can tell "accepted" from "accepted and
 // silently discarded". Everything before it is about what left this machine.
 func checkPlayback(hlsURL string) (string, string) {
-	out, err := exec.Command("ffprobe", "-hide_banner", "-loglevel", "error",
+	if ffprobeBin == "" {
+		return verdictInconclusive, "ffprobe is not on PATH (it ships with FFmpeg), " +
+			"so nothing is known about what the platform delivers"
+	}
+	out, err := exec.Command(ffprobeBin, "-hide_banner", "-loglevel", "error",
 		"-select_streams", "a", "-show_entries", "stream=index",
 		"-of", "csv=p=0", "-i", hlsURL).Output()
 	if err != nil {
@@ -628,6 +650,14 @@ func checkPlayback(hlsURL string) (string, string) {
 		tones = append(tones, toneOf(hlsURL, i))
 	}
 	fmt.Println("playback tones:", tones)
+	// toneOf returns 0 only when the local decode failed or came back short.
+	// That is a statement about this machine's tooling, not about which tones
+	// the platform delivers, so it must not fall through to verdictDropped.
+	if contains(tones, 0) {
+		return verdictInconclusive, fmt.Sprintf("could not decode a full second of "+
+			"audio from every playback track (got %v), so nothing is known about "+
+			"which tones the platform delivers", tones)
+	}
 	if !contains(tones, toneA) || !contains(tones, toneB) {
 		return verdictDropped, fmt.Sprintf("playback carries %d tracks but not both "+
 			"published tones (%d and %d); got %v", len(seen), toneA, toneB, tones)
@@ -641,10 +671,14 @@ func checkPlayback(hlsURL string) (string, string) {
 // dependency -- the same choice, and the same reasoning, as
 // scripts/verify_ertmp_multitrack.go.
 func toneOf(path string, stream int) int {
-	raw, err := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-i", path,
+	raw, err := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error", "-i", path,
 		"-map", fmt.Sprintf("0:a:%d", stream), "-t", "1", "-f", "s16le", "-ac", "1",
 		"-ar", strconv.Itoa(sr), "-").Output()
-	if err != nil || len(raw) < sr {
+	// s16le is TWO bytes per sample, so a full second of mono at sr Hz is
+	// 2*sr bytes, not sr. The old bound accepted a half-second buffer and
+	// ran the Goertzel over half its intended window, returning a confident
+	// answer from a bin twice as wide.
+	if err != nil || len(raw) < 2*sr {
 		return 0
 	}
 	n := len(raw) / 2
