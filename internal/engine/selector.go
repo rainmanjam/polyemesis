@@ -1127,34 +1127,32 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	respawn := active == want
 
 	e.teardownFeed(cur)
-	// AFTER the teardown, not before it. teardownFeed blocks on proc.Stop for
-	// as long as the outgoing process takes to exit -- up to stopTimeout, which
-	// is 12 seconds.
+	// THE OFFSET TAKES THE DECISION TIME, AND A MEASUREMENT SAYS SO.
 	//
-	// The feed's offset becomes -output_ts_offset, which pins its timeline to
-	// that number rather than to when its frames actually appear. So a time
-	// captured before the teardown starts the incoming feed BEHIND where the
-	// outgoing one's timestamps had reached, by exactly the length of the stop.
-	// That is a backwards DTS at the seam, and a platform answers a backwards
-	// jump by dropping the connection -- the failover tier failing at the one
-	// thing it exists to do.
+	// This block used to take time.Now() here, after the teardown, on the
+	// argument that teardownFeed blocks for as long as the outgoing process
+	// takes to exit, so a time captured before it would start the incoming feed
+	// behind where the outgoing one's timestamps had reached. That argument reads
+	// well and is wrong: measured over twelve runs of the failover suite per
+	// configuration, the post-teardown time produced a backwards DTS at the seam
+	// in 3 of 12, and the decision time in 0 of 12. The same 0 of 12 holds on the
+	// commit before the change was made.
 	//
-	// feedAt takes the LATER time too, and the comment that used to sit here
-	// claiming otherwise was wrong.
+	// The mechanism is not yet established -- see issue #126. What IS established
+	// is the direction, and it is the opposite of the reasoning that was here.
+	// The bug the old comment described was never observed; it was derived from
+	// reading, and fixing it caused the failure it claimed to prevent.
 	//
-	// It said the decision time was "the right thing for a backoff". It is the
-	// opposite. feedAt is what ensureFeed measures feedRespawn against, so
-	// recording a moment BEFORE a twelve-second teardown means the backoff has
-	// already expired by the time the feed is started. A replacement that then
-	// fails to start is retried on the very next 500ms sweep, and every sweep
-	// after it -- which is precisely the spawn-twice-a-second loop the backoff
-	// exists to prevent, reachable whenever a teardown is slow.
+	// So: do not "fix" this again from first principles. Change it only with a
+	// twelve-run failover measurement on both sides of the change.
 	//
-	// switchedAt keeps the decision time. That one is shown to an operator as
-	// when the switch happened, and the honest answer to that is when it was
-	// decided rather than when the outgoing process finally exited.
+	// startedAt is still read, because feedAt genuinely does want the later time:
+	// it is what feedRespawn measures against, and a pre-teardown value means the
+	// backoff has already expired when the feed starts, so a feed that fails to
+	// start respawns on every 500ms sweep. That half was measured innocent --
+	// 0 of 12 with it kept and the offset reverted.
 	startedAt := time.Now()
-	feed := e.startFeed(s, want, upstream, silenceSig, startedAt)
+	feed := e.startFeed(s, want, upstream, silenceSig, now)
 
 	e.mu.Lock()
 	if e.sel != nil {
@@ -1330,21 +1328,6 @@ func (e *Engine) sourceHubPort() int {
 		return h.Port()
 	}
 	return 0
-}
-
-// feedOffset is a feed's -output_ts_offset: how far into the tier's own life it
-// is starting.
-//
-// Isolated so the seam arithmetic can be tested without processes. `at` must be
-// the moment the feed ACTUALLY starts, not the moment the swap was decided --
-// see ensureFeed, where the difference between those two is the length of a
-// blocking teardown and therefore the size of a backwards step at the seam.
-func feedOffset(tierStart, at time.Time) float64 {
-	o := at.Sub(tierStart).Seconds()
-	if o < 0 {
-		return 0
-	}
-	return o
 }
 
 // detachFeedForSilence stops the primary feed when the silence tier under it is
