@@ -8,6 +8,77 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-09
+
+An operator-facing release: the server now tells you an update exists and what a
+restart would cost, a rendition stopped doing work it threw away, and two
+failover faults at the same seam are fixed.
+
+### Added
+
+- **The server tells you when there is a newer release, and what stopping would
+  interrupt.** A banner in the UI, translated across all fifteen locales, and a
+  version endpoint behind it.
+
+  The second half is the part that matters. polyemesis is not a tool you run and
+  close; it is the thing carrying a broadcast, and restarting it drops every
+  destination mid-stream. So the check reports what is **on air** — how many
+  encoders are publishing, how many destinations are live, whether a recording is
+  running, and which programmes those belong to — rather than a yes/no on whether
+  an upgrade is allowed. "Cannot upgrade" is useless on its own; "3 destinations
+  are live and a recording is running" lets an operator decide it is fine.
+
+  A destination that is reconnecting counts as live, because from the desk it is
+  mid-broadcast, and restarting underneath it turns a recoverable blip into a
+  dropped show.
+
+### Changed
+
+- **A rendition that drops frames now drops them before scaling, not after.**
+  `-r` decimates at the encoder, which is after the filter graph, so a 60→30
+  rendition scaled all sixty frames of the source and then discarded half of
+  them. Every one of those scales was work spent on a frame that never reached
+  the encoder.
+
+  Measured on a 6-core Haswell VPS, 4K60 → 1080p30 at veryfast/6000k: 2.13×
+  realtime before, 2.49× after — **17% more headroom** on the case that needed it
+  most.
+
+### Fixed
+
+Two faults at the failover switch seam, found by reading the code rather than by
+a failing test, and both the same mistake in opposite directions: a timestamp
+taken before a blocking call and used as though it described what happened after.
+
+- **A feed's timeline offset is taken after the teardown, not before it.**
+  `-output_ts_offset` was computed at the moment the switch was decided, then
+  applied to a process that only started once the outgoing feed had finished
+  tearing down — up to twelve seconds later on a slow teardown. The new feed
+  therefore began life describing a moment that had already passed, and the
+  destination was handed a timeline that did not match the one it was already
+  receiving.
+
+- **The respawn backoff is measured from the start, not from the decision.** The
+  same pre-teardown timestamp was being used as the feed's start time for backoff
+  purposes, so after a long teardown the backoff interval had already elapsed
+  before the feed had run for a single second. A feed that failed immediately was
+  respawned on every 500 ms sweep instead of backing off.
+
+### Internal
+
+- **Groundwork for in-place upgrades, not yet reachable.** A new `internal/upgrade`
+  package works out how an install was made — container, systemd unit, or a
+  binary someone runs themselves — and refuses to act where acting is useless or
+  reckless. For the one case it can act on it stages a checksum-verified binary
+  beside the running one, keeping the outgoing one for rollback, ordered so that
+  every state the process can be killed into leaves a runnable box.
+
+  Nothing calls it yet. There is no endpoint and no button, so this release
+  changes no upgrade behaviour; it is listed here because it exists in the tree
+  and because the next release is expected to wire it. Four adversarial review
+  rounds went into it, which is the appropriate amount for code whose failure
+  mode is a server with no runnable binary.
+
 ## [0.5.0] — 2026-08-08
 
 The first release with the core review in it, and the version number is
@@ -1179,7 +1250,9 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rainmanjam/polyemesis/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rainmanjam/polyemesis/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...v0.2.0
