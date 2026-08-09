@@ -578,6 +578,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [resilience, setResilience] = useState<DestResilience>({});
   // Output audio encoding. Empty is AAC stereo.
   const [audio, setAudio] = useState<AudioEncoding>({});
+  // Copying audio is offered only where the receiver is not a platform ingest.
+  // An RTMP destination is refused server-side, so the toggle is not shown for
+  // it at all rather than shown and rejected on save. Derived rather than
+  // stored so that changing the transport cannot leave a hidden flag set.
+  const canCopyAudio = kind === "srt" || kind === "file";
+  const copyOn = canCopyAudio && (audio.copy ?? false);
   // Obligation metadata. Empty means "touch nothing", which is what every
   // destination that has never set any carries.
   const [compliance, setCompliance] = useState<Compliance>({});
@@ -816,7 +822,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
         transport,
         resilience,
-        audio,
+        // copyOn rather than audio.copy: switching the transport to RTMP has to
+        // drop the flag here, or the operator gets a save error about a control
+        // that is no longer on screen to turn off.
+        audio: { ...audio, copy: copyOn },
         compliance,
         facebook,
         backupIngestWanted,
@@ -876,10 +885,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         <DialogHeader>
           <DialogTitle>{editing ? "Edit destination" : "Add destination"}</DialogTitle>
           <DialogDescription>
-            This destination copies its video and re-encodes only its audio, from its own
-            routing profile. Put it on a rendition if the platform will not take the source
-            video — a rendition re-encodes video once for everyone that shares it, and still
-            leaves the audio to each destination.
+            This destination copies its video, and by default mixes and re-encodes its audio
+            from its own routing profile. An SRT or file destination can copy the audio too,
+            forwarding your encoder's tracks untouched. Put it on a rendition if the platform
+            will not take the source video — a rendition re-encodes video once for everyone
+            that shares it, and still leaves the audio to each destination.
           </DialogDescription>
         </DialogHeader>
 
@@ -1477,6 +1487,27 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             )}
           </fieldset>
 
+          {canCopyAudio && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="dest-audio-copy">Audio</Label>
+              <div className="flex h-9 items-center gap-2">
+                <Switch
+                  id="dest-audio-copy"
+                  checked={copyOn}
+                  onCheckedChange={(v) => setAudio({ ...audio, copy: v })}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {copyOn ? "Copy the ingest tracks" : "Mix and re-encode"}
+                </span>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                {copyOn
+                  ? "This destination forwards your encoder's own audio tracks untouched — no decode, no mix, no encoder. Which tracks go out, and which roles are excluded, still apply. Everything the mix does to the samples does not: gain, normalization, loudness, ducking, delay and mono are all refused on save rather than silently ignored."
+                  : "The mix path: your routing profile decides the tracks and levels, and the result is encoded to one stereo track. Switch to copy for an archive or a hand-off where the receiver can take the tracks as they are."}
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-bitrate">{t("dest.audioBitrate")}</Label>
             <div className="flex items-center gap-2">
@@ -1488,12 +1519,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 value={bitrate}
                 onChange={(e) => setBitrate(Number(e.target.value))}
                 className="w-24"
+                disabled={copyOn}
               />
               <span className="text-[11px] text-muted-foreground">kbps, AAC stereo</span>
             </div>
             <span className="text-[10px] text-muted-foreground">
-              Mixed here from this destination's own routing profile, whichever rendition it is
-              on — a rendition never touches audio.
+              {copyOn
+                ? "Not used: nothing is encoded, so the bitrate is whatever your encoder sent."
+                : "Mixed here from this destination's own routing profile, whichever rendition it is on — a rendition never touches audio."}
             </span>
           </div>
 
@@ -1505,7 +1538,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 onValueChange={(v) =>
                   setAudio({ ...audio, codec: v === "aac" ? "" : (v as "opus") })
                 }
-                disabled={kind === "rtmp"}
+                disabled={kind === "rtmp" || copyOn}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1516,9 +1549,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </SelectContent>
               </Select>
               <span className="text-[10px] text-muted-foreground">
-                {kind === "rtmp"
-                  ? "RTMP is AAC. FFmpeg will mux Opus into FLV, but no mainstream ingest accepts it — the stream would upload cleanly and be rejected."
-                  : "Opus is worth it for a low-bitrate feed. Check the receiver takes it."}
+                {copyOn
+                  ? "Not used: nothing is encoded, so the codec is whatever your encoder sent."
+                  : kind === "rtmp"
+                    ? "RTMP is AAC. FFmpeg will mux Opus into FLV, but no mainstream ingest accepts it — the stream would upload cleanly and be rejected."
+                    : "Opus is worth it for a low-bitrate feed. Check the receiver takes it."}
               </span>
             </div>
             <div className="flex flex-col gap-1">
@@ -1528,14 +1563,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   id="dest-mono"
                   checked={audio.mono ?? false}
                   onCheckedChange={(v) => setAudio({ ...audio, mono: v })}
+                  disabled={copyOn}
                 />
                 <span className="text-[11px] text-muted-foreground">
                   {audio.mono ? "Mono" : "Stereo"}
                 </span>
               </div>
               <span className="text-[10px] text-muted-foreground">
-                Mono folds your mix down rather than re-routing it, and halves the bitrate on talk
-                content for no perceptual loss.
+                {copyOn
+                  ? "Not used: folding to one channel needs a decode and a re-encode, which is what copy removes."
+                  : "Mono folds your mix down rather than re-routing it, and halves the bitrate on talk content for no perceptual loss."}
               </span>
             </div>
           </div>
