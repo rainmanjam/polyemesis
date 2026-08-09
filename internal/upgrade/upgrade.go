@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Method is how this install was put on the box.
@@ -145,6 +146,7 @@ func supervisedByAUnit(env func(string) string, exists func(string) bool) bool {
 		// job; this one has already cleared the cheap tests.
 		return true
 	}
+	conclusive := false
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 		// "0::/system.slice/polyemesis.service" (v2), or
 		// "1:name=systemd:/system.slice/polyemesis.service" (v1).
@@ -152,6 +154,16 @@ func supervisedByAUnit(env func(string) string, exists func(string) bool) bool {
 		if i := strings.LastIndex(line, ":"); i >= 0 {
 			path = line[i+1:]
 		}
+		// A cgroup NAMESPACE reports membership relative to its own root, so a
+		// unit that has one -- which systemd gives to anything with
+		// PrivateMounts, and every container runtime sets -- reads its own
+		// cgroup as "0::/". That is not evidence of being unsupervised; it is
+		// the absence of evidence, and treating it as a login session would
+		// deny a genuine unit its upgrade path.
+		if path == "" || path == "/" {
+			continue
+		}
+		conclusive = true
 		// The LAST component, not the whole path. A user session lives under
 		// "user@1000.service", so any process a person starts by hand has
 		// ".service" somewhere in its cgroup -- but its own leaf is a ".scope".
@@ -159,7 +171,9 @@ func supervisedByAUnit(env func(string) string, exists func(string) bool) bool {
 			return true
 		}
 	}
-	return false
+	// Nothing the cgroup said bore on the question. Fall back to the weaker
+	// signals, as with an unreadable file.
+	return !conclusive
 }
 
 // PreviousPath is where the outgoing binary is kept so a rollback can find it.
@@ -175,7 +189,8 @@ func PreviousPath(binary string) string { return binary + ".previous" }
 // can paste. It is never used to decide anything.
 func PlanFor(m Method, binary, version string) Plan {
 	p := Plan{Method: m}
-	if _, err := os.Stat(PreviousPath(binary)); err == nil {
+	// Beside the RESOLVED binary, because that is where Stage put it.
+	if _, err := os.Stat(PreviousPath(resolve(binary))); err == nil {
 		p.RollbackAvailable = true
 	}
 
@@ -197,6 +212,10 @@ func PlanFor(m Method, binary, version string) Plan {
 			p.Reason = "the running binary's path could not be determined"
 			return p
 		}
+		// The path the upgrade will actually write to, which is not the given
+		// one when it is a symlink. Reported as BinaryPath too: an operator
+		// being told what is about to be replaced should be told the truth.
+		binary = resolve(binary)
 		// Writability of the DIRECTORY, not the file: an upgrade replaces the
 		// file by renaming a staged one over it, which needs the directory.
 		if err := writable(filepath.Dir(binary)); err != nil {
@@ -294,6 +313,8 @@ func Stage(binary, staged, wantHex string) error {
 	if strings.TrimSpace(wantHex) == "" {
 		return errors.New("no expected checksum was supplied; refusing to install an unverified binary")
 	}
+	// Upgrade what the path POINTS AT. See resolve.
+	binary = resolve(binary)
 	// PRESERVE THE MODE THE INSTALL ALREADY HAD, rather than asserting one.
 	//
 	// Hardcoding 0o755 was both a Sonar S2612 finding and, more importantly,
@@ -398,8 +419,15 @@ func install(binary, incoming, dir string) (bool, error) {
 	// even if keeping the rollback point fails: the caller has to know the live
 	// binary changed.
 	if err := os.Rename(backup, PreviousPath(binary)); err != nil {
-		os.Remove(backup)
-		return true, err
+		// THE BACKUP IS NOT DELETED HERE, and that is deliberate. It is now the
+		// only copy of the version that was running a moment ago -- deleting it
+		// because the rename failed would destroy the very thing it exists to
+		// preserve, which for a rollback means the operator can no longer undo
+		// what they just did. Left on disk, and named in the error so a person
+		// can put it back by hand.
+		return true, fmt.Errorf("the new binary is installed but the rollback point could not be "+
+			"written: the previous version is at %s, move it to %s to restore it: %w",
+			backup, PreviousPath(binary), err)
 	}
 	return true, syncDir(dir)
 }
@@ -415,9 +443,14 @@ const (
 // Without this an install directory accumulates a near-copy of the binary for
 // every upgrade that was interrupted.
 //
-// Safe only because two upgrades never run at once on one box; if one somehow
-// did, the loser's rename fails and its install is left untouched, which is the
-// right way round to lose.
+// STALE, not merely present. An upgrade in flight owns temp files of exactly
+// these names, and a second upgrade starting a moment later would otherwise
+// unlink them out from under the first. An age limit avoids needing a lock for
+// something that has no legitimate concurrent case: a copy of the binary takes
+// seconds, so anything untouched for an hour was abandoned.
+//
+// Regular files only. A directory sharing the prefix is not something this
+// package made, and removing things it did not create is not its business.
 func sweepStaleTemps(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -425,11 +458,23 @@ func sweepStaleTemps(dir string) {
 	}
 	for _, e := range entries {
 		n := e.Name()
-		if strings.HasPrefix(n, incomingPrefix) || strings.HasPrefix(n, backupPrefix) {
-			os.Remove(filepath.Join(dir, n))
+		if !strings.HasPrefix(n, incomingPrefix) && !strings.HasPrefix(n, backupPrefix) {
+			continue
 		}
+		if !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < staleAfter {
+			continue
+		}
+		os.Remove(filepath.Join(dir, n))
 	}
 }
+
+// staleAfter is how long a temp file must be untouched before a later run
+// treats it as debris from a killed one.
+const staleAfter = time.Hour
 
 // copyIntoDir writes src into dir under a fresh private name, at mode, durably,
 // and returns that name with the sha256 of what was written.
@@ -522,6 +567,7 @@ func syncDir(dir string) error {
 // The CURRENT binary becomes the new .previous, so a rollback taken by mistake
 // can be undone by a second rollback. Nobody should need the release page at 3am.
 func Rollback(binary string) error {
+	binary = resolve(binary)
 	// Read before anything moves: afterwards the live path holds the file that
 	// was being kept owner-only, and its mode is not the one to restore.
 	mode, err := liveMode(binary)
@@ -557,6 +603,31 @@ func Rollback(binary string) error {
 	}
 	installed, err = install(binary, incoming, dir)
 	return err
+}
+
+// resolve follows symlinks to the file an upgrade should actually replace.
+//
+// os.Executable can hand back a path that is a symlink -- /usr/local/bin/poly-
+// emesis pointing into /opt/polyemesis/v0.5.0/ is how release managers and
+// hand-rolled install scripts keep versions side by side. Renaming over the LINK
+// replaces the indirection with a plain file, silently dismantling the scheme
+// the operator built and stranding whatever the link pointed at.
+//
+// Every path this package touches is derived from the resolved one, so the
+// backup lands beside the real binary and the writability check asks about the
+// directory that will actually be written to.
+//
+// An unresolvable path is returned unchanged: the error belongs to whichever
+// operation tries to use it, which can say what it was doing at the time.
+func resolve(binary string) string {
+	if binary == "" {
+		return binary
+	}
+	real, err := filepath.EvalSymlinks(binary)
+	if err != nil {
+		return binary
+	}
+	return real
 }
 
 // liveMode is the permission bits the installed binary currently carries, with

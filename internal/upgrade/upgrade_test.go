@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDetectPrefersContainerOverSystemd(t *testing.T) {
@@ -109,6 +110,29 @@ func TestSystemdNeedsMoreThanAnInheritedInvocationID(t *testing.T) {
 	}
 }
 
+// A CGROUP NAMESPACE HIDES THE ANSWER, AND THAT IS NOT A "NO".
+//
+// A namespace reports membership relative to its own root, so a unit that has
+// one -- systemd gives one to anything with PrivateMounts, and every container
+// runtime sets one -- reads its own cgroup as "0::/". The last component is "/",
+// which is not a ".service", so a strict reading calls a genuine supervised unit
+// "manual" and takes away its upgrade path entirely.
+//
+// The rule is that the cgroup can prove supervision or prove a login session;
+// when it says nothing, the weaker signals stand.
+func TestANamespacedCgroupDoesNotDemoteAGenuineUnit(t *testing.T) {
+	for _, cgroup := range []string{"0::/\n", "0::/\n1:name=systemd:/\n"} {
+		t.Run(strings.ReplaceAll(cgroup, "\n", "|"), func(t *testing.T) {
+			withCgroup(t, cgroup)
+			got := Detect(envVar("INVOCATION_ID", "abc123"), func(p string) bool { return p == "/run/systemd/system" })
+			if got != MethodSystemd {
+				t.Errorf("Detect = %q, want %q: a namespaced unit is still a unit, and calling it "+
+					"manual leaves a supervised install with no way to upgrade", got, MethodSystemd)
+			}
+		})
+	}
+}
+
 // An unreadable cgroup falls back to the weaker signals rather than refusing:
 // treating a genuine unit as manual leaves an operator with no upgrade path.
 func TestAnUnreadableCgroupFallsBackRatherThanRefusing(t *testing.T) {
@@ -171,8 +195,8 @@ func TestStageClearsTempFilesAKilledRunLeftBehind(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "polyemesis")
 	os.WriteFile(bin, []byte("v1"), 0o755)
-	os.WriteFile(filepath.Join(dir, incomingPrefix+"123"), []byte("half a download"), 0o600)
-	os.WriteFile(filepath.Join(dir, backupPrefix+"456"), []byte("an orphaned backup"), 0o700)
+	abandoned(t, filepath.Join(dir, incomingPrefix+"123"), "half a download")
+	abandoned(t, filepath.Join(dir, backupPrefix+"456"), "an orphaned backup")
 
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
@@ -180,6 +204,156 @@ func TestStageClearsTempFilesAKilledRunLeftBehind(t *testing.T) {
 		t.Fatalf("Stage: %v", err)
 	}
 	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "staged")
+}
+
+// STALE, not merely present.
+//
+// An upgrade in flight owns temp files of exactly these names. A sweep that
+// deleted every match would unlink a concurrent run's incoming binary between
+// its copy and its rename, failing an upgrade that was doing nothing wrong. The
+// age limit is what stands in for a lock, and a copy of a binary takes seconds.
+func TestTheSweepLeavesAnotherRunsFreshTempFilesAlone(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	inFlight := filepath.Join(dir, incomingPrefix+"another-upgrade")
+	os.WriteFile(inFlight, []byte("a download in progress"), 0o600)
+
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("v2"), 0o644)
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if _, err := os.Stat(inFlight); err != nil {
+		t.Error("swept away a temp file another upgrade was still using; that run's rename " +
+			"would fail on a file it had just written correctly")
+	}
+}
+
+// A directory sharing the prefix is not something this package made, and
+// removing what it did not create is not its business.
+func TestTheSweepDoesNotRemoveDirectories(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	notOurs := filepath.Join(dir, incomingPrefix+"a-directory")
+	if err := os.Mkdir(notOurs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.Chtimes(notOurs, time.Now().Add(-48*time.Hour), time.Now().Add(-48*time.Hour))
+
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("v2"), 0o644)
+	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if _, err := os.Stat(notOurs); err != nil {
+		t.Error("removed a directory it did not create")
+	}
+}
+
+// abandoned writes a temp file and backdates it past the staleness threshold,
+// standing in for one a killed run left behind.
+func abandoned(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AN UPGRADE MUST REPLACE WHAT THE PATH POINTS AT, NOT THE POINTER.
+//
+// /usr/local/bin/polyemesis pointing into /opt/polyemesis/v0.5.0/ is how release
+// managers and install scripts keep versions side by side. Renaming over the
+// LINK replaces that indirection with a plain file, silently dismantling the
+// scheme the operator built.
+func TestAnUpgradeFollowsASymlinkedBinaryToItsTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows that CI does not have")
+	}
+	root := t.TempDir()
+	releases := filepath.Join(root, "opt")
+	binDir := filepath.Join(root, "bin")
+	os.Mkdir(releases, 0o755)
+	os.Mkdir(binDir, 0o755)
+
+	real := filepath.Join(releases, "polyemesis-v1")
+	os.WriteFile(real, []byte("v1"), 0o755)
+	link := filepath.Join(binDir, "polyemesis")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	staged := filepath.Join(root, "staged")
+	os.WriteFile(staged, []byte("v2"), 0o644)
+	if err := Stage(link, staged, hashOf(t, staged)); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat the link: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("the symlink was replaced by a regular file; the operator's release layout is gone")
+	}
+	if b, _ := os.ReadFile(real); string(b) != "v2" {
+		t.Errorf("the target holds %q, want v2 — the upgrade did not land where the link points", b)
+	}
+	// And the rollback point belongs beside the real binary, not the link.
+	if b, _ := os.ReadFile(PreviousPath(real)); string(b) != "v1" {
+		t.Errorf("previous beside the target is %q, want v1", b)
+	}
+	assertNoLitter(t, binDir, "polyemesis")
+}
+
+// A ROLLBACK MUST STAY UNDOABLE EVEN WHEN IT HALF FAILS.
+//
+// If the rollback point cannot be written after the swap, the outgoing version
+// exists in exactly one place: the backup temp. Deleting it there destroys the
+// only way back to what was running a moment ago. It is kept, and named in the
+// error so a person can move it by hand.
+func TestAHalfFailedInstallKeepsTheOutgoingBinarySomewhere(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "polyemesis")
+	os.WriteFile(bin, []byte("v1"), 0o755)
+	// A directory at .previous: the rename onto it fails, the install does not.
+	if err := os.Mkdir(PreviousPath(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(PreviousPath(bin), "occupied"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staged := filepath.Join(dir, "staged")
+	os.WriteFile(staged, []byte("v2"), 0o644)
+	err := Stage(bin, staged, hashOf(t, staged))
+	if err == nil {
+		t.Fatal("Stage reported success though the rollback point could not be written")
+	}
+	if b, _ := os.ReadFile(bin); string(b) != "v2" {
+		t.Errorf("binary is %q, want v2: the install itself succeeded and must be reported as done", b)
+	}
+	// v1 must still exist somewhere, and the error must say where.
+	found := ""
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), backupPrefix) {
+			if b, _ := os.ReadFile(filepath.Join(dir, e.Name())); string(b) == "v1" {
+				found = e.Name()
+			}
+		}
+	}
+	if found == "" {
+		t.Fatal("the outgoing binary was deleted; there is now no copy of the version that was running")
+	}
+	if !strings.Contains(err.Error(), found) {
+		t.Errorf("the error does not name the file holding the previous version: %v", err)
+	}
 }
 
 // Only systemd may act. The others must produce a COMMAND, because acting on
