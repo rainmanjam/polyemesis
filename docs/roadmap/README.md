@@ -30,7 +30,7 @@ claim is often more instructive than the right one.
 | **11** | [Chat moderation](CHAT-MODERATION.md) | — | ✅ **shipped** | Ban, timeout and delete across four platforms, plus upstream retraction. Shipped 2026-07-30 with every item in the plan and two more the research turned up |
 | **12** | [Chat automod](CHAT-AUTOMOD.md) | — | ✅ **shipped** | Rules, then per-author history, then an optional model. The acting half already exists — four adapters expose ban/timeout/delete — so this is only the deciding half |
 | — | [Unreachable knobs](UNREACHABLE-KNOBS.md) | — | survey | The sibling of item 0, for *settings* rather than features: knobs the server honours that no operator can reach. Surveyed 2026-07-30; one shipped, the rest open |
-| — | [Light mode, and the card](THEME-AND-UI.md) | — | **planned v0.5.0** | Light mode is an argument with a stated design decision, not a missing feature: the signal palette exists because dark surfaces make trouble readable across the room. Recommends the PUBLIC PLAYER first, console stays dark. References captured 2026-08-04 |
+| — | [Light mode, and the card](THEME-AND-UI.md) | — | **researched · not in 0.5.0 or 0.6.0** | Light mode is an argument with a stated design decision, not a missing feature: the signal palette exists because dark surfaces make trouble readable across the room. Recommends the PUBLIC PLAYER first, console stays dark. References captured 2026-08-04 |
 
 ## Two items deferred, 2026-08-02
 
