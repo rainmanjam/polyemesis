@@ -20,6 +20,9 @@ import "syscall"
 // Its one honest use is the failing direction: if it still says true well
 // inside a bound that only a real kill could meet, something leaked. When the
 // question is "was the child reaped", the answer is a nil error from Stop --
-// which entails cmd.Wait() returned -- not a probe. (If this is ever renamed,
-// pidExists is the accurate name: it reports existence, not identity.)
+// which entails cmd.Wait() returned -- plus the pipe-EOF timing assertion in
+// TestStopReapsTheChildWhenItHasTimeTo, which observes the same fact without
+// naming a pid and so cannot be told either lie above. Never this. (If this is
+// ever renamed, pidExists is the accurate name: it reports existence, not
+// identity.)
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
