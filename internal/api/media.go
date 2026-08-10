@@ -186,10 +186,13 @@ const probeUploadTimeout = 30 * time.Second
 // used to be here as a description and was false: every non-nil error took the
 // reject path, including a context error, and the reject path deleted the file.
 // So a client disconnecting after the bytes had already landed -- routine on an
-// 8 GiB limit with no WriteTimeout and proxies in front -- answered 400 "this
-// file could not be read as media: context canceled" and DESTROYED a perfectly
-// good upload while asserting something false about it. Reproduced end to end
-// before it was fixed.
+// 8 GiB limit with no WriteTimeout and proxies in front -- answered 400 and
+// DESTROYED a perfectly good upload while asserting something false about it.
+// Reproduced end to end before it was fixed; the body was
+//
+//	{"error":"this file could not be read as media: signal: killed"}
+//
+// and the uploads directory was empty afterwards.
 //
 // Interruption is now a third answer, and it joins the could-not-check path:
 // the probe did not run, so it did not disagree, so there is nothing to refuse
@@ -260,14 +263,18 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.M
 	if err != nil {
 		// Interruption first, because it is not a verdict about the file.
 		//
-		// Both tests are needed and neither is redundant. errors.Is catches the
-		// context error when os/exec surfaces one. ctx.Err() catches the case
-		// where it does not: exec.CommandContext kills the child, and what
-		// comes back can be a plain "signal: killed" ExitError with ffprobe's
-		// stderr attached, which carries no context error to match on. Asking
-		// the context we handed the probe whether it is done answers the actual
-		// question -- was this probe cut short -- without depending on how the
-		// os/exec of the day reports it.
+		// CTX.ERR() IS THE CLAUSE THAT ACTUALLY WORKS, and the errors.Is arms
+		// alone do not. Measured: with only the errors.Is arms, the
+		// client-disconnect reproduction still answers 400 "signal: killed" and
+		// still deletes the file. exec.CommandContext kills the child, and what
+		// comes back is a plain *exec.ExitError carrying no context error to
+		// match on -- so errors.Is finds nothing.
+		//
+		// Asking the context we handed the probe whether it is done answers the
+		// actual question, "was this probe cut short", without depending on how
+		// the os/exec of the day chooses to report it. The errors.Is arms stay
+		// for the cases where the chain IS present, which is why ProbeFile now
+		// wraps with %w on both of its error branches.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 			ctx.Err() != nil {
 			s.log.Warn("upload probe was interrupted; accepting the file unchecked",
