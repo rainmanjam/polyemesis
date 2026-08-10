@@ -34,12 +34,39 @@ import (
 // takes an operator to switch tabs and wonder why nothing happened.
 const mqttSettingsPoll = 5 * time.Second
 
+// mqttEngine is exactly the slice of *engine.Engine that snapshot reads.
+//
+// It exists so snapshot can be driven from a test. The alternative is a real
+// engine.Manager, and a Manager only registers an engine that has STARTED --
+// which means binding a listener and spawning children. That cost bought
+// nothing here and, worse, it bought no coverage: the fields snapshot copies
+// are ordinary status, and the one field that must not be copied verbatim
+// (DestState.Error, below) is only ever non-empty on a destination that failed
+// to start for reasons a unit test does not get to choose. So the wiring that
+// matters most on this file was the wiring nothing could assert. This interface
+// is what closes that.
+type mqttEngine interface {
+	SourceID() int64
+	SourceName() string
+	Settings() db.Settings
+	Status() engine.Status
+
+	// ScrubDestinationText is on this interface, rather than being applied by
+	// the caller, because DestState.Error goes to a RETAINED topic (#160) and
+	// the scrub has to be un-droppable from the one place that builds it.
+	ScrubDestinationText(id int64, text string) string
+}
+
 // mqttRunner keeps a broker connection matching the stored settings.
 type mqttRunner struct {
 	log   *slog.Logger
 	store *db.DB
 	box   *secrets.Box
-	eng   *engine.Manager
+
+	// engines is how snapshot reaches the live engines: a field rather than a
+	// *engine.Manager, so a test can supply an engine whose destinations are in
+	// states this process cannot be made to produce on demand.
+	engines func() []mqttEngine
 
 	version string
 	started time.Time
@@ -60,7 +87,7 @@ type mqttRunner struct {
 // polyemesis with it, and the entire design assumes the link comes and goes.
 func startMQTT(ctx context.Context, log *slog.Logger, store *db.DB, box *secrets.Box, eng *engine.Manager, version string) func(context.Context) {
 	r := &mqttRunner{
-		log: log, store: store, box: box, eng: eng,
+		log: log, store: store, box: box, engines: managerEngines(eng),
 		version: version, started: time.Now(),
 	}
 	go r.watch(ctx)
@@ -244,6 +271,21 @@ func (r *mqttRunner) disconnect(ctx context.Context) {
 // stop is the shutdown hook handed back to main.
 func (r *mqttRunner) stop(ctx context.Context) { r.disconnect(ctx) }
 
+// managerEngines adapts the real manager to mqttEngine.
+//
+// The loop is the whole of it: Go will not convert []*engine.Engine to
+// []mqttEngine, and there is nothing else this indirection does.
+func managerEngines(m *engine.Manager) func() []mqttEngine {
+	return func() []mqttEngine {
+		live := m.Engines()
+		out := make([]mqttEngine, 0, len(live))
+		for _, e := range live {
+			out = append(out, e)
+		}
+		return out
+	}
+}
+
 // snapshot flattens every engine into the shape the publisher sends.
 //
 // Nothing secret crosses this boundary. A destination contributes its name,
@@ -251,7 +293,7 @@ func (r *mqttRunner) stop(ctx context.Context) { r.disconnect(ctx) }
 // alertSnapshot follows, and the reason mqtt.DestState has no field for one.
 func (r *mqttRunner) snapshot() mqtt.Snapshot {
 	now := time.Now()
-	engines := r.eng.Engines()
+	engines := r.engines()
 
 	snap := mqtt.Snapshot{
 		Host: mqtt.HostState{
@@ -300,7 +342,17 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 			ds := mqtt.DestState{
 				ID: d.ID, Name: d.Name, Slug: mqtt.Slug(d.Name),
 				Platform: string(d.Platform), Kind: string(d.Kind),
-				Enabled: d.Enabled, Running: running, Error: d.Error,
+				Enabled: d.Enabled, Running: running,
+				// Scrubbed HERE and not in Status (#160). Everything else on
+				// this topic tree was already covered -- SourceState.IngestError
+				// comes from supervisor Status.LastError, which Process.scrub
+				// has already put through the ingest's exact secret set -- and
+				// this one field arrived from the engine untouched. Same
+				// retained topic, so the same rule has to hold: a retained
+				// message outlives the process and is redelivered to every
+				// future subscriber, which makes a credential landing here
+				// unfixable by rotation.
+				Error:     e.ScrubDestinationText(d.ID, d.Error),
 				Rendition: d.RenditionName, At: now,
 			}
 			if d.Process != nil {

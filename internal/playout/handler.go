@@ -59,9 +59,26 @@ func (m *Manager) Handler(prefix string) http.Handler {
 			setCORS(w)
 		}
 		if r.Method == http.MethodOptions {
-			// Answered even when playout is off: a preflight is not a request
-			// for content, and 404ing it produces a CORS error in the browser
-			// console that reads as a bug rather than as a disabled feature.
+			// Answered unconditionally HERE, and that is no longer the whole
+			// story: this handler is not reached at all unless the caller has
+			// already passed the API's configuration gate.
+			//
+			// This comment used to say "answered even when playout is off",
+			// justified by a CORS error reading as a bug rather than as a
+			// disabled feature. That justification was for a browser embedding a
+			// stream the operator DID publish -- and it was being applied to a
+			// server with playout switched off, where there is nothing to embed
+			// and the 204 (plus, with AllowCrossOrigin, the CORS headers set
+			// above this branch, above the Enabled check) disclosed the server's
+			// configuration to anyone who asked. See
+			// api.(*Server).playoutPreflightAllowed, which now answers 404 for
+			// that case, matching what GET already did.
+			//
+			// The unconditional answer is kept here because by this point the
+			// only remaining reasons to refuse would be credential ones, and a
+			// preflight carries no credentials. A caller reaching this line has
+			// already been established as looking at an ENABLED and PUBLISHED
+			// stream, or as the operator previewing a private one.
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

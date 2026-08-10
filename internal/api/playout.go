@@ -332,6 +332,50 @@ func (s *Server) authorizePlayout(r *http.Request) playoutAccess {
 	return playoutDenyChallenge
 }
 
+// playoutPreflightAllowed is authorizePlayout's CONFIGURATION HALF, and the
+// only part of the gate a CORS preflight is held to (#170).
+//
+// The gate asks three kinds of question and they are not the same kind:
+//
+//	PUBLICATION STATE  Enabled -- is playout switched on at all
+//	                   Public  -- has the operator published it
+//	CREDENTIAL         Protection / token / cookie / basic
+//
+// The first two are properties of the SERVER and are true or false before any
+// request arrives. The third is a property of the CALLER. A preflight is a
+// browser asking "would you accept a request like this from this origin", and it
+// carries no credentials BY SPECIFICATION -- so holding it to the credential
+// half is not strictness, it is a category error with a concrete cost: an
+// OPTIONS answered 401 fails the preflight, the browser never issues the real
+// request, and a token-protected public stream cannot be embedded cross-origin
+// at all. That breaks the cookie handoff, which is the mechanism the whole
+// token-protected embed depends on.
+//
+// The configuration half has no such problem, and skipping it was a real
+// disclosure. With playout switched OFF, GET answers 404 and says nothing;
+// OPTIONS answered 204 -- and, with AllowCrossOrigin on, attached
+// Access-Control-Allow-Origin and -Allow-Methods, because internal/playout's
+// handler sets CORS above its own Enabled check. So an anonymous caller could
+// establish both that a playout origin is mounted and that the operator has
+// turned cross-origin embedding on, on a server that is deliberately hiding
+// everything else about it.
+//
+// The operator branch is kept, and in the same order authorizePlayout puts it:
+// the console previews a PRIVATE stream, and its player's own preflights have to
+// succeed for that preview to work.
+//
+// What this does NOT do is make OPTIONS a reliable "is there media here" oracle
+// in the allowed case -- it answers 204 for any path under the prefix, mounted
+// or not, exactly as before. The state it stops disclosing is the SERVER's, not
+// a file's.
+func (s *Server) playoutPreflightAllowed(r *http.Request) bool {
+	set := s.playoutSettings()
+	if !set.Enabled {
+		return false
+	}
+	return s.playoutOperator(r) || set.Public
+}
+
 // playoutOperator reports whether the request carries the AUTHORITY OF THE
 // OPERATOR: the signed-in console, or a bearer token minted with the admin
 // scope. Nothing else.
@@ -462,10 +506,31 @@ func (s *Server) playoutHandler() http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A preflight carries no credentials by definition, so it is answered
-		// before the access check. It reveals nothing: the browser still has to
-		// make the real request, and that one is checked.
+		// A preflight carries no credentials by definition, so it is held to the
+		// CONFIGURATION half of the gate and not to the credential half.
+		//
+		// The old comment here said it was answered "before the access check"
+		// and "reveals nothing", and both halves of that were wrong (#170).
+		// authorizePlayout is not only a credential check: its first two tests,
+		// Enabled and Public, are publication state, and they are exactly the
+		// facts a disabled server is trying not to disclose. Answering 204 above
+		// them told an anonymous caller that a playout origin is mounted on a
+		// server whose GET deliberately 404s -- and with AllowCrossOrigin on it
+		// also handed over the CORS headers, because internal/playout sets those
+		// above its own Enabled check.
+		//
+		// Denied answers the SAME 404 GET gives, so the two are consistent and a
+		// prober learns the same nothing from either.
+		//
+		// The credential half stays out of it deliberately: see
+		// playoutPreflightAllowed for why 401ing a preflight would break
+		// cross-origin playback of a token-protected public stream, which is a
+		// working flow this must not cost.
 		if r.Method == http.MethodOptions {
+			if !s.playoutPreflightAllowed(r) {
+				http.NotFound(w, r)
+				return
+			}
 			if h := resolve(); h != nil {
 				h.ServeHTTP(w, r)
 				return
