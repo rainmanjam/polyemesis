@@ -265,9 +265,32 @@ func redactInPlace(s string) string {
 // afterwards to the read token the redaction exists for. Operators front this
 // with nginx and Caddy, so this is required rather than defensive.
 //
+// BOTH request headers that carry a principal are named. Authorization is the
+// bearer token; Cookie is the SESSION, and it was missing. The session is the
+// principal that receives the UNREDACTED body -- it is the one whose response
+// must never be replayed to somebody else -- and a cache keyed on
+// Authorization alone treats "no Authorization header" as a single cache key
+// shared by the signed-in operator and every anonymous caller. Naming only
+// the header the redaction reads, rather than every header the principal is
+// derived from, is the same class of mistake as the rest of this round: a
+// correct-looking rule with one of its inputs left out.
+//
 // Vary alone would not be enough for a shared cache that ignores it, hence
-// no-store as well.
+// no-store as well. That is a belt-and-braces argument and not a reason to
+// leave Vary incomplete: the two protect against different caches, and the one
+// that honours Vary is the one that would otherwise be handed a correct-looking
+// key.
+//
+// SCOPE. This covers the internal/api routes that call it. The playout MEDIA
+// origin in internal/playout/handler.go serves segments with `Cache-Control:
+// public` and no Vary at all, which is a real gap and a different one -- that
+// handler is in another package, never reaches this function, and its responses
+// do not vary by principal in the first place (see the gate in playout.go,
+// where a read bearer is byte-identical to an anonymous viewer): it is a
+// WATCH-token problem that exists for a purely anonymous deployment too. Filed
+// as #155 rather than folded in here.
 func principalVaryingResponse(w http.ResponseWriter) {
 	w.Header().Add("Vary", "Authorization")
+	w.Header().Add("Vary", "Cookie")
 	w.Header().Set("Cache-Control", "private, no-store")
 }

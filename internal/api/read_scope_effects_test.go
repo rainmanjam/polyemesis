@@ -157,11 +157,29 @@ func TestHLSPreviewIsSessionOnly(t *testing.T) {
 
 	// And it no longer answers the methods a file server has no business
 	// answering. POST used to reach PreviewRequested exactly as GET did.
+	//
+	// EXACTLY 405, and the loosening to `!= 405 && != 404` that stood here was
+	// found by mutation to be vacuous: reverting the route registration to the
+	// pre-fix `r.Handle("/hls/*", ...)`, which answers POST with the handler
+	// itself, still produced a status this accepted. A 404 is what a route that
+	// does not exist returns; the claim being made is that the route DOES exist
+	// and refuses the method, and only 405 says that. It passes as written
+	// today -- the narrowing costs nothing and buys the whole assertion.
 	rp := jsonRequest(t, http.MethodPost, "/hls/live.m3u8", nil)
 	sign(rp)
-	if w := do(t, h, rp); w.Code != http.StatusMethodNotAllowed && w.Code != http.StatusNotFound {
-		t.Errorf("POST /hls/live.m3u8 returned %d; the group is registered for GET and "+
-			"HEAD now, so anything else should not reach the handler", w.Code)
+	w := do(t, h, rp)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /hls/live.m3u8 returned %d, want 405; the group is registered for "+
+			"GET and HEAD, so anything else must be refused BY THE ROUTER rather than "+
+			"reaching the handler", w.Code)
+	}
+	// Allow is asserted only to be PRESENT. It reads "HEAD" here rather than
+	// "GET, HEAD", which was measured and is chi's own accounting of the
+	// method-not-allowed set, not something this route table can spell
+	// differently. Pinning the exact string would be pinning a dependency's
+	// internals under the name of a claim about this product.
+	if w.Header().Get("Allow") == "" {
+		t.Error("POST /hls/live.m3u8 answered 405 with no Allow header")
 	}
 }
 

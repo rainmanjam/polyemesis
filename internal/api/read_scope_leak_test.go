@@ -623,8 +623,17 @@ func TestPrincipalVaryingResponsesAreNotCacheable(t *testing.T) {
 			t.Errorf("GET %s: Cache-Control = %q, want no-store — this body depends on "+
 				"who asked", path, got)
 		}
-		if got := w.Header().Values("Vary"); !containsFold(got, "Authorization") {
-			t.Errorf("GET %s: Vary = %v, want Authorization", path, got)
+		// BOTH headers a principal can arrive on. Authorization was asserted
+		// from the start; Cookie was not, and it is the one that carries the
+		// SESSION -- the principal that receives the unredacted body, and so
+		// the one response that must never be replayed to anybody else. A cache
+		// keyed on Authorization alone files the signed-in operator's settings
+		// blob under the same key as every anonymous caller's.
+		for _, header := range []string{"Authorization", "Cookie"} {
+			if got := w.Header().Values("Vary"); !containsFold(got, header) {
+				t.Errorf("GET %s: Vary = %v, want it to name %s — this body depends on "+
+					"a principal that arrives in that header", path, got, header)
+			}
 		}
 	}
 }
