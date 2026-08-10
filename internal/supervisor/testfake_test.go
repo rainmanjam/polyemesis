@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -60,11 +61,38 @@ func runFakeChild(mode string, args []string) int {
 		// IGNORES SIGTERM, which is the case Stop's deadline exists for and the
 		// only way to reach it without waiting out a real timeout. An FFmpeg
 		// wedged on a stuck output socket behaves this way.
-		signal.Ignore(syscall.SIGTERM)
+		//
+		// signal.Notify INTO A CHANNEL NOBODY READS, not signal.Ignore, and the
+		// difference is a Windows correctness bug rather than a style choice.
+		// signal.Ignore takes the "ignore" path in runtime/sigqueue.go, which
+		// CLEARS the wanted bit for the signal. With the bit clear, sigsend
+		// refuses the delivery, and os_windows.go's ctrlHandler answers a
+		// refused delivery by running the DEFAULT handler -- which terminates
+		// the process. A fake called "deaf" that dies on the first signal is
+		// the worst possible fixture: every test that trusts the name silently
+		// asserts nothing. Notify keeps the bit set, the signal is queued to a
+		// buffered channel with no reader, and the process genuinely ignores it
+		// on both platforms.
+		//
+		// Both SIGTERM and os.Interrupt, because they are the same event on
+		// different platforms: Unix stop sends SIGTERM, while the Windows path
+		// arrives as a console control event that the runtime maps to SIGINT.
+		//
+		// (Windows behaviour here is read off the runtime sources, not executed
+		// -- see the skip in TestStopReportsWhenItHadToKillTheChild.)
+		deaf := make(chan os.Signal, 1)
+		signal.Notify(deaf, syscall.SIGTERM, os.Interrupt)
 		d, err := time.ParseDuration(args[0])
 		if err != nil {
 			return 2
 		}
+		// THE HANDSHAKE, and it must come after Notify. StateRunning is set the
+		// instant cmd.Start() returns, which is before the child has executed
+		// its first instruction; a test that signalled on the strength of that
+		// could land the signal on a child whose handler was not installed yet,
+		// and watch a "deaf" fake die obediently. Announcing readiness from
+		// inside the child is the only report that cannot be early.
+		fmt.Fprintln(os.Stderr, deafReadyLine)
 		time.Sleep(d)
 		return 0
 
@@ -106,8 +134,36 @@ func fakeExit(code int) fake { return newFake("exit", strconv.Itoa(code)) }
 // fakeSleep spawns a child that stays up until it is signalled.
 func fakeSleep(d time.Duration) fake { return newFake("sleep", d.String()) }
 
+// deafReadyLine is what a "deaf" child prints on stderr once its signal
+// handlers are installed. It goes to stderr because the supervisor scans stderr
+// into the log ring, where a test can see it; stdout is fed to the FFmpeg
+// progress parser and would swallow it.
+const deafReadyLine = "fake child: signal handlers installed"
+
 // fakeDeaf spawns a child that ignores SIGTERM, so only SIGKILL ends it.
+// Pair it with waitForDeaf: until the readiness line arrives the child is not
+// yet deaf, and a signal delivered before then is answered by the default
+// disposition.
 func fakeDeaf(d time.Duration) fake { return newFake("deaf", d.String()) }
+
+// waitForDeaf blocks until a fakeDeaf child has installed its handlers.
+//
+// VERIFIED DEAFNESS IS A PRECONDITION for anything the deadline arm asserts,
+// and it is also the precondition on un-skipping that arm's test on Windows:
+// without this, a Windows run cannot tell "the signal was ignored and the
+// deadline won" from "the signal arrived a microsecond too early and the child
+// died the ordinary way".
+func waitForDeaf(t *testing.T, p *Process) {
+	t.Helper()
+	waitFor(t, "the deaf child to install its signal handlers", func() bool {
+		for _, l := range p.Logs() {
+			if strings.Contains(l.Text, deafReadyLine) {
+				return true
+			}
+		}
+		return false
+	})
+}
 
 // fakeStderr spawns a child that writes n lines to stderr and exits cleanly.
 func fakeStderr(n int) fake { return newFake("stderr", strconv.Itoa(n)) }
@@ -134,14 +190,26 @@ const waitTimeout = 15 * time.Second
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(waitTimeout)
+	waitForBounded(t, waitTimeout, what, cond)
+}
+
+// waitForBounded is waitFor with the ceiling named at the call site.
+//
+// It exists because waitTimeout is deliberately generous, and a generous
+// ceiling is the wrong instrument when the point of the poll is to distinguish
+// a fast mechanism from a slow one that would satisfy it anyway. A caller that
+// passes its own bound is asserting something about WHICH mechanism ran, and
+// owes a comment saying why that number and not a larger one.
+func waitForBounded(t *testing.T, bound time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(bound)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", what)
+	t.Fatalf("timed out after %s waiting for %s", bound, what)
 }
 
 // recorder collects the state transitions the supervisor announces. Polling

@@ -155,7 +155,40 @@ func TestBackoffDoublesUpToTheCeiling(t *testing.T) {
 
 // --------------------------------------------------------------------- stop
 
-func TestStopKillsTheChildAndReportsStopped(t *testing.T) {
+// reapDeadline is the context deadline given to Stop by the test below, and it
+// is load-bearing at a value nobody would guess.
+//
+// IT MUST EXCEED shutdownGrace (8s, supervisor.go:48). stop() signals the group
+// and then selects on {child reaped, deadline}. When the signal does not land --
+// a child that ignores SIGTERM, a Git-Bash `kill` that cannot deliver a real
+// SIGTERM to a native .exe at all -- the ONLY thing that still ends the child is
+// terminate()'s grace goroutine, which sleeps shutdownGrace and then kills the
+// group. A deadline below 8s therefore expires BEFORE the rescue can fire, and
+// the deadline arm is not merely possible but guaranteed: the test would be
+// asserting the wrong arm every time, on every platform, whenever a signal is
+// slow or ignored.
+//
+// That is what the old 3s value did, and why this test flaked on Windows
+// (issue #180, "pid N survived Stop" on a byte-identical supervisor). Do not
+// lower it back under 8s. Raising it costs nothing: it is a ceiling that a
+// healthy run never approaches, paid in full only by a genuinely failing test,
+// the same bargain waitTimeout makes in testfake_test.go.
+const reapDeadline = 20 * time.Second
+
+// TestStopReapsTheChildWhenItHasTimeTo pins ONE of stop()'s two arms, by name.
+//
+// stop() has two exits and sets StateStopped on both:
+//
+//	case <-done:      supervise() finished cmd.Wait() -- the child IS reaped
+//	case <-ctx.Done(): SIGKILL is issued and this returns without waiting;
+//	                   returns ErrStopDeadline "may still be running"
+//
+// So neither the state nor a liveness probe can say which one ran. The error
+// can, and it is the only thing that can, which is why this test captures it
+// instead of discarding it. A test that throws it away cannot distinguish
+// "Stop is broken" from "Stop correctly reported it ran out of time" -- the
+// exact ambiguity that made #180 take a day to read.
+func TestStopReapsTheChildWhenItHasTimeTo(t *testing.T) {
 	p := testProcess(t, fakeSleep(30*time.Second), Spec{
 		AutoRestart: true,
 		MinBackoff:  10 * time.Millisecond,
@@ -163,31 +196,60 @@ func TestStopKillsTheChildAndReportsStopped(t *testing.T) {
 	p.Start()
 
 	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
-	pid := p.Status().PID
-	if pid == 0 {
+	if pid := p.Status().PID; pid == 0 {
 		t.Fatal("a running process must report its pid")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), reapDeadline)
 	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		p.Stop(ctx)
-		close(done)
-	}()
+	errc := make(chan error, 1)
+	go func() { errc <- p.Stop(ctx) }()
+
+	var err error
 	select {
-	case <-done:
-	case <-time.After(4 * time.Second):
+	case err = <-errc:
+	case <-time.After(reapDeadline + 5*time.Second):
 		t.Fatal("Stop did not return")
+	}
+
+	// THE ASSERTION. err == nil is reachable only through `case <-done:`, and
+	// done is closed by supervise() after runOnce() returned, which happens
+	// only after wg.Wait() and cmd.Wait() both returned. cmd.Wait() returning
+	// IS the reap, observed synchronously by this process. So a nil error is a
+	// strictly stronger statement than any liveness probe could make, and it is
+	// made without a poll, a sleep or a race.
+	//
+	// It says "the child this Process tracked was reaped". It does NOT say
+	// "pid N is dead" -- and the difference is why the old `if alive(pid)`
+	// check that used to sit below is gone rather than kept alongside:
+	//
+	//   1. On Unix, alive() is Kill(pid, 0). Between cmd.Wait() and the probe
+	//      the kernel is free to hand that pid to somebody else, so a true
+	//      answer can be about a process this test never started. It also
+	//      returns true for a zombie -- a child that IS dead and merely
+	//      unreaped -- which is the precise state it was written to exclude.
+	//   2. On Windows, alive() is OpenProcess + WaitForSingleObject(h, 0), an
+	//      instantaneous poll. After cmd.Wait() has returned, BOTH of its
+	//      branches report false, so it adds nothing to what err == nil
+	//      already proved.
+	//
+	// The one caveat on the entailment: it means "the tracked child was
+	// reaped" only because this test established StateRunning first. Without
+	// that, Stop on a process that never started also returns nil.
+	//
+	// Do not restore a liveness probe here in any form. Measured vacuous: a
+	// bounded poll for !alive(pid) passes 10/10 against a supervisor mutated
+	// to never wait at all.
+	if err != nil {
+		t.Fatalf("Stop on a child that honours SIGTERM returned %v; this test pins the "+
+			"reap path (case <-done), and a deadline here is a regression in the stop "+
+			"path or an undersized deadline, not a slow runner. The deadline is %s and "+
+			"the grace escalation that rescues an unheeded signal is %s.",
+			err, reapDeadline, shutdownGrace)
 	}
 
 	if st := p.Status(); st.State != StateStopped {
 		t.Errorf("state = %q, want %q", st.State, StateStopped)
-	}
-	// Stop must reap the child, not merely stop watching it: a leaked FFmpeg
-	// keeps holding the capture device and the destination socket.
-	if alive(pid) {
-		t.Errorf("pid %d survived Stop", pid)
 	}
 	// AutoRestart must not resurrect a deliberately stopped process.
 	time.Sleep(100 * time.Millisecond)
@@ -476,27 +538,54 @@ func TestStartDelayIsInterruptedByAStop(t *testing.T) {
 // line, which nothing can branch on. See issue #138.
 func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("no SIGTERM semantics on Windows")
+		// NOT "no SIGTERM semantics on Windows" -- that was false, and being
+		// false it made the deadline arm look like a Unix curiosity when it is
+		// the arm Windows takes in PRODUCTION: under the SCM (service_windows.go
+		// :50-82) a stop request arrives with a deadline already ticking.
+		//
+		// The real reason to skip is that arm selection here is not yet proven
+		// deterministic on a console-less runner. signalGroup's Windows path is
+		// GenerateConsoleCtrlEvent (proc_windows.go:66-74), and when that fails
+		// -- which it does with no attached console -- it falls straight
+		// through to killGroup. TerminateProcess is asynchronous by contract,
+		// but the child may still be reaped fast enough for `done` to race the
+		// already-expired ctx at the select, and this test would then fail
+		// claiming Stop reported a clean stop on an expired deadline.
+		//
+		// Preconditions for un-skipping, recorded so the next person does not
+		// have to rediscover them: prove deterministic arm selection on a
+		// console-less runner, and land the fakeDeaf readiness handshake first
+		// (done: see testfake_test.go) so "deaf" is verified rather than
+		// assumed. Tracked as its own issue; deliberately not gambled on the
+		// day this repository is prosecuting flakes.
+		t.Skip("deadline-arm selection is not yet proven deterministic on a console-less Windows runner")
 	}
 	p := testProcess(t, fakeDeaf(30*time.Second), Spec{})
 	p.Start()
 	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
+	// StateRunning only means cmd.Start() returned. Wait for the child to say
+	// its handlers are up, or "deaf" is an aspiration.
+	waitForDeaf(t, p)
 	pid := p.Status().PID
 
 	// AN ALREADY-EXPIRED DEADLINE, and the reason is worth recording.
 	//
-	// Reaching this branch with a live child is harder than it looks: stop()
-	// cancels the process's own context before it signals, and exec.CommandContext
-	// answers that cancellation with SIGKILL regardless of what the child does
-	// about SIGTERM. So a child ignoring SIGTERM still dies almost at once and
-	// `done` closes first. That is why no run in the #126 investigation ever
-	// logged this path, and it is a good thing about the design rather than a
-	// gap in it.
+	// The comment that used to sit here credited the context-aware exec
+	// constructor with killing the child on cancellation. This package does not
+	// use it: runOnce builds children with plain exec.Command (supervisor.go
+	// :671) and sets no WaitDelay, so cancelling the process's own context
+	// signals nothing by itself, and the old comment described a mechanism that
+	// is not present. (Grep the package for the constructor's name and the only
+	// hit was that comment.) The true mechanism is narrower: signalGroup asks, and
+	// the ONLY thing that follows up on a child that does not listen is
+	// terminate()'s grace goroutine, which sleeps shutdownGrace (8s) and then
+	// kills the group. Any deadline shorter than that reaches the select first.
 	//
-	// What must still be true is that when the deadline DOES win -- a child
+	// So an already-expired context forces the deadline arm deterministically,
+	// which is what this test wants: when the deadline DOES win -- a child
 	// whose exit is blocked on something SIGKILL cannot hurry, a wedged pipe
-	// with a grandchild holding it open -- Stop says so instead of reporting a
-	// clean stop. Handing it a spent deadline exercises exactly that select
+	// with a grandchild holding it open -- Stop must say so instead of
+	// reporting a clean stop. A spent deadline exercises exactly that select
 	// arm without pretending to reproduce the wedge.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -514,7 +603,28 @@ func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
 	}
 	// The kill still has to land, or this reports a problem while also leaking
 	// the child.
-	waitFor(t, "the killed child to be reaped", func() bool { return !alive(pid) })
+	//
+	// THE BOUND IS 2s AND THAT IS THE WHOLE POINT OF THE ASSERTION. waitFor's
+	// 15s ceiling made this test pass for the wrong reason, measured: with
+	// p.kill() deleted from the deadline arm, the poll still went green at
+	// ~17s of wall clock, because terminate()'s grace goroutine reaps the child
+	// at shutdownGrace (8s) on stop's behalf. A leak check that any 8s backstop
+	// satisfies is not checking the kill this arm is documented to issue.
+	//
+	// 2s is below shutdownGrace by enough that only stop()'s own p.kill() can
+	// satisfy it, and far above the ~1ms a SIGKILL'd fake child actually takes.
+	// If this ever needs raising, it may not go to or past 8: it would stop
+	// distinguishing the kill from the grace period and become the ninth test
+	// in this repository that passes for a reason nobody intended.
+	//
+	// alive() is used HERE AND NOWHERE ELSE, as a leak check, never as a Stop
+	// postcondition -- see the comment in TestStopReapsTheChildWhenItHasTimeTo
+	// for the two ways it lies. Here its weakness does not matter: the failing
+	// direction (a pid that stays alive) is the one being excluded, and 2s of
+	// pid reuse on a just-killed child is not a hazard worth trading the
+	// mutation sensitivity for.
+	waitForBounded(t, 2*time.Second, "the killed child to be reaped by stop's own kill",
+		func() bool { return !alive(pid) })
 }
 
 // And the ordinary path must stay quiet, or the selector would log a warning on
