@@ -136,9 +136,29 @@ func SafeName(hint string) string {
 	return fmt.Sprintf("%s-%s%s", stem, hex.EncodeToString(buf[:]), ext)
 }
 
-// allowedExt is what may be preserved from a client filename. Containers
-// polyemesis can plausibly read; anything else is stored as .bin and still
-// works, because ffmpeg probes content rather than trusting the extension.
+// allowedExt is what may be preserved from a client filename: containers
+// polyemesis can plausibly read. Anything else is stored as ".bin".
+//
+// This used to end "and still works, because ffmpeg probes content rather than
+// trusting the extension". Both halves of that were wrong by the time it was
+// read, and the second half is what this whole feature exists to refute.
+//
+// "Still works" is no longer true in either direction. An unrecognised
+// extension used to mean the file was stored, listed, and left for the operator
+// to discover at air; POST /api/v1/media now probes the bytes and refuses what
+// is not media, so a ".bin" that is a PDF gets a 400 and is never stored, and a
+// ".bin" that IS media is accepted exactly as before. The extension decides the
+// stored NAME and nothing about admission.
+//
+// "ffmpeg probes content rather than trusting the extension" is the sentence
+// that let a PDF into the Library, and it is only mostly true even as a
+// statement about ffmpeg. It was measured on this repo's FFmpeg that content
+// probing alone decided the format for every shape tried (mp4, mkv, mpegts,
+// mxf, nut, wtv, mpeg, and raw h264/mpegvideo/ac3/eac3), with and without the
+// extension present -- but "mostly true about ffmpeg" is not a licence for this
+// package to make a claim about admission, which it does not control. What
+// admits an upload is internal/ffmpeg.ProbeFile's format allowlist and the
+// handler's stream check. Not this map.
 var allowedExt = map[string]bool{
 	".ts": true, ".mp4": true, ".mkv": true, ".mov": true, ".m4v": true,
 	".flv": true, ".webm": true, ".mpg": true, ".mpeg": true, ".m2ts": true,
@@ -289,14 +309,109 @@ func (s *Store) removeMedia(stored string) {
 	_ = os.Remove(filepath.Join(s.dir, sidecarName(stored)))
 }
 
+// Pending is an upload whose bytes are on disk and which is NOT yet visible.
+//
+// It exists so a caller can look at the bytes before deciding. Save used to be
+// the whole story -- stream, rename, hand back a File -- and the rename is the
+// moment the file becomes real: List returns it, its pullUrl works, and PUT
+// /api/v1/settings will accept it as a playlist item. A caller that renames
+// first and inspects second has, for the length of the inspection, published a
+// file it is about to delete. That gap is not theoretical; it was driven to
+// 201-then-deleted with a stored playlist item left naming nothing, which is
+// the dangling reference handleDeleteMedia takes settingsMu to prevent and
+// answers 409 for.
+//
+// So the sequence is Stage, look, then Commit or Discard. Exactly one of the
+// last two must be called; Discard after Commit is a no-op, which makes
+// `defer p.Discard()` safe to write next to the Stage.
+type Pending struct {
+	store *Store
+	tmp   string
+	name  string
+	bytes int64
+	done  bool
+}
+
+// Path is the absolute path of the staged bytes, for a caller that wants to
+// read them before deciding. It is inside the uploads directory and carries the
+// ".partial-" prefix List skips, so nothing lists it and no pullUrl reaches it.
+func (p *Pending) Path() string { return p.tmp }
+
+// Name is the filename the upload will have if it is committed.
+func (p *Pending) Name() string { return p.name }
+
+// Bytes is what was actually written.
+func (p *Pending) Bytes() int64 { return p.bytes }
+
+// Commit publishes the staged file under its final name.
+func (p *Pending) Commit() (File, error) {
+	if p.done {
+		return File{}, errors.New("uploads: this upload was already committed or discarded")
+	}
+	final, err := p.store.Resolve(p.name)
+	if err != nil {
+		return File{}, err
+	}
+	if err := os.Rename(p.tmp, final); err != nil {
+		return File{}, fmt.Errorf("finalise upload: %w", err)
+	}
+	p.done = true
+	// 0600, not 0644. Nothing outside this process reads an upload: the server
+	// serves it over the API and the FFmpeg children it spawns run as the same
+	// user. os.CreateTemp already makes the file 0600, so the earlier 0644 was
+	// actively WIDENING permissions on operator media for no reader that exists.
+	if err := os.Chmod(final, 0o600); err != nil {
+		return File{}, fmt.Errorf("chmod upload: %w", err)
+	}
+	return File{
+		Name:     p.name,
+		Origin:   OriginUploaded,
+		Bytes:    p.bytes,
+		Modified: time.Now().UTC(),
+		PullURL:  PullURL(p.name),
+	}, nil
+}
+
+// Discard removes the staged bytes. Idempotent, and a no-op after Commit.
+//
+// There is no sidecar to remove and no reference to check: a Pending was never
+// published, so nothing in the product has had the chance to name it. That is
+// the entire reason the reject path moved here from store.Delete, which had to
+// be trusted not to race a settings save and could not be.
+func (p *Pending) Discard() error {
+	if p.done {
+		return nil
+	}
+	p.done = true
+	if err := os.Remove(p.tmp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // Save streams r into the uploads directory and returns the stored file.
+//
+// Stage plus Commit with nothing in between, kept because that is genuinely
+// all some callers want. A caller that must inspect the bytes before the file
+// becomes listable wants Stage.
+func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint64) (File, error) {
+	p, err := s.Stage(r, hint, maxBytes, minFreeBytes)
+	if err != nil {
+		return File{}, err
+	}
+	defer p.Discard()
+	return p.Commit()
+}
+
+// Stage streams r into a temp file in the uploads directory without publishing
+// it, and returns the Pending the caller must Commit or Discard.
 //
 // It writes to a temporary file and renames on success, so a cancelled or
 // oversized upload never leaves a partial file that looks selectable. That
 // matters more here than in most upload paths: a half-written video is not
 // obviously broken in a listing, and the operator would discover it when the
 // broadcast they scheduled goes to air.
-func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint64) (File, error) {
+func (s *Store) Stage(r io.Reader, hint string, maxBytes int64, minFreeBytes uint64) (*Pending, error) {
 	if minFreeBytes > 0 && s.freeBytes != nil {
 		free, err := s.freeBytes(s.dir)
 		if err != nil {
@@ -304,7 +419,7 @@ func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint
 			// itself errored, which is the wrong direction for a disk check:
 			// the one case where you cannot tell how much room is left is not
 			// the case to start writing gigabytes.
-			return File{}, fmt.Errorf("%w: could not read free space: %v", ErrNoSpace, err)
+			return nil, fmt.Errorf("%w: could not read free space: %v", ErrNoSpace, err)
 		}
 		// The floor has to survive the upload, not merely precede it. Checking
 		// `free < minFreeBytes` alone accepts an 8 GiB upload onto a volume
@@ -316,27 +431,35 @@ func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint
 			needed += uint64(maxBytes)
 		}
 		if free < needed {
-			return File{}, ErrNoSpace
+			return nil, ErrNoSpace
 		}
 	}
 
 	name := SafeName(hint)
-	final, err := s.Resolve(name)
-	if err != nil {
-		return File{}, err
+	if _, err := s.Resolve(name); err != nil {
+		return nil, err
 	}
 
-	tmp, err := os.CreateTemp(s.dir, ".partial-*")
+	// The temp file keeps the final name's extension. Content probing decided
+	// the format for every shape this was measured against -- mp4, mkv, mpegts,
+	// mxf, nut, wtv, mpeg, and the raw h264/mpegvideo/ac3/eac3 elementary
+	// streams all reported the same format_name under ".partial-1234567" as
+	// under their real name -- so this is not load-bearing. It is here so that
+	// the file the gate inspects and the file the operator gets differ in
+	// nothing an ffmpeg looks at, which is a cheaper thing to keep true than to
+	// re-measure whenever the allowlist grows.
+	tmp, err := os.CreateTemp(s.dir, partialPrefix+"*"+filepath.Ext(name))
 	if err != nil {
-		return File{}, fmt.Errorf("create temp file: %w", err)
+		return nil, fmt.Errorf("create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	// Both cleanups are unconditional and idempotent: on the success path the
-	// rename has already moved the file, so the Remove is a no-op.
-	defer func() {
+	// Every early return below leaves nothing behind. Past this function the
+	// Pending owns the file and Commit/Discard decide its fate.
+	fail := func(err error) (*Pending, error) {
 		tmp.Close()
 		os.Remove(tmpName)
-	}()
+		return nil, err
+	}
 
 	var written int64
 	if maxBytes > 0 {
@@ -347,38 +470,23 @@ func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint
 		written, err = io.Copy(tmp, r)
 	}
 	if err != nil {
-		return File{}, fmt.Errorf("write upload: %w", err)
+		return fail(fmt.Errorf("write upload: %w", err))
 	}
 	if maxBytes > 0 && written > maxBytes {
-		return File{}, ErrTooLarge
+		return fail(ErrTooLarge)
 	}
 	if written == 0 {
-		return File{}, ErrEmpty
+		return fail(ErrEmpty)
 	}
 	if err := tmp.Sync(); err != nil {
-		return File{}, fmt.Errorf("sync upload: %w", err)
+		return fail(fmt.Errorf("sync upload: %w", err))
 	}
 	if err := tmp.Close(); err != nil {
-		return File{}, fmt.Errorf("close upload: %w", err)
-	}
-	if err := os.Rename(tmpName, final); err != nil {
-		return File{}, fmt.Errorf("finalise upload: %w", err)
-	}
-	// 0600, not 0644. Nothing outside this process reads an upload: the server
-	// serves it over the API and the FFmpeg children it spawns run as the same
-	// user. os.CreateTemp already makes the file 0600, so the earlier 0644 was
-	// actively WIDENING permissions on operator media for no reader that exists.
-	if err := os.Chmod(final, 0o600); err != nil {
-		return File{}, fmt.Errorf("chmod upload: %w", err)
+		os.Remove(tmpName)
+		return nil, fmt.Errorf("close upload: %w", err)
 	}
 
-	return File{
-		Name:     name,
-		Origin:   OriginUploaded,
-		Bytes:    written,
-		Modified: time.Now().UTC(),
-		PullURL:  PullURL(name),
-	}, nil
+	return &Pending{store: s, tmp: tmpName, name: name, bytes: written}, nil
 }
 
 // PullURL renders the file:// URL for a stored upload, relative to the data
@@ -386,6 +494,28 @@ func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint
 // a URL, and a backslash here would be a literal character in a filename on
 // the platform that uses it as a separator.
 func PullURL(name string) string { return "file://" + Dir + "/" + name }
+
+// partialPrefix marks bytes that are on disk but not published: a Pending, or
+// the leavings of a process that died mid-upload.
+const partialPrefix = ".partial-"
+
+// Listable reports whether a stored filename is one this package will ever
+// offer as an upload.
+//
+// EXPORTED SO THE RULE HAS ONE HOME. Two things ask this question and they must
+// not be allowed to answer it differently: List, which decides what the Library
+// shows, and internal/api's playlist validation, which decides what a stored
+// playlist item may name. That second one used to ask os.Stat instead, which
+// answers a different question -- "are there bytes at this path" -- and every
+// name skipped here has bytes at its path. So a settings save naming a
+// ".partial-" file staged by an upload in flight, or a ".probe-" sidecar,
+// passed validation and became a playlist item pointing at something that was
+// about to be deleted or was never media in the first place.
+func Listable(name string) bool {
+	return name != "" &&
+		!strings.HasPrefix(name, partialPrefix) &&
+		!strings.HasPrefix(name, sidecarPrefix)
+}
 
 // List returns the stored uploads, newest first.
 func (s *Store) List() ([]File, error) {
@@ -399,9 +529,7 @@ func (s *Store) List() ([]File, error) {
 		// something to offer as a source. Sidecars go with them -- a probe
 		// result is not itself media, and listing one would offer it as a
 		// pull source.
-		if e.IsDir() ||
-			strings.HasPrefix(e.Name(), ".partial-") ||
-			strings.HasPrefix(e.Name(), sidecarPrefix) {
+		if e.IsDir() || !Listable(e.Name()) {
 			continue
 		}
 		info, err := e.Info()

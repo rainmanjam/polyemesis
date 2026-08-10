@@ -217,10 +217,20 @@ rejection is almost always there.
 
 ### An upload is refused
 
-The Library probes every upload before accepting it, and refuses anything
-ffprobe cannot read as media. The message is ffprobe's own — `moov atom not
-found` means a truncated download, and `Invalid data found when processing
-input` usually means the file is not what its name says.
+The Library probes every upload before it is stored under its final name, and
+refuses anything ffprobe cannot read as media. Usually the message is ffprobe's
+own: `Invalid data found when processing input` means the file is not what its
+name says, and `moov atom not found` means an MP4 whose end is missing.
+
+Two refusals are polyemesis's own words rather than ffprobe's:
+
+- **"this file carries no video or audio stream"** — ffprobe read the container
+  and found nothing playable in it. A renamed archive arrives this way.
+- **"this file is a playlist or script naming other files, not media itself"** —
+  the file is an ffconcat script, an HLS playlist or similar. These are refused
+  even though ffprobe reports streams for them, because the streams belong to
+  the files they NAME. A four-line text file would otherwise be stored with
+  another video's codecs, resolution and duration shown as its own.
 
 This is stricter than it used to be. The extension list was never a gate: an
 unrecognised extension was stored as `.bin` and listed as media anyway, so a
@@ -230,12 +240,48 @@ normalise job failed on it — or until it reached air.
 A file the server accepts but you cannot play locally is worth checking the
 other way round: **your** player may lack a codec this FFmpeg has.
 
-**The check is skipped rather than failed when it cannot run**, and uploads are
-accepted unchecked. That happens when the server has no `ffprobe` on its PATH,
-and also when it has no running engine — an install whose video pipeline will
-not build logs the reason and keeps serving, and refusing every upload on top
-of that would be a worse outage than the one it is guarding against. The
-startup log says which binaries were found and whether the engine came up.
+#### Truncation is mostly NOT caught
+
+Do not read the check as a completeness guarantee, because it is not one.
+`moov atom not found` only appears for an MP4 whose index sits at the end of
+the file, which is the default layout. Measured on the FFmpeg this repository
+builds against:
+
+| file, cut to 10% of its length | result |
+| --- | --- |
+| MP4, default layout | **refused**, `moov atom not found` |
+| MP4 written with `-movflags +faststart` | **accepted**, and the Library shows the ORIGINAL duration |
+| Matroska (`.mkv`) | **accepted**, and the Library shows the ORIGINAL duration |
+
+So a partial download of a faststart MP4 or an MKV is accepted and listed as
+ten minutes long while holding one. The check answers "is this media", not "is
+this all of it". `internal/ffmpeg.TestProbeFileAcceptsMostTruncatedMedia` pins
+each of the three rows above.
+
+#### When the check is skipped
+
+**The check is skipped rather than failed when it cannot run**, and the upload
+is accepted unchecked. There are four ways that happens: the server has no
+`ffprobe`, it has no running engine (an install whose video pipeline will not
+build logs the reason and keeps serving), the client disconnected while the
+probe was running, or the probe took longer than 30 seconds. Refusing every
+upload in any of those cases would be a worse outage than the one it guards
+against — and deleting the file, which is what the first version of this did on
+a disconnect, destroys a transfer that had already completed.
+
+**Every one of them writes a WARN line naming the upload**, and that is the way
+to find out it happened:
+
+```
+level=WARN msg="no ffprobe available; accepting this upload unchecked" reason="the engine reports no ffprobe binary" name=show-629507cb.mkv
+level=WARN msg="upload probe was interrupted; accepting the file unchecked" name=show-4aee482d.mkv cause="context deadline exceeded" err="signal: killed"
+```
+
+`name` is the stored filename, so it matches what the Library shows.
+
+The startup log will not tell you: it prints ffmpeg's version and path and says
+nothing about ffprobe, and there is no "engine came up" line to look for. Grep
+the running server's log for `unchecked`.
 
 ### "Error binding filtergraph inputs/outputs"
 

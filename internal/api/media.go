@@ -96,14 +96,8 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		file, err := store.Save(part, part.FileName(), MaxUploadBytes, UploadFreeFloor)
-		part.Close()
-		if err != nil {
-			writeUploadError(w, err)
-			return
-		}
-		// Probed before it is reported as accepted, and removed again if it is
-		// not media.
+		// STAGED, THEN PROBED, THEN PUBLISHED, and that order is the fix rather
+		// than a tidy-up.
 		//
 		// Nothing checked this before. The extension allowlist looks like a
 		// gate and is not one -- SafeName only uses it to decide what to keep
@@ -113,22 +107,48 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 		// sign of trouble was a playlist normalise job failing, or the file
 		// reaching air.
 		//
+		// The first version of this fix probed AFTER store.Save, which renames
+		// the file into place. For the length of the probe -- tens of
+		// milliseconds usually, up to probeUploadTimeout -- the file was listed
+		// by GET /api/v1/media with a working pullUrl, and PUT /api/v1/settings
+		// would accept it as a playlist item. Rejecting then deleted it with a
+		// raw store.Delete, taking neither settingsMu nor the in-use check, and
+		// left a stored playlist item naming a file that no longer exists:
+		// exactly the state handleDeleteMedia holds a global lock to prevent
+		// and answers 409 for. Driven end to end, twice.
+		//
+		// Staging first closes it at the source rather than by adding a second
+		// lock. A Pending is under ".partial-", which List skips, so there is
+		// no window in which a file that is about to be refused is visible, no
+		// pullUrl for it, and nothing for a settings save to reference.
+		//
 		// The reject is the point, but the numbers it collects on the way are
 		// what the Library then shows: an operator choosing between two similar
 		// files could previously see a name, a size and a date, none of which
 		// say whether the thing carries the three audio tracks they are about
 		// to route.
-		if info, probeErr := s.probeUpload(r.Context(), store, file.Name); probeErr != nil {
-			if delErr := store.Delete(file.Name); delErr != nil {
-				// Worth a line: the request is answered either way, but a file
-				// nothing will ever list is now occupying the volume.
-				s.log.Warn("could not remove a rejected upload",
-					"name", file.Name, "err", delErr)
-			}
-			s.log.Info("media rejected", "name", file.Name, "err", probeErr)
+		pending, err := store.Stage(part, part.FileName(), MaxUploadBytes, UploadFreeFloor)
+		part.Close()
+		if err != nil {
+			writeUploadError(w, err)
+			return
+		}
+		// Safe next to the Commit below: Discard is a no-op once committed.
+		defer func() { _ = pending.Discard() }()
+
+		info, probeErr := s.probeUpload(r.Context(), pending.Path(), pending.Name())
+		if probeErr != nil {
+			s.log.Info("media rejected", "name", pending.Name(), "err", probeErr)
 			writeError(w, http.StatusBadRequest, probeErr.Error())
 			return
-		} else if info != nil {
+		}
+
+		file, err := pending.Commit()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if info != nil {
 			// Best-effort: the file is good and already stored, so failing the
 			// upload because a cache could not be written would throw away
 			// minutes of the operator's time to protect a nicety.
@@ -155,16 +175,60 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 // the cost of waiting.
 const probeUploadTimeout = 30 * time.Second
 
-// probeUpload inspects a freshly stored file and reports whether it is media.
+// probeUpload inspects staged bytes and reports whether they are media.
 //
 // A nil error with a nil result means "could not check" rather than "not
 // media": with no ffprobe on the box there is nothing to judge with, and
 // refusing every upload because the server cannot inspect them would break a
-// working install for the sake of a check it cannot perform. The gate closes
-// only when ffprobe ran and disagreed.
-func (s *Server) probeUpload(ctx context.Context, store *uploads.Store, name string) (*uploads.MediaInfo, error) {
+// working install for the sake of a check it cannot perform.
+//
+// THE GATE CLOSES WHEN FFPROBE RAN AND DISAGREED, AND ONLY THEN. That sentence
+// used to be here as a description and was false: every non-nil error took the
+// reject path, including a context error, and the reject path deleted the file.
+// So a client disconnecting after the bytes had already landed -- routine on an
+// 8 GiB limit with no WriteTimeout and proxies in front -- answered 400 "this
+// file could not be read as media: context canceled" and DESTROYED a perfectly
+// good upload while asserting something false about it. Reproduced end to end
+// before it was fixed.
+//
+// Interruption is now a third answer, and it joins the could-not-check path:
+// the probe did not run, so it did not disagree, so there is nothing to refuse
+// on. Both interruptions land here and the difference is worth knowing:
+//
+//   - the client went away (context.Canceled). Nobody is listening for the
+//     response. Keeping the bytes is the only outcome that does not throw away
+//     the operator's completed transfer.
+//   - probeUploadTimeout expired (context.DeadlineExceeded). This is a real
+//     hole and is stated rather than hidden: a file that takes ffprobe more
+//     than 30 seconds is accepted unchecked. It is the same hole as having no
+//     ffprobe at all, reached by a different route, and closing it by deleting
+//     instead would mean a slow disk deletes valid media. It is logged at Warn,
+//     which is the only way to notice it.
+//
+// path is the staged file to inspect; name is what it will be CALLED if it is
+// accepted, and every log line here uses the second one. The first is a
+// ".partial-" temp name that appears nowhere else in the product, so an
+// operator who greps for the warning below could not match it to anything they
+// can see in the Library.
+func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.MediaInfo, error) {
 	bin := s.probeBin
 	if bin == "" {
+		// EVERY ONE OF THESE LOGS BEFORE IT RETURNS, and that is the whole
+		// reason unchecked is a survivable outcome.
+		//
+		// docs/TROUBLESHOOTING.md tells an operator how to find out whether
+		// their uploads are being checked. It used to point at the startup log,
+		// which says nothing of the sort: main.go logs ffmpeg's path and never
+		// ffprobe's, and no line anywhere reports the engine coming up. So the
+		// documented way to detect a silently-open gate did not exist, in the
+		// same paragraph that introduced the gate. The line below is what the
+		// documentation now points at, and it is per upload rather than per
+		// boot, so it appears next to the upload it applies to.
+		unchecked := func(reason string) (*uploads.MediaInfo, error) {
+			s.log.Warn("no ffprobe available; accepting this upload unchecked",
+				"reason", reason, "name", name)
+			return nil, nil
+		}
 		// s.mgr is nil in every test in this package, and Manager.Default takes
 		// a read lock on the manager, so an unguarded s.eng() turns POST
 		// /api/v1/media into a panic under `go test ./internal/api`. It is
@@ -173,30 +237,64 @@ func (s *Server) probeUpload(ctx context.Context, store *uploads.Store, name str
 		// build has no default engine -- and refusing every upload because of
 		// that would be a worse outage than the one it is guarding against.
 		if s.mgr == nil {
-			return nil, nil
+			return unchecked("this build has no engine manager")
 		}
 		eng := s.eng()
 		if eng == nil {
-			return nil, nil
+			return unchecked("no default engine")
 		}
 		tools := eng.Tools()
 		if tools == nil || tools.FFprobe == "" {
-			return nil, nil
+			return unchecked("the engine reports no ffprobe binary")
 		}
 		bin = tools.FFprobe
 	}
-	path, err := store.Resolve(name)
-	if err != nil {
-		return nil, err
+	timeout := s.probeTimeout
+	if timeout <= 0 {
+		timeout = probeUploadTimeout
 	}
-	ctx, cancel := context.WithTimeout(ctx, probeUploadTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	res, err := ffmpeg.ProbeFile(ctx, bin, path)
 	if err != nil {
-		// ffprobe's own words. "moov atom not found" tells somebody their
-		// download was truncated; "could not read this file" tells them
-		// nothing they can act on.
+		// Interruption first, because it is not a verdict about the file.
+		//
+		// Both tests are needed and neither is redundant. errors.Is catches the
+		// context error when os/exec surfaces one. ctx.Err() catches the case
+		// where it does not: exec.CommandContext kills the child, and what
+		// comes back can be a plain "signal: killed" ExitError with ffprobe's
+		// stderr attached, which carries no context error to match on. Asking
+		// the context we handed the probe whether it is done answers the actual
+		// question -- was this probe cut short -- without depending on how the
+		// os/exec of the day reports it.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			ctx.Err() != nil {
+			s.log.Warn("upload probe was interrupted; accepting the file unchecked",
+				"name", name, "cause", ctx.Err(), "err", err)
+			return nil, nil
+		}
+		if errors.Is(err, ffmpeg.ErrIndirectContainer) {
+			// Not "could not read": ffprobe read it fine and reported another
+			// file's streams. Saying "could not be read as media" here would be
+			// the false diagnosis all over again.
+			return nil, errors.New(
+				"this file is a playlist or script naming other files, not media itself")
+		}
+		// ffprobe's own words, because "could not read this file" tells the
+		// operator nothing they can act on and ffprobe's message usually does.
+		//
+		// NOT A COMPLETENESS CHECK, and the comment here used to imply it was:
+		// it said "moov atom not found tells somebody their download was
+		// truncated", which is true of that one message and gets read as "a
+		// truncated file is caught". It is not. Measured: an MP4 written with
+		// -movflags +faststart and a Matroska file are both ACCEPTED when cut
+		// to a tenth of their length, and both report the WHOLE file's
+		// duration, because the header that carries it survived. Only an MP4
+		// with its index at the end -- the default layout -- fails, and it
+		// fails on the missing index rather than on being short. The boundary
+		// is pinned by internal/ffmpeg.TestProbeFileAcceptsMostTruncatedMedia
+		// and written down in docs/TROUBLESHOOTING.md.
 		return nil, fmt.Errorf("this file could not be read as media: %s", err)
 	}
 	if res.Video == nil && len(res.Audio) == 0 {

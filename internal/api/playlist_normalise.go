@@ -109,6 +109,19 @@ func (s *Server) playlistUploadProblems(want, stored db.PlaylistSettings) error 
 		if err != nil {
 			return fmt.Errorf("playlist item %d: %w", i, err)
 		}
+		// Listable BEFORE Stat, and it is not a tidy-up.
+		//
+		// Stat asks "are there bytes at this path", which is not the question.
+		// The uploads directory also holds ".partial-" files -- an upload whose
+		// bytes have landed and which is being probed, and which will be
+		// deleted in a moment if it is not media -- and ".probe-" sidecars,
+		// which are JSON. Both stat perfectly well, neither is ever listed, and
+		// a playlist item naming one is a reference to something the operator
+		// cannot see and cannot remove from the Library.
+		if !uploads.Listable(name) {
+			return fmt.Errorf("playlist item %d: there is no upload named %q; "+
+				"upload the file again or remove the item", i, name)
+		}
 		if _, err := os.Stat(path); err != nil {
 			return fmt.Errorf("playlist item %d: there is no upload named %q; "+
 				"upload the file again or remove the item", i, name)
