@@ -1147,6 +1147,50 @@ export interface OnAir {
   names?: string[] | null;
 }
 
+/** What GET /upgrade/plan returns: what could be done about the available
+ *  release, on this box, right now.
+ *
+ *  Its own request rather than a field on VersionInfo, and that is not a
+ *  layering preference. Building the plan probes whether the install directory
+ *  is writable by CREATING A FILE IN IT, which is the only check that survives
+ *  a read-only mount -- and the update banner reads /version on every page
+ *  load. Ask for this when an operator has actually asked to act. */
+export interface UpgradePlan {
+  /** How this install was made. The empty string is a server that could not
+   *  tell, which is a refusal rather than a default. */
+  method: "docker" | "systemd" | "manual" | "";
+  /** Whether the server can perform the upgrade itself. False is the ORDINARY
+   *  answer on a stock install: the systemd unit runs with
+   *  ProtectSystem=strict, so /usr/local/bin is read-only to the service and
+   *  the honest move is to show `command`. Do not render that as an error. */
+  automatic: boolean;
+  /** What the operator should run when `automatic` is false. Shown verbatim. */
+  command?: string;
+  binaryPath?: string;
+  /** A previous binary is staged and could be restored. */
+  rollbackAvailable: boolean;
+  /** Why an upgrade is refused for a reason that is not about being on air --
+   *  an unwritable directory, an install nothing could identify. */
+  reason?: string;
+  /** The release this plan is about: the tag the last check found. */
+  version?: string;
+  onAir: OnAir;
+  onAirSummary?: string;
+}
+
+/** What POST /upgrade/stage and POST /upgrade/rollback return.
+ *
+ *  Neither ever reports that the upgrade has been APPLIED, because it has not:
+ *  the binary on disk has changed and the running process has not. `command` is
+ *  what makes it take effect, and the UI must say so rather than "updated". */
+export interface UpgradeResult {
+  staged?: boolean;
+  rolledBack?: boolean;
+  version?: string;
+  restartRequired: boolean;
+  command: string;
+}
+
 export interface FFmpegTools {
   ffmpeg: string;
   ffprobe: string;

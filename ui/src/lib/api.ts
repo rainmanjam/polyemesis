@@ -72,6 +72,8 @@ import type {
   HookCreated,
   HookTrigger,
   VersionInfo,
+  UpgradePlan,
+  UpgradeResult,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -235,6 +237,25 @@ export const api = {
   /** Asks the server to consult the release feed. Rate-limited server-side by a
    *  6h TTL, so calling this on a click is safe. */
   checkUpdate: () => post<VersionInfo>("/version/check"),
+
+  // --- upgrade ---
+  /** What could be done about the available release, on this box. Ask on an
+   *  operator's action, never on page load: building the answer creates a file
+   *  in the install directory to find out whether it can be written to. */
+  upgradePlan: () => get<UpgradePlan>("/upgrade/plan"),
+  /** Download, verify and swap the binary. Does NOT restart anything.
+   *
+   *  `version` confirms the release the operator was looking at; it does not
+   *  choose one. The server installs whatever its last check found and refuses
+   *  if the two disagree, so a page left open overnight cannot install a
+   *  release nobody read the notes for.
+   *
+   *  `force` overrides the on-air refusal. Only ever send it from an explicit
+   *  confirmation that named what is live. */
+  upgradeStage: (version: string, force = false) =>
+    post<UpgradeResult>("/upgrade/stage", { version, force }),
+  /** Put the previous binary back. Also does not restart anything. */
+  upgradeRollback: (force = false) => post<UpgradeResult>("/upgrade/rollback", { force }),
 
   // --- setup & auth ---
   setupStatus: () =>
