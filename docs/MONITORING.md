@@ -190,18 +190,50 @@ the receiving end of the webhook is where to keep it.
 ## Automation
 
 Everything the UI does is a REST call, and a script can make the same calls with
-an API token instead of a session:
+an API token instead of a session.
+
+**A token carries a scope, and a new one is `read` unless you say otherwise.**
+The Create-token dialog defaults to it, and so does the API: a `POST
+/auth/tokens` that omits the `scope` field mints a read-only token. That is
+deliberate — a scope feature whose default is "everything" protects only the
+people who already knew about it — but it means a script written against an
+older version of this page will get 403s until its token is reminted.
+
+A `read` token is for **monitoring**. It reads the metadata a dashboard needs:
 
 ```sh
 curl -H "Authorization: Bearer pmk_..." https://stream.example.com/api/v1/status
+curl -H "Authorization: Bearer pmk_..." https://stream.example.com/api/v1/stats
+curl -H "Authorization: Bearer pmk_..." https://stream.example.com/api/v1/destinations
+```
+
+It does not get content, and it does not get credentials. Stream keys,
+passphrases, the publish token and the playback token come back blanked or
+masked; a handful of GETs that return a credential or spawn real work — the
+expert command endpoints, keyframe extraction, per-account platform stats — are
+refused outright; and the live playout media of a stream you have not made
+public is refused exactly as it is for a stranger. See
+[SECURITY.md](../SECURITY.md) for the full list and the reasoning.
+
+Anything that changes something needs `admin`:
+
+```sh
+# 403 with a read token; mint an admin one for this.
 curl -H "Authorization: Bearer pmk_..." \
      -X POST https://stream.example.com/api/v1/destinations/3/stop
 ```
 
-A token acts as the admin with one exception: **it cannot create or revoke
-tokens.** If a leaked token could mint more, revoking the one you know about
-would mean nothing — the holder has quietly issued three others. Minting stays
-behind the password, so revocation is final.
+An `admin` token acts as the admin with two exceptions, both of which are the
+router's rules rather than a handler's good manners:
+
+- **It cannot create or revoke tokens.** If a leaked token could mint more,
+  revoking the one you know about would mean nothing — the holder has quietly
+  issued three others. Minting stays behind the password, so revocation is
+  final.
+- **It cannot replace the server's binary, change the password, or upload
+  media.** Those are the browser's, for the same reason: a credential built for
+  unattended automation should not be able to write arbitrary bytes to the disk
+  the database lives on.
 
 Full route reference: [API.md](API.md).
 

@@ -59,12 +59,28 @@ the software actually promises.
   and publish URLs, the SRT passphrase and legacy RTMP stream key on both the
   primary and the standby ingest, pull URLs carrying `user:pass@`, the MQTT
   broker URL, destination stream keys and an Icecast mount's password, the
-  constructed ingest URL on `/system`, and the playout playback token together
-  with the three URLs that embed it. Each of those *is* a publish or watch
-  credential, so a credential that could read one could use it — and "read-only"
-  has to mean it cannot put video into your programme or watch a private one.
-  The listings still work: values are blanked or masked, never removed, and a
-  session or `admin` token sees exactly what it saw before.
+  automod model endpoint when it carries an `?api_key=`, a destination's expert
+  FFmpeg arguments, the constructed ingest URL on `/system`, and the playout
+  playback token together with the three URLs that embed it. Each of those *is*
+  a publish or watch credential, so a credential that could read one could use
+  it — and "read-only" has to mean it cannot put video into your programme or
+  watch a private one.
+
+  The listings still work: **values are blanked or masked, and the JSON path of
+  every field is the same for a `read` token as for an admin.** Where a field
+  carries `omitempty`, redaction puts `[redacted]` in it rather than emptying
+  it, because an empty string would delete the key and change the shape of the
+  document. A `kind: file` destination's `url` is a filename rather than a URL
+  and comes back intact — masking it would destroy a field that never held a
+  credential. A session or `admin` token sees exactly what it saw before.
+
+  **Live playout media is content, and a `read` token does not get it.** The
+  three playout routes sit outside every authenticated group by necessity — a
+  viewer has no account — so the check runs per request in the handler, and a
+  bearer token buys nothing there: on a stream you have not published, a `read`
+  token receives byte for byte what a stranger receives. `Public: false` is a
+  decision about the resource, and a role-level scope must not silently override
+  it.
 
   **Five GETs are not reads, and a `read` token is refused them outright.** The
   two expert-command endpoints return the FFmpeg argv with the stream key in it,

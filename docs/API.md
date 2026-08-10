@@ -35,8 +35,11 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | `GET` and `HEAD`, minus the five denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the five denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
+
+The middleware also lets `HEAD` through, and no route in this API is registered
+for it, so `HEAD` on any of them is `405` whatever scope you hold. Use `GET`.
 
 ```sh
 curl -X POST -H "Content-Type: application/json" \
@@ -71,13 +74,36 @@ replaced by `[redacted]`, while the surrounding field is left readable:
 | `GET /sources`, `GET /sources/{id}` | `token`, `publishUrls`, `legacyRtmpKey`, `ingest.srt.passphrase`, `ingest.rtmp.streamKey`, `ingest.pull.url` |
 | `GET /settings` | the same `ingest.*` fields, `failover.backup.{srt.passphrase,rtmp.streamKey,pull.url}`, `mqtt.brokerUrl` |
 | `GET /system` | the credential parts of `ingestUrl` — the SRT `passphrase` parameter, and a pull URL's `user:pass@` |
-| `GET /destinations`, `GET /destinations/{id}` | `streamKey`, `backupStreamKey`, and the userinfo in `url` / `backupUrl` (an Icecast mount's password) |
+| `GET /settings` | also `automod.model.endpoint` — the sealed key table protects the key you typed there, not one pasted into the URL as `?api_key=` |
+| `GET /destinations`, `GET /destinations/{id}` | `streamKey`, `backupStreamKey`, `extraInputArgs`, `extraOutputArgs`, and the userinfo in `url` / `backupUrl` (an Icecast mount's password) |
 | `GET /playout` | `token` and all three `urls`, each of which embeds it |
 
-The **field set never changes** — values are blanked, not removed — so a client
-that reads, edits and PUTs the document straight back still works. These
-responses carry `Vary: Authorization` and `Cache-Control: private, no-store`,
-because their body now depends on who asked.
+`extraInputArgs` and `extraOutputArgs` are there because
+`GET /destinations/{id}/expert` is refused to a `read` token for returning the
+resolved FFmpeg argv with the stream key in it — and those two fields *are* that
+argv, as you typed it. The same bytes cannot have two answers depending on which
+route serves them.
+
+A `kind: file` destination's `url` is a **filename**, not a URL, and it comes
+back intact. Redacting it would delete a field that never held a credential.
+
+**Values are blanked or masked, not removed** — so a client that reads, edits
+and PUTs the document straight back still works, and the JSON path of every
+redacted field is the same for a `read` token as for an admin. Note the
+consequence for the fields tagged `omitempty`: `backupStreamKey`,
+`legacyRtmpKey`, `extraInputArgs` and `extraOutputArgs` come back as the literal
+string `[redacted]` rather than as `""`, because an empty string would make the
+key vanish and change the shape of the document. A field that was genuinely
+empty stays absent for everyone.
+
+The one place the shape does differ is `publishUrls` on `GET /sources`, which is
+`null` for a `read` token. Each entry is a publish URL in which the token *is*
+the address, so there is no masked form of it that is still a URL.
+
+These responses carry `Vary: Authorization, Cookie` and
+`Cache-Control: private, no-store`, because their body depends on who asked —
+and a principal arrives in either header: a bearer in `Authorization`, the
+signed-in operator in `Cookie`.
 
 **Five routes are refused outright.** Masking would have been wrong for the
 first two (expert mode's contract is that the command shown is the command that
@@ -147,6 +173,20 @@ tokens are for.
 | `GET` | `/tls/ca` | The generated CA, for trusting a self-signed instance |
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
+
+Both of these, and the media origin at `/playout/*`, sit outside every
+authenticated group — a viewer has no account and never will — and are guarded
+per request instead, because "is this stream published" is a setting an operator
+flips at runtime while a route table is built once at startup.
+
+**A bearer token gets no privilege here.** The request is judged on the viewer's
+terms: an unpublished stream is `404` for everyone except the signed-in console
+and an `admin` token, and a published-but-protected stream wants the playback
+token in `?t=`, the `X-Playout-Token` header, the `polyemesis_playout` cookie or
+an HTTP basic password. A `read` token is treated exactly as an anonymous
+caller — the same status, the same body, the same headers. That is `read`
+meaning metadata and not content: live media is content, and `Public: false` is
+a decision about the resource that a role-level scope must not override.
 
 ### Session and access
 
