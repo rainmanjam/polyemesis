@@ -166,8 +166,13 @@ func TestManualKeyForOnlyFlagsPlatformsThatAuthenticateButCannotFetchAKey(t *tes
 	// which no amount of retrying fixes because granting a scope does not
 	// upgrade a token already issued.
 	t.Run("kick keeps reconnect advice for a token that predates the scope", func(t *testing.T) {
+		// Was a t.Skip. Kick IS registered, and has been; but a test whose
+		// subject is Kick's advice cannot be satisfied by declining to run
+		// when Kick is absent -- that is the failure it is watching for.
 		if _, err := Get(db.PlatformKick); err != nil {
-			t.Skip("Kick is not in Providers() yet")
+			t.Fatalf("Kick is not in Providers(): %v. This case is ABOUT Kick's "+
+				"manual-key advice, so its absence is the finding rather than a reason "+
+				"to stand down. See testdata/provider-scopes.json.", err)
 		}
 		mk, ok := ManualKeyFor(db.PlatformKick)
 		if !ok {
@@ -182,9 +187,14 @@ func TestManualKeyForOnlyFlagsPlatformsThatAuthenticateButCannotFetchAKey(t *tes
 }
 
 func TestGetKickResolvesToAProviderRatherThanAnUnsupportedPlatform(t *testing.T) {
+	// Was a t.Skip naming the one-line registration that would fix it. A test
+	// called "Get(kick) resolves to a provider rather than an unsupported
+	// platform" reporting PASS while Kick is unsupported is the whole of #161
+	// in a single line.
 	p, err := Get(db.PlatformKick)
 	if err != nil {
-		t.Skip("Kick is not in Providers() yet; apply the one-line registration from the Kick provider report")
+		t.Fatalf("Get(kick) returned %v. This test's entire subject is that it does "+
+			"NOT. Apply the registration in ProvidersWith; do not restore the skip.", err)
 	}
 	if p.Platform() != db.PlatformKick {
 		t.Fatalf("Get(kick) returned the %q provider", p.Platform())

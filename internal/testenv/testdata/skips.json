@@ -1,0 +1,26 @@
+{
+  "note": "t.Skip/Skipf/SkipNow call sites per package, outside internal/testenv. A COUNT rather than a per-site registry: a registry needs an entry for every one of these, most of which are honest environmental skips, and a list that long becomes a rubber stamp. This can only fall on regeneration; raising it is a hand edit of this file.",
+  "total": 83,
+  "byPackage": {
+    "cmd/polyemesis": 1,
+    "internal/api": 4,
+    "internal/clipper": 4,
+    "internal/clips": 4,
+    "internal/config": 1,
+    "internal/db": 1,
+    "internal/engine": 6,
+    "internal/ffmpeg": 18,
+    "internal/media": 5,
+    "internal/meters": 3,
+    "internal/playlistmedia": 3,
+    "internal/relay": 3,
+    "internal/routing": 5,
+    "internal/rtmpserver": 10,
+    "internal/scheduler": 1,
+    "internal/secrets": 1,
+    "internal/srtserver": 3,
+    "internal/supervisor": 1,
+    "internal/transcribe": 1,
+    "internal/upgrade": 8
+  }
+}

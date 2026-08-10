@@ -11,6 +11,8 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 func testRendition(id int64, name string) *db.Rendition {
@@ -541,7 +543,10 @@ func TestStemsAreNotPlannedBeforeTheIngestIsProbed(t *testing.T) {
 func TestTheUnprobedPlaceholderLayoutWouldMapTracksThatDoNotExist(t *testing.T) {
 	plan := recording.PlanStems(routing.DefaultSource(), ffmpeg.StemFLAC)
 	if len(plan) <= 3 {
-		t.Skipf("DefaultSource now yields %d tracks; the hazard this documents is gone", len(plan))
+		// Was t.Skipf. It fires when the hazard this test DOCUMENTS has
+		// gone away, which is a real change in the product and the moment
+		// somebody should read it -- not the moment to stand down.
+		testenv.Quarantine(t, "engine-placeholder-layout-track-hazard")
 	}
 	var beyond int
 	for _, st := range plan {

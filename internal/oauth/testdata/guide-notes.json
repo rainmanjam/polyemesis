@@ -1,0 +1,50 @@
+[
+  {
+    "platform": "facebook",
+    "note": "Read this first: Meta will not let anyone but you use this app until it passes App Review. Your own Facebook account works immediately as a developer/tester of the app, which is all a self-hosted setup normally needs — but if anyone else is going to connect their account here, the app has to be submitted for Advanced Access to publish_video (profiles) or pages_manage_posts (Pages) first. Budget days, not minutes, and start it before you need it. Facebook also issues a new ingest URL and key for every broadcast, so connecting the account creates the broadcast: there is no permanent key to reuse.",
+    "steps": [
+      "Before anything else: decide who will connect accounts. Only people listed under Roles → Roles (admins, developers, testers) can use an app in development mode. Anyone else requires App Review, which is Meta's process, not something polyemesis can shortcut.",
+      "Open the Meta app dashboard and click Create app. Pick the “Other” use case and the “Business” type — that is the one that offers Facebook Login and the Live Video permissions.",
+      "Add the “Facebook Login” product. Under Facebook Login → Settings, switch on “Client OAuth login” and “Web OAuth login”, and add exactly the redirect URI shown below under “Valid OAuth Redirect URIs”.",
+      "In App settings → Basic, copy the App ID and App Secret into the fields on this page. The App ID is the client ID and the App Secret is the client secret.",
+      "Decide the target. Streaming to your own profile needs publish_video. Streaming to a Page needs pages_manage_posts and pages_read_engagement, plus pages_show_list so polyemesis can offer you the Page to pick. polyemesis asks for all of them; you can decline the ones you do not want on the consent screen.",
+      "In App Review → Permissions and Features, request Advanced Access for the permissions you need. Skip this only while you are the sole person connecting an account.",
+      "Go to a destination and click Connect account, then choose your profile or one of your Pages. polyemesis creates the broadcast and fills in the RTMPS URL and stream key for you."
+    ]
+  },
+  {
+    "platform": "kick",
+    "note": "Kick uses OAuth 2.1, so the consent step sends a PKCE challenge automatically — there is nothing extra to configure for it. Grant every scope on the consent screen: the stream key is withheld unless streamkey:read is among them, and an account connected before that scope was requested has to be disconnected and reconnected once before the key appears.",
+    "steps": [
+      "Open Kick → Settings → Developer and create an OAuth application.",
+      "Set the Redirect URI to exactly the URI shown below.",
+      "Copy the Client ID and Client Secret into the fields on this page and save.",
+      "Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
+      "Nothing to paste: polyemesis reads the ingest URL and stream key from the channels resource over the streamkey:read scope, the same way it does for the other platforms."
+    ]
+  },
+  {
+    "platform": "twitch",
+    "note": "",
+    "steps": [
+      "Open the Twitch Developer Console and click Register Your Application.",
+      "Give it any name, set the OAuth Redirect URL to exactly the URI shown below, and pick category “Broadcasting Suite”.",
+      "Set Client Type to Confidential — polyemesis exchanges the code server-side and needs a client secret.",
+      "Click Manage on the new app, then New Secret, and copy both the Client ID and the secret into the fields on this page.",
+      "Go to a destination and click Connect account. polyemesis reads your stream key via the Helix API."
+    ]
+  },
+  {
+    "platform": "youtube",
+    "note": "",
+    "steps": [
+      "Open the Google Cloud Console and create a project (or pick an existing one).",
+      "In APIs \u0026 Services → Library, enable the “YouTube Data API v3”.",
+      "In APIs \u0026 Services → OAuth consent screen, choose External, fill in the app name and your email, and add your own Google account under Test users. You do not need to publish the app.",
+      "In APIs \u0026 Services → Credentials, click Create Credentials → OAuth client ID → Web application.",
+      "Under “Authorised redirect URIs”, add exactly the redirect URI shown below.",
+      "Copy the Client ID and Client secret into the fields on this page and save.",
+      "Go to a destination and click Connect account. YouTube will ask you to grant access, then polyemesis fetches your ingest URL and stream key automatically."
+    ]
+  }
+]
