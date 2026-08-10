@@ -323,6 +323,7 @@ jobs:
       #
       # bash on all three: windows-latest ships Git Bash, so one script serves
       # every runner rather than a PowerShell fork nobody maintains.
+      #
       # timeout-minutes because this step BACKGROUNDS A PROCESS, and a step that
       # holds a pid can wait on something that never comes. 10 against a
       # measured 2-4s (n=21) is enormous headroom, and it is sized for the
@@ -388,6 +389,7 @@ jobs:
       # per-band energy back out of the file. A destination that silently
       # carried the wrong mix would pass any check that only asked whether
       # FFmpeg exited 0.
+      #
       # timeout-minutes for the same reason as the step above: it backgrounds a
       # process. 8 against a measured 91-93s (n=21) is roughly 5x headroom, and
       # it is below the job's 30 on purpose -- a step timeout names the step
@@ -401,7 +403,7 @@ jobs:
           ./polyemesis-smoke -addr 127.0.0.1:8099 -data ./data -log warn > bcast-server.log 2>&1 &
           pid=$!
           # Same shape as the step above: a trap, and the verdict before the
-          # cleanup. The unbounded shell `wait` that used to sit between `rc` and the
+          # cleanup. The shell `wait` that used to sit between `rc` and the
           # report was unbounded, and on Windows it is unbounded against a kill
           # that may never land. This step is the last in the job and binds a
           # different port (8099) from the one above, so a best-effort kill
