@@ -184,6 +184,43 @@ func TestSavingAPlaylistItemThatNamesNoUploadIsRefused(t *testing.T) {
 	}
 }
 
+// A playlist item may only name something the Library shows.
+//
+// The uploads directory holds two kinds of file the Library deliberately never
+// lists: ".partial-" files, which are uploads whose bytes have landed and which
+// are being probed right now and may be deleted in a second, and ".probe-"
+// sidecars, which are JSON. Both exist on disk, so the os.Stat this validation
+// used to be made of said yes to both -- and a playlist item naming one is a
+// reference to something the operator cannot see in the Library and therefore
+// cannot remove from it.
+//
+// The staged case is the one that matters most, because uploading is what
+// creates it: for the length of a probe there is a real file on disk under a
+// name that is about to stop existing.
+//
+// The mutation: drop the uploads.Listable call in playlistUploadProblems and
+// both refusals below become 200.
+func TestSavingAPlaylistItemNamingAStagedOrSidecarFileIsRefused(t *testing.T) {
+	h, sign, srv, q := playlistJobServer(t)
+	seedUpload(t, srv, "real.ts")
+
+	// THE CONTROL FIRST. If an ordinary upload were refused too, the two
+	// refusals below would prove nothing at all.
+	savePlaylist(t, h, sign, []string{"real.ts"}, http.StatusOK)
+
+	seedUpload(t, srv, ".partial-1234567.ts")
+	seedUpload(t, srv, ".probe-real.ts.json")
+
+	savePlaylist(t, h, sign, []string{"real.ts", ".partial-1234567.ts"}, http.StatusBadRequest)
+	savePlaylist(t, h, sign, []string{"real.ts", ".probe-real.ts.json"}, http.StatusBadRequest)
+
+	// The control save queued one normalisation for real.ts and the two refused
+	// saves queued nothing more: a refused save must have no side effects.
+	if got := normaliseJobs(t, q); len(got) != 1 {
+		t.Errorf("normalise jobs = %d, want the 1 from the control save: %+v", len(got), got)
+	}
+}
+
 // TestADeletedUploadDoesNotLockTheOperatorOutOfSettings is the other half, and
 // it is about a check that was too strict rather than too loose.
 //

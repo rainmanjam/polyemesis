@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -101,9 +103,26 @@ func TestUploadDiscardsAHostileFilename(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dataDir, "etc", "passwd")); err == nil {
 		t.Fatal("upload escaped the uploads directory")
 	}
+	// The file and its verdict record, and nothing else. The record is not
+	// optional and not an extra: every published upload now carries one, saying
+	// whether anything inspected it -- this server has no prober configured, so
+	// this one says nobody did. See uploads.Verdict.
 	entries, err := os.ReadDir(filepath.Join(dataDir, uploads.Dir))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected exactly one file in uploads/, got %v (err %v)", entries, err)
+	if err != nil {
+		t.Fatalf("read uploads dir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	want := []string{".probe-" + got.Name + ".json", got.Name}
+	sort.Strings(names)
+	sort.Strings(want)
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("uploads/ holds %v, want %v", names, want)
+	}
+	if got.Verified {
+		t.Errorf("an upload nothing inspected reports verified=true")
 	}
 }
 

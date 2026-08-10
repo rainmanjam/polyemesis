@@ -2316,6 +2316,41 @@ export interface MediaFile {
   /** Paste into a pull source. Relative to the data directory, which is what
    *  ffmpeg's file:// handling resolves against. */
   pullUrl: string;
+  /** What ffprobe found when the file was accepted. Absent whenever the file was
+   *  not inspected — which is never "it was inspected and found to be nothing" —
+   *  so render nothing rather than zeroes. */
+  media?: MediaInfo;
+  /** Whether these bytes were inspected and accepted as media.
+   *
+   *  ALWAYS PRESENT, and that is the point of it. An upload is in one of three
+   *  states: inspected and accepted, refused (in which case it is not here), and
+   *  STORED WITHOUT BEING INSPECTED. The third is reachable on demand by a remote
+   *  client — the server's probe runs under the request's context, so dropping
+   *  the connection after the body has landed cancels it, and a cancelled probe
+   *  is not a verdict, so the bytes are kept. Keeping them is right; leaving the
+   *  result indistinguishable was not. Before this field the only trace was the
+   *  ABSENCE of `media`, which is also what every upload stored before probing
+   *  looks like. */
+  verified: boolean;
+  /** Why, when `verified` is false. Empty for a file with no recorded verdict at
+   *  all — one stored before verdicts existed. */
+  unverifiedReason?: string;
+}
+
+/** MediaInfo is a stored upload's probe result, as the Library shows it. */
+export interface MediaInfo {
+  durationSeconds: number;
+  videoCodec: string;
+  width: number;
+  height: number;
+  frameRate: number;
+  /** The count routing cares about: selecting track 3 of a file that carries
+   *  one is silence on air, and the Library is where to notice beforehand. */
+  audioTracks: number;
+  audioCodec: string;
+  audioChannels: number;
+  audioLayout: string;
+  probedAt: string;
 }
 
 /* --------------------------------------------------------------- automod --

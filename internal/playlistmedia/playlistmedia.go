@@ -192,8 +192,8 @@ func progressArgs() []string {
 // This job produces a file nobody is waiting on this second. Losing that race
 // trades a stream for a file, so the cheapest way to never be in it is to never
 // want the GPU.
-func normaliseArgs(in, out string, videoSecs, audioSecs float64) []string {
-	return buildNormalise(in, out, false, videoSecs, audioSecs)
+func normaliseArgs(in, out string, videoSecs, audioSecs float64, maxBytes int64) []string {
+	return buildNormalise(in, out, false, videoSecs, audioSecs, maxBytes)
 }
 
 // normaliseSilentArgs is the same profile for a source with no audio track.
@@ -208,8 +208,8 @@ func normaliseArgs(in, out string, videoSecs, audioSecs float64) []string {
 // gives it a stop that costs nothing, because the audio here is synthesised TO
 // MATCH the picture rather than recovered from operator media. See
 // buildNormalise.
-func normaliseSilentArgs(in, out string) []string {
-	return buildNormalise(in, out, true, 0, 0)
+func normaliseSilentArgs(in, out string, maxBytes int64) []string {
+	return buildNormalise(in, out, true, 0, 0, maxBytes)
 }
 
 // PadSlackSecs is added to the computed pad target below, to survive the gap
@@ -226,7 +226,7 @@ const PadSlackSecs = 0.05
 // differs only in where the audio comes from and in the padding described
 // below; every encoding flag shared between them lives in one place, so the
 // two outputs cannot drift apart into two profiles.
-func buildNormalise(in, out string, silent bool, videoSecs, audioSecs float64) []string {
+func buildNormalise(in, out string, silent bool, videoSecs, audioSecs float64, maxBytes int64) []string {
 	args := commonArgs()
 	args = append(args, progressArgs()...)
 	args = append(args, "-i", in)
@@ -353,6 +353,45 @@ func buildNormalise(in, out string, silent bool, videoSecs, audioSecs float64) [
 	// sources did. -muxdelay/-muxpreload 0 remove the muxer's default 0.7 s
 	// offset, which would otherwise appear at the front of every item and add
 	// up over a long playlist.
+	// -fs STOPS THE WRITER, and it is here because nothing else in this argv
+	// does.
+	//
+	// Everything above bounds the output's SHAPE -- resolution, frame rate,
+	// bitrate ceiling -- and nothing bounds its LENGTH, which is whatever the
+	// input turns out to be. That was survivable only while the input was
+	// assumed to be media. It is not assumed any more (see SourceVerifier), and
+	// this is what turns the disk guard from a prediction into something FFmpeg
+	// is actually held to.
+	//
+	// IT IS NOT BYTE-EXACT, and saying it was would be the sort of claim this
+	// whole change exists to stop making. FFmpeg stops writing further chunks
+	// once the limit is passed, so the finished file is a little OVER it.
+	// Measured against this exact profile, 640x360 at the 6000k ceiling:
+	//
+	//	cap        finished     over by
+	//	100 KB       116184      16184
+	//	500 KB       589756      89756
+	//	  2 MB      2117256     117256
+	//	  8 MB      8162584     162584
+	//	 32 MB     32356868     356868
+	//
+	// The overshoot is mux-flush granularity, not a fraction: it grows by 340 KB
+	// across a 320x range of caps. So the real bound is maxBytes plus a few
+	// hundred kilobytes, which is inside estimateBytes' own headroom (10% of the
+	// duration plus 30 seconds) at every size a playlist item has. The guard is
+	// sound; the sentence about it now matches what was measured.
+	//
+	// FFmpeg exits 0 when it stops, so this alone would publish a SHORT
+	// derivative. RunNormalise compares the finished size against the same
+	// figure and refuses to publish one that reached it -- the cap catches the
+	// runaway, that check stops the runaway becoming an item that dies halfway
+	// through on air. The overshoot is why that comparison is >= rather than >.
+	//
+	// Zero means no cap, for a caller that has no estimate to give. Every
+	// production path has one.
+	if maxBytes > 0 {
+		args = append(args, "-fs", strconv.FormatInt(maxBytes, 10))
+	}
 	args = append(args, "-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", out)
 	return args
 }
@@ -571,6 +610,31 @@ type StreamProber func(ctx context.Context, path, kind string) (bool, error)
 // answer either question.
 type DurationProber func(ctx context.Context, path string) (videoSecs, audioSecs float64, err error)
 
+// SourceVerifier re-establishes, at the moment of use, that a file is
+// self-contained media -- and reports its duration, which is the number the
+// disk guard was previously guessing at.
+//
+// THE SECOND GATE, and the reason it exists is that the first one is not
+// reachable from here and cannot be relied on to have run.
+// internal/ffmpeg.ProbeFile's format allowlist had EXACTLY ONE production call
+// site, the upload handler, and that handler's gate is triggerable by the
+// client: the probe runs under the request's context, so a caller that sends a
+// complete body and drops the connection gets the file stored with no
+// inspection at all. The upload path now records that, and the settings
+// validator refuses an item naming such a file -- but neither of those covers
+// an item the operator inherited, a file that predates verdicts, or a file put
+// in the uploads directory by hand, and all three arrive here.
+//
+// What arrived here before was `ffmpeg -i <path>` with no -f and no
+// -protocol_whitelist (see buildNormalise), and a 3 KB ffconcat script naming
+// one clip two hundred times was measured producing a 50 MB derivative in 8
+// seconds at 1143% CPU -- 15,517x amplification, on the box that is carrying a
+// live broadcast, past a free-space guard that had been told to expect 3 KB.
+//
+// A field on Processor for the same reason StreamProber is one: the worker's
+// paths must be reachable in a test on a machine with no media and no FFprobe.
+type SourceVerifier func(ctx context.Context, path string) (durationSecs float64, err error)
+
 // Processor runs the normalisation job.
 type Processor struct {
 	log    *slog.Logger
@@ -578,6 +642,7 @@ type Processor struct {
 	exec   media.Execer
 	stream StreamProber
 	dur    DurationProber
+	verify SourceVerifier
 	free   func(path string) (uint64, error)
 	// beforePublish is a test seam only -- see RunNormalise's pre-publish
 	// recheck for why the hook exists at all.
@@ -597,6 +662,10 @@ func WithStreamProber(s StreamProber) Option { return func(p *Processor) { p.str
 // WithDurationProber replaces the source-duration check.
 func WithDurationProber(d DurationProber) Option { return func(p *Processor) { p.dur = d } }
 
+// WithSourceVerifier replaces the format re-check. See SourceVerifier for why
+// there is a second gate here at all.
+func WithSourceVerifier(v SourceVerifier) Option { return func(p *Processor) { p.verify = v } }
+
 // WithFreeSpace replaces the free-space reporter, so a full disk can be
 // simulated without one.
 func WithFreeSpace(fn func(path string) (uint64, error)) Option {
@@ -614,6 +683,7 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 	p := &Processor{log: log, cfg: cfg.Normalized(), exec: media.Exec, free: uploads.FreeBytes}
 	p.stream = p.probeStream
 	p.dur = p.probeDuration
+	p.verify = p.verifySource
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -755,12 +825,63 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 		return fmt.Errorf("create %s: %w", filepath.Dir(final), err)
 	}
 
-	if err := p.checkSpace(filepath.Dir(final), info.Size(), params.DurationMS, rep); err != nil {
+	// VERIFY BEFORE ANY FFMPEG IS BUILT, let alone run. See SourceVerifier: the
+	// upload gate is triggerable by the client, and three routes reach this
+	// worker without ever passing it. Everything below -- the disk estimate, the
+	// output cap, the profile choice -- assumes the input is media, and this is
+	// the line that makes the assumption true rather than hopeful.
+	durationSecs, err := p.verify(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	// THE DISK GUARD NOW HAS A REAL DURATION, which is what makes it a bound
+	// rather than a guess.
+	//
+	// It used to be handed params.DurationMS, which the only production
+	// submitter deliberately leaves at zero (see NormaliseParams.DurationMS), so
+	// estimateBytes always fell back to the SOURCE'S SIZE and reported
+	// bounded=false. That is not a weak bound, it is the wrong quantity: the
+	// source's size and the derivative's size are related only for ordinary
+	// media, and the input that matters is precisely the one where they are not.
+	// The probe above already had to read the container, so the duration costs
+	// nothing extra.
+	durationMS := params.DurationMS
+	if ms := int64(durationSecs * 1000); ms > durationMS {
+		durationMS = ms
+	}
+	if durationMS > MaxDurationMS {
+		// MaxDurationMS was inert while nothing populated a duration. Now that
+		// something does, it is what it always said it was: a bound on the
+		// arithmetic below, and a refusal for an item no playlist wants.
+		return jobs.Permanent(fmt.Errorf(
+			"%s is %d hours long, which is past the %d-hour limit for a playlist item",
+			params.Upload, durationMS/3600000, MaxDurationMS/3600000))
+	}
+	estimate, bounded := estimateBytes(durationMS, info.Size())
+	if !bounded {
+		// REFUSED RATHER THAN GUESSED AT. The fallback -- estimate the
+		// derivative from the SOURCE'S size -- is not a weaker bound, it is a
+		// measurement of the wrong thing, and it is the number the 15,517x
+		// amplification walked straight past. It is also useless as a cap: a
+		// short low-resolution source normalises LARGER than it arrived, so
+		// handing the source's size to -fs would truncate honest media.
+		//
+		// Nothing legitimate should land here any more. The probe above has
+		// already read the container; a container that will not say how long it
+		// is, after being accepted as self-contained media, is a file this
+		// worker cannot size, cannot cap and cannot schedule -- and the operator
+		// can act on that sentence, which is more than a silent guess gave them.
+		return jobs.Permanent(fmt.Errorf(
+			"polyemesis could not work out how long %s is, so it cannot be normalised "+
+				"safely; re-save it as MP4 or MPEG-TS and upload it again", params.Upload))
+	}
+	if err := p.checkSpace(filepath.Dir(final), estimate, bounded, rep); err != nil {
 		return err
 	}
 
 	partial := final + PartialSuffix
-	args, silent, err := p.chooseProfile(ctx, params.Upload, input, partial)
+	args, silent, err := p.chooseProfile(ctx, params.Upload, input, partial, estimate)
 	if err != nil {
 		return err
 	}
@@ -770,11 +891,33 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 
 	rep.Logf("normalising %s to %dx%d %d fps", params.Upload,
 		NormaliseWidth, NormaliseHeight, NormaliseFPS)
-	if err := p.run(ctx, rep, media.Command{Name: p.cfg.FFmpeg, Args: args}, params.DurationMS); err != nil {
+	if err := p.run(ctx, rep, media.Command{Name: p.cfg.FFmpeg, Args: args}, durationMS); err != nil {
 		// A failed encode has already lost; a leftover .partial is then a
 		// disk-space problem the next attempt inherits.
 		p.discard(partial)
 		return err
+	}
+
+	// DID THE OUTPUT CAP FIRE? -fs stops FFmpeg cleanly, so a run that hit it
+	// exits 0 with a SHORT file, and publishing that would put a derivative on
+	// air that stops in the middle. The cap is far above what the profile
+	// produces for a source of the measured duration -- estimateBytes carries
+	// 10% of the duration plus 30 seconds of headroom -- so reaching it means
+	// the estimate and the reality have parted company, which is the state the
+	// cap exists to catch and not one to paper over by publishing anyway.
+	//
+	// >= rather than >, because -fs is not byte-exact: it stops after the limit
+	// is passed, so a run that hit it lands a few hundred kilobytes OVER the
+	// figure rather than exactly on it. See buildNormalise for the measurements.
+	// The converse -- a legitimate encode landing exactly on the estimate
+	// without the cap firing -- would mean it consumed the whole headroom, and
+	// the cost of being wrong about that is a permanent refusal with a sentence
+	// the operator can act on rather than a truncated item at air.
+	if st, err := os.Stat(partial); err == nil && st.Size() >= estimate {
+		p.discard(partial)
+		return jobs.Permanent(fmt.Errorf(
+			"normalising %s produced more than the %d MiB its duration allows for; "+
+				"nothing was published", params.Upload, estimate>>20))
 	}
 
 	// The upload may have been deleted while this job ran -- a transcode of a
@@ -843,7 +986,7 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 // audio-only file would put a black screen on air, which is the exact thing an
 // operator reaches for a slate to avoid. Refusing permanently is the honest
 // answer, and it is what stops the retry burn.
-func (p *Processor) chooseProfile(ctx context.Context, upload, input, out string) (args []string, silent bool, err error) {
+func (p *Processor) chooseProfile(ctx context.Context, upload, input, out string, maxBytes int64) (args []string, silent bool, err error) {
 	hasVideo, err := p.stream(ctx, input, streamVideo)
 	if err != nil {
 		return nil, false, err
@@ -858,7 +1001,7 @@ func (p *Processor) chooseProfile(ctx context.Context, upload, input, out string
 		return nil, false, err
 	}
 	if !hasAudio {
-		return normaliseSilentArgs(input, out), true, nil
+		return normaliseSilentArgs(input, out, maxBytes), true, nil
 	}
 	// The source's own two track durations are what buildNormalise's pad
 	// filters are computed from -- see the comment there. A file that has
@@ -869,7 +1012,7 @@ func (p *Processor) chooseProfile(ctx context.Context, upload, input, out string
 	if err != nil {
 		return nil, false, err
 	}
-	return normaliseArgs(input, out, videoSecs, audioSecs), false, nil
+	return normaliseArgs(input, out, videoSecs, audioSecs, maxBytes), false, nil
 }
 
 // checkSpace refuses the transcode when the volume could not survive it.
@@ -878,7 +1021,7 @@ func (p *Processor) chooseProfile(ctx context.Context, upload, input, out string
 // the same direction uploads.Save takes, and for the same reason: the one case
 // where you cannot tell how much room is left is not the case to start writing
 // gigabytes.
-func (p *Processor) checkSpace(dir string, sourceBytes, durationMS int64, rep jobs.Reporter) error {
+func (p *Processor) checkSpace(dir string, estimate int64, bounded bool, rep jobs.Reporter) error {
 	if p.free == nil {
 		return nil
 	}
@@ -886,9 +1029,9 @@ func (p *Processor) checkSpace(dir string, sourceBytes, durationMS int64, rep jo
 	if err != nil {
 		return fmt.Errorf("%w: could not read free space: %v", ErrNoSpace, err)
 	}
-	estimate, bounded := estimateBytes(durationMS, sourceBytes)
 	if !bounded {
-		rep.Logf("no duration was supplied, so the free-space check is working from the source's size")
+		rep.Logf("this source reports no duration, so the free-space check is working " +
+			"from its size; the encode is capped at that figure regardless")
 	}
 	// The floor has to survive the transcode, not merely precede it: checking
 	// `free < floor` alone accepts a two-hour item onto a volume with exactly
@@ -912,6 +1055,21 @@ func (p *Processor) checkSpace(dir string, sourceBytes, durationMS int64, rep jo
 // strong as it looks.
 func estimateBytes(durationMS, sourceBytes int64) (n int64, bounded bool) {
 	if durationMS > 0 {
+		// DURATION HEADROOM, because this figure is now a HARD CAP on the
+		// writer (buildNormalise's -fs) and not only a disk demand. A cap that
+		// is merely accurate trips on the honest cases: the derivative is padded
+		// to the LONGER of the source's two track durations plus PadSlackSecs,
+		// and a container's own duration field is not always the longer of them
+		// -- MPEG-TS estimates it, and a stream can outlast what the header
+		// claims. A trip means an operator's legitimate item is refused rather
+		// than played, so the margin is deliberately larger than the error it is
+		// covering: ten percent, plus thirty seconds for short items where a
+		// percentage is nothing.
+		//
+		// It costs ten percent of a disk demand and buys a safety valve that
+		// only ever fires on something genuinely wrong. Both figures are far
+		// inside the int64 multiply below at MaxDurationMS.
+		durationMS += durationMS/10 + 30_000
 		bits := int64(NormaliseVideoKbps+NormaliseAudioKbps) * durationMS
 		// +5% for TS packet and PSI overhead, which is real at 188-byte packets.
 		return bits / 8 * 21 / 20, true
@@ -920,6 +1078,55 @@ func estimateBytes(durationMS, sourceBytes int64) (n int64, bounded bool) {
 		sourceBytes = 0
 	}
 	return sourceBytes, false
+}
+
+// verifySource is the real SourceVerifier: internal/ffmpeg.ProbeFile, which is
+// the SAME allowlist and the same -protocol_whitelist the upload gate uses.
+//
+// Deliberately the same function rather than a second copy of the rule. A
+// re-implementation here would be a second place for the allowlist to drift
+// from the one internal/ffmpeg documents and tests, and the whole argument for
+// an allowlist is that it is a closed set somebody owns.
+//
+// THE CLASSIFICATION MIRRORS THE UPLOAD HANDLER'S, which is not a coincidence
+// and is the point: a fact about the FILE is permanent, because no number of
+// retries makes an ffconcat script into media; a fact about THIS SERVER --
+// ffprobe missing, a fork that failed, output that is not JSON -- is retryable,
+// because it is not a verdict about the operator's bytes and the next attempt
+// may well be on a less busy machine. Getting that backwards is how a queue
+// burns every attempt on a file that can never succeed, or gives up permanently
+// on a file that is fine.
+func (p *Processor) verifySource(ctx context.Context, path string) (float64, error) {
+	res, err := ffmpeg.ProbeFile(ctx, p.cfg.FFprobe, path)
+	if err != nil {
+		name := filepath.Base(path)
+		// ffmpeg.Refused, not a list of arms, and for the reason spelled out at
+		// that function: the default here is RETRYABLE, so every refusal shape
+		// this handler has not learned about would otherwise be retried forever
+		// against a file that can never pass.
+		if ffmpeg.Refused(err) {
+			switch {
+			case errors.Is(err, ffmpeg.ErrIndirectContainer):
+				return 0, jobs.Permanent(fmt.Errorf(
+					"%s is a playlist or script naming other files, not media itself, "+
+						"so it cannot be a playlist item; remove it and upload the file it names", name))
+			case errors.Is(err, ffmpeg.ErrUnsupportedContainer):
+				return 0, jobs.Permanent(fmt.Errorf(
+					"%s: %v; re-save it as MP4 or MPEG-TS", name, err))
+			}
+			return 0, jobs.Permanent(fmt.Errorf("%s cannot be used as a playlist item: %v", name, err))
+		}
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return 0, jobs.Permanent(fmt.Errorf("ffprobe could not read %s: %v", name, err))
+		}
+		return 0, fmt.Errorf("could not inspect %s: %w", name, err)
+	}
+	if res.Video == nil && len(res.Audio) == 0 {
+		return 0, jobs.Permanent(fmt.Errorf(
+			"%s carries no video or audio stream", filepath.Base(path)))
+	}
+	return res.DurationSeconds, nil
 }
 
 // probeStream is the real StreamProber: one ffprobe that prints the codec type

@@ -97,8 +97,16 @@ func TestSafeNameDiscardsTheClientsPath(t *testing.T) {
 			if got == "" || got == "." || got == ".." {
 				t.Fatalf("SafeName(%q) = %q", c.hint, got)
 			}
-			if len(got) > MaxNameLength+16 {
-				t.Fatalf("SafeName(%q) is %d chars, too long", c.hint, len(got))
+			// The EXACT budget rather than a round number with slack in it:
+			// the capped stem, one dash, the hex suffix, the extension. It
+			// was MaxNameLength+16, which happened to fit a four-byte suffix
+			// and silently became the thing that failed when the suffix grew
+			// to eight (see nameSuffixBytes) -- a limit that moves when an
+			// unrelated constant does is not a limit anyone can reason about.
+			// Every filesystem this runs on takes 255 bytes per component and
+			// this is 117.
+			if max := MaxNameLength + 1 + 2*nameSuffixBytes + len(c.wantExt); len(got) > max {
+				t.Fatalf("SafeName(%q) is %d chars, want at most %d", c.hint, len(got), max)
 			}
 		})
 	}

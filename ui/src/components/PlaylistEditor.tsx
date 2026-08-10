@@ -165,7 +165,22 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
   // An upload already queued is not offered again: the same file twice is a
   // mistake this editor can prevent rather than one an operator finds later
   // by watching it repeat on air.
-  const available = uploads.filter((u) => !items.some((it) => it.upload === u.name));
+  // An upload the server never inspected is not offered either.
+  //
+  // The server is the gate — playlistUploadProblems refuses an item naming one,
+  // with a sentence saying to upload the file again — and this only avoids
+  // offering a choice that will be refused on save. The test is "recorded as
+  // uninspected", exactly as the server's is: `unverifiedReason` is empty for an
+  // upload with no verdict at all, which is every file stored before verdicts
+  // existed, and those are still allowed (the normalise worker re-checks them
+  // at the moment of use). No new string is needed for this and none is added:
+  // the Library row for such a file carries the explanation, on the page where
+  // the operator can act on it.
+  const available = uploads.filter(
+    (u) =>
+      !items.some((it) => it.upload === u.name) &&
+      (u.verified || !u.unverifiedReason),
+  );
 
   return (
     <div className="flex flex-col gap-2">

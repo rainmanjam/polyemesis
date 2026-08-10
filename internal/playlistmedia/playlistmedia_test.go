@@ -33,7 +33,7 @@ import (
 // checked to appear exactly once, because a second `-r` later in the argv would
 // silently win.
 func TestEveryProfileFlagCarriesTheValueWeMeant(t *testing.T) {
-	args := normaliseArgs("/in.mov", "/out.ts", 2, 2)
+	args := normaliseArgs("/in.mov", "/out.ts", 2, 2, 0)
 	for _, tc := range []struct{ flag, value string }{
 		{"-c:v", "libx264"},
 		{"-pix_fmt", "yuv420p"},
@@ -72,7 +72,7 @@ func TestEveryProfileFlagCarriesTheValueWeMeant(t *testing.T) {
 // profile: two files can agree on 1920x1080 and still disagree on sample aspect
 // ratio, which the concat demuxer counts as a mismatch.
 func TestTheProfileLetterboxesRatherThanStretchesAndPinsTheSampleAspect(t *testing.T) {
-	vf, n := pairValue(normaliseArgs("/in.mov", "/out.ts", 2, 2), "-vf")
+	vf, n := pairValue(normaliseArgs("/in.mov", "/out.ts", 2, 2, 0), "-vf")
 	if n != 1 {
 		t.Fatalf("expected exactly one -vf, got %d", n)
 	}
@@ -88,7 +88,7 @@ func TestTheProfileLetterboxesRatherThanStretchesAndPinsTheSampleAspect(t *testi
 }
 
 func TestTheOutputIsTheLastArgumentAndTheInputIsNamedOnce(t *testing.T) {
-	args := normaliseArgs("/in.mov", "/out.ts", 2, 2)
+	args := normaliseArgs("/in.mov", "/out.ts", 2, 2, 0)
 	if got := args[len(args)-1]; got != "/out.ts" {
 		t.Errorf("output should be the final argument, got %q", got)
 	}
@@ -103,8 +103,8 @@ func TestTheOutputIsTheLastArgumentAndTheInputIsNamedOnce(t *testing.T) {
 // must therefore agree on every encoding flag and differ only in where the
 // audio comes from.
 func TestTheSilentProfileEncodesIdenticallyToTheAudioOne(t *testing.T) {
-	audio := normaliseArgs("/in.mov", "/out.ts", 2, 2)
-	silent := normaliseSilentArgs("/in.mov", "/out.ts")
+	audio := normaliseArgs("/in.mov", "/out.ts", 2, 2, 0)
+	silent := normaliseSilentArgs("/in.mov", "/out.ts", 0)
 
 	if in, n := pairValue(silent, "-map"); n != 2 || in != "0:v:0" {
 		t.Errorf("silent profile should map the source's video and nothing else from it: %v", silent)
@@ -155,7 +155,7 @@ func TestTheSilentProfileEncodesIdenticallyToTheAudioOne(t *testing.T) {
 // output: a later reader looking to speed this up would reach for the GPU, and
 // the GPU is the one resource a live encoder cannot share.
 func TestTheHardwareProbeIsNotConsulted(t *testing.T) {
-	joined := strings.Join(normaliseArgs("/in.mov", "/out.ts", 2, 2), " ")
+	joined := strings.Join(normaliseArgs("/in.mov", "/out.ts", 2, 2, 0), " ")
 	for _, hw := range []string{
 		"nvenc", "videotoolbox", "qsv", "vaapi", "v4l2m2m", "amf", "-hwaccel",
 	} {
@@ -879,6 +879,17 @@ func newTestProcessor(t *testing.T, dataDir string, opts ...Option) *Processor {
 	base := []Option{
 		WithStreamProber(streams(true, true)),
 		WithFreeSpace(func(string) (uint64, error) { return 1 << 60, nil }),
+		// The format re-check, stubbed to "yes, media, 2 seconds of it".
+		//
+		// It is a seam for the same reason the two probers above are: most
+		// tests in this file hand the worker a text file called .mp4 and are
+		// about the argv, the paths or the queue semantics rather than about
+		// whether the bytes are real. The gate ITSELF is covered by tests that
+		// deliberately do not take this default -- see
+		// TestANormaliseSourceThatNamesOtherFilesIsRefusedPermanently and the
+		// real-media integration tests, which run New bare and get the real
+		// ffmpeg.ProbeFile.
+		WithSourceVerifier(func(context.Context, string) (float64, error) { return 2, nil }),
 	}
 	// No default WithExecer here, unlike before: New's own default is
 	// media.Exec, the REAL subprocess runner, resolving "ffmpeg"/"ffprobe"

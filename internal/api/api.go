@@ -228,6 +228,25 @@ type Server struct {
 	// what, on which branch -- cannot be asserted at all. Removing all five
 	// call sites left the package green.
 	auditSink func(alerts.Event)
+
+	// probeBin supplies the ffprobe path directly, and is set only by tests.
+	//
+	// Same shape as auditSink and for the same reason. probeUpload reaches
+	// ffprobe through s.eng().Tools(), and this package's tests have no
+	// manager, so probing is skipped and every upload is accepted -- which
+	// means deleting the probe call from the handler leaves the package green.
+	// Review found that; the tests did not. Setting this exercises the real
+	// handler path rather than replacing it.
+	probeBin string
+
+	// probeTimeout overrides probeUploadTimeout, and is set only by tests.
+	//
+	// Zero means the constant. It exists because probeUploadTimeout is 30
+	// seconds and the behaviour that needs asserting -- a probe that runs out
+	// of time is treated as "could not check" and the upload is kept -- would
+	// otherwise cost half a minute per run, which is how a check ends up
+	// deleted rather than fixed.
+	probeTimeout time.Duration
 }
 
 // showKey identifies one scheduled show: a destination, and the schedule that
