@@ -297,6 +297,13 @@ func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result,
 			Codec: audioCodecOf(row.Audio.Codec),
 			Mono:  row.Audio.Mono,
 		},
+		// Bit-exact audio. The compiled result is still the authority on WHICH
+		// tracks go out -- routing.Compile runs for a copy destination exactly
+		// as it does for a mixing one, so the profile's selection and the role
+		// exclusions reach the -map list rather than being bypassed. The graph
+		// it also produced is simply not used, and DestinationArgs drops it.
+		CopyAudio:   row.Audio.Copy,
+		AudioTracks: compiled.Tracks,
 		// Muxer and socket tuning. Its zero value emits nothing, so a
 		// destination that has not opted in produces exactly the command
 		// it always did.

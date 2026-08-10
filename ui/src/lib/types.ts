@@ -1699,6 +1699,19 @@ export interface AudioEncoding {
   /** Folds the routing graph's stereo output to one channel. A downmix of your
    *  mix, not a re-route. */
   mono?: boolean;
+  /** Forward the selected ingest tracks untouched -- no decode, no mix, no
+   *  encoder -- so this destination carries the same bits your encoder sent.
+   *
+   *  SRT and file destinations only. It is called copy and not "passthrough"
+   *  because passthrough already means a null rendition, i.e. video at the
+   *  ingest's own resolution, everywhere else in this app.
+   *
+   *  Copy still SELECTS: which tracks go out, and which roles are excluded,
+   *  both still apply. What it gives up is everything the mix does to the
+   *  samples -- gain, normalization, loudness, ducking, delay, mono -- and a
+   *  destination that asks for copy and for any of those is refused on save
+   *  rather than silently ignoring one of them. */
+  copy?: boolean;
 }
 
 /** YouTube broadcast visibility. Empty means LEAVE IT ALONE, and that

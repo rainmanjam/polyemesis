@@ -353,6 +353,14 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 			"recordings directory at start."
 	}
 
+	// This is the SECOND place a ffmpeg.DestSpec is built -- the engine's
+	// destSpecFor is the other -- and it has always omitted Audio and Transport,
+	// so the preview of a destination using either already differs from the
+	// command that runs. CopyAudio is added here anyway, because the difference
+	// it makes is not a missing flag but a whole shape: without it the operator
+	// previewing a copy destination is shown a filter graph and an encoder that
+	// will not be there. Unifying the two construction sites is a separate
+	// change and has its own follow-up issue.
 	base = ffmpeg.DestinationArgs(ffmpeg.DestSpec{
 		Kind:          ffmpeg.DestKind(row.Kind),
 		Target:        target,
@@ -363,6 +371,8 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		SampleRate:    row.Profile.SampleRate,
 		CopyVideo:     true,
 		VideoDelayMS:  compiled.VideoDelayMS,
+		CopyAudio:     row.Audio.Copy,
+		AudioTracks:   compiled.Tracks,
 	})
 	return bin, base, false, note, nil
 }
