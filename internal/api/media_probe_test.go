@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -747,5 +748,60 @@ func TestUploadIsAcceptedUncheckedWhenThereIsNoProber(t *testing.T) {
 	auth(r)
 	if w := do(t, h, r); w.Code != http.StatusCreated {
 		t.Fatalf("upload status = %d, want 201 when nothing can probe: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestDeletingAVerdictSidecarIsRefused pins that the record of an upload having
+// gone uninspected cannot be removed by the person who created it.
+//
+// The design distinguishes four states, and two of them are "recorded
+// unverified" and "no record at all" -- the second exists so an install's
+// history, uploaded before verdicts, is not stranded. That distinction is
+// load-bearing: playlistUploadProblems refuses on `recorded && !v.Verified`, so
+// a file with no record is treated MORE permissively than one recorded as
+// unchecked.
+//
+// handleDeleteMedia validated its {name} with store.Resolve, which only refuses
+// separators, so `.probe-<name>.json` was a legal name to delete. Driven through
+// the real router by a reviewer: DELETE returned 204, the listing went from
+// UnverifiedReason set to UnverifiedReason empty, and a settings save that was
+// 400 before became 200 after. Deleting DATA made the system more permissive,
+// which is the shape a caller can always reach for.
+//
+// The guard is uploads.Listable, whose own comment says the rule has one home.
+// This was the caller that did not go there.
+func TestDeletingAVerdictSidecarIsRefused(t *testing.T) {
+	_, h, dataDir, auth := probeServer(t, "")
+
+	dir := filepath.Join(dataDir, "uploads")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const name = "show.mp4"
+	sidecar := filepath.Join(dir, ".probe-"+name+".json")
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, []byte(`{"verified":false,"reason":"cut short"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := jsonRequest(t, http.MethodDelete, "/api/v1/media/"+url.PathEscape(".probe-"+name+".json"), nil)
+	auth(r)
+	if code := do(t, h, r).Code; code == http.StatusNoContent {
+		t.Errorf("DELETE of a verdict sidecar returned 204; erasing the record that a "+
+			"file went uninspected is a privilege upgrade, because no-record is "+
+			"treated more permissively than recorded-unverified (status %d)", code)
+	}
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Errorf("the verdict sidecar was removed over HTTP: %v", err)
+	}
+
+	// And the partial name of an in-flight upload, which the same hole reached.
+	r2 := jsonRequest(t, http.MethodDelete, "/api/v1/media/"+url.PathEscape(".partial-abc-"+name), nil)
+	auth(r2)
+	if code := do(t, h, r2).Code; code == http.StatusNoContent {
+		t.Errorf("DELETE of a .partial- name returned 204, so an upload in flight is " +
+			"reachable by a concurrent request")
 	}
 }

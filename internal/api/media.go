@@ -545,6 +545,25 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 	// compares, so a traversal spelled with a backslash slips past the in-use
 	// guard and reaches the sweep. Resolving first makes the guard's answer and
 	// the sweep's target the same name on every platform.
+	// AND THE NAME HAS TO BE ONE THE LIBRARY LISTS. Resolve only refuses
+	// separators, so `.probe-<name>.json` was a legal {name} here -- and deleting
+	// a verdict sidecar is a PRIVILEGE UPGRADE, because the design's load-bearing
+	// distinction is "recorded unverified" versus "no record at all", and
+	// removing the record moves a file from the first to the second.
+	//
+	// Measured through the real router: DELETE /api/v1/media/.probe-attack.ts.json
+	// returned 204, the listing went from UnverifiedReason set to
+	// UnverifiedReason empty, and a settings save that was 400 before the delete
+	// became 200 after it. The same session-holder who created an unchecked file
+	// could erase the evidence that it was unchecked.
+	//
+	// uploads.Listable is asked because its own comment says the rule has one
+	// home; this was the caller that did not go there. It also covers the
+	// `.partial-` name of an upload still in flight.
+	if !uploads.Listable(name) {
+		writeError(w, http.StatusBadRequest, "no such upload")
+		return
+	}
 	if _, err := store.Resolve(name); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

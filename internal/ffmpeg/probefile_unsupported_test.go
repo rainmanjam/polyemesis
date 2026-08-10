@@ -150,6 +150,7 @@ func TestEveryProbeFileRefusalIsClassified(t *testing.T) {
 		"ErrIndirectContainer":    ErrIndirectContainer,
 		"ErrUnsupportedContainer": ErrUnsupportedContainer,
 		"ErrProbeTooVerbose":      ErrProbeTooVerbose,
+		"ErrNoDuration":           ErrNoDuration,
 	}
 	for _, name := range found {
 		if _, ok := exempt[name]; ok {

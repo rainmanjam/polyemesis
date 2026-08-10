@@ -153,8 +153,14 @@ var ErrProbeTooVerbose = errors.New("ffprobe printed more about this file than p
 func Refused(err error) bool {
 	return errors.Is(err, ErrIndirectContainer) ||
 		errors.Is(err, ErrUnsupportedContainer) ||
+		errors.Is(err, ErrNoDuration) ||
 		errors.Is(err, ErrProbeTooVerbose)
 }
+
+// ErrNoDuration is returned for a file whose format is accepted but whose length
+// ffprobe will not state. It is a refusal at the door rather than a permanent
+// failure at the worker, which is where it used to land.
+var ErrNoDuration = errors.New("polyemesis cannot work out how long this file is")
 
 // indirectFormats are the demuxer names whose whole job is resolving a NAME to
 // bytes somewhere else. They are the reason selfContainedFormats is an
@@ -320,6 +326,33 @@ func probeFile(ctx context.Context, ffprobeBin, path string, stdoutCap int) (*Pr
 			return nil, fmt.Errorf("%w (ffprobe read it as %q)", ErrIndirectContainer, res.FormatName)
 		}
 		return nil, fmt.Errorf("%w (ffprobe read it as %q)", ErrUnsupportedContainer, res.FormatName)
+	}
+	// AND A DURATION HAS TO EXIST, because the worker that will normalise this
+	// file cannot proceed without one and the two gates must not disagree.
+	//
+	// The allowlist admits raw elementary streams on the reasoning that a .h264
+	// dump from an encoder is a real file. Measured with ffprobe 8.1.2: h264,
+	// hevc and mpegvideo all report duration=None, while ac3 carries one. So the
+	// upload gate ACCEPTED such a file and the normalise worker then refused it
+	// PERMANENTLY -- "polyemesis could not work out how long it is" -- leaving a
+	// playlist that can never go on air. Accepted at the door, unusable forever,
+	// which is worse than either answer given consistently.
+	//
+	// Keyed on the duration rather than on the format name deliberately: the
+	// gate's real requirement is the one the worker has, so any future format
+	// with this property is covered without a second list to keep in step. ac3
+	// and every container that carries a duration are unaffected.
+	//
+	// Ordered AFTER the caller's no-streams diagnosis in effect, by asking only
+	// when there is something to measure: a no-tracks MP4 reaches here read
+	// perfectly, with zero streams and no duration, and "no video or audio
+	// stream" is the sentence that tells its owner what is wrong. Measured -- the
+	// first version of this check preempted it and TestUploadRefusesAContainer
+	// WithNoStreams failed with the less useful reason.
+	if (res.Video != nil || len(res.Audio) > 0) && res.DurationSeconds <= 0 {
+		return nil, fmt.Errorf("%w (ffprobe read it as %q and reported no duration; "+
+			"re-save it as MP4 or MPEG-TS and upload it again)",
+			ErrNoDuration, res.FormatName)
 	}
 	return res, nil
 }
