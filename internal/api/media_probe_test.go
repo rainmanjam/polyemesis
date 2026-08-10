@@ -112,15 +112,20 @@ func TestUploadRejectsAFileThatIsNotMedia(t *testing.T) {
 	}
 }
 
-func TestUploadAcceptsRealMediaAndRecordsWhatItIs(t *testing.T) {
-	ffprobe := ffprobeOrSkip(t)
+// sampleMedia returns the bytes of a short 160x90 h264 file with TWO aac audio
+// tracks, which is the shape the assertions below are written against.
+//
+// ONE SKIP SITE FOR EVERY TEST IN THIS FILE THAT NEEDS REAL MEDIA. Each of
+// them used to carry its own "ffmpeg is not installed" and "could not build a
+// sample" pair, and internal/testenv's ratchet is right that every one of those
+// is a free pass: an FFmpeg without libx264 would stop exercising the upload
+// gate several tests at a time and print ok.
+func sampleMedia(t *testing.T) []byte {
+	t.Helper()
 	ffmpegBin, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		t.Skip("ffmpeg is not installed")
+		t.Skip("ffmpeg is not installed, so no real media can be built to upload")
 	}
-	_, h, _, auth := probeServer(t, ffprobe)
-
-	// Two audio tracks: the count is the field the Library exists to show.
 	src := filepath.Join(t.TempDir(), "src.mkv")
 	mk := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=15",
@@ -130,12 +135,20 @@ func TestUploadAcceptsRealMediaAndRecordsWhatItIs(t *testing.T) {
 		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
 		"-c:a", "aac", "-t", "1", "-y", src)
 	if out, err := mk.CombinedOutput(); err != nil {
-		t.Skipf("could not build a sample: %v: %s", err, out)
+		t.Skipf("could not build a sample with this FFmpeg: %v: %s", err, out)
 	}
 	body, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatalf("read sample: %v", err)
 	}
+	return body
+}
+
+func TestUploadAcceptsRealMediaAndRecordsWhatItIs(t *testing.T) {
+	ffprobe := ffprobeOrSkip(t)
+	// Two audio tracks: the count is the field the Library exists to show.
+	body := sampleMedia(t)
+	_, h, _, auth := probeServer(t, ffprobe)
 
 	r := uploadBytesRequest(t, "show.mkv", body)
 	auth(r)
@@ -286,26 +299,8 @@ func listMedia(t *testing.T, h http.Handler, auth func(*http.Request)) []uploads
 // the feature itself.
 func TestUploadRefusesAScriptThatNamesAnotherUpload(t *testing.T) {
 	ffprobe := ffprobeOrSkip(t)
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
+	body := sampleMedia(t)
 	_, h, dataDir, auth := probeServer(t, ffprobe)
-
-	src := filepath.Join(t.TempDir(), "victim.mkv")
-	mk := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=15",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-		"-map", "0:v", "-map", "1:a",
-		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-		"-c:a", "aac", "-t", "1", "-y", src)
-	if out, err := mk.CombinedOutput(); err != nil {
-		t.Skipf("could not build a sample: %v: %s", err, out)
-	}
-	body, err := os.ReadFile(src)
-	if err != nil {
-		t.Fatalf("read sample: %v", err)
-	}
 
 	r := uploadBytesRequest(t, "victim.mkv", body)
 	auth(r)

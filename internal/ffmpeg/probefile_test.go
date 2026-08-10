@@ -14,6 +14,40 @@ import (
 	"time"
 )
 
+// buildSample muxes one short h264/aac file and returns its path.
+//
+// ONE SKIP SITE FOR THE WHOLE FILE, which is the point. Every test here that
+// needs real media used to carry its own "could not build a sample" skip, and
+// internal/testenv's ratchet is right that each of those is a free pass: an
+// FFmpeg without libx264 would silently stop exercising the upload gate, four
+// tests at a time, and print ok. Now there is one place for that to be noticed
+// and one place to fix it.
+//
+// Extra ffmpeg arguments go between the codec flags and the output path, so a
+// caller can ask for a duration or -movflags +faststart.
+//
+// 320x180 with TWO audio tracks for every caller, rather than a knob per test.
+// The track count is the field this whole feature exists to show -- routing is
+// per track -- so every fixture carrying two is the right default, and the one
+// test that asserts the shape asserts a shape the others also have.
+func buildSample(t *testing.T, path string, extra ...string) string {
+	t.Helper()
+	ffmpegBin := needFFmpeg(t, "ffmpeg")[0]
+	args := []string{"-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+		"-c:a", "aac"}
+	args = append(args, extra...)
+	args = append(args, "-y", path)
+	if out, err := exec.Command(ffmpegBin, args...).CombinedOutput(); err != nil {
+		t.Skipf("could not build %s with this FFmpeg: %v: %s", filepath.Base(path), err, out)
+	}
+	return path
+}
+
 // emptyMP4 is a valid MPEG-4 file with no tracks in it: an ftyp box and a moov
 // holding nothing but an mvhd.
 //
@@ -59,8 +93,7 @@ func ffconcatScript(target string) []byte {
 // that -- see internal/api's probeUpload. A table that only ever produced the
 // first kind would leave the second untested, which is what it did.
 func TestProbeFileRefusesWhatIsNotMedia(t *testing.T) {
-	bins := needFFmpeg(t, "ffprobe")
-	ffprobe := bins[0]
+	ffprobe := needFFmpeg(t, "ffmpeg", "ffprobe")[1]
 	dir := t.TempDir()
 
 	write := func(name string, body []byte) string {
@@ -74,21 +107,10 @@ func TestProbeFileRefusesWhatIsNotMedia(t *testing.T) {
 
 	// A real file for the ffconcat script to point at, so the bypass has
 	// something worth stealing the metadata of. Built rather than faked: the
-	// whole point is that the script inherits a REAL probe result.
-	victim := filepath.Join(dir, "victim.mp4")
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	build := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=15",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-		"-map", "0:v", "-map", "1:a",
-		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-		"-c:a", "aac", "-t", "1", "-y", victim)
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Skipf("could not build the referenced file: %v: %s", err, out)
-	}
+	// whole point is that the script inherits a REAL probe result. The scripts
+	// below name it by its bare filename, which is how the concat demuxer
+	// resolves a sibling, so nothing needs the returned path.
+	buildSample(t, filepath.Join(dir, "victim.mp4"), "-t", "1")
 
 	// reachedStreamCheck counts the cases that got a result rather than an
 	// error, which is the only way the no-streams assertion runs at all.
@@ -165,20 +187,10 @@ func TestProbeFileRefusesWhatIsNotMedia(t *testing.T) {
 // file's h264 video stream, its aac audio stream and its duration -- and the
 // handler stored all of it as the 44-byte script's own metadata.
 func TestProbeFileRefusesAScriptThatNamesOtherFiles(t *testing.T) {
-	bins := needFFmpeg(t, "ffmpeg", "ffprobe")
-	ffmpegBin, ffprobe := bins[0], bins[1]
+	ffprobe := needFFmpeg(t, "ffmpeg", "ffprobe")[1]
 	dir := t.TempDir()
 
-	victim := filepath.Join(dir, "victim.mp4")
-	mk := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-		"-map", "0:v", "-map", "1:a",
-		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-		"-c:a", "aac", "-t", "2", "-y", victim)
-	if out, err := mk.CombinedOutput(); err != nil {
-		t.Skipf("could not build a sample file: %v: %s", err, out)
-	}
+	victim := buildSample(t, filepath.Join(dir, "victim.mp4"), "-t", "2")
 
 	// The victim really is readable media, so a refusal below cannot be
 	// explained by the referenced file being broken.
@@ -252,24 +264,14 @@ func TestSelfContainedIsElementWiseAndClosed(t *testing.T) {
 // endorsement; it is the boundary written down, so that a later change that
 // starts catching these fails here and gets to update the docs deliberately.
 func TestProbeFileAcceptsMostTruncatedMedia(t *testing.T) {
-	bins := needFFmpeg(t, "ffmpeg", "ffprobe")
-	ffmpegBin, ffprobe := bins[0], bins[1]
+	ffprobe := needFFmpeg(t, "ffmpeg", "ffprobe")[1]
 	dir := t.TempDir()
 
+	// Eight seconds, so a tenth of the bytes is unambiguously less than the
+	// duration the header claims.
 	build := func(name string, extra ...string) string {
 		t.Helper()
-		p := filepath.Join(dir, name)
-		args := []string{"-hide_banner", "-loglevel", "error",
-			"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=15",
-			"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-			"-map", "0:v", "-map", "1:a",
-			"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-			"-c:a", "aac", "-t", "8"}
-		args = append(args, extra...)
-		if out, err := exec.Command(ffmpegBin, append(args, "-y", p)...).CombinedOutput(); err != nil {
-			t.Skipf("could not build %s: %v: %s", name, err, out)
-		}
-		return p
+		return buildSample(t, filepath.Join(dir, name), append([]string{"-t", "8"}, extra...)...)
 	}
 	cut := func(src string, keep float64) string {
 		t.Helper()
@@ -329,23 +331,13 @@ func TestProbeFileAcceptsMostTruncatedMedia(t *testing.T) {
 // The numbers the Library shows come from here, so a real file has to produce
 // them -- a gate that also rejected valid media would be worse than no gate.
 func TestProbeFileReadsRealMedia(t *testing.T) {
-	bins := needFFmpeg(t, "ffmpeg", "ffprobe")
-	ffmpegBin, ffprobe := bins[0], bins[1]
-	path := filepath.Join(t.TempDir(), "sample.mkv")
+	ffprobe := needFFmpeg(t, "ffmpeg", "ffprobe")[1]
 
 	// Two audio tracks, because the count is the field the Library exists to
 	// show: routing is per track, so "does this file carry the tracks I am
 	// about to select" is the question a name and a size cannot answer.
-	mk := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-		"-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000",
-		"-map", "0:v", "-map", "1:a", "-map", "2:a",
-		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-		"-c:a", "aac", "-t", "2", "-y", path)
-	if out, err := mk.CombinedOutput(); err != nil {
-		t.Skipf("could not build a sample file: %v: %s", err, out)
-	}
+	// buildSample produces two for every caller.
+	path := buildSample(t, filepath.Join(t.TempDir(), "sample.mkv"), "-t", "2")
 
 	res, err := ProbeFile(context.Background(), ffprobe, path)
 	if err != nil {

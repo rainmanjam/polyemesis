@@ -1,15 +1,28 @@
 {
   "note": "t.Skip/Skipf/SkipNow call sites per package, outside internal/testenv. A COUNT rather than a per-site registry: a registry needs an entry for every one of these, most of which are honest environmental skips, and a list that long becomes a rubber stamp. This can only fall on regeneration; raising it is a hand edit of this file.",
-  "total": 83,
+  "raisedBy": [
+    {
+      "pr": 118,
+      "from": 83,
+      "to": 88,
+      "packages": {
+        "internal/api": "4 -> 7",
+        "internal/ffmpeg": "18 -> 20"
+      },
+      "why": "The upload probe gate needs a real ffprobe to gate with and a real ffmpeg to build media to feed it, and neither is a property of the code. The five sites are: ffprobeOrSkip (no ffprobe, so there is nothing to gate with); sampleMedia's two (no ffmpeg, and an ffmpeg that cannot mux h264/aac); buildSample's one (same, for internal/ffmpeg); and TestProbeFileReturnsWhenItsContextIsCancelled on Windows, whose fixture is a #!/bin/sh wrapper script chosen precisely because it leaves a grandchild holding the stdout pipe. Every one is 'this environment cannot run the test', none is 'the thing under test changed'.",
+      "alreadyPaidDown": "The first draft of the same tests added ELEVEN sites. sampleMedia and buildSample were extracted so that each environmental reason has exactly one site for the whole file instead of one per test, which also took two pre-existing per-test build skips with it. See issue #187: the real fix is making these fail rather than skip when POLYEMESIS_REQUIRE_FFMPEG is set in CI, at which point all five can come back out."
+    }
+  ],
+  "total": 88,
   "byPackage": {
     "cmd/polyemesis": 1,
-    "internal/api": 4,
+    "internal/api": 7,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
     "internal/db": 1,
     "internal/engine": 6,
-    "internal/ffmpeg": 18,
+    "internal/ffmpeg": 20,
     "internal/media": 5,
     "internal/meters": 3,
     "internal/playlistmedia": 3,
