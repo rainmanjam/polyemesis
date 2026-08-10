@@ -331,8 +331,17 @@ if [ -n "$pid" ]; then
   # this script can be a zombie for a moment, and a zombie answers `kill -0`
   # with success while holding no sockets at all. The port being released is the
   # fact this step actually depends on.
+  #
+  # The lsof branch is not defensive bookkeeping. poly_port_holders returns
+  # nothing when lsof is absent, and poly_free_port reads "nothing holds it" as
+  # success -- so without this the observation would silently degrade back into
+  # the assumption it replaces, and print the same confident `ok`. CI installs
+  # lsof for this job (ci.yml:738); a machine without it gets told the check
+  # could not be made, rather than told it passed.
   kill -9 "$pid" 2>/dev/null
-  if poly_free_port "$PORT"; then
+  if ! command -v lsof >/dev/null 2>&1; then
+    bad "lsof is missing, so the SIGKILL could not be observed; install it rather than reading the will-message verdict below as a broker result"
+  elif poly_free_port "$PORT"; then
     ok "polyemesis was SIGKILLed with no chance to say goodbye"
   else
     bad "polyemesis still holds port $PORT after SIGKILL; its broker connection is still open, so the will-message check below would be measuring our teardown rather than the broker"
