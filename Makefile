@@ -75,23 +75,41 @@ test: preflight-guard ## Run the Go test suite
 	go test ./...
 
 .PHONY: preflight-guard
-preflight-guard: ## Prove the route-coverage preflight still runs under any -run
+preflight-guard: ## Prove the route-coverage preflight survives -run, -skip and -count=0
 	@# internal/api runs a preflight before whatever the caller selected, so that a
-	@# -run filter cannot switch the route coverage ledger off. That guard is only
+	@# test filter cannot switch the route coverage ledger off. That guard is only
 	@# worth anything while it is WIRED, and a TestMain is a quiet thing to delete.
 	@#
 	@# So its liveness is proven the same way everything else in the ledger is
-	@# proven: by running something that fails if it stopped. -run XXXNoSuchTest
-	@# selects no test at all, and the marker must still appear.
-	@go test ./internal/api -run XXXNoSuchTest -count=1 -v 2>&1 \
-		| grep -q 'polyemesis: route-coverage preflight ran' \
-		|| { echo 'THE ROUTE COVERAGE PREFLIGHT IS GONE.'; \
-		     echo 'internal/api/main_test.go forces ^TestLedgerPreflight$$ before the'; \
-		     echo 'caller'"'"'s own -run, so that no filter can leave the ledger unchecked.'; \
-		     echo 'Its marker no longer prints, which means TestMain was removed, renamed'; \
-		     echo 'or stopped running the preflight. Restore it; do not delete this check.'; \
-		     exit 1; }
-	@echo 'preflight-guard: the route-coverage preflight still runs under any -run'
+	@# proven: by running something that fails if it stopped.
+	@#
+	@# THREE switches, because the first version of this target probed one. Go has
+	@# three ways to decide that a test does not run, and TestMain overrode only
+	@# -run: `-skip TestLedgerPreflight` reported ok in 41.7s against a registry
+	@# that failed seven ways, and `-count=0` ran nothing at all in 0.2s. A guard
+	@# thorough over a set that excludes the bypass is the exact shape the ledger
+	@# exists to catch, so this target now probes each switch by name and says
+	@# which one defeated it.
+	@#
+	@# CI RUNS THIS TARGET. It used to be reachable only through `make test`, and
+	@# ci.yml invokes `go test` directly -- so the gate existed on developer
+	@# machines and nowhere else, which is a local-only gate described as a gate.
+	@# -count=1 comes FIRST so the probe wins when the probe is itself a -count:
+	@# Go's flag package takes the last occurrence, and `-count=0 -count=1` would
+	@# have quietly turned the -count=0 probe into a plain run that passes.
+	@for probe in '-run XXXNoSuchTest' '-skip TestLedgerPreflight' '-count=0'; do \
+		go test -count=1 ./internal/api $$probe -v 2>&1 \
+			| grep -q 'polyemesis: route-coverage preflight ran' \
+			|| { echo "THE ROUTE COVERAGE PREFLIGHT IS DEFEATED BY: $$probe"; \
+			     echo 'internal/api/main_test.go forces ^TestLedgerPreflight$$ through a'; \
+			     echo 'first m.Run with the caller'"'"'s -run, -skip and -count set aside,'; \
+			     echo 'so that no filter can leave the ledger unchecked. Under the switch'; \
+			     echo 'above its marker no longer prints, which means TestMain was removed,'; \
+			     echo 'renamed, or stopped neutralising that switch. Restore it; do not'; \
+			     echo 'delete this check, and do not narrow the probe list.'; \
+			     exit 1; }; \
+	done
+	@echo 'preflight-guard: the route-coverage preflight still runs under -run, -skip and -count=0'
 
 .PHONY: test-v
 test-v: ## Run the Go test suite verbosely

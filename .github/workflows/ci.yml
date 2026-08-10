@@ -125,6 +125,25 @@ jobs:
           echo "gofmt: clean"
       - run: go build ./...
       - run: go vet ./...
+
+      # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
+      # running anywhere.
+      #
+      # internal/api forces its route coverage ledger through a first m.Run with
+      # the caller's -run, -skip and -count set aside, so that no test filter can
+      # switch the ledger off. `make preflight-guard` proves that mechanism is
+      # still wired by running the package under each of those three switches and
+      # requiring the preflight's marker to print anyway.
+      #
+      # It was reachable only as a prerequisite of `make test`, and this workflow
+      # invokes `go test` directly -- here and in the crossplatform job -- so the
+      # guard existed on developer machines and nowhere else. A local-only gate
+      # described in a comment as a gate is the species this whole change is
+      # about. ~4s; it runs the package three times with a filter that selects
+      # almost nothing.
+      - name: The route-coverage preflight is still wired
+        run: make preflight-guard
+
       # -race because the engine reconciles from several goroutines and a data
       # race here shows up in production as a stream that stops for one viewer.
       #
