@@ -1285,6 +1285,17 @@ func TestLedgerPreflight(t *testing.T) {
 		assertRouteSetsEqual(t, want.Routes, enumerated)
 		assertSweepVerdictsEqual(t, want.SweepVerdicts, verdicts)
 		assertPartitionTotalsEqual(t, want.Partition, part)
+		assertCoverageTotalsEqual(t, want.Totals, fillDerivedTotals(totals, enumerated))
+		// The note is the other scalar block, and the one a reviewer reads first.
+		// A committed note saying "Everything in this ledger is fully covered. No
+		// route is excused." passed a full strict run before this line existed --
+		// prose asserting the exact opposite of the 57 excused pairs recorded
+		// three keys below it.
+		if want.Note != ledgerNote {
+			t.Errorf("the note in %s is not the one this build writes. It is the first "+
+				"thing a reader trusts and nothing was comparing it.\ncommitted: %q\nlive: %q",
+				coveragePath, want.Note, ledgerNote)
+		}
 		assertProseSectionsEcho(t, want)
 	}
 
@@ -1672,17 +1683,8 @@ func readLedger(t *testing.T) coverageLedger {
 func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute,
 	totals coverageTotals, verdicts []sweepVerdict, part partitionTotals) {
 	t.Helper()
-	totals.MethodPatternPairs = len(routes)
-	totals.NonTrieProbes = len(notFoundProbes()) + len(methodNotAllowedProbes())
+	totals = fillDerivedTotals(totals, routes)
 	shapes := emittedShapes()
-	for _, sh := range shapes {
-		if sh.Emitted {
-			totals.ShapesEmitted++
-			if !sh.Inspected {
-				totals.ShapesNotInspected++
-			}
-		}
-	}
 
 	out := coverageLedger{
 		Note:          ledgerNote,
@@ -1920,6 +1922,74 @@ func assertKeyedRowsEqual[T any](t *testing.T, section string, want, got []T, ke
 		if _, ok := w[k]; !ok {
 			t.Errorf("%s: %q exists in the code and is not in %s. Regenerate.",
 				section, k, coveragePath)
+		}
+	}
+}
+
+// fillDerivedTotals completes the four fields of coverageTotals that are not
+// counted during classification: the pair count, the non-trie probe count, and
+// the two shape counts.
+//
+// Extracted because they used to be computed INSIDE writeLedger, which put them
+// downstream of the comparison and made assertCoverageTotalsEqual read four
+// zeroes. Both the write path and the assert path now derive them the same way,
+// which is the only arrangement in which comparing them means anything.
+func fillDerivedTotals(totals coverageTotals, routes []coverageRoute) coverageTotals {
+	totals.MethodPatternPairs = len(routes)
+	totals.NonTrieProbes = len(notFoundProbes()) + len(methodNotAllowedProbes())
+	totals.ShapesEmitted, totals.ShapesNotInspected = 0, 0
+	for _, sh := range emittedShapes() {
+		if sh.Emitted {
+			totals.ShapesEmitted++
+			if !sh.Inspected {
+				totals.ShapesNotInspected++
+			}
+		}
+	}
+	return totals
+}
+
+// assertCoverageTotalsEqual compares the committed summary block against the
+// live count, field by field.
+//
+// THE EIGHTH INSTANCE. `totals` was computed by writeLedger, written to the
+// artifact, and read back by nothing -- exactly the defect this round was
+// convened to fix one struct lower down, and missed because the sweep for it
+// looked at the three ARRAY sections (excuses, shapes, deferred) and not at the
+// two SCALAR blocks. Replacing the committed block with
+//
+//	"totals": {"methodPatternPairs": 3, "swept": 999, "denied": 42, ...}
+//
+// left `POLYEMESIS_LEDGER=strict go test ./internal/api` at ok, and left
+// `make preflight-guard` passing.
+//
+// Lower severity than the partition gap and worth saying why: every number here
+// is derived from routes and shapes, both of which ARE compared, so no CODE
+// change can hide behind it. What it permitted was an artifact edit that makes
+// the summary lie indefinitely on every plain run -- and `totals` is the block
+// a reviewer reads first, which is the same argument assertProseSectionsEcho
+// was written on: a committed copy allowed to disagree with the code is worse
+// than no copy, because it gets quoted.
+func assertCoverageTotalsEqual(t *testing.T, want, got coverageTotals) {
+	t.Helper()
+	for _, f := range []struct {
+		name      string
+		want, got int
+	}{
+		{"methodPatternPairs", want.MethodPatternPairs, got.MethodPatternPairs},
+		{"swept", want.Swept, got.Swept},
+		{"excused", want.Excused, got.Excused},
+		{"denied", want.Denied, got.Denied},
+		{"nonTrieProbes", want.NonTrieProbes, got.NonTrieProbes},
+		{"shapesEmitted", want.ShapesEmitted, got.ShapesEmitted},
+		{"shapesNotInspected", want.ShapesNotInspected, got.ShapesNotInspected},
+	} {
+		if f.want != f.got {
+			t.Errorf("totals.%s is %d in %s and computes as %d live. Like the partition "+
+				"counts, these are DERIVED -- from routes and shapes -- so this fires "+
+				"either because a route's verdict moved (the message naming it is above) "+
+				"or because the summary block was edited without running anything.",
+				f.name, f.want, coveragePath, f.got)
 		}
 	}
 }
