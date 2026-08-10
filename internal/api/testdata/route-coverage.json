@@ -1,18 +1,25 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run TestRouteCoverageLedger -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 68,
+  "excusedCeiling": 57,
   "counterpartlessExcusedCeiling": 32,
-  "differentialFloor": 0,
+  "differentialFloor": 8,
   "unstableCeiling": 2,
   "varianceExemptCeiling": 2,
   "totals": {
     "methodPatternPairs": 211,
-    "swept": 49,
-    "excused": 68,
-    "denied": 94,
+    "swept": 55,
+    "excused": 57,
+    "denied": 99,
     "nonTrieProbes": 11,
     "shapesEmitted": 11,
     "shapesNotInspected": 4
+  },
+  "partition": {
+    "differential": 8,
+    "invariant": 44,
+    "inertSubsetOfInvariant": 11,
+    "explainedVariance": 1,
+    "unstable": 2
   },
   "routes": [
     {
@@ -73,7 +80,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/auth/tokens",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "POST",
@@ -348,7 +355,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/health",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "GET",
@@ -383,7 +390,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/hooks/{id}/deliveries",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "POST",
@@ -398,7 +405,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/jobs/overview",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "POST",
@@ -408,7 +415,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/jobs/policy",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "PUT",
@@ -578,12 +585,12 @@
     {
       "method": "GET",
       "pattern": "/api/v1/oauth/{platform}/callback",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/oauth/{platform}/start",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
@@ -808,7 +815,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/setup",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "POST",
@@ -903,7 +910,7 @@
     {
       "method": "POST",
       "pattern": "/api/v1/version/check",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "GET",
@@ -913,12 +920,12 @@
     {
       "method": "GET",
       "pattern": "/hls/*",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "HEAD",
       "pattern": "/hls/*",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "CONNECT",
@@ -1071,321 +1078,794 @@
       "coverage": "excused"
     }
   ],
+  "sweepVerdicts": [
+    {
+      "path": "/api/v1/alerts/meta",
+      "pattern": "GET /api/v1/alerts/meta",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/alerts/rules",
+      "pattern": "GET /api/v1/alerts/rules",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/auth/me",
+      "pattern": "GET /api/v1/auth/me",
+      "class": "explained-variance",
+      "pointers": [
+        "/auth",
+        "/tokenName"
+      ]
+    },
+    {
+      "path": "/api/v1/automod/matrix",
+      "pattern": "GET /api/v1/automod/matrix",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/automod/stats",
+      "pattern": "GET /api/v1/automod/stats",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/chat",
+      "pattern": "GET /api/v1/chat",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/chat/messages",
+      "pattern": "GET /api/v1/chat/messages",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/chat/search?q=hello",
+      "pattern": "GET /api/v1/chat/search",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/chat/users?platform=twitch\u0026authorId=1",
+      "pattern": "GET /api/v1/chat/users",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/clips",
+      "pattern": "GET /api/v1/clips",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/destinations",
+      "pattern": "GET /api/v1/destinations",
+      "class": "differential",
+      "pointers": [
+        "/0/destination/backupStreamKey",
+        "/0/destination/extraInputArgs",
+        "/0/destination/extraOutputArgs",
+        "/0/destination/streamKey",
+        "/1/destination/url"
+      ],
+      "sentinels": [
+        "SENTINEL-destination-streamkey-9f3a",
+        "SENTINEL-destination-backupkey-9f3a",
+        "SENTINEL-icecast-password-9f3a",
+        "SENTINEL-expert-argv-streamkey-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/destinations/1",
+      "pattern": "GET /api/v1/destinations/{id}",
+      "class": "differential",
+      "pointers": [
+        "/destination/backupStreamKey",
+        "/destination/extraInputArgs",
+        "/destination/extraOutputArgs",
+        "/destination/streamKey"
+      ],
+      "sentinels": [
+        "SENTINEL-destination-streamkey-9f3a",
+        "SENTINEL-destination-backupkey-9f3a",
+        "SENTINEL-expert-argv-streamkey-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/destinations/2",
+      "pattern": "GET /api/v1/destinations/{id}",
+      "class": "differential",
+      "pointers": [
+        "/destination/url"
+      ],
+      "sentinels": [
+        "SENTINEL-icecast-password-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/destinations/3",
+      "pattern": "GET /api/v1/destinations/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/encoders",
+      "pattern": "GET /api/v1/encoders",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/failover/playlist",
+      "pattern": "GET /api/v1/failover/playlist",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/fonts",
+      "pattern": "GET /api/v1/fonts",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/health",
+      "pattern": "GET /api/v1/health",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/hooks",
+      "pattern": "GET /api/v1/hooks",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/hooks/1/deliveries",
+      "pattern": "GET /api/v1/hooks/{id}/deliveries",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/hooks/meta",
+      "pattern": "GET /api/v1/hooks/meta",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/jobs/overview",
+      "pattern": "GET /api/v1/jobs/overview",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/jobs/policy",
+      "pattern": "GET /api/v1/jobs/policy",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/levels",
+      "pattern": "GET /api/v1/levels",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/library",
+      "pattern": "GET /api/v1/library",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/loudness",
+      "pattern": "GET /api/v1/loudness",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/media",
+      "pattern": "GET /api/v1/media",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/metadata",
+      "pattern": "GET /api/v1/metadata",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/metrics",
+      "pattern": "GET /api/v1/metrics",
+      "class": "unstable"
+    },
+    {
+      "path": "/api/v1/platforms/accounts",
+      "pattern": "GET /api/v1/platforms/accounts",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/platforms/capabilities",
+      "pattern": "GET /api/v1/platforms/capabilities",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/platforms/credentials",
+      "pattern": "GET /api/v1/platforms/credentials",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/platforms/guides",
+      "pattern": "GET /api/v1/platforms/guides",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/platforms/presets",
+      "pattern": "GET /api/v1/platforms/presets",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/playout",
+      "pattern": "GET /api/v1/playout",
+      "class": "differential",
+      "pointers": [
+        "/token",
+        "/urls/embed",
+        "/urls/master",
+        "/urls/watch"
+      ],
+      "sentinels": [
+        "SENTINEL-playout-watch-token-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/processes",
+      "pattern": "GET /api/v1/processes",
+      "class": "unstable"
+    },
+    {
+      "path": "/api/v1/recordings",
+      "pattern": "GET /api/v1/recordings",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/recordings/stems",
+      "pattern": "GET /api/v1/recordings/stems",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/recordings/usage",
+      "pattern": "GET /api/v1/recordings/usage",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/renditions",
+      "pattern": "GET /api/v1/renditions",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/renditions/presets",
+      "pattern": "GET /api/v1/renditions/presets",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/routing/presets",
+      "pattern": "GET /api/v1/routing/presets",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/schedules",
+      "pattern": "GET /api/v1/schedules",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/schedules/runs",
+      "pattern": "GET /api/v1/schedules/runs",
+      "class": "invariant",
+      "inert": true
+    },
+    {
+      "path": "/api/v1/settings",
+      "pattern": "GET /api/v1/settings",
+      "class": "differential",
+      "pointers": [
+        "/automod/model/endpoint",
+        "/failover/backup/pull/url",
+        "/failover/backup/rtmp/streamKey",
+        "/failover/backup/srt/passphrase",
+        "/ingest/pull/url",
+        "/ingest/rtmp/streamKey",
+        "/ingest/srt/passphrase",
+        "/mqtt/brokerUrl"
+      ],
+      "sentinels": [
+        "SENTINEL-settings-srt-passphrase-9f3a",
+        "SENTINEL-settings-rtmp-streamkey-9f3a",
+        "SENTINEL-settings-pull-password-9f3a",
+        "SENTINEL-backup-srt-passphrase-9f3a",
+        "SENTINEL-backup-rtmp-streamkey-9f3a",
+        "SENTINEL-backup-pull-password-9f3a",
+        "SENTINEL-mqtt-broker-password-9f3a",
+        "SENTINEL-automod-endpoint-apikey-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/setup",
+      "pattern": "GET /api/v1/setup",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/source",
+      "pattern": "GET /api/v1/source",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/sources",
+      "pattern": "GET /api/v1/sources",
+      "class": "differential",
+      "pointers": [
+        "/0/ingest/pull/url",
+        "/0/ingest/rtmp/streamKey",
+        "/0/ingest/srt/passphrase",
+        "/0/publishUrls",
+        "/0/token"
+      ],
+      "sentinels": [
+        "SENTINEL-source-srt-passphrase-9f3a",
+        "SENTINEL-source-rtmp-streamkey-9f3a",
+        "SENTINEL-source-pull-password-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/sources/1",
+      "pattern": "GET /api/v1/sources/{id}",
+      "class": "differential",
+      "pointers": [
+        "/ingest/pull/url",
+        "/ingest/rtmp/streamKey",
+        "/ingest/srt/passphrase",
+        "/publishUrls",
+        "/token"
+      ],
+      "sentinels": [
+        "SENTINEL-source-srt-passphrase-9f3a",
+        "SENTINEL-source-rtmp-streamkey-9f3a",
+        "SENTINEL-source-pull-password-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/stats",
+      "pattern": "GET /api/v1/stats",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/status",
+      "pattern": "GET /api/v1/status",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/system",
+      "pattern": "GET /api/v1/system",
+      "class": "differential",
+      "pointers": [
+        "/ingestUrl"
+      ],
+      "sentinels": [
+        "SENTINEL-source-srt-passphrase-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/tls",
+      "pattern": "GET /api/v1/tls",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/upgrade/plan",
+      "pattern": "GET /api/v1/upgrade/plan",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/version",
+      "pattern": "GET /api/v1/version",
+      "class": "invariant"
+    }
+  ],
   "excuses": [
     {
       "route": "ANY /api/v1/chat/kick/{secret}",
       "scope": "route",
-      "reason": "unauthenticated by necessity: the path segment IS the credential and a mismatch is a bare 404, for every method chi registered",
-      "counterpart": "",
-      "deferredIssue": "n/a: no stored value is served"
+      "why": "unauthenticated by necessity: the path segment IS the credential and a mismatch is a bare 404, for every method chi registered",
+      "want": {
+        "as": "read",
+        "status": 404,
+        "anonMatchesRead": true
+      },
+      "counterpart": ""
     },
     {
       "route": "ANY /playout/*",
       "scope": "route",
-      "reason": "the public media origin under every method chi registered on the mount. Gated per request by authorizePlayout; the GET row carries the streaming counterpart and the rest reach the same gate.",
-      "counterpart": "playoutManifestBytes",
-      "deferredIssue": ""
+      "why": "the public media origin under every method chi registered on the mount. Gated per request by authorizePlayout; the GET row carries the streaming counterpart and the rest reach the same gate.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "playoutManifestBytes"
     },
     {
       "route": "ANY /watch",
       "scope": "route",
-      "reason": "the player SPA bundle: build-time embed.FS, byte-identical for every principal",
-      "counterpart": "notFoundSurfaceIsPrincipalIndependent",
-      "deferredIssue": ""
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
     },
     {
       "route": "ANY /watch/*",
       "scope": "route",
-      "reason": "the player SPA bundle: build-time embed.FS, byte-identical for every principal",
-      "counterpart": "notFoundSurfaceIsPrincipalIndependent",
-      "deferredIssue": ""
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
     },
     {
       "route": "GET /api/v1/alerts/rules/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
       "counterpart": "",
-      "deferredIssue": "#163"
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/auth/tokens",
       "scope": "route",
-      "reason": "session-only; no bearer of either scope reaches it",
-      "counterpart": "",
-      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/clipper/jobs/{id}/download",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/clipper/recordings/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
       "counterpart": "",
-      "deferredIssue": "#154"
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/clipper/recordings/{id}/keyframes",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/clipper/recordings/{id}/transcript",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/clips/{name}/download",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/destinations/{id}/expert",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
-    },
-    {
-      "route": "GET /api/v1/health",
-      "scope": "route",
-      "reason": "an unauthenticated liveness probe: a status word and an uptime",
-      "counterpart": "",
-      "deferredIssue": "n/a: no stored value is served"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/hooks/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
       "counterpart": "",
-      "deferredIssue": "#163"
-    },
-    {
-      "route": "GET /api/v1/hooks/{id}/deliveries",
-      "scope": "route",
-      "reason": "needs a hook row. Written NOW rather than deferred because it is alerts.Redact consumer #5 -- the same dependency class as the argv leak -- and deferring the one excuse that shares the bug's shape is how the bug comes back.",
-      "counterpart": "hookDeliveries",
-      "deferredIssue": ""
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/jobs",
       "scope": "route",
-      "reason": "503 without a job queue wired; carries no stored credential",
-      "counterpart": "",
-      "deferredIssue": "#163"
-    },
-    {
-      "route": "GET /api/v1/jobs/overview",
-      "scope": "route",
-      "reason": "503 without a job queue wired; carries no stored credential",
-      "counterpart": "",
-      "deferredIssue": "#163"
-    },
-    {
-      "route": "GET /api/v1/jobs/policy",
-      "scope": "route",
-      "reason": "503 without a job queue wired; carries no stored credential",
-      "counterpart": "",
-      "deferredIssue": "#163"
+      "why": "503 without a job queue wired; the handler never reaches storage",
+      "want": {
+        "as": "read",
+        "status": 503
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/jobs/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
-      "counterpart": "",
-      "deferredIssue": "#163"
+      "why": "503 without a job queue wired; the handler never reaches storage",
+      "want": {
+        "as": "read",
+        "status": 503
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/library/recordings/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
       "counterpart": "",
-      "deferredIssue": "#154"
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/library/recordings/{id}/media/{file}",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/library/recordings/{id}/transcript",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/library/search",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/library/sessions/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
       "counterpart": "",
-      "deferredIssue": "#154"
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/metadata/broadcast-window",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/metadata/push/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
-      "counterpart": "",
-      "deferredIssue": "#163"
+      "why": "reached only with a metadata push row this fixture does not create; the 404 body is the handler's own \"no such metadata push\", not the router's",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/oauth/{platform}/callback",
       "scope": "route",
-      "reason": "session-only; no bearer of either scope reaches it",
-      "counterpart": "",
-      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/oauth/{platform}/start",
       "scope": "route",
-      "reason": "session-only; no bearer of either scope reaches it",
-      "counterpart": "",
-      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/platforms/accounts/{id}/stats",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/playout/poster.jpg",
       "scope": "route",
-      "reason": "a JPEG rendered from a segment, and this fixture has no segment. Gated by authorizePlayout; the verdict is asserted rather than the bytes, because at the wire an allowed poster with nothing to render and a denied one are both 404.",
-      "counterpart": "",
-      "deferredIssue": "#154"
+      "why": "a JPEG rendered from a segment, and this fixture has no segment. Gated by authorizePlayout; at the wire an allowed poster with nothing to render and a denied one are both 404, which is why the identity with anonymous is the claim rather than the bytes.",
+      "want": {
+        "as": "read",
+        "status": 404,
+        "anonMatchesRead": true
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/playout/public",
       "scope": "route",
-      "reason": "gated by authorizePlayout; against this fixture a read token receives no body at all, exactly as a stranger does, so a 200-body sweep would be asserting over a response the deployment never produces.",
-      "counterpart": "playoutPublicView",
-      "deferredIssue": ""
+      "why": "gated by authorizePlayout; a read token receives exactly what a stranger does. The old text said \"no body at all\", which is false when driven -- there is a fifty-byte error body -- so the claim that survives is the one that matters and can fail: byte-identical to anonymous.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "playoutPublicView"
     },
     {
       "route": "GET /api/v1/processes/{name}/logs",
       "scope": "route",
-      "reason": "the fixture the value sweep runs against starts no destination child, so this route answers 404 there. It is NOT excused from inspection: a separate fixture spawns a real child and drives it.",
-      "counterpart": "runningDestinationLogs",
-      "deferredIssue": ""
+      "why": "the fixture the value sweep runs against starts no destination child, so this route answers 404 there. It is NOT excused from inspection: a separate fixture spawns a real child and drives it.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
+      "counterpart": "runningDestinationLogs"
     },
     {
       "route": "GET /api/v1/recordings/stems/{name}/download",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/recordings/{id}/download",
       "scope": "route",
-      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
-      "counterpart": "",
-      "deferredIssue": "n/a: nothing is disclosed to assert about"
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/renditions/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
       "counterpart": "",
-      "deferredIssue": "#163"
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/schedules/{id}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
+      "want": {
+        "as": "read",
+        "status": 404
+      },
       "counterpart": "",
-      "deferredIssue": "#163"
-    },
-    {
-      "route": "GET /api/v1/setup",
-      "scope": "route",
-      "reason": "unauthenticated; needsSetup and a minimum password length",
-      "counterpart": "",
-      "deferredIssue": "n/a: no stored value is served"
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/tls/ca",
       "scope": "route",
-      "reason": "unauthenticated; the PUBLIC half of the local CA",
-      "counterpart": "",
-      "deferredIssue": "n/a: no stored value is served"
+      "why": "unauthenticated; the PUBLIC half of the local CA. This fixture runs TLS off, so there is no CA to serve and the route answers 404 to everyone.",
+      "want": {
+        "as": "read",
+        "status": 404,
+        "anonMatchesRead": true
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /api/v1/ws",
       "scope": "route",
-      "reason": "a WebSocket upgrade, so it emits frames rather than a response body and the body sweep cannot read it at all.",
-      "counterpart": "websocketFrames",
-      "deferredIssue": ""
+      "why": "a WebSocket upgrade, so it emits frames rather than a response body and the body sweep cannot read it at all. A plain GET without the upgrade headers is a 400, which is what the Want below observes.",
+      "want": {
+        "as": "read",
+        "status": 400
+      },
+      "counterpart": "websocketFrames"
     },
     {
       "route": "GET /hls/*",
       "scope": "route",
-      "reason": "session-only; no bearer of either scope reaches it",
-      "counterpart": "",
-      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "GET /playout/*",
       "scope": "route",
-      "reason": "the public media origin. A STREAMING response -- an HLS manifest and MPEG-TS segments -- which is the shape that escaped the sweep before, since a body scan reads none of it. Gated per request by authorizePlayout.",
-      "counterpart": "playoutManifestBytes",
-      "deferredIssue": ""
+      "why": "the public media origin. A STREAMING response -- an HLS manifest and MPEG-TS segments -- which is the shape that escaped the sweep before, since a body scan reads none of it. Gated per request by authorizePlayout.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "playoutManifestBytes"
     },
     {
       "route": "HEAD /hls/*",
       "scope": "route",
-      "reason": "session-only; no bearer of either scope reaches it",
-      "counterpart": "",
-      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
     },
     {
       "route": "POST /api/v1/auth/login",
       "scope": "route",
-      "reason": "unauthenticated by necessity: it is how a session is obtained. Throttled; see login_throttle_test.go",
-      "counterpart": "",
-      "deferredIssue": "n/a: no stored value is served"
+      "why": "unauthenticated by necessity: it is how a session is obtained. Throttled; see login_throttle_test.go",
+      "want": {
+        "as": "read",
+        "status": 400,
+        "anonMatchesRead": true
+      },
+      "counterpart": ""
     },
     {
       "route": "POST /api/v1/setup",
       "scope": "route",
-      "reason": "unauthenticated; refuses once an admin exists",
-      "counterpart": "",
-      "deferredIssue": "n/a: no stored value is served"
-    },
-    {
-      "route": "POST /api/v1/version/check",
-      "scope": "route",
-      "reason": "readScopeWritePatterns admits a read token, so this IS reachable and does return a body -- but the body comes from an outbound call to the release feed, and value-sweeping it would make this suite depend on the network. Its payload is a version string, a URL and release notes; no stored configuration is read.",
-      "counterpart": "",
-      "deferredIssue": "#157"
+      "why": "unauthenticated; refuses once an admin exists",
+      "want": {
+        "as": "read",
+        "status": 400,
+        "anonMatchesRead": true
+      },
+      "counterpart": ""
     }
   ],
   "shapes": [
@@ -1422,7 +1902,7 @@
       "emitted": true,
       "inspected": false,
       "by": "",
-      "note": "download filenames; media names only, no stored credential. Deferred: #154"
+      "note": "download filenames; media names only, no stored credential. RE-POINTED from #154, which commit ae8df24 announces closing: what remains is the general fact that response HEADERS are not inspected by any sweep. Deferred: #168"
     },
     {
       "shape": "streaming-media",
@@ -1436,7 +1916,7 @@
       "emitted": true,
       "inspected": false,
       "by": "",
-      "note": "recordings, stems, clips and exports. Deferred: #154, already decided"
+      "note": "recordings, stems, clips and exports. #154 decided this and is CLOSED by ae8df24: every download route now answers a read token 403, which the excuse registry drives. What is still uninspected is the shape itself for the principals entitled to it. Deferred: #168"
     },
     {
       "shape": "websocket-frame",
@@ -1525,18 +2005,36 @@
       "issue": "#161"
     },
     {
-      "id": "empty-counterpart-rows",
-      "what": "the excuses that ship with a filed deferral rather than a counterpart proof: the recordings, clips, jobs, rules, schedules and library-session routes reached only with a row this fixture does not create.",
-      "whySafe": "each was traced to its leaf fields and carries no stored credential; they are media, transcripts and text.",
-      "whatWouldMakeItUnsafe": "any of those payloads gaining a configuration field. Deferred but no longer invisible, which is the whole difference.",
+      "id": "empty-fixture-rows",
+      "what": "the routes reached only with a row this fixture does not create -- clipper recordings, library recordings and sessions, alert rules, hooks, schedules, renditions. Their excuses no longer discharge on prose or on an issue number: each DRIVES the 404 it claims. What is still deferred is the FIXTURE, not the guard.",
+      "whySafe": "the 404 is now an assertion. If any of these starts answering a read token with a body, the excuse drive fails naming the route and the observed status, and the fix is leakRoutes().",
+      "whatWouldMakeItUnsafe": "nothing silently -- that is the change. What it costs is coverage: ten routes whose response bodies no principal has ever seen in a test, so their leaf fields are still traced by reading rather than by reading bytes.",
       "issue": "#163"
     },
     {
-      "id": "read-token-media-envelope",
-      "what": "a read token can still download recordings, stems, clips and exports, and read full transcripts.",
-      "whySafe": "already decided and explicitly out of scope for this PR.",
-      "whatWouldMakeItUnsafe": "n/a: this is a product decision, not an oversight.",
-      "issue": "#154"
+      "id": "counterpart-proofs-outside-the-preflight",
+      "what": "the two counterpart proofs that spawn a real FFmpeg stand-in -- runningDestinationLogs and websocketFrames -- run as ordinary tests and are therefore defeatable by `go test -run`, unlike everything else the ledger asserts.",
+      "whySafe": "CI sets POLYEMESIS_LEDGER=strict, which runs them from inside the preflight as well, so no single -run filter silences both paths.",
+      "whatWouldMakeItUnsafe": "CI dropping that variable. The reason they are not in the default preflight is ~15s of wall clock on every invocation, and a preflight nobody can afford to run is a preflight somebody deletes -- which returns all five issues at once.",
+      "issue": "#161"
+    },
+    {
+      "id": "invariant-is-weaker-than-differential",
+      "what": "the invariant verdict passes a credential that is disclosed IDENTICALLY to every principal. Byte-equality across principals says nothing is disclosed to one and withheld from another; it says nothing at all about something disclosed to everyone.",
+      "whySafe": "a blanket differential rule was executed and rejected: it is unsatisfiable by construction on the routes whose credential is sealed (hook signing secret, platform client secret, alerts.Rule.URL is json:\"-\"), and its only available discharge there is fabricated fixture data, which reviews identically to a real fix.",
+      "whatWouldMakeItUnsafe": "a stored credential added to a response every principal receives. The shape list is where that lives.",
+      "issue": "#168"
     }
+  ],
+  "citedIssues": [
+    "#156",
+    "#157",
+    "#158",
+    "#159",
+    "#160",
+    "#161",
+    "#162",
+    "#163",
+    "#168"
   ]
 }
