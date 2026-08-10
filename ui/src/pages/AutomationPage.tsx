@@ -50,6 +50,14 @@ import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { autoApi } from "@/lib/autoApi";
 import { timestamp } from "@/lib/format";
+import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
+import {
+  SCHEDULE_ACTIONS,
+  isPlaylistAction,
+  isStartAction,
+  scheduleActionLabel,
+  type ScheduleAction,
+} from "@/lib/scheduleActions";
 
 export type AlertFormat = "json" | "discord" | "slack";
 export type AlertSeverity = "info" | "warning" | "critical";
@@ -90,7 +98,7 @@ interface AlertsMeta {
   stats: AlertStats;
 }
 
-type ScheduleAction = "start" | "stop" | "playlist.start" | "playlist.stop";
+
 type ScheduleKind = "once" | "daily" | "weekly";
 
 // "start" names two different things now -- starting destinations and starting
@@ -99,8 +107,7 @@ type ScheduleKind = "once" | "daily" | "weekly";
 // which kind of target the row has. Comparing against the bare string "start"
 // is what gave playlist.start the stopped badge and the "every destination"
 // subtitle, which is precisely what its validation forbids.
-const isPlaylistAction = (a: ScheduleAction) => a.startsWith("playlist.");
-const isStartAction = (a: ScheduleAction) => a === "start" || a === "playlist.start";
+
 
 export interface Schedule {
   id: number;
@@ -138,31 +145,37 @@ interface ScheduleRun {
 /** Event types are stored strings, so the catalogue comes from the server and
  *  only the wording lives here. An unknown type still renders — as its own
  *  name — rather than vanishing from the picker. */
-const EVENT_LABELS: Record<string, string> = {
-  "destination.down": "Destination went down",
-  "destination.recovered": "Destination recovered",
-  "destination.falling_behind": "Destination falling behind realtime",
-  "destination.caught_up": "Destination keeping up again",
-  "ingest.lost": "Ingest lost",
-  "ingest.recovered": "Ingest recovered",
-  "failover.switched": "Failover switched source",
-  "audio.clipping": "Audio clipping",
-  "disk.low": "Disk running low",
-  "disk.recovered": "Disk recovered",
-  "loudness.out_of_compliance": "Loudness out of compliance",
-  "loudness.recovered": "Loudness back in compliance",
-  "auth.login.failed": "Repeated failed sign-ins",
-  "auth.login.succeeded": "Signed in",
-  "auth.password.changed": "Admin password changed",
-  "auth.token.created": "API token created",
-  "auth.token.revoked": "API token revoked",
-  "settings.changed": "Settings changed",
-  "clip.captured": "Clip captured",
+const EVENT_LABELS: Record<string, TranslationKey> = {
+  "destination.down": "auto.destinationWentDown",
+  "destination.recovered": "auto.destinationRecovered",
+  "destination.falling_behind": "auto.destinationFallingBehindRealtime",
+  "destination.caught_up": "auto.destinationKeepingUpAgain",
+  "ingest.lost": "auto.evIngestLost",
+  "ingest.recovered": "auto.evIngestRecovered",
+  "failover.switched": "auto.failoverSwitchedSource",
+  "audio.clipping": "auto.evAudioClipping",
+  "disk.low": "auto.evDiskLow",
+  "disk.recovered": "auto.evDiskRecovered",
+  "loudness.out_of_compliance": "auto.loudnessOutOfCompliance",
+  "loudness.recovered": "auto.loudnessBackInCompliance",
+  "auth.login.failed": "auto.repeatedFailedSignIns",
+  "auth.login.succeeded": "auto.evSignedIn",
+  "auth.password.changed": "auto.adminPasswordChanged",
+  "auth.token.created": "auth.tokenCreated",
+  "auth.token.revoked": "auth.tokenRevoked",
+  "settings.changed": "auto.evSettingsChanged",
+  "clip.captured": "auto.evClipCaptured",
 };
 
-const eventLabel = (t: string) => EVENT_LABELS[t] ?? t;
+/** The stored event name is the fallback: an unknown type renders as itself
+ *  rather than vanishing from the picker. */
+const eventLabel = (t: Translator, name: string) =>
+  name in EVENT_LABELS ? t(EVENT_LABELS[name]) : name;
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAY_KEYS: TranslationKey[] = [
+  "auto.weekSun", "auto.weekMon", "auto.weekTue", "auto.weekWed",
+  "auto.weekThu", "auto.weekFri", "auto.weekSat",
+];
 
 function hhmm(minutes: number): string {
   const m = Math.max(0, Math.min(1439, Math.round(minutes)));
@@ -206,7 +219,7 @@ function describeSchedule(s: Schedule): string {
     case "daily":
       return `Every day at ${s.localTime || hhmm(s.atMinutes)} ${zone}`;
     case "weekly": {
-      const days = (s.days ?? []).map((d) => WEEKDAYS[d] ?? d).join(", ");
+      const days = (s.days ?? []).map((d) => WEEKDAY_KEYS[d] ?? d).join(", ");
       return `${days || "no days"} at ${s.localTime || hhmm(s.atMinutes)} ${zone}`;
     }
     default:
@@ -225,6 +238,7 @@ const errText = (err: unknown, fallback: string) =>
  *  unattended stream wants "tell me when it breaks" and "start it at seven"
  *  in the same sitting. */
 export function AutomationPage() {
+  const t = useT();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [meta, setMeta] = useState<AlertsMeta | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -247,9 +261,9 @@ export function AutomationPage() {
         setSchedules(s ?? []);
         setRuns(runList ?? []);
       })
-      .catch((err) => toast.error(errText(err, "Could not load automation settings.")))
+      .catch((err) => toast.error(errText(err, t("auto.couldNotLoadAutomationSettings"))))
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
   useEffect(load, [load]);
 
@@ -267,8 +281,8 @@ export function AutomationPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Automation"
-        subtitle="Webhooks that tell you something broke, and schedules that run the show without you."
+        title={t("auto.title")}
+        subtitle={t("auto.subtitle")}
       />
 
       {loading ? (
@@ -389,6 +403,7 @@ function AlertRules({
   onEdit: (r: AlertRule) => void;
   onNew: () => void;
 }) {
+  const t = useT();
   const [testing, setTesting] = useState<number | null>(null);
 
   const toggle = async (r: AlertRule, enabled: boolean) => {
@@ -396,7 +411,7 @@ function AlertRules({
       await autoApi.put<AlertRule>(`/alerts/rules/${r.id}`, { enabled });
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not change the rule."));
+      toast.error(errText(err, t("auto.couldNotChangeTheRule")));
     }
   };
 
@@ -405,10 +420,10 @@ function AlertRules({
   const remove = async (r: AlertRule) => {
     try {
       await autoApi.del(`/alerts/rules/${r.id}`);
-      toast.success("Alert rule deleted.");
+      toast.success(t("auto.ruleDeleted"));
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the rule."));
+      toast.error(errText(err, t("auto.couldNotDeleteTheRule")));
     }
   };
 
@@ -421,7 +436,7 @@ function AlertRules({
       await autoApi.post(`/alerts/rules/${r.id}/test`, {});
       toast.success(`Test alert delivered to ${r.name}. Check the channel.`);
     } catch (err) {
-      toast.error(errText(err, "The endpoint did not accept the test message."));
+      toast.error(errText(err, t("auto.theEndpointDidNotAccept")));
     } finally {
       setTesting(null);
     }
@@ -433,7 +448,7 @@ function AlertRules({
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
       <Card>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>Webhook rules</CardTitle>
+          <CardTitle>{t("auto.webhookRules")}</CardTitle>
           <Button size="sm" onClick={onNew}>
             <Plus /> New rule
           </Button>
@@ -449,9 +464,9 @@ function AlertRules({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Rule</TableHead>
-                  <TableHead>Endpoint</TableHead>
-                  <TableHead>Subscribed to</TableHead>
+                  <TableHead>{t("auto.rule")}</TableHead>
+                  <TableHead>{t("auto.endpoint")}</TableHead>
+                  <TableHead>{t("auto.subscribedTo")}</TableHead>
                   <TableHead className="text-center">On</TableHead>
                   <TableHead className="w-28" />
                 </TableRow>
@@ -495,8 +510,8 @@ function AlertRules({
                           size="icon-sm"
                           onClick={() => test(r)}
                           disabled={testing === r.id}
-                          aria-label="Send test alert"
-                          title="Send a test alert now"
+                          aria-label={t("auto.sendTest")}
+                          title={t("auto.sendTestTitle")}
                         >
                           {testing === r.id ? <Loader2 className="animate-spin" /> : <Send />}
                         </Button>
@@ -504,7 +519,7 @@ function AlertRules({
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => onEdit(r)}
-                          aria-label="Edit"
+                          aria-label={t("auto.edit")}
                         >
                           <Pencil />
                         </Button>
@@ -512,7 +527,7 @@ function AlertRules({
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => confirmDelete.ask(r)}
-                          aria-label="Delete"
+                          aria-label={t("auto.delete")}
                           className="text-muted-foreground hover:text-down"
                         >
                           <Trash2 />
@@ -529,23 +544,23 @@ function AlertRules({
 
       <Card>
         <CardHeader>
-          <CardTitle>Delivery</CardTitle>
+          <CardTitle>{t("auto.delivery")}</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-2">
-          <Stat label="Sent" value={stats?.sent ?? 0} />
-          <Stat label="Failed" value={stats?.failed ?? 0} tone={stats?.failed ? "down" : "muted"} />
-          <Stat label="Coalesced" value={stats?.coalesced ?? 0} tone="muted" />
-          <Stat label="Pending" value={stats?.pending ?? 0} tone="muted" />
+          <Stat label={t("auto.sent")} value={stats?.sent ?? 0} />
+          <Stat label={t("auto.failed")} value={stats?.failed ?? 0} tone={stats?.failed ? "down" : "muted"} />
+          <Stat label={t("auto.coalesced")} value={stats?.coalesced ?? 0} tone="muted" />
+          <Stat label={t("auto.pending")} value={stats?.pending ?? 0} tone="muted" />
           <Stat
-            label="Dropped"
+            label={t("auto.dropped")}
             value={stats?.dropped ?? 0}
             tone={stats?.dropped ? "warn" : "muted"}
           />
-          <Stat label="Retries" value={stats?.retries ?? 0} tone="muted" />
+          <Stat label={t("auto.retries")} value={stats?.retries ?? 0} tone="muted" />
           {stats?.lastSent && (
             <Stat
               className="col-span-2"
-              label="Last delivery"
+              label={t("auto.lastDelivery")}
               value={timestamp(stats.lastSent)}
               tone="muted"
             />
@@ -562,9 +577,9 @@ function AlertRules({
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
-        title="Delete this alert rule?"
-        description="The rule stops firing. Its webhook endpoint is untouched, and you can recreate the rule."
-        confirmLabel="Delete rule"
+        title={t("auto.deleteRuleTitle")}
+        description={t("auto.deleteRuleDesc")}
+        confirmLabel={t("auto.deleteRule")}
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target);
         }}
@@ -584,6 +599,7 @@ function RuleDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useT();
   const [form, setForm] = useState<AlertRule>(draft);
   const [saving, setSaving] = useState(false);
   const editing = draft.id > 0;
@@ -612,10 +628,10 @@ function RuleDialog({
       };
       if (editing) await autoApi.put(`/alerts/rules/${form.id}`, body);
       else await autoApi.post("/alerts/rules", body);
-      toast.success(editing ? "Alert rule saved." : "Alert rule created. Send it a test.");
+      toast.success(editing ? t("auto.ruleSaved") : t("auto.ruleCreated"));
       onSaved();
     } catch (err) {
-      toast.error(errText(err, "Could not save the rule."));
+      toast.error(errText(err, t("auto.couldNotSaveTheRule")));
     } finally {
       setSaving(false);
     }
@@ -625,7 +641,7 @@ function RuleDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit alert rule" : "New alert rule"}</DialogTitle>
+          <DialogTitle>{editing ? t("auto.editRule") : t("auto.newRule")}</DialogTitle>
           <DialogDescription>
             One endpoint and what it wants to hear about. Everything raised about the same subject
             inside the coalescing window arrives as a single message with a count.
@@ -634,35 +650,34 @@ function RuleDialog({
 
         <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="rule-name">Name</Label>
+            <Label htmlFor="rule-name">{t("auto.name")}</Label>
             <Input
               id="rule-name"
               value={form.name}
               maxLength={meta.bounds.maxNameLen || 120}
-              placeholder="Discord — show alerts"
+              placeholder={t("auto.rulePlaceholder")}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="rule-url">Webhook URL</Label>
+            <Label htmlFor="rule-url">{t("auto.webhookUrl")}</Label>
             <Input
               id="rule-url"
               value={form.url}
               spellCheck={false}
-              placeholder="https://discord.com/api/webhooks/…"
+              placeholder={t("auto.webhookPlaceholder")}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
             />
             <span className="text-[10px] text-muted-foreground">
               {editing
-                ? "Shown masked because the secret lives in the path. Leave it alone to keep the current endpoint, or paste a new URL to replace it."
-                : "Discord and Slack both give you one under channel settings."}
+                ? t("auto.secretMasked") : t("auto.webhookHint")}
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <Label>Payload format</Label>
+              <Label>{t("auto.payloadFormat")}</Label>
               <Select
                 value={form.format}
                 onValueChange={(v) => setForm({ ...form, format: v as AlertFormat })}
@@ -680,7 +695,7 @@ function RuleDialog({
               </Select>
             </div>
             <div className="flex flex-col gap-1">
-              <Label>Minimum severity</Label>
+              <Label>{t("auto.minSeverity")}</Label>
               <Select
                 value={form.minSeverity}
                 onValueChange={(v) => setForm({ ...form, minSeverity: v as AlertSeverity })}
@@ -700,15 +715,15 @@ function RuleDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Events</Label>
+            <Label>{t("auto.events")}</Label>
             <p className="text-[10px] text-muted-foreground">
               None selected means every event, which is the useful default for a first rule.
             </p>
             <div className="grid gap-1.5 sm:grid-cols-2">
-              {meta.events.map((t) => (
-                <label key={t} className="flex items-center gap-2 text-[11px]">
-                  <Checkbox checked={events.includes(t)} onCheckedChange={() => toggleEvent(t)} />
-                  {eventLabel(t)}
+              {meta.events.map((ev) => (
+                <label key={ev} className="flex items-center gap-2 text-[11px]">
+                  <Checkbox checked={events.includes(ev)} onCheckedChange={() => toggleEvent(ev)} />
+                  {eventLabel(t, ev)}
                 </label>
               ))}
             </div>
@@ -716,7 +731,7 @@ function RuleDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rule-debounce">Coalescing window (seconds)</Label>
+              <Label htmlFor="rule-debounce">{t("auto.coalescingWindow")}</Label>
               <Input
                 id="rule-debounce"
                 type="number"
@@ -727,7 +742,7 @@ function RuleDialog({
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rule-interval">Minimum gap between messages (seconds)</Label>
+              <Label htmlFor="rule-interval">{t("auto.minGap")}</Label>
               <Input
                 id="rule-interval"
                 type="number"
@@ -746,7 +761,7 @@ function RuleDialog({
           </Button>
           <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
             {saving && <Loader2 className="animate-spin" />}
-            {editing ? "Save rule" : "Create rule"}
+            {editing ? t("auto.saveRule") : t("auto.createRule")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -769,6 +784,7 @@ function Schedules({
   onEdit: (s: Schedule) => void;
   onNew: () => void;
 }) {
+  const t = useT();
   const { status } = useLiveData();
   const destNames = useMemo(() => {
     const m = new Map<number, string>();
@@ -792,7 +808,7 @@ function Schedules({
       });
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not change the schedule."));
+      toast.error(errText(err, t("auto.couldNotChangeTheSchedule")));
     }
   };
 
@@ -801,10 +817,10 @@ function Schedules({
   const remove = async (s: Schedule) => {
     try {
       await autoApi.del(`/schedules/${s.id}`);
-      toast.success("Schedule deleted.");
+      toast.success(t("auto.scheduleDeleted"));
       onReload();
     } catch (err) {
-      toast.error(errText(err, "Could not delete the schedule."));
+      toast.error(errText(err, t("auto.couldNotDeleteTheSchedule")));
     }
   };
 
@@ -824,7 +840,7 @@ function Schedules({
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <Card>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>Schedules</CardTitle>
+          <CardTitle>{t("auto.schedules")}</CardTitle>
           <Button size="sm" onClick={onNew}>
             <Plus /> New schedule
           </Button>
@@ -839,9 +855,9 @@ function Schedules({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Schedule</TableHead>
-                  <TableHead>When</TableHead>
-                  <TableHead>Next</TableHead>
+                  <TableHead>{t("auto.schedule")}</TableHead>
+                  <TableHead>{t("auto.when")}</TableHead>
+                  <TableHead>{t("auto.next")}</TableHead>
                   <TableHead className="text-center">On</TableHead>
                   <TableHead className="w-20" />
                 </TableRow>
@@ -883,7 +899,7 @@ function Schedules({
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => onEdit(s)}
-                          aria-label="Edit"
+                          aria-label={t("auto.edit")}
                         >
                           <Pencil />
                         </Button>
@@ -891,7 +907,7 @@ function Schedules({
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => confirmDelete.ask(s)}
-                          aria-label="Delete"
+                          aria-label={t("auto.delete")}
                           className="text-muted-foreground hover:text-down"
                         >
                           <Trash2 />
@@ -908,12 +924,12 @@ function Schedules({
 
       <Card>
         <CardHeader>
-          <CardTitle>Last sweep</CardTitle>
+          <CardTitle>{t("auto.lastSweep")}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {runs.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">
-              Nothing has fired yet. The scheduler sweeps every 20 seconds.
+            {t("auto.nothingFired")}
             </p>
           ) : (
             runs.map((r) => (
@@ -921,7 +937,7 @@ function Schedules({
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-[11px]">{r.name}</span>
                   <Badge variant={r.error ? "down" : r.fired ? "live" : "outline"}>
-                    {r.error ? "error" : r.fired ? "fired" : "skipped"}
+                    {r.error ? "error" : r.fired ? t("auto.fired") : t("auto.skipped")}
                   </Badge>
                 </div>
                 <span className="tnum font-mono text-[10px] text-muted-foreground">
@@ -932,9 +948,7 @@ function Schedules({
             ))
           )}
           <p className="text-[10px] text-subtle-foreground">
-            An occurrence missed because the server was down is marked handled and skipped rather
-            than fired late — a stream that starts itself four hours late is worse than one that
-            never started.
+            {t("auto.missedNote")}
           </p>
         </CardContent>
       </Card>
@@ -942,9 +956,9 @@ function Schedules({
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
-        title="Delete this schedule?"
-        description="The schedule stops running. Anything it already started is unaffected."
-        confirmLabel="Delete schedule"
+        title={t("auto.deleteScheduleTitle")}
+        description={t("auto.deleteScheduleDesc")}
+        confirmLabel={t("auto.deleteSchedule")}
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target);
         }}
@@ -962,6 +976,7 @@ function ScheduleDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useT();
   const { status } = useLiveData();
   const [form, setForm] = useState<Schedule>(draft);
   const [saving, setSaving] = useState(false);
@@ -1001,10 +1016,10 @@ function ScheduleDialog({
       };
       if (editing) await autoApi.put(`/schedules/${form.id}`, body);
       else await autoApi.post("/schedules", body);
-      toast.success(editing ? "Schedule saved." : "Schedule created.");
+      toast.success(editing ? t("auto.scheduleSaved") : t("auto.scheduleCreated"));
       onSaved();
     } catch (err) {
-      toast.error(errText(err, "Could not save the schedule."));
+      toast.error(errText(err, t("auto.couldNotSaveTheSchedule")));
     } finally {
       setSaving(false);
     }
@@ -1014,7 +1029,7 @@ function ScheduleDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit schedule" : "New schedule"}</DialogTitle>
+          <DialogTitle>{editing ? t("auto.editSchedule") : t("auto.newSchedule")}</DialogTitle>
           <DialogDescription>
             Wall-clock times carry their own zone, so a schedule does not move when the server's
             does.
@@ -1023,18 +1038,18 @@ function ScheduleDialog({
 
         <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sch-name">Name</Label>
+            <Label htmlFor="sch-name">{t("auto.name")}</Label>
             <Input
               id="sch-name"
               value={form.name}
-              placeholder="Weeknight show"
+              placeholder={t("auto.schedulePlaceholder")}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <Label>Action</Label>
+              <Label>{t("auto.action")}</Label>
               <Select
                 value={form.action}
                 onValueChange={(v) => {
@@ -1055,15 +1070,16 @@ function ScheduleDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="start">Start destinations</SelectItem>
-                  <SelectItem value="stop">Stop destinations</SelectItem>
-                  <SelectItem value="playlist.start">Start the playlist</SelectItem>
-                  <SelectItem value="playlist.stop">Stop the playlist</SelectItem>
+                  {SCHEDULE_ACTIONS.map((a) => (
+                    <SelectItem key={a} value={a}>
+                      {scheduleActionLabel(a, t)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex flex-col gap-1">
-              <Label>Repeats</Label>
+              <Label>{t("auto.repeats")}</Label>
               <Select
                 value={form.kind}
                 onValueChange={(v) => setForm({ ...form, kind: v as ScheduleKind })}
@@ -1072,9 +1088,9 @@ function ScheduleDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="once">Once</SelectItem>
-                  <SelectItem value="daily">Every day</SelectItem>
-                  <SelectItem value="weekly">Chosen weekdays</SelectItem>
+                  <SelectItem value="once">{t("auto.once")}</SelectItem>
+                  <SelectItem value="daily">{t("auto.everyDay")}</SelectItem>
+                  <SelectItem value="weekly">{t("auto.chosenWeekdays")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1082,7 +1098,7 @@ function ScheduleDialog({
 
           {form.kind === "once" ? (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="sch-runat">Fires at</Label>
+              <Label htmlFor="sch-runat">{t("auto.firesAt")}</Label>
               <Input
                 id="sch-runat"
                 type="datetime-local"
@@ -1098,7 +1114,7 @@ function ScheduleDialog({
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="sch-time">Time</Label>
+                  <Label htmlFor="sch-time">{t("auto.time")}</Label>
                   <Input
                     id="sch-time"
                     type="time"
@@ -1109,13 +1125,13 @@ function ScheduleDialog({
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="sch-tz">Time zone</Label>
+                  <Label htmlFor="sch-tz">{t("auto.timeZone")}</Label>
                   <Input
                     id="sch-tz"
                     list="sch-tz-options"
                     value={form.tz}
                     spellCheck={false}
-                    placeholder="UTC"
+                    placeholder={t("auto.tzPlaceholder")}
                     onChange={(e) => setForm({ ...form, tz: e.target.value })}
                   />
                   <datalist id="sch-tz-options">
@@ -1130,9 +1146,9 @@ function ScheduleDialog({
 
               {form.kind === "weekly" && (
                 <div className="flex flex-col gap-1.5">
-                  <Label>Days</Label>
+                  <Label>{t("auto.days")}</Label>
                   <div className="flex flex-wrap gap-3">
-                    {WEEKDAYS.map((label, i) => (
+                    {WEEKDAY_KEYS.map((label, i) => (
                       <label key={label} className="flex items-center gap-1.5 text-[11px]">
                         <Checkbox checked={days.includes(i)} onCheckedChange={() => toggleDay(i)} />
                         {label}
@@ -1146,7 +1162,7 @@ function ScheduleDialog({
 
           {!form.action.startsWith("playlist.") && (
             <div className="flex flex-col gap-1.5">
-              <Label>Destinations</Label>
+              <Label>{t("auto.destinations")}</Label>
               <p className="text-[10px] text-muted-foreground">
                 None selected means every destination, which is what "start the show" usually
                 means.
@@ -1166,7 +1182,7 @@ function ScheduleDialog({
           )}
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sch-grace">Lateness allowance (seconds)</Label>
+            <Label htmlFor="sch-grace">{t("auto.latenessAllowance")}</Label>
             <Input
               id="sch-grace"
               type="number"
@@ -1188,7 +1204,7 @@ function ScheduleDialog({
           </Button>
           <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
             {saving && <Loader2 className="animate-spin" />}
-            {editing ? "Save schedule" : "Create schedule"}
+            {editing ? t("auto.saveSchedule") : t("auto.createSchedule")}
           </Button>
         </DialogFooter>
       </DialogContent>

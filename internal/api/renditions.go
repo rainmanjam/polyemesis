@@ -342,6 +342,23 @@ func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
 
 	gpu := machineGPUs(r.Context())
 	if r.URL.Query().Get("redetect") != "" {
+		// The plain listing is a read and stays reachable by a read-scoped
+		// token. This is not: it spawns a test encode per candidate encoder,
+		// enumerates GPU device nodes, and overwrites install-wide capability
+		// state under a global mutex for up to redetectCeiling -- on a context
+		// deliberately detached from the request, so the caller cannot even
+		// abort what it started.
+		//
+		// Gated in the handler rather than by denying the route, because the
+		// two behaviours share a URL and only one of them is the problem.
+		// Renaming it to a POST would be the tidier shape and is a UI change
+		// this security fix has no business making.
+		if isReadScopedToken(r) {
+			writeError(w, http.StatusForbidden,
+				"re-detecting hardware runs test encodes and rewrites this install's "+
+					"encoder capabilities; that needs a token with the \"admin\" scope")
+			return
+		}
 		gpu = redetectHardware(r.Context(), tools)
 	}
 

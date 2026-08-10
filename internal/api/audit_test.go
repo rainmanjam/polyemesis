@@ -32,7 +32,11 @@ func everyAuditEvent() []alerts.Event {
 		auditLoginFailed(dirty, 7),
 		auditLoginSucceeded(dirty, 7),
 		auditPasswordChanged(dirty),
-		auditAPITokenCreated("deploy bot streamkey="+plantedSecret, dirty),
+		// The scope is NOT planted, and the asymmetry is the point: the name is
+		// free text an operator types, while the scope is validated against a
+		// closed set before it is ever stored, so a hostile value cannot reach
+		// this field without db.ValidScope having already refused it.
+		auditAPITokenCreated("deploy bot streamkey="+plantedSecret, db.ScopeAdmin, dirty),
 		auditAPITokenRevoked("deploy bot streamkey="+plantedSecret, dirty),
 		auditSettingsChanged([]string{"ingest", "listeners"}, dirty),
 		// A realistic clip name rather than a planted one, and the distinction

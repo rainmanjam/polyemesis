@@ -3,6 +3,7 @@ package alerts
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -291,8 +292,19 @@ func (n *Notifier) Test(ctx context.Context, r Rule) error {
 		Text:  "If you can read this, " + r.Name + " is wired up correctly.",
 		At:    now,
 	}.Redacted()
-	d := Delivery{Rule: r.Normalized(), Items: []Item{{Event: ev, Count: 1, First: now, Last: now}}}
-	return n.post(ctx, d)
+	rule := r.Normalized()
+	d := Delivery{Rule: rule, Items: []Item{{Event: ev, Count: 1, First: now, Last: now}}}
+	err := n.post(ctx, d)
+	if err == nil {
+		return nil
+	}
+	// The same masking deliver applies, because the API handler for this route
+	// writes err.Error() into a 502 body and its comment claims "errors out of
+	// the notifier are already redacted". Until this was added that claim was
+	// FALSE: post hands back the raw *url.Error, whose text is the full rule
+	// URL, secret path and all. The route is admin-only, which lowers the
+	// severity and does not make an untrue comment acceptable.
+	return errors.New(n.endpointSecrets(rule).Scrub(ClientErrorText(err)))
 }
 
 // HasRules reports whether anybody is listening.
@@ -359,16 +371,53 @@ func (n *Notifier) currentRules() []Rule {
 }
 
 // deliver sends and records the outcome.
+//
+// THE ERROR TEXT IS THE SENSITIVE PART OF THIS FUNCTION (#160). Stats.LastError
+// is served verbatim at GET /api/v1/alerts/meta, which sits in the ordinary
+// authenticated group and is therefore reachable by a READ-SCOPED token. It
+// used to be `err.Error()` with no masking at all, and net/http wraps every
+// transport failure in a *url.Error whose text is the FULL rule URL -- so a
+// single DNS failure published a working Slack webhook secret to a credential
+// whose entire promise is that it cannot write anything. Two layers now stand
+// between that error and the field, in this order:
+//
+//  1. ClientErrorText unwraps the *url.Error and rebuilds it with the path
+//     masked, keeping the host and the inner wording (x509 vs timeout vs
+//     refused) an operator needs to tell the failures apart.
+//  2. A SecretSet of this rule's own endpoint literals, for the OTHER shape:
+//     an endpoint that quotes the path back inside its own error body, which no
+//     wrapper-aware rule can see.
+//
+// The set is built HERE, from the Rule that was just delivered against, rather
+// than cached anywhere. That is deliberate and it is the lesson of the
+// destination keep-check: a compiled secret set is only safe if it cannot
+// outlive the credential it was compiled from. Deriving it per delivery from
+// the same value the request was built with makes staleness unrepresentable
+// rather than merely unlikely. A handful of allocations on a path that fires
+// when a broadcast fails is not a cost worth reasoning about.
+//
+// alerts.Redact is NOT the fix here and adding it would be a no-op: it does not
+// mask an https path segment. See its doc, limit 2.
 func (n *Notifier) deliver(ctx context.Context, d Delivery) {
 	err := n.post(ctx, d)
 	if err != nil {
+		text := n.endpointSecrets(d.Rule).Scrub(ClientErrorText(err))
 		n.log.Warn("alert delivery failed",
-			"rule", d.Rule.Name, "url", d.Rule.RedactedURL(), "err", err)
-		n.bump(func(s *Stats) { s.Failed++; s.LastError = err.Error() })
+			"rule", d.Rule.Name, "url", d.Rule.RedactedURL(), "err", text)
+		n.bump(func(s *Stats) { s.Failed++; s.LastError = text })
 		return
 	}
 	sent := n.now()
 	n.bump(func(s *Stats) { s.Sent++; s.LastSent = sent; s.LastError = "" })
+}
+
+// endpointSecrets compiles this rule's own credential literals.
+//
+// nil logger on purpose: a refusal here is not news. The floor and the
+// FFmpeg-vocabulary denylist exist for operator-typed expert arguments, and a
+// webhook path shorter than MinSecretLen is not a credential anybody minted.
+func (n *Notifier) endpointSecrets(r Rule) *SecretSet {
+	return NewSecretSet(nil, EndpointSecrets(r.URL)...)
 }
 
 // SetRetry changes the retry budget on a running Notifier.

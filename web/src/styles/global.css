@@ -1,0 +1,463 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Tokens.
+
+   Decided by three passes — two external agents and this one — and where they
+   disagreed the reasoning is recorded, because a palette nobody can justify
+   gets repainted by the next person who touches it.
+
+   DARK, AND MATCHED TO THE APP. Both agents reached this independently and for
+   the same reason: the people who install this work in dark control rooms next
+   to a video preview, and a bright marketing page followed by a near-black
+   application reads as two different products. These are the app's own values
+   from ui/src/index.css, not an approximation, so a screenshot dropped on the
+   page sits in its own colour space.
+
+   AMBER IS RESERVED — for the signal path, and for nothing else.
+
+   The rule used to read "an active crosspoint and nothing else", which was
+   narrower than the design had ever actually been: the hero's route lines have
+   always been amber, and they are the same idea as a crosspoint seen from one
+   level up. A rule the code contradicts is not a rule, so this is the rule
+   corrected to what it was really doing.
+
+   Amber is permitted on exactly three things, and they are one thing:
+
+     1. a lit crosspoint            (.xpt:checked)
+     2. the route that crosspoint feeds  (the hero's SVG paths)
+     3. that route running hot      (a summed level above -12 dBFS)
+
+   Crosspoint, path, level: where audio is, and what it is doing. That is what
+   makes the page read as broadcast hardware rather than as a settings form.
+
+   What is still forbidden is the thing the original rule was written to
+   prevent: amber as a general-purpose accent. A callout border, a highlighted
+   paragraph, a "note" box — none of those carry signal, and every one of them
+   spends the colour that makes the matrix legible. Use primary for emphasis.
+   The comparison page's Restreamer callout was exactly this mistake and now
+   uses primary.
+   --------------------------------------------------------------------------- */
+
+@theme {
+  /* Space Grotesk carries the headings: mechanical and geometric, and audibly
+     not the Inter that every adjacent developer tool uses. Plex Sans carries
+     body copy because Grotesk gets tiring below 15px and this page is dense.
+     JetBrains Mono carries every number, route and config line. */
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-ink: #0b0d11;
+  --color-surface: #12151c;
+  --color-raised: #171d27;
+  --color-line: #232936;
+  --color-line-strong: #2a3444;
+
+  --color-fg: #edf2f8;
+  --color-muted: #9ba9ba;
+  --color-subtle: #6b7686;
+
+  --color-primary: #5b7fc7;
+  --color-primary-bright: #78a6e8;
+  --color-primary-dim: #253148;
+  --color-live: #3ecf6d;
+  --color-live-dim: #143d25;
+  --color-cross: #e8a33d; /* active crosspoint ONLY */
+  --color-cross-dim: #3d2f12;
+  --color-meter: #45b5d0;
+  --color-down: #e25c5c;
+
+  --radius-token: 0.5rem;
+
+  /* --- MOTION. The site had none of these: eleven ad-hoc timings spread
+     across the file, five of them within 70ms of each other and none named.
+     The app has carried a named scale from the start; this is the same scale,
+     so a duration means the same thing on both sides of the product.
+
+     A console animates to EXPLAIN a state change, never to decorate one. On
+     the marketing site the equivalent rule is that motion should look like
+     instrumentation behaving, not like a page being pleased with itself. --- */
+  --motion-instant: 90ms; /* hover, focus, press */
+  --motion-quick: 160ms; /* disclosure, hover reveal */
+  --motion-settle: 260ms; /* larger state change */
+  --motion-enter: 420ms; /* content arriving on scroll */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  /* Symmetric, for anything that breathes rather than arrives. */
+  --ease-breath: cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    background-color: var(--color-ink);
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-ink);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+  /* Every figure on this page sits in a column that has to line up. */
+  .tnum, table td, table th {
+    font-variant-numeric: tabular-nums;
+  }
+  ::selection {
+    background: var(--color-primary);
+    color: var(--color-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+  [id] {
+    scroll-margin-top: 5rem;
+  }
+}
+
+@layer components {
+  .wrap {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 80rem;
+    padding-inline: 1.25rem;
+  }
+
+  /* A faint signal-flow grid. The product is a signal path, so the page has
+     one running under it. Under 4% opacity: texture, not pattern.
+
+     The grid itself never moves. What moves is a single wide, soft band that
+     drifts across it — a bus sweep, the thing that makes the grid read as a
+     backplane carrying something rather than as graph paper.
+
+     WHY A PSEUDO-ELEMENT AND transform, NOT background-position.
+     Animating background-position on a full-viewport element repaints that
+     element every frame: background-position is not a compositor-only
+     property, so the raster work lands on the main thread behind the whole
+     hero. transform and opacity are the only two properties the compositor can
+     animate on its own, so the band is its own layer and translating it costs
+     nothing per frame. On a page whose audience opens devtools, a background
+     that shows up in a paint-flashing trace is worse than no background. */
+  .signal-grid {
+    position: relative;
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 40%, transparent 100%);
+    overflow: hidden;
+  }
+
+  .signal-grid::after {
+    content: "";
+    position: absolute;
+    inset: 0 -60%;
+    pointer-events: none;
+    /* Primary blue, not amber. Amber means an active crosspoint and nothing
+       else; spending it on decoration would cost the matrix its meaning. */
+    background: linear-gradient(
+      100deg,
+      transparent 0%,
+      rgb(91 127 199 / 0.05) 42%,
+      rgb(120 166 232 / 0.08) 50%,
+      rgb(91 127 199 / 0.05) 58%,
+      transparent 100%
+    );
+    will-change: transform;
+    animation: bus-sweep 19s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+  }
+
+  /* 19s, and deliberately not linear. A constant-speed sweep reads as a loading
+     shimmer — the exact thing this must not look like. Easing in and out makes
+     it a slow pass that most readers will never consciously notice, which is
+     the point of a background. */
+  @keyframes bus-sweep {
+    0%        { transform: translate3d(-55%, 0, 0); }
+    /* Sits off-screen for a third of the cycle. Without the hold it sweeps
+       continuously and becomes a pattern the eye starts tracking. */
+    70%, 100% { transform: translate3d(55%, 0, 0); }
+  }
+
+  .card {
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    border-radius: var(--radius-token);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 9999px;
+    padding: 0.125rem 0.625rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-muted);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-token);
+    padding: 0.625rem 1.125rem;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    transition:
+      background-color var(--motion-instant) var(--ease-out),
+      border-color var(--motion-instant) var(--ease-out),
+      color var(--motion-instant) var(--ease-out),
+      transform var(--motion-instant) var(--ease-out);
+  }
+  /* The same 1px of travel as the crosspoints, for the same reason. */
+  .btn:active { transform: translateY(1px); }
+  /* A HARD focus ring, not a soft glow. Two pixels, full contrast, square to
+     the control. Keyboard users on this site are disproportionately the people
+     evaluating it seriously, and a blurred halo reads as decoration — it is
+     also the first thing to disappear against a dark background. */
+  .btn:focus-visible,
+  .xpt:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+  .btn-primary { background: var(--color-primary); color: var(--color-ink); }
+  .btn-primary:hover { background: var(--color-primary-bright); }
+  .btn-ghost { border: 1px solid var(--color-line-strong); color: var(--color-fg); }
+  .btn-ghost:hover { border-color: var(--color-primary); background: var(--color-primary-dim); }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-subtle);
+  }
+
+  /* --- the patchbay ---------------------------------------------------- */
+
+  /* A crosspoint, not a checkbox. Both agents said the same thing about the
+     first draft: <input type=checkbox> reads as a web survey, and this needs to
+     read as a router. The input stays for keyboard and screen-reader
+     behaviour and is drawn as an illuminated square button. */
+  .xpt {
+    appearance: none;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 0.25rem;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-ink);
+    cursor: pointer;
+    position: relative;
+    /* A top highlight and a floor shadow, one pixel each. This is what makes a
+       square read as a KEY rather than a filled rectangle — the same trick a
+       physical patchbay gets for free from having a lit cap sitting proud of
+       the panel. Kept to 1px: heavier bevels look like 2009. */
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.04),
+      inset 0 -1px 0 rgb(0 0 0 / 0.35);
+    transition:
+      background-color var(--motion-instant) var(--ease-out),
+      border-color var(--motion-instant) var(--ease-out),
+      box-shadow var(--motion-instant) var(--ease-out),
+      transform var(--motion-instant) var(--ease-out);
+  }
+  .xpt:hover { border-color: var(--color-primary); }
+  /* Travel. A key that does not move when pressed is a picture of a key. */
+  .xpt:active { transform: translateY(1px); }
+  .xpt:checked {
+    background: var(--color-cross-dim);
+    border-color: var(--color-cross);
+    box-shadow: inset 0 0 0 1px rgb(232 163 61 / 0.35);
+  }
+  .xpt:checked::after {
+    content: "";
+    position: absolute;
+    inset: 0.4375rem;
+    border-radius: 1px;
+    background: var(--color-cross);
+  }
+
+  /* Hovering a destination column isolates its path. The whole product is
+     "these columns differ", so letting someone trace one is the fastest way to
+     show it. */
+  .patch:has(.col-1:hover) td:not(.c1),
+  .patch:has(.col-2:hover) td:not(.c2),
+  .patch:has(.col-3:hover) td:not(.c3),
+  .patch:has(.col-4:hover) td:not(.c4) {
+    opacity: 0.35;
+  }
+  .patch td { transition: opacity 120ms; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  /* Scroll-driven reveals need switching OFF, not shortening.
+     The blanket rule above zeroes animation-duration, which is the standard
+     recipe and is enough for every time-driven animation on the page. It does
+     nothing here: a scroll-driven animation takes its progress from scroll
+     position, not from elapsed time, so duration is not what advances it. With
+     `animation-fill-mode: both` the element then holds the `from` keyframe —
+     opacity 0 — for as long as it is above the entry range.
+     The result was the exact opposite of the intent: a reader who asked for
+     less motion got a page whose content was invisible until scrolled past.
+     Verified: 6 of 6 sections held at opacity 0 before this rule existed. */
+  [data-reveal] {
+    animation-name: none !important;
+    animation-timeline: auto !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .reveal { opacity: 1 !important; transform: none !important; }
+}
+
+/* ---------------------------------------------------------------------------
+   Motion.
+
+   The rule applied throughout: motion has to carry meaning or it is noise on a
+   page about a signal path. So there are exactly three kinds here — content
+   arriving, signal flowing, and levels moving — and nothing decorative.
+
+   All of it is already covered by the prefers-reduced-motion block above, which
+   zeroes every duration rather than merely shortening it.
+   --------------------------------------------------------------------------- */
+
+@layer components {
+  /* 1. Content arriving. A short rise on first paint for the hero, and on
+        entry for everything below it. 14px and 400ms — far enough to read as
+        motion, short enough that a fast scroller never waits for it. */
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .rise {
+    animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+  .rise-1 { animation-delay: 0.05s; }
+  .rise-2 { animation-delay: 0.12s; }
+  .rise-3 { animation-delay: 0.19s; }
+  .rise-4 { animation-delay: 0.26s; }
+
+  /* Entry reveals. Marked in the markup with `data-reveal`, which is inert on
+     its own — nothing is hidden until one of the two mechanisms below has
+     committed to revealing it again. That ordering is the whole trick: a
+     reader with no JavaScript and no scroll-driven animation support sees the
+     page in full rather than a column of blank space.
+
+     Path 1, where the browser has it: driven entirely by scroll position, no
+     JavaScript, and it cannot fire late because there is no observer to
+     schedule. Base.astro tests the same @supports condition and skips its
+     observer here. */
+  @supports (animation-timeline: view()) {
+    [data-reveal] {
+      animation-name: rise;
+      animation-duration: 0.6s;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: entry 8% cover 26%;
+    }
+  }
+
+  /* Path 2, everywhere else: Base.astro adds `.reveal` — hiding the element —
+     and the observer adds `.shown` when it comes into view. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .reveal.shown { opacity: 1; transform: none; }
+
+  /* 2. Signal flowing. The dash marches along the hero's route lines at the
+        pace of something actually moving through them. This is the one piece
+        of motion that is genuinely explanatory: it says the lines are a path,
+        not a diagram. */
+  @keyframes flow {
+    to { stroke-dashoffset: -24; }
+  }
+  .route-live {
+    stroke-dasharray: 4 8;
+    animation: flow 1.4s linear infinite;
+  }
+
+  /* Destination loudness bars. Same principle as the hero meters and a
+     narrower amplitude: these carry measured LUFS figures, so the movement has
+     to stay small enough that nobody could misread the bar as reporting a
+     different number than the one printed beside it. 1.5% of width, and the
+     printed figure never moves. */
+  @keyframes loud {
+    0%, 100% { transform: scaleX(1); }
+    50%      { transform: scaleX(0.985); }
+  }
+  /* Loudness is NOT given the ballistics above, deliberately. Integrated LUFS
+     is a long moving average — it drifts, it does not chase transients — so a
+     fast attack here would be the wrong instrument entirely. Smooth and slow
+     is what an R128 readout actually does. */
+  .loud-bar {
+    transform-origin: left;
+    animation: loud 3.4s var(--ease-breath) infinite;
+  }
+
+  /* 3. Levels moving. Meter bars breathe by a couple of percent so the hero
+        reads as live rather than as a screenshot of a meter. Deliberately
+        small: a bar swinging its whole width would be a lie about the
+        signal.
+
+        BALLISTICS, NOT A SINE WAVE. The previous keyframe was symmetric with
+        ease-in-out — the bar took as long to rise as to fall. No meter behaves
+        that way, and an audience of broadcast engineers reads a symmetric
+        wobble as a decorative web animation, which is the one impression this
+        page cannot afford.
+
+        A real peak meter has a fast attack and a slow decay: programme
+        material arrives suddenly and the needle chases it, then falls back at
+        a fixed rate. So the rise is ~8% of the cycle and the fall is the rest,
+        and the curve is linear on the way down because a decay that eases out
+        looks like it is being animated rather than measured. */
+  @keyframes meter {
+    0%   { transform: scaleX(0.94); }
+    8%   { transform: scaleX(1); }      /* attack: fast */
+    70%  { transform: scaleX(0.955); }  /* decay: linear, unhurried */
+    100% { transform: scaleX(0.94); }
+  }
+  .meter-live {
+    transform-origin: left;
+    animation: meter 2.4s linear infinite;
+  }
+
+  /* Peak hold. A real meter leaves the highest recent peak marked while the
+     bar itself falls away — it is how you read a transient you did not catch.
+     Held near the top of the bar's travel and released on the same cycle. */
+  @keyframes peak-hold {
+    0%, 8%   { opacity: 0; transform: translateX(0); }
+    9%, 62%  { opacity: 1; transform: translateX(0); }
+    100%     { opacity: 0.25; transform: translateX(-6%); }
+  }
+  .meter-peak-tick {
+    animation: peak-hold 2.4s linear infinite;
+  }
+
+  /* The crosspoint's press used to be a `latch` keyframe here. It is now a
+     spring in MixMatrix.astro, because a keyframe restarts from scale(0.88)
+     every time it is retriggered — visible as a stutter when you toggle a row
+     quickly — whereas a spring retargets from wherever the cell currently is.
+     That difference is the entire reason a motion library is on this page.
+     Removed rather than left in place: two animations driving `transform` on
+     the same element is a race, and the one that loses is whichever the
+     browser applies first. */
+}

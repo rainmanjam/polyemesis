@@ -183,6 +183,62 @@ func (s *Server) handleChatMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs, "stored": true})
 }
 
+// chatSearchResult is a search response. It carries the same honesty fields as
+// chatUserCard for the same reason: the operator is looking at a slice of a
+// purged table, and a bare list of hits invites reading "no results" as "never
+// said" when it means "not in what we kept".
+type chatSearchResult struct {
+	Query    string         `json:"query"`
+	Platform db.Platform    `json:"platform,omitempty"`
+	Messages []chat.Message `json:"messages"`
+	// Truncated says the limit was reached, so older matches may exist.
+	Truncated     bool   `json:"truncated"`
+	RetentionNote string `json:"retentionNote"`
+}
+
+// handleChatSearch finds a message in the retained scrollback.
+//
+// This searches the database and never the Hub's ring. The ring holds only what
+// this process has seen since it started, and "find the comment from earlier"
+// is precisely the request a process-lifetime buffer cannot answer.
+func (s *Server) handleChatSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	query := strings.TrimSpace(q.Get("q"))
+	platform := db.Platform(strings.TrimSpace(q.Get("platform")))
+	if query == "" {
+		writeError(w, http.StatusBadRequest, "q is required")
+		return
+	}
+	limit := chatLimitParam(r)
+
+	out := chatSearchResult{
+		Query:    query,
+		Platform: platform,
+		Messages: []chat.Message{},
+		RetentionNote: "Searches this server's own retained scrollback. No platform offers an API " +
+			"for chat history, so a message purged by the chat retention setting cannot be found here.",
+	}
+	if s.store == nil {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	rows, err := s.store.SearchChatMessages(platform, query, limit)
+	if err != nil {
+		// Same posture as the rest of this file: an unreadable scrollback
+		// answers empty rather than failing. A search box that errors out is
+		// indistinguishable, to the operator, from chat itself being broken.
+		s.log.Debug("chat search unavailable", "err", err)
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	for _, row := range rows {
+		out.Messages = append(out.Messages, chat.FromDB(row))
+	}
+	out.Truncated = len(rows) >= limit
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleChatSend fans one message out to every connected platform.
 func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	if !s.requireChat(w) {

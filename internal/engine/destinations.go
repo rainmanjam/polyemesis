@@ -41,7 +41,7 @@ type destPlan struct {
 
 // planDestinations works out the desired state of every enabled destination,
 // including which upstream it reads and whether it can run at all.
-func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source, silenceSig string) map[int64]destPlan {
+func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]string, src routing.Source, silenceSig string, provisional bool) map[int64]destPlan {
 	plans := map[int64]destPlan{}
 	for _, row := range rows {
 		if !row.Enabled {
@@ -68,7 +68,16 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 			upstream = sig
 		}
 
-		compiled, cerr := routing.Compile(row.Profile, src)
+		// provisional means the ingest could not be probed at all, so src is the
+		// placeholder and its channel counts are a guess. CompileProvisional
+		// replaces the guessed pan matrices with a runtime downmix, which is
+		// what makes running on a guess defensible: a wrong layout then folds
+		// audibly rather than discarding dialogue in silence.
+		compile := routing.Compile
+		if provisional {
+			compile = routing.CompileProvisional
+		}
+		compiled, cerr := compile(row.Profile, src)
 		if cerr != nil {
 			p.err = cerr.Error()
 		} else {
@@ -288,6 +297,13 @@ func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result,
 			Codec: audioCodecOf(row.Audio.Codec),
 			Mono:  row.Audio.Mono,
 		},
+		// Bit-exact audio. The compiled result is still the authority on WHICH
+		// tracks go out -- routing.Compile runs for a copy destination exactly
+		// as it does for a mixing one, so the profile's selection and the role
+		// exclusions reach the -map list rather than being bypassed. The graph
+		// it also produced is simply not used, and DestinationArgs drops it.
+		CopyAudio:   row.Audio.Copy,
+		AudioTracks: compiled.Tracks,
 		// Muxer and socket tuning. Its zero value emits nothing, so a
 		// destination that has not opted in produces exactly the command
 		// it always did.
@@ -657,6 +673,7 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		Bin:         e.tools.FFmpeg,
 		Args:        buildArgs(target),
 		NextArgs:    nextArgs,
+		Secrets:     destSecrets(row),
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
 		// own defaults in place, which is what every destination ran on before
@@ -764,7 +781,6 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	if prev == nil || prev.row == nil {
 		return
 	}
-	want := backupSpecOf(prev.row, compiled, upstream)
 	// The toggle-on-but-no-endpoint case is included in "not wanted": it is a
 	// real state between enabling the setting and the next broadcast being
 	// created, and it is reported rather than left blank.
@@ -772,7 +788,14 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	if !wantsBackup(prev.row) && prev.row.BackupIngestWanted && prev.row.BackupURL == "" {
 		reason = backupPending
 	}
+	// want is computed ONLY on the branch that reads it. backupSpecOf renders a
+	// whole destination argv and takes a SHA-256 of it, and it used to run above
+	// this switch -- so every destination without redundancy, on every reconcile,
+	// paid for a hash of a command line that was then discarded by the early
+	// return below. That is the common case, not an edge one.
+	var want string
 	if wantsBackup(prev.row) {
+		want = backupSpecOf(prev.row, compiled, upstream)
 		if prev.backup != nil && prev.backupSpec == want {
 			return
 		}
@@ -859,6 +882,7 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 		Kind:        "destination",
 		Bin:         e.tools.FFmpeg,
 		Args:        e.destArgs(d.row, compiled, url, backupTarget(d.row)),
+		Secrets:     destSecrets(d.row),
 		AutoRestart: true,
 		MinBackoff:  destPolicy(d.row).MinBackoff,
 		MaxBackoff:  destPolicy(d.row).MaxBackoff,

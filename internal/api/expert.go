@@ -288,10 +288,20 @@ func quoteArgv(bin string, args []string) string {
 // THIS ONE IS DELIBERATELY NOT REDACTED, and the difference from every other
 // egress of these bytes is worth stating so nobody "fixes" it later.
 //
-// Process.CommandString, Process.Logs and Status.LastError are all masked
-// inside supervisor now, because no caller of those wanted the raw form and one
-// of them was reaching an MQTT broker retained. Args() stays raw for callers
-// that must reason about the arguments themselves, and this is that caller.
+// Process.CommandString, Process.Logs, Process.appendLog and Status.LastError
+// are all masked inside supervisor now, because no caller of those wanted the
+// raw form and two of them leave the process entirely with no principal
+// attached: the on-disk process.log and a RETAINED MQTT topic. Args() stays raw
+// for callers that must reason about the arguments themselves, and this is that
+// caller.
+//
+// What those four do is NOT what the previous version of this comment implied.
+// They do not run alerts.Redact and call it masked -- that is what shipped, and
+// it left `-rtmp_conn S:<key>` and `Authorization:Bearer\ <key>` in the clear on
+// three read-reachable egresses. They remove the destination's EXACT credential
+// literals first, declared on the Spec, and run Redact only as a residual pass
+// afterwards. This route is the deliberate exception to that, and it is
+// admin-only for exactly that reason.
 //
 // Expert mode's whole contract is that the command the operator confirms cannot
 // drift from the one that runs -- see resolveExpertCommand, which splices
@@ -300,11 +310,18 @@ func quoteArgv(bin string, args []string) string {
 // telling them it is. That is a worse failure than the disclosure: it breaks
 // the approval this screen exists to obtain.
 //
-// The exposure is bounded by the same boundary the rest of the console has.
-// This route is inside the requireAuth+requireCSRF group, and the same caller
-// can already read streamKey and backupStreamKey in cleartext from
-// GET /destinations, so redacting here would remove nothing an authenticated
-// operator cannot already fetch.
+// The exposure is bounded instead BY WHO CAN ASK. What used to stand here
+// argued that redaction would remove nothing, "because the same caller can
+// already read streamKey and backupStreamKey in cleartext from
+// GET /destinations". Token scopes falsified that premise: a read-scoped bearer
+// is now a lower-privileged principal inside the same requireAuth boundary, and
+// it is refused both streamKey on /destinations and these routes outright --
+// GET /destinations/{id}/expert and POST /destinations/{id}/expert/preview are
+// in readScopeDeniedPatterns. A session and an admin token, which can rotate
+// the key anyway, still get the exact command.
+//
+// Do not "fix" this by masking the argv. The next reader who is tempted should
+// read that list's comment first.
 func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []string, live bool, note string, err error) {
 	bin = s.eng().Tools().FFmpeg
 
@@ -353,6 +370,14 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 			"recordings directory at start."
 	}
 
+	// This is the SECOND place a ffmpeg.DestSpec is built -- the engine's
+	// destSpecFor is the other -- and it has always omitted Audio and Transport,
+	// so the preview of a destination using either already differs from the
+	// command that runs. CopyAudio is added here anyway, because the difference
+	// it makes is not a missing flag but a whole shape: without it the operator
+	// previewing a copy destination is shown a filter graph and an encoder that
+	// will not be there. Unifying the two construction sites is a separate
+	// change and has its own follow-up issue.
 	base = ffmpeg.DestinationArgs(ffmpeg.DestSpec{
 		Kind:          ffmpeg.DestKind(row.Kind),
 		Target:        target,
@@ -363,6 +388,8 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		SampleRate:    row.Profile.SampleRate,
 		CopyVideo:     true,
 		VideoDelayMS:  compiled.VideoDelayMS,
+		CopyAudio:     row.Audio.Copy,
+		AudioTracks:   compiled.Tracks,
 	})
 	return bin, base, false, note, nil
 }

@@ -249,13 +249,32 @@ func (s *Server) setFacebookBroadcast(accountRef, liveVideoID string) {
 //
 // It is mounted outside the session middleware because Kick posts here
 // unauthenticated; the unguessable path segment is the credential, which is why
-// it is compared in full before anything else happens. A mismatch answers 404
-// rather than 401: an attacker probing for the path learns nothing from a
-// "wrong secret" that they would not learn from "no such route".
+// it is compared in full, in constant time, before anything else happens.
+//
+// A mismatch answers 404 rather than 401, and the answer is BYTE-IDENTICAL to
+// the one an unrouted /api/v1 path gets: same status, same Content-Type, same
+// Cache-Control, same body. That equality is the claim, and it was FALSE until
+// it was measured (#158). This used to call http.NotFound, which writes Go's
+// own `404 page not found` as text/plain with no Cache-Control, while the
+// router's own miss is web.Handler's `{"error":"no such endpoint"}` as JSON
+// with Cache-Control: no-store. Two different 404s, trivially told apart by an
+// anonymous caller, and the difference answered the one question this route's
+// existence is meant to keep private: whether /api/v1/chat/kick/{secret} is
+// mounted here at all. The comment asserting an attacker "learns nothing" was
+// therefore a false statement of coverage, which is worse than none, because it
+// is what the next reader relies on.
+//
+// The SECRET itself was never the weak part and is untouched: 128 bits derived
+// from the data key, compared with subtle.ConstantTimeCompare before any other
+// work happens, so there is no timing, length or partial-match oracle on the
+// value. What leaked was the SHAPE of the reply, not the credential.
+//
+// See TestWrongKickSecretIsIndistinguishableFromAnUnroutedPath, which asserts
+// the equality against the real router rather than against this comment.
 func (s *Server) handleKickChatWebhook(w http.ResponseWriter, r *http.Request) {
 	want := s.kickCallbackSecret()
 	if want == "" || !secretEqual(chi.URLParam(r, "secret"), want) {
-		http.NotFound(w, r)
+		writeNoSuchEndpoint(w)
 		return
 	}
 	if s.chat == nil {

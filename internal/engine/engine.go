@@ -13,7 +13,6 @@
 package engine
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,10 +20,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,7 +37,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/meters"
-	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -115,6 +111,16 @@ type Engine struct {
 	// be captured into the StdoutHandler closure at spawn time, which made
 	// editing it a silent no-op.
 	meterInterval atomic.Int64
+
+	// feedGen numbers every source feed this engine has ever started, so the
+	// seam ledger can name the outgoing and incoming feed of one switch without
+	// ambiguity. Deliberately NOT a field on the selector: a tier that is torn
+	// down and rebuilt would restart its own counter, and two feeds sharing a
+	// number is precisely the confusion the ledger exists to remove when a run
+	// is read back hours later. Atomic rather than under e.mu because it is
+	// incremented inside startFeed, which already runs under selMu, and a second
+	// lock ordering for a counter would be all cost.
+	feedGen atomic.Uint64
 
 	// reloadRec is the note collector for the reconcile currently in flight,
 	// nil the rest of the time. Atomic because it is read from teardown paths
@@ -264,20 +270,38 @@ type Engine struct {
 	// to somebody else.
 	metersHub *relay.Hub
 
-	// source is the probed ingest layout. Until the ingest carries a stream,
-	// this is DefaultSource() so the routing editor still has something to
-	// render.
-	source routing.Source
+	// sourceState is the ingest layout and the flags that say what it is.
+	// Embedded, so every existing e.source / e.measured / e.probed still reads
+	// the same -- see sourcestate.go for the invariant that ties them together
+	// and for the five bugs that came from confusing two of them.
+	sourceState
 	// sourceName is the operator's label for this programme, refreshed on every
 	// reconcile. Cached rather than read on demand: Status() runs per WebSocket
 	// push and per telemetry tick, and a database read on that path buys
 	// nothing -- a rename cannot happen without a reconcile.
 	sourceName string
-	probed     bool
-	videoInfo  *ffmpeg.VideoStream
-	levels     ffmpeg.Levels
-	levelsAt   time.Time
-	settings   db.Settings
+	// sourceToken is this programme's publish secret, refreshed on the same
+	// reconcile as sourceName.
+	//
+	// It is here because it is not just a credential any more, it is an ADDRESS:
+	// the RTMP ingest child dials rtmp://127.0.0.1:PORT/live/<token> to
+	// subscribe to what the encoder published, so building that command needs
+	// the token in hand. db.Settings carries the ingest block but not the token,
+	// and reaching for the row inside ingestSpec would put a database read in
+	// the middle of command construction for no benefit -- a rotation cannot
+	// happen without a reconcile either.
+	sourceToken string
+	// probeFailed is set while probes are failing, so the warning is logged on
+	// the transition rather than on every 3s retry.
+	probeFailed atomic.Bool
+	// probeFails counts CONSECUTIVE probe failures, so a layout that cannot be
+	// measured can be told apart from one that has merely not been measured
+	// yet. See probeUnmeasurable and the hold in reconcileOutputs.
+	probeFails atomic.Int64
+
+	levels   ffmpeg.Levels
+	levelsAt time.Time
+	settings db.Settings
 
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
@@ -447,7 +471,9 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		loud:      map[int64]*loudnessMon{},
 		loudStore: meters.NewStore(),
 		playProcs: map[string]*supervisor.Process{},
-		source:    routing.DefaultSource(),
+		// Promoted fields cannot be set in a composite literal; the placeholder
+		// goes in just below.
+		sourceState: sourceState{source: routing.DefaultSource()},
 		// The clip buffer is described in full but switched OFF, so an upgrade
 		// changes nothing at all about how much memory this process holds.
 		// SetClipBuffer is what turns it on. See reconcileClips.
@@ -516,7 +542,7 @@ func (p *playoutProc) Start() {
 	p.Process.Start()
 }
 
-func (p *playoutProc) Stop(ctx context.Context) {
+func (p *playoutProc) Stop(ctx context.Context) error {
 	p.e.mu.Lock()
 	// Only if it is still ours: a restarted variant registers its replacement
 	// under the same name before the old one is torn down.
@@ -524,7 +550,7 @@ func (p *playoutProc) Stop(ctx context.Context) {
 		delete(p.e.playProcs, p.name)
 	}
 	p.e.mu.Unlock()
-	p.Process.Stop(ctx)
+	return p.Process.Stop(ctx)
 }
 
 // Hub exposes the relay for the monitoring endpoint.
@@ -865,7 +891,22 @@ func (e *Engine) onStorage(st recording.StorageState) {
 	} else {
 		e.log.Info("free space recovered; restarting recorder")
 	}
+	// UNDER reconcileMu, like every other production caller.
+	//
+	// This was the last one that skipped it, and free-space recovery is exactly
+	// when a reconcile is likely to be in flight: the sweeper that frees the
+	// space also fires onChange. Two passes then reached reconcileRecorder at
+	// once, both read e.recorderSig unlocked, and both concluded the recorder
+	// needed starting -- two FFmpegs writing the same segment pattern, one of
+	// them an orphan holding a relay port that Stop cannot reach because only
+	// the second is in e.recorder.
+	//
+	// Safe to take here: the guard fires from the recording manager's own
+	// 30-second sweep goroutine, and nothing on the Reconcile path calls into
+	// it, so this can never be re-entered from inside a reconcile.
+	e.reconcileMu.Lock()
 	e.reconcileRecorder(e.Settings())
+	e.reconcileMu.Unlock()
 	e.publishStatus()
 }
 
@@ -904,9 +945,18 @@ func (e *Engine) effectiveSettings() (db.Settings, error) {
 	// reconcile.
 	e.mu.Lock()
 	e.sourceName = src.Name
+	e.sourceToken = src.Token
 	e.mu.Unlock()
 
 	return settings, nil
+}
+
+// ingestToken is the address this programme is reached at on the shared
+// listeners. Empty until the first reconcile has read the row.
+func (e *Engine) ingestToken() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.sourceToken
 }
 
 // SourceID reports which programme this engine owns.
@@ -995,7 +1045,78 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	// That is not hypothetical: it is exactly what this did until the port was
 	// made install-wide, and on a host whose FFmpeg lacks libsrt it hid behind
 	// "Protocol not found" rather than showing itself as a conflict.
+	//
+	// A LAYOUT BELONGS TO THE TRANSPORT THAT DELIVERED IT.
+	//
+	// Checked here, above every early return below, because three of them exit
+	// without reaching the reset that starting an ingest performs. Switching an
+	// RTMP source to SRT took the first of them and left the RTMP stream's
+	// layout in e.source, still flagged measured -- so reconcileOutputs planned
+	// destinations against the previous transport's track list until the new
+	// probe landed. A guard that refuses the placeholder and accepts a stale
+	// real layout is worth very little.
+	// TWO SEPARATE CONCERNS, and tangling them left a door open.
+	//
+	// Invalidating the layout only makes sense if there IS one, so that half is
+	// rightly gated on measured. Bumping the generation is not: it exists to
+	// discard a probe that is ALREADY IN FLIGHT, and a probe in flight is
+	// precisely the state where measured is still false. Gating the bump on
+	// measured meant a mode switch made before the first probe committed bumped
+	// nothing -- so that probe passed its generation check and committed the
+	// OLD transport's layout stamped with the NEW mode. measured=true over the
+	// wrong track list, and the guard permanently satisfied: the exact failure
+	// the comment above describes, reached through the one door it did not
+	// close.
+	e.mu.Lock()
+	if e.measuredMode != s.Ingest.Mode {
+		if e.measured {
+			// invalidate does both halves, generation included.
+			e.invalidate()
+		} else {
+			// Nothing measured to put back, but a probe may still be in flight
+			// and it has to be told its result is stale.
+			e.sourceGen++
+		}
+		// The failure history belongs to the OLD transport. Without this, five
+		// failed RTMP probes followed by a switch to SRT started destinations
+		// provisionally on the very next reconcile, before a single SRT probe
+		// had been attempted -- and the SRT path returns early without
+		// replacing the ingest child, so the reset at ingest start never runs.
+		e.probeFails.Store(0)
+	}
+	e.mu.Unlock()
+
+	// RTMP IS NOT THE SAME CASE, even though it now has a one-port Go listener
+	// too. srtserver hands datagrams straight to a Sink, so an SRT source needs
+	// no child at all; rtmpserver has no Sink and re-publishes to subscribers,
+	// so an RTMP source still needs a child -- one that DIALS the listener on
+	// loopback instead of binding 1935. Extending this early return to RTMP
+	// would leave the programme with a publisher and nobody reading it.
 	if s.Ingest.Mode == db.IngestSRT {
+		e.stopIngestProcess()
+		return
+	}
+
+	// Nothing chosen yet. A fresh install does not pick an ingest on the
+	// operator's behalf (see db.IngestUnset), so there is nothing to listen
+	// with until they do — and spawning FFmpeg with an empty Kind would build a
+	// command with no input and crash-loop against it.
+	if s.Ingest.Mode == db.IngestUnset {
+		e.stopIngestProcess()
+		return
+	}
+
+	// An RTMP source with no token has no address, and the child must not be
+	// spawned without one. `rtmp://127.0.0.1:1935/live/` resolves — StreamKey
+	// falls back to the whole path when there is no second segment — so the
+	// subscriber would silently attach to the stream key "live" and receive
+	// whatever any publisher happened to send there. Reachable only through
+	// effectiveSettings' fail-open path, where the source row went missing
+	// mid-reconcile, which is exactly when quietly crossing two programmes
+	// would be hardest to notice.
+	if s.Ingest.Mode == db.IngestRTMP && e.ingestToken() == "" {
+		e.log.Error("rtmp ingest not started: the source has no publish token, so it has no address",
+			"source", e.sourceID)
 		e.stopIngestProcess()
 		return
 	}
@@ -1022,6 +1143,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		Kind:        "ingest",
 		Bin:         e.tools.FFmpeg,
 		Args:        spec,
+		Secrets:     ingestSecrets(s.Ingest.SRT, s.Ingest.RTMP, s.Ingest.Pull, e.ingestToken()),
 		AutoRestart: true,
 		// The ingest listener is expected to exit whenever the streamer stops,
 		// so it must come back fast rather than backing off toward 30s and
@@ -1036,9 +1158,16 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	e.mu.Lock()
 	e.ingest = proc
 	e.ingestSig = sig
-	// A new ingest means the previous layout is stale.
-	e.probed = false
-	e.source = routing.DefaultSource()
+	// A new ingest means the previous layout is stale. One of two places the
+	// placeholder goes back into e.source (the other invalidates on an
+	// ingest-mode change, above); both bump sourceGen and both clear measured.
+	// probeLoop's idle branch does NEITHER on purpose -- it drops probed but
+	// keeps the layout, because a layout that was measured stays measured.
+	e.invalidate()
+	// A new ingest gets a fresh hold. The failure count is about THIS stream,
+	// so carrying it across a restart would start the next one provisionally
+	// before anything had been tried.
+	e.probeFails.Store(0)
 	e.mu.Unlock()
 
 	proc.Start()
@@ -1069,7 +1198,12 @@ func (e *Engine) ingestSpec(s db.Settings) []string {
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
 		RTMPPort:      s.Listeners.RTMPPort,
 		RTMPApp:       s.Ingest.RTMP.App,
-		RTMPStreamKey: s.Ingest.RTMP.StreamKey,
+		// The token, not s.Ingest.RTMP.StreamKey. This child SUBSCRIBES to the
+		// shared listener, and the path it dials has to be the same address the
+		// manager registered for this source -- which is the token, because that
+		// is the only per-source value that is unique, rotatable and never
+		// logged. See db.RTMPSettings.StreamKey for what the old field became.
+		RTMPAddress: e.ingestToken(),
 		// DataDir is the confinement root for a file:// source. Without it a
 		// relative path resolves against the process working directory, which
 		// fails open — FFmpeg says "no such file" — rather than fails unsafe.
@@ -1090,8 +1224,10 @@ func (e *Engine) ingestPublicURL(s db.Settings) string {
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
 		RTMPPort:      s.Listeners.RTMPPort,
 		RTMPApp:       s.Ingest.RTMP.App,
-		// In pull mode nobody points an encoder anywhere, so the address the
-		// operator needs to see is the one we dial.
+		// No RTMPAddress: PublicIngestURL deliberately renders the server half
+		// only, and the token goes in OBS's separate stream-key box. This is a
+		// log line and a dashboard string, so the token stays out of it.
+
 		PullURL: s.Ingest.Pull.URL,
 	}
 	return spec.PublicIngestURL("<server>")
@@ -1136,11 +1272,37 @@ func stemPlanSig(plan []recording.Stem) string {
 // `0:a` wholesale, which is correct whatever arrives, and an operator who
 // switched recording on wants the programme captured from the first frame
 // -- waiting for a probe would lose the opening seconds for nothing.
-func stemPlanFor(rec db.RecordingSettings, src routing.Source, probed bool) []recording.Stem {
-	if !rec.Stems || !probed {
+// stemPlanFor derives the per-track stem outputs from the ingest layout.
+//
+// known means e.source is a measurement rather than the placeholder, which is
+// the only thing that makes PlanStems' output real. It used to be `probed`,
+// which asks whether a stream is arriving right now — so an encoder going quiet
+// for a few seconds emptied the plan, changed the recorder signature, and
+// restarted the recorder WITHOUT stems mid-outage, then restarted it a second
+// time when the probe came back. Two segment splits and a hole in the stems for
+// every blip, from a layout that never actually changed.
+func stemPlanFor(rec db.RecordingSettings, src routing.Source, known bool) []recording.Stem {
+	if !rec.Stems || !known {
 		return nil
 	}
 	return recording.PlanStems(src, rec.StemCodec)
+}
+
+// probeGiveUp is how many consecutive probe failures mean the layout is not
+// going to be measured.
+//
+// probeLoop retries every 3 seconds while bytes are flowing, so this is about
+// fifteen seconds of trying. Long enough that a transient failure -- a relay
+// port not yet bound, a stream whose first packets are not yet decodable -- rides
+// through it and destinations are never planned on a guess they did not need.
+// Short enough that a genuinely broken ffprobe does not take a broadcast off air
+// for the length of an event.
+const probeGiveUp = 5
+
+// probeUnmeasurable reports that probing has failed enough times in a row to
+// stop waiting for it.
+func (e *Engine) probeUnmeasurable() bool {
+	return e.probeFails.Load() >= probeGiveUp
 }
 
 func (e *Engine) reconcileRecorder(s db.Settings) {
@@ -1149,7 +1311,10 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	// Read here rather than through e.Source(): that takes the same RLock, and
 	// this function holds it again further down.
 	src := e.source
-	probed := e.probed
+	// The recorder reads e.hub — the INGEST relay, not the downstream one — so
+	// the layout that matters is the ingest's own, and the silence tier never
+	// stands in for it here. measured is what says e.source holds one.
+	measured := e.measured
 	e.mu.RUnlock()
 	src = e.annotate(src)
 
@@ -1161,7 +1326,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		}
 		return
 	}
-	plan := stemPlanFor(s.Recording, src, probed)
+	plan := stemPlanFor(s.Recording, src, measured)
 	sig := strconv.Itoa(s.Recording.SegmentSeconds) + "|" +
 		strconv.FormatBool(s.Recording.Stems) + "|" + string(s.Recording.StemCodec) + "|" +
 		stemPlanSig(plan)
@@ -1582,6 +1747,7 @@ func (e *Engine) reconcileOutputs() error {
 
 	e.mu.RLock()
 	src := e.source
+	measured := e.measured
 	fps := probedFPS(e.videoInfo)
 	e.mu.RUnlock()
 
@@ -1617,8 +1783,112 @@ func (e *Engine) reconcileOutputs() error {
 	e.mu.RUnlock()
 	startRends, stopRends := diffRenditions(wantRends, haveRends)
 
-	plans := e.planDestinations(destRows, wantRends, src, srcSig)
+	// DO NOT COMPILE A ROUTING GRAPH AGAINST A LAYOUT NOBODY HAS MEASURED.
+	//
+	// Until the probe lands, e.source is routing.DefaultSource(): six stereo
+	// tracks that exist so the routing editor has something to draw, not a claim
+	// about what is arriving. reconcileMeters and stemPlanFor both refuse on
+	// exactly this — see the comment at reconcileMeters, which spells out that
+	// the zero-track check cannot catch it because the placeholder HAS tracks.
+	// Destinations were the one process-building consumer that read e.source raw,
+	// and they are the ones that matter most.
+	//
+	// Two ways it goes wrong, and the second is the reason this is a guard rather
+	// than a warning. A profile naming a track the stream does not have emits
+	// `[0:a:5]` and FFmpeg refuses to start, so the destination crash-loops —
+	// loud, and diagnosable. But the placeholder also claims Channels: 2 on every
+	// track, so a real 5.1 track compiles to `pan=stereo|c0=c0|c1=c1`, which is
+	// VALID FFmpeg: the destination starts, stays up, and publishes front L/R
+	// only. Centre — where dialogue lives — is discarded, with no error anywhere.
+	//
+	// A silence tier substitutes synthTrack() above, which IS a measured layout,
+	// so that case is known and proceeds normally.
+	//
+	// TWO THINGS THIS GUARD GOT WRONG ON THE WAY IN, both found by the failover
+	// suite, and both worth stating because the wrong versions read as obviously
+	// correct.
+	//
+	// It is DESTINATIONS ONLY. The first version returned from reconcileOutputs
+	// outright, which also skipped the selector, the silence tier, the
+	// renditions and playout. Nothing below compiles a routing graph against
+	// e.source, so nothing below is exposed to the placeholder; holding them
+	// took the slate off air during the outage the selector exists to cover, and
+	// the late reconcile put a backwards DTS step in the output — the
+	// discontinuity a receiving platform drops the connection on.
+	//
+	// And it asks MEASURED, not probed. probed means "a layout is arriving right
+	// now", and probeLoop clears it after three idle rounds so the UI stops
+	// claiming tracks nobody is sending — but it deliberately leaves e.source
+	// alone. Only ingest start resets e.source to the placeholder. So an encoder
+	// that stopped a moment ago still has a real, measured layout on file, and
+	// holding on !probed refused to plan against it: a destination added during
+	// a failover could not start until the primary came back. The literal read
+	// of the probe is the same mistake holdSilence exists to prevent one tier
+	// down — see the comment there.
+	//
+	// THE HOLD HAS AN EXIT, and needing one is not hypothetical. wantSilence
+	// itself requires `measured`, so a probe that can NEVER succeed -- a missing
+	// or broken ffprobe, an unidentifiable stream -- left silenceSig empty and
+	// measured false forever. Every destination stayed down permanently, with
+	// the one tier that could have lifted the hold structurally unable to.
+	//
+	// So after enough consecutive failures the layout is declared unmeasurable
+	// and destinations are planned PROVISIONALLY: the guessed pan matrices are
+	// replaced by a runtime downmix, so a wrong layout folds audibly instead of
+	// discarding dialogue in silence. That is the property the hold existed to
+	// protect, and once it holds by construction the hold is no longer earning
+	// its cost. See routing.CompileProvisional.
+	//
+	// A timeout was the other candidate and is worse: it reintroduces the
+	// original bug on a schedule, because it fires just as readily while a probe
+	// is merely slow. This fires only when probing has actually failed, and it
+	// reverts the instant one succeeds.
+	unmeasurable := !measured && e.probeUnmeasurable()
+	holdDests := !measured && silenceSig == "" && !unmeasurable
+	switch {
+	case holdDests:
+		e.noteReload("destinations", "all", reloadRestart,
+			"held: the ingest layout has not been probed yet, and a routing graph "+
+				"compiled against the placeholder would map tracks that may not exist")
+	case unmeasurable:
+		e.noteReload("destinations", "all", reloadRestart,
+			"the ingest layout cannot be measured, so each track is downmixed by "+
+				"FFmpeg at runtime rather than by its profile's matrix")
+	}
 
+	// PLANNED AND STOPPED ALWAYS. ONLY THE START IS HELD.
+	//
+	// The obvious shape -- skip all three while held -- is wrong, and quietly
+	// so. Everything below still tears down and replaces hubs: renditions,
+	// the silence tier, the selector. Skipping stopDestinations leaves a
+	// destination subscribed to a hub that is then closed under it, and closing
+	// a hub only stops UDP delivery; it does not end the process. So FFmpeg sits
+	// there "started", never restarting because nothing asked it to, receiving
+	// nothing. It cost a file destination its entire 76-second run: zero bytes,
+	// no error, and a suite that stayed green because the only check that would
+	// have seen it was a note rather than an assertion.
+	//
+	// That ordering -- consumers stopped before their upstream is replaced -- is
+	// the invariant the comment above reconcileSilence already states. The hold
+	// has no business suspending it. Planning against the placeholder is
+	// harmless in itself: the specs it produces are only ever read by
+	// startDestinations, which is the one call that must not happen.
+	// While held, plans is EMPTY rather than placeholder-derived, and that is a
+	// second bug fixed in the same line. stopDestinations keeps a destination
+	// whose running spec equals its planned one -- so a destination compiled
+	// against a real stereo layout SURVIVED an unmeasured window, because the
+	// placeholder is also stereo and produced an identical spec. The next stream
+	// being 5.1 changed nothing: it kept running the old graph and published
+	// front L/R, silently discarding centre. Exactly the failure the hold exists
+	// to prevent, reached through the hold itself.
+	//
+	// Empty, not nil, and still passed: an unmeasured layout means no
+	// destination's graph can be vouched for, so none may keep running. They
+	// come back on the next reconcile once the probe lands.
+	plans := map[int64]destPlan{}
+	if !holdDests {
+		plans = e.planDestinations(destRows, wantRends, src, srcSig, unmeasurable)
+	}
 	e.stopDestinations(plans)
 	for _, id := range stopRends {
 		e.mu.Lock()
@@ -1663,7 +1933,9 @@ func (e *Engine) reconcileOutputs() error {
 		e.log.Error("playout reconcile", "err", err)
 	}
 
-	e.startDestinations(plans)
+	if !holdDests {
+		e.startDestinations(plans)
+	}
 	return nil
 }
 
@@ -2202,2266 +2474,6 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 	}
 }
 
-// ----------------------------------------------------------------- selector
-//
-// The source-selector tier is a permanent relay between the ingest and
-// everything downstream. Destinations, renditions, playout and the meters
-// subscribe to it for their whole life; a separate FEED process decides what
-// flows into it — the primary ingest, the backup ingest, or a synthesised
-// slate — and a switch replaces only that feed.
-//
-//	ingest  -> [silence] -\
-//	backup ingest --------+-> [selector] -> [rendition] -> destination
-//	slate ----------------/
-//
-// That indirection is the whole feature. Switching a destination's own
-// subscription would restart its process and drop the platform connection,
-// which is the exact failure both failover and the slate exist to prevent. So
-// the hub a destination reads never changes; only the bytes arriving on it do.
-//
-// It is OFF by default and costs nothing when off: sourceHub() answers exactly
-// as it did before, and no feed process runs. Turning it on adds one `-c copy`
-// remux hop, which is a few percent of a core and a few milliseconds — real,
-// but not something an upgrade should spend on your behalf.
-//
-// TWO THINGS THAT DECIDE WHETHER THIS WORKS AT ALL:
-//
-// PTS CONTINUITY. Every feed normalises its own input to a timeline starting at
-// zero, so without help each switch would hand the destinations a timestamp
-// that jumps BACKWARDS by however long the previous feed had been running —
-// and a platform answers a backwards jump by dropping the connection. Every
-// feed is therefore started with -output_ts_offset set to the tier's own
-// elapsed wall-clock time (SlateSpec.TimestampOffsetSeconds is the slate's
-// spelling of the same flag). Because each feed publishes in real time, the
-// published timeline stays within a switch's dead time of wall clock, forwards
-// and monotonic across any number of switches. This is the first thing to look
-// at if destinations stall on a switch rather than riding it.
-//
-// It is also why a feed is NOT AutoRestart: the supervisor would respawn it
-// with the offset it was born with, and the second life of a feed that had been
-// running an hour would publish an hour in the past. Respawn is owned by the
-// sweep below, which computes a fresh offset every time.
-//
-// CODEC AND LAYOUT MATCH. A destination copies video (`-c:v copy`), so the
-// slate has to look enough like the departed ingest that the platform's decoder
-// re-initialises instead of giving up. The slate is therefore built at the
-// PROBED width, height and frame rate, and the mpegts muxer repeats SPS/PPS
-// in-band at every keyframe so a decoder has what it needs to re-init. What it
-// cannot match is the encoder itself: the ingest's stream came from OBS, the
-// slate's comes from libx264, and a platform that refuses that change will show
-// a glitch or a reconnect at the switch. When the ingest was never probed there
-// is no geometry to copy and the slate falls back to 1280x720 at 30, which a
-// copying destination will pass through as a visible resolution change. Both of
-// those are the deliberate choice: degrade visibly rather than corrupt quietly.
-//
-// The slate publishes ONE stereo track. A destination whose routing profile
-// selects track 1 or above finds nothing on those inputs while the slate is up
-// and stops producing output — no worse than the departed ingest, which
-// delivered nothing on every track, but no better either. Closing that gap
-// needs a track count on ffmpeg.SlateSpec, which is a change to a file this
-// work does not own.
-
-const (
-	// selectorSweep is how often liveness is re-evaluated. Well under any
-	// sensible grace period, so a switch lands near its deadline rather than up
-	// to a whole period late.
-	selectorSweep = 500 * time.Millisecond
-	// feedRespawn bounds how fast a feed that will not start is retried, so a
-	// slate with a broken encoder logs once a couple of seconds instead of
-	// spawning in a tight loop.
-	feedRespawn = 2 * time.Second
-	// selectorSubName is the selector's subscription on whichever hub is
-	// feeding it. Fixed: there is at most one feed.
-	selectorSubName = "selector"
-	// eventFailover announces a source switch. Declared here rather than in
-	// internal/events because the constant is only meaningful to a system that
-	// has a selector tier; the broker takes any type.
-	eventFailover events.Type = "failover"
-)
-
-// sourceKind names what is feeding the selector.
-type sourceKind string
-
-const (
-	sourceNone    sourceKind = ""
-	sourcePrimary sourceKind = "primary"
-	sourceBackup  sourceKind = "backup"
-	// sourcePlaylist is a scheduled playlist feed: a real programme, but not a
-	// live one. It sits between the ingests and the slate -- see candidatesFor
-	// for why that is the ordering and not the other one.
-	sourcePlaylist sourceKind = "playlist"
-	sourceSlate    sourceKind = "slate"
-)
-
-// selector is the running tier.
-type selector struct {
-	// hub is the relay every downstream consumer reads, for its whole life.
-	hub *relay.Hub
-	// spec is deliberately constant while the tier is enabled. Anything that
-	// changed it would close this hub and restart every destination on it,
-	// which is precisely what the tier exists to avoid.
-	spec string
-	// startedAt is the tier's own clock and the origin of every feed's
-	// timestamp offset.
-	startedAt time.Time
-
-	feed   *sourceFeed
-	active sourceKind
-	// feedAt is the last START ATTEMPT, recorded whether or not it worked, so a
-	// feed that cannot start backs off instead of being retried every sweep.
-	feedAt time.Time
-	reason string
-	// pinned is an operator's manual choice. It is honoured only while that
-	// source is delivering: a pin that outlived its source would strand the
-	// broadcast on a dead input, which is the opposite of what somebody
-	// reaching for a manual override wants.
-	pinned     sourceKind
-	switchedAt time.Time
-	switches   int
-	err        string
-
-	// live is per-source liveness, sampled from each hub's byte counter.
-	live map[sourceKind]*liveness
-}
-
-// sourceFeed is the one process publishing into the selector's hub.
-type sourceFeed struct {
-	kind sourceKind
-	proc *supervisor.Process
-	// in is the hub this feed READS, nil for the slate, which reads nothing.
-	in      *relay.Hub
-	port    int
-	subName string
-	// upstream hashes what the feed's command line depends on, so a settings
-	// change respawns the feed without disturbing anything downstream of it.
-	upstream  string
-	offset    float64
-	startedAt time.Time
-}
-
-// backupIngest is the second listener, with a hub of its own so it can be
-// receiving from its encoder long before anybody asks it to go on air.
-type backupIngest struct {
-	proc *supervisor.Process
-	hub  *relay.Hub
-	sig  string
-}
-
-// playlistTier is the file on loop, and it is shaped exactly like backupIngest
-// because it answers the same question the backup does: what else could be on
-// air, and is it ready before anybody asks for it.
-//
-// The hub of its own is the entire point of the tier. A file played into the
-// PRIMARY's hub carries bytes into it, so the primary reads live, and a live
-// primary is the one thing failover never switches away from -- putting a file
-// on air would have silently disabled the whole feature. With its own relay the
-// primary goes quiet when the encoder goes quiet, which is the truth the
-// selector needs.
-type playlistTier struct {
-	proc *supervisor.Process
-	hub  *relay.Hub
-	sig  string
-	// listPath is the concat list this tier's FFmpeg is reading, and the tier
-	// owns exactly that file: it wrote it before spawning and removes that same
-	// path, and no other, once its process has stopped.
-	//
-	// Held as a field rather than recomputed at teardown because a recomputed
-	// name is only as good as the inputs still being what they were. The
-	// signature moves whenever the list does, so a teardown that rebuilt the
-	// name from the CURRENT settings would sweep the wrong file, or none, at
-	// precisely the moment an operator edits a playlist that is on air.
-	listPath string
-}
-
-// liveness is one candidate source's delivery record, derived from bytes on its
-// hub rather than from its process state. An SRT listener sits in "running"
-// for as long as it waits for a publisher, so process state answers a different
-// question than the one failover has to ask.
-type liveness struct {
-	rx uint64
-	// at is when rx last increased, zero for a source that has never delivered.
-	at time.Time
-	// since is when the current unbroken run of delivery began, which is what an
-	// automatic return measures its stability window against.
-	since time.Time
-}
-
-func (l liveness) alive(now time.Time, grace time.Duration) bool {
-	return !l.at.IsZero() && now.Sub(l.at) < grace
-}
-
-func (l liveness) stableFor(now time.Time) time.Duration {
-	if l.since.IsZero() {
-		return 0
-	}
-	return now.Sub(l.since)
-}
-
-func (l *liveness) sample(rx uint64, now time.Time, grace time.Duration) {
-	if rx <= l.rx {
-		return
-	}
-	if !l.alive(now, grace) {
-		l.since = now
-	}
-	l.rx = rx
-	l.at = now
-}
-
-// wantSelector reports the tier's signature, empty when it must not run.
-//
-// The signature is a constant rather than a hash of the settings, and that is
-// load-bearing: every consumer folds it into its own restart hash, so a
-// signature that moved with the backup's port or the slate's colour would
-// restart every destination on an edit that changes neither.
-func wantSelector(s db.Settings) string {
-	if !s.Failover.Enabled {
-		return ""
-	}
-	return "on"
-}
-
-// upstreamSig is what a consumer of "the source" folds into its restart hash:
-// the selector tier's signature when it is running, the silence tier's
-// otherwise.
-//
-// With the selector running the silence signature drops out entirely, because a
-// destination no longer reads the silence hub — the feed does. That is what
-// makes an ingest gaining or losing audio a restart of one remux process rather
-// than of every destination.
-func upstreamSig(selSig, silenceSig string) string {
-	if selSig != "" {
-		return "selector:" + selSig
-	}
-	return silenceSig
-}
-
-// selectorHub is the tier's relay, or nil when the tier is not running.
-func (e *Engine) selectorHub() *relay.Hub {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.sel == nil {
-		return nil
-	}
-	return e.sel.hub
-}
-
-// downstreamHub is what sourceHub() would answer if it could see the selector.
-//
-// Every consumer inside this file names this instead of sourceHub(), so there
-// is still exactly ONE decision about where "the source" is — it is spelled
-// across two files only because the silence tier and the selector tier are
-// stacked, and sourceHub() remains the answer for everything below the selector
-// as well as for the whole pipeline when the tier is off.
-func (e *Engine) downstreamHub() *relay.Hub {
-	if h := e.selectorHub(); h != nil {
-		return h
-	}
-	return e.sourceHub()
-}
-
-// sourceLabel distinguishes the hubs a consumer might be reading, for the
-// restart hashes that have to notice a consumer moving between them.
-func (e *Engine) sourceLabel() string {
-	e.mu.RLock()
-	sel := e.sel
-	e.mu.RUnlock()
-	if sel != nil && sel.hub != nil {
-		return "selector:" + sel.spec
-	}
-	return e.silenceLabel()
-}
-
-// backupHub is the second listener's relay, or nil when there is none.
-func (e *Engine) backupHub() *relay.Hub {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.backup == nil {
-		return nil
-	}
-	return e.backup.hub
-}
-
-// playlistHub is the playlist tier's relay, or nil when there is none.
-//
-// Nil rather than a panic for the same reason backupHub answers nil: every
-// caller asks BEFORE knowing whether the tier is running, and "no hub" is a
-// normal answer for a feature that is off by default.
-func (e *Engine) playlistHub() *relay.Hub {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.playlist == nil {
-		return nil
-	}
-	return e.playlist.hub
-}
-
-// holdSilence freezes the silence tier's signature while the selector is
-// standing in for a departed primary.
-//
-// wantSilence answers from the PROBE, and the probe goes blank a few seconds
-// after the primary stops delivering. Read literally that would tear the
-// silence tier down in the middle of a failover, change the signature every
-// consumer was started with, and restart every destination — the exact failure
-// the tier exists to prevent. So the last answer taken while the primary was
-// the live source is held until it is the live source again.
-func (e *Engine) holdSilence(fresh string) string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.sel != nil && e.sel.hub != nil && e.sel.active != sourcePrimary {
-		return e.heldSilenceSig
-	}
-	e.heldSilenceSig = fresh
-	return fresh
-}
-
-// heldSilence is the signature the running primary feed was built against.
-func (e *Engine) heldSilence() string {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.heldSilenceSig
-}
-
-// sourceChoice is everything the decision needs, gathered under the lock so the
-// decision itself stays a pure function of a snapshot.
-type sourceChoice struct {
-	now     time.Time
-	cur     sourceKind
-	pinned  sourceKind
-	primary liveness
-	backup  liveness
-
-	backupEnabled bool
-	slateEnabled  bool
-	// playlistRunning is whether the playlist is DELIVERING, which is the whole
-	// of "would the playlist carry bytes if we switched to it".
-	//
-	// It is not "the tier is up". PlaylistFileProblem checks path confinement,
-	// not existence, so a path safely inside the data directory that names no
-	// file starts a supervised process which never opens an input -- running,
-	// and permanently empty. Offering that as a candidate would rank a source
-	// that cannot deliver above the slate, and the slate is the thing that
-	// exists so an operator never sees nothing. So it is collapsed from the
-	// playlist hub's own liveness, sampled from that hub's byte counter beside
-	// the two ingests' -- see sampleSources, and the comment on liveness for why
-	// process state answers a different question than failover has to ask.
-	//
-	// One bit, not a liveness: the decision asks nothing else of a playlist.
-	// There is no automatic return TO a file and no stability window to measure,
-	// so alive/not is everything, and it is collapsed by the caller under the
-	// lock rather than looked up from inside the decision -- chooseSource has to
-	// stay pure and cheap, because the golden table's only claim to being
-	// exhaustive is that every input it branches on can be enumerated.
-	playlistRunning bool
-	grace           time.Duration
-	autoReturn      bool
-	returnStable    time.Duration
-}
-
-// candidate is one source the selector may choose, and whether it can be
-// chosen right now.
-//
-// available is not "is the process running" — it is "would this deliver bytes
-// if we switched to it". A slate is always available when enabled because it
-// synthesises its own picture; an ingest is available only when it is actually
-// delivering, which is the distinction the liveness type already draws and the
-// reason the selector switches on delivery rather than on process state.
-type candidate struct {
-	kind      sourceKind
-	available bool
-	// rank orders the list. Lower is preferred. It is a field rather than the
-	// slice position so a future caller can build the list in any order and
-	// still get a stable decision.
-	rank int
-}
-
-// candidatesFor turns a snapshot into the ordered list the ladder implies:
-// primary, then backup, then the playlist, then slate.
-//
-// rank is assigned from position rather than written out, so this literal is
-// the ONE place the preference order lives. Two spellings of the same ordering
-// is how a reordering ends up half-applied — the list reads one way, the
-// decision goes the other, and nothing fails until an outage.
-func candidatesFor(c sourceChoice) []candidate {
-	out := []candidate{
-		{kind: sourcePrimary, available: c.primary.alive(c.now, c.grace)},
-		// A backup that is delivering into a hub nobody enabled is still not a
-		// place to send viewers, so the setting gates availability rather than
-		// membership: the candidate stays in the list and stays unavailable.
-		{kind: sourceBackup, available: c.backupEnabled && c.backup.alive(c.now, c.grace)},
-		// THE PLAYLIST RANKS BELOW BOTH INGESTS, AND THAT IS A DECISION.
-		//
-		// A scheduled broadcast is a fallback for "nobody is streaming", not a
-		// pre-emption of somebody who is. Put it above the primary and the
-		// failure it buys is the one nobody forgives: a presenter live on air
-		// is cut off mid-sentence because a playlist entry came due. An
-		// operator who genuinely wants the playlist to win says so by pinning
-		// it, and the pin path outranks this whole ladder already — so the
-		// wanted behaviour costs nothing and the unwanted one cannot happen by
-		// accident.
-		//
-		// It ranks ABOVE the slate for the mirror-image reason: both are
-		// holding patterns, but one of them is programming somebody chose and
-		// the other is a card saying the picture is missing.
-		//
-		// There is deliberately no `&& c.playlistEnabled` here to mirror the
-		// backup's line above, and the asymmetry is the design rather than an
-		// omission. The backup's hub is the listener's and outlives every
-		// publisher, so its counter cannot tell enabled from disabled; the
-		// playlist's hub belongs to the tier and dies with it, so
-		// reconcilePlaylist zeroes this liveness as it tears the tier down --
-		// see the comment there. That covers the untick a setting gate would
-		// cover AND the three it would not: failover switched off entirely, a
-		// file path that fails confinement, and a path edit that swaps one hub
-		// for another. The invariant the two ends maintain between them: no
-		// hub, no liveness, no candidate.
-		{kind: sourcePlaylist, available: c.playlistRunning},
-		// The slate has no liveness to check. It synthesises its own picture, so
-		// "enabled" is the whole of "would this deliver bytes".
-		{kind: sourceSlate, available: c.slateEnabled},
-	}
-	for i := range out {
-		out[i].rank = i
-	}
-	return out
-}
-
-// chooseFrom is the ladder, expressed over a candidate list.
-//
-// Every branch below picks the best AVAILABLE candidate and then names why,
-// which is the shape the ladder always had; the reasons are keyed by the kind
-// that won because they are a contract. They reach an operator through
-// Failover.Reason, so rewording one is a user-visible change.
-//
-// PRECONDITION: cands and c must describe the SAME INSTANT. This function has
-// two sources of truth and reads both. Preference order and "can this deliver
-// bytes right now" come from cands; everything else -- c.cur, c.pinned,
-// c.autoReturn, c.returnStable, and the liveness histories behind
-// c.primary/c.backup -- comes from c. Two rules read one of each in the same
-// breath: the pin below asks available(c.pinned), and the flapping guard asks
-// available(sourcePrimary) alongside c.primary.stableFor(c.now). Build cands
-// from a snapshot fresher (or staler) than c and those rules straddle two
-// different moments: the `>= returnStable` boundary would be evaluated against
-// a primary the list never judged, so the selector could return to a primary
-// the list calls dead, or refuse to return to one it calls alive. chooseSource
-// keeps the two consistent by construction -- it derives cands from the same c
-// it passes -- and that is exactly why the golden table cannot see a violation
-// here. A future caller that assembles candidates itself owns this precondition.
-//
-// It also assumes the list is well formed: one candidate per kind, and no
-// available sourceNone. best() panics on the ways that matter rather than
-// deciding from a list that cannot mean what it says.
-func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
-	ranked := slices.Clone(cands)
-	slices.SortStableFunc(ranked, func(a, b candidate) int { return cmp.Compare(a.rank, b.rank) })
-
-	// available answers about one named source, for the rules that are about a
-	// particular source rather than about preference order.
-	available := func(k sourceKind) bool {
-		for _, cand := range ranked {
-			if cand.kind == k {
-				return cand.available
-			}
-		}
-		return false
-	}
-
-	// best is the ladder itself: the first available candidate wins, and says
-	// the sentence that goes with having won. fallbackKind is where the
-	// selector parks when nothing at all is available — never sourceNone,
-	// because handing the pipeline nothing is worse than every alternative.
-	//
-	// reasons is looked up with comma-ok rather than a plain index, and a miss
-	// panics instead of returning "". A plain index is what this looked like
-	// until a review of the candidate-list cutover: available(k) matches the
-	// FIRST candidate of a kind in rank order, while best here matches the
-	// FIRST AVAILABLE one, and those two agree only when the list has one
-	// candidate per kind. candidatesFor always builds it that way today, but
-	// nothing in the type checks that a future caller -- or a map literal
-	// missing the entry for a kind Task 4 adds -- keeps it true. Get it wrong
-	// and a plain index hands the operator a blank Failover.Reason on a real
-	// switch, which reads as "nothing happened" when something did. A panic
-	// naming the kind is a test failure at the point the list is built wrong,
-	// which is the whole point of a candidate winning a reason nobody wrote.
-	//
-	// An available sourceNone is rejected the same way, and BEFORE the reason
-	// lookup, because it is malformed for a different reason: sourceNone is the
-	// absence of a source, not a source that can be on air, so a list offering
-	// it as available says something that cannot be true. Returning it would be
-	// worse than the blank reason above -- applySourceChoice's want ==
-	// sourceNone guard would drop the decision, and a dropped decision is a
-	// failover that silently did not happen. Today a "" kind happens to trip
-	// the missing-reason panic below, because no branch registers a reason
-	// under the empty key -- but only by accident, and a map literal that ever
-	// gained a sourceNone entry would turn that accident into a silent
-	// discard. This check does not read the reasons map, so no map can undo it.
-	best := func(reasons map[sourceKind]string, fallbackKind sourceKind, fallbackReason string) (sourceKind, string) {
-		for _, cand := range ranked {
-			if cand.available {
-				if cand.kind == sourceNone {
-					panic("chooseFrom: the candidate list offers sourceNone as available, but sourceNone is the absence of a source and can never be put on air -- fix the list that was built")
-				}
-				reason, ok := reasons[cand.kind]
-				if !ok {
-					panic(fmt.Sprintf("chooseFrom: candidate %q won but this branch has no reason registered for it -- add one to the map", cand.kind))
-				}
-				return cand.kind, reason
-			}
-		}
-		return fallbackKind, fallbackReason
-	}
-
-	// An operator's pin outranks the ladder, but only while the pinned source
-	// is available: a pin that outlived its source would strand the broadcast
-	// on a dead input.
-	if reason, ok := pinReason(c.pinned); ok && available(c.pinned) {
-		return c.pinned, reason
-	}
-
-	switch c.cur {
-	case sourceBackup:
-		if available(sourceBackup) {
-			// The flapping guard. Manual is the default because an encoder that
-			// dropped once usually drops again, and each automatic return is a
-			// visible cut for every viewer.
-			if available(sourcePrimary) && c.autoReturn && c.primary.stableFor(c.now) >= c.returnStable {
-				return sourcePrimary, "the primary ingest has been delivering steadily again"
-			}
-			return sourceBackup, ""
-		}
-		// Manual return means "do not flap", not "never recover": with the
-		// backup gone there is nothing to flap between. The backup is known
-		// unavailable here, so it cannot win its own branch.
-		return best(map[sourceKind]string{
-			sourcePrimary:  "the backup ingest stopped delivering and the primary is back",
-			sourcePlaylist: "neither ingest is delivering, so the playlist is on air",
-			sourceSlate:    "neither ingest is delivering",
-		}, sourcePrimary, "the backup ingest stopped delivering")
-
-	case sourceSlate:
-		// A slate is a holding pattern, never a destination. The return to a
-		// real source is immediate and is NOT subject to the return mode: the
-		// flap risk is already bounded by the grace period on the way out, and
-		// sitting on a standby card while the show is back on air is the worse
-		// failure by a wide margin. Staying put is silent; a slate that has been
-		// switched off underneath us falls through to the primary.
-		return best(map[sourceKind]string{
-			sourcePrimary:  "the primary ingest is delivering again",
-			sourceBackup:   "the backup ingest is delivering",
-			sourcePlaylist: "the playlist is running",
-			sourceSlate:    "",
-		}, sourcePrimary, "the slate was switched off")
-
-	case sourcePlaylist:
-		// The playlist is a holding pattern too, so it leaves the same way the
-		// slate does: the moment a real ingest is back, and without consulting
-		// the return mode. The flap risk the return mode exists to bound is a
-		// risk between two LIVE encoders; there is none here, because the
-		// playlist never stops delivering and so can never hand the primary a
-		// window to flap in.
-		//
-		// Staying put is silent, exactly as the slate branch is. Without that
-		// empty string a selector already on the playlist would republish the
-		// same reason on every 500ms sweep for the whole scheduled programme,
-		// and an operator reading the log would find a failover storm where
-		// nothing at all had moved. That is the trap a fourth kind walks into
-		// by being added only to the maps of branches it can arrive in, and
-		// never to a branch of its own.
-		return best(map[sourceKind]string{
-			sourcePrimary:  "the primary ingest is delivering again",
-			sourceBackup:   "the backup ingest is delivering",
-			sourcePlaylist: "",
-			sourceSlate:    "the playlist stopped running",
-		}, sourcePrimary, "the playlist stopped running")
-
-	default:
-		// Already on the primary means the primary winning is not news, so the
-		// reason stays empty and nothing is logged or published.
-		onPrimary := ""
-		if c.cur != sourcePrimary {
-			onPrimary = "the primary ingest is delivering"
-		}
-		// Nothing better exists, so stay parked on the primary rather than
-		// switching to nothing: a feed that is merely waiting still holds its
-		// place, and it starts carrying the stream the moment an encoder
-		// arrives.
-		noOther := ""
-		if c.cur != sourcePrimary {
-			noOther = "there is no other source to run"
-		}
-		return best(map[sourceKind]string{
-			sourcePrimary:  onPrimary,
-			sourceBackup:   "the primary ingest stopped delivering",
-			sourcePlaylist: "the primary ingest stopped delivering and the playlist is running",
-			sourceSlate:    "the primary ingest stopped delivering and no backup is on air",
-		}, sourcePrimary, noOther)
-	}
-}
-
-// pinReason is the sentence for an honoured manual override, and whether the
-// kind is one an operator can pin at all. sourceNone is not: it is the absence
-// of a pin, not a pin on nothing.
-func pinReason(k sourceKind) (string, bool) {
-	switch k {
-	case sourcePrimary:
-		return "an operator selected the primary ingest", true
-	case sourceBackup:
-		return "an operator selected the backup ingest", true
-	// The pin is how an operator overrides the ranking decision candidatesFor
-	// explains: the playlist loses to a live encoder on the ladder, and this is
-	// the sentence that says somebody wanted it to win anyway. Still honoured
-	// only while the playlist is actually running, like every other pin.
-	case sourcePlaylist:
-		return "an operator selected the playlist", true
-	case sourceSlate:
-		return "an operator selected the slate", true
-	}
-	return "", false
-}
-
-// chooseSource decides what should be feeding the selector, and says why.
-//
-// An empty reason means "no change"; a non-empty one is written to the log and
-// published, because a failover nobody notices is how an operator discovers at
-// the end of a broadcast that they streamed the backup all night.
-func chooseSource(c sourceChoice) (sourceKind, string) {
-	return chooseFrom(candidatesFor(c), c)
-}
-
-// reconcileSelector brings the tier, the backup listener and the feed into line
-// with settings.
-//
-// Called from reconcileOutputs in the window where nothing downstream is
-// reading anything: the hub it may create is the one every consumer below will
-// subscribe to, and the hub it may close must not close under one.
-func (e *Engine) reconcileSelector(s db.Settings, want, silenceSig string) {
-	e.selMu.Lock()
-	defer e.selMu.Unlock()
-
-	e.mu.Lock()
-	cur := e.sel
-	e.mu.Unlock()
-
-	// A tier whose hub failed to bind carries an empty signature, so it never
-	// matches "on" and is retried on the next reconcile — and it is cleared
-	// unconditionally when the feature is switched off, because a leftover
-	// broken tier would go on refusing destinations that no longer need it.
-	if cur != nil && cur.spec == want && want != "" {
-		e.reconcileBackupIngest(s)
-		e.reconcilePlaylist(s)
-		// Ignored on purpose: a reconcile has no caller to fail to, and a
-		// decision that could not be made has already logged itself. Holding
-		// the current source is what this path wants anyway.
-		_ = e.applySourceChoice(s, silenceSig, time.Now())
-		return
-	}
-
-	if cur != nil {
-		e.mu.Lock()
-		e.sel = nil
-		e.mu.Unlock()
-		e.teardownFeed(cur.feed)
-		if cur.hub != nil {
-			_ = cur.hub.Close()
-			e.log.Info("source selector stopped; destinations read the ingest directly again")
-		}
-	}
-	if want == "" {
-		e.reconcileBackupIngest(s)
-		// Reached with the whole feature switched off, which is when the tier
-		// most needs stopping: playlistSig is empty without Failover.Enabled, so
-		// this is the call that takes the file off air with the selector.
-		e.reconcilePlaylist(s)
-		return
-	}
-
-	hub, err := relay.New(e.log, 0)
-	if err != nil {
-		// Recorded rather than returned, exactly as a rendition does: the
-		// destinations downstream have to be told why they are not starting.
-		e.mu.Lock()
-		e.sel = &selector{spec: "", err: err.Error()}
-		e.mu.Unlock()
-		e.log.Error("start source selector", "err", err)
-		return
-	}
-
-	now := time.Now()
-	e.mu.Lock()
-	if e.stopped {
-		e.mu.Unlock()
-		_ = hub.Close()
-		return
-	}
-	e.sel = &selector{
-		hub: hub, spec: want, startedAt: now, switchedAt: now,
-		live: map[sourceKind]*liveness{
-			sourcePrimary: {}, sourceBackup: {}, sourcePlaylist: {},
-		},
-	}
-	e.mu.Unlock()
-
-	e.log.Info("source selector started",
-		"reason", "failover is enabled, so destinations subscribe to one stable relay for their whole life",
-		"relayPort", hub.Port())
-
-	e.reconcileBackupIngest(s)
-	e.reconcilePlaylist(s)
-	// Ignored for the same reason as the "already running" window above.
-	_ = e.applySourceChoice(s, silenceSig, now)
-}
-
-// selectorProblem is the reason a destination cannot run that the selector is
-// responsible for, or nil when it is not in the way.
-//
-// A feed that is down is deliberately NOT a reason: a destination started
-// against a silent hub holds its platform connection and starts sending the
-// moment the feed comes back, whereas one that refused to start has already
-// lost the broadcast.
-func (e *Engine) selectorProblem() error {
-	e.mu.RLock()
-	sel := e.sel
-	e.mu.RUnlock()
-	if sel == nil || sel.hub != nil {
-		return nil
-	}
-	if sel.err != "" {
-		return fmt.Errorf("the source selector failed to start: %s", sel.err)
-	}
-	return fmt.Errorf("the source selector is not running")
-}
-
-// selectorLoop is the failover detector: it samples each source's byte counter
-// and switches the feed when the answer changes.
-func (e *Engine) selectorLoop(ctx context.Context) {
-	tick := time.NewTicker(selectorSweep)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			e.sweepSelector(time.Now())
-		}
-	}
-}
-
-func (e *Engine) sweepSelector(now time.Time) {
-	s := e.Settings()
-
-	e.selMu.Lock()
-	defer e.selMu.Unlock()
-	if e.selectorHub() == nil {
-		return
-	}
-	e.sampleSources(s, now)
-	// Ignored on purpose: the ticker has no caller to fail to. A decision that
-	// could not be made holds the current source and logs, and the next tick
-	// tries again 500ms later.
-	_ = e.applySourceChoice(s, e.heldSilence(), now)
-}
-
-// sampleSources folds each candidate hub's byte counter into its liveness.
-func (e *Engine) sampleSources(s db.Settings, now time.Time) {
-	// The PRIMARY's own hub, never the selector's or the silence tier's: the
-	// question is whether the operator's encoder is delivering, and the selector
-	// hub carries bytes whichever source is on air.
-	primaryRx := e.hub.RxBytes()
-	var backupRx uint64
-	if h := e.backupHub(); h != nil {
-		backupRx = h.RxBytes()
-	}
-	// The playlist is sampled from bytes for the same reason the two ingests
-	// are, and the failure it guards against is specific: PlaylistFileProblem
-	// checks that the operator's path is CONFINED to the data directory, not
-	// that it names a file. A path that is safely inside it and names nothing
-	// passes validation, playlistSig is non-empty, the tier starts, and FFmpeg
-	// then fails to open the input and backs off toward five seconds. "The tier
-	// is running" is true throughout, and it is the wrong question -- exactly as
-	// it is for an SRT listener that sits in "running" while it waits for a
-	// publisher. Ranking is only worth anything if a candidate offered is a
-	// candidate that would deliver, so what is sampled is delivery.
-	var playlistRx uint64
-	if h := e.playlistHub(); h != nil {
-		playlistRx = h.RxBytes()
-	}
-	grace := failoverGrace(s)
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.sel == nil {
-		return
-	}
-	e.sel.live[sourcePrimary].sample(primaryRx, now, grace)
-	e.sel.live[sourceBackup].sample(backupRx, now, grace)
-
-	// The playlist's counter is the one that goes BACKWARDS, and it has to be
-	// handled rather than fed to sample(), which takes a counter that only ever
-	// rises and ignores anything at or below what it has seen. Two ordinary
-	// things reset it: an operator editing the file path, which makes
-	// reconcilePlaylist close this hub and build a fresh one counting from zero,
-	// and disabling the tier, which leaves no hub to read at all. Fed in as-is,
-	// the first would leave the liveness pinned at the OLD hub's total -- a
-	// playlist that has been re-pointed at a working file reported dead until it
-	// out-counts a file it no longer plays -- and the second would keep offering
-	// a tier that has been torn down for a whole grace window, which startFeed
-	// can only answer with "the playlist source has no relay to read". Zeroing
-	// first makes both read as what they are: this is a different playlist, and
-	// it has delivered nothing yet.
-	//
-	// reconcilePlaylist now zeroes the same liveness as it tears a tier down,
-	// which is what makes the correction immediate rather than one sweep late,
-	// so in practice this branch finds pl.rx already zero. It stays as the
-	// second line of defence for the invariant, not as its enforcement: this is
-	// the only place that reads the counter, and a counter read without a
-	// rollback guard is how the first version of this went wrong.
-	pl := e.sel.live[sourcePlaylist]
-	if playlistRx < pl.rx {
-		*pl = liveness{}
-	}
-	pl.sample(playlistRx, now, grace)
-}
-
-func failoverGrace(s db.Settings) time.Duration {
-	if s.Failover.GraceSeconds <= 0 {
-		return 5 * time.Second
-	}
-	return time.Duration(s.Failover.GraceSeconds) * time.Second
-}
-
-// errSelectorUndecided says the selector produced no source to put on air, so
-// nothing was switched. It is what a recovered decision panic looks like from
-// the outside: the three background callers ignore it and hold what they have,
-// and SwitchSource turns it into a failure for the operator rather than
-// reporting a switch that did not happen.
-var errSelectorUndecided = errors.New("the source selector could not decide which source to put on air")
-
-// applySourceChoice decides which source should be on air and makes it so. The
-// caller must hold selMu.
-//
-// It returns errSelectorUndecided when the decision failed and the current
-// source was held instead. Nothing was switched in that case, so a caller that
-// asked for a specific source must not report success. The background callers
-// -- the sweep ticker and both reconcile windows -- have nobody to report to
-// and deliberately ignore it: holding is already the behaviour they want, and
-// making them start failing would turn a decision bug into a reconcile outage.
-func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Time) error {
-	e.mu.Lock()
-	sel := e.sel
-	if sel == nil || sel.hub == nil {
-		e.mu.Unlock()
-		return nil
-	}
-	c := sourceChoice{
-		now:           now,
-		cur:           sel.active,
-		pinned:        sel.pinned,
-		primary:       *sel.live[sourcePrimary],
-		backup:        *sel.live[sourceBackup],
-		backupEnabled: s.Failover.Backup.Enabled,
-		slateEnabled:  s.Failover.Slate.Enabled,
-		// Collapsed from the playlist hub's liveness, NOT from "e.playlist !=
-		// nil". A tier can be up and its hub empty forever -- see the field's
-		// comment on sourceChoice -- and a candidate offered on process state
-		// would be a candidate that cannot deliver. Read here under the same
-		// lock as the primary's, from the sample sweepSelector took a moment
-		// ago, so the decision still sees one consistent snapshot.
-		playlistRunning: sel.live[sourcePlaylist].alive(now, failoverGrace(s)),
-		grace:           failoverGrace(s),
-		autoReturn:      s.Failover.Return == db.FailoverReturnAuto,
-		returnStable:    time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
-	}
-	e.mu.Unlock()
-
-	want, reason, decided := e.decideSource(c)
-	// want == sourceNone can ONLY happen here on a recovered panic with
-	// nothing to hold: chooseFrom's own best() never returns sourceNone on a
-	// real decision (its fallback is always sourcePrimary -- see the comment
-	// on candidatesFor), so decideSource's recover is the only path that can
-	// hand this back, and only when c.cur was itself sourceNone -- the
-	// selector's first decision, before any feed has ever run, or the first
-	// one after the tier restarts. There is no current source to hold, so
-	// there is nothing to do, and this returns rather than calling
-	// ensureFeed(sourceNone).
-	//
-	// ensureFeed would now refuse that kind itself -- errNoFeedShape lists the
-	// kinds positively and sourceNone is not among them -- but this guard is
-	// still the one that belongs here, and it is not redundant: refusing inside
-	// ensureFeed would record an error on the tier describing a missing feed
-	// shape, when the true story is that the decision itself failed and there
-	// was nothing to hold. The two are logged apart on purpose below. Before
-	// either guard existed this started a PRIMARY-shaped feed while
-	// e.sel.active stayed recorded as none, because every function that builds
-	// a feed treated an unrecognised kind as the primary.
-	//
-	// It used to return here in silence, which was the one thing worse than the
-	// blank reason this whole file exists to prevent: a decision that reached
-	// no feed and left no trace. The two ways of getting here are logged apart
-	// on purpose, and neither repeats the panic itself -- decideSource has
-	// already named the cause, and once a minute its stack -- so this line adds
-	// only what that one cannot know, which is that nothing is on air.
-	if want == sourceNone {
-		if decided {
-			// Unreachable today and a bug if it ever happens: a real decision
-			// never yields sourceNone. best() panics on an available one and
-			// every fallback is sourcePrimary, which is why all 3200 rows of
-			// the frozen table decide primary, backup, playlist or slate and
-			// none ever decides none.
-			e.log.Error("selector decided on no source at all; no feed started",
-				"source", e.sourceID, "cause", "the candidate list produced sourceNone from a decision that did not panic")
-		} else {
-			e.log.Error("selector has no current source to hold; no feed started",
-				"source", e.sourceID, "cause", "the decision panicked before any feed had ever run, so there was nothing to hold")
-		}
-		return errSelectorUndecided
-	}
-	e.ensureFeed(s, silenceSig, want, reason, now)
-	if !decided {
-		return errSelectorUndecided
-	}
-	return nil
-}
-
-// selPanicRelogDefault bounds how often a PERSISTENT decision panic re-logs
-// its full stack, for every Engine that leaves its own selPanicRelog field at
-// the zero value -- which is every production Engine, since only a test ever
-// sets that field (see its comment on the Engine struct for why the window
-// lives there, per-instance, rather than in a package-level var). The
-// underlying cause (a map entry missing a reason) does not change between
-// sweeps, so the tenth identical stack trace in five seconds tells an
-// operator nothing the first one didn't -- it only spends CPU walking the
-// stack and log volume repeating it, on the same 500ms ticker that is also
-// the thing hammering the panic.
-//
-// It is a window since the last STACK WAS LOGGED, not since the last panic --
-// see decideSource. Measured the other way it would never elapse, and "bounds
-// how often" would quietly mean "logs it once".
-const selPanicRelogDefault = time.Minute
-
-// decideSource is chooseSource with a recover around it, and it is the ONE
-// place that recover needs to live: chooseSource has exactly one caller
-// (here), and this is in turn called from every production path that can
-// reach the selector's decision -- both windows of reconcileSelector, the
-// operator's SwitchSource, and the sweep's ticker. Recovering here, rather
-// than separately in each of those four, is what keeps a fix from covering
-// three of them and leaving the fourth fatal.
-//
-// It is placed at the DECISION, not around applySourceChoice's ensureFeed
-// call that follows it. applySourceChoice is the function that performs a
-// switch -- teardownFeed, then startFeed, then only after both succeed does
-// it update e.sel.feed/active -- so recovering across that whole sequence
-// could catch a panic mid-switch and leave e.sel's bookkeeping pointing at a
-// feed that teardownFeed already stopped: a half-switched state that is worse
-// than the panic it was hiding. chooseSource runs entirely before any of that
-// teardown or start begins, so a panic here can only ever mean "the decision
-// itself is broken", never "the switch got halfway done". Recovering at
-// exactly this boundary makes surviving it safe BY CONSTRUCTION rather than
-// by care taken in ensureFeed.
-//
-// On a recovered panic this holds the current source with no reason AND
-// reports decided=false, which is the least action available: not "switch to
-// whatever best() almost
-// picked" (that candidate had no explanation, and this file exists precisely
-// so an unexplained switch is never shown to an operator as one), and not
-// "crash" either. The invariant chooseFrom's best() leans on -- one candidate
-// per kind -- is enforced by candidatesFor's convention, not by the compiler,
-// so a change that breaks it (Task 4 adds a fourth candidate kind) reaches
-// this on every reconcile a settings change triggers, not only on a tick.
-//
-// "Hold the current source" only means something when there is one. On the
-// selector's first decision -- c.cur is sourceNone, no feed has ever run --
-// there is nothing to hold, and the caller must not treat sourceNone as a
-// destination: this was considered, not missed, and applySourceChoice is
-// where it is handled, by skipping ensureFeed entirely rather than starting
-// a feed the bookkeeping cannot describe. See the comment there.
-//
-// decided is how the recovery leaves the building. Holding the current source
-// is the right BEHAVIOUR for the three callers that have nobody to report to
-// -- the ticker and both reconcile windows just carry on -- but it is a lie to
-// the one that does: SwitchSource would otherwise return nil to an operator
-// whose source was never put on air, with the log saying it was and the pin
-// LATCHED, so every later sweep re-panics on the same input forever. A
-// substituted value cannot be told apart from a real one; a separate flag can.
-//
-// Deliberately NOT inside chooseFrom, chooseSource or best: those are called
-// directly by selector_candidates_test.go and selector_golden_test.go, and a
-// recover placed there would swallow the panic those tests exist to observe.
-func (e *Engine) decideSource(c sourceChoice) (kind sourceKind, reason string, decided bool) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			return
-		}
-		msg := fmt.Sprint(r)
-		window := e.selPanicRelog
-		if window == 0 {
-			window = selPanicRelogDefault
-		}
-		// The window is measured from the last STACK, not from the last panic.
-		// Refreshing selPanicAt on every panic would restart the clock twice a
-		// second, time.Since would never reach the window, and the full
-		// stack would be logged once EVER rather than once a minute -- so an
-		// operator opening the logs an hour into an incident would find only
-		// stackless lines and a first stack that had long since rotated out.
-		fresh := msg != e.selPanicMsg || time.Since(e.selPanicAt) > window
-		if fresh {
-			e.selPanicMsg, e.selPanicAt = msg, time.Now()
-			e.log.Error("selector decision panicked; holding the current source",
-				"source", e.sourceID, "panic", msg, "stack", string(debug.Stack()))
-		} else {
-			e.log.Error("selector decision panicked again; holding the current source",
-				"source", e.sourceID, "panic", msg)
-		}
-		kind, reason, decided = c.cur, "", false
-	}()
-	// choose is chooseSource unless a test has substituted decideFn -- see
-	// its comment on the Engine struct. Indirecting through a local rather
-	// than branching inline keeps this identical to calling chooseSource
-	// directly when decideFn is nil, which is every production call.
-	choose := chooseSource
-	if e.decideFn != nil {
-		choose = e.decideFn
-	}
-	kind, reason = choose(c)
-	return kind, reason, true
-}
-
-// holdForUnfeedableKind records a decision the feed layer cannot carry out and
-// leaves everything else exactly as it was.
-//
-// It logs once per distinct cause rather than on every 500ms sweep. The cause
-// cannot change between sweeps -- it is a missing case in the source, not a
-// condition that clears -- so the hundredth identical line tells an operator
-// nothing the first did, while the sweep producing it is the same one already
-// hammering the fault. sel.err is the dedupe key AND the operator-visible
-// record, which is what keeps the quiet sweeps from being silent ones: the
-// tier goes on reporting the fault through the API for as long as it lasts.
-func (e *Engine) holdForUnfeedableKind(want sourceKind, err error) {
-	e.mu.Lock()
-	repeat := e.sel != nil && e.sel.err == err.Error()
-	if e.sel != nil {
-		e.sel.err = err.Error()
-	}
-	e.mu.Unlock()
-	if repeat {
-		return
-	}
-	e.log.Error("the selector chose a source no feed can run; holding the current feed",
-		"source", e.sourceID, "want", string(want), "err", err)
-}
-
-// ensureFeed starts, replaces or leaves the feed alone. The caller must hold
-// selMu.
-func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, reason string, now time.Time) {
-	// The boundary for the three functions below, and the reason none of their
-	// loud failures reaches a production crash: a kind the feed layer cannot
-	// build is refused HERE, before anything is torn down. The running feed
-	// keeps running, active and reason are left alone, and the tier records why
-	// -- which is the same "hold what you have and say so" the recovered
-	// decision panic settles on, for the same reason. Starting nothing is
-	// better than starting the primary under another name.
-	if err := errNoFeedShape(want); err != nil {
-		e.holdForUnfeedableKind(want, err)
-		return
-	}
-	upstream := e.feedUpstreamSig(s, want, silenceSig)
-
-	e.mu.Lock()
-	sel := e.sel
-	if sel == nil || sel.hub == nil {
-		e.mu.Unlock()
-		return
-	}
-	cur, active, lastAt := sel.feed, sel.active, sel.feedAt
-	e.mu.Unlock()
-
-	switch {
-	case cur != nil && cur.kind == want && cur.upstream == upstream:
-		if feedRunning(cur) {
-			return
-		}
-		if now.Sub(lastAt) < feedRespawn {
-			return
-		}
-	case cur == nil && !lastAt.IsZero() && now.Sub(lastAt) < feedRespawn:
-		// A start that failed backs off rather than being retried on every
-		// sweep, which is what keeps a slate with an unopenable encoder from
-		// spawning twice a second forever.
-		return
-	}
-	respawn := active == want
-
-	e.teardownFeed(cur)
-	feed := e.startFeed(s, want, upstream, silenceSig, now)
-
-	e.mu.Lock()
-	if e.sel != nil {
-		e.sel.feed = feed
-		e.sel.active = want
-		e.sel.feedAt = now
-		if feed != nil {
-			e.sel.err = ""
-		}
-		if !respawn {
-			e.sel.reason = reason
-			e.sel.switchedAt = now
-			e.sel.switches++
-		}
-	}
-	e.mu.Unlock()
-
-	if respawn {
-		// Not a switch, but never silent either: a feed that keeps dying is the
-		// difference between a broadcast that is on air and one that only looks
-		// like it.
-		e.log.Warn("source feed restarted", "source", string(want))
-		e.publishStatus()
-		return
-	}
-	if reason == "" {
-		return
-	}
-	// Three ways to notice, because a silent failover is the failure this
-	// feature is judged on: a log line, the status snapshot, and an event.
-	if want == sourcePrimary {
-		e.log.Info("source switched", "to", string(want), "reason", reason)
-	} else {
-		e.log.Warn("source switched", "to", string(want), "reason", reason)
-	}
-	e.bus.Publish(eventFailover, e.Failover())
-	e.publishStatus()
-}
-
-// feedRunning reports whether the feed's process is still up. A feed is not
-// AutoRestart, so a process that has exited stays exited until the sweep
-// rebuilds it with a current timestamp offset.
-func feedRunning(f *sourceFeed) bool {
-	if f == nil || f.proc == nil {
-		return false
-	}
-	switch f.proc.Status().State {
-	case supervisor.StateStopped, supervisor.StateFailed:
-		return false
-	}
-	return true
-}
-
-// errNoFeedShape names a source kind that the feed layer does not know how to
-// run, and it exists because "does not know how to run it" used to be spelled
-// as silence.
-//
-// THREE functions decide what a feed actually is -- feedUpstreamSig hashes what
-// its command line depends on, startFeed builds that command line, and
-// downstreamFeedInput picks the hub it reads -- and until this commit ALL THREE
-// treated an unrecognised kind as the primary. A kind added to the ladder and
-// missed in any one of them therefore produced a running process reading the
-// PRIMARY's hub while sel.active recorded the new kind and Failover.Reason told
-// the operator that new source was on air. Bookkeeping and process disagreeing,
-// with no error, no panic and no test failure -- and the selector's panic
-// recovery never fires, because nothing panicked.
-//
-// This is the same class of defect best() already refuses in chooseFrom (a
-// winning candidate with no reason registered), caught the same way and for the
-// same reason: a kind that reaches a place nobody taught about it must fail
-// where it is noticed, not produce a plausible-looking wrong answer.
-//
-// The kinds are listed positively. A future kind is then a case that is
-// VISIBLY absent here rather than one silently absorbed by a default.
-func errNoFeedShape(kind sourceKind) error {
-	switch kind {
-	case sourcePrimary, sourceBackup, sourceSlate, sourcePlaylist:
-		return nil
-	}
-	// The three sites are named in the message rather than in a comment, because
-	// the reader of this line is somebody who has just added a FIFTH kind and is
-	// looking at a failure they did not expect. Teaching two of the three and
-	// missing the last is the mistake this whole guard exists for, and it is the
-	// one a message that merely said "unknown source" would let them repeat.
-	return fmt.Errorf("no feed knows how to run source %q: feedUpstreamSig, startFeed and "+
-		"downstreamFeedInput each need a case for it before the selector is ever allowed "+
-		"to offer it as a candidate", kind)
-}
-
-// feedUpstreamSig hashes what one feed's command line depends on, so a settings
-// change respawns the feed and disturbs nothing downstream of it.
-//
-// It panics on a kind with no feed shape rather than hashing one. It cannot
-// return an error -- its result is a hash folded into a respawn decision, and
-// there is no value it could return that means "refuse" -- so the loud failure
-// is the only honest one available here. ensureFeed rejects such a kind before
-// this is ever reached, which is what keeps the panic off every production
-// path; see the guard there.
-func (e *Engine) feedUpstreamSig(s db.Settings, kind sourceKind, silenceSig string) string {
-	if err := errNoFeedShape(kind); err != nil {
-		panic("feedUpstreamSig: " + err.Error())
-	}
-	switch kind {
-	case sourceBackup:
-		return hashStrings([]string{"backup", backupIngestSig(s)})
-	case sourcePlaylist:
-		// playlistSig, exactly as the backup folds in backupIngestSig: the feed
-		// here is only a copy hop out of the playlist's hub, but that hub is
-		// CLOSED and rebuilt whenever reconcilePlaylist sees the signature move
-		// -- an operator editing the file path is the ordinary case -- and a
-		// copy hop left pointing at the old relay would spin on a port nothing
-		// publishes to. Folding the same signature in is what makes the feed
-		// respawn onto the new hub in the same sweep.
-		return hashStrings([]string{"playlist", playlistSig(s)})
-	case sourceSlate:
-		e.mu.RLock()
-		v := e.videoInfo
-		e.mu.RUnlock()
-		sl := s.Failover.Slate
-		parts := []string{
-			"slate", sl.ImagePath, sl.Color, strconv.Itoa(sl.VideoKbps),
-			string(sl.Encoder), sl.Preset,
-		}
-		if v != nil {
-			parts = append(parts, strconv.Itoa(v.Width), strconv.Itoa(v.Height),
-				strconv.FormatFloat(v.FrameRate, 'g', -1, 64))
-		}
-		return hashStrings(parts)
-	default:
-		// sourcePrimary, and nothing else: errNoFeedShape above has already
-		// turned every other kind away. Left as a default rather than written
-		// as `case sourcePrimary` so the compiler still sees a total function,
-		// but the set it stands for is now one kind wide instead of open.
-		return primaryFeedSig(silenceSig)
-	}
-}
-
-// primaryFeedSig is the primary feed's upstream signature. The silence tier is
-// between the ingest and this feed, so the feed has to be rebuilt onto the
-// tier's hub when one appears and back off it when it goes.
-func primaryFeedSig(silenceSig string) string {
-	return hashStrings([]string{"primary", silenceSig})
-}
-
-// detachFeedForSilence stops the primary feed when the silence tier under it is
-// about to be replaced.
-//
-// reconcileSilence closes that tier's hub, and the feed is the only thing still
-// subscribed to it. Stopped here, it is rebuilt onto the new hub by
-// reconcileSelector a few lines later, and the destinations ride out the same
-// pause in datagrams they already survive on every rendition restart.
-func (e *Engine) detachFeedForSilence(silenceSig string) {
-	e.selMu.Lock()
-	defer e.selMu.Unlock()
-
-	want := primaryFeedSig(silenceSig)
-	e.mu.Lock()
-	var feed *sourceFeed
-	if e.sel != nil && e.sel.feed != nil &&
-		e.sel.feed.kind == sourcePrimary && e.sel.feed.upstream != want {
-		feed, e.sel.feed = e.sel.feed, nil
-		// Cleared, or the failed-start backoff would read this deliberate
-		// teardown as a feed that cannot start and leave the tier unfed for a
-		// couple of seconds.
-		e.sel.feedAt = time.Time{}
-	}
-	e.mu.Unlock()
-	e.teardownFeed(feed)
-}
-
-// startFeed spawns the process that publishes one source into the selector's
-// hub. The caller must hold selMu.
-func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig string, now time.Time) *sourceFeed {
-	fail := func(err error) *sourceFeed {
-		e.mu.Lock()
-		if e.sel != nil {
-			e.sel.err = err.Error()
-		}
-		e.mu.Unlock()
-		e.log.Error("start source feed", "source", string(kind), "err", err)
-		return nil
-	}
-
-	e.mu.RLock()
-	sel := e.sel
-	e.mu.RUnlock()
-	if sel == nil || sel.hub == nil {
-		return nil
-	}
-	out := sel.hub.InputURL()
-	// The tier's own elapsed time. See the PTS note at the top of this section:
-	// this single number is what keeps the published timeline monotonic across
-	// every switch and every respawn.
-	offset := now.Sub(sel.startedAt).Seconds()
-	if offset < 0 {
-		offset = 0
-	}
-
-	feed := &sourceFeed{kind: kind, upstream: upstream, offset: offset, startedAt: now}
-	var args []string
-
-	// Switched on the kind exhaustively rather than "slate, or else the primary
-	// shape". The else was the mechanism: an unrecognised kind fell into the
-	// relay branch, downstreamFeedInput handed it the primary's hub, and a
-	// process started that read the primary while calling itself something
-	// else. This function can report a failure -- fail() records it on the tier
-	// and logs it -- so an unfeedable kind is returned as an error rather than
-	// as a panic.
-	switch kind {
-	case sourceSlate:
-		spec, encFallback := e.slateSpec(s, out, offset)
-		if encFallback != "" {
-			e.log.Warn("slate encoder unusable; falling back to software",
-				"encoder", string(s.Failover.Slate.Encoder), "reason", encFallback)
-		}
-		args = ffmpeg.SlateArgs(spec)
-	case sourcePrimary, sourceBackup, sourcePlaylist:
-		// The playlist joins the two ingests here rather than getting a branch
-		// of its own, and that is the whole shape of the tier: it already runs
-		// its own FFmpeg against the file and publishes into its own hub, so
-		// what the selector needs is the identical copy hop the backup gets --
-		// subscribe to a relay, republish into the selector's hub with the
-		// tier's timestamp offset. Re-reading the file here instead would put a
-		// second decoder on the same input and reset its timeline on every
-		// switch, which is the thing the offset exists to prevent.
-		in := e.downstreamFeedInput(kind)
-		if in == nil {
-			return fail(fmt.Errorf("the %s source has no relay to read", kind))
-		}
-		port, err := e.alloc.Allocate()
-		if err != nil {
-			return fail(err)
-		}
-		feed.in, feed.port, feed.subName = in, port, selectorSubName
-		args = relayFeedArgs(in.Subscribe(selectorSubName, port), out, offset)
-	default:
-		// A fifth kind lands here, and lands here VISIBLY: nothing is started
-		// and nothing is recorded as active, because a feed that cannot be built
-		// must not leave a process behind that pretends it was.
-		return fail(errNoFeedShape(kind))
-	}
-
-	feed.proc = supervisor.New(e.log, supervisor.Spec{
-		Name: "source:" + string(kind), Kind: "source", Bin: e.tools.FFmpeg, Args: args,
-		// Deliberately not AutoRestart: a respawn has to be rebuilt with a
-		// current timestamp offset, so the sweep owns it.
-		AutoRestart: false, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
-	})
-
-	e.mu.Lock()
-	// Shutdown may have run since this started; publishing under the same lock
-	// Stop collects processes with is what keeps a late start from becoming an
-	// orphan holding a UDP socket.
-	if e.stopped {
-		e.mu.Unlock()
-		e.teardownFeed(feed)
-		return nil
-	}
-	e.mu.Unlock()
-
-	feed.proc.Start()
-	return feed
-}
-
-// downstreamFeedInput is the hub one copy-hop feed reads.
-//
-// This is the function that actually made a mislabelled feed primary-shaped: it
-// was `if kind == sourceBackup` and everything else fell through to
-// sourceHub(). A kind nobody taught it about got the primary's bytes and no
-// complaint. It is now a closed switch, and startFeed calls it only for the two
-// kinds that HAVE a hub, so the panic below is a "this cannot happen" marker
-// rather than a path -- the same division of labour as chooseFrom's best(),
-// which panics while decideSource holds the recovery.
-func (e *Engine) downstreamFeedInput(kind sourceKind) *relay.Hub {
-	switch kind {
-	case sourceBackup:
-		return e.backupHub()
-	case sourcePlaylist:
-		// The playlist's OWN hub, and naming it here is the point of the tier
-		// having one. Handed the primary's hub instead -- which is what the old
-		// fall-through did -- a file on air would have carried bytes onto the
-		// primary's relay, the primary would have read live, and failover never
-		// switches away from a live primary. The feature would have disabled
-		// itself the first time it was used, silently.
-		return e.playlistHub()
-	case sourcePrimary:
-		// sourceHub(), not e.hub: with a video-only primary the silence tier is
-		// between the two, and feeding the selector from the raw ingest would
-		// publish a stream with no audio track at all.
-		return e.sourceHub()
-	}
-	panic(fmt.Sprintf("downstreamFeedInput: source %q has no hub to read -- only the primary, "+
-		"the backup and the playlist do, and startFeed must not ask about any other kind", kind))
-}
-
-func (e *Engine) teardownFeed(f *sourceFeed) {
-	if f == nil {
-		return
-	}
-	if f.proc != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		f.proc.Stop(ctx)
-		cancel()
-	}
-	if f.subName != "" && f.in != nil {
-		f.in.Unsubscribe(f.subName)
-	}
-	if f.port != 0 {
-		e.alloc.Release(f.port)
-	}
-}
-
-// relayFeedArgs builds the copy hop that carries one ingest into the selector.
-//
-// `-map 0 -c copy`, exactly like the ingest itself: the selector must never
-// become a second place video is degraded or a track is quietly dropped. The
-// one thing it adds is -output_ts_offset, which is what makes a switch a
-// forward step on a shared timeline instead of a jump into the past.
-//
-// This is the only FFmpeg command line built outside internal/ffmpeg. It
-// belongs there beside IngestArgs, where it would be table-tested with the
-// rest; it is written out here because nothing in that package builds a
-// relay-to-relay copy yet.
-func relayFeedArgs(inURL, outURL string, offsetSeconds float64) []string {
-	return []string{
-		"-hide_banner", "-nostdin", "-loglevel", "warning",
-		"-nostats", "-progress", "pipe:1",
-		"-fflags", "+genpts",
-		"-thread_queue_size", "1024",
-		"-i", ffmpeg.RelayInputURL(inURL),
-		"-map", "0",
-		"-c", "copy",
-		"-output_ts_offset", strconv.FormatFloat(offsetSeconds, 'f', 3, 64),
-		"-f", "mpegts",
-		"-flush_packets", "1",
-		ffmpeg.RelayOutputURL(outURL),
-	}
-}
-
-// slateSpec builds the standby source, and reports why a configured encoder was
-// not used when it was not.
-func (e *Engine) slateSpec(s db.Settings, out string, offset float64) (ffmpeg.SlateSpec, string) {
-	sl := s.Failover.Slate
-
-	e.mu.RLock()
-	v := e.videoInfo
-	e.mu.RUnlock()
-
-	spec := ffmpeg.SlateSpec{
-		OutRelayURL:            out,
-		Color:                  sl.Color,
-		VideoKbps:              sl.VideoKbps,
-		Preset:                 sl.Preset,
-		TimestampOffsetSeconds: offset,
-	}
-	// Geometry from the probe, never from a form: matching the departed ingest
-	// is what gives a `-c:v copy` destination a chance of riding the change, and
-	// a hand-typed 1080p over a 720p camera would be exactly the silent
-	// corruption this must not cause.
-	if v != nil {
-		spec.Width, spec.Height, spec.FPS = v.Width, v.Height, v.FrameRate
-	}
-
-	var fallback string
-	if sl.Encoder != "" {
-		if err := renditionEncoderProblem(e.tools, sl.Encoder); err != nil {
-			// Fails OPEN, and this is the one place in the pipeline where that
-			// matters most: a standby source exists to start when everything
-			// else has already failed, so an encoder we cannot vouch for costs
-			// a fallback to software, never a refusal to build a command.
-			fallback = err.Error()
-		} else {
-			// The device is left to SlateArgs' own default, exactly as a
-			// rendition leaves it: one place decides which render node VAAPI
-			// opens, and it is not this one.
-			spec.Encoder = string(sl.Encoder)
-		}
-	}
-
-	if p := strings.TrimSpace(sl.ImagePath); p != "" {
-		if err := sl.SlateImageProblem(); err != nil {
-			e.log.Warn("ignoring slate image; painting a flat colour instead",
-				"path", p, "err", err)
-		} else {
-			// Confined to the data directory, resolved here rather than stored
-			// absolute, exactly as a file:// pull source is.
-			spec.ImagePath = filepath.Join(e.cfg.DataDir, filepath.FromSlash(p))
-		}
-	}
-	return spec, fallback
-}
-
-// ----------------------------------------------------------- backup listener
-
-// backupIngestSig hashes everything the second listener's command depends on.
-func backupIngestSig(s db.Settings) string {
-	b := s.Failover.Backup
-	if !s.Failover.Enabled || !b.Enabled {
-		return ""
-	}
-	return hashStrings([]string{
-		string(b.Mode),
-		b.SRT.Passphrase, strconv.Itoa(b.SRT.LatencyMS),
-		b.RTMP.App, b.RTMP.StreamKey,
-		// The listener ports are install-wide now, but they still belong in
-		// this hash: changing one changes the command the backup runs.
-		strconv.Itoa(s.Listeners.SRTPort), strconv.Itoa(s.Listeners.RTMPPort),
-		b.Pull.URL, strconv.Itoa(b.Pull.ReconnectDelayMaxSeconds), b.Pull.RTSPTransport,
-	})
-}
-
-// reconcileBackupIngest starts, stops or restarts the second listener. The
-// caller must hold selMu.
-func (e *Engine) reconcileBackupIngest(s db.Settings) {
-	want := backupIngestSig(s)
-
-	e.mu.Lock()
-	cur := e.backup
-	e.mu.Unlock()
-	if cur != nil && cur.sig == want {
-		return
-	}
-
-	if cur != nil {
-		// The feed reads this hub, so it goes first — a feed left running
-		// across the teardown would spin on a relay that has gone away.
-		e.mu.Lock()
-		var feed *sourceFeed
-		if e.sel != nil && e.sel.feed != nil && e.sel.feed.kind == sourceBackup {
-			feed, e.sel.feed = e.sel.feed, nil
-			// See detachFeedForSilence: a deliberate teardown must not be
-			// mistaken for a start that failed.
-			e.sel.feedAt = time.Time{}
-		}
-		e.backup = nil
-		e.mu.Unlock()
-		e.teardownFeed(feed)
-		e.teardownBackup(cur)
-	}
-	if want == "" {
-		return
-	}
-
-	hub, err := relay.New(e.log, 0)
-	if err != nil {
-		e.log.Error("backup ingest: no relay", "err", err)
-		return
-	}
-	b := s.Failover.Backup
-	if b.Mode == db.IngestSRT {
-		// Same reasoning as the primary: the Go listener already holds the
-		// socket, and the backup is reached on it by publishing to
-		// `<token>.backup`. All this tier needs is the hub to receive into,
-		// which was created above.
-		e.mu.Lock()
-		e.backup = &backupIngest{hub: hub, sig: want}
-		e.mu.Unlock()
-		e.log.Info("backup ingest ready", "addressedBy", "<token>.backup",
-			"relayPort", hub.Port())
-		return
-	}
-	spec := ffmpeg.IngestSpec{
-		Kind:                  ffmpeg.IngestKind(b.Mode),
-		SRTPort:               s.Listeners.SRTPort,
-		SRTPassphrase:         b.SRT.Passphrase,
-		SRTLatencyMS:          b.SRT.LatencyMS,
-		RTMPPort:              s.Listeners.RTMPPort,
-		RTMPApp:               b.RTMP.App,
-		RTMPStreamKey:         b.RTMP.StreamKey,
-		PullURL:               b.Pull.URL,
-		PullDataDir:           e.cfg.DataDir,
-		PullReconnectDelayMax: b.Pull.ReconnectDelayMaxSeconds,
-		PullRTSPTransport:     b.Pull.RTSPTransport,
-		RelayURL:              hub.InputURL(),
-	}
-
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "backup-ingest", Kind: "ingest", Bin: e.tools.FFmpeg,
-		Args:        ffmpeg.IngestArgs(spec),
-		AutoRestart: true,
-		// Same reasoning as the primary listener: it exits whenever its
-		// streamer stops, and the backup of all things must be waiting again
-		// immediately rather than backing off toward half a minute.
-		MinBackoff: 500 * time.Millisecond,
-		MaxBackoff: 5 * time.Second,
-		OnLog:      e.onLog, OnState: e.onState, LogSink: logSink{e},
-	})
-
-	e.mu.Lock()
-	if e.stopped {
-		e.mu.Unlock()
-		_ = hub.Close()
-		return
-	}
-	e.backup = &backupIngest{proc: proc, hub: hub, sig: want}
-	e.mu.Unlock()
-
-	proc.Start()
-	e.log.Info("backup ingest started", "mode", b.Mode, "url", spec.PublicIngestURL("<server>"))
-}
-
-func (e *Engine) teardownBackup(b *backupIngest) {
-	if b == nil {
-		return
-	}
-	if b.proc != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		b.proc.Stop(ctx)
-		cancel()
-	}
-	if b.hub != nil {
-		_ = b.hub.Close()
-	}
-}
-
-// ------------------------------------------------------------ playlist tier
-
-// playlistItemUpload is item i's Upload, trimmed -- the ONE place engine.go
-// reads it, so playlistSig's hash and reconcilePlaylist's resolution cannot
-// disagree about what an item names.
-//
-// THE TRIM ITSELF IS db.PlaylistUploadName'S, not a copy of it. This function
-// exists for the bounds check and for being the single engine-side accessor;
-// the whitespace rule lives with the type, where internal/api can reach it too.
-// It used to carry its own strings.TrimSpace, and a second one appeared in
-// internal/api the moment the settings handler started reading items -- which
-// is the same three-way drift, starting again, that this helper was created to
-// end. See db.PlaylistUploadName for the failure.
-func playlistItemUpload(items []db.PlaylistItem, i int) string {
-	if i < 0 || i >= len(items) {
-		return ""
-	}
-	return db.PlaylistUploadName(items[i].Upload)
-}
-
-// playlistItemsReady reports whether every item could actually go on air:
-// every one has a derivative this profile produced.
-//
-// NORMALISATION IS ASYNCHRONOUS, so "an item names this upload" and "this item
-// can be played" are different states, and there is nothing else on disk that
-// tells them apart. An operator adds an item the moment their file finishes
-// uploading; the transcode that makes it playable is a queued job that runs
-// when the governor lets it, which on a machine that is busy carrying a live
-// stream is not immediately.
-//
-// THE FAILURE THIS PREVENTS: the playlist ranks ABOVE the slate. Start the tier
-// for a list whose first item is still transcoding and the selector is offered
-// a candidate that cannot play, in preference to the slate -- and the slate is
-// the one thing that exists so that an operator never sees nothing. Holding the
-// slate for another few seconds is the cheap outcome; handing the broadcast to
-// a file that is not there yet is not.
-//
-// IT ASKS ONE QUESTION: is there a non-empty derivative this profile produced?
-// It no longer asks whether the upload survives.
-//
-// B1 required the upload too, because the argv NAMED it: a deleted upload was a
-// tier respawn-looping on a missing file with the process reported healthy the
-// whole time. B2's argv names the concat list, every entry of which is a
-// derivative, so the original is never opened and that reason expired with it.
-// Keeping the stat would take a PLAYING programme off air because a source file
-// was tidied away -- punishing the operator for something the broadcast does not
-// depend on. A missing upload is a configuration problem the readiness endpoint
-// reports; it is not a reason to go to black. Validation governs what may be
-// SAVED, readiness governs what may go to AIR, and this is where they stop
-// swapping jobs.
-//
-// Confinement is not lost with the upload stat, it moves to where the path is
-// actually built: playlistmedia.DerivativePath reduces the name to its base
-// before joining, so no item name can name a file outside the derivative
-// directory -- which is the property -c copy's `-safe 0` list depends on, and
-// stronger than the uploads-directory check it replaces. An item that escapes
-// is refused earlier anyway: playlistSig hashes EMPTY when PlaylistFileProblem
-// fails, so an unusable list never reaches this function at all.
-//
-// This is NOT a second notion of availability. Sub-project A settled that a
-// candidate is available when its hub is delivering bytes, and chooseSource
-// sees one plain boolean for that; a parallel "ready" input would give the
-// selector two ways to be unavailable and make the golden table's claim to
-// exhaustiveness false. This decides whether the hub gets FED at all: an
-// unready playlist starts no tier, so playlistRunning stays false through the
-// existing byte-counter path and the slate wins by the ranking already there.
-//
-// An empty list is vacuously ready and never reaches here anyway: playlistSig
-// is empty for an enabled playlist with no items, so reconcilePlaylist has
-// already returned.
-//
-// It takes the items rather than reading e.settings because reconcilePlaylist
-// must gate the playlist it is ABOUT TO START -- the settings it was handed --
-// and not whatever the engine last stored. In production those are the same
-// value; Reconcile assigns e.settings before reconcileOutputs runs. Anywhere
-// else they are not, and a gate that consulted the wrong one would refuse or
-// admit a playlist other than the one being started.
-func (e *Engine) playlistItemsReady(items []db.PlaylistItem) bool {
-	for i := range items {
-		// playlistItemUpload is the ONE trim point shared with playlistSig, so
-		// readiness cannot disagree with the hash about what an item names.
-		upload := playlistItemUpload(items, i)
-		// The normalised copy, which is what says the transcode has finished AND
-		// is the exact file reconcilePlaylist puts in the concat list below.
-		// os.Stat, never a Resolve: Resolve is a shape check that never touches
-		// the disk, and the question here is existence.
-		//
-		// NON-EMPTY, not merely present. A zero-length file under the finished
-		// name is a transcode that died between create and first write, and
-		// nothing on disk distinguishes it from a finished one except its size.
-		// Admit it and the concat list names an empty file, FFmpeg exits at once
-		// and the tier respawn-loops while the process reports healthy -- the
-		// same shape as B1's deleted-upload loop, and it would do it in
-		// preference to the slate.
-		//
-		// The other three readers of this exact path already treat zero-length
-		// as absent: api.playlistItemStatus, api.enqueuePlaylistNormalisation
-		// and RunNormalise's already-normalised skip. This one decides what goes
-		// to AIR, so a disagreement here is the one that costs a broadcast --
-		// and it would show as an amber UI over a black output, with nothing
-		// reconciling the two.
-		fi, err := os.Stat(playlistmedia.DerivativePath(e.cfg.DataDir, upload))
-		if err != nil || fi.Size() == 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// playlistSig hashes everything the playlist's command depends on, and is empty
-// when the tier must not run.
-//
-// An unusable list hashes empty rather than being started and left to fail:
-// PlaylistFileProblem is the same confinement a file:// pull source and the
-// slate's still are held to, and an item that fails it is operator input
-// trying to name something other than a stored upload, not a file to hand
-// FFmpeg anyway.
-func playlistSig(s db.Settings) string {
-	p := s.Failover.Playlist
-	if !s.Failover.Enabled || !p.Enabled {
-		return ""
-	}
-	if p.PlaylistFileProblem() != nil {
-		return ""
-	}
-	// Every item's name is part of the hash, and in order, so re-sequencing
-	// the list (once sequencing exists) respawns exactly as editing one entry
-	// does now.
-	parts := make([]string, 0, len(p.Items)+1)
-	parts = append(parts, "playlist")
-	for i := range p.Items {
-		parts = append(parts, playlistItemUpload(p.Items, i))
-	}
-	return hashStrings(parts)
-}
-
-// playlistFeedArgs builds the loop that publishes the WHOLE list into the
-// playlist's own hub. It is the backup's command with a concat list where the
-// socket was: `-map 0 -c copy`, so a programme that was encoded once is not
-// re-encoded here.
-//
-// -f concat over every item's derivative, looped as a whole rather than per
-// item, so the list plays in order and then starts again from the top.
-//
-// THE LIST NAMES DERIVATIVES, which is the point of B1: every entry shares
-// codec, timebase, geometry and channel layout by construction, so `-c copy`
-// across a seam is a copy and not a codec change.
-//
-// -safe 0 because the list holds absolute paths. They are paths this process
-// built through playlistmedia.DerivativePath, from a name uploads.SafeName had
-// already sanitised and DerivativePath then reduces to its base -- never
-// operator text reaching FFmpeg as written, which is the whole reason items
-// reference uploads rather than paths.
-//
-// ALWAYS CONCAT, EVEN FOR ONE ITEM. A single-file special case would mean two
-// argv shapes, two sets of seam behaviour, and a branch that is wrong in a way
-// nobody notices until the one-item playlist is the one on air.
-//
-// NO `duration` DIRECTIVES ARE EMITTED, and that is a measured result rather
-// than a preference: three real derivatives were concatenated, looped past two
-// full wraps and probed over 1068 packets with and without the per-entry
-// directives. See internal/playlistmedia/concat_behaviour_test.go.
-//
-// The packet streams are identical ONLY WHEN THE DIRECTIVE IS EXACT. An earlier
-// version of this comment said "byte-identical either way" without that clause,
-// and the measurement does not support it: at three decimals the directive is
-// 333 microseconds short of the file and every packet after the first item
-// shifts. ffmpeg.ConcatList renders `%.3f` because ConcatEntry.DurationMS is
-// MILLISECONDS, so the only directives this product could emit are the
-// inaccurate kind -- which is an argument for leaving the field zero, not
-// against it. The field survives for a profile that drifts far enough to need
-// it, and whoever turns it on needs sub-millisecond precision first.
-//
-// The two input flags are the whole difference from every other feed, and
-// neither is optional. -stream_loop -1 is what makes a file that ends look like
-// a source that does not, so the tier is still delivering an hour later instead
-// of exiting once and leaving the selector with a candidate that vanished.
-// Without -re FFmpeg reads a file as fast as the disk allows: an hour of
-// programme arrives at the relay in seconds, the hub's consumers are handed a
-// timeline racing away from wall clock, and what an operator sees is a playlist
-// that "played" and disappeared. The same pair, for the same reason, is what
-// pullFile emits for a file:// ingest.
-//
-// The "file:" prefix pins the LIST to the file protocol, as B1 pinned the
-// upload path and as pullFile and pullSource pin theirs.
-//
-// WHAT IT ACTUALLY PROTECTS IS NARROWER THAN IT LOOKS, and the boundary was
-// measured against FFmpeg 8.1.2 rather than reasoned about. FFmpeg infers a
-// protocol from the characters before the first ":" ONLY while no "/" has
-// appeared, so:
-//
-//   - "2026:01/data/list.txt" -- a RELATIVE data directory whose first segment
-//     carries a colon -- fails with "Protocol not found" unprefixed, and opens
-//     with the prefix. This is the case the prefix buys.
-//   - "/mnt/2026:01/data/list.txt" is fine either way. An ABSOLUTE path can
-//     never be misread, because the leading "/" ends protocol detection before
-//     the colon is reached.
-//   - "data/a:b/list.txt" is fine either way, for the same reason.
-//
-// So the widely-repeated worry -- an operator's data directory containing a
-// colon -- is NOT a failure for any absolute DataDir, which is the ordinary
-// case. The prefix is kept because it makes the guarantee unconditional instead
-// of resting on that argument, it costs one string concatenation, and it keeps
-// every file input in this package spelled the same way. It is not load bearing
-// for a deployment that configures an absolute data directory.
-//
-// THE FILE'S CODEC PARAMETERS MUST MATCH THE INGEST'S, AND NOTHING CHECKS.
-// `-c copy` here and a copy hop in startFeed mean the file's codec, resolution,
-// frame rate and pixel format reach every destination exactly as they were
-// encoded. A destination that is also copying passes them straight to the
-// platform, so switching to a file that differs is a mid-stream codec change --
-// and platforms answer that by dropping the connection, which is the one thing
-// this whole tier exists to prevent. The slate re-encodes to the ingest's
-// PROBED geometry for precisely this reason; the playlist cannot, because
-// re-encoding a programme that was already encoded once is a cost an operator
-// did not ask for. scripts/acceptance-failover.sh builds its filler clip to
-// match the publisher deliberately, and says so.
-//
-// It is not validated here because validation would mean probing the operator's
-// file at settings-save time and comparing it against an ingest that may not be
-// connected yet -- a feature with its own failure modes (an unprobeable file, a
-// geometry that changes when the encoder reconnects), not a check this function
-// can make from an argv. Until that exists the constraint is documented where
-// an operator meets it, in docs/SCHEDULED-BROADCAST.md.
-func playlistFeedArgs(listPath, outURL string) []string {
-	return []string{
-		"-hide_banner", "-nostdin", "-loglevel", "warning",
-		"-nostats", "-progress", "pipe:1",
-		"-stream_loop", "-1",
-		"-re",
-		// Each entry's own timestamps restart at every seam and at every loop
-		// boundary; genpts gives the relay a monotonic base without touching the
-		// payload.
-		"-fflags", "+genpts",
-		"-f", "concat", "-safe", "0", "-i", "file:" + listPath,
-		"-map", "0",
-		"-c", "copy",
-		"-f", "mpegts",
-		"-flush_packets", "1",
-		ffmpeg.RelayOutputURL(outURL),
-	}
-}
-
-// reconcilePlaylist starts, stops or restarts the playlist tier. The caller
-// must hold selMu.
-//
-// Signature-compared rather than restarted unconditionally, exactly as the
-// backup listener is: a respawn is visible downstream -- the hub goes quiet
-// while FFmpeg reopens the file and the loop restarts from the top -- so a
-// settings save that touches the recorder or a destination must not cost the
-// playlist a gap. The no-op is the common case, not the optimisation.
-func (e *Engine) reconcilePlaylist(s db.Settings) {
-	want := playlistSig(s)
-
-	e.mu.Lock()
-	cur := e.playlist
-	e.mu.Unlock()
-	if cur != nil && cur.sig == want {
-		return
-	}
-
-	// READINESS IS EVALUATED BEFORE ANYTHING IS TORN DOWN, and the order is the
-	// whole of this check. It used to sit after the teardown block below, so an
-	// operator who appended one item to a playlist that was ON AIR moved the
-	// signature, lost the running tier to the teardown, and then had the gate
-	// refuse to bring it back because the new item had not been normalised yet.
-	// That is dead air, bought for an item B1 would not have played anyway --
-	// it still plays item 0 only -- and it lasted until some unrelated event
-	// happened to reconcile again. Refusing HERE leaves the running tier
-	// exactly as it was, still recorded under the OLD signature, so the next
-	// reconcile after the transcode lands still sees a mismatch and respawns
-	// onto the new list. Nothing is latched.
-	//
-	// Only when want is non-empty. An empty signature means the playlist must
-	// STOP -- the operator disabled it, or the items no longer pass
-	// PlaylistFileProblem -- and a stop must never be held up by a readiness
-	// question about a list that is not going on air.
-	if want != "" && !e.playlistItemsReady(s.Failover.Playlist.Items) {
-		e.log.Info("playlist not started; not every item has been normalised yet",
-			"items", s.Failover.Playlist.Items,
-			"alreadyRunning", cur != nil,
-			"reason", "the playlist ranks above the slate, so a tier started for an item "+
-				"that cannot play would displace the source that exists so an operator "+
-				"never sees nothing; a finished normalisation job reconciles again")
-		return
-	}
-
-	if cur != nil {
-		// The feed reads this hub, so it goes first -- a feed left running
-		// across the teardown would spin on a relay that has gone away. This
-		// is now a live hazard rather than a precaution: startFeed builds a
-		// playlist copy hop out of exactly the hub being closed two lines below.
-		e.mu.Lock()
-		var feed *sourceFeed
-		if e.sel != nil && e.sel.feed != nil && e.sel.feed.kind == sourcePlaylist {
-			feed, e.sel.feed = e.sel.feed, nil
-			// See detachFeedForSilence: a deliberate teardown must not be
-			// mistaken for a start that failed.
-			e.sel.feedAt = time.Time{}
-		}
-		// A TIER THAT HAS BEEN TORN DOWN MUST NOT READ AS DELIVERING, and this
-		// is the line that makes that true at the instant it stops being a
-		// place to send viewers rather than up to a sweep later.
-		//
-		// The liveness this zeroes is the ONLY thing candidatesFor consults
-		// about the playlist. Leave it standing and the very next decision --
-		// applySourceChoice, which reconcileSelector calls immediately after
-		// this function with no sample in between -- reads a counter describing
-		// a hub that has just been closed, holds the playlist, and asks
-		// startFeed for a relay that no longer exists. What an operator does to
-		// reach that is not exotic: they untick the playlist while it is on
-		// air. The result was roughly two seconds of dead air on every
-		// destination, because the sweep that would have corrected it arrives
-		// after ensureFeed's failed-start backoff has already begun.
-		//
-		// Zeroed HERE rather than gated in candidatesFor on
-		// Failover.Playlist.Enabled, which was the other candidate fix and is
-		// the shape the backup's own line has. That gate would answer the
-		// untick and nothing else: playlistSig is also empty when the whole
-		// failover feature goes off and when the file path fails confinement,
-		// and it changes for a path EDIT, which closes this hub and builds a
-		// fresh one counting from zero. In every one of those the setting still
-		// reads enabled while the hub is gone or new, so a gate on the setting
-		// would leave the same stale-liveness hole open under a different
-		// cause. One assignment at the single place the tier can go away covers
-		// all four, and it keeps chooseSource's inputs describing DELIVERY
-		// rather than mixing in a process fact -- which is what the comment on
-		// sourceChoice.playlistRunning promises a reader.
-		if e.sel != nil {
-			if pl := e.sel.live[sourcePlaylist]; pl != nil {
-				*pl = liveness{}
-			}
-		}
-		e.playlist = nil
-		e.mu.Unlock()
-		e.teardownFeed(feed)
-		e.teardownPlaylist(cur)
-	}
-	if want == "" {
-		if s.Failover.Enabled && s.Failover.Playlist.Enabled {
-			// Only reachable through settings that never passed validation --
-			// db.Settings.Validate rejects an item that fails PlaylistFileProblem
-			// -- so it is said out loud rather than left as a tier that quietly
-			// never starts.
-			e.log.Warn("playlist not started; its items are unusable",
-				"items", s.Failover.Playlist.Items,
-				"err", s.Failover.Playlist.PlaylistFileProblem())
-		}
-		return
-	}
-
-	// READINESS GATED THE START ABOVE, before the teardown, and that is the
-	// whole of it -- there is no second availability input anywhere below. A
-	// playlist that is not ready starts no tier, so it has no hub, so
-	// playlistRunning stays false through the byte counter sampleSources
-	// already reads, and the slate wins on the ranking that is already there.
-	//
-	// Re-read on every reconcile rather than watched: an unready reconcile
-	// records no tier, so the next one re-evaluates for free. What FIRES that
-	// next reconcile when the last normalisation job finishes is
-	// cmd/polyemesis/postprod.go's queue change hook, which calls
-	// Manager.Reconcile for a completed playlistmedia.KindNormalise. Without
-	// it nothing would: reconcilePlaylist is reached only from Reconcile, and
-	// Reconcile is only called by settings saves, the API, the manager and the
-	// scheduler -- none of which a finished job is.
-	hub, err := relay.New(e.log, 0)
-	if err != nil {
-		e.log.Error("playlist: no relay", "err", err)
-		return
-	}
-
-	// EVERY ITEM, IN ORDER, AND IT PLAYS THE DERIVATIVES. The gate above has
-	// already required a derivative for every item; these are the very files it
-	// stat'd, and the operator's originals are not opened at all. That is what
-	// makes the fixed normalised profile load bearing rather than bookkeeping:
-	// the concat demuxer requires every file in the list to share codecs,
-	// timebase, resolution and channel layout, and `-c copy` across a seam is
-	// only a copy because B1 guaranteed it.
-	//
-	// Built through playlistmedia.DerivativePath, never a join of our own, so
-	// the profile version in the filename cannot drift from the one the
-	// normaliser writes -- and so the name is reduced to its base on the way,
-	// which is the confinement standing behind `-safe 0`.
-	//
-	// No per-entry `duration` directives: DurationMS is left zero deliberately.
-	// Three real derivatives, looped past two full wraps, 1068 packets probed
-	// with and without them -- identical ONLY when the directive is exact, and
-	// ConcatList renders milliseconds. See the fuller note above playlistFeedArgs
-	// and internal/playlistmedia/concat_behaviour_test.go.
-	// ABSOLUTE, and that is a bug fix rather than tidiness.
-	//
-	// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN
-	// DIRECTORY -- and the list lives in <dataDir>/playlist-media, which is
-	// exactly the prefix a relative DerivativePath already carries. So
-	// `--data data` produced entries like `data/playlist-media/x.ts.v2.ts` in a
-	// list at `data/playlist-media/`, the demuxer looked for
-	// `data/playlist-media/data/playlist-media/x.ts.v2.ts`, and the tier
-	// respawn-looped on a file that was sitting right there. Readiness had
-	// already stat'd it and passed, because readiness resolves paths from the
-	// process's working directory the way every other caller does.
-	//
-	// Nothing shipped hits it -- deployments pass an absolute --data and the
-	// engine's own tests build one with t.TempDir() -- which is precisely why it
-	// survived: every existing caller happened to be absolute, so the one that
-	// is not had nothing watching it. Found by the acceptance suite.
-	items := s.Failover.Playlist.Items
-	entries := make([]ffmpeg.ConcatEntry, 0, len(items))
-	for i := range items {
-		p := playlistmedia.DerivativePath(e.cfg.DataDir, playlistItemUpload(items, i))
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			// Only when the working directory cannot be read, which is a great
-			// deal more wrong than one playlist. Said out loud rather than
-			// silently feeding the demuxer a path it will double.
-			e.log.Error("playlist: cannot make a derivative path absolute",
-				"path", p, "err", err)
-			return
-		}
-		entries = append(entries, ffmpeg.ConcatEntry{Path: abs})
-	}
-
-	// THE FILENAME CARRIES THE SIGNATURE AND THIS ENGINE'S SOURCE ID, and it
-	// needs both.
-	//
-	// The signature alone fixes the different-list overwrite but not the
-	// identical-list case. internal/engine/manager.go runs ONE ENGINE PER
-	// SOURCE over a shared data directory, so two sources configured with the
-	// same playlist hash the same: one tier stopping would delete a file the
-	// other's FFmpeg is still re-reading at its next wrap, and the second source
-	// would drop off air for a reason nothing in its own configuration changed.
-	// A tier deletes only the path it holds, and only once its process is gone.
-	listPath := filepath.Join(playlistmedia.DerivativeDir(e.cfg.DataDir),
-		fmt.Sprintf("playlist-%d-%s.txt", e.sourceID, want))
-	if err := os.MkdirAll(filepath.Dir(listPath), 0o755); err != nil {
-		e.log.Error("playlist: no derivative directory for the list", "err", err)
-		_ = hub.Close()
-		return
-	}
-	if err := os.WriteFile(listPath, []byte(ffmpeg.ConcatList(entries)), 0o600); err != nil {
-		// Written BEFORE the process is spawned, so a list that cannot be
-		// written is a tier that never starts rather than one that respawn-loops
-		// on a file it will never find.
-		e.log.Error("playlist: cannot write the concat list", "path", listPath, "err", err)
-		_ = hub.Close()
-		return
-	}
-
-	proc := supervisor.New(e.log, supervisor.Spec{
-		Name: "playlist", Kind: "source", Bin: e.tools.FFmpeg,
-		Args: playlistFeedArgs(listPath, hub.InputURL()),
-		// AutoRestart, unlike a selector feed: this process publishes into its
-		// OWN hub and carries no timestamp offset, so there is nothing for a
-		// sweep to rebuild and no reason to make an operator wait for one. A
-		// file that FFmpeg cannot open backs off toward five seconds and says so
-		// every time, which is what the supervisor's backoff is for.
-		AutoRestart: true,
-		MinBackoff:  500 * time.Millisecond,
-		MaxBackoff:  5 * time.Second,
-		OnLog:       e.onLog, OnState: e.onState, LogSink: logSink{e},
-	})
-
-	e.mu.Lock()
-	if e.stopped {
-		e.mu.Unlock()
-		_ = hub.Close()
-		// No tier is recorded, so nothing else will ever own this file. It is
-		// removed here or not at all.
-		_ = os.Remove(listPath)
-		return
-	}
-	e.playlist = &playlistTier{proc: proc, hub: hub, sig: want, listPath: listPath}
-	e.mu.Unlock()
-
-	proc.Start()
-	e.log.Info("playlist started", "list", listPath, "items", len(entries),
-		"relayPort", hub.Port(),
-		"reason", "a playlist publishes into a hub of its own, so a file on air "+
-			"never makes the primary ingest read live")
-}
-
-func (e *Engine) teardownPlaylist(p *playlistTier) {
-	if p == nil {
-		return
-	}
-	if p.proc != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		p.proc.Stop(ctx)
-		cancel()
-	}
-	if p.hub != nil {
-		_ = p.hub.Close()
-	}
-	// AFTER Stop returns, and only the path this tier wrote.
-	//
-	// After, because the concat demuxer re-reads the list at every wrap: remove
-	// it while the process is still running and a tier that was asked to stop
-	// spends its last seconds failing to reopen its own input, logging as though
-	// something were wrong. Only this path, because another source may hold an
-	// identically-hashed list of its own -- which is why the filename carries a
-	// source id at all.
-	//
-	// The error is dropped deliberately. A list that is already gone is the
-	// ordinary outcome of a data directory cleaned up underneath us, and there
-	// is nothing a stopping tier could usefully do about it.
-	if p.listPath != "" {
-		_ = os.Remove(p.listPath)
-	}
-}
-
-// ------------------------------------------------------- failover: operator
-
-// SwitchSource puts one source on air by hand.
-//
-// "auto" hands the decision back to the detector. Anything else is honoured
-// only while that source is delivering, which is what makes a manual return
-// safe: a pin cannot strand the broadcast on an input that has since died.
-func (e *Engine) SwitchSource(kind string) error {
-	var want sourceKind
-	switch sourceKind(strings.ToLower(strings.TrimSpace(kind))) {
-	case sourcePrimary:
-		want = sourcePrimary
-	case sourceBackup:
-		want = sourceBackup
-	case sourceSlate:
-		want = sourceSlate
-	case sourcePlaylist:
-		// Accepted only now that a playlist feed can actually be built. The pin
-		// itself has been honoured by the decision since the candidate was
-		// added; this list was the one thing keeping an operator from setting
-		// it, and it stayed shut on purpose while a decision of "playlist"
-		// would have reached a feed layer that could not run one.
-		want = sourcePlaylist
-	case sourceNone, "auto":
-		want = sourceNone
-	default:
-		return fmt.Errorf("unknown source %q (primary, backup, slate, playlist, auto)", kind)
-	}
-
-	e.selMu.Lock()
-	defer e.selMu.Unlock()
-
-	e.mu.Lock()
-	if e.sel == nil || e.sel.hub == nil {
-		e.mu.Unlock()
-		return fmt.Errorf("failover is not enabled, so there is nothing to switch between")
-	}
-	prev := e.sel.pinned
-	e.sel.pinned = want
-	e.mu.Unlock()
-
-	// The pin has to be committed before the decision, because the decision
-	// reads it. That makes rolling it back the only way to keep the pin and
-	// what actually happened in step: a failed decision switched nothing, and a
-	// pin that survived one would be LATCHED -- re-read by every 500ms sweep,
-	// re-panicking on the same input forever, with the dashboard showing a
-	// pinned source that is not the active one and the operator holding an
-	// HTTP 200 that said it worked. Rolled back under e.mu exactly as it was
-	// set, and still inside the selMu the whole method holds, so no sweep can
-	// observe the pin between the failure and the rollback. Nothing is
-	// published: the state is what it was before the call.
-	if err := e.applySourceChoice(e.Settings(), e.heldSilence(), time.Now()); err != nil {
-		e.mu.Lock()
-		if e.sel != nil {
-			e.sel.pinned = prev
-		}
-		e.mu.Unlock()
-		e.log.Error("source selection was not applied; the pin was rolled back",
-			"source", e.sourceID, "requested", kind, "err", err)
-		return fmt.Errorf("could not select source %q: %w", kind, err)
-	}
-
-	// Logged only once the switch has actually been applied. Announcing it
-	// first is how the log came to say a source was selected on sweeps where
-	// nothing was.
-	if want == sourceNone {
-		e.log.Info("source selection returned to automatic")
-	} else {
-		e.log.Info("source selected by operator", "source", string(want))
-	}
-	e.publishStatus()
-	return nil
-}
-
-// FailoverStatus is the tier as the dashboard reports it. Absent entirely when
-// the tier is not running, which is the default.
-type FailoverStatus struct {
-	Active sourceKind `json:"active"`
-	Reason string     `json:"reason,omitempty"`
-	// Pinned is the operator's manual choice, empty when the detector is in
-	// charge.
-	Pinned     sourceKind `json:"pinned,omitempty"`
-	SwitchedAt time.Time  `json:"switchedAt"`
-	Switches   int        `json:"switches"`
-	Error      string     `json:"error,omitempty"`
-	RelayPort  int        `json:"relayPort,omitempty"`
-
-	PrimaryLive   bool `json:"primaryLive"`
-	BackupLive    bool `json:"backupLive"`
-	BackupEnabled bool `json:"backupEnabled"`
-	SlateEnabled  bool `json:"slateEnabled"`
-
-	Feed   *supervisor.Status `json:"feed,omitempty"`
-	Backup *supervisor.Status `json:"backup,omitempty"`
-}
-
-// Failover returns the tier's live state, or nil when there is none.
-func (e *Engine) Failover() *FailoverStatus {
-	s := e.Settings()
-	now := time.Now()
-	grace := failoverGrace(s)
-
-	// Everything the tier owns is copied out under the lock — the mutable
-	// fields as VALUES, not through the selector pointer, because the failover
-	// sweep is writing them from another goroutine. Only the two process
-	// handles leave the lock, and those are read the way every other status
-	// reads them: after it is released, so a state callback cannot deadlock
-	// against a snapshot being taken.
-	e.mu.RLock()
-	sel := e.sel
-	if sel == nil {
-		e.mu.RUnlock()
-		return nil
-	}
-	st := &FailoverStatus{
-		Active:        sel.active,
-		Reason:        sel.reason,
-		Pinned:        sel.pinned,
-		SwitchedAt:    sel.switchedAt,
-		Switches:      sel.switches,
-		Error:         sel.err,
-		BackupEnabled: s.Failover.Backup.Enabled,
-		SlateEnabled:  s.Failover.Slate.Enabled,
-	}
-	if sel.hub != nil {
-		st.RelayPort = sel.hub.Port()
-	}
-	if sel.live != nil {
-		st.PrimaryLive = sel.live[sourcePrimary].alive(now, grace)
-		st.BackupLive = st.BackupEnabled && sel.live[sourceBackup].alive(now, grace)
-	}
-	var feedProc, backupProc *supervisor.Process
-	if sel.feed != nil {
-		feedProc = sel.feed.proc
-	}
-	if e.backup != nil {
-		backupProc = e.backup.proc
-	}
-	e.mu.RUnlock()
-
-	st.Feed = procStatus(feedProc)
-	st.Backup = procStatus(backupProc)
-	return st
-}
-
 // ------------------------------------------------------------------ probing
 
 // probeLoop keeps the ingest's track layout up to date.
@@ -4498,16 +2510,44 @@ func (e *Engine) probeLoop(ctx context.Context) {
 		next := fast
 		if flowing {
 			idleRounds = 0
-			if changed := e.probeOnce(ctx); changed {
+			// The hold's exit is a STATE TRANSITION, not a layout change, and
+			// reconciling only on `changed` left the exit inert.
+			//
+			// probeOnce returns false on every failure, so the fifth one -- the
+			// one that declares the layout unmeasurable -- looked identical to
+			// the four before it. The log line went out, and nothing re-planned:
+			// destinations stayed held until some unrelated HTTP request
+			// happened to call Reconcile, which on an unattended box is never.
+			// The fix for a permanent outage that was itself permanently inert.
+			wasUnmeasurable := e.probeUnmeasurable()
+			changed := e.probeOnce(ctx)
+			if changed || e.probeUnmeasurable() != wasUnmeasurable {
 				// Layout changed: the meters process and every destination
 				// graph were built against the old one, and a rendition that
 				// inherits the source frame rate has a keyframe interval
 				// derived from it. The recorder is in this list only when it
 				// is writing stems, which are planned one per probed track —
 				// its signature is unchanged otherwise, so this costs nothing.
+				//
+				// UNDER reconcileMu, which this used to skip. Reconcile holds it
+				// end to end (see the field comment); this path is the only other
+				// production caller of reconcileOutputs, and unserialised the two
+				// now DISAGREE where they used to agree. `measured` flips inside
+				// the probeOnce just above, so a Reconcile that snapshotted
+				// measured=false is still mid-pass holding an empty plan set
+				// while this pass sees measured=true and starts every
+				// destination -- then that pass reaches stopDestinations({}) and
+				// tears down everything this one just started. Nothing restarts
+				// them: the layout is stable so no later probe reports `changed`,
+				// and Reconcile is event-driven with no ticker.
+				//
+				// Taken HERE, not inside reconcileOutputs: Reconcile already
+				// holds it when it calls that, and the mutex is not reentrant.
+				e.reconcileMu.Lock()
 				e.reconcileMeters(e.Settings())
 				e.reconcileRecorder(e.Settings())
 				_ = e.reconcileOutputs()
+				e.reconcileMu.Unlock()
 				e.publishStatus()
 			}
 			e.mu.RLock()
@@ -4524,7 +2564,7 @@ func (e *Engine) probeLoop(ctx context.Context) {
 			if idleRounds >= 3 {
 				e.mu.Lock()
 				wasProbed := e.probed
-				e.probed = false
+				e.clearProbed()
 				e.mu.Unlock()
 				if wasProbed {
 					e.log.Info("ingest stopped; track layout cleared")
@@ -4547,12 +2587,40 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	url := e.hub.Subscribe(name, port)
 	defer e.hub.Unsubscribe(name)
 
+	// Captured BEFORE the read, checked before the write. Everything between is
+	// up to ten seconds during which the ingest can be restarted or switched to
+	// another transport; see sourceGen.
+	e.mu.RLock()
+	gen := e.sourceGen
+	e.mu.RUnlock()
+
 	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	res, err := ffmpeg.Probe(pctx, e.tools.FFprobe, url, 3)
 	if err != nil {
+		// SAY SO. This used to return silently, and silence here is expensive:
+		// destinations are held until a probe lands, so a probe that can never
+		// land (missing ffprobe, an unusable stream) leaves every destination
+		// down with nothing anywhere explaining why.
+		//
+		// Logged once per run of failures rather than every time. probeLoop
+		// retries on a 3s cadence while bytes are flowing, and an unconditional
+		// line here would bury the rest of the log within minutes.
+		if n := e.probeFails.Add(1); !e.probeFailed.Swap(true) {
+			e.log.Warn("ingest probe failed; destinations are held until a layout is measured",
+				"err", err, "source", e.sourceID)
+		} else if n == probeGiveUp {
+			// The transition out of the hold, said once and plainly. An operator
+			// whose destinations just came up carrying an approximate mix needs
+			// to be able to find out why from the log alone.
+			e.log.Warn("ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices",
+				"failures", n, "err", err, "source", e.sourceID)
+		}
 		return false
+	}
+	if e.probeFailed.Swap(false) {
+		e.log.Info("ingest probe recovered", "source", e.sourceID)
 	}
 	// A probe that succeeded and found no audio is a RESULT, not a failure, and
 	// it used to be thrown away here. It is the only evidence that an ingest is
@@ -4565,8 +2633,20 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	if res.Video == nil && len(res.Audio) == 0 {
 		// Neither video nor audio is not a video-only stream, it is a probe that
 		// read a few packets of something it could not identify yet.
+		//
+		// COUNTS TOWARD GIVING UP. A probe that ran and identified nothing is
+		// exactly as unmeasurable as one that could not run, and this is the
+		// "unidentifiable stream" case the hold's exit was written for. The
+		// reset used to sit above this return, so this branch cleared the
+		// counter on every attempt and it could never reach probeGiveUp --
+		// which left the one shape the exit most needed to cover wedged in the
+		// hold forever. Both reviewers found it independently.
+		e.probeFails.Add(1)
 		return false
 	}
+	// Reset only once there is a real result to commit. Anything that returns
+	// before this point failed to measure the layout, whatever the reason.
+	e.probeFails.Store(0)
 
 	src := routing.Source{}
 	for _, a := range res.Audio {
@@ -4582,9 +2662,15 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	// started before the first probe is running on the assumed rate.
 	changed := !sameSource(e.source, src) || !e.probed ||
 		probedFPS(e.videoInfo) != probedFPS(res.Video)
-	e.source = src
-	e.probed = true
-	e.videoInfo = res.Video
+	if e.sourceGen != gen {
+		// The ingest was restarted or switched while this probe was reading, so
+		// what it measured belongs to a stream that is no longer arriving.
+		// Committing it would mark a dead transport's layout `measured` under
+		// the new mode and satisfy the guard permanently.
+		e.mu.Unlock()
+		return false
+	}
+	e.commitProbe(src, res.Video, e.settings.Ingest.Mode)
 	e.mu.Unlock()
 
 	if changed {
@@ -4643,6 +2729,23 @@ func (e *Engine) Source() routing.Source {
 	return e.effectiveSource()
 }
 
+// SourceKnown is Source plus whether that layout is a MEASUREMENT or the
+// placeholder, so a caller can say which it is showing.
+//
+// Source() alone discards the bit, and every API path that compiles a routing
+// preview used it. The result was that an unprobed engine handed the operator a
+// filterComplex containing [0:a:5] and 2-channel pans, labelled as their
+// destination's routing, while reconcileOutputs was refusing to run that very
+// graph -- the screen and the process disagreeing, in the direction that makes
+// the placeholder look authoritative.
+//
+// Deliberately NOT a refusal. Configuring destinations before any stream has
+// connected is the normal order (see the refuseIfSilent reasoning in the API),
+// so the preview stays; it just has to admit what it is compiled from.
+func (e *Engine) SourceKnown() (routing.Source, bool) {
+	return e.effectiveSourceKnown()
+}
+
 // SourceInfo is the ingest layout as the API reports it.
 type SourceInfo struct {
 	// ID and Name identify the programme this snapshot belongs to. They are
@@ -4669,18 +2772,32 @@ type SourceInfo struct {
 // is the probe's unless the silence tier is standing in for it.
 func (e *Engine) SourceInfo() SourceInfo {
 	e.mu.RLock()
-	probed, src, video := e.probed, e.source, e.videoInfo
-	name := e.sourceName
-	synthetic := e.silence != nil && e.silence.hub != nil
-	e.mu.RUnlock()
+	defer e.mu.RUnlock()
+	return e.sourceInfoLocked()
+}
 
+// sourceInfoLocked is SourceInfo for a caller that already holds e.mu.
+//
+// It exists so Status can read the process states and the source layout under
+// ONE acquisition instead of two. Between two acquisitions a reconcile can land,
+// and the snapshot then pairs the ingest's state with a layout from a different
+// instant -- "running" beside a track list that has just been invalidated, which
+// reads to an operator as a fault that is not there.
+//
+// It does not make the WHOLE snapshot atomic, and that is deliberate rather than
+// forgotten: Renditions, Loudness, ClipBuffer and Failover go to the database or
+// to subsystems with their own mutexes, and holding e.mu across a database query
+// to tidy a display inconsistency would be a bad trade. See status.go.
+func (e *Engine) sourceInfoLocked() SourceInfo {
+	src, video := e.source, e.videoInfo
+	synthetic := e.silence != nil && e.silence.hub != nil
 	if synthetic {
 		src = synthTrack()
 	}
 	return SourceInfo{
-		ID: e.sourceID, Name: name,
-		Probed: probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
-		Annotations: e.Settings().Ingest.Annotations,
+		ID: e.sourceID, Name: e.sourceName,
+		Probed: e.probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
+		Annotations: e.settings.Ingest.Annotations,
 	}
 }
 
@@ -5743,290 +3860,6 @@ func (e *Engine) diskState() alerts.DiskState {
 	}
 }
 
-// ------------------------------------------------------------------- status
-
-// DestStatus is one destination's live state, as the dashboard renders it.
-type DestStatus struct {
-	ID            int64              `json:"id"`
-	Name          string             `json:"name"`
-	Kind          db.DestKind        `json:"kind"`
-	Platform      db.Platform        `json:"platform"`
-	Enabled       bool               `json:"enabled"`
-	Summary       string             `json:"summary"`
-	Tracks        []int              `json:"tracks"`
-	FilterComplex string             `json:"filterComplex"`
-	Normalization routing.NormMode   `json:"normalization"`
-	Warnings      []string           `json:"warnings"`
-	Error         string             `json:"error,omitempty"`
-	Process       *supervisor.Status `json:"process,omitempty"`
-	// RenditionID is the shared encode this destination reads, nil for
-	// passthrough. RenditionName is its label, empty for passthrough, so the
-	// dashboard can group destinations under the encode they share.
-	RenditionID   *int64 `json:"renditionId,omitempty"`
-	RenditionName string `json:"renditionName,omitempty"`
-	// BackupProcess is the redundant output's live state, absent when this
-	// destination has none.
-	//
-	// Reported separately rather than folded into Process, because a backup
-	// that has been dead for an hour beside a healthy primary is the single
-	// state this feature must never hide: the operator believes they have
-	// redundancy, which is worse than knowing they do not.
-	BackupProcess *supervisor.Status `json:"backupProcess,omitempty"`
-	// BackupError says why there is no backup when one was asked for.
-	BackupError string `json:"backupError,omitempty"`
-	// FacebookBroadcastID is the pre-announced scheduled broadcast, when one
-	// exists. Carried on the live status rather than left on the stored row
-	// because the card is where an operator looks, and a public event page
-	// created on their behalf that they cannot reach is half a feature.
-	FacebookBroadcastID string `json:"facebookBroadcastId,omitempty"`
-}
-
-// RenditionStatus is one shared video encode's live state.
-//
-// Consumers is the ref count the engine acted on: a rendition with none has no
-// process, by design, and the dashboard should say so rather than show it as
-// failed.
-type RenditionStatus struct {
-	ID           int64              `json:"id"`
-	Name         string             `json:"name"`
-	Width        int                `json:"width"`
-	Height       int                `json:"height"`
-	FPS          int                `json:"fps"`
-	VideoBitrate int                `json:"videoBitrate"`
-	Encoder      db.VideoEncoder    `json:"encoder"`
-	Codec        string             `json:"codec"`
-	Consumers    int                `json:"consumers"`
-	RelayPort    int                `json:"relayPort,omitempty"`
-	Error        string             `json:"error,omitempty"`
-	Process      *supervisor.Status `json:"process,omitempty"`
-}
-
-// Status is the whole-system snapshot pushed over the WebSocket.
-type Status struct {
-	Ingest   *supervisor.Status `json:"ingest,omitempty"`
-	Recorder *supervisor.Status `json:"recorder,omitempty"`
-	Preview  *supervisor.Status `json:"preview,omitempty"`
-	Meters   *supervisor.Status `json:"meters,omitempty"`
-	// Silence is the synthetic-audio tier, absent unless it is running. Nothing
-	// in the stream can say why a video-only ingest suddenly has audio — the
-	// MPEG-TS muxer discards a track title — so this is the only place it can
-	// be explained.
-	Silence *SilenceStatus `json:"silence,omitempty"`
-	// Failover is the source-selector tier, absent unless it is running. Which
-	// source is on air has to be visible somewhere: a failover nobody notices is
-	// how an operator discovers at the end of a broadcast that they streamed the
-	// backup all night.
-	Failover     *FailoverStatus   `json:"failover,omitempty"`
-	Renditions   []RenditionStatus `json:"renditions"`
-	Destinations []DestStatus      `json:"destinations"`
-	Source       SourceInfo        `json:"source"`
-	Relay        relay.Stats       `json:"relay"`
-	// Loudness is the post-routing EBU R128 report for each monitored
-	// destination — what the platform on the other end actually receives, which
-	// is the only loudness figure it will judge the stream on.
-	Loudness []meters.Report `json:"loudness"`
-	// Clips is the rolling capture buffer's state.
-	Clips ClipStatus `json:"clips"`
-}
-
-// procStatus is nil for a process that is not running, which the JSON omits.
-func procStatus(p *supervisor.Process) *supervisor.Status {
-	if p == nil {
-		return nil
-	}
-	s := p.Status()
-	return &s
-}
-
-// Renditions returns the live state of every shared encode.
-//
-// Every rendition row appears, running or not: one with no enabled destination
-// is idle on purpose and must not read as broken.
-func (e *Engine) Renditions() []RenditionStatus {
-	rows, err := e.store.ListRenditions()
-	if err != nil {
-		return []RenditionStatus{}
-	}
-	counts, cerr := e.store.CountEnabledDestinationsByRendition()
-	if cerr != nil {
-		counts = map[int64]int{}
-	}
-	// The same fold reconcileOutputs does. Without it a tier kept alive purely
-	// by a playout variant reads as "0 consumers" on a card that is showing a
-	// running process, which is the dashboard calling its own decision a bug.
-	for id, n := range playout.RenditionRefs(e.Settings().Playout) {
-		counts[id] += n
-	}
-
-	e.mu.RLock()
-	live := make(map[int64]*rendition, len(e.rends))
-	for id, r := range e.rends {
-		live[id] = r
-	}
-	e.mu.RUnlock()
-
-	out := make([]RenditionStatus, 0, len(rows))
-	for _, row := range rows {
-		rs := RenditionStatus{
-			ID: row.ID, Name: row.Name, Width: row.Width, Height: row.Height,
-			FPS: row.FPS, VideoBitrate: row.VideoBitrate, Encoder: row.Encoder,
-			Codec: row.Codec(), Consumers: counts[row.ID],
-		}
-		if r := live[row.ID]; r != nil {
-			rs.Error = r.err
-			rs.Process = procStatus(r.proc)
-			if r.hub != nil {
-				rs.RelayPort = r.hub.Port()
-			}
-		}
-		out = append(out, rs)
-	}
-	return out
-}
-
-// Status assembles the current snapshot.
-func (e *Engine) Status() Status {
-	e.mu.RLock()
-	ingest, recorder, preview, meters := e.ingest, e.recorder, e.preview, e.meters
-	dests := make([]*destination, 0, len(e.dests))
-	for _, d := range e.dests {
-		dests = append(dests, d)
-	}
-	e.mu.RUnlock()
-
-	st := Status{
-		Source:       e.SourceInfo(),
-		Relay:        e.hub.Stats(),
-		Renditions:   e.Renditions(),
-		Destinations: []DestStatus{},
-		Loudness:     e.Loudness(),
-		Clips:        e.ClipBuffer(),
-	}
-	st.Ingest = procStatus(ingest)
-	st.Recorder = procStatus(recorder)
-	st.Preview = procStatus(preview)
-	st.Meters = procStatus(meters)
-	st.Silence = e.Silence()
-	st.Failover = e.Failover()
-
-	names := make(map[int64]string, len(st.Renditions))
-	for _, r := range st.Renditions {
-		names[r.ID] = r.Name
-	}
-
-	// Every destination row appears, running or not, so the dashboard shows a
-	// disabled destination rather than silently omitting it.
-	rows, err := e.store.ListDestinations()
-	if err == nil {
-		for _, row := range rows {
-			ds := DestStatus{
-				ID: row.ID, Name: row.Name, Kind: row.Kind,
-				Platform: row.Platform, Enabled: row.Enabled,
-				RenditionID: row.RenditionID,
-			}
-			if row.RenditionID != nil {
-				ds.RenditionName = names[*row.RenditionID]
-			}
-			ds.FacebookBroadcastID = row.Facebook.BroadcastID
-			if live := e.destByID(dests, row.ID); live != nil {
-				ds.BackupProcess = procStatus(live.backup)
-				ds.BackupError = live.backupErr
-			}
-			if live := e.destByID(dests, row.ID); live != nil {
-				ds.Summary = live.compiled.Summary
-				ds.Tracks = live.compiled.Tracks
-				ds.FilterComplex = live.compiled.FilterComplex
-				ds.Normalization = live.compiled.Normalization
-				ds.Warnings = live.compiled.Warnings
-				ds.Error = live.err
-				ds.Process = procStatus(live.proc)
-			} else if c, cerr := routing.Compile(row.Profile, e.Source()); cerr == nil {
-				// Not running: still show what it *would* send, so the card is
-				// informative before the stream is ever started.
-				ds.Summary = c.Summary
-				ds.Tracks = c.Tracks
-				ds.FilterComplex = c.FilterComplex
-				ds.Normalization = c.Normalization
-				ds.Warnings = c.Warnings
-			} else {
-				ds.Error = cerr.Error()
-			}
-			st.Destinations = append(st.Destinations, ds)
-		}
-	}
-	return st
-}
-
-func (e *Engine) destByID(list []*destination, id int64) *destination {
-	for _, d := range list {
-		if d.row != nil && d.row.ID == id {
-			return d
-		}
-	}
-	return nil
-}
-
-// Processes returns every supervised process, for the monitoring page.
-func (e *Engine) Processes() []*supervisor.Process {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	var out []*supervisor.Process
-	procs := []*supervisor.Process{e.ingest, e.recorder, e.preview, e.meters}
-	if e.silence != nil {
-		procs = append(procs, e.silence.proc)
-	}
-	if e.backup != nil {
-		procs = append(procs, e.backup.proc)
-	}
-	if e.playlist != nil {
-		procs = append(procs, e.playlist.proc)
-	}
-	if e.sel != nil && e.sel.feed != nil {
-		procs = append(procs, e.sel.feed.proc)
-	}
-	for _, p := range procs {
-		if p != nil {
-			out = append(out, p)
-		}
-	}
-	for _, r := range e.rends {
-		if r.proc != nil {
-			out = append(out, r.proc)
-		}
-	}
-	for _, d := range e.dests {
-		if d.proc != nil {
-			out = append(out, d.proc)
-		}
-		// The REDUNDANT output, which is not e.backup above -- that is the
-		// source-side backup-ingest tier, a different thing entirely.
-		//
-		// Both API consumers go through this function, so without it
-		// GET /processes/dest:<id>:backup/logs answered "no such process". The
-		// card shows the backup's state, so an operator could see that
-		// redundancy was broken and had no way to find out why, at the one
-		// moment those logs exist for. destArgs' own justification for existing
-		// is that a drifted backup argv "would be invisible until somebody
-		// compared two argv strings on the monitoring page" -- and the backup's
-		// argv was never on that page.
-		if d.backup != nil {
-			out = append(out, d.backup)
-		}
-	}
-	// Sorted, because a map of analysers would otherwise reshuffle the
-	// monitoring page on every poll.
-	for _, id := range slices.Sorted(maps.Keys(e.loud)) {
-		if m := e.loud[id]; m != nil && m.proc != nil {
-			out = append(out, m.proc)
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(e.playProcs)) {
-		out = append(out, e.playProcs[name])
-	}
-	return out
-}
-
 // RestartRendition cycles one shared encode without touching anything else.
 //
 // Its destinations ride the gap out rather than being restarted with it: their
@@ -6070,6 +3903,41 @@ func (e *Engine) onState(s supervisor.Status) {
 	e.publishStatus()
 }
 
+// publishStatus asks for a status snapshot to go out. COALESCING: a burst of
+// callers produces one immediate push and at most one more per window.
+//
+// Status() costs three database queries plus a routing.Compile for every
+// destination that is not running, and onState fires it per process transition
+// -- so a reconcile starting N destinations rebuilt the whole snapshot N times,
+// each one describing state that the next was about to replace.
+//
+// Leading edge, deliberately. The first request publishes immediately, so a
+// single event still reaches the UI with no added latency; only the ones piling
+// up behind it are collapsed. A trailing-edge debounce would have made every
+// isolated change feel slow, which is the trade this was NOT worth making.
+//
+// Falls back to publishing inline when the loop is not running -- before Start,
+// and in the unit tests that drive an Engine directly -- so this is never a
+// reason a status goes missing.
+// publishStatus sends a status snapshot to the event bus.
+//
+// SYNCHRONOUS, and it stays that way. A coalescing version of this lived here
+// briefly: Status() costs three database queries plus a routing.Compile per
+// idle destination, and onState fires it per process transition, so a reconcile
+// starting N destinations rebuilt the whole snapshot N times. Collapsing a burst
+// into one immediate push plus at most one more per 150ms window is a real
+// saving and it was measured as one.
+//
+// It also caused a REGRESSION, measured with scripts/../flake-rate on ten runs a
+// side: with coalescing the failover suite handed a destination a backwards
+// decode timestamp at a switch in 3 runs out of 10, and with this synchronous
+// version it does so in 0. A platform drops the connection on a backwards DTS,
+// so that is the failover tier failing at the one thing it exists to do.
+//
+// Whether the delay CREATED that or merely exposed a latent race in the switch
+// path is not settled -- see issue #126, which stays open for it. What is
+// settled is that this cost three in ten broadcasts to save some database reads
+// on a path nobody had complained about, which is not a trade worth making.
 func (e *Engine) publishStatus() {
 	e.bus.Publish(events.TypeStatus, e.Status())
 }

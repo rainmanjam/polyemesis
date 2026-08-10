@@ -1,7 +1,10 @@
 /** Types mirroring the Go API. Kept hand-written and small rather than
  *  generated, so the shapes the UI actually consumes stay obvious. */
 
-export const MAX_TRACKS = 6;
+/** Mirrors routing.MaxTracks. The server also reports this as `maxTracks` in
+ *  its capabilities response — prefer that where it is to hand, and treat this
+ *  as the fallback for code that renders before capabilities have loaded. */
+export const MAX_TRACKS = 32;
 
 export type RoutingMode = "simple" | "matrix";
 export type NormalizeMode = "auto" | "off" | "limiter" | "loudnorm";
@@ -384,6 +387,34 @@ export interface FontInfo {
 
 /** A rendition plus its usage. `enabledDestinations` is the ref count the
  *  engine acts on: at zero there is no process and no CPU burnt. */
+/** A platform's OWN published encoder guidance, served from
+ *  GET /platforms/presets. Advisory: it seeds a form and annotates a choice,
+ *  and never gates anything.
+ *
+ *  `source` and `checked` are not decoration. Once a bitrate is sitting in a
+ *  form field an operator cannot tell a researched number from a guess, so the
+ *  UI always shows where it came from and when it was last read. */
+export interface VideoGuidance {
+  width?: number;
+  height?: number;
+  fps?: number;
+  kbpsMin?: number;
+  kbpsMax?: number;
+  gopSeconds?: number;
+  note?: string;
+  source: string;
+  checked: string;
+}
+
+/** One entry of the server's platform catalogue. Only the fields the dialog
+ *  reads are typed here — the UI keeps its own preset list for the picker and
+ *  consults this for the researched data it must not duplicate. */
+export interface PlatformPresetInfo {
+  id: string;
+  name: string;
+  video?: VideoGuidance;
+}
+
 export interface RenditionView {
   rendition: Rendition;
   destinations: number;
@@ -699,6 +730,28 @@ export interface SourceView extends Source {
    *  is stored but not running, and that is the answer to "why is nothing
    *  arriving". */
   running: boolean;
+  /** How completely the listener bound, when there is one to describe.
+   *
+   *  `running` and `tokenEnforced` are both booleans over a listener that can
+   *  be HALF up: a wildcard SRT listener binds one socket per address family
+   *  and deliberately survives one of them failing, so a source can be running,
+   *  token-enforced, and unreachable for every encoder on the family that did
+   *  not bind. `detail` is always set when the state is degraded — a bare
+   *  "degraded" tells an operator nothing they can act on.
+   *
+   *  `degraded` means a family this HOST HAS was refused anyway — the port held
+   *  by another process, a permission denied — and not merely that some
+   *  requested address did not bind. An IPv4-only container cannot bind `[::]`
+   *  and never will, so reporting that as degraded put a permanent orange badge
+   *  on a perfectly healthy install, which teaches an operator to ignore the
+   *  badge and costs them the one time it means something. The server draws
+   *  that distinction from the errno; see engine.listenerHealthFor. The log
+   *  line still records BOTH, because whoever is working out why an encoder
+   *  will not connect needs the IPv4-only case too. */
+  listenerHealth?: {
+    state: "ok" | "degraded";
+    detail?: string;
+  };
 }
 
 export interface Settings {
@@ -1078,12 +1131,98 @@ export interface StorageState {
 }
 
 /** A long-lived automation credential. The secret exists only at creation. */
+/** What a token is allowed to do.
+ *
+ *  `read` reaches GET and HEAD plus a short list of POSTs that compute an
+ *  answer and write nothing; everything else is refused with a 403. `admin` is
+ *  everything the signed-in operator can do, which is what every token was
+ *  before scopes existed — tokens created before the upgrade are all `admin`,
+ *  because narrowing a credential a running script is holding would break it
+ *  without anyone being told.
+ */
+export type TokenScope = "read" | "admin";
+
 export interface ApiToken {
   id: number;
   name: string;
   prefix: string;
+  scope: TokenScope;
   createdAt: string;
   lastUsedAt: string;
+}
+
+/** What GET /version and POST /version/check return.
+ *
+ *  `latest`, `releaseUrl` and `checkedAt` stay empty until a check has actually
+ *  run: the server never contacts GitHub on its own, which is deliberate for
+ *  self-hosted software and is a property worth not breaking from this side. */
+export interface VersionInfo {
+  version: string;
+  latest?: string;
+  releaseUrl?: string;
+  updateAvailable: boolean;
+  /** False when either side is not a semantic version -- a dev build or a
+   *  commit hash. The tag found is still reported, because "there is a v1.4.0,
+   *  work out whether you have it" beats saying nothing. */
+  comparable: boolean;
+  checkedAt?: string;
+  checkFailed?: boolean;
+  /** What a restart would interrupt, surveyed fresh on every call. */
+  onAir: OnAir;
+  /** The sentence to show, empty when nothing is at stake. The server owns the
+   *  wording so a browser and a terminal cannot disagree about a refusal. */
+  onAirSummary?: string;
+}
+
+export interface OnAir {
+  publishers: number;
+  destinations: number;
+  recording: boolean;
+  names?: string[] | null;
+}
+
+/** What GET /upgrade/plan returns: what could be done about the available
+ *  release, on this box, right now.
+ *
+ *  Its own request rather than a field on VersionInfo, and that is not a
+ *  layering preference. Building the plan probes whether the install directory
+ *  is writable by CREATING A FILE IN IT, which is the only check that survives
+ *  a read-only mount -- and the update banner reads /version on every page
+ *  load. Ask for this when an operator has actually asked to act. */
+export interface UpgradePlan {
+  /** How this install was made. The empty string is a server that could not
+   *  tell, which is a refusal rather than a default. */
+  method: "docker" | "systemd" | "manual" | "";
+  /** Whether the server can perform the upgrade itself. False is the ORDINARY
+   *  answer on a stock install: the systemd unit runs with
+   *  ProtectSystem=strict, so /usr/local/bin is read-only to the service and
+   *  the honest move is to show `command`. Do not render that as an error. */
+  automatic: boolean;
+  /** What the operator should run when `automatic` is false. Shown verbatim. */
+  command?: string;
+  binaryPath?: string;
+  /** A previous binary is staged and could be restored. */
+  rollbackAvailable: boolean;
+  /** Why an upgrade is refused for a reason that is not about being on air --
+   *  an unwritable directory, an install nothing could identify. */
+  reason?: string;
+  /** The release this plan is about: the tag the last check found. */
+  version?: string;
+  onAir: OnAir;
+  onAirSummary?: string;
+}
+
+/** What POST /upgrade/stage and POST /upgrade/rollback return.
+ *
+ *  Neither ever reports that the upgrade has been APPLIED, because it has not:
+ *  the binary on disk has changed and the running process has not. `command` is
+ *  what makes it take effect, and the UI must say so rather than "updated". */
+export interface UpgradeResult {
+  staged?: boolean;
+  rolledBack?: boolean;
+  version?: string;
+  restartRequired: boolean;
+  command: string;
 }
 
 export interface FFmpegTools {
@@ -1529,6 +1668,23 @@ export interface ChatUserCard {
   retentionNote: string;
 }
 
+/** A chat search result set.
+ *
+ *  Carries the same two honesty fields as ChatUserCard and for a sharper
+ *  reason: search is the one place an operator can conclude something did NOT
+ *  happen. "No results" here means "not in the scrollback we kept", never "never
+ *  said", so `retentionNote` has to be rendered alongside an empty result and
+ *  not only alongside a full one. */
+export interface ChatSearchResult {
+  query: string;
+  /** Echoed back so the UI can label a narrowed result set. */
+  platform?: ChatPlatform;
+  messages: ChatMessage[];
+  /** The limit was reached; older matches may exist beyond this page. */
+  truncated: boolean;
+  retentionNote: string;
+}
+
 /** Messages that are gone. Carried by the "chatRetract" event.
  *
  *  A list rather than one id because a timeout removes everything one author
@@ -1621,6 +1777,19 @@ export interface AudioEncoding {
   /** Folds the routing graph's stereo output to one channel. A downmix of your
    *  mix, not a re-route. */
   mono?: boolean;
+  /** Forward the selected ingest tracks untouched -- no decode, no mix, no
+   *  encoder -- so this destination carries the same bits your encoder sent.
+   *
+   *  SRT and file destinations only. It is called copy and not "passthrough"
+   *  because passthrough already means a null rendition, i.e. video at the
+   *  ingest's own resolution, everywhere else in this app.
+   *
+   *  Copy still SELECTS: which tracks go out, and which roles are excluded,
+   *  both still apply. What it gives up is everything the mix does to the
+   *  samples -- gain, normalization, loudness, ducking, delay, mono -- and a
+   *  destination that asks for copy and for any of those is refused on save
+   *  rather than silently ignoring one of them. */
+  copy?: boolean;
 }
 
 /** YouTube broadcast visibility. Empty means LEAVE IT ALONE, and that

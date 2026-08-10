@@ -18,9 +18,10 @@ import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
-import { labelForState, toneBadge, toneForState } from "@/lib/signal";
+import { toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
 import type { Destination, MetaField, SystemInfo } from "@/lib/types";
+import { useT, useStateLabel } from "@/lib/i18n";
 
 // hls.js is a few hundred kilobytes that only the preview needs, and the
 // preview is off entirely for some installs. Load it alongside the dashboard
@@ -154,6 +155,7 @@ const metaLabel: Record<MetaState, string> = {
 };
 
 function GoLiveComposer() {
+  const t = useT();
   const [targets, setTargets] = useState<MetaTarget[] | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -312,7 +314,7 @@ function GoLiveComposer() {
       });
       setJob(started);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not push the metadata.");
+      toast.error(err instanceof Error ? err.message : t("dash.couldNotPushTheMetadata"));
     } finally {
       setPushing(false);
     }
@@ -349,9 +351,7 @@ function GoLiveComposer() {
       {targets.length === 0 ? (
         <CardContent>
           <p className="text-[12px] text-muted-foreground">
-            Connect a YouTube, Twitch, Facebook or Kick account in Settings → Platform credentials
-            to set your stream title, description and category on every platform at once. Each one
-            accepts a different subset — the composer names which, and pushes what it can.
+            {t("dash.connectPrompt")}
           </p>
         </CardContent>
       ) : (
@@ -360,7 +360,7 @@ function GoLiveComposer() {
           <div className="flex flex-col gap-2.5">
             <div className="flex flex-col gap-1">
               <div className="flex items-baseline justify-between">
-                <Label htmlFor="golive-title">Title</Label>
+                <Label htmlFor="golive-title">{t("dash.metaTitle")}</Label>
                 {titleMax > 0 && (
                   <span
                     className={`tnum font-mono text-[10px] ${
@@ -374,7 +374,7 @@ function GoLiveComposer() {
               <Input
                 id="golive-title"
                 value={title}
-                placeholder="Friday night set"
+                placeholder={t("dash.titlePlaceholder")}
                 onChange={(e) => setTitle(e.target.value)}
               />
               {overLimit.length > 0 && (
@@ -386,12 +386,12 @@ function GoLiveComposer() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="golive-description">Description</Label>
+              <Label htmlFor="golive-description">{t("dash.metaDescription")}</Label>
               <Textarea
                 id="golive-description"
                 value={description}
                 rows={3}
-                placeholder="What this stream is."
+                placeholder={t("dash.descriptionPlaceholder")}
                 onChange={(e) => setDescription(e.target.value)}
               />
               {noDescription.length > 0 && (
@@ -403,11 +403,11 @@ function GoLiveComposer() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="golive-category">Category</Label>
+              <Label htmlFor="golive-category">{t("dash.metaCategory")}</Label>
               <Input
                 id="golive-category"
                 value={category}
-                placeholder="Music"
+                placeholder={t("dash.categoryPlaceholder")}
                 onChange={(e) => setCategory(e.target.value)}
               />
               {categoryHint && (
@@ -419,11 +419,11 @@ function GoLiveComposer() {
 
             {tagTargets.length > 0 && (
               <div className="flex flex-col gap-1">
-                <Label htmlFor="golive-tags">Tags</Label>
+                <Label htmlFor="golive-tags">{t("dash.metaTags")}</Label>
                 <Input
                   id="golive-tags"
                   value={tags}
-                  placeholder="live, house, dj set"
+                  placeholder={t("dash.tagsPlaceholder")}
                   onChange={(e) => setTags(e.target.value)}
                 />
                 <span className="text-[10px] text-muted-foreground">
@@ -437,14 +437,14 @@ function GoLiveComposer() {
             {broadcastAccounts.length > 0 && (
               <div className="flex flex-col gap-2 rounded-md border border-border p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <Label>Broadcast settings</Label>
+                  <Label>{t("dash.broadcastSettings")}</Label>
                   <span className="text-[10px] text-muted-foreground">
                     {broadcastAccounts.map((w) => w.platform).join(", ")} only
                   </span>
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="golive-start">Scheduled start</Label>
+                  <Label htmlFor="golive-start">{t("dash.scheduledStart")}</Label>
                   <Input
                     id="golive-start"
                     type="datetime-local"
@@ -457,9 +457,9 @@ function GoLiveComposer() {
                 </div>
 
                 {contentDetailsLocked && (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-500">
+                  <p className="text-[10px] text-warn">
                     {lockedReason ||
-                      "YouTube stops accepting these once a broadcast leaves \"created\" or \"ready\"."}
+                      t("dash.youtubeStopsAcceptingTheseOnce")}
                   </p>
                 )}
 
@@ -481,26 +481,25 @@ function GoLiveComposer() {
                         {/* "Leave alone" is the DEFAULT and is not the same as
                             "off". An omitted field keeps whatever the platform
                             has; sending false turns the feature off. */}
-                        <option value="">Leave unchanged</option>
+                        <option value="">{t("dash.leaveUnchanged")}</option>
                         <option value="on">On</option>
-                        <option value="off">Off</option>
+                        <option value="off">{t("dash.off")}</option>
                       </select>
                     </div>
                   ))}
                 </div>
                 <span className="text-[10px] text-muted-foreground">
-                  “Leave unchanged” sends nothing at all, so the platform keeps what it has.
-                  Choosing On or Off writes that value.
+            {t("dash.leaveUnchangedNote")}
                 </span>
               </div>
             )}
 
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={push} disabled={empty || busy}>
-                <Megaphone /> {busy ? "Pushing…" : "Push to platforms"}
+                <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
               <span className="text-[10px] text-muted-foreground">
-                Applies to {accepts("title").length === 1 ? "the connected account" : "every connected account"}.
+                Applies to {accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount")}.
               </span>
             </div>
 
@@ -569,6 +568,8 @@ function GoLiveComposer() {
 }
 
 export function Dashboard() {
+  const stateLabel = useStateLabel();
+  const t = useT();
   const { status } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
@@ -607,7 +608,7 @@ export function Dashboard() {
       setEditing(destination);
       setDialogOpen(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load the destination.");
+      toast.error(err instanceof Error ? err.message : t("dash.couldNotLoadTheDestination"));
     }
   };
 
@@ -615,7 +616,7 @@ export function Dashboard() {
 
   const remove = async (id: number) => {
     await act(id, () => api.deleteDestination(id), "delete the destination");
-    toast.success("Destination deleted.");
+    toast.success(t("dash.destDeleted"));
     setRefreshKey((k) => k + 1);
   };
 
@@ -665,7 +666,7 @@ export function Dashboard() {
     } catch (err) {
       setPending(null);
       setMoveNote("");
-      toast.error(err instanceof Error ? err.message : "Could not reorder the destinations.");
+      toast.error(err instanceof Error ? err.message : t("dash.couldNotReorderTheDestinations"));
     }
   };
 
@@ -673,17 +674,17 @@ export function Dashboard() {
     if (!system?.ingestUrl) return;
     try {
       await navigator.clipboard.writeText(system.ingestUrl);
-      toast.success("Ingest URL copied.");
+      toast.success(t("dash.ingestUrlCopied"));
     } catch {
-      toast.error("Clipboard is unavailable on this origin.");
+      toast.error(t("dash.clipboardUnavailable"));
     }
   };
 
   return (
     <div className="p-3">
       <PageHeader
-        title="Dashboard"
-        subtitle="Ingest once, fan out with shared video and per-destination audio."
+        title={t("dash.title")}
+        subtitle={t("dash.subtitle")}
         actions={
           <Button
             size="sm"
@@ -714,21 +715,21 @@ export function Dashboard() {
                 <StatusDot tone={ingestTone} />
                 Ingest
               </CardTitle>
-              <Badge variant={toneBadge[ingestTone]}>{labelForState(ingest?.state)}</Badge>
+              <Badge variant={toneBadge[ingestTone]}>{stateLabel(ingest?.state)}</Badge>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat
-                  label="Bitrate"
+                  label={t("dash.bitrate")}
                   value={ingest?.state === "running" ? kbps(ingest.progress?.bitrateKbps ?? 0) : "—"}
                 />
                 <Stat
-                  label="Uptime"
+                  label={t("dash.uptime")}
                   value={ingest?.state === "running" ? duration(ingest.uptimeSec) : "—"}
                 />
-                <Stat label="Audio tracks" value={source?.tracks?.length ?? 0} />
+                <Stat label={t("dash.audioTracks")} value={source?.tracks?.length ?? 0} />
                 <Stat
-                  label="Reconnects"
+                  label={t("dash.reconnects")}
                   value={ingest?.restarts ?? 0}
                   tone={(ingest?.restarts ?? 0) > 0 ? "warn" : "muted"}
                 />
@@ -746,7 +747,7 @@ export function Dashboard() {
                 <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
                   {system?.ingestUrl ?? "…"}
                 </code>
-                <Button variant="ghost" size="icon-sm" onClick={copyIngest} aria-label="Copy ingest URL">
+                <Button variant="ghost" size="icon-sm" onClick={copyIngest} aria-label={t("dash.copyIngestUrl")}>
                   <Copy />
                 </Button>
               </div>
@@ -778,7 +779,7 @@ export function Dashboard() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Pipeline</CardTitle>
+              <CardTitle>{t("dash.pipeline")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-1.5">
               {(
@@ -787,7 +788,7 @@ export function Dashboard() {
                   // The preview encoder is started on demand and stopped again
                   // when nobody is watching, so having no process is the normal
                   // idle state rather than a fault or a disabled feature.
-                  ["Preview", status?.preview, settingsPreview ? "idle" : "disabled"],
+                  ["Preview", status?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
                   ["Meters", status?.meters, "disabled"],
                 ] as const
               ).map(([label, proc, absent]) => {
@@ -799,13 +800,13 @@ export function Dashboard() {
                       <span className="text-[11px]">{label}</span>
                     </div>
                     <span className="font-mono text-[10px] text-muted-foreground">
-                      {proc ? labelForState(proc.state) : absent}
+                      {proc ? stateLabel(proc.state) : absent}
                     </span>
                   </div>
                 );
               })}
               <div className="mt-1 flex items-center justify-between border-t border-border pt-1.5">
-                <span className="text-[11px] text-muted-foreground">Relay subscribers</span>
+                <span className="text-[11px] text-muted-foreground">{t("dash.relaySubscribers")}</span>
                 <span className="tnum font-mono text-[10px]">
                   {status?.relay.subscribers?.length ?? 0}
                 </span>
@@ -817,7 +818,7 @@ export function Dashboard() {
                   fault, and the destination count is the whole economic
                   argument: three platforms on one tier is still one encode. */}
               <div className="mt-1 flex flex-col gap-1 border-t border-border pt-1.5">
-                <span className="text-[11px] text-muted-foreground">Renditions</span>
+                <span className="text-[11px] text-muted-foreground">{t("dash.renditions")}</span>
                 {renditions.length === 0 ? (
                   <span className="font-mono text-[10px] text-muted-foreground">
                     none — every destination is on passthrough
@@ -867,7 +868,7 @@ export function Dashboard() {
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
               <p className="text-[12px] text-muted-foreground">
-                No destinations yet. Add one, then choose which audio tracks it receives.
+            {t("dash.noDestinations")}
               </p>
               <Button
                 size="sm"
@@ -903,7 +904,7 @@ export function Dashboard() {
                     d.id,
                     async () => {
                       await api.refreshStreamKey(d.id);
-                      toast.success("Stream key refreshed from the platform.");
+                      toast.success(t("dash.keyRefreshed"));
                     },
                     "refresh the stream key",
                   );
@@ -925,8 +926,8 @@ export function Dashboard() {
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
         title={`Delete “${confirmDelete.target?.name}”?`}
-        description="This removes the destination and its routing profile. The platform is untouched, and you can add it back — but the audio routing you set up for it is gone."
-        confirmLabel="Delete destination"
+        description={t("dash.deleteDestDescription")}
+        confirmLabel={t("dash.deleteDest")}
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target.id);
         }}

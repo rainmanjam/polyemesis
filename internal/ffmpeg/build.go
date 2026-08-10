@@ -108,9 +108,26 @@ type IngestSpec struct {
 	SRTLatencyMS  int
 
 	// RTMP
-	RTMPPort      int
-	RTMPApp       string
-	RTMPStreamKey string
+	//
+	// RTMPPort is the shared one-port RTMP listener, which polyemesis binds
+	// itself; this spec never binds it. The ingest child is a SUBSCRIBER that
+	// dials that listener back out on loopback, the same shape every RTMP server
+	// uses, so the two addresses below are a dial target and a display string
+	// rather than a bind.
+	//
+	// RTMPApp is the cosmetic first path element -- the "live" in
+	// rtmp://host/live/<key>. The listener discards it (rtmpserver.StreamKey),
+	// so it decides nothing; it exists because encoders expect a server URL that
+	// looks like one, and because it is what goes in OBS's "Server" box.
+	//
+	// RTMPAddress is what actually selects the source: the publish token, or
+	// "<token>.backup" for the failover standby. It replaced a per-source
+	// RTMPStreamKey, which used to be a playpath FFmpeg checked while listening
+	// -- a mechanism that no longer exists, and one that could not tell two
+	// sources apart because nothing made stream keys unique.
+	RTMPPort    int
+	RTMPApp     string
+	RTMPAddress string
 
 	// Pull
 	//
@@ -247,11 +264,17 @@ func (s IngestSpec) IngestURL() string {
 		src, _ := s.PullSource()
 		return src
 	case IngestRTMP:
-		u := fmt.Sprintf("rtmp://0.0.0.0:%d/%s", s.RTMPPort, strings.Trim(s.RTMPApp, "/"))
-		if s.RTMPStreamKey != "" {
-			u += "/" + s.RTMPStreamKey
-		}
-		return u
+		// 127.0.0.1, and it matters that it is not 0.0.0.0. This is a DIAL
+		// target now: polyemesis binds the RTMP port itself and this child
+		// subscribes to it. 0.0.0.0 was correct while `-listen 1` made FFmpeg
+		// the server, and as a dial target it is the wrong address rather than
+		// the same one spelled differently.
+		//
+		// Loopback also because rtmpserver refuses any non-loopback subscriber:
+		// a stream key is a publish credential and must not double as a viewing
+		// one.
+		return fmt.Sprintf("rtmp://127.0.0.1:%d/%s/%s",
+			s.RTMPPort, strings.Trim(s.RTMPApp, "/"), s.RTMPAddress)
 	default:
 		q := url.Values{}
 		q.Set("mode", "listener")
@@ -280,6 +303,11 @@ func (s IngestSpec) PublicIngestURL(host string) string {
 	case IngestPull:
 		return strings.TrimSpace(s.PullURL)
 	case IngestRTMP:
+		// The app only, deliberately: this is OBS's "Server" box and the address
+		// goes in its "Stream Key" box beside it. Appending the address here
+		// too would produce /live/<token>/<token> for the operator who fills in
+		// both, which is the one mistake this split exists to make impossible.
+		// api.publishURLs emits the key as its own field for that reason.
 		return fmt.Sprintf("rtmp://%s:%d/%s", host, s.RTMPPort, strings.Trim(s.RTMPApp, "/"))
 	default:
 		q := url.Values{}
@@ -307,10 +335,13 @@ func IngestArgs(s IngestSpec) []string {
 
 	switch s.Kind {
 	case IngestRTMP:
-		// The rtmp protocol's own listen option. FFmpeg accepts one publisher,
-		// then exits; the supervisor respawns it, which is exactly the
-		// "wait for the next session" behaviour we want.
-		args = append(args, "-listen", "1")
+		// Nothing. RTMP used to pass `-listen 1` here, which made FFmpeg the
+		// server and is exactly what capped an install at ONE RTMP source: a
+		// single-connection receiver cannot demultiplex by path. The listener is
+		// now polyemesis's own, on one port for every source, and this child
+		// dials it as an ordinary client -- no more flags than SRT needs, and
+		// for the same reason (see pullDirect): it either reconnects itself or
+		// exits, and the supervisor respawns it.
 	case IngestPull:
 		args = append(args, s.pullInputArgs()...)
 	}
@@ -482,6 +513,18 @@ type DestSpec struct {
 	// Audio is the optional output-encoding choice. Its zero value is AAC
 	// stereo, which is what every destination emitted before this existed.
 	Audio AudioSpec
+
+	// CopyAudio forwards the selected ingest tracks with `-c:a copy` instead of
+	// decoding them through FilterComplex and re-encoding. False for every
+	// destination that has not opted in, which produces byte-for-byte the
+	// command it produced before this field existed.
+	CopyAudio bool
+	// AudioTracks are the 0-based ingest track indices to map when CopyAudio is
+	// set, and are ignored otherwise. This is routing.Result.Tracks passed
+	// straight through: the compiler has already applied the profile's
+	// selection and removed the roles the destination excludes, so this list is
+	// the answer to "which tracks does this destination carry", copy or not.
+	AudioTracks []int
 }
 
 // Audio codec names, spelled the way FFmpeg spells them because these strings
@@ -709,6 +752,13 @@ func StripExtraArgs(argv, in, out []string) []string {
 // decoded, re-mixed through the routing graph, and re-encoded to the single
 // stereo track the platform will accept.
 //
+// CopyAudio is the one destination that opts out of the audio half of that, for
+// the outputs where the platform is not the constraint: an SRT contribution feed
+// or a local file can take the ingest's own tracks untouched. See copyAudioArgs,
+// which is a separate function rather than a set of conditionals threaded
+// through this one, because it shares only the input arguments -- everything
+// after them differs.
+//
 // DestAudio is the same command with the video half deleted rather than a
 // second code path: same relay, same filter graph, same explicit maps. What it
 // drops is the video map and the video codec flag, and what it gains is a
@@ -732,10 +782,22 @@ func DestinationArgs(s DestSpec) []string {
 		// jitter that would otherwise show up as dropped frames.
 		"-thread_queue_size", "1024",
 	)
-	args = append(args,
-		"-i", RelayInputURL(s.RelayURL),
-		"-filter_complex", s.FilterComplex,
-	)
+	args = append(args, "-i", RelayInputURL(s.RelayURL))
+
+	// The copy path branches BEFORE -filter_complex, and it has to. A graph
+	// that is compiled and never mapped is not ignored: FFmpeg 8.1.2 answers
+	// it with
+	//
+	//	Filter 'anull:default' has output 0 (aout) unconnected
+	//	Error binding filtergraph inputs/outputs: Invalid argument
+	//
+	// and exits 234 having written nothing. Leaving the graph in as a harmless
+	// leftover would mean a copy destination that never starts.
+	if s.CopyAudio && s.Kind != DestAudio {
+		return copyAudioArgs(s, args)
+	}
+
+	args = append(args, "-filter_complex", s.FilterComplex)
 
 	// Explicit maps only. Without them FFmpeg's default stream selection would
 	// pick one arbitrary audio track and quietly ignore the routing graph
@@ -754,6 +816,59 @@ func DestinationArgs(s DestSpec) []string {
 
 	args = append(args, audioCodecArgs(s)...)
 	args = append(args, transportOutputArgs(s)...)
+	switch s.Kind {
+	case DestRTMP:
+		args = append(args, "-f", "flv")
+	case DestSRT:
+		args = append(args, "-f", "mpegts")
+	case DestFile:
+		args = append(args, "-f", fileFormat(s.Target))
+	}
+	args = append(args, s.Target)
+	return SpliceExtraArgs(args, s.ExtraInputArgs, s.ExtraOutputArgs)
+}
+
+// copyAudioArgs finishes the command for a destination that forwards its audio
+// bit-for-bit: no filter graph, no decoder, no encoder, just maps and copies.
+//
+// IT SELECTS, IT DOES NOT FORWARD EVERYTHING. `-map 0 -c copy` is the shorter
+// spelling and it is the wrong one. It would take every track the ingest
+// carries, which destroys the two things a destination is FOR: the profile's
+// track selection, and ExcludeRoles -- the DMCA switch that marks the licensed
+// music track and keeps it out of the archive. A copy destination that silently
+// re-admitted the music track would be a compliance failure that looks like a
+// working feature, so the maps stay explicit and come from the compiled result.
+//
+// The maps carry no '?' suffix. An optional map would turn "the track the
+// operator selected is not on this ingest" into silence; routing.Compile has
+// already dropped every track that is not present in the measured layout, so a
+// track named here and missing at runtime means the layout changed under us and
+// is worth failing loudly over.
+//
+// audioCodecArgs is omitted rather than adapted. -b:a, -ac and -ar are encoder
+// options and there is no encoder; FFmpeg warns about each of them next to a
+// copy, and -ac in particular reads as an instruction the output will not obey.
+func copyAudioArgs(s DestSpec, args []string) []string {
+	args = append(args, "-map", "0:v:0", "-c:v", "copy")
+	// Kept on this path for the same reason it exists on the other: the field
+	// means "hold the picture back by this much" and must not mean two
+	// different things depending on how the audio travels. Unreachable today,
+	// because a destination that copies its audio is refused at save time if it
+	// carries any delay at all.
+	args = append(args, videoDelayArgs(s)...)
+
+	for _, t := range s.AudioTracks {
+		args = append(args, "-map", "0:a:"+strconv.Itoa(t))
+	}
+	args = append(args, "-c:a", "copy")
+
+	args = append(args, transportOutputArgs(s)...)
+	// Every kind that reaches here names its container, RTMP included. Copy is
+	// refused on an RTMP destination at save time -- see AudioEncoding.copyProblems
+	// -- so this case should be unreachable, and it is spelled out anyway rather
+	// than left to fall through to no -f at all. A builder that silently drops
+	// the muxer for one kind is how a validation gap turns into an unreadable
+	// FFmpeg error instead of a refused save.
 	switch s.Kind {
 	case DestRTMP:
 		args = append(args, "-f", "flv")
@@ -1014,6 +1129,50 @@ func (s MetersSpec) ChannelOffset(track int) int {
 
 // MetersArgs builds the metering sidecar command.
 //
+// MeterChannelLimit is amerge's ceiling. Beyond 64 channels it refuses outright
+// with "Too many channels (max 64)", so this is a hard boundary of the
+// one-process meters design rather than a tuning choice.
+//
+// Duplicated from routing.MaxMeterChannels rather than imported: this package
+// builds command lines and deliberately does not depend on routing. The
+// constants are asserted equal in the tests.
+const MeterChannelLimit = 64
+
+// meterableTracks reports how many leading tracks fit under MeterChannelLimit.
+//
+// Whole tracks only -- metering half of a 5.1 track would report channels
+// against the wrong labels, which is worse than not reporting them. Returning
+// fewer than len(chans) is a real outcome for a wide ingest, and MetersDropped
+// is what tells the operator so.
+//
+// The first track is always included, however wide it is. The limit belongs to
+// amerge, and a lone track is never merged -- it goes straight to astats. This
+// also keeps the count non-zero, which the caller depends on: it indexes
+// labels[0] unconditionally.
+func meterableTracks(chans []int) int {
+	total := 0
+	for i, c := range chans {
+		if c <= 0 {
+			c = 1 // a track whose width never probed still occupies a leg
+		}
+		if i > 0 && total+c > MeterChannelLimit {
+			return i
+		}
+		total += c
+	}
+	return len(chans)
+}
+
+// MetersDropped reports how many trailing tracks MetersArgs could not cover.
+//
+// Zero for every ingest anyone is likely to send -- 32 stereo tracks fit. It
+// exists so a wide ingest degrades visibly instead of silently metering a
+// prefix and letting an operator believe a track is silent when it is merely
+// unmeasured.
+func MetersDropped(chans []int) int {
+	return len(chans) - meterableTracks(chans)
+}
+
 // One process meters every channel of every track. The trick is amerge: rather
 // than running N processes (and pulling N copies of the video over the relay
 // just to reach the audio), every track is merged into one wide stream and a
@@ -1026,7 +1185,7 @@ func MetersArgs(s MetersSpec) []string {
 	if s.SampleRate == 0 {
 		s.SampleRate = 48000
 	}
-	n := len(s.TrackChannels)
+	n := meterableTracks(s.TrackChannels)
 
 	var chains []string
 	var labels []string

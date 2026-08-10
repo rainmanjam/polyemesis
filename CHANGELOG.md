@@ -8,6 +8,594 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Changed
+
+- **A `read` API token no longer reaches the live media of a stream you have not
+  published.** `read` means metadata, not content, and live playout is content.
+
+  The three playout routes sit outside every authenticated group by necessity —
+  a viewer has no account — so the scope check runs per request in the handler,
+  and it was asking the wrong question: it resolved the caller and then threw
+  the principal away, so any valid bearer was treated as the operator previewing
+  their own private stream. A `read` token is now treated exactly as an
+  anonymous viewer on `/playout/*`, `/playout/public` and `/playout/poster.jpg`
+  — the same status, the same body, the same headers.
+
+  Two consequences worth knowing before you upgrade. On a stream with
+  `Public: false`, a `read` token now gets `404` where it used to get the media.
+  On a published stream protected by the playback token, a `read` token that
+  does **not** present that playback token now gets the `401` challenge instead
+  of being served; presenting it in `?t=`, the header, the cookie or as a basic
+  password works as it always did. Anonymous viewers, the signed-in console and
+  `admin` tokens are unaffected, and an open stream is unaffected for everyone.
+
+- **The "Partly bound" badge on a source card now appears only when there is
+  something to fix.** A wildcard SRT listener binds one socket per address
+  family and survives one of them failing, which on an IPv4-only host — a
+  container with IPv6 disabled — meant a permanent orange badge on a perfectly
+  healthy install. The badge now distinguishes an address family this machine
+  does not have from one it has and could not bind, and only warns about the
+  second. The log line is unchanged and still records both, because whoever is
+  working out why an encoder will not connect needs the first one too.
+
+### Fixed
+
+- **Three more values a `read` token could read.** The automod model endpoint
+  when it carries an `?api_key=` in the query string, and a destination's
+  `extraInputArgs` / `extraOutputArgs` — which are the resolved FFmpeg argv, the
+  same bytes `GET /destinations/{id}/expert` already refuses that token for.
+
+- **A `kind: file` destination no longer loses its filename for a `read`
+  token.** That field is a filename rather than a URL, and running it through
+  the URL masker replaced the whole thing with `[redacted]`.
+
+- **Redacted fields keep their JSON key.** Four fields carry `omitempty`, so
+  blanking them removed them from the document entirely and a `read` token's
+  response was a different shape from an admin's. They now come back as
+  `[redacted]`.
+
+- **`Vary` on principal-dependent responses now names `Cookie` as well as
+  `Authorization`.** The signed-in operator — the principal that receives the
+  unredacted body — arrives in a cookie, so a shared cache keyed on
+  `Authorization` alone filed their response under the same key as every
+  anonymous caller's.
+
+## [0.6.0] — 2026-08-09
+
+An operator-facing release: the server now tells you an update exists and what a
+restart would cost, a rendition stopped doing work it threw away, and a failover
+respawn stopped ignoring its own backoff.
+
+### Added
+
+- **The server tells you when there is a newer release, and what stopping would
+  interrupt.** A banner in the UI, translated across all fifteen locales, and a
+  version endpoint behind it.
+
+  The second half is the part that matters. polyemesis is not a tool you run and
+  close; it is the thing carrying a broadcast, and restarting it drops every
+  destination mid-stream. So the check reports what is **on air** — how many
+  encoders are publishing, how many destinations are live, whether a recording is
+  running, and which programmes those belong to — rather than a yes/no on whether
+  an upgrade is allowed. "Cannot upgrade" is useless on its own; "3 destinations
+  are live and a recording is running" lets an operator decide it is fine.
+
+  A destination that is reconnecting counts as live, because from the desk it is
+  mid-broadcast, and restarting underneath it turns a recoverable blip into a
+  dropped show.
+
+### Changed
+
+- **A rendition that drops frames now drops them before scaling, not after.**
+  `-r` decimates at the encoder, which is after the filter graph, so a 60→30
+  rendition scaled all sixty frames of the source and then discarded half of
+  them. Every one of those scales was work spent on a frame that never reached
+  the encoder.
+
+  Measured on a 6-core Haswell VPS, 4K60 → 1080p30 at veryfast/6000k: 2.13×
+  realtime before, 2.49× after — **17% more headroom** on the case that needed it
+  most.
+
+### Fixed
+
+- **A supervised child that had to be killed is no longer reported as one that
+  stopped.** `Stop` gives a wedged process a deadline and then sends SIGKILL,
+  but it returned at that point without waiting and recorded the fact only in a
+  log line — and both outcomes then reported the same state, so nothing could
+  tell "the child exited" from "the child was killed and may still be running".
+
+  The failover tier is where that matters: it starts a replacement feed into the
+  same hub the moment the teardown returns, so a child still alive and still
+  writing is two publishers on one input. The condition is now surfaced on the
+  tier and logged. The switch still proceeds — leaving the tier with no feed at
+  all is worse than a seam — so this is a thing you are told about rather than a
+  thing that blocks a switch.
+
+- **The failover respawn backoff is measured from the feed's start, not from the
+  decision to switch.** The timestamp recorded as a feed's start time was taken
+  before a teardown that blocks for as long as the outgoing process needs to
+  exit — up to twelve seconds. After a slow teardown the backoff interval had
+  therefore already elapsed before the replacement had run for a single second,
+  so a feed that failed immediately was respawned on every 500 ms sweep instead
+  of backing off.
+
+  Nothing else at that seam changed in this release. A second change was made
+  alongside this one — moving `-output_ts_offset` from the switch decision to
+  the feed's actual start, on the same reasoning — and was **reverted before
+  release**. With it, the failover suite reported a backwards decode timestamp
+  at a switch in 3 runs of 12; without it, 0 in 12, both before the change and
+  after reverting it. A platform drops the connection on a backwards DTS, which
+  is the failover tier failing at the one thing it exists for, so the
+  configuration with none of them is the one that ships.
+
+  Whether that change CREATED those steps or merely made existing ones large
+  enough to cross the suite's one-millisecond threshold is not settled, and the
+  distinction matters: one is a bug introduced, the other a bug revealed. Issue
+  #126 stays open for it and the check now reports the size of every step,
+  including the ones too small to fail on. What is settled is the direction, and
+  the bug the reverted change described — a backwards step caused by a slow
+  teardown — was never observed at all.
+
+### Internal
+
+- **Groundwork for in-place upgrades, not yet reachable.** A new `internal/upgrade`
+  package works out how an install was made — container, systemd unit, or a
+  binary someone runs themselves — and refuses to act where acting is useless or
+  reckless. For the one case it can act on it stages a checksum-verified binary
+  beside the running one, keeping the outgoing one for rollback, ordered so that
+  every state the process can be killed into leaves a runnable box.
+
+  Nothing calls it yet. There is no endpoint and no button, so this release
+  changes no upgrade behaviour; it is listed here because it exists in the tree
+  and because the next release is expected to wire it. Four adversarial review
+  rounds went into it, which is the appropriate amount for code whose failure
+  mode is a server with no runnable binary.
+
+## [0.5.0] — 2026-08-08
+
+The first release with the core review in it, and the version number is
+deliberately 0.5.0 rather than 0.6.0.
+
+0.5.0 was written up in this file on 2026-08-07 and then never tagged, so its
+contents have never been in anyone's hands — a heading that looked released
+above work that was not. Folding this release into it closes that rather than
+shipping 0.6.0 over a hole in the version line, or retroactively tagging a
+release nobody could have installed.
+
+So everything below is one release: the four-reviewer core review worked end to
+end, plus the two operator-visible changes the never-cut 0.5.0 had described.
+
+### Added
+
+- **`polyemesis -reset-admin`** — set a new admin password from the box the
+  database lives on, for an operator who has shell access and no way in through
+  the UI. Asks twice without echoing, signs out every existing session, and
+  exits without binding a port, so it is safe to run against a live server. Pipe
+  the password twice to script it.
+
+  The password is deliberately **not** a flag: argv is visible in `ps` to every
+  other user on the machine, lands in shell history, and appears in any audit log
+  that records command lines.
+
+  It also replaces advice nobody should follow. Deleting the row from the users
+  table does restore first-run setup — `needsSetup` is just "the table is empty"
+  — but `POST /api/v1/setup` is unauthenticated and the only guard on it is that
+  an account already exists. Deleting the account removes that guard, so until
+  setup is finished anyone who can reach the port can claim the install.
+  `-reset-admin` never opens that window.
+
+### Fixed
+
+Nine more defects from the same core review, in the transport and concurrency
+layers. Every one is the shape the whole review turned out to be: a protection
+that is present in name and absent in effect.
+
+- **An RTMP publisher for an SRT source is refused immediately again.** The
+  readiness grace described further down this same release claimed in its own
+  comment that it could not be used to hold connections open. It could: a target is registered for every
+  source whatever its ingest mode, so any valid token for an SRT-mode source was
+  found, enabled, and permanently not ready — the one verdict the grace waits
+  on. Every connect burned the full six seconds, in parallel, for a state no
+  amount of waiting could change. The listener now waits only where a subscriber
+  is genuinely on its way, and caps waiters per publisher slot so one reconnect
+  gets its grace while a flood does not multiply it.
+
+- **A measured layout survives the encoder going quiet.** Roughly nine seconds
+  into any outage the engine began reporting a real measured layout as the
+  placeholder, because the check asked "is a stream arriving now" where it meant
+  "has one ever been measured". The meters were torn down, the captioner rebuilt
+  against an unknown source, and the routing preview stopped describing the graph
+  its destinations were running. The stem plan had the same mistake from the
+  other end: an encoder going quiet emptied it and restarted the recorder
+  **without stems** mid-outage, then restarted it again when the probe returned.
+
+- **A genuine data race in the relay's loss measurement.** `Deliver` runs on the
+  SRT read loop, and a publisher takeover deliberately overlaps two of them —
+  closing the incumbent's connection wakes its `Read`, which is not the same as
+  it having finished. Two goroutines wrote the continuity counters and the
+  send-error tally with nothing between them, corrupting the TSLost figure that
+  the "UDP on loopback is defensible because it is measured" argument rests on.
+
+- **A dead subscriber no longer counts as a reader.** A subscriber whose FFmpeg
+  exited while nothing was publishing was never noticed — there are no writes to
+  fail — so readiness kept reporting a closed socket as a live reader and
+  admitted publishers into a stream nobody was reading.
+
+- **A mid-stream cue point no longer replaces the cached metadata.** Every AMF0
+  data message shared one setup slot, so a cue point evicted `onMetaData` and
+  every subscriber attaching afterwards got the cue point replayed where its
+  metadata should have been.
+
+- **A source disabled between connect and publish is now refused.** The SRT
+  publish callback re-checked the token and the pipeline but not whether the
+  source was still enabled, so an operator's "off" did nothing until the session
+  ended by itself.
+
+- **Two recorders can no longer start on the same segment pattern**, and **two
+  engines can no longer start for one source.** Free-space recovery reconciled
+  the recorder without the lock every other caller takes, and the manager's
+  engine sync had no such lock at all while being reached from several HTTP
+  handlers — leaving a running engine that nothing held a reference to.
+
+- **A destination can no longer report "running" while publishing nothing.** The
+  primary feed's signature named what the failover tier was supposed to be rather
+  than what the feed was reading, so a feed started during a hub swap matched the
+  signature the next reconcile asked for and was left alone permanently: the hub
+  carried zero bytes, every destination read healthy, and nothing raised an
+  error.
+
+### Changed
+
+- Faster on the paths that run constantly: the relay fan-out takes no lock and
+  allocates nothing per datagram, a held publisher is woken by its subscriber
+  attaching instead of polling the database sixty times, and the status snapshot
+  no longer scans its destination list twice per row.
+
+  One optimisation was tried and **withdrawn**. Coalescing status pushes onto a
+  150 ms window is a genuine saving, and it cost three broadcasts in ten: with it
+  the failover suite handed a destination a backwards decode timestamp at a
+  switch in 3 runs out of 10, measured against 0 in 10 without it. A platform
+  drops the connection on a backwards DTS, which is the failover tier failing at
+  the one thing it exists to do. See issue #126.
+
+Earlier in the same review, four defects in the per-destination audio routing:
+
+Four defects in the per-destination audio routing, all of them audible, all
+found by a four-reviewer pass over the compiler and confirmed by measuring what
+FFmpeg actually produced rather than by reading the filtergraph.
+
+- **The downmix now reads the track's channel layout, not just its channel
+  count.** Every 3-channel track was treated as 3.0 = FL FR FC. A 2.1 track is
+  FL FR LFE, so its LFE was folded into both legs at −7.7 dB — precisely what
+  the file promised in its header never happened. The same mistake dropped a
+  real channel from `hexagonal` and `6.1(back)`, which have no LFE at the index
+  where 5.1 and 7.1 keep theirs. Coefficients are now assigned by channel name
+  from libavutil's own layout table, with the old count-keyed table kept as the
+  fallback for a layout ffprobe could not name.
+
+  **What you may notice.** The layouts that were already correct — mono, stereo,
+  3.0, quad, 5.0, 5.1, 5.1(side), 6.1, 7.1 — compile to byte-identical graphs
+  and their destinations do not restart. A destination fed a 2.1, 3.1, 4.1,
+  hexagonal or 6.1(back) track will restart once on upgrade, and will sound
+  different afterwards, because it was wrong before.
+
+- **`auto` clip protection now looks at the gain, not only the track count.**
+  The rule was "only summing across tracks can clip, so one track needs no
+  limiter". But `pan` sums too, per output channel, and validation caps each
+  cell at 2.0 and never the row. A one-track matrix with three cells at maximum
+  gain on one leg compiled to `c0=2*c0+2*c2+2*c4` — six times full scale, hard
+  clipping, with `auto` having decided no protection was needed. The track count
+  keeps its say and the peak per-output gain gets one as well. This only ever
+  adds a limiter: nothing that has one today loses it, and any profile peaking
+  at or below unity compiles to the string it always did.
+
+- **A wide track of unknown layout no longer sits off-centre.** The fallback
+  splits even channels left and odd channels right, then normalised each leg by
+  its own sum — so an odd channel count, which puts one more channel on the
+  left, scaled the two sides by different divisors. Nine channels gave a
+  permanent 1.94 dB image shift. Both legs are now divided by the same figure.
+
+- **A matrix whose ingest has narrowed now says the level moved.** A saved 5.1
+  matrix meeting a stereo ingest drops the cells addressing the missing channels
+  and keeps coefficients that were scaled for the old width, leaving the
+  destination 7.7 dB down. It warned about the channel numbers and never about
+  the volume, which is the part anyone would actually notice. The coefficients
+  are still the operator's to change — rescaling them silently would be the same
+  category of mistake — but the drop is now stated in dB.
+
+### Changed — the two from the never-cut 0.5.0
+
+Written up on 2026-08-07 against a tag that was never pushed. Both are still
+accurate and both ship here for the first time.
+
+- **An RTMP publisher is now admitted only when something is subscribed to read
+  it.** `Target.Ready` used to mean "an engine exists for this source and its
+  mode is rtmp", which says a subscriber SHOULD exist, never that one does. A
+  publisher whose ingest child never spawned, or was crash-looping, was admitted
+  into a stream with no reader: the encoder goes green, the bytes are fanned out
+  to nobody, and the operator has a healthy OBS and no output with nothing
+  saying why. It is now asked of the listener directly. The same fix was applied
+  to the failover standby, which had been a hardcoded `true` sitting directly
+  below a comment describing the opposite contract.
+
+  **What you may notice.** The ingest child carries no reconnect flags — it
+  exits whenever its publisher does and is respawned on a 500 ms–5 s backoff —
+  so an encoder reconnecting after a network blip arrives while nothing is
+  subscribed. Rather than refuse it, the listener now HOLDS such a connection
+  for up to 6 seconds and admits it if a subscriber attaches. Only that one
+  verdict waits; an unknown key or a disabled source is still answered at once.
+
+- **Destinations are not planned until the ingest layout has been measured.**
+  Before a probe lands, the layout is a placeholder of six stereo tracks that
+  exists so the routing editor has something to draw. Compiling a real routing
+  graph against it fails in two ways, and the second is why this is a guard
+  rather than a warning: a profile naming a track the stream lacks emits
+  `[0:a:5]` and FFmpeg refuses to start — loud, and diagnosable — but the
+  placeholder also claims two channels on every track, so a real 5.1 track
+  compiles to `pan=stereo|c0=c0|c1=c1`, which is perfectly valid FFmpeg. The
+  destination starts, stays up, and publishes front L/R only, with centre —
+  where dialogue lives — discarded and no error anywhere.
+
+- **A routing preview compiled from the placeholder now says so.** Every
+  destination endpoint returns a compiled `filterComplex` so the editor can show
+  the mix without a second round trip. Those compiled against an unmeasured
+  layout are marked `routingProvisional`. They are flagged, never withheld:
+  configuring a destination before going live is when most people configure them.
+
+- **Both ingest ports bind by default, and both are published by default.**
+  The RTMP listener used to bind only when some enabled source was configured
+  for it, while SRT bound unconditionally. That was not a policy — it was two
+  histories preserved side by side: `ffmpeg -listen 1` had held 1935 only while
+  an RTMP source existed, and the SRT listener had always been up. The asymmetry
+  showed on a fresh install that had chosen no ingest mode at all, which still
+  opened 6000 while refusing to open 1935 on the grounds that nothing there
+  spoke the protocol.
+  It also disagreed with this project's own instructions: `docs/HARDWARE.md` and
+  `docs/TROUBLESHOOTING.md` have always said to run
+  `-p 6000:6000/udp -p 1935:1935`, so we documented publishing a port that might
+  not be listening. datarhei Restreamer opens both, and so do we now.
+  `install.sh` matches: it asks for an RTMP port the way it asks for an SRT one
+  rather than a yes/no, defaults to publishing 1935, and takes `--rtmp-port 0`
+  to decline it. **The port is the switch on both sides** — the server treats 0
+  as off too — instead of a yes/no in the installer and a port in the settings
+  meaning the same thing two different ways.
+  What this adds is narrow: a host with **no firewall at all** now has 1935
+  reachable, where the source list used to close it by accident. Everywhere else
+  the ufw rule and the compose publish still decide, which is what they always
+  claimed to do. Both listeners refuse an unknown token or key in constant time,
+  both require the source to be ready before admitting anything, and a
+  connection that says nothing dies on the handshake timeout.
+
+### Fixed
+
+Twelve defects in the work above, found across four independent review passes.
+The ones with operator-visible consequences:
+
+- A probe takes up to ten seconds and used to commit its result unconditionally.
+  One in flight across an ingest restart or a mode change re-certified the
+  previous transport's track layout under the new mode — and stamped it in a way
+  that satisfied the guard permanently, so destinations compiled against a dead
+  stream's layout until something else changed.
+- The guard held every tier below it, not just destinations. Killing the primary
+  encoder clears the probe state, so it fired for exactly the window the failover
+  selector exists to cover: the selector stopped being reconciled and the late
+  catch-up put a backwards decode timestamp in the output — the discontinuity a
+  receiving platform drops the connection on.
+- A destination could be left subscribed to a relay hub that was then closed
+  underneath it. Closing a hub stops delivery without ending the process, so
+  FFmpeg sat there running and receiving nothing: 76 seconds, zero bytes, no
+  error. It reproduced about one run in two.
+- A video-only source going idle tore down its silence tier, after which every
+  destination on that source was torn down too, for as long as the encoder was
+  quiet.
+- A probe that could never succeed — a missing ffprobe, an unidentifiable
+  stream — held every destination down and said nothing at all. It now says so.
+
+### Installer
+
+- **The installer now offers to serve HTTPS on 443, and opens it.** The port was
+  asked for before the TLS mode was chosen, so an operator picked one without
+  yet knowing they would be serving HTTPS at all — and the default 8080 gave a
+  working but unlovely install where every link carried a port and nothing
+  listened on the one people try first. Offered only when the port is still the
+  untouched default; a port given on the command line or typed at the prompt is
+  a decision and is left alone. The firewall rule follows the chosen port rather
+  than opening 443 unconditionally, because a port nothing binds looks like
+  working TLS and serves nothing.
+
+- **`CAP_NET_BIND_SERVICE` is granted for any privileged port, not only for
+  ACME.** It used to be gated on `tls.mode: acme`, which covered the `:80`
+  challenge and missed the web UI itself: selfsigned is the DEFAULT choice, so
+  an operator taking the 443 offer would have got a unit that could not bind the
+  port the installer had just written into its own `ExecStart` — `bind:
+  permission denied`, on a fresh install, from following the prompts.
+
+
+### Testing
+
+- The cross-platform smoke test now publishes over **E-RTMP and SRT** as well as
+  injecting into the relay hub, and measures per-destination audio for each.
+  Both publishers are pure Go — `gortmplib` and `datarhei/gosrt` — so the one-port
+  listener, the readiness gate and multitrack FLV demux are exercised on macOS
+  and Windows too, not only on the Linux acceptance suites. FFmpeg is left doing
+  only what every build can do: muxing.
+- The container suite gained two steps that publish routed audio to a real RTMP
+  sink, from an E-RTMP ingest and from an SRT ingest, closing a coverage gap
+  where each half had been proven and the combination never had.
+- A destination that runs its whole life and writes nothing now fails the
+  failover suite. It used to be a note, and a note is why the 76-second silent
+  destination above stayed green.
+
+## [0.4.0] — 2026-08-07
+
+A minor bump. Nothing here breaks a stored config, but two behaviours change in
+ways an existing install will notice: **ingest mode no longer has a default**, so
+a fresh install asks rather than choosing; and **RTMP ingest is now addressed by
+stream key** on one shared listener rather than by a port per source. Keys that
+already worked keep working through a grandfather clause.
+
+The headline is multi-source RTMP: how many programmes an install can carry no
+longer depends on which protocol the encoder speaks. Alongside it, the audio
+track ceiling goes from six to thirty-two, destinations gained per-platform
+encoder guidance sourced from what each platform publishes, and the project got
+a website.
+
+The fixes are worth reading in full. Three of them — a data race in the new RTMP
+listener, multitrack being unusable for any subscriber that joined late, and
+every SRT install reporting its ingest as offline — were found by tests written
+after the feature, which is the argument for writing them.
+
+
+### Added
+
+- **Chat search.** `GET /api/v1/chat/search?q=` matches a message's text or its
+  author's name across the retained scrollback, newest first, optionally scoped
+  to one platform. The pane gains a search box that replaces the live timeline
+  while a query is active — results come from the database and are frozen at the
+  moment of the query, so letting live messages append underneath them would
+  present two different things as one list. Search is where an operator can
+  wrongly conclude something did not happen, so the retention caveat renders on
+  an empty result, not only on a full one.
+- **Right-click and double-click moderation on a chat message.** Timeouts, delete
+  and the user card, two seconds from reading a bad line to acting on it.
+  Double-click is the same menu for pointers with no secondary button. It adds no
+  capability the user card lacked; a permanent ban deliberately does *not* fire
+  from the menu but opens the card, which confirms — the one irreversible action
+  reachable from a right-click should not be a single click on a menu that
+  appeared under the cursor.
+- **Links out to the platform.** Twitch gets its real moderator viewer card in a
+  separate window. YouTube, Kick and Facebook get a profile or channel link and
+  say so, because none of them publishes a per-viewer chat history at any URL —
+  a uniform "Open on <platform>" label would promise a moderator the same thing
+  everywhere and deliver it only on Twitch.
+- **Per-setting help.** An `(i)` popover beside a setting's label explains what it
+  actually changes — 2.5× your round-trip time for SRT latency, why the free-space
+  floor is the only limit that accounts for files polyemesis did not write. Click
+  rather than hover, so it works on touch and under a screen reader, and the body
+  is a catalogue key, so the explanation is translated too.
+- **Multi-source RTMP.** RTMP ingest was `ffmpeg -listen 1` — a single-connection
+  receiver that cannot demultiplex by path — so an install could carry exactly
+  one RTMP source while SRT carried as many as you liked. That asymmetry was an
+  artefact of the implementation rather than a decision. `internal/rtmpserver`
+  is now one listener on one port for every source, addressed by the stream key
+  in the publish URL, the same shape `internal/srtserver` already had. Publishers
+  push to it and this install's own FFmpeg processes subscribe to it on the same
+  socket. Media is never parsed: RTMP *messages* are relayed, so `-map 0 -c copy`
+  downstream is untouched and Enhanced RTMP multitrack passes through without the
+  server knowing what a track is. Existing keys keep working through a
+  grandfather clause.
+- **Thirty-two audio tracks, up from six.** `routing.MaxTracks` is 32, with a
+  Σchannels ≤ 64 guard because FFmpeg's `amerge` caps there and the failure past
+  it is a filter graph that will not build.
+- **A marketing website.** `web/` — Astro, static, its own container image, with
+  a build-time guard on the parts of it that have silently broken before.
+- **Per-platform encoder guidance.** Each preset carries the resolution, bitrate
+  and frame rate the platform itself publishes, with the source URL and the date
+  it was read attached — both required fields, because a figure whose provenance
+  is not on screen is indistinguishable from a guess. Cross-checked against OBS's
+  own `services.json`.
+- **An advanced section for customising a destination's encode.** A variant is
+  a second encode seeded from a shared one, so an operator can have "the same
+  tier but 4500 kbps for the constrained uplink" without editing the tier every
+  other destination is on.
+- **Alerts when a destination stops keeping up**, and security and configuration
+  events for Slack and Discord.
+- **An OBS acceptance suite.** `scripts/acceptance-obs-multitrack.sh` runs OBS
+  headless in Docker and publishes into a real polyemesis, which is the only way
+  to test OBS's own handshake and metadata rather than FFmpeg's.
+
+
+### Changed
+
+- **The application is translated.** Every page under `src/pages` now reads from
+  the catalogue; a sweep for hard-coded prose returns nothing. The catalogue grew
+  from 135 keys to 1,098 and all fifteen languages are complete.
+
+  Previously only the nav shell and three widgets were extracted, so an operator
+  who chose Deutsch got a German sidebar and an English application. The 135 keys
+  that existed were complete in every language, which is exactly why the gap was
+  easy to miss: the coverage looked like 100%.
+
+  Extraction found prose in four shapes, each invisible to the check written for
+  the one before it — JSX text, string props and toasts; ternaries such as
+  `{busy ? "Pushing…" : "Push to platforms"}`; object-literal properties built
+  from template literals; and eight module-scope tables. The last of those could
+  never have called `useT()` at all, since hooks do not run at module scope, so
+  each now holds a `TranslationKey` and is translated where it is rendered — a
+  `Record<K, TranslationKey>` cannot hold a sentence, which the compiler enforces.
+- **One word per locale for "rendition".** Ten of the fifteen catalogues disagreed
+  with themselves across `nav.renditions`, `rend.title`, `sources.renditions` and
+  `dash.renditions`. In Polish the sidebar read "Opcje jakości" while the page it
+  opened was titled "Warianty", so following the link appeared to land elsewhere.
+  Japanese, Korean and Dutch additionally used a term meaning "rendering
+  settings"; a rendition is one video variant at a given size and bitrate, not a
+  settings screen, and they now say so.
+- `vitest` runs in CI alongside `tsc` and `oxlint`, covering the pure logic the
+  browser suite cannot practically enumerate — platform link construction across
+  five platforms, and the translation catalogues themselves.
+- **Ingest mode is an explicit first-run choice, with no default.** The two
+  options are not interchangeable and the difference is not recoverable by
+  guessing: SRT carries every audio track, and RTMP delivers a single one on any
+  FFmpeg below 7.1 — which includes Ubuntu 24.04's stock build. Defaulting to
+  either silently hands a share of installs the wrong thing, and the RTMP failure
+  is invisible: the stream works, and one of the six tracks arrives.
+- **The video treatment on a destination is two cards, not a dropdown.** Copying
+  video is `-c:v copy` and costs nothing; a shared encode is the most expensive
+  thing on the page. A `<select>` presented them as the same kind of choice. The
+  picker now leads with what an encode *produces* rather than what someone named
+  it, and states the consequence of joining or leaving one — including what
+  happens to the encode you are leaving, which nothing else in this space tells
+  you.
+- **A motion scale that is actually wired.** `--motion-instant/quick/settle` and
+  `--ease-out` were declared and registered with Tailwind zero times, so all 27
+  `transition-colors` ran on its 150ms default — and the reduced-motion block
+  that set those tokens to `0ms` did nothing at all. The website, which had no
+  named timings, now shares the same scale.
+- **The E-RTMP multitrack harness is Go**, not Python. It was the repository's
+  only `.py` file; everything else that stands up a real stream and measures what
+  comes back is already a `//go:build ignore` main under `scripts/`.
+
+
+### Fixed
+
+- Chat's `(i)` help buttons no longer all announce as "More information"; each
+  names the setting it explains, so a screen-reader user can tell a dozen of them
+  apart.
+- **A data race in the RTMP listener.** `serveSubscriber` assigned `sub.conn`
+  after publishing the subscriber into the stream table, so `Stop` could read the
+  field while it was being written. Found by CI's `-race`; no local run had ever
+  used it.
+- **Enhanced RTMP multitrack was unusable for any subscriber that joined late.**
+  Tracks 2..N arrive wrapped in `AudioExMultitrack`, and the setup cache did not
+  unwrap them — so a late subscriber held coded frames for tracks it had no
+  decoder configuration for, and `ffprobe` hung rather than failing. Late is the
+  normal case: the ingest child subscribes when the source is enabled, and the
+  operator starts their encoder whenever they like.
+- **Every healthy SRT install reported its ingest as offline.** The header read
+  `status.ingest.state`, and SRT deliberately has no ingest child — `srtserver`
+  delivers straight into the hub — so the most prominent status in the
+  application contradicted the meters, the LIVE badge and the API. It now asks
+  the question the rest of the app asks: are bytes arriving.
+- **The reconnecting indicator faded itself.** `live` pulsed a separate halo and
+  kept its core opaque; `warn` pulsed the core, dropping the only indicator to
+  35% opacity twice a second. The state that most needs attention was the one
+  rendered hardest to see.
+- **Twenty-one raw Tailwind colours collided with the semantic tones**, and the
+  guard whitelisted them: `red-500` is ΔE 8.11 from `--down`, which is to say
+  indistinguishable.
+- **Recordings were truncated on stop rather than finalised**, on every platform
+  and not only Windows as first recorded.
+- **`--tls acme --yes` spun forever, and a re-install never restarted.**
+- **The default Docker install reported unhealthy forever.**
+- **An unmatched `/api` path answered 200 with the UI instead of a 404.**
+- **The Docker upgrade backup archived an empty volume and exited 0.**
+- **A short window drew two scrollbars**, one of which scrolled 14px of nothing.
+- **A fresh install logged an ERROR about an RTMP port nobody had set.**
+- **The installer's FFmpeg download could be walked down to plaintext HTTP.**
+  Every other fetch in `install.sh` pins the scheme; this one went through
+  `urllib.request.urlretrieve`, which follows redirects without restricting it —
+  and it writes a binary into `/usr/local/bin` that a root service executes.
+
 ## [0.3.0] — 2026-08-05
 
 A minor bump rather than a patch, and deliberately: `facebook.backupIngest`
@@ -734,7 +1322,10 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rainmanjam/polyemesis/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rainmanjam/polyemesis/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rainmanjam/polyemesis/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rainmanjam/polyemesis/releases/tag/v0.1.0

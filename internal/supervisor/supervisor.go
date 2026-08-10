@@ -9,6 +9,7 @@ package supervisor
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -67,6 +68,30 @@ type Spec struct {
 	Kind string
 	Bin  string
 	Args []string
+
+	// Secrets are the EXACT credential literals that appear anywhere in this
+	// process's argv, its stderr, or an error string it produces.
+	//
+	// Everything the supervisor renders for a human -- CommandString, the log
+	// ring, the on-disk process.log, the WebSocket log frames and
+	// Status.LastError -- removes these by exact substring match before anything
+	// else looks at the text. See (*Process).scrub.
+	//
+	// It exists because alerts.Redact, which was the only masking on those
+	// egresses, is a GRAMMAR over an open namespace. FFmpeg takes arbitrary
+	// `-flag value` pairs, so `-rtmp_conn S:<key>` is invisible to it and
+	// `Authorization:Bearer\ <key>` splits into argv entries where it masks the
+	// word "Bearer" and hands back the key. Both shapes shipped, and both
+	// reached a READ-scoped API token through GET /processes, GET
+	// /processes/{name}/logs and the /ws log stream. No regex closes that,
+	// because the set of flag spellings is not enumerable -- but the set of
+	// credentials THIS process was built with is, and it is right here.
+	//
+	// Populate it at every construction site whose argv can carry an operator's
+	// credential. internal/engine has an AST guard that fails the build when a
+	// site neither sets this nor appears in its declared exemption list with a
+	// reason, because a forgotten site reproduces exactly the bug this closes.
+	Secrets []string
 
 	// NextArgs, when set, is called immediately before EVERY spawn and its
 	// result is used instead of Args for that run.
@@ -169,6 +194,10 @@ type Status struct {
 type Process struct {
 	spec Spec
 	log  *slog.Logger
+	// secrets is spec.Secrets compiled once at construction. Immutable after
+	// New, so scrub needs no lock and can be called from the stderr scan
+	// goroutine and an HTTP handler at the same time.
+	secrets *alerts.SecretSet
 
 	mu        sync.RWMutex
 	state     State
@@ -230,13 +259,39 @@ func New(log *slog.Logger, spec Spec) *Process {
 	}.Normalised()
 	spec.MinBackoff, spec.MaxBackoff = pol.MinBackoff, pol.MaxBackoff
 	return &Process{
-		spec:   spec,
-		pol:    pol,
-		retune: make(chan struct{}, 1),
-		log:    log.With("process", spec.Name),
-		state:  StateStopped,
-		logs:   newRing(logRingSize),
+		spec:    spec,
+		pol:     pol,
+		retune:  make(chan struct{}, 1),
+		log:     log.With("process", spec.Name),
+		state:   StateStopped,
+		logs:    newRing(logRingSize),
+		secrets: alerts.NewSecretSet(log, spec.Secrets...),
 	}
+}
+
+// scrub is THE chokepoint. Every string this process renders for a reader --
+// human or machine, authenticated or not -- goes through here and through
+// nothing else.
+//
+// Two passes, in this order and for different reasons:
+//
+//  1. The exact literals from Spec.Secrets. This is the boundary. It cannot be
+//     defeated by how the credential was spelled onto the command line, because
+//     it does not read the spelling at all.
+//  2. alerts.Redact, as a RESIDUAL best-effort pass, for credentials this
+//     process was never told about: a token an endpoint echoed back in an error
+//     string, a URL FFmpeg synthesised from parts. It is not the boundary and
+//     the four callers below must not be read as though it were.
+//
+// UNCONDITIONAL -- there is no principal argument and there must not be one.
+// Two of the sinks fed from here have no principal and never will: process.log
+// is a file that ends up in support tarballs, and cmd/polyemesis/mqtt.go
+// publishes Status.LastError to a RETAINED topic that outlives the process and
+// is readable by every subscriber on the broker. An admin who genuinely wants
+// the raw argv has GET /destinations/{id}/expert, which is admin-only and reads
+// Args() rather than anything on this path.
+func (p *Process) scrub(s string) string {
+	return alerts.Redact(p.secrets.Scrub(s))
 }
 
 // Normalised fills a Policy's zero fields with the defaults a running process
@@ -371,27 +426,36 @@ func (p *Process) Args() []string { return append([]string{p.spec.Bin}, p.curren
 // rtmps://<host>/rtmp/<key>, and with backup ingest on it contains the backup
 // key too. A caller that genuinely needs the real argv has Args().
 //
-// alerts.Redact is deliberately the same function the alerts payloads, the
-// lifecycle hooks and the MQTT broker logs already run on this byte stream.
-// Having one redactor is the only thing that stops this path drifting from
-// those, which is exactly how it came to be the one egress that skipped the
-// policy.
+// TWO passes over TWO different units of text, and the split is the fix rather
+// than a tidy-up.
 //
-// Redaction runs before quoting so the shell quoting describes the string that
-// is actually shown rather than the one being hidden.
+// The exact literals from Spec.Secrets are removed PER ELEMENT, because that is
+// the unit the credential arrives in and a substring match does not care what
+// is glued to it.
+//
+// alerts.Redact then runs ONCE over the JOINED string, because applying it per
+// argument is itself a leaking shape. `-headers Authorization: Bearer <key>` is
+// fully masked as one string -- the bearerToken rule spans the space -- and
+// leaks the key when each argv element is redacted alone, since "Bearer" and
+// the key are separate elements and neither matches anything by itself. This
+// method did exactly that, so the CANONICAL, correctly-spelled header form was
+// the one it failed on. Reconstituting the line before the residual pass is
+// what closes it.
+//
+// Redaction of the literals runs before quoting so the shell quoting describes
+// the string that is actually shown rather than the one being hidden.
 func (p *Process) CommandString() string {
 	live := p.currentArgs()
 	parts := make([]string, 0, len(live)+1)
 	parts = append(parts, p.spec.Bin)
 	for _, a := range live {
-		a = alerts.Redact(a)
+		a = p.secrets.Scrub(a)
 		if strings.ContainsAny(a, " \t\"'|&;<>()$`\\") {
-			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
-			continue
+			a = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 		}
 		parts = append(parts, a)
 	}
-	return strings.Join(parts, " ")
+	return alerts.Redact(strings.Join(parts, " "))
 }
 
 // Start begins supervising. Calling it on an already-running process is a
@@ -420,11 +484,22 @@ func (p *Process) Start() {
 // Stop terminates the child and stops supervising. It blocks until the child
 // is gone or ctx expires.
 //
+// RETURNS AN ERROR WHEN THE CHILD HAD TO BE KILLED ON THE DEADLINE, because
+// "stopped" and "sent SIGKILL and stopped waiting" are different facts and a
+// caller cannot tell them apart from the state alone. Both end at StateStopped.
+// The one caller that most needs the difference is the selector: it starts a
+// replacement feed into the same hub the moment this returns, so a child that
+// is still alive and still writing is two publishers on one input.
+//
+// Ignoring the error is fine and most callers do -- a shutdown path has nothing
+// better to do with it -- which is why this returns rather than blocking longer
+// or panicking.
+//
 // Stop is TERMINAL. It retires the process even when there is nothing running
 // to terminate, so a Start that was already on its way -- built, published,
 // about to be called -- cannot bring a child up behind the shutdown that just
 // released its port and its subscription.
-func (p *Process) Stop(ctx context.Context) { p.stop(ctx, true) }
+func (p *Process) Stop(ctx context.Context) error { return p.stop(ctx, true) }
 
 // Restart stops and starts the process. Used when a routing profile changes:
 // only the affected destination is cycled, never the ingest.
@@ -433,18 +508,26 @@ func (p *Process) Stop(ctx context.Context) { p.stop(ctx, true) }
 // lands in the gap, its latch makes the Start below a no-op, which is the
 // outcome the caller of Stop asked for.
 func (p *Process) Restart(ctx context.Context) {
-	p.stop(ctx, false)
+	// Deliberately discarded: a restart that had to kill the old child still
+	// wants the new one, and the caller of Restart has no different action to
+	// take. The selector, which does, calls Stop directly.
+	_ = p.stop(ctx, false)
 	p.Start()
 }
 
-func (p *Process) stop(ctx context.Context, retire bool) {
+// ErrStopDeadline reports that Stop gave up waiting and killed the child. Its
+// own error because the caller's question is "can I reuse what it was holding
+// yet", and that has a different answer from any other stop failure.
+var ErrStopDeadline = errors.New("process did not exit before the stop deadline")
+
+func (p *Process) stop(ctx context.Context, retire bool) error {
 	p.runMu.Lock()
 	if retire {
 		p.retired = true
 	}
 	if !p.running {
 		p.runMu.Unlock()
-		return
+		return nil
 	}
 	cancel, done := p.cancel, p.done
 	p.running = false
@@ -453,13 +536,21 @@ func (p *Process) stop(ctx context.Context, retire bool) {
 	cancel()
 	p.terminate()
 
+	var err error
 	select {
 	case <-done:
 	case <-ctx.Done():
+		// SIGKILL is issued and this returns; it does NOT wait for the child to
+		// die. It cannot: the deadline is already spent, and blocking past it
+		// would hold whatever the caller is holding for an unbounded time. So
+		// the honest thing is to say so rather than to report a clean stop.
 		p.log.Warn("timed out waiting for process to exit; killing")
 		p.kill()
+		err = fmt.Errorf("%w after %s: the child was sent SIGKILL and may still be running",
+			ErrStopDeadline, p.Name())
 	}
 	p.setState(StateStopped, "")
+	return err
 }
 
 func (p *Process) supervise(ctx context.Context, done chan struct{}) {
@@ -751,7 +842,7 @@ func (p *Process) appendLog(text, level string) {
 	l := LogLine{
 		Time:    time.Now(),
 		Process: p.spec.Name,
-		Text:    alerts.Redact(text),
+		Text:    p.scrub(text),
 		Level:   level,
 	}
 	p.logs.add(l)
@@ -786,7 +877,7 @@ func (p *Process) Status() Status {
 		State:     p.state,
 		PID:       p.pid,
 		Restarts:  p.restarts,
-		LastError: alerts.Redact(p.lastErr),
+		LastError: p.scrub(p.lastErr),
 		Progress:  p.progress,
 	}
 	if p.state == StateRunning && !p.startedAt.IsZero() {
@@ -819,14 +910,20 @@ func (p *Process) Status() Status {
 // a future writer to the ring forgets. Redact is idempotent, so running it over
 // already-clean text costs a scan and changes nothing.
 //
-// alerts.Redact touches URLs and bare key=value credentials only. An FFmpeg
-// progress or error line has neither, so the diagnostic value an operator came
-// for -- the scheme, the host, "Connection refused", the frame counters --
-// survives intact.
+// What "masked" means here is scrub, NOT alerts.Redact. The process's exact
+// declared credential literals are removed first and Redact runs afterwards only
+// as a residual pass over whatever it can recognise. The distinction is the
+// whole of #150's argv finding: Redact alone left `-rtmp_conn S:<key>` and the
+// backslash-escaped form of an Authorization header in the clear, and both
+// reached a read-scoped API token through this method.
+//
+// The diagnostic value an operator came for survives either way: the scheme, the
+// host, "Connection refused" and the frame counters are none of them
+// credentials and none of them declared, so nothing removes them.
 func (p *Process) Logs() []LogLine {
 	lines := p.logs.snapshot()
 	for i := range lines {
-		lines[i].Text = alerts.Redact(lines[i].Text)
+		lines[i].Text = p.scrub(lines[i].Text)
 	}
 	return lines
 }

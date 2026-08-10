@@ -112,6 +112,12 @@ func RedactWebhookURL(raw string) string {
 // maskLastSegment blanks the final path element when there is an application
 // above it, which is the shape every RTMP ingest uses. A single-segment path is
 // the application on its own and carries no key, so it survives.
+//
+// There is deliberately NO "skip a segment that is already the mask" guard
+// here: the assignment below writes Mask, so a segment that already equals Mask
+// is unchanged by definition. The double-mask this looked like it should fix
+// came from splitTrailer eating the mask's closing bracket before this function
+// ever saw it, and it is fixed there.
 func maskLastSegment(path string) string {
 	parts := strings.Split(path, "/")
 	last := -1
@@ -145,9 +151,21 @@ func maskUnparseable(raw string) string {
 
 // splitTrailer peels the punctuation a sentence puts after a URL, so it is not
 // swallowed into the masked path and does not break url.Parse.
+//
+// It stops at a mask THIS package already wrote. Mask ends in ']', which is
+// also sentence punctuation, so peeling it left maskLastSegment looking at
+// "[redacted" -- a segment it did not recognise, masked again, and the trailing
+// ']' put back afterwards: "rtmps://h/app/[redacted]]". That is not cosmetic
+// noise from a contrived input, it is what the MQTT path produces every time,
+// because Process.scrub runs SecretSet.Scrub (which writes the mask) and THEN
+// Redact (which reads it back) over the same string. See
+// TestRedactIsIdempotentOverItsOwnMask.
 func splitTrailer(raw string) (string, string) {
 	end := len(raw)
 	for end > 0 && strings.ContainsRune(".,;:)]}!?", rune(raw[end-1])) {
+		if raw[end-1] == ']' && strings.HasSuffix(raw[:end], Mask) {
+			break
+		}
 		end--
 	}
 	return raw[:end], raw[end:]
@@ -155,6 +173,62 @@ func splitTrailer(raw string) (string, string) {
 
 // Redact scrubs free text: every URL in it, plus any credential written as a
 // bare key=value pair.
+//
+// IT IS A RESIDUAL PASS, NOT A BOUNDARY. The boundary is alerts.SecretSet,
+// which removes the EXACT literals a process was configured with and cannot be
+// defeated by how they were spelled. Redact runs after that, over the same
+// bytes, for the credentials nobody could have declared: a token an endpoint
+// echoed back, a URL FFmpeg synthesised from parts. Anything that treats a
+// Redact call as the reason a sink is safe is wrong, and the four limits below
+// are why. All four are MEASURED and pinned by TestRedactKnownResiduals and
+// TestRedactPerElementIsStrictlyWorse in redact_test.go.
+//
+//  1. THE GRAMMAR IS `label SEP value`, SEP in {':', '='}, and the label side is
+//     a CLOSED table (bareSecret / secretParam). FFmpeg's grammar is
+//     `-flag SP value` over an OPEN option namespace, and it is invisible here:
+//
+//     Redact("-passphrase KEY")   == "-passphrase KEY"     // unchanged
+//     Redact("-streamid KEY")     == "-streamid KEY"       // unchanged
+//     Redact("-rtmp_conn S:KEY")  == "-rtmp_conn S:KEY"    // unchanged
+//
+//     `passphrase` and `streamid` ARE both in the table. They still leak. The
+//     failure is GRAMMATICAL, not lexical, so ENLARGING THE TABLE CANNOT FIX
+//     IT -- the set of FFmpeg flag spellings is not enumerable, and each new
+//     regex only moves the boundary of a thing that has no boundary.
+//
+//  2. IT DOES NOT MASK AN https PATH SEGMENT. Only the keyCarrying schemes
+//     (rtmp/rtmps/rtsp/rtsps/srt/udp/rtp) have their last path element blanked,
+//     because for those the path IS the stream key. A Slack or Discord webhook
+//     carries its secret in an https path and survives untouched:
+//
+//     Redact("https://host/a/b/KEY") == "https://host/a/b/KEY"
+//
+//     Use RedactWebhookURL for that shape. Running Redact over a webhook URL,
+//     or over an error wrapping one, is a NO-OP and must never be recorded as
+//     a fix; see alerts.ClientErrorText.
+//
+//  3. IT DOES NOT SEE JSON. `{"token":"KEY"}` is unchanged: the quotes sit
+//     between the separator and the value, so the bare-pair regex does not
+//     reach it, and a third party's error body is exactly where that shape
+//     arrives.
+//
+//  4. APPLYING IT PER ELEMENT OF AN ARGV IS STRICTLY WORSE THAN APPLYING IT TO
+//     THE JOINED TEXT, AND NEVER BETTER. Its matches are substrings of the
+//     input, so splitting on whitespace can only sever a label from its value,
+//     never create a match. Three shapes measurably differ, all of them
+//     `label: value` where the split lands on the space:
+//
+//     "Authorization: Bearer KEY"  whole -> masked   per-element -> LEAKED
+//     "Authorization: Basic KEY"   whole -> masked   per-element -> LEAKED
+//     "token: KEY"                 whole -> masked   per-element -> LEAKED
+//
+//     This is the bug #150 fixed structurally rather than lexically: argv
+//     egresses now go through supervisor.Spec.Secrets, and a new caller looping
+//     Redact over tokens re-creates it. TestRedactIsCalledOnlyFromTheAllowlist
+//     fails the build on a bare-Redact caller outside a short, reasoned list.
+//
+// The correct reading of a Redact call is "the declared secrets are already
+// gone; this is the best-effort pass over what is left".
 func Redact(s string) string {
 	if s == "" {
 		return s

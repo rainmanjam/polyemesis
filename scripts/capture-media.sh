@@ -91,12 +91,33 @@ if lsof -nP -iTCP:"$PORT" 2>/dev/null | grep -q LISTEN; then
   exit 1
 fi
 
-docker image inspect "$IMAGE" >/dev/null 2>&1 || {
-  echo "image $IMAGE not found. Build it with:"
-  echo "  make build   # populates internal/web/dist so the UI is embedded"
-  echo "  CGO_ENABLED=0 GOOS=linux GOARCH=\$(uname -m | sed s/x86_64/amd64/;s/aarch64/arm64/) go build -o /tmp/poly ./cmd/polyemesis"
-  exit 1
-}
+# BUILD THE IMAGE, every run.
+#
+# This used to check only that the image EXISTED, and reused whatever was there.
+# The one on this machine turned out to be a week old, so every capture -- and
+# every screenshot committed from one -- photographed week-old code. It is the
+# same defect acceptance-failover.sh had, where a stale binary in the repo root
+# made a local run pass against a program nobody had built.
+#
+# A capture tool that advertises the product must photograph the product as it
+# is now, or the screenshots are documentation of something else. Rebuilding
+# costs a minute; being wrong about what shipped costs more.
+#
+# --no-cache is deliberately NOT passed: the layer cache is keyed on the binary
+# and the built UI, both of which are regenerated above, so a cached layer here
+# means nothing changed.
+echo "==> building the UI and the capture image"
+( cd "$ROOT" && make build >/dev/null ) || { echo "make build failed"; exit 1; }
+GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+( cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH_LOCAL" \
+    go build -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
+  echo "cross-compile for the container failed"; exit 1; }
+docker build -q -t "$IMAGE" -f - "$WORK" >/dev/null <<'DOCKERFILE' || { echo "docker build failed"; exit 1; }
+FROM alpine:3.20
+RUN apk add --no-cache ffmpeg ca-certificates
+COPY polyemesis-linux /usr/local/bin/polyemesis
+ENTRYPOINT ["/usr/local/bin/polyemesis"]
+DOCKERFILE
 
 echo "==> starting polyemesis (container) on :$PORT"
 docker network create "$NET" >/dev/null 2>&1 || true

@@ -255,6 +255,13 @@ Open <http://localhost:8080> and set an admin password on the first-run screen.
 | `1935/tcp` | RTMP ingest, the fallback for encoders that cannot do SRT |
 | `80/tcp` | **ACME only**, and shipped commented out — see below |
 
+Both ingest ports are published **once, for the whole install.** Adding a second
+programme never means publishing another port or restarting the container: every
+source arrives on the same listener and is told apart by its publish token (SRT)
+or stream key (RTMP). That is the point of
+[DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md) — editing
+`docker-compose.yml` to add a source was a real cost it removed.
+
 **Port 80 and Let's Encrypt.** If you want polyemesis to obtain its own
 certificate (`tls.mode: acme`, or `auto` resolving to it), HTTP-01 validation
 must reach `http://<hostname>/.well-known/acme-challenge/…` on port 80 from the
@@ -639,14 +646,16 @@ tls mode=… hostname=…
 |---|---|---|
 | 8080 | TCP | always — web UI and API. Configurable via `addr`. |
 | 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest*. |
-| 1935 | TCP | RTMP ingest, only if you use the fallback |
+| 1935 | TCP | RTMP ingest, only if you use the fallback. One port however many RTMP sources you run. |
 | 80 | TCP | only for `tls.mode: acme` (HTTP-01 validation), plus the HTTP→HTTPS redirect whenever polyemesis terminates TLS |
 | 443 | TCP | only if you set `addr` to `:443` rather than serving TLS on 8080 |
 
-The SRT ingest listener binds `0.0.0.0` regardless of `addr`, so restricting
-`addr` to loopback for a reverse-proxy deployment does not restrict ingest. Set
-an SRT passphrase in *Settings → Ingest*: without one your stream crosses the
-network in the clear.
+The ingest listeners bind `0.0.0.0` regardless of `addr`, so restricting `addr`
+to loopback for a reverse-proxy deployment does not restrict ingest. Set an SRT
+passphrase in *Settings → Ingest*: without one your stream crosses the network
+in the clear. RTMP has no equivalent — its stream key authenticates the
+publisher but encrypts nothing, so the RTMP port is the one to keep off the
+public internet if you have the choice.
 
 ---
 

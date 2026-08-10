@@ -36,7 +36,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **X (Twitter) Live** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
 | **Rumble** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Instagram Live** | Not possible | **Not possible** | Not possible | Not possible | Not possible | Not possible | Not possible |
+| **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
 | *Everything else* | — | By hand | — | — | — | — | — |
 
 | Term | Means |
@@ -128,9 +128,18 @@ third-party live-video ingest endpoint; access to what *is* documented is
 credit-based and paid. Create the source in X's own producer tooling and copy
 the URL and key across.
 
-**Instagram — polyemesis cannot stream here.** Instagram's platform covers
-messaging, content publishing and comments. There is no Live broadcast API, and
-Live Producer's RTMP path was removed for most accounts. It is listed, and
+**Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
+distinction matters and this page used to collapse it. Instagram's platform
+covers messaging, content publishing and comments: there is no Live broadcast
+API, so nothing here can create a broadcast, fetch a key, read chat or report
+viewers. That is what "unsupported" means, and it is why the preset exists.
+
+What it does NOT mean is that the bytes are refused. `TierUnsupported` feeds
+`UnsupportedPresets()`, which only tells the destination picker to mark the row;
+nothing in the streaming path consults it. If your account is one of the few
+that still has Live Producer, take its server URL and key, create a **Generic
+RTMPS** destination, and it streams like any other — with its own per-destination
+audio mix. The key changes every broadcast, so it is manual each time. It is listed, and
 marked unsupported in the destination picker, rather than shipped as a preset
 that quietly never connects — a destination that fails silently looks exactly
 like a bug in polyemesis, and there is nothing to fix. If your account is one of

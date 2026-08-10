@@ -7,6 +7,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
@@ -21,11 +22,7 @@ import (
 func storeEngine(t *testing.T) (*Engine, *db.DB) {
 	t.Helper()
 	dir := t.TempDir()
-	store, err := db.Open(filepath.Join(dir, "polyemesis.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
 
 	cfg := config.Config{DataDir: dir}
 	if err := cfg.EnsureDirs(); err != nil {

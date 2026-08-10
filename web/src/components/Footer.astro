@@ -1,0 +1,77 @@
+---
+const cols = [
+  {
+    title: "Product",
+    links: [
+      { href: "/features", label: "Features" },
+      { href: "/comparison", label: "How it compares" },
+      { href: "/download", label: "Install" },
+    ],
+  },
+  {
+    title: "Docs",
+    links: [
+      { href: "/docs", label: "Overview" },
+      { href: "/docs#audio-routing", label: "Audio routing" },
+      { href: "/docs#start", label: "OBS setup" },  // OBS.md lives in the "Getting it running" group
+      { href: "/docs#api", label: "HTTP API" },
+    ],
+  },
+  {
+    title: "Project",
+    links: [
+      { href: "https://github.com/rainmanjam/polyemesis", label: "GitHub" },
+      { href: "https://github.com/rainmanjam/polyemesis/issues", label: "Issues" },
+      { href: "https://hub.docker.com/r/rainmanjam/polyemesis", label: "Docker Hub" },
+      { href: "https://github.com/rainmanjam/polyemesis/blob/main/LICENSE", label: "MIT licence" },
+    ],
+  },
+];
+---
+
+<footer class="border-t border-line">
+  <div class="wrap grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
+    <div>
+      <div class="flex items-center gap-2.5 font-display font-medium">
+        <svg width="20" height="20" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+          <rect x="1" y="8" width="2.5" height="6" rx="1.25" fill="#5b7fc7" />
+          <rect x="5" y="4" width="2.5" height="14" rx="1.25" fill="#5b7fc7" />
+          <rect x="9" y="6.5" width="2.5" height="9" rx="1.25" fill="#3ecf6d" />
+          <rect x="13" y="2" width="2.5" height="18" rx="1.25" fill="#3ecf6d" />
+          <rect x="17" y="7" width="2.5" height="8" rx="1.25" fill="#45b5d0" />
+        </svg>
+        polyemesis
+      </div>
+      <p class="mt-3 max-w-xs text-sm leading-relaxed text-subtle">
+        A self-hosted restreaming server with per-destination multichannel audio
+        routing. One static binary, MIT licensed.
+      </p>
+    </div>
+    {
+      cols.map((c) => (
+        <div>
+          <h2 class="font-mono text-[11px] uppercase tracking-wider text-subtle">{c.title}</h2>
+          <ul class="mt-3 space-y-2">
+            {c.links.map((l) => (
+              <li>
+                <a
+                  href={l.href}
+                  class="text-sm text-muted transition-colors hover:text-fg"
+                  rel={l.href.startsWith("http") ? "noopener" : undefined}
+                >
+                  {l.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
+  <div class="border-t border-line/60">
+    <div class="wrap flex flex-wrap items-center justify-between gap-3 py-5 font-mono text-[11px] text-subtle">
+      <span>MIT licensed. Run it on your own hardware.</span>
+      <span>Not affiliated with YouTube, Twitch, Kick or Meta.</span>
+    </div>
+  </div>
+</footer>

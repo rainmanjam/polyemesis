@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -424,8 +425,8 @@ func TestRelayFeedArgsCopyEverythingAndCarryTheTimelineForward(t *testing.T) {
 // sees a format change it may refuse.
 func TestSlateSpecFollowsTheProbedIngestRatherThanAForm(t *testing.T) {
 	e := &Engine{
-		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		videoInfo: &ffmpeg.VideoStream{Width: 1920, Height: 1080, FrameRate: 50},
+		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		sourceState: sourceState{videoInfo: &ffmpeg.VideoStream{Width: 1920, Height: 1080, FrameRate: 50}},
 	}
 	s := db.DefaultSettings()
 	s.Failover.Slate.Color = "0x101014"
@@ -506,24 +507,9 @@ func failoverEngine(t *testing.T) *Engine {
 	}
 	t.Cleanup(func() { _ = hub.Close() })
 
-	store, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	store := dbtest.OpenAt(t, filepath.Join(t.TempDir(), "test.db"))
 
-	return &Engine{
-		log:       log,
-		store:     store,
-		bus:       events.NewBroker(),
-		hub:       hub,
-		alloc:     relay.NewPortAllocator(relayPortBase+relayPortSpan, 64),
-		tools:     &ffmpeg.Tools{FFmpeg: "polyemesis-no-such-binary"},
-		dests:     map[int64]*destination{},
-		rends:     map[int64]*rendition{},
-		playProcs: map[string]*supervisor.Process{},
-		source:    routing.DefaultSource(),
-	}
+	return &Engine{log: log, store: store, bus: events.NewBroker(), hub: hub, alloc: relay.NewPortAllocator(relayPortBase+relayPortSpan, 64), tools: &ffmpeg.Tools{FFmpeg: "polyemesis-no-such-binary"}, dests: map[int64]*destination{}, rends: map[int64]*rendition{}, playProcs: map[string]*supervisor.Process{}, sourceState: sourceState{source: routing.DefaultSource()}}
 }
 
 func failoverOnSettings() db.Settings {
@@ -857,11 +843,12 @@ func TestFailoverValidationRefusesWhatCannotStart(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			// The one exclusivity left. There is a single RTMP listener and no
-			// token routing on it, so a primary and a backup cannot both have
-			// it -- and finding that out at runtime means a backup that never
-			// takes over on the night it was needed.
-			name: "an RTMP backup behind an RTMP primary is refused",
+			// The last exclusivity, now gone. It existed because there was one
+			// RTMP listener with no token routing on it, so a primary and a
+			// backup could not both have it. internal/rtmpserver routes by
+			// token, and the standby is reached at "<token>.backup" on the same
+			// socket -- exactly as it already was over SRT.
+			name: "an RTMP backup behind an RTMP primary is fine",
 			mut: func(s *db.Settings) {
 				s.Ingest.Mode = db.IngestRTMP
 				s.Ingest.RTMP.App = "live"
@@ -870,7 +857,7 @@ func TestFailoverValidationRefusesWhatCannotStart(t *testing.T) {
 				s.Failover.Backup.Mode = db.IngestRTMP
 				s.Failover.Backup.RTMP.App = "live"
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			// An RTMP backup is fine when the primary is not using RTMP.

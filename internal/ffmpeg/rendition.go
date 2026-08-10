@@ -423,6 +423,32 @@ func videoFilterChain(s RenditionSpec, prof encoderProfile, includeText bool) st
 	if di := deinterlaceFilter(s.Deinterlace); di != "" {
 		chain = append(chain, di)
 	}
+	// DECIMATE BEFORE SCALING, and after deinterlacing.
+	//
+	// -r drops frames at the encoder, which is AFTER the filter graph, so a
+	// 60 -> 30 rendition scaled all sixty frames of the source and then
+	// discarded half of them. Every one of those scales was work spent on a
+	// frame that never reached the encoder.
+	//
+	// Measured on a 6-core Haswell VPS, 4K60 -> 1080p30 at veryfast/6000k:
+	//
+	//	scale then -r    2.13x realtime
+	//	fps then scale   2.49x realtime   (+17%)
+	//
+	// And the control, 4K60 -> 1080p60, where nothing is dropped: 1.50x against
+	// 1.53x. No change is what says the gain is the avoided scaling rather than
+	// measurement drift -- without that row this could have been noise.
+	//
+	// AFTER the deinterlace, never before. Dropping fields before they have
+	// been woven throws away half the information the deinterlacer needs, and
+	// the combing it then fails to remove is baked into every scaled frame.
+	//
+	// -r stays on the command line as well. This sets the rate the ENCODER
+	// sees; -r is what the muxer writes into the container, and a stream whose
+	// header disagrees with its frames is one some players refuse.
+	if s.FPS > 0 {
+		chain = append(chain, "fps="+formatFPS(s.FPS))
+	}
 	if fit := aspectFilter(s); fit != "" {
 		// The aspect chain already ends at exactly Width x Height, so the plain
 		// scale would be a second, redundant resize.

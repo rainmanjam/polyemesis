@@ -288,6 +288,59 @@ func (d *DB) TakeOAuthState(state string) (Platform, string, error) {
 // hostname costs them a broadcast, and it fails as a connection timeout that
 // looks like their network.
 
+// VideoGuidance is what a PLATFORM publishes about encoder settings — never
+// what polyemesis thinks it should be.
+//
+// The distinction is the whole reason this type carries a Source and a Checked
+// date, and why both are required rather than optional. This catalogue already
+// ships ingest hostnames, which move without notice, under a disclaimer saying
+// exactly that. Numbers move faster. A bitrate figure with no provenance is the
+// "confidently wrong" failure the disclaimer exists to prevent, and it would be
+// worse than shipping nothing: an operator has no way to tell a researched
+// number from a guess once it is in a form field.
+//
+// ADVISORY, ALWAYS. This seeds a form and annotates a picker. It must never
+// hide an option, refuse a value, or block a save. datarhei's `allowCopy`
+// filter — which suppresses the passthrough option when the source codec is not
+// in a platform's accepted list — was considered for this codebase and
+// rejected: suggesting is honest, hiding on the strength of a third-party
+// number is not.
+//
+// A preset with no VideoGuidance ships none. "Not published" is a real answer
+// and the catalogue says it rather than interpolating from a neighbour.
+type VideoGuidance struct {
+	// Width/Height/FPS describe the standard broadcast the platform documents.
+	// Zero means the platform does not state one.
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
+	FPS    int `json:"fps,omitempty"`
+
+	// KbpsMin/KbpsMax bound the platform's recommended VIDEO bitrate. Equal
+	// values mean it publishes a single figure rather than a range.
+	KbpsMin int `json:"kbpsMin,omitempty"`
+	KbpsMax int `json:"kbpsMax,omitempty"`
+
+	// GOPSeconds is the keyframe interval the platform asks for. Several
+	// platforms refuse or degrade a stream that ignores this, which is why it
+	// sits beside the bitrate rather than in a note.
+	GOPSeconds float64 `json:"gopSeconds,omitempty"`
+
+	// Note carries what a number cannot: tier gating, transcode availability,
+	// and anything the platform qualifies its own figures with. Twitch is the
+	// reason this is not optional in practice — its guidance differs by
+	// partner/affiliate status and its transcodes are not guaranteed, and
+	// flattening that into one bitrate would mislead exactly the operators who
+	// most need it.
+	Note string `json:"note,omitempty"`
+
+	// Source is the URL this came from, and Checked is when it was last read.
+	// Both required: a figure whose provenance cannot be shown is not shippable
+	// here, and a figure nobody has re-read in a year should say so itself
+	// rather than wait to be discovered wrong during a broadcast.
+	Source  string `json:"source"`
+	Checked string `json:"checked"`
+}
+
 // PlatformPresetDisclaimer is the wording the UI must show beside the
 // catalogue. Ingest hostnames and platform limits move without notice, so no
 // preset is presented as authoritative and every field stays editable.
@@ -357,6 +410,11 @@ type DestinationPreset struct {
 	// to invent one — Notes says where to find it instead.
 	URL string `json:"url"`
 
+	// Video is the platform's own published encoder guidance, or nil when it
+	// publishes none. Advisory: it seeds forms and annotates choices, and never
+	// gates anything.
+	Video *VideoGuidance `json:"video,omitempty"`
+
 	// SeparateKey reports whether the platform issues a stream key distinct
 	// from the URL. SRT is the usual false: its stream id rides in the query
 	// string, so there is nothing to put in a second field.
@@ -386,6 +444,11 @@ var destinationPresets = []DestinationPreset{
 	// ---------------------------------------------------------------- major
 	{
 		ID: "youtube", Name: "YouTube Live", Group: GroupMajor,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
+			Note:   "12000 is YouTube's RECOMMENDED H.264 figure for 1080p60, not a ceiling -- OBS's services.json carries 51000 as YouTube's maximum, a different fact rather than a contradiction. Keyframes must not exceed 4s -- beyond that YouTube reports gopSizeLong and the stream buffers. CBR.",
+			Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMP, Kind: DestRTMP, Platform: PlatformYouTube,
 		URL:         "rtmp://a.rtmp.youtube.com/live2",
 		SeparateKey: true,
@@ -397,6 +460,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "youtube-rtmps", Name: "YouTube Live (RTMPS)", Group: GroupMajor,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 2,
+			Note:   "The same figures as YouTube's RTMP ingest, from the same page -- which recommends RTMPS over RTMP.",
+			Source: "https://support.google.com/youtube/answer/2853702", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformYouTube,
 		URL:         "rtmps://a.rtmps.youtube.com/live2",
 		SeparateKey: true,
@@ -407,6 +475,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "twitch", Name: "Twitch", Group: GroupMajor,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 6000, KbpsMax: 6000, GOPSeconds: 2,
+			Note:   "Twitch's encoder guidance is the same for everyone; what is tiered is what happens AFTER ingest. Partners get transcodes on every broadcast, everyone else gets them on availability -- so a viewer on a slow connection may have no lower option. No maximum video bitrate is published. The two sources disagree on audio: Twitch's help page says 160 kbps maximum, OBS's services.json says 320.",
+			Source: "https://help.twitch.tv/s/article/broadcasting-guidelines", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMP, Kind: DestRTMP, Platform: PlatformTwitch,
 		URL:         "rtmp://live.twitch.tv/app",
 		SeparateKey: true,
@@ -428,6 +501,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "kick", Name: "Kick", Group: GroupMajor,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 1000, KbpsMax: 8000, GOPSeconds: 2,
+			Note:   "H.264 only -- Kick refuses H.265 -- and CBR only; it does not accept VBR. 1920x1080 and 8000 kbps are stated as platform caps rather than advice. No audio bitrate is published: Kick's own FAQ asks the question twice and answers with sample rate and channels.",
+			Source: "https://help.kick.com/en/articles/7066931-how-to-stream-on-kick-com", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformKick,
 		URL:         "rtmps://fa723fc1b171.global-contribute.live-video.net",
 		SeparateKey: true,
@@ -440,6 +518,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "facebook", Name: "Facebook Live", Group: GroupMajor,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4500, KbpsMax: 9000, GOPSeconds: 2,
+			Note:   "H.264 video and AAC audio only; other formats may be rejected. Aspect ratio must be near 16:9 or the stream may not be supported. Keyframes must not exceed 4s. Eight hours maximum.",
+			Source: "https://www.facebook.com/business/help/162540111070395", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformFacebook,
 		URL:         "rtmps://live-api-s.facebook.com:443/rtmp/",
 		SeparateKey: true,
@@ -474,6 +557,11 @@ var destinationPresets = []DestinationPreset{
 	// ------------------------------------------------------- video platforms
 	{
 		ID: "x", Name: "X (Twitter) Live", Group: GroupVideo,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 3,
+			Note:   "Live Studio's figures. X's older Media Studio Producer page is still published and disagrees materially (9000 recommended, 720p60), so no maximum is offered until the two reconcile. X ignores variants whose codec or bitrate it does not accept.",
+			Source: "https://help.x.com/en/using-x/live-studio", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "Manual key only. X's API covers posts, users, media and the post firehose — \"streaming\" in its " +
@@ -484,6 +572,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "linkedin", Name: "LinkedIn Live", Group: GroupVideo,
+		Video: &VideoGuidance{
+			Width: 1280, Height: 720, FPS: 30, KbpsMin: 3500, KbpsMax: 6000, GOPSeconds: 2,
+			Note:   "720p is LinkedIn's recommendation and 1080p its maximum. Published as guidance for cloud services rather than for a direct encoder, and the page carries only a relative date, so it will drift silently.",
+			Source: "https://www.linkedin.com/help/linkedin/answer/a567498/", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "LinkedIn issues the ingest URL and key per event, either from LinkedIn's own event creation flow or " +
@@ -491,6 +584,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "trovo", Name: "Trovo", Group: GroupVideo,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 30, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
+			Note:   "Above 6000 kbps is subscribers only. Trovo's own page is undated and omits the keyframe interval, audio codec and audio bitrate; the 2s keyframe here is from OBS's services.json, in which Trovo maintains its own entry. OBS carries a 9000 kbps ceiling against Trovo's published 6000-for-non-subscribers.",
+			Source: "https://support.trovo.live/category/1/article/778", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "Copy the server URL and stream key from the Trovo creator dashboard → Stream. Trovo's ingest " +
@@ -506,6 +604,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "rumble", Name: "Rumble", Group: GroupVideo,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
+			Note:   "8000 kbps is Rumble's stated ceiling. Its language above the recommended range is degradation, not refusal.",
+			Source: "https://rumble.support/help/livestream-settings", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "Manual key only. Rumble Studio issues an ingest URL and key per stream — set the stream up there and " +
@@ -529,6 +632,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "dailymotion", Name: "Dailymotion", Group: GroupVideo,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 10000, KbpsMax: 10000, GOPSeconds: 2,
+			Note:   "H.264 High profile only, and live streaming is gated behind a paid plan. Dailymotion's 1080p figure is a steep jump from its 720p one (2500 kbps); reproduced as published.",
+			Source: "https://faq.dailymotion.com/hc/en-us/articles/203655666-Encoding-parameters", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,
 		Notes: "Dailymotion Studio issues an ingest URL and key per live video. Copy both from the live video's " +
@@ -548,6 +656,11 @@ var destinationPresets = []DestinationPreset{
 	},
 	{
 		ID: "owncast", Name: "Owncast", Group: GroupSelfHosted,
+		Video: &VideoGuidance{
+			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 5000, KbpsMax: 5000, GOPSeconds: 2,
+			Note:   "Owncast asks for an explicit 2s keyframe interval rather than auto. It does not re-encode audio, so whatever you send is what viewers get.",
+			Source: "https://owncast.online/docs/broadcasting/", Checked: "2026-08-06",
+		},
 		Transport: PresetRTMP, Kind: DestRTMP,
 		URL:         "rtmp://{owncast-host}:1935/live",
 		SeparateKey: true,

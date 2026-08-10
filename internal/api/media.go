@@ -30,9 +30,17 @@ import (
 //   - free space is checked BEFORE the write, because an upload can fill the
 //     volume the database and the recorder live on
 //
-// It sits behind the same session + CSRF middleware as every other mutation, so
-// an API token cannot upload: tokens are for automation, and writing arbitrary
-// bytes to the server's disk is not something a leaked token should reach.
+// Uploading and deleting are registered in the session-only router group in
+// api.go, so an API token cannot reach them: tokens are for automation, and
+// writing arbitrary bytes to the server's disk is not something a leaked one
+// should reach. Listing is not in that group and stays token-reachable.
+//
+// This comment used to say "behind the same session + CSRF middleware as every
+// other mutation", which was wrong in the way that matters: requireCSRF passes
+// a token principal through deliberately, so the CSRF layer was never a session
+// check and the routes had no session check at all. #140 is what that cost. If
+// you add another route here, the group in api.go is what decides who reaches
+// it -- this paragraph decides nothing.
 
 const (
 	// MaxUploadBytes caps one upload. 8 GiB is a couple of hours of a decent

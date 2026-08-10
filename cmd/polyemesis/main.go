@@ -110,6 +110,7 @@ func run(h *hooks) error {
 		ffprobePath = flag.String("ffprobe", "", "path to the ffprobe binary (overrides config)")
 		logLevel    = flag.String("log", "info", "log level: debug, info, warn, error")
 		showVersion = flag.Bool("version", false, "print the version and exit")
+		resetPass   = flag.Bool("reset-admin", false, "set a new admin password and sign out every session, then exit")
 	)
 	flag.Parse()
 
@@ -144,6 +145,15 @@ func run(h *hooks) error {
 	}
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
+	}
+
+	// BEFORE anything is started. A reset touches only the database and then
+	// exits, so it must not bind a port, spawn a child or write a log file --
+	// this is run on a box where the real server is usually already running, and
+	// a second instance racing it for the listener would fail for a reason that
+	// has nothing to do with the password.
+	if *resetPass {
+		return resetAdmin(cfg, os.Stdin, os.Stdout)
 	}
 	// Text overlays need a font FILE, and the image polyemesis ships has no
 	// system fonts at all -- fontconfig is installed and finds nothing. The
@@ -487,8 +497,43 @@ func redirectToHTTPS(cfg config.Config) http.HandlerFunc {
 			w.Header().Add("Vary", "Host")
 		}
 
+		// The Location header carries the REQUEST URI verbatim, query string and
+		// all, and a playout watch token travels in that query string. With
+		// tls.hostname set -- the recommended production configuration -- this is
+		// a 301/308, which is permanently cacheable by definition: every
+		// intermediary and the browser's own redirect cache is then holding a
+		// URL that contains a live watch credential, for as long as it likes.
+		//
+		// So no-store fires whenever there is a token to leak, in BOTH branches,
+		// rather than only in the unconfigured one where it was put for an
+		// unrelated reason (a Host header the client chose). Vary: Host goes with
+		// it for the same reason it always did.
+		//
+		// Deliberately over-broad on the query test: ANY query string suppresses
+		// caching, not just one whose parameter happens to be spelled "token".
+		// The failure direction of over-matching is one uncached redirect; the
+		// failure direction of under-matching is a permanently cached credential,
+		// and this exact class shipped once already because a name-based rule did
+		// not recognise the spelling in front of it.
+		if r.URL.RawQuery != "" || carriesWatchPath(r.URL.Path) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Add("Vary", "Host")
+		}
+
 		http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), code)
 	}
+}
+
+// carriesWatchPath reports whether a path is under the public playout origin or
+// the player page, which are the two places a watch token can arrive WITHOUT a
+// query string -- a cookie handoff, or a path a future release moves it into.
+//
+// Belt and braces beside the query test above. Neither is a boundary; together
+// they are the answer to "could this Location possibly hold a credential", and
+// the honest answer for these prefixes is yes.
+func carriesWatchPath(path string) bool {
+	return strings.HasPrefix(path, api.PlayoutPrefix) ||
+		path == api.WatchPath || strings.HasPrefix(path, api.WatchPath+"/")
 }
 
 // plausibleHost reports whether a host:port taken from a request header is
@@ -569,7 +614,14 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 
 	fmt.Printf("\n  polyemesis %s\n", version)
 	fmt.Printf("  web ui      %s://%s\n", scheme, shown)
-	fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
+	// An install that has not chosen yet prints that, rather than an empty mode
+	// beside a port number — which reads as "srt on 6000" to anyone skimming and
+	// is the one impression this must not give.
+	if settings.Ingest.Mode == db.IngestUnset {
+		fmt.Printf("  ingest      not chosen yet — pick SRT, RTMP or pull in the web UI\n")
+	} else {
+		fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
+	}
 	fmt.Printf("  data dir    %s\n", cfg.DataDir)
 	fmt.Printf("  ffmpeg      %s\n", tools.Version)
 	reportTLS(cfg, provider, shown)

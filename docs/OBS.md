@@ -3,6 +3,14 @@
 polyemesis accepts a stream from anything that can push MPEG-TS over SRT or a
 single track over RTMP. OBS is what most people use, so it gets its own page.
 
+> **On Enhanced RTMP.** OBS 30.2+ can send several audio tracks over RTMP using
+> the Enhanced RTMP multitrack format. FFmpeg gained multitrack FLV demuxing in
+> late 2024, so a new enough build carries those tracks through polyemesis's
+> existing ingest command unchanged — verified up to six tracks on FFmpeg 8.1.
+> Ubuntu 24.04's stock FFmpeg 6.1.1 cannot: it refuses with *"at most one audio
+> stream is supported in flv"*. See `notes/enhanced-rtmp-multitrack.md`; a
+> confirmation run against real OBS is still outstanding.
+
 Only one of these configurations unlocks per-destination audio routing:
 **multitrack over SRT**. The others work, and are documented here so that
 choosing one is deliberate rather than accidental.
@@ -94,32 +102,59 @@ claim.
 
 ## Standard RTMP (single track)
 
-For encoders that cannot do SRT. RTMP carries one audio track by protocol, so
+For encoders that cannot do SRT. *Classic* RTMP carries one audio track, so
 per-destination *track* routing does not apply — though gain, matrix panning and
 5.1 downmix still do.
 
-In polyemesis: `Settings → Ingest → Mode: RTMP`. Note the app name and stream
-key. In OBS: `Settings → Stream`, Service **Custom...**:
+In polyemesis: open the source under **Sources** and set `Ingest → Mode: RTMP`.
+It gets its own app name and stream key. In OBS: `Settings → Stream`, Service
+**Custom...**:
 
 | Field | Value |
 |---|---|
 | Server | `rtmp://YOUR_SERVER:1935/live` |
-| Stream Key | the key from polyemesis Settings |
+| Stream Key | that source's stream key, from **Sources** |
 
 Then press **Start Streaming**.
 
-**At most one source may use RTMP ingest.** polyemesis has no RTMP server of its
-own — it uses `ffmpeg -listen 1`, a single-connection receiver that cannot
-demultiplex by path — so a second RTMP source is refused with an error that says
-so, rather than accepted and silently starved. Any number of sources can share
-the SRT port.
+> **The stream key is the address, not an extra.** One RTMP port serves every
+> source and they are told apart by the key in the publish URL, exactly as SRT
+> tells them apart by token — so a publisher presenting an unrecognised key is
+> refused rather than landing on whichever source happens to be there. Copy the
+> Server and Stream Key from **Sources** rather than assembling them by hand:
+> each source has its own pair, and pasting one source's key under another
+> source's name is the mistake this shape makes easy to notice and easy to fix.
+
+**Any number of sources may use RTMP ingest**, the same as SRT. A second RTMP
+encoder is an ordinary second source; it needs no extra port and no
+configuration beyond its own stream key. See
+[DESIGN-ONE-PORT-ONLY.md](DESIGN-ONE-PORT-ONLY.md#rtmp) for how that came to be
+true — until 2026-08-06 an install could carry exactly one RTMP source.
+
+What RTMP still does not give you is per-destination *track* routing, which is
+a limit of the format rather than of the listener. If your encoder can speak
+SRT, use SRT.
 
 ---
 
-## Enhanced RTMP multitrack (not implemented)
+## Enhanced RTMP multitrack (works on FFmpeg 7.1+, unconfirmed with OBS)
 
-OBS 30.2+ can send multiple audio tracks over Enhanced RTMP/FLV. **polyemesis
-does not support this.** RTMP ingest is single-track.
+OBS 30.2+ can send multiple audio tracks over Enhanced RTMP/FLV.
+
+It works on a new enough FFmpeg. Multitrack FLV demuxing landed in FFmpeg 7.1,
+and from there the tracks arrive through polyemesis's existing ingest command
+unchanged — verified end to end: a destination configured for tracks 1 and 3
+received exactly those two and neither of the others. It does **not** work on
+FFmpeg 6.1.1, which is Ubuntu 24.04's stock build: that refuses with *"at most
+one audio stream is supported in flv"*, and the extra tracks are lost with no
+error at either end.
+
+What has not been done is a run with OBS itself as the publisher — the testing
+used FFmpeg. OBS writes the same `MULTITRACKTYPE_ONE_TRACK` format (read from
+its `flv-mux.c`), so the wire format is not in question, but the handshake and
+metadata path are unconfirmed. SRT remains the operated path.
+
+See `notes/enhanced-rtmp-multitrack.md`.
 
 `config.yaml` used to declare an `enhancedRtmp` key. It has been removed: it
 was an inert placeholder that read as a switch, and it was kept on the belief

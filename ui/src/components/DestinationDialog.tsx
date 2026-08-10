@@ -10,6 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { StatusDot } from "@/components/signature/StatusDot";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
 import { Switch } from "@/components/ui/switch";
 // The capability matrix this dialog renders inline. Data, not a component, and
 // shared with the settings page — see lib/capabilities.ts.
@@ -45,6 +48,8 @@ import type {
   Platform,
   PlatformAccount,
   Rendition,
+  PlatformPresetInfo,
+  RenditionView,
 } from "@/lib/types";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
@@ -573,6 +578,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [resilience, setResilience] = useState<DestResilience>({});
   // Output audio encoding. Empty is AAC stereo.
   const [audio, setAudio] = useState<AudioEncoding>({});
+  // Copying audio is offered only where the receiver is not a platform ingest.
+  // An RTMP destination is refused server-side, so the toggle is not shown for
+  // it at all rather than shown and rejected on save. Derived rather than
+  // stored so that changing the transport cannot leave a hidden flag set.
+  const canCopyAudio = kind === "srt" || kind === "file";
+  const copyOn = canCopyAudio && (audio.copy ?? false);
   // Obligation metadata. Empty means "touch nothing", which is what every
   // destination that has never set any carries.
   const [compliance, setCompliance] = useState<Compliance>({});
@@ -589,16 +600,43 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
-  const [renditions, setRenditions] = useState<Rendition[]>([]);
+  // RenditionView, not Rendition. The view carries `destinations` and
+  // `enabledDestinations`, and this used to strip them off one line after they
+  // arrived — throwing away the only data that can tell an operator whether
+  // picking an encode starts a new one or joins a running one. That fact is
+  // the entire argument for renditions existing, and the UI could not state it.
+  const [renditions, setRenditions] = useState<RenditionView[]>([]);
+  const [guidance, setGuidance] = useState<PlatformPresetInfo[]>([]);
   const [busy, setBusy] = useState(false);
+  // The variant form: an operator wanting "this tier but 4500 kbps for the
+  // constrained uplink". Deliberately NOT a per-destination override of the
+  // shared encode — there is no such thing, and there must not be: editing the
+  // shared tier would silently change the picture every other destination on it
+  // receives. A variant is a SECOND encode, and the UI says so before you make
+  // one.
+  const [variantOpen, setVariantOpen] = useState(false);
+  const [variantBitrate, setVariantBitrate] = useState("");
+  const [variantWidth, setVariantWidth] = useState("");
+  const [variantHeight, setVariantHeight] = useState("");
+  const [variantFps, setVariantFps] = useState("");
+  const [variantErr, setVariantErr] = useState("");
 
   useEffect(() => {
     if (!open) return;
     api.listAccounts().then(setAccounts).catch(() => setAccounts([]));
     api
       .listRenditions()
-      .then((rows) => setRenditions(rows.map((r) => r.rendition)))
+      .then(setRenditions)
       .catch(() => setRenditions([]));
+    // Fetched, not mirrored. The UI keeps its own preset list so the picker
+    // renders before any request resolves, but the researched numbers carry a
+    // source and a date and a second copy of them here would drift silently —
+    // which is exactly what happened when they were added to the Go catalogue
+    // and nothing surfaced them.
+    api
+      .platformPresets()
+      .then((r) => setGuidance(r.presets))
+      .catch(() => setGuidance([]));
 
     setPickerOpen(false);
     setQuery("");
@@ -676,9 +714,49 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     return acct?.accountRef?.startsWith("page:") ?? false;
   }, [accounts, accountId]);
 
-  const selectedRendition = useMemo(
-    () => renditions.find((r) => String(r.id) === renditionId) ?? null,
+  /** What this destination's platform says it wants. Null when the operator has
+   *  not picked a preset, or when the platform publishes nothing usable — which
+   *  is a real answer for TikTok and PeerTube and is shown as silence rather
+   *  than as an invented number. */
+  const platformVideo = useMemo(
+    () => guidance.find((g) => g.id === presetId)?.video ?? null,
+    [guidance, presetId],
+  );
+
+  const selectedView = useMemo(
+    () => renditions.find((v) => String(v.rendition.id) === renditionId) ?? null,
     [renditions, renditionId],
+  );
+  const selectedRendition = selectedView?.rendition ?? null;
+
+  /** What the encode this destination is LEAVING will do once it has gone.
+   *
+   *  Nothing in the field tells an operator this — MediaLive's documented
+   *  remediation is "make a note of the video encode, in case you need to refer
+   *  to it again". It is the same arithmetic as joining, run backwards, so it
+   *  costs nothing to say. */
+  useEffect(() => {
+    if (!variantOpen || !selectedRendition) return;
+    setVariantBitrate(String(selectedRendition.videoBitrate));
+    setVariantWidth(selectedRendition.width ? String(selectedRendition.width) : "");
+    setVariantHeight(selectedRendition.height ? String(selectedRendition.height) : "");
+    setVariantFps(selectedRendition.fps ? String(selectedRendition.fps) : "");
+    setVariantErr("");
+  }, [variantOpen, selectedRendition]);
+
+  const leaving = useMemo(
+    () =>
+      computeLeaving(destination?.renditionId, renditionId, destination?.enabled === true, (id) => {
+        const was = renditions.find((v) => v.rendition.id === id);
+        return was
+          ? {
+              name: was.rendition.name,
+              destinations: was.destinations,
+              enabledDestinations: was.enabledDestinations,
+            }
+          : null;
+      }),
+    [destination, renditionId, renditions],
   );
 
   // Thirty entries is past the point where scanning works, so the list is
@@ -744,7 +822,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
         transport,
         resilience,
-        audio,
+        // copyOn rather than audio.copy: switching the transport to RTMP has to
+        // drop the flag here, or the operator gets a save error about a control
+        // that is no longer on screen to turn off.
+        audio: { ...audio, copy: copyOn },
         compliance,
         facebook,
         backupIngestWanted,
@@ -804,26 +885,27 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         <DialogHeader>
           <DialogTitle>{editing ? "Edit destination" : "Add destination"}</DialogTitle>
           <DialogDescription>
-            This destination copies its video and re-encodes only its audio, from its own
-            routing profile. Put it on a rendition if the platform will not take the source
-            video — a rendition re-encodes video once for everyone that shares it, and still
-            leaves the audio to each destination.
+            This destination copies its video, and by default mixes and re-encodes its audio
+            from its own routing profile. An SRT or file destination can copy the audio too,
+            forwarding your encoder's tracks untouched. Put it on a rendition if the platform
+            will not take the source video — a rendition re-encodes video once for everyone
+            that shares it, and still leaves the audio to each destination.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="dest-name">Name</Label>
+            <Label htmlFor="dest-name">{t("dest.name")}</Label>
             <Input
               id="dest-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="YouTube — main channel"
+              placeholder={t("dest.namePlaceholder")}
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <Label>Platform</Label>
+            <Label>{t("dest.platform")}</Label>
             <Button
               type="button"
               variant="outline"
@@ -900,7 +982,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 still empty. */}
                             {p.kind && !p.url && rowCaps.tier !== "unsupported" && (
                               <span className="shrink-0 text-[9px] text-muted-foreground">
-                                URL from dashboard
+                                {t("dest.urlFromDashboard")}
                               </span>
                             )}
                             <span className="shrink-0 font-mono text-[9px] uppercase text-muted-foreground">
@@ -973,22 +1055,22 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           )}
 
           <div className="flex flex-col gap-1">
-            <Label>Transport</Label>
+            <Label>{t("dest.transport")}</Label>
             <Select value={kind} onValueChange={(v) => setKind(v as DestKind)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="rtmp">RTMP / RTMPS</SelectItem>
+                <SelectItem value="rtmp">{t("dest.transportRtmp")}</SelectItem>
                 <SelectItem value="srt">SRT</SelectItem>
-                <SelectItem value="file">Local file</SelectItem>
+                <SelectItem value="file">{t("dest.transportFile")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           {showOAuth && caps?.connect && (
             <div className="flex flex-col gap-1">
-              <Label>Connected account</Label>
+              <Label>{t("dest.connectedAccount")}</Label>
               {platformAccounts.length > 0 ? (
                 <Select value={accountId} onValueChange={setAccountId}>
                   <SelectTrigger>
@@ -998,7 +1080,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     {/* "Not linked" is neutral wording on purpose. On Kick the
                         key is always typed, so calling the unlinked state
                         "manual" would imply the account link had failed. */}
-                    <SelectItem value="none">Not linked</SelectItem>
+                    <SelectItem value="none">{t("dest.notLinked")}</SelectItem>
                     {platformAccounts.map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>
                         {a.accountName}
@@ -1069,7 +1151,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           {kind === "rtmp" && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-key">Stream key</Label>
+              <Label htmlFor="dest-key">{t("dest.streamKeyLabel")}</Label>
               <Input
                 id="dest-key"
                 type="password"
@@ -1100,43 +1182,334 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           {/* Video and audio sit together on purpose: what a platform receives
               is one answer with two halves, and the pairing is the feature. */}
-          <div className="flex flex-col gap-1">
-            <Label>Video</Label>
-            <Select value={renditionId} onValueChange={setRenditionId}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={PASSTHROUGH}>Passthrough — source, copied</SelectItem>
-                {renditions.map((r) => (
-                  <SelectItem key={r.id} value={String(r.id)}>
-                    {r.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-[10px] text-muted-foreground">
-              {selectedRendition ? (
-                <>
-                  <span className="font-mono">{renditionSpec(selectedRendition)}</span>
-                  {/* Shared, not per-destination: this is why picking a
-                      rendition for a third platform costs nothing extra. */}
-                  {" — one encode, shared by every destination on this rendition."}
-                </>
-              ) : (
-                <>
-                  <span className="font-mono">-c:v copy</span> — the source video, byte for byte,
-                  at zero CPU cost. Pick a rendition when a platform will not accept the source.
-                </>
-              )}
-            </span>
-            {selectedRendition?.note && (
-              <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+          {/* Two cards, not a <Select>.
+              A dropdown presents copying and encoding as the same kind of
+              choice. They are not: copying is `-c:v copy` and costs nothing,
+              while an encode is the most expensive thing an operator can switch
+              on here. Making that a structural difference — two cards, with
+              everything under the second one collapsed until it is chosen — is
+              the whole point, and it is what Restreamer already does (its
+              filter controls render only when the codec is not `copy`). */}
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-[12px] font-medium">{t("dest.videoTreatment")}</legend>
+
+            {/* role="radio" is only meaningful inside a radiogroup. Without this
+                wrapper the two cards are announced as two unrelated radios with
+                no shared name, so a screen reader user is told "checked" about a
+                choice whose alternatives were never named. */}
+            <div role="radiogroup" aria-label={t("dest.videoTreatment")} className="flex flex-col gap-2">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={renditionId === PASSTHROUGH}
+                onClick={() => setRenditionId(PASSTHROUGH)}
+                className={cn(
+                  "rounded-md border p-2.5 text-left transition-colors",
+                  renditionId === PASSTHROUGH
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:border-primary/60",
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <StatusDot tone={renditionId === PASSTHROUGH ? "live" : "idle"} size="sm" />
+                  <span className="text-[13px] font-medium">{t("dest.copySource")}</span>
+                  <Badge variant="outline" className="ml-auto">recommended</Badge>
+                </span>
+                <span className="mt-1 block text-[10px] text-muted-foreground">
+                  <span className="font-mono">-c:v copy</span> — the source video exactly as your
+                  encoder sent it. No encode, no process, no CPU.
+                </span>
+              </button>
+
+              <button
+                type="button"
+                role="radio"
+                aria-checked={renditionId !== PASSTHROUGH}
+                onClick={() => {
+                  if (renditionId === PASSTHROUGH && renditions.length > 0) {
+                    setRenditionId(String(renditions[0].rendition.id));
+                  }
+                }}
+                disabled={renditions.length === 0}
+                className={cn(
+                  "rounded-md border p-2.5 text-left transition-colors disabled:opacity-50",
+                  renditionId !== PASSTHROUGH
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:border-primary/60",
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <StatusDot tone={renditionId !== PASSTHROUGH ? "live" : "idle"} size="sm" />
+                  <span className="text-[13px] font-medium">{t("dest.useSharedEncode")}</span>
+                </span>
+                <span className="mt-1 block text-[10px] text-muted-foreground">
+                  {renditions.length === 0
+                    ? "No shared encodes yet. Create one on the Renditions page first."
+                    : "Changes the picture once and shares it between destinations."}
+                </span>
+              </button>
+            </div>
+
+            {/* Collapsed under Copy. The free path has nothing to configure,
+                and rendering an empty picker under it would imply otherwise. */}
+            {renditionId !== PASSTHROUGH && (
+              <div className="ml-2 flex flex-col gap-1.5 border-l border-border pl-3">
+                <Select value={renditionId} onValueChange={setRenditionId}>
+                  {/* Named, because this control has no visible label of its
+                      own — it sits under a radio card that supplies the meaning,
+                      which leaves the select itself anonymous to a screen reader
+                      and ambiguous to a test. */}
+                  <SelectTrigger aria-label={t("dest.sharedEncodeAria")} data-testid="rendition-picker">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {renditions.map((v) => (
+                      <SelectItem key={v.rendition.id} value={String(v.rendition.id)}>
+                        {/* Spec first, name second. An encode named by its
+                            creator tells the next person nothing; what it
+                            PRODUCES tells them everything. */}
+                        <span className="font-mono">{renditionSpec(v.rendition)}</span>
+                        {v.rendition.name ? ` — ${v.rendition.name}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {selectedView && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {/* The consequence, computed rather than asserted. Whether
+                        this costs a new encode or nothing at all is the fact
+                        the whole shared model turns on, and it was previously
+                        one static sentence that could not tell the two apart. */}
+                    {joinConsequence(selectedView)}
+                  </span>
+                )}
+                {selectedRendition?.note && (
+                  <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+                )}
+
+                {/* Advanced: make a variant.
+                    There is no per-destination override of a shared encode, and
+                    there must not be — editing the shared tier would silently
+                    change the picture every other destination on it receives.
+                    So "customise for this destination" means creating a second
+                    encode, and the cost is stated before the form, not after
+                    the operator has filled it in. */}
+                {selectedRendition && (
+                  <details
+                    className="mt-1 rounded-md border border-border p-2"
+                    open={variantOpen}
+                    onToggle={(e) => setVariantOpen((e.target as HTMLDetailsElement).open)}
+                  >
+                    <summary className="cursor-pointer text-[11px] font-medium">
+                      {t("dest.customiseSummary")}
+                    </summary>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                      {t("dest.variantWarning", { name: selectedRendition.name })}
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-bitrate">{t("dest.varBitrate")}</Label>
+                        <Input
+                          id="var-bitrate"
+                          value={variantBitrate}
+                          onChange={(e) => setVariantBitrate(e.target.value)}
+                          inputMode="numeric"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-fps">{t("dest.varFps")}</Label>
+                        <Input
+                          id="var-fps"
+                          value={variantFps}
+                          onChange={(e) => setVariantFps(e.target.value)}
+                          inputMode="numeric"
+                          placeholder={t("dest.varSourceHint")}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-width">{t("dest.varWidth")}</Label>
+                        <Input
+                          id="var-width"
+                          value={variantWidth}
+                          onChange={(e) => setVariantWidth(e.target.value)}
+                          inputMode="numeric"
+                          placeholder={t("dest.varSourceHint")}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor="var-height">{t("dest.varHeight")}</Label>
+                        <Input
+                          id="var-height"
+                          value={variantHeight}
+                          onChange={(e) => setVariantHeight(e.target.value)}
+                          inputMode="numeric"
+                          placeholder={t("dest.varSourceHint")}
+                        />
+                      </div>
+                    </div>
+                    {/* One click to the platform's own numbers. The case this
+                        exists for is "make this fit Kick", and making someone
+                        transcribe four figures from the panel above into the
+                        four fields below is how they end up mistyping one. */}
+                    {platformVideo && (
+                      <button
+                        type="button"
+                        className="mt-2 text-left text-[10px] text-primary underline hover:opacity-80"
+                        onClick={() => {
+                          // The TOP of the range, not the bottom.
+                          //
+                          // Seeding kbpsMin looked reasonable and was wrong:
+                          // Kick publishes 1000-8000, and 1000 kbps at 1080p60
+                          // is a picture nobody would ship. Where a platform
+                          // gives a range it is a range of what it ACCEPTS, and
+                          // the useful end is the one that looks best — the
+                          // operator can lower it, and the field is right there.
+                          const kbps = platformVideo.kbpsMax || platformVideo.kbpsMin;
+                          if (kbps) setVariantBitrate(String(kbps));
+                          if (platformVideo.width) setVariantWidth(String(platformVideo.width));
+                          if (platformVideo.height) setVariantHeight(String(platformVideo.height));
+                          if (platformVideo.fps) setVariantFps(String(platformVideo.fps));
+                          setVariantErr("");
+                        }}
+                      >
+                        {t("dest.fillFromPlatform")}
+                      </button>
+                    )}
+                    {variantErr && (
+                      <p className="mt-1.5 text-[10px] text-down">{variantErr}</p>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      disabled={busy}
+                      onClick={async () => {
+                        setVariantErr("");
+                        const kbps = Number(variantBitrate);
+                        if (!Number.isFinite(kbps) || kbps <= 0) {
+                          // Every other field may legitimately be blank ("keep
+                          // the source's"). Bitrate cannot: an encode with no
+                          // target is not a variation of anything.
+                          setVariantErr("Video bitrate is required — an encode needs a target.");
+                          return;
+                        }
+                        setBusy(true);
+                        try {
+                          const num = (v: string) => (v.trim() === "" ? 0 : Number(v));
+                          const made = await api.createRendition({
+                            ...selectedRendition,
+                            id: undefined,
+                            // Named after what it is FOR, so the picker's
+                            // spec-first row is followed by something that says
+                            // why this one exists rather than repeating the spec.
+                            name: `${selectedRendition.name} — ${name || "variant"}`,
+                            videoBitrate: kbps,
+                            width: num(variantWidth),
+                            height: num(variantHeight),
+                            fps: num(variantFps),
+                          } as Partial<Rendition>);
+                          const rows = await api.listRenditions();
+                          setRenditions(rows);
+                          setRenditionId(String(made.rendition.id));
+                          setVariantOpen(false);
+                        } catch (e) {
+                          setVariantErr(e instanceof Error ? e.message : "Could not create the encode.");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      {t("dest.createVariant")}
+                    </Button>
+                  </details>
+                )}
+              </div>
             )}
-          </div>
+
+            {/* What the platform asks for, with its provenance attached.
+                Shown under BOTH cards rather than only under the encode one:
+                an operator on passthrough needs to know their 4K source is
+                above what Kick will take just as much as one who is already
+                encoding — arguably more, since nothing is going to reshape it
+                for them. */}
+            {platformVideo && (
+              <div className="rounded-md border border-border bg-background p-2">
+                <span className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-[11px] font-medium">
+                    {guidance.find((g) => g.id === presetId)?.name ?? "This platform"} publishes:
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {[
+                      platformVideo.width && platformVideo.height
+                        ? `${platformVideo.width}×${platformVideo.height}`
+                        : null,
+                      platformVideo.fps ? `${platformVideo.fps} fps` : null,
+                      platformVideo.kbpsMin
+                        ? platformVideo.kbpsMax && platformVideo.kbpsMax !== platformVideo.kbpsMin
+                          ? `${platformVideo.kbpsMin}–${platformVideo.kbpsMax} kbps`
+                          : `${platformVideo.kbpsMin} kbps`
+                        : null,
+                      platformVideo.gopSeconds ? `${platformVideo.gopSeconds}s keyframes` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+                {platformVideo.note && (
+                  <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    {platformVideo.note}
+                  </p>
+                )}
+                {/* The disclaimer this catalogue has always carried, applied to
+                    numbers rather than to hostnames. A figure whose provenance
+                    is not on screen is indistinguishable from a guess. */}
+                <p className="mt-1 text-[10px] text-subtle-foreground">
+                  Starting point, not a rule —{" "}
+                  <a
+                    href={platformVideo.source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-foreground"
+                  >
+                    published by the platform
+                  </a>
+                  , read {platformVideo.checked}. Verify before you go live.
+                </p>
+              </div>
+            )}
+
+            {leaving && (
+              <span className="text-[10px] text-warn">
+                {leaveConsequence(leaving)}
+              </span>
+            )}
+          </fieldset>
+
+          {canCopyAudio && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="dest-audio-copy">Audio</Label>
+              <div className="flex h-9 items-center gap-2">
+                <Switch
+                  id="dest-audio-copy"
+                  checked={copyOn}
+                  onCheckedChange={(v) => setAudio({ ...audio, copy: v })}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {copyOn ? "Copy the ingest tracks" : "Mix and re-encode"}
+                </span>
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                {copyOn
+                  ? "This destination forwards your encoder's own audio tracks untouched — no decode, no mix, no encoder. Which tracks go out, and which roles are excluded, still apply. Everything the mix does to the samples does not: gain, normalization, loudness, ducking, delay and mono are all refused on save rather than silently ignored."
+                  : "The mix path: your routing profile decides the tracks and levels, and the result is encoded to one stereo track. Switch to copy for an archive or a hand-off where the receiver can take the tracks as they are."}
+              </span>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
-            <Label htmlFor="dest-bitrate">Audio bitrate</Label>
+            <Label htmlFor="dest-bitrate">{t("dest.audioBitrate")}</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="dest-bitrate"
@@ -1146,24 +1519,26 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 value={bitrate}
                 onChange={(e) => setBitrate(Number(e.target.value))}
                 className="w-24"
+                disabled={copyOn}
               />
               <span className="text-[11px] text-muted-foreground">kbps, AAC stereo</span>
             </div>
             <span className="text-[10px] text-muted-foreground">
-              Mixed here from this destination's own routing profile, whichever rendition it is
-              on — a rendition never touches audio.
+              {copyOn
+                ? "Not used: nothing is encoded, so the bitrate is whatever your encoder sent."
+                : "Mixed here from this destination's own routing profile, whichever rendition it is on — a rendition never touches audio."}
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label>Audio codec</Label>
+              <Label>{t("dest.audioCodec")}</Label>
               <Select
                 value={audio.codec || "aac"}
                 onValueChange={(v) =>
                   setAudio({ ...audio, codec: v === "aac" ? "" : (v as "opus") })
                 }
-                disabled={kind === "rtmp"}
+                disabled={kind === "rtmp" || copyOn}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1174,33 +1549,37 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </SelectContent>
               </Select>
               <span className="text-[10px] text-muted-foreground">
-                {kind === "rtmp"
-                  ? "RTMP is AAC. FFmpeg will mux Opus into FLV, but no mainstream ingest accepts it — the stream would upload cleanly and be rejected."
-                  : "Opus is worth it for a low-bitrate feed. Check the receiver takes it."}
+                {copyOn
+                  ? "Not used: nothing is encoded, so the codec is whatever your encoder sent."
+                  : kind === "rtmp"
+                    ? "RTMP is AAC. FFmpeg will mux Opus into FLV, but no mainstream ingest accepts it — the stream would upload cleanly and be rejected."
+                    : "Opus is worth it for a low-bitrate feed. Check the receiver takes it."}
               </span>
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-mono">Channels</Label>
+              <Label htmlFor="dest-mono">{t("dest.channels")}</Label>
               <div className="flex h-9 items-center gap-2">
                 <Switch
                   id="dest-mono"
                   checked={audio.mono ?? false}
                   onCheckedChange={(v) => setAudio({ ...audio, mono: v })}
+                  disabled={copyOn}
                 />
                 <span className="text-[11px] text-muted-foreground">
                   {audio.mono ? "Mono" : "Stereo"}
                 </span>
               </div>
               <span className="text-[10px] text-muted-foreground">
-                Mono folds your mix down rather than re-routing it, and halves the bitrate on talk
-                content for no perceptual loss.
+                {copyOn
+                  ? "Not used: folding to one channel needs a decode and a re-encode, which is what copy removes."
+                  : "Mono folds your mix down rather than re-routing it, and halves the bitrate on talk content for no perceptual loss."}
               </span>
             </div>
           </div>
 
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
-            <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
-              <p className="text-xs font-medium">Compliance</p>
+            <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">
+              <p className="text-xs font-medium">{t("dest.compliance")}</p>
               <span className="text-[10px] text-muted-foreground">
                 Not cosmetic. COPPA is a law for YouTube, Twitch requires labels for several
                 content classes, Facebook has no way to widen a broadcast's audience once
@@ -1212,7 +1591,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               {platform === "youtube" && (
                 <>
                   <div className="flex flex-col gap-1">
-                    <Label>Visibility</Label>
+                    <Label>{t("dest.visibility")}</Label>
                     <Select
                       value={compliance.privacy || "unset"}
                       onValueChange={(v) =>
@@ -1226,10 +1605,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
-                        <SelectItem value="private">Private</SelectItem>
-                        <SelectItem value="unlisted">Unlisted</SelectItem>
-                        <SelectItem value="public">Public</SelectItem>
+                        <SelectItem value="unset">{t("dest.leaveOnYouTube")}</SelectItem>
+                        <SelectItem value="private">{t("dest.private")}</SelectItem>
+                        <SelectItem value="unlisted">{t("dest.unlisted")}</SelectItem>
+                        <SelectItem value="public">{t("dest.public")}</SelectItem>
                       </SelectContent>
                     </Select>
                     <span className="text-[10px] text-muted-foreground">
@@ -1241,7 +1620,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <Label>Made for kids (COPPA)</Label>
+                    <Label>{t("dest.madeForKids")}</Label>
                     <Select
                       value={
                         compliance.madeForKids === undefined ||
@@ -1268,7 +1647,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="unset">Leave as it is on YouTube</SelectItem>
+                        <SelectItem value="unset">{t("dest.leaveOnYouTube")}</SelectItem>
                         <SelectItem value="no">No &mdash; not made for kids</SelectItem>
                         <SelectItem value="yes">Yes &mdash; made for kids</SelectItem>
                       </SelectContent>
@@ -1284,7 +1663,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
               {platform === "twitch" && (
                 <div className="flex flex-col gap-1">
-                  <Label>Content labels</Label>
+                  <Label>{t("dest.contentLabels")}</Label>
                   <div className="flex flex-col gap-1">
                     {TWITCH_LABELS.map((id) => (
                       <div key={id} className="flex items-center justify-between gap-2">
@@ -1319,7 +1698,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
               {platform === "facebook" && !facebookTargetsAPage && (
                 <div className="flex flex-col gap-1">
-                  <Label>Audience</Label>
+                  <Label>{t("dest.audience")}</Label>
                   <Select
                     value={compliance.facebookPrivacy || "unset"}
                     onValueChange={(v) =>
@@ -1333,11 +1712,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="unset">Leave as it is on Facebook</SelectItem>
-                      <SelectItem value="SELF">Only me</SelectItem>
-                      <SelectItem value="ALL_FRIENDS">Friends</SelectItem>
-                      <SelectItem value="FRIENDS_OF_FRIENDS">Friends of friends</SelectItem>
-                      <SelectItem value="EVERYONE">Public</SelectItem>
+                      <SelectItem value="unset">{t("dest.leaveOnFacebook")}</SelectItem>
+                      <SelectItem value="SELF">{t("dest.onlyMe")}</SelectItem>
+                      <SelectItem value="ALL_FRIENDS">{t("dest.friends")}</SelectItem>
+                      <SelectItem value="FRIENDS_OF_FRIENDS">{t("dest.friendsOfFriends")}</SelectItem>
+                      <SelectItem value="EVERYONE">{t("dest.public")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <span className="text-[10px] text-muted-foreground">
@@ -1494,7 +1873,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </span>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="dest-rwt">Socket timeout (seconds)</Label>
+                <Label htmlFor="dest-rwt">{t("dest.socketTimeout")}</Label>
                 <Input
                   id="dest-rwt"
                   type="number"
@@ -1535,7 +1914,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="dest-mqp">Muxing queue (packets)</Label>
+                  <Label htmlFor="dest-mqp">{t("dest.muxQueue")}</Label>
                   <Input
                     id="dest-mqp"
                     type="number"
@@ -1560,19 +1939,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </div>
               </div>
               <span className="text-[10px] text-muted-foreground">
-                These are a <strong>pair</strong>: FFmpeg applies the packet cap only once the queue
-                has grown past the byte threshold, so a threshold on its own does nothing and will
-                be refused. Raise them if a destination reports interleave errors &mdash; the audio
-                path here has variable latency, because loudness normalisation reads ahead.
+                {t("dest.muxQueuePair")}
               </span>
 
               <div className="border-t border-border pt-3">
-                <p className="text-xs font-medium">Reconnecting</p>
+                <p className="text-xs font-medium">{t("dest.reconnecting")}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="dest-minbo">Retry after (seconds)</Label>
+                  <Label htmlFor="dest-minbo">{t("dest.retryAfter")}</Label>
                   <Input
                     id="dest-minbo"
                     type="number"
@@ -1604,7 +1980,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </span>
 
               <div className="flex flex-col gap-1">
-                <Label htmlFor="dest-giveup">Give up after (retries)</Label>
+                <Label htmlFor="dest-giveup">{t("dest.giveUpAfter")}</Label>
                 <Input
                   id="dest-giveup"
                   type="number"

@@ -8,9 +8,11 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -460,5 +462,71 @@ func TestStartDelayIsInterruptedByAStop(t *testing.T) {
 	p.Stop(context.Background())
 	if waited := time.Since(begin); waited > 2*time.Second {
 		t.Errorf("Stop took %s; it waited out the start delay instead of cancelling it", waited)
+	}
+}
+
+// A CHILD THAT HAD TO BE KILLED IS NOT A CHILD THAT STOPPED, and Stop has to
+// say which happened.
+//
+// Both outcomes end at StateStopped, so the state cannot answer it. The caller
+// that needs the difference is the selector: teardownFeed returns and ensureFeed
+// immediately starts a replacement feed into the same hub, so a child still
+// alive and still writing means two publishers on one input -- a corrupted
+// timeline rather than a missing one. Before this, the only record was a log
+// line, which nothing can branch on. See issue #138.
+func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no SIGTERM semantics on Windows")
+	}
+	p := testProcess(t, fakeDeaf(30*time.Second), Spec{})
+	p.Start()
+	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
+	pid := p.Status().PID
+
+	// AN ALREADY-EXPIRED DEADLINE, and the reason is worth recording.
+	//
+	// Reaching this branch with a live child is harder than it looks: stop()
+	// cancels the process's own context before it signals, and exec.CommandContext
+	// answers that cancellation with SIGKILL regardless of what the child does
+	// about SIGTERM. So a child ignoring SIGTERM still dies almost at once and
+	// `done` closes first. That is why no run in the #126 investigation ever
+	// logged this path, and it is a good thing about the design rather than a
+	// gap in it.
+	//
+	// What must still be true is that when the deadline DOES win -- a child
+	// whose exit is blocked on something SIGKILL cannot hurry, a wedged pipe
+	// with a grandchild holding it open -- Stop says so instead of reporting a
+	// clean stop. Handing it a spent deadline exercises exactly that select
+	// arm without pretending to reproduce the wedge.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := p.Stop(ctx)
+
+	if err == nil {
+		t.Fatal("Stop reported a clean stop on an expired deadline; the selector starts a " +
+			"replacement feed into the same hub on the strength of that answer")
+	}
+	if !errors.Is(err, ErrStopDeadline) {
+		t.Errorf("err = %v, want ErrStopDeadline so a caller can tell this from any other failure", err)
+	}
+	if st := p.Status(); st.State != StateStopped {
+		t.Errorf("state = %q, want %q: the process is retired either way", st.State, StateStopped)
+	}
+	// The kill still has to land, or this reports a problem while also leaking
+	// the child.
+	waitFor(t, "the killed child to be reaped", func() bool { return !alive(pid) })
+}
+
+// And the ordinary path must stay quiet, or the selector would log a warning on
+// every healthy switch and the signal would be worthless.
+func TestStopReportsNoErrorWhenTheChildExitsOnItsOwn(t *testing.T) {
+	p := testProcess(t, fakeSleep(30*time.Second), Spec{})
+	p.Start()
+	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.Stop(ctx); err != nil {
+		t.Errorf("Stop on a child that honours SIGTERM returned %v, want nil", err)
 	}
 }

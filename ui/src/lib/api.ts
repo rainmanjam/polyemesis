@@ -1,5 +1,6 @@
 import type {
   ApiToken,
+  TokenScope,
   AutomodMatrixView,
   AutomodModelStats,
   BitrateSample,
@@ -7,6 +8,7 @@ import type {
   ChatModerationResult,
   ChatOverview,
   ChatPlatform,
+  ChatSearchResult,
   ChatSendResponse,
   ChatSettings,
   ChatUserCard,
@@ -46,6 +48,7 @@ import type {
   RenditionBounds,
   RenditionDeleted,
   RenditionPreset,
+  PlatformPresetInfo,
   RenditionView,
   RoutingProfile,
   RoutingResult,
@@ -68,7 +71,10 @@ import type {
   HookDelivery,
   HookTestResult,
   HookCreated,
-  HookTrigger
+  HookTrigger,
+  VersionInfo,
+  UpgradePlan,
+  UpgradeResult,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -226,6 +232,32 @@ export const api = {
   deleteMedia: (name: string) => del<void>(`/media/${encodeURIComponent(name)}`),
   uploadMedia,
 
+  // --- version ---
+  /** The cached answer. Never triggers a network call to GitHub on its own. */
+  version: () => get<VersionInfo>("/version"),
+  /** Asks the server to consult the release feed. Rate-limited server-side by a
+   *  6h TTL, so calling this on a click is safe. */
+  checkUpdate: () => post<VersionInfo>("/version/check"),
+
+  // --- upgrade ---
+  /** What could be done about the available release, on this box. Ask on an
+   *  operator's action, never on page load: building the answer creates a file
+   *  in the install directory to find out whether it can be written to. */
+  upgradePlan: () => get<UpgradePlan>("/upgrade/plan"),
+  /** Download, verify and swap the binary. Does NOT restart anything.
+   *
+   *  `version` confirms the release the operator was looking at; it does not
+   *  choose one. The server installs whatever its last check found and refuses
+   *  if the two disagree, so a page left open overnight cannot install a
+   *  release nobody read the notes for.
+   *
+   *  `force` overrides the on-air refusal. Only ever send it from an explicit
+   *  confirmation that named what is live. */
+  upgradeStage: (version: string, force = false) =>
+    post<UpgradeResult>("/upgrade/stage", { version, force }),
+  /** Put the previous binary back. Also does not restart anything. */
+  upgradeRollback: (force = false) => post<UpgradeResult>("/upgrade/rollback", { force }),
+
   // --- setup & auth ---
   setupStatus: () =>
     get<{ needsSetup: boolean; minPasswordChars: number }>("/setup"),
@@ -244,8 +276,8 @@ export const api = {
    * `plaintext` is the only time the secret exists — nothing stores it, so a
    * caller that drops it has to mint a new token.
    */
-  createToken: (name: string) =>
-    post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name }),
+  createToken: (name: string, scope: TokenScope) =>
+    post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name, scope }),
   revokeToken: (id: number) => del<{ status: string }>(`/auth/tokens/${id}`),
 
   // --- system & telemetry ---
@@ -348,6 +380,11 @@ export const api = {
   // A rendition is one shared video encode several destinations can select, so
   // N destinations wanting 1080p60 cost one encode rather than N. A destination
   // with no rendition is passthrough, which is the default and costs nothing.
+  /** The server's platform catalogue, including researched encoder guidance.
+   *  Fetched rather than mirrored: the numbers carry a source and a date, and
+   *  a second copy of them in the UI would drift silently. */
+  platformPresets: () =>
+    get<{ presets: PlatformPresetInfo[]; disclaimer: string }>("/platforms/presets"),
   listRenditions: () => get<RenditionView[]>("/renditions"),
   getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
   createRendition: (r: Partial<Rendition>) =>
@@ -646,6 +683,18 @@ export const api = {
     return get<{ messages: ChatMessage[]; stored: boolean }>(
       "/chat/messages" + (qs ? `?${qs}` : ""),
     );
+  },
+  /** Find a message again, by its text or by who said it.
+   *
+   *  Server-side and against the database, not the pane: the timeline holds one
+   *  session's worth of messages and "where did that comment go" is exactly the
+   *  question it cannot answer. Bounded by the chat retention setting, which is
+   *  why the response carries a note saying so. */
+  chatSearch: (opts: { q: string; platform?: ChatPlatform; limit?: number }) => {
+    const p = new URLSearchParams({ q: opts.q });
+    if (opts.platform) p.set("platform", opts.platform);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    return get<ChatSearchResult>(`/chat/search?${p.toString()}`);
   },
   /** Fan-out. Answers 200 even when every platform failed: the per-platform
    *  verdicts are the answer, and a status code cannot say "Twitch took it and

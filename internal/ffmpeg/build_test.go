@@ -79,9 +79,39 @@ func TestIngestURLSRTWithPassphrase(t *testing.T) {
 	}
 }
 
-func TestIngestURLRTMP(t *testing.T) {
-	s := IngestSpec{Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPStreamKey: "sekrit"}
-	if got, want := s.IngestURL(), "rtmp://0.0.0.0:1935/live/sekrit"; got != want {
+// The RTMP ingest DIALS the shared listener; it does not bind one. 0.0.0.0 as a
+// dial target is not the same address spelled differently -- it is the one that
+// must not survive -- and a non-loopback host is refused by rtmpserver outright,
+// because a stream key is a publish credential and must not authorise playback.
+func TestIngestURLRTMPSubscribesOnLoopback(t *testing.T) {
+	s := IngestSpec{Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPAddress: "tok-abc"}
+	if got, want := s.IngestURL(), "rtmp://127.0.0.1:1935/live/tok-abc"; got != want {
+		t.Errorf("url = %q, want %q", got, want)
+	}
+}
+
+// The address is what selects the source on a listener shared by all of them.
+// Dropping it would put every RTMP source on the same path, which is one
+// programme receiving another's video -- the exact failure the one-port work
+// exists to remove.
+func TestIngestURLRTMPCarriesTheAddress(t *testing.T) {
+	a := IngestSpec{Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPAddress: "tok-a"}
+	b := IngestSpec{Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPAddress: "tok-b"}
+	if a.IngestURL() == b.IngestURL() {
+		t.Fatalf("two sources dial the same URL %q; one would receive the other's stream", a.IngestURL())
+	}
+	if !strings.HasSuffix(a.IngestURL(), "/tok-a") {
+		t.Errorf("url = %q, want it to end in the address", a.IngestURL())
+	}
+}
+
+// OBS's two-box form: the server URL and the stream key are separate fields, so
+// the public URL must be the server half ALONE. Emitting the address here too
+// gives the operator who fills in both /live/<token>/<token>, which reaches
+// nothing and looks like it should.
+func TestPublicIngestURLRTMPIsTheServerHalfOnly(t *testing.T) {
+	s := IngestSpec{Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPAddress: "tok-abc"}
+	if got, want := s.PublicIngestURL("stream.example.com"), "rtmp://stream.example.com:1935/live"; got != want {
 		t.Errorf("url = %q, want %q", got, want)
 	}
 }
@@ -133,16 +163,19 @@ func TestIngestArgsCopiesEveryTrack(t *testing.T) {
 
 func TestIngestArgsRTMPListens(t *testing.T) {
 	args := IngestArgs(IngestSpec{
-		Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPStreamKey: "k",
+		Kind: IngestRTMP, RTMPPort: 1935, RTMPApp: "live", RTMPAddress: "tok-abc",
 		RelayURL: "udp://127.0.0.1:20000",
 	})
-	if v, ok := argsAfter(args, "-listen"); !ok || v != "1" {
-		t.Errorf("RTMP ingest must listen: %s", join(args))
+	// -listen 1 made FFmpeg the RTMP server, and a single-connection one: it is
+	// precisely why an install could carry exactly one RTMP source. If it comes
+	// back, FFmpeg tries to bind 1935 behind polyemesis's own listener, fails,
+	// and crash-loops forever behind a socket that is working fine.
+	if _, ok := argsAfter(args, "-listen"); ok {
+		t.Errorf("RTMP ingest must subscribe, not listen: %s", join(args))
 	}
-	// -listen must precede -i, or FFmpeg applies it to nothing.
-	li, ii := indexOf(args, "-listen"), indexOf(args, "-i")
-	if li < 0 || ii < 0 || li > ii {
-		t.Errorf("-listen must come before -i: %s", join(args))
+	input, _ := argsAfter(args, "-i")
+	if input != "rtmp://127.0.0.1:1935/live/tok-abc" {
+		t.Errorf("-i = %q, want the loopback subscribe URL", input)
 	}
 }
 

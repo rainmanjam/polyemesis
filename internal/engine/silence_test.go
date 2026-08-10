@@ -13,12 +13,15 @@ import (
 
 // silenceEngine is the smallest engine the tier's decision function needs: it
 // reads only settings, the probe flag and the track list.
-func silenceEngine(probed bool, tracks int) *Engine {
+// measured, not probed: wantSilence asks whether a probe ever SUCCEEDED for
+// this ingest, not whether one is arriving right now. The two differ exactly
+// when a stream goes quiet, which is the gap the tier has to survive.
+func silenceEngine(measured bool, tracks int) *Engine {
 	src := routing.Source{}
 	for i := 0; i < tracks; i++ {
 		src.Tracks = append(src.Tracks, routing.Track{Index: i, Channels: 2, Codec: "aac"})
 	}
-	return &Engine{probed: probed, source: src}
+	return &Engine{sourceState: sourceState{measured: measured, source: src}}
 }
 
 func silenceSettings(on bool) db.Settings {
@@ -33,47 +36,58 @@ func silenceSettings(on bool) db.Settings {
 // or act on evidence the engine does not have.
 func TestWantSilenceOnlyOnAProbeThatFoundNoAudio(t *testing.T) {
 	tests := []struct {
-		name    string
-		enabled bool
-		probed  bool
-		tracks  int
-		want    bool
+		name     string
+		enabled  bool
+		measured bool
+		tracks   int
+		want     bool
 	}{
 		{
 			name:    "a probed video-only ingest gets a synthetic track",
-			enabled: true, probed: true, tracks: 0, want: true,
+			enabled: true, measured: true, tracks: 0, want: true,
 		},
 		{
 			// The one failure this product cannot have. -map 1:a:0 in
 			// SilenceArgs means a tier started over a real multitrack ingest
 			// would publish silence and drop every track the operator selected.
 			name:    "an ingest that carries audio never gets one",
-			enabled: true, probed: true, tracks: 4, want: false,
+			enabled: true, measured: true, tracks: 4, want: false,
 		},
 		{
 			name:    "a single-track ingest never gets one",
-			enabled: true, probed: true, tracks: 1, want: false,
+			enabled: true, measured: true, tracks: 1, want: false,
 		},
 		{
 			// "We have not looked yet" is not evidence of anything. Acting on it
 			// would synthesise for every ingest during the seconds before the
 			// first probe lands.
-			name:    "an unprobed ingest gets nothing",
-			enabled: true, probed: false, tracks: 0, want: false,
+			name:    "an unmeasured ingest gets nothing",
+			enabled: true, measured: false, tracks: 0, want: false,
 		},
 		{
-			name:    "an unprobed ingest gets nothing even with a stale track list",
-			enabled: true, probed: false, tracks: 2, want: false,
+			name:    "an unmeasured ingest gets nothing even with a stale track list",
+			enabled: true, measured: false, tracks: 2, want: false,
+		},
+		{
+			// THE ROW THIS TABLE WAS MISSING, and the bug it hid. probeLoop
+			// clears `probed` a few rounds after a stream stops but leaves
+			// e.source alone, so a video-only ingest that goes quiet is still
+			// measured with zero tracks. Reading `probed` here tore the tier
+			// down, and reconcileOutputs then compiled every destination against
+			// zero tracks -- routing.Compile answers ErrNoAudio, so they were all
+			// torn down for as long as the encoder was quiet.
+			name:    "a video-only ingest that went idle keeps its tier",
+			enabled: true, measured: true, tracks: 0, want: true,
 		},
 		{
 			name:    "the setting off means no tier whatever the probe says",
-			enabled: false, probed: true, tracks: 0, want: false,
+			enabled: false, measured: true, tracks: 0, want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := silenceEngine(tt.probed, tt.tracks)
+			e := silenceEngine(tt.measured, tt.tracks)
 			got := e.wantSilence(silenceSettings(tt.enabled)) != ""
 			if got != tt.want {
 				t.Errorf("wantSilence() != \"\" = %v, want %v", got, tt.want)

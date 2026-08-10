@@ -21,11 +21,134 @@ Create tokens in the UI under **Settings → API tokens**, or via
 creation, and cannot be recovered. Revoke individually with
 `DELETE /auth/tokens/{id}`.
 
-**A token cannot manage other tokens.** That is deliberate: a leaked token
-should not be able to mint replacements for itself or lock you out.
+**A token cannot manage other tokens**, change the account password, upload or
+delete media, or complete an OAuth connect flow. Those are session-only: a
+leaked token should not be able to mint replacements for itself, lock you out,
+write arbitrary bytes to the server's disk, or attach a platform account.
 
 Bearer requests need no CSRF token — nothing attaches an `Authorization` header
 on its own, so there is no cross-site request to forge.
+
+#### Token scopes
+
+Every token carries a scope, chosen when it is created:
+
+| Scope | Reaches |
+|---|---|
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
+
+The middleware also lets `HEAD` through, and no route in this API is registered
+for it, so `HEAD` on any of them is `405` whatever scope you hold. Use `GET`.
+
+```sh
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name":"prometheus","scope":"read"}' \
+  https://host:8080/api/v1/auth/tokens
+```
+
+**Omitting `scope` mints a `read` token.** A client that has never heard of
+scopes gets the credential that cannot change anything, which is the only
+default that protects anyone who has not already read this page.
+
+The rule is shaped by HTTP method rather than by a list of routes, and that is
+deliberate: a route added to this API tomorrow is refused to `read` tokens by
+construction, with no table anyone has to remember to update. The small
+allowlist above is additive, so forgetting to extend it denies a request that
+should have been allowed — never the reverse. `POST
+/destinations/{id}/expert/dry-run` is deliberately *not* on it, despite writing
+nothing to the database: it spawns FFmpeg with a caller-supplied argument list.
+
+#### What the method rule cannot see
+
+A rule about the HTTP verb cannot tell that one `GET`'s **response body is
+itself a credential**, and it cannot tell that another `GET` **does real work**.
+Both are handled explicitly, because both were real:
+
+**Credentials are blanked or masked in the response.** For a `read` token — and
+only for a `read` token — these come back empty or with the secret part
+replaced by `[redacted]`, while the surrounding field is left readable:
+
+| Route | Withheld from a `read` token |
+|---|---|
+| `GET /sources`, `GET /sources/{id}` | `token`, `publishUrls`, `legacyRtmpKey`, `ingest.srt.passphrase`, `ingest.rtmp.streamKey`, `ingest.pull.url` |
+| `GET /settings` | the same `ingest.*` fields, `failover.backup.{srt.passphrase,rtmp.streamKey,pull.url}`, `mqtt.brokerUrl` |
+| `GET /system` | the credential parts of `ingestUrl` — the SRT `passphrase` parameter, and a pull URL's `user:pass@` |
+| `GET /settings` | also `automod.model.endpoint` — the sealed key table protects the key you typed there, not one pasted into the URL as `?api_key=` |
+| `GET /destinations`, `GET /destinations/{id}` | `streamKey`, `backupStreamKey`, `extraInputArgs`, `extraOutputArgs`, and the userinfo in `url` / `backupUrl` (an Icecast mount's password) |
+| `GET /playout` | `token` and all three `urls`, each of which embeds it |
+
+`extraInputArgs` and `extraOutputArgs` are there because
+`GET /destinations/{id}/expert` is refused to a `read` token for returning the
+resolved FFmpeg argv with the stream key in it — and those two fields *are* that
+argv, as you typed it. The same bytes cannot have two answers depending on which
+route serves them.
+
+A `kind: file` destination's `url` is a **filename**, not a URL, and it comes
+back intact. Redacting it would delete a field that never held a credential.
+
+**Values are blanked or masked, not removed** — so a client that reads, edits
+and PUTs the document straight back still works, and the JSON path of every
+redacted field is the same for a `read` token as for an admin. Note the
+consequence for the fields tagged `omitempty`: `backupStreamKey`,
+`legacyRtmpKey`, `extraInputArgs` and `extraOutputArgs` come back as the literal
+string `[redacted]` rather than as `""`, because an empty string would make the
+key vanish and change the shape of the document. A field that was genuinely
+empty stays absent for everyone.
+
+The one place the shape does differ is `publishUrls` on `GET /sources`, which is
+`null` for a `read` token. Each entry is a publish URL in which the token *is*
+the address, so there is no masked form of it that is still a URL.
+
+These responses carry `Vary: Authorization, Cookie` and
+`Cache-Control: private, no-store`, because their body depends on who asked —
+and a principal arrives in either header: a bearer in `Authorization`, the
+signed-in operator in `Cookie`.
+
+**Thirteen routes are refused outright**, for three different reasons. Masking
+would have been wrong for the first two (expert mode's contract is that the
+command shown is the command that runs) and pointless for the next three, which
+are `403` because of what they *do*. The last eight are `403` because of what
+`read` was decided to mean:
+
+| Route | Why |
+|---|---|
+| `GET /destinations/{id}/expert` | returns the resolved FFmpeg argv, stream key and all |
+| `POST /destinations/{id}/expert/preview` | the same argv |
+| `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
+| `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
+| `GET /metadata/broadcast-window` | the same, once per connected account |
+| `GET /recordings/{id}/download` | the recording itself |
+| `GET /recordings/stems/{name}/download` | a separated audio stem |
+| `GET /clips/{name}/download` | an exported clip |
+| `GET /clipper/jobs/{id}/download` | the clipper's output |
+| `GET /library/recordings/{id}/media/{file}` | a media file inside a library recording |
+| `GET /clipper/recordings/{id}/transcript` | the verbatim transcript |
+| `GET /library/recordings/{id}/transcript` | the same, by the library's route |
+| `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
+
+The last of those is the one worth reading twice. `GET /library/search` looks
+like a metadata query and is not: iterating common words would rebuild whole
+transcripts without ever requesting a route with `transcript` in its path. The
+list is drawn from what the bytes are, not from what the URL says.
+
+Listing still works. A `read` token sees recordings, clips, stems and sessions,
+their durations, sizes and status, and whether a transcript exists — and
+`GET /library` still returns the bare list of speaker labels, which is who
+appears rather than what was said.
+
+`GET /encoders` stays available, but `?redetect=` needs `admin`: it runs a test
+encode per candidate encoder and rewrites the install's capability cache.
+
+`/hls/*`, the dashboard's preview playlist, is now **session-only** — no bearer
+of either scope. Requesting a playlist starts the on-demand preview encoder and
+polling keeps it running, and hls.js in the console authenticates with the
+session cookie anyway.
+
+**Tokens created before scopes existed are `admin`.** They could already do
+everything, so the upgrade grandfathers them rather than silently narrowing a
+credential some running script is holding — the failure would otherwise land as
+a `403` inside unattended automation. Revoke and re-mint to narrow one.
 
 ### 2. Session cookie (what the browser uses)
 
@@ -71,6 +194,20 @@ tokens are for.
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
 
+Both of these, and the media origin at `/playout/*`, sit outside every
+authenticated group — a viewer has no account and never will — and are guarded
+per request instead, because "is this stream published" is a setting an operator
+flips at runtime while a route table is built once at startup.
+
+**A bearer token gets no privilege here.** The request is judged on the viewer's
+terms: an unpublished stream is `404` for everyone except the signed-in console
+and an `admin` token, and a published-but-protected stream wants the playback
+token in `?t=`, the `X-Playout-Token` header, the `polyemesis_playout` cookie or
+an HTTP basic password. A `read` token is treated exactly as an anonymous
+caller — the same status, the same body, the same headers. That is `read`
+meaning metadata and not content: live media is content, and `Public: false` is
+a decision about the resource that a role-level scope must not override.
+
 ### Session and access
 
 | Method | Path |
@@ -92,6 +229,8 @@ tokens are for.
 | `GET` | `/source` | Probed track layout |
 | `PUT` | `/source/annotations` | Label what each incoming track is |
 | `GET` | `/version`, `POST` `/version/check` | |
+| `GET` | `/upgrade/plan` | What an in-place upgrade would do on this install, and whether it can |
+| `POST` | `/upgrade/stage`, `/upgrade/rollback` | Session-only. Staging writes the new binary; rollback restores the saved one |
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
@@ -212,6 +351,7 @@ does.
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/failover/source` | `{"source": "primary\|backup\|slate\|auto"}` |
+| `GET` | `/failover/playlist` | The slate playlist's current item and its position |
 
 `auto` clears a manual pin and returns control to the detector. `400` when
 failover is off — there is no tier to switch.
@@ -247,9 +387,16 @@ file an operator deliberately put there. Every file carries an `origin` of
 `uploaded`, `recorded` or `clip`, derived from which store it came out of rather
 than stored beside it.
 
-These sit behind the session, like every other mutation, which means **an API
-token cannot upload**. Tokens are for automation, and writing arbitrary bytes to
-the server's disk is not something a leaked one should reach.
+`POST /media` and `DELETE /media/{name}` are **session-only**: a browser session
+reaches them and **an API token does not**. Writing arbitrary bytes to the
+server's disk is not something a leaked automation credential should reach.
+`GET /media` is not restricted — a token can list what is stored, which is the
+half of this endpoint automation actually wants.
+
+Until this was fixed, the sentence above was the only thing enforcing it: the
+routes were in the ordinary authenticated group, and a token-only `POST`
+succeeded. They now sit in a session-only router group, which is what makes the
+statement checkable rather than aspirational.
 
 Refusals worth knowing: `413` over the size limit, `507` when the volume lacks
 room — checked *before* the write, because a filled disk takes the database and
@@ -365,18 +512,25 @@ told so. The schedule still saves and still runs.
 | `GET` | `/platforms/presets`, `/capabilities`, `/guides` |
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
+| `POST` | `/platforms/credentials/{platform}/check` |
 | `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
-| `GET` | `/chat`, `/chat/messages`, `/chat/users` |
+| `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
 | `POST` `DELETE` | `/chat/bans` |
 | `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
+
+`POST /platforms/credentials/{platform}/check` asks the platform whether the
+stored client credentials for it are still good, and answers with a verdict —
+never with the credential. It is a `POST` because it makes an outbound call, and
+it is refused to `read` tokens for the same reason: a route that exercises a
+stored secret is not a read, whatever its verb.
 
 `/metadata/broadcast-window` reports the period each platform will accept a
 scheduled broadcast in, because they disagree and the composer has to say so
@@ -390,6 +544,21 @@ platform here publishes an API for a user's message history, Twitch included.
 Its mod card is a web-app feature backed by internal endpoints. The trade is
 depth for breadth: shallower than Twitch's card, and it works across all four
 platforms at once.
+
+`/chat/search?q=` finds a message again, matching on its text **or its author's
+name**, newest first — the one read here that is not chronological, because a
+result list answers "where did that comment go" and burying the likeliest answer
+at the bottom would be perverse. `platform=` narrows it to one tab and `limit=`
+bounds the page.
+
+It searches the database and never the Hub's in-memory ring, which holds only
+what the current process has seen; "find the comment from earlier" is precisely
+the question a process-lifetime buffer cannot answer. The same caveat as
+`/chat/users` applies and applies harder: the response carries `retentionNote`
+and `truncated` because search is the one place an operator can conclude
+something did *not* happen. **An empty result means "not in the scrollback we
+kept", never "never said"** — so render the note alongside no-results, not only
+alongside a full page.
 
 `DELETE /chat/messages` removes one message on the platform. `POST
 /chat/messages/hide` is Facebook's reversible hide where the platform offers it,

@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -19,8 +20,13 @@ import (
 
 func doRedirect(t *testing.T, hostname, sendHost, method string) *httptest.ResponseRecorder {
 	t.Helper()
+	return doRedirectTo(t, hostname, sendHost, method, "/some/path?a=1")
+}
+
+func doRedirectTo(t *testing.T, hostname, sendHost, method, target string) *httptest.ResponseRecorder {
+	t.Helper()
 	cfg := config.Config{Addr: ":8443", TLS: config.TLS{Hostname: hostname}}
-	req := httptest.NewRequest(method, "http://placeholder/some/path?a=1", nil)
+	req := httptest.NewRequest(method, "http://placeholder"+target, nil)
 	req.Host = sendHost
 	w := httptest.NewRecorder()
 	redirectToHTTPS(cfg)(w, req)
@@ -37,8 +43,67 @@ func TestConfiguredHostnameIgnoresTheHostHeaderEntirely(t *testing.T) {
 	if w.Code != http.StatusMovedPermanently {
 		t.Errorf("code = %d, want 301: a destination we chose is safe to cache", w.Code)
 	}
-	if cc := w.Header().Get("Cache-Control"); cc == "no-store" {
-		t.Errorf("Cache-Control = %q; a fixed, configured destination is worth caching", cc)
+	// The request this helper builds carries "?a=1", and ANY query string now
+	// suppresses caching -- see the watch-token rule below. Assert the caching
+	// claim on a request that has no query at all, which is what the original
+	// version of this test meant and could not distinguish.
+	bare := doRedirectTo(t, "box.example.com", "evil.attacker.test", http.MethodGet, "/some/path")
+	if cc := bare.Header().Get("Cache-Control"); cc == "no-store" {
+		t.Errorf("Cache-Control = %q on a query-less path; a fixed, configured destination "+
+			"with nothing secret in its URI is worth caching", cc)
+	}
+}
+
+// TestAConfiguredRedirectNeverCachesAWatchToken is the guard for G5.
+//
+// A 301 or 308 is permanently cacheable by definition, and the Location carries
+// the request URI verbatim -- so with tls.hostname set, which is the RECOMMENDED
+// production configuration, http://host/playout/master.m3u8?token=SECRET
+// produced a Location holding a live watch credential that every intermediary
+// and the browser's own redirect cache was free to keep for ever.
+//
+// All four cells of configured x method, because the two branches picked their
+// codes independently and only one of them ever set the header.
+func TestAConfiguredRedirectNeverCachesAWatchToken(t *testing.T) {
+	const secret = "SENTINEL-watch-token-in-a-redirect-3f19"
+	target := "/playout/master.m3u8?token=" + secret
+
+	for _, hostname := range []string{"box.example.com", ""} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			name := "unconfigured"
+			if hostname != "" {
+				name = "configured"
+			}
+			t.Run(name+"/"+method, func(t *testing.T) {
+				w := doRedirectTo(t, hostname, "box.example.com", method, target)
+				loc := w.Header().Get("Location")
+				if !strings.Contains(loc, secret) {
+					t.Fatalf("the positive control failed: Location %q does not carry the "+
+						"token, so asserting that it is not cacheable proves nothing", loc)
+				}
+				if got := w.Header().Get("Cache-Control"); got != "no-store" {
+					t.Errorf("Cache-Control = %q, want no-store. This Location holds a live "+
+						"watch token and the status is %d, which is cacheable; a shared "+
+						"proxy or the browser redirect cache may keep it indefinitely.",
+						got, w.Code)
+				}
+				if got := w.Header().Get("Vary"); got != "Host" {
+					t.Errorf("Vary = %q, want Host", got)
+				}
+			})
+		}
+	}
+}
+
+// TestATokenlessWatchPathIsStillUncacheable covers the carrier with no query
+// string at all: the player page and the media origin, where a credential can
+// arrive through a cookie handoff or, in a future release, a path segment.
+func TestATokenlessWatchPathIsStillUncacheable(t *testing.T) {
+	for _, path := range []string{"/playout/master.m3u8", "/watch", "/watch/embed"} {
+		w := doRedirectTo(t, "box.example.com", "box.example.com", http.MethodGet, path)
+		if got := w.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s: Cache-Control = %q, want no-store", path, got)
+		}
 	}
 }
 

@@ -1,0 +1,247 @@
+#!/usr/bin/env node
+/* Assertions about the BUILT output, not the source.
+ *
+ * These exist because the source can be correct while the shipped CSS is wrong.
+ * The scroll-driven reveals were written as
+ *
+ *     animation: rise 0.6s linear both;
+ *     animation-timeline: view();
+ *
+ * which is valid, and works in dev. Lightning CSS merged the two into the
+ * shorthand `animation: .6s linear both rise view()`, which Chrome rejects
+ * outright — computed animation-name came back `none`, so every reveal on the
+ * site silently did nothing. No amount of reading the source would have caught
+ * it, and the page looked fine, because the failure mode was "content is
+ * simply always visible".
+ */
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+const DIST = new URL("../dist/", import.meta.url).pathname;
+const fail = [];
+
+const cssFiles = readdirSync(join(DIST, "_astro")).filter((f) => f.endsWith(".css"));
+const css = cssFiles.map((f) => readFileSync(join(DIST, "_astro", f), "utf8")).join("\n");
+
+// 1. animation-timeline must survive as its own declaration.
+const folded = /animation:[^;}]*\bview\(\)/.exec(css);
+if (folded) {
+  fail.push(
+    `animation-timeline was folded into an \`animation\` shorthand, which Chrome drops:\n` +
+    `      ${folded[0].slice(0, 90)}\n` +
+    `    Use the longhands so the minifier has no shorthand to merge into.`,
+  );
+}
+if (!/animation-timeline:\s*view\(\)/.test(css)) {
+  fail.push("no `animation-timeline: view()` in the built CSS — scroll reveals are not shipping");
+}
+
+// 2. Reduced motion must switch scroll-driven reveals OFF, not shorten them.
+if (!/@media\s*\(prefers-reduced-motion/.test(css)) {
+  fail.push("no prefers-reduced-motion block in the built CSS");
+} else if (!/animation-name:\s*none\s*!important/.test(css)) {
+  fail.push("reduced motion does not set `animation-name: none !important` — a scroll-driven reveal ignores animation-duration");
+}
+
+// 3+4. Internal links and fragments must resolve to something that was built.
+/* The motion tokens have to survive minification as VARIABLES.
+ *
+ * This file already exists because Lightning CSS folded `animation-timeline`
+ * into a shorthand Chrome rejects, and the scroll reveals silently stopped
+ * running in production. The same class of failure applies to a token: if the
+ * minifier inlines `--motion-instant` at each use site, the scale still looks
+ * right and stops being a scale — nothing can override it, which is exactly how
+ * the app's reduced-motion block ended up decorative for months. */
+if (!/--motion-instant:\s*90ms/.test(css)) {
+  fail.push("the motion scale is missing from the built CSS: --motion-instant was not emitted");
+}
+if (!/var\(--motion-instant\)/.test(css)) {
+  fail.push(
+    "nothing REFERENCES --motion-instant in the built CSS — the minifier inlined it, " +
+      "so the scale is decorative and cannot be overridden",
+  );
+}
+
+/* The meter keyframe must stay asymmetric.
+ *
+ * A symmetric rise and fall is a sine wave, and to the audience this page is
+ * written for that reads as a decorative web animation rather than an
+ * instrument. Attack fast, decay slow — the check is that the midpoint is NOT
+ * the extreme, which is what a 0/50/100 keyframe always is. */
+/* NB: matched against the css as-built, NOT a whitespace-stripped copy. The
+ * first version of this check stripped whitespace first, which turned
+ * "@keyframes meter" into "@keyframesmeter" and matched nothing — the guard
+ * passed on a deliberately symmetric keyframe. Caught by mutating the source
+ * and watching the build stay green. */
+const meterKf = /@keyframes\s+meter\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/.exec(css);
+if (!meterKf) {
+  fail.push("the meter keyframe is gone from the built CSS; this check no longer guards anything");
+} else if (/(^|[},])\s*50%\s*[,{]/.test(meterKf[1])) {
+  fail.push(
+    "the meter keyframe is symmetric again (has a 50% stop): real peak meters " +
+      "attack fast and decay slowly, and engineers read a sine wobble as fake",
+  );
+}
+
+const pages = readdirSync(DIST).filter((f) => f.endsWith(".html"));
+const built = new Set(pages.map((f) => "/" + f.replace(/\.html$/, "").replace(/^index$/, "")));
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  for (const m of html.matchAll(/href="(\/[^"#?]*)(#[^"]*)?"/g)) {
+    const path = m[1].replace(/\/$/, "") || "/";
+    if (path.startsWith("/_astro") || /\.[a-z0-9]+$/i.test(path)) continue;
+    if (!built.has(path)) fail.push(`${f}: links to ${m[1]}, which was not built`);
+  }
+  for (const m of html.matchAll(/href="(\/[a-z]*)#([a-z0-9-]+)"/g)) {
+    const target = m[1] === "/" ? "index.html" : `${m[1].slice(1)}.html`;
+    if (!pages.includes(target)) continue;
+    if (!new RegExp(`id="${m[2]}"`).test(readFileSync(join(DIST, target), "utf8"))) {
+      fail.push(`${f}: links to ${m[1]}#${m[2]} but ${target} has no element with that id`);
+    }
+  }
+}
+
+// 5. The amber reservation, enforced rather than merely documented.
+//
+//    Amber (--color-cross / #e8a33d) marks the signal path: a lit crosspoint,
+//    the route it feeds, and that route running hot. The rule drifted once
+//    already — it said "crosspoint and nothing else" while the hero's routes
+//    had always been amber, and a comparison-page callout had quietly picked it
+//    up as a general accent. Prose in a stylesheet did not stop that; this does.
+const amberAllowed = {
+  // The hero's route lines and their junction dot.
+  "index.html": 3,
+};
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  const hits = (html.match(/e8a33d/gi) || []).length;
+  const allowed = amberAllowed[f] ?? 0;
+  if (hits !== allowed) {
+    fail.push(
+      `${f}: ${hits} literal amber (#e8a33d) use(s), expected ${allowed}. ` +
+      `Amber is reserved for the signal path — see the rule at the top of global.css. ` +
+      `If this is deliberate, update amberAllowed here and say why there.`,
+    );
+  }
+  // Utility-class amber on markup is always an accent use; the crosspoint gets
+  // its amber from the .xpt rules and the level readout from the matrix script.
+  for (const cls of ["border-cross", "bg-cross", "text-cross"]) {
+    if (new RegExp(`class="[^"]*\\b${cls}\\b`).test(html)) {
+      fail.push(`${f}: \`${cls}\` on markup — amber is not a general accent. Use primary.`);
+    }
+  }
+}
+
+/* 6. The comparison table is published three times and the copies must agree.
+ *
+ * docs/COMPARISON.md, /comparison and /features each carry their own copy of
+ * the capability rows, and that duplication has now drifted three separate
+ * times: the destination cap was corrected on the site and left wrong in the
+ * two documents, the recording row said Restreamer records when their own
+ * tracker says otherwise, and the same row was worded "Runs on your hardware"
+ * in one copy and "Runs on hardware you control" in another. Prose asking
+ * people to keep them in step has not worked once.
+ *
+ * This compares SHIPPED TEXT to SHIPPED TEXT: the rows a visitor's browser
+ * actually renders, against the document those rows claim to come from. It is
+ * deliberately not the anti-pattern in #107 — nothing here greps source code to
+ * infer behaviour, and there is no assertion that passes because a string
+ * happens to appear in a file nobody executes. If the built page says it, this
+ * check reads it from the built page. */
+const COMPARISON_MD = new URL("../../docs/COMPARISON.md", import.meta.url).pathname;
+
+const ENTITIES = {
+  amp: "&", lt: "<", gt: ">", quot: '"', nbsp: " ",
+  mdash: "—", ndash: "–", hellip: "…",
+  lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", "#39": "'",
+};
+
+/* Typography is the whole difficulty here. The Markdown says `**Multitrack
+ * archive** — every…`, the built HTML says `Multitrack archive &#8212; every…`,
+ * and the smart-quote transform turns "Yes" into “Yes” on the way. Normalise
+ * both sides to the same plain lowercase text or this check false-positives on
+ * its first run and gets deleted by the next person. */
+const norm = (s) =>
+  s
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&([a-z]+|#\d+);/gi, (_, e) => ENTITIES[e.toLowerCase()] ?? " ")
+    .replace(/[*`]/g, "")
+    .replace(/[‐-―−]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+const tablesIn = (html) => html.match(/<table[\s\S]*?<\/table>/g) || [];
+const rowsIn = (table) => table.match(/<tr[\s\S]*?<\/tr>/g) || [];
+const cellsIn = (row) => (row.match(/<t[dh][\s\S]*?<\/t[dh]>/g) || []).map(norm);
+
+const comparisonMd = norm(readFileSync(COMPARISON_MD, "utf8"));
+
+/* Rows that exist on the site and deliberately NOT in docs/COMPARISON.md.
+ * The document's capability table is headed "what polyemesis has that none of
+ * them have", and this row is not one of those — Restreamer scores Yes on it
+ * too. It earns its place in the site's table as the reason a reader who does
+ * not care about audio might still be here. Adding a row to this list is fine;
+ * doing it without saying why is not. */
+const siteOnlyRows = new Set([
+  "runs on hardware you control, no per-destination pricing",
+]);
+
+let capabilityRowsChecked = 0;
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  for (const table of tablesIn(html)) {
+    const rows = rowsIn(table);
+    if (!rows.length || !cellsIn(rows[0]).includes("capability")) continue;
+    for (const row of rows.slice(1)) {
+      const label = cellsIn(row)[0];
+      if (!label || siteOnlyRows.has(label)) continue;
+      capabilityRowsChecked++;
+      if (!comparisonMd.includes(label)) {
+        fail.push(
+          `${f}: capability row "${label}" does not appear in docs/COMPARISON.md.\n` +
+          `    The page and the document have drifted. Reword whichever one is wrong ` +
+          `— or, if the row is site-only on purpose, add it to siteOnlyRows here and say why.`,
+        );
+      }
+    }
+  }
+}
+if (!capabilityRowsChecked) {
+  fail.push("no capability table found in the built pages; the COMPARISON.md parity check no longer guards anything");
+}
+
+/* Restreamer's recording cell specifically, because it shipped as a bare "Yes"
+ * for months while datarhei/restreamer#692 — their own open request for exactly
+ * this — sat open since February 2024. A row that is confidently wrong about a
+ * competitor is the one that costs the page its credibility. */
+let recordingRowChecked = false;
+for (const table of tablesIn(readFileSync(join(DIST, "comparison.html"), "utf8"))) {
+  const rows = rowsIn(table);
+  if (!rows.length) continue;
+  const column = cellsIn(rows[0]).indexOf("restreamer");
+  if (column < 0) continue;
+  for (const row of rows.slice(1)) {
+    const cells = cellsIn(row);
+    if (cells[0] !== "recording") continue;
+    recordingRowChecked = true;
+    if (cells[column] === "yes") {
+      fail.push(
+        `comparison.html: Restreamer's recording cell renders as a bare "Yes". ` +
+        `It is an open feature request on their tracker (datarhei/restreamer#692) — ` +
+        `see the footnote in docs/COMPARISON.md.`,
+      );
+    }
+  }
+}
+if (!recordingRowChecked) {
+  fail.push("no Recording row found on the built comparison page; that check no longer guards anything");
+}
+
+if (fail.length) {
+  console.error("build checks FAILED:\n" + fail.map((f) => "  - " + f).join("\n"));
+  process.exit(1);
+}
+console.log(`build checks passed (${pages.length} pages, ${cssFiles.length} stylesheet)`);

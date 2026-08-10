@@ -61,13 +61,22 @@ pgrep -af ffmpeg
 1. **Is the port published?** In Docker, SRT is UDP: `-p 6000:6000/udp`. Missing
    `/udp` is the single most common cause.
 2. **Does the mode match?** An SRT listener will not accept an RTMP publisher.
-3. **Is a firewall in the way?** SRT is UDP and is often dropped by default.
-4. **Does your FFmpeg have SRT?** `ffmpeg -protocols | grep -x srt`. Homebrew's
+3. **Is the address right for *that* source?** Both listeners are shared, so the
+   token (SRT) or the stream key (RTMP) is what picks the source out — a valid
+   URL with the wrong key reaches the server and is refused, it does not fall
+   through to whichever source happens to be there. On RTMP the log line is
+   `rtmp publish refused` and it deliberately names **no source**: "no such
+   key", "that source is disabled" and "that source has no engine" are three
+   different facts, and telling them apart is what would let someone enumerate
+   which keys exist. Copy the URL and key from **Sources** rather than retyping
+   them.
+4. **Is a firewall in the way?** SRT is UDP and is often dropped by default.
+5. **Does your FFmpeg have SRT?** `ffmpeg -protocols | grep -x srt`. Homebrew's
    does not. Without it, the ingest cannot listen and the log says
    `Protocol not found`.
-5. **Are you on macOS with a bare `:port`?** See directly below — this one looks
+6. **Are you on macOS with a bare `:port`?** See directly below — this one looks
    exactly like a firewall and is not one.
-6. **Is the link lossy?** A handshake can fail on loss that an established
+7. **Is the link lossy?** A handshake can fail on loss that an established
    stream would shrug off, and it fails with a bare `I/O error` that names
    nothing. See [It connects on some attempts and not
    others](#it-connects-on-some-attempts-and-not-others).

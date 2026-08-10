@@ -15,11 +15,57 @@ import (
 )
 
 // MaxTracks is the number of audio tracks polyemesis accepts from an ingest.
-// Matches OBS' six-track limit.
-const MaxTracks = 6
+//
+// It was 6, matching OBS' six-track limit, back when OBS over RTMP was the only
+// way tracks arrived. That is no longer the ceiling: SRT carries MPEG-TS, which
+// has no such limit, and Enhanced RTMP identifies tracks by a one-byte trackId,
+// so the protocols allow 256. 32 is where the *implementation* stops rather
+// than where the specs do -- see MaxMeterChannels.
+//
+// Raising this does not oblige anyone to use it. OBS still sends at most six,
+// and a six-track ingest produces byte-identical commands to before.
+const MaxTracks = 32
 
-// MaxChannels is the largest per-track channel count we build a downmix for.
-const MaxChannels = 8
+// MaxChannels is the highest per-track channel a matrix cell may ADDRESS.
+//
+// It never was what its old name said -- "the largest per-track channel count we
+// build a downmix for". DownmixMatrix has always handled any width, and simple
+// mode passes the probed count straight through, so a nine-channel track routed
+// perfectly well while its ninth channel could not be named in a matrix. A width
+// you can route and cannot address is an inconsistency with no reason behind it.
+//
+// 16 covers every layout libavutil names, including the immersive ones (7.1.4 is
+// twelve channels, 9.1.6 is sixteen). Raising it only WIDENS what validates, so
+// no profile that was accepted before is rejected now.
+//
+// It bounds a channel INDEX, not a track's real width: a cell naming a channel
+// the ingest does not carry is still dropped at compile time with a warning, and
+// the level that drop costs is reported in dB.
+const MaxChannels = 16
+
+// MaxMeterChannels is FFmpeg's amerge ceiling, and the reason MaxTracks is 32
+// rather than 256.
+//
+// The meters process merges every channel of every track into one wide stream
+// so a single astats can report them all (see ffmpeg.MetersArgs). amerge refuses
+// beyond 64 channels -- "Too many channels (max 64)" -- which is 32 stereo
+// tracks, or 8 eight-channel ones.
+//
+// Note this bounds tracks x channels, not tracks alone, so MaxTracks and
+// MaxChannels cannot both be spent at once. Exceeding it does not invalidate a
+// profile and never rejects an ingest: an ingest polyemesis cannot fully meter
+// is still an ingest it can route, and routing is the product. MetersArgs
+// covers as many whole tracks as fit and reports how many it dropped.
+const MaxMeterChannels = 64
+
+// PlaceholderTracks is how many tracks DefaultSource pretends exist before the
+// ingest has been probed.
+//
+// Deliberately NOT MaxTracks. This is a guess shown in the UI so a destination
+// can be configured before a stream has ever connected, and guessing 32 would
+// fill the routing editor with 26 tracks that will almost certainly never
+// arrive. Six is what OBS sends, which is the overwhelmingly common case.
+const PlaceholderTracks = 6
 
 // MaxGain caps any single gain coefficient. 2.0 == +6 dB, which is as much
 // boost as is defensible before the limiter is doing all the work.
@@ -414,9 +460,14 @@ func primarySubtag(tag string) string {
 // DefaultSource is what we assume before the ingest has been probed: six
 // stereo tracks. It lets the UI render a routing editor and lets a destination
 // be configured before the stream has ever come up.
+//
+// Bounded by PlaceholderTracks rather than MaxTracks, which used to be the same
+// number and no longer is. The engine leans on this being small and concrete:
+// it substitutes this layout for an unprobed ingest, so widening it would mean
+// compiling meter and mix commands against tracks that do not exist.
 func DefaultSource() Source {
 	s := Source{}
-	for i := 0; i < MaxTracks; i++ {
+	for i := 0; i < PlaceholderTracks; i++ {
 		s.Tracks = append(s.Tracks, Track{Index: i, Channels: 2, Codec: "aac", Layout: "stereo"})
 	}
 	return s

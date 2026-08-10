@@ -298,17 +298,24 @@ func (a playoutAccess) ok() bool { return a >= playoutAllowAdmin }
 func (s *Server) authorizePlayout(r *http.Request) playoutAccess {
 	set := s.playoutSettings()
 
-	// An administrator can always watch their own output, including while it is
+	// An OPERATOR can always watch their own output, including while it is
 	// private — otherwise the Playout page could not preview what it is about
-	// to publish. Checked before Enabled so a disabled stream still 404s for
+	// to publish. Read "operator" strictly: the signed-in console, or a bearer
+	// whose scope is admin. See playoutOperator, and note what this branch
+	// SKIPS -- allowing here jumps the `!set.Public` test three lines below, so
+	// whoever satisfies this predicate is being handed the media of a stream
+	// the operator has not published. That is the right answer for the console
+	// and it was the wrong answer for everybody else the old predicate let in.
+	//
+	// Computed before Enabled is consulted so a disabled stream still 404s for
 	// everyone rather than 401ing for an admin, which would be a confusing way
 	// to say "playout is off".
-	admin := s.authenticatedPlayout(r)
+	operator := s.playoutOperator(r)
 
 	if !set.Enabled {
 		return playoutDenyHidden
 	}
-	if admin {
+	if operator {
 		return playoutAllowAdmin
 	}
 	if !set.Public {
@@ -325,13 +332,102 @@ func (s *Server) authorizePlayout(r *http.Request) playoutAccess {
 	return playoutDenyChallenge
 }
 
-// authenticatedPlayout reports whether the request carries an administrator's
-// credential. CSRF is not consulted: these are read-only GETs, and a cross-site
-// forgery whose entire effect is that somebody else's browser fetches a video
-// segment is not a threat worth a token exchange a player cannot perform.
-func (s *Server) authenticatedPlayout(r *http.Request) bool {
-	_, err := s.authenticate(r)
-	return err == nil
+// playoutPreflightAllowed is authorizePlayout's CONFIGURATION HALF, and the
+// only part of the gate a CORS preflight is held to (#170).
+//
+// The gate asks three kinds of question and they are not the same kind:
+//
+//	PUBLICATION STATE  Enabled -- is playout switched on at all
+//	                   Public  -- has the operator published it
+//	CREDENTIAL         Protection / token / cookie / basic
+//
+// The first two are properties of the SERVER and are true or false before any
+// request arrives. The third is a property of the CALLER. A preflight is a
+// browser asking "would you accept a request like this from this origin", and it
+// carries no credentials BY SPECIFICATION -- so holding it to the credential
+// half is not strictness, it is a category error with a concrete cost: an
+// OPTIONS answered 401 fails the preflight, the browser never issues the real
+// request, and a token-protected public stream cannot be embedded cross-origin
+// at all. That breaks the cookie handoff, which is the mechanism the whole
+// token-protected embed depends on.
+//
+// The configuration half has no such problem, and skipping it was a real
+// disclosure. With playout switched OFF, GET answers 404 and says nothing;
+// OPTIONS answered 204 -- and, with AllowCrossOrigin on, attached
+// Access-Control-Allow-Origin and -Allow-Methods, because internal/playout's
+// handler sets CORS above its own Enabled check. So an anonymous caller could
+// establish both that a playout origin is mounted and that the operator has
+// turned cross-origin embedding on, on a server that is deliberately hiding
+// everything else about it.
+//
+// The operator branch is kept, and in the same order authorizePlayout puts it:
+// the console previews a PRIVATE stream, and its player's own preflights have to
+// succeed for that preview to work.
+//
+// What this does NOT do is make OPTIONS a reliable "is there media here" oracle
+// in the allowed case -- it answers 204 for any path under the prefix, mounted
+// or not, exactly as before. The state it stops disclosing is the SERVER's, not
+// a file's.
+func (s *Server) playoutPreflightAllowed(r *http.Request) bool {
+	set := s.playoutSettings()
+	if !set.Enabled {
+		return false
+	}
+	return s.playoutOperator(r) || set.Public
+}
+
+// playoutOperator reports whether the request carries the AUTHORITY OF THE
+// OPERATOR: the signed-in console, or a bearer token minted with the admin
+// scope. Nothing else.
+//
+// It used to be `_, err := s.authenticate(r); return err == nil` -- named
+// authenticatedPlayout, and that name was an accurate description of a
+// question that was the wrong one to ask. It resolved the principal and then
+// threw it away, so every distinction #104 had just introduced was erased at
+// this one call site: a read-scoped token, whose entire promise is that it can
+// read METADATA and not CONTENT (#154), satisfied a predicate whose caller
+// treats a true as "this is the operator previewing their own private stream"
+// and hands over the media. /playout/* is registered outside every
+// authenticated group, so requireScope never runs on it and there was nowhere
+// else the scope could have been consulted. Discarding the principal WAS the
+// bug; keeping it is the fix.
+//
+// Positive against admin rather than negative against read. A scope string this
+// build does not recognise -- from a newer schema, or a hand-edited row --
+// narrows what the credential can do instead of widening it, which is the same
+// rule requireScope states and the reason it is restated here rather than
+// inverted.
+//
+// Deliberately NOT extracted into a predicate shared with requireScope or with
+// readScopeCannotSeePublishTokens. Those live inside the disclosure fix and
+// re-expressing them to serve a third caller would put a verified boundary at
+// the mercy of a fourth. TestOnlyTwoFunctionsAuthenticate pins that this and
+// requireAuth are the only two places in the package that resolve a principal,
+// which is the durability that matters here.
+//
+// Bearer beats session and does NOT fall back: s.authenticate resolves an
+// Authorization header first, so a request carrying BOTH a read token and a
+// valid session cookie is refused. That is deliberate. Falling back to the
+// cookie would mean a REVOKED token still watched the stream for as long as its
+// holder's browser had a session, which is precisely the property revocation is
+// bought for, and this is the one route in the product that serves video.
+//
+// CSRF is not consulted: these are read-only GETs, and a cross-site forgery
+// whose entire effect is that somebody else's browser fetches a video segment
+// is not a threat worth a token exchange a player cannot perform.
+func (s *Server) playoutOperator(r *http.Request) bool {
+	p, err := s.authenticate(r)
+	if err != nil {
+		// Anonymous, a garbage bearer, an expired session. A viewer, in other
+		// words, and a viewer is judged by the rules below this call.
+		return false
+	}
+	if p.token == nil {
+		// The signed-in console. Scopes describe a token; the operator at the
+		// keyboard is not one.
+		return true
+	}
+	return p.token.Scope == db.ScopeAdmin
 }
 
 // playoutTokenMatches checks every channel a token may arrive on.
@@ -410,10 +506,31 @@ func (s *Server) playoutHandler() http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A preflight carries no credentials by definition, so it is answered
-		// before the access check. It reveals nothing: the browser still has to
-		// make the real request, and that one is checked.
+		// A preflight carries no credentials by definition, so it is held to the
+		// CONFIGURATION half of the gate and not to the credential half.
+		//
+		// The old comment here said it was answered "before the access check"
+		// and "reveals nothing", and both halves of that were wrong (#170).
+		// authorizePlayout is not only a credential check: its first two tests,
+		// Enabled and Public, are publication state, and they are exactly the
+		// facts a disabled server is trying not to disclose. Answering 204 above
+		// them told an anonymous caller that a playout origin is mounted on a
+		// server whose GET deliberately 404s -- and with AllowCrossOrigin on it
+		// also handed over the CORS headers, because internal/playout sets those
+		// above its own Enabled check.
+		//
+		// Denied answers the SAME 404 GET gives, so the two are consistent and a
+		// prober learns the same nothing from either.
+		//
+		// The credential half stays out of it deliberately: see
+		// playoutPreflightAllowed for why 401ing a preflight would break
+		// cross-origin playback of a token-protected public stream, which is a
+		// working flow this must not cost.
 		if r.Method == http.MethodOptions {
+			if !s.playoutPreflightAllowed(r) {
+				http.NotFound(w, r)
+				return
+			}
 			if h := resolve(); h != nil {
 				h.ServeHTTP(w, r)
 				return
@@ -665,9 +782,18 @@ type playoutAdminView struct {
 	// second call to /settings.
 	Settings   db.PlayoutSettings `json:"settings"`
 	Protection playoutProtection  `json:"protection"`
-	// Token is the playback secret in the clear. This endpoint is behind the
-	// administrator's session; there is exactly one person entitled to see it,
-	// and hiding it from them would only mean they could not share the link.
+	// Token is the playback secret in the clear, for an operator.
+	//
+	// What used to stand here asserted that "this endpoint is behind the
+	// administrator's session". It is not, and never was: the route is
+	// registered in the plain authenticated group, so any bearer reaches it,
+	// and the method rule waves a GET through. The claim was written in prose
+	// beside the type instead of enforced at the route, which is the exact
+	// failure the session-only group was created to end.
+	//
+	// It is now blanked for a read-scoped token, along with the three URLs
+	// below -- each of which re-embeds the same secret, so blanking the field
+	// alone would hand it straight back in a different shape.
 	Token       string      `json:"token"`
 	Title       string      `json:"title"`
 	Description string      `json:"description"`
@@ -706,7 +832,38 @@ func (s *Server) handleGetPlayout(w http.ResponseWriter, r *http.Request) {
 			Format:  set.Format,
 		}
 	}
+	if readScopeCannotSeePublishTokens(r) {
+		view = readSafePlayoutView(view)
+	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, view)
+}
+
+// readSafePlayoutView is the read-scoped projection of a playoutAdminView, as a
+// PURE FUNCTION of the view.
+//
+// Extracted for the same reason as readSafeSourceView: the drift guard used to
+// be written against redactPlayoutViewLikeHandler, a hand copy of these two
+// lines living in the test file. Nothing was at risk THAT day, because neither
+// field carries omitempty -- but the guard was equally blind either way, and a
+// guard whose correctness depends on a struct tag nobody has changed yet is not
+// a guard.
+//
+// The token is a WATCH credential: with it a read-scoped holder can pull the
+// media of a stream the operator has not made public. There is no read-safe
+// shape that keeps it, so all four carriers go -- the field, and the master,
+// watch and embed URLs that each embed it. playoutPublicView is what a caller
+// without the operator's authority is meant to read.
+//
+// Blanked rather than redacted in place, and that is the deliberate difference
+// from sourceView.LegacyRTMPKey: neither `token` nor `urls` carries omitempty,
+// so assigning the zero value keeps the key present and the wire shape
+// unchanged. If either tag ever gains omitempty, the drift guard fails and this
+// has to become redactInPlace.
+func readSafePlayoutView(v playoutAdminView) playoutAdminView {
+	v.Token = ""
+	v.URLs = playoutURLs{}
+	return v
 }
 
 // playoutURLsFor builds absolute URLs from the request, because the operator is

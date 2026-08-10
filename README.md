@@ -6,7 +6,7 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
 A self-hosted restreaming server with **per-destination multichannel audio
-routing**.
+routing** — multistream from one upload, with a different mix per platform.
 
 You stream once. polyemesis fans it out to as many destinations as you like —
 and each destination gets its *own* audio mix, chosen from the audio tracks your
@@ -21,14 +21,19 @@ OBS ──SRT, 6 audio tracks──► polyemesis ──┼── Twitch     tra
 
 ## The problem it solves
 
-You run OBS with several audio tracks — track 1 is the full mix including
-copyrighted music, track 2 is the clean mix without it, track 3 is your mic.
+You run OBS with split audio tracks — track 1 is the full mix including
+copyrighted music, track 2 is the clean feed without it, track 3 is your mic.
 Every live platform accepts exactly **one stereo audio stream**, so normally you
 must choose one mix for everyone, or run several encoders and several uploads.
+Choosing wrong is what gets the Twitch VOD muted or the YouTube stream struck,
+and running several uploads is what multistreaming from the stream PC costs you.
+
+OBS can send one extra track — the VOD track — but only to a service that
+supports it, and it is a track it *selects*, not a mix it builds.
 
 polyemesis ingests once and lets you pick, per destination, which tracks get
 summed into the stereo feed that destination receives. YouTube gets the clean
-mix; your local archive keeps everything; your Discord restream keeps the mic
+feed; your local archive keeps everything; your Discord restream keeps the mic
 hot. One upload, one video encode, different audio per platform.
 
 ## What it does
@@ -43,12 +48,16 @@ hot. One upload, one video encode, different audio per platform.
   encode feeds every destination that selects it, ref-counted so an unused tier
   costs nothing — and it re-encodes **video only**, so audio still routes per
   destination. [→ RENDITIONS.md](docs/RENDITIONS.md)
-- **SRT multitrack ingest** (up to 6 AAC tracks), addressed by token on a single
-  port, with RTMP as a single-track fallback. [→ OBS.md](docs/OBS.md)
+- **SRT multitrack ingest** (up to 32 AAC tracks; six is what OBS sends), addressed by token on a single
+  port, with RTMP as a single-track fallback — also one port, addressed by
+  stream key, and equally unlimited in how many sources it carries.
+  [→ OBS.md](docs/OBS.md)
 - **Live audio meters** for every channel of every track — how you verify the
   clean track really is clean, *before* going live.
-- **Unlimited destinations**: RTMP(S), SRT, or local file, each independently
-  startable with auto-reconnect and exponential backoff.
+- **No configured cap on destinations**: RTMP(S), SRT, or local file, each
+  independently startable with auto-reconnect and exponential backoff. There is
+  no limit in the software; upload bandwidth and CPU are the real ones, at
+  roughly 4% of one core per destination.
 - **Platform sign-in** for YouTube, Twitch, Facebook and Kick, with chat and
   metadata push where the API allows it. [→ PLATFORMS.md](docs/PLATFORMS.md)
 - **Chat moderation on all four** — delete, ban, timeout, and a moderator user
@@ -86,9 +95,8 @@ roadmap.
 
 | | |
 |---|---|
-| **No multitrack over RTMP.** | RTMP carries one stereo pair. Enhanced RTMP multitrack from OBS 30.2+ is **not** supported, and the `enhancedRtmp` config key is an inert placeholder. Multitrack means SRT. |
-| **One RTMP source, maximum.** | polyemesis has no RTMP server of its own — it uses `ffmpeg -listen 1`, which cannot demultiplex by path. Any number of sources can share the SRT port; only one can use RTMP. [Why](docs/DESIGN-ONE-PORT-ONLY.md#rtmp) |
-| **No per-source ports.** | Every push source is addressed by its token on one SRT port. Giving one programme its own port for firewall, NIC or QoS purposes is not something polyemesis does. [Why](docs/DESIGN-ONE-PORT-ONLY.md#what-it-costs) |
+| **RTMP multitrack is not the operated path.** | Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) carries more and works on FFmpeg 7.1+ — verified end to end — but not on FFmpeg 6.1.1, and not yet confirmed with OBS publishing. SRT is what is operated. See `docs/notes/enhanced-rtmp-multitrack.md`. |
+| **No per-source ports.** | Every push source is addressed by its token on one SRT port, or its stream key on one RTMP port. Giving one programme its own port for firewall, NIC or QoS purposes is not something polyemesis does. [Why](docs/DESIGN-ONE-PORT-ONLY.md#what-it-costs) |
 | **One user, no roles.** | No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming — and, through file destinations and expert mode, meaningful control of the machine. |
 | **Instagram Live cannot work.** | There is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts. It is listed and marked unsupported rather than shipped as a preset that quietly never connects. |
 | **Your source video is your problem.** | Renditions can re-encode down, but polyemesis will not rescue a 4K60 ingest on a box that cannot software-encode it in realtime. |
@@ -119,7 +127,8 @@ is a different and smaller claim than it used to be.
 
 ### Project status
 
-**Pre-release.** No version has been tagged. The test suites are extensive and
+**Pre-release.** Tagged releases exist from v0.1.0, and the API and config
+format may still change between minor versions. The test suites are extensive and
 green, and the software has been run in earnest — but it has one maintainer, no
 production installs beyond that, and no compatibility promises yet. The
 [changelog](CHANGELOG.md) records what a first release will contain.

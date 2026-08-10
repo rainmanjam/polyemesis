@@ -36,6 +36,8 @@ import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n";
+import { InfoHint } from "@/components/InfoHint";
 import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
 import type { DiskUsage, Recording, Settings } from "@/lib/types";
@@ -64,6 +66,7 @@ function masterKey(filename: string): string {
 }
 
 export function RecordingsPage() {
+  const t = useT();
   const { recordingsRevision, status } = useLiveData();
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [usage, setUsage] = useState<DiskUsage | null>(null);
@@ -89,9 +92,9 @@ export function RecordingsPage() {
         setSettings(s);
         setStems(st ?? []);
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : "Could not load recordings."))
+      .catch((err) => toast.error(err instanceof Error ? err.message : t("rec.loadFailed")))
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
   useEffect(load, [load, recordingsRevision]);
 
@@ -112,10 +115,10 @@ export function RecordingsPage() {
   const remove = async (rec: Recording) => {
     try {
       await api.deleteRecording(rec.id);
-      toast.success("Recording deleted.");
+      toast.success(t("rec.deleted"));
       load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete the recording.");
+      toast.error(err instanceof Error ? err.message : t("rec.deleteFailed"));
     }
   };
 
@@ -123,9 +126,9 @@ export function RecordingsPage() {
     setSaving(true);
     try {
       setSettings(await api.putSettings(next));
-      toast.success("Recording settings saved.");
+      toast.success(t("rec.saved"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save the settings.");
+      toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -153,11 +156,11 @@ export function RecordingsPage() {
   return (
     <div className="p-3">
       <PageHeader
-        title="Recordings"
-        subtitle="The full multitrack archive: every ingest audio track preserved, unencoded."
+        title={t("rec.title")}
+        subtitle={t("rec.subtitle")}
         actions={
           <Badge variant={recorderState === "running" ? "live" : "outline"}>
-            {recorderState === "running" ? "recording" : (recorderState ?? "disabled")}
+            {recorderState === "running" ? t("rec.recording") : (recorderState ?? t("rec.disabled"))}
           </Badge>
         }
       />
@@ -166,7 +169,7 @@ export function RecordingsPage() {
         {/* ---------- file list ---------- */}
         <Card>
           <CardHeader>
-            <CardTitle>Segments</CardTitle>
+            <CardTitle>{t("rec.segments")}</CardTitle>
           </CardHeader>
           <CardContent className="px-0 pb-0">
             {loading ? (
@@ -175,18 +178,18 @@ export function RecordingsPage() {
               </div>
             ) : recordings.length === 0 ? (
               <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
-                No recordings yet. Enable recording on the right and start a stream.
+                {t("rec.empty")}
               </div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>File</TableHead>
-                    <TableHead>Started</TableHead>
-                    <TableHead className="text-right">Duration</TableHead>
-                    <TableHead className="text-center">Tracks</TableHead>
-                    <TableHead className="text-center">Stems</TableHead>
-                    <TableHead className="text-right">Size</TableHead>
+                    <TableHead>{t("rec.file")}</TableHead>
+                    <TableHead>{t("rec.started")}</TableHead>
+                    <TableHead className="text-right">{t("rec.duration")}</TableHead>
+                    <TableHead className="text-center">{t("rec.tracks")}</TableHead>
+                    <TableHead className="text-center">{t("rec.stems")}</TableHead>
+                    <TableHead className="text-right">{t("rec.size")}</TableHead>
                     <TableHead className="w-20" />
                   </TableRow>
                 </TableHeader>
@@ -207,7 +210,7 @@ export function RecordingsPage() {
                                   type="button"
                                   onClick={() => setExpanded(open ? null : r.id)}
                                   aria-expanded={open}
-                                  aria-label={open ? "Hide stems" : "Show stems"}
+                                  aria-label={open ? t("rec.hideStems") : t("rec.showStems")}
                                   className="text-muted-foreground hover:text-foreground"
                                 >
                                   {open ? (
@@ -232,7 +235,7 @@ export function RecordingsPage() {
                           </TableCell>
                           <TableCell className="text-center">
                             {r.tracks > 0 ? (
-                              <Badge variant="outline" title={`${r.tracks} audio tracks preserved`}>
+                              <Badge variant="outline" title={t("rec.tracksTitle", { count: r.tracks })}>
                                 {r.tracks}
                               </Badge>
                             ) : (
@@ -243,7 +246,7 @@ export function RecordingsPage() {
                             {mine.length > 0 ? (
                               <Badge
                                 variant="armed"
-                                title={`${mine.length} per-track stem files, sample-aligned with the master`}
+                                title={t("rec.stemsTitle", { count: mine.length })}
                               >
                                 <AudioLines className="h-2.5 w-2.5" />
                                 {mine.length}
@@ -257,7 +260,7 @@ export function RecordingsPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex justify-end gap-0.5">
-                              <Button variant="ghost" size="icon-sm" asChild aria-label="Download">
+                              <Button variant="ghost" size="icon-sm" asChild aria-label={t("rec.download")}>
                                 <a href={api.downloadUrl(r.id)} download>
                                   <Download />
                                 </a>
@@ -266,7 +269,7 @@ export function RecordingsPage() {
                                 variant="ghost"
                                 size="icon-sm"
                                 onClick={() => confirmDelete.ask(r)}
-                                aria-label="Delete"
+                                aria-label={t("rec.delete")}
                                 className="text-muted-foreground hover:text-down"
                               >
                                 <Trash2 />
@@ -295,7 +298,7 @@ export function RecordingsPage() {
                                         variant="ghost"
                                         size="icon-sm"
                                         asChild
-                                        aria-label={`Download ${s.name}`}
+                                        aria-label={t("rec.downloadNamed", { name: s.name })}
                                       >
                                         <a href={stemDownloadUrl(s.name)} download>
                                           <Download />
@@ -322,27 +325,27 @@ export function RecordingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-1.5">
-                <HardDrive className="h-3.5 w-3.5" /> Disk
+                <HardDrive className="h-3.5 w-3.5" /> {t("rec.disk")}
               </CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-2">
-              <Stat label="Recordings" value={usage?.count ?? 0} />
-              <Stat label="Used" value={bytes(usage?.usedBytes ?? 0)} />
+              <Stat label={t("rec.diskRecordings")} value={usage?.count ?? 0} />
+              <Stat label={t("rec.used")} value={bytes(usage?.usedBytes ?? 0)} />
               <Stat
-                label="Free"
+                label={t("rec.free")}
                 value={usage?.freeBytes ? bytes(usage.freeBytes) : "—"}
                 tone={
                   usage && usage.freeBytes > 0 && usage.freeBytes < 5 * 1024 ** 3 ? "warn" : "muted"
                 }
               />
-              <Stat label="Volume" value={usage?.totalBytes ? bytes(usage.totalBytes) : "—"} tone="muted" />
+              <Stat label={t("rec.volume")} value={usage?.totalBytes ? bytes(usage.totalBytes) : "—"} tone="muted" />
               {/* Stems are not in the recordings index, so their bytes are not
                   in `used` either — showing them separately is the only way the
                   disk figures add up on a machine that writes them. */}
               {stems.length > 0 && (
                 <Stat
                   className="col-span-2"
-                  label={`Stems (${stems.length} files)`}
+                  label={t("rec.stemsUsage", { count: stems.length })}
                   value={bytes(stemBytes)}
                   tone="muted"
                 />
@@ -351,8 +354,8 @@ export function RecordingsPage() {
             {usage?.storage.halted && (
               <CardContent className="pt-0">
                 <p className="rounded border border-down/50 bg-down/5 p-2 text-[11px] text-down">
-                  {usage.storage.reason ?? "Recording is halted: the volume is below the free-space floor."}
-                  {" "}The recorder restarts by itself once space is freed.
+                  {usage.storage.reason ?? t("rec.haltedDefault")}{" "}
+                  {t("rec.haltedRestarts")}
                 </p>
               </CardContent>
             )}
@@ -361,11 +364,14 @@ export function RecordingsPage() {
           {settings && (
             <Card>
               <CardHeader>
-                <CardTitle>Recording</CardTitle>
+                <CardTitle>{t("rec.settingsTitle")}</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="rec-enabled">Enabled</Label>
+                  <Label htmlFor="rec-enabled" className="flex items-center gap-1">
+                    {t("rec.enabled")}
+                    <InfoHint body="rec.help.enabled" title="rec.enabled" />
+                  </Label>
                   <Switch
                     id="rec-enabled"
                     checked={settings.recording.enabled}
@@ -382,7 +388,10 @@ export function RecordingsPage() {
                     count, so this is off by default and stays that way through
                     an upgrade. */}
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="rec-stems">Per-track stem files</Label>
+                  <Label htmlFor="rec-stems" className="flex items-center gap-1">
+                    {t("rec.stemFiles")}
+                    <InfoHint body="rec.help.stemFiles" title="rec.stemFiles" />
+                  </Label>
                   <Switch
                     id="rec-stems"
                     checked={recSettings.stems ?? false}
@@ -392,7 +401,10 @@ export function RecordingsPage() {
 
                 {recSettings.stems && (
                   <div className="flex flex-col gap-1">
-                    <Label>Stem format</Label>
+                    <Label className="flex items-center gap-1">
+                      {t("rec.stemFormat")}
+                      <InfoHint body="rec.help.stemFormat" title="rec.stemFormat" />
+                    </Label>
                     <Select
                       value={recSettings.stemCodec || "flac"}
                       onValueChange={(v) => saveRecording({ stemCodec: v })}
@@ -401,20 +413,21 @@ export function RecordingsPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="flac">FLAC — lossless, about half the size</SelectItem>
-                        <SelectItem value="wav">WAV — lossless, opens anywhere</SelectItem>
+                        <SelectItem value="flac">{t("rec.stemFlac")}</SelectItem>
+                        <SelectItem value="wav">{t("rec.stemWav")}</SelectItem>
                       </SelectContent>
                     </Select>
                     <span className="text-[10px] text-muted-foreground">
-                      Written from the same process as the master, so every stem stays
-                      sample-aligned with the others. Tracks wider than 8 channels fall back to WAV
-                      on their own.
+                      {t("rec.stemNote")}
                     </span>
                   </div>
                 )}
 
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="rec-seg">Segment length (seconds)</Label>
+                  <Label htmlFor="rec-seg" className="flex items-center gap-1">
+                    {t("rec.segmentSeconds")}
+                    <InfoHint body="rec.help.segmentSeconds" title="rec.segmentSeconds" />
+                  </Label>
                   <Input
                     id="rec-seg"
                     type="number"
@@ -433,7 +446,10 @@ export function RecordingsPage() {
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="rec-gb">Keep at most (GB)</Label>
+                  <Label htmlFor="rec-gb" className="flex items-center gap-1">
+                    {t("rec.maxGb")}
+                    <InfoHint body="rec.help.maxGb" title="rec.maxGb" />
+                  </Label>
                   <Input
                     id="rec-gb"
                     type="number"
@@ -447,11 +463,14 @@ export function RecordingsPage() {
                       })
                     }
                   />
-                  <span className="text-[10px] text-muted-foreground">0 = no size limit.</span>
+                  <span className="text-[10px] text-muted-foreground">{t("rec.noSizeLimit")}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="rec-age">Delete after (hours)</Label>
+                  <Label htmlFor="rec-age" className="flex items-center gap-1">
+                    {t("rec.maxAgeHours")}
+                    <InfoHint body="rec.help.maxAgeHours" title="rec.maxAgeHours" />
+                  </Label>
                   <Input
                     id="rec-age"
                     type="number"
@@ -467,11 +486,14 @@ export function RecordingsPage() {
                       })
                     }
                   />
-                  <span className="text-[10px] text-muted-foreground">0 = keep forever.</span>
+                  <span className="text-[10px] text-muted-foreground">{t("rec.keepForever")}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="rec-free">Stop below free space (GB)</Label>
+                  <Label htmlFor="rec-free" className="flex items-center gap-1">
+                    {t("rec.minFreeGb")}
+                    <InfoHint body="rec.help.minFreeGb" title="rec.minFreeGb" />
+                  </Label>
                   <Input
                     id="rec-free"
                     type="number"
@@ -489,18 +511,16 @@ export function RecordingsPage() {
                     }
                   />
                   <span className="text-[10px] text-muted-foreground">
-                    The caps above only bound what polyemesis wrote; anything else on the volume can
-                    still fill it. 0 = no floor.
+                    {t("rec.minFreeNote")}
                   </span>
                 </div>
 
                 <Button size="sm" onClick={() => saveRetention(settings)} disabled={saving}>
                   {saving && <Loader2 className="animate-spin" />}
-                  Save retention policy
+                  {t("rec.savePolicy")}
                 </Button>
                 <p className="text-[10px] text-muted-foreground">
-                  Retention runs every 30 seconds: oldest first, by age then by total size. The
-                  segment currently being written is never deleted.
+                  {t("rec.retentionNote")}
                 </p>
               </CardContent>
             </Card>
@@ -512,8 +532,8 @@ export function RecordingsPage() {
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.filename ?? ""}
-        title="Delete this recording?"
-        description="The file is removed from disk, along with its proxies, thumbnails and transcript. This cannot be undone."
+        title={t("rec.deleteTitle")}
+        description={t("rec.deleteDescription")}
         requireTyping
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target);

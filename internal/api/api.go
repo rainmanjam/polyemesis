@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
+	"github.com/rainmanjam/polyemesis/internal/upgrade"
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
@@ -91,6 +93,23 @@ type Server struct {
 	// startedAt is the process start, which is what the uptime metric reports.
 	startedAt time.Time
 
+	// upgradeMethod and execPath are how this install was put on the box and
+	// what an upgrade would replace. Both are settled ONCE, in New, because
+	// both are properties of the process rather than of a request: Detect reads
+	// the environment and /proc/self/cgroup, os.Executable reads the same
+	// argv-derived path every time, and neither answer can change without this
+	// process ending. Deciding them per request would put file stats in a
+	// handler and buy nothing.
+	//
+	// PLAIN FIELDS, not an interface or an Options entry, so a test can build
+	// &Server{upgradeMethod: ..., execPath: ...} the way version_check_test.go
+	// already builds a server for the version endpoints. Their zero values are
+	// safe: an empty Method makes upgrade.PlanFor report "unrecognised install
+	// method", which is a refusal, and a refusal is the correct answer from a
+	// server that never established how it was installed.
+	upgradeMethod upgrade.Method
+	execPath      string
+
 	// The post-production tier. Every one of these is optional and every
 	// handler that reads one checks first, because a build that has not wired
 	// the queue yet must still serve the console — the library's search and
@@ -114,6 +133,57 @@ type Server struct {
 	// one per adapter: the key belongs to Kick, not to an account, so two
 	// connected Kick channels share the fetch.
 	kickKeys *chat.KickKeyFetcher
+
+	// revokedMu guards revoked and wsPingEvery.
+	revokedMu sync.RWMutex
+	// revoked is the set of api_tokens.id values this process has deleted.
+	//
+	// IT EXISTS FOR ONE READER: the /ws ping tick (#159). A socket's principal
+	// is captured once, at upgrade, and requireAuth never runs again -- so
+	// revoking a token, which is the operator's ONLY lever after a leak, did
+	// not reach a socket that was already open. It stayed open, and it stayed
+	// at the scope it was opened with, until the client went away. Under a
+	// single-administrator product that is defensible; "revoke does not revoke"
+	// is not a sentence to leave in the product.
+	//
+	// IN-PROCESS AND WRITE-ONLY-ON-REVOKE, and the three alternatives were all
+	// worse:
+	//
+	//	Re-looking the token up on each tick (LookupAPIToken) means retaining
+	//	the PLAINTEXT bearer for the life of the socket so there is something
+	//	to look up with, and firing a last_used_at write per socket per minute
+	//	at a single SQLite connection, and adding a database-error path to a
+	//	loop where the only safe answer to an error is "do not close the
+	//	socket" -- which is a branch that must never be got wrong and would
+	//	never be exercised.
+	//
+	//	A process-global epoch counter bumped on every mutation does not
+	//	survive a restart, has to be touched by every future mutation site, and
+	//	invites somebody to treat the counter as the authorisation decision.
+	//
+	//	Broadcasting revocations over a channel couples the socket loop to the
+	//	store's lifecycle for a signal that is one map lookup.
+	//
+	// UNBOUNDED BY DESIGN, and the bound is the process. An entry is ~8 bytes
+	// and is added only when an operator revokes a token by hand; an install
+	// that revoked ten thousand tokens between restarts would be holding 80 kB.
+	// Pruning would need to know that no socket still holds the id, which is
+	// the state this map exists to avoid tracking.
+	//
+	// It is NOT an authorisation source. Absence from this set means "this
+	// process has not seen that token deleted", which is not the same as "the
+	// token is valid" -- a token deleted by another process, or by an operator
+	// editing the database, is absent here. Every REQUEST still goes through
+	// requireAuth, which asks the database. This only ever CLOSES a socket
+	// early; it never keeps one open.
+	revoked map[int64]struct{}
+	// wsPingEvery overrides pingPeriod, and is set only by tests.
+	//
+	// The revocation check rides the existing ping tick, so a test of it has to
+	// wait a tick, and the real tick is 25 seconds. The alternative was to
+	// export the check and call it directly, which would test the map and not
+	// the thing that was broken -- that a socket already open stops receiving.
+	wsPingEvery time.Duration
 
 	// settingsMu is the one serialisation boundary between a playlist
 	// reference existing and an upload it names being removable.
@@ -240,6 +310,7 @@ func New(o Options) *Server {
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
 		kickKeys:  &chat.KickKeyFetcher{},
+		revoked:   map[int64]struct{}{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
@@ -253,6 +324,17 @@ func New(o Options) *Server {
 			// request, with no window in which a revoked token still works.
 			o.DB.TokenEpoch,
 		),
+	}
+	// nil for both probes means "ask the real environment and the real
+	// filesystem", which is what a running server wants; the parameters exist
+	// for internal/upgrade's own tests.
+	s.upgradeMethod = upgrade.Detect(nil, nil)
+	// An error here is not fatal and must not be. os.Executable fails on a few
+	// exotic platforms and on a process whose binary has been unlinked, and
+	// neither is a reason to refuse to serve — it is a reason to refuse to
+	// UPGRADE, which is exactly what an empty path makes upgrade.PlanFor do.
+	if p, err := os.Executable(); err == nil {
+		s.execPath = p
 	}
 	return s
 }
@@ -290,15 +372,93 @@ func (s *Server) Handler() http.Handler {
 		// --- authenticated ---
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			// After requireAuth, which is what puts the principal in the
+			// context, and before everything else: a read-scoped token is
+			// refused here rather than in any handler. See requireScope.
+			r.Use(s.requireScope)
 			r.Use(s.requireCSRF)
 
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
-			r.Post("/auth/password", s.handleChangePassword)
 
-			r.Get("/auth/tokens", s.handleListAPITokens)
-			r.Post("/auth/tokens", s.handleCreateAPIToken)
-			r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
+			// --- session only ---
+			//
+			// A signed-in browser reaches these; an API token does not, and the
+			// group is where that is enforced rather than merely described.
+			//
+			// #140 is why it exists. The media writes below used to sit in the
+			// plain authenticated group under a comment stating that a token
+			// could not reach them, which was false the day it was written:
+			// requireCSRF passes token principals through on purpose, so the
+			// only thing standing between a leaked token and an arbitrary file
+			// on the server's disk was a sentence. The three token routes were
+			// genuinely enforced, by an `if !requireSession(...)` at the top of
+			// each handler -- a pattern that protects the handlers that
+			// remember it and nothing else, which is precisely how the media
+			// routes came to be added without one.
+			//
+			// So membership of this group is now the whole statement. Adding a
+			// route here makes it session-only; adding one outside does not
+			// silently make it token-reachable-but-documented-otherwise,
+			// because there is no longer a claim anywhere except this block.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireSession)
+
+				// Minting and revoking. A token that can mint tokens makes
+				// revocation meaningless -- the operator deletes the one they
+				// know about while the holder has quietly issued three more.
+				// The list is here too: it is the operator's inventory of
+				// credentials, and automation has no reason to enumerate it.
+				r.Get("/auth/tokens", s.handleListAPITokens)
+				r.Post("/auth/tokens", s.handleCreateAPIToken)
+				r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
+
+				// The password. handleChangePassword already demands the
+				// CURRENT password, so a token alone could never have changed
+				// it, but that is an incidental defence sitting inside a
+				// handler rather than a stated rule: the account credential is
+				// not something a machine credential gets to touch, and after
+				// #140 the difference between "cannot in practice" and "is
+				// refused by the router" is one this file takes seriously.
+				r.Post("/auth/password", s.handleChangePassword)
+
+				// Media WRITES. The bytes and the filename both come from the
+				// caller, which is the shape SECURITY.md's path-confinement
+				// section exists for, and a credential built for unattended
+				// automation should not be able to fill the volume the database
+				// and the recorder live on.
+				//
+				// GET /media is deliberately NOT here. Listing what is already
+				// stored is exactly what automation is for, and it is the read
+				// the narrowed wording in SECURITY.md and docs/API.md now
+				// promises: a token can list media, and cannot write it.
+				r.Post("/media", s.handleUploadMedia)
+				r.Delete("/media/{name}", s.handleDeleteMedia)
+
+				// Replacing the server's own binary, and putting the previous
+				// one back. #149 added these calling requireSession from
+				// inside the handler, for the reason the group's opening
+				// paragraph gives: requireCSRF passes a token-authenticated
+				// request straight through by design, so membership of the
+				// merely-authenticated group would have left a leaked token
+				// able to overwrite the binary. That reasoning is right and
+				// the placement was the pre-#140 one -- a check the handler
+				// remembers rather than a rule the router imposes. Here the
+				// router imposes it. GET /upgrade/plan stays outside: reading
+				// what an upgrade WOULD do is a read.
+				r.Post("/upgrade/stage", s.handleUpgradeStage)
+				r.Post("/upgrade/rollback", s.handleUpgradeRollback)
+
+				// PUT /settings/automod-key is deliberately NOT here, and the
+				// question was asked rather than skipped. It seals a
+				// third-party API key, which sounds like credential management
+				// until you notice that PUT /platforms/credentials/{platform}
+				// does the same thing for every streaming platform and stays
+				// token-reachable. Sealing a key an operator pasted is a
+				// settings write like the others; what should gate it is the
+				// token's scope (#104), not this group, and pulling one of the
+				// two in here would leave a rule no reader could restate.
+			})
 
 			r.Get("/system", s.handleSystem)
 			// Authenticated on purpose: the build number is a fingerprint, and
@@ -307,6 +467,17 @@ func (s *Server) Handler() http.Handler {
 			// can reach out to GitHub on the operator's behalf.
 			r.Get("/version", s.handleVersion)
 			r.Post("/version/check", s.handleCheckUpdate)
+			// Acting on what the check found. Separate from /version on
+			// purpose: the plan probes whether the install directory is
+			// writable BY CREATING A FILE IN IT, and /version is read by the
+			// update banner on every page load. See handleUpgradePlan.
+			//
+			// The two MUTATING routes are registered in the session-only group
+			// above, not here: being inside this group is NOT enough --
+			// requireCSRF passes a token-authenticated request straight
+			// through, by design, so a leaked API token would otherwise be
+			// able to replace the server's own binary. See upgrade.go.
+			r.Get("/upgrade/plan", s.handleUpgradePlan)
 			r.Get("/status", s.handleStatus)
 			r.Get("/source", s.handleSource)
 			// What each incoming track is. Per-ingest, not per-destination:
@@ -362,10 +533,6 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/sources/{id}", s.handleDeleteSource)
 			r.Post("/sources/{id}/token", s.handleRotateSourceToken)
 
-			// Media uploads. Inside the session+CSRF group like every other
-			// mutation, which also means an API token cannot reach them: a
-			// token is for automation, and writing arbitrary bytes to the
-			// server's disk is not something a leaked one should be able to do.
 			// Automod. Its CONFIG rides inside Settings, so GET/PUT /settings
 			// already carries the matrix, rules and model options; only the
 			// derived matrix, model spend and the sealed key need endpoints.
@@ -373,9 +540,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/automod/stats", s.handleAutomodStats)
 			r.Put("/settings/automod-key", s.handlePutAutomodKey)
 
-			r.Post("/media", s.handleUploadMedia)
+			// The read half of media. POST /media and DELETE /media/{name} are
+			// in the session-only group above, which is the fix for #140; this
+			// listing stays reachable by an API token on purpose.
 			r.Get("/media", s.handleListMedia)
-			r.Delete("/media/{name}", s.handleDeleteMedia)
 
 			r.Get("/renditions", s.handleListRenditions)
 			r.Post("/renditions", s.handleCreateRendition)
@@ -550,6 +718,9 @@ func (s *Server) Handler() http.Handler {
 			// survive a path segment. See chat.go.
 			r.Get("/chat", s.handleChatOverview)
 			r.Get("/chat/messages", s.handleChatMessages)
+			// Finding one comment again. Searches the table rather than the
+			// Hub's ring, which only holds this process's lifetime.
+			r.Get("/chat/search", s.handleChatSearch)
 			// The moderator's user card: what one person has said. Read from
 			// our own scrollback, because no platform publishes this.
 			r.Get("/chat/users", s.handleChatUser)
@@ -573,14 +744,29 @@ func (s *Server) Handler() http.Handler {
 		// handleMetrics says why.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.requireScope)
 			r.Get("/metrics", s.handleMetrics)
 		})
 
 		// OAuth redirects are top-level browser navigations, so they carry the
 		// session cookie but cannot carry a CSRF header. The OAuth `state`
 		// parameter is the CSRF defence for these two routes.
+		//
+		// Session-only, and this is the one place the method-shaped scope rule
+		// in requireScope would have been wrong. Its premise is that GET does
+		// not change anything, and GET /oauth/{platform}/callback does: it
+		// stores a connected platform account. The `state` it demands is held
+		// in the DATABASE rather than in a cookie, so a caller holding only a
+		// bearer token could walk both halves of the flow and attach an account
+		// to somebody else's server -- a write, reached by a credential this
+		// release is otherwise promising is read-only.
+		//
+		// Requiring a session costs nothing real, because completing an OAuth
+		// consent screen is something only a browser does, and a browser doing
+		// it is signed in by definition.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.requireSession)
 			r.Get("/oauth/{platform}/start", s.handleOAuthStart)
 			r.Get("/oauth/{platform}/callback", s.handleOAuthCallback)
 		})
@@ -595,12 +781,30 @@ func (s *Server) Handler() http.Handler {
 		// the upgrade request, so CSRF middleware would reject it.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			// A read-scoped token is welcome here, and stays welcome: watching a
+			// stream go out is the monitoring use case scopes exist for.
+			//
+			// The reasoning that USED to stand here -- "the read pump discards
+			// whatever the client sends, so this is telemetry out and nothing
+			// in" -- was true and beside the point. It argued only about the
+			// INBOUND direction, and the socket's problem was outbound: every
+			// event was rendered by a bare json.Marshal with no principal
+			// anywhere in the call, so a read token received the admin shape of
+			// everything, including FFmpeg log lines carrying an argv.
+			//
+			// What makes the read scope safe here is now a thing rather than a
+			// sentence: handleWS captures the principal at upgrade and every
+			// frame goes through eventView over a CLOSED policy table, which
+			// fails closed on an event type nobody has classified. See
+			// ws_policy.go.
+			r.Use(s.requireScope)
 			r.Get("/ws", s.handleWS)
 		})
 
 		// Downloads are top-level navigations for the same reason.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.requireScope)
 			r.Get("/recordings/{id}/download", s.handleDownloadRecording)
 			r.Get("/recordings/stems/{name}/download", s.handleDownloadStem)
 			// Addressed by the JOB rather than by a filename: the export's
@@ -612,10 +816,28 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// Preview playlist and segments. hls.js cannot attach headers, so this
-	// relies on the session cookie, same-origin.
+	// relies on the session cookie, same-origin -- and now SAYS SO IN THE ROUTE
+	// TABLE rather than only in this comment.
+	//
+	// Two things were wrong with the previous registration, and neither was
+	// visible from the handler. It carried requireAuth but NOT requireScope,
+	// making it the one authenticated group in the table with no scope check at
+	// all -- so a read token reached it, and any request whose path ends
+	// .m3u8 calls PreviewRequested, which starts the on-demand preview encoder
+	// and keeps it alive for as long as the polling continues. And it was
+	// registered with r.Handle, so it answered EVERY method, including the ones
+	// the scope rule refuses everywhere else.
+	//
+	// Session-only closes the encoder-pinning for read AND admin bearers, at no
+	// cost to the dashboard: the browser is the only thing that has ever
+	// fetched these, and it has the cookie. GET and HEAD only, so the method
+	// surface matches what a media element actually issues.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
-		r.Handle("/hls/*", s.hlsHandler())
+		r.Use(s.requireSession)
+		hls := s.hlsHandler()
+		r.Get("/hls/*", hls.ServeHTTP)
+		r.Head("/hls/*", hls.ServeHTTP)
 	})
 
 	// --- the public origin ---
@@ -675,6 +897,79 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 	})
 }
 
+// markRevoked records that this process deleted an API token, so any /ws socket
+// still holding it can be closed on its next ping tick. See Server.revoked.
+//
+// Called AFTER the delete succeeds, never before: a failed delete leaves the
+// token working, and an entry here would then close a socket whose credential
+// is still valid -- a self-inflicted outage in the one code path an operator
+// reaches for during an incident.
+func (s *Server) markRevoked(id int64) {
+	if s == nil || id == 0 {
+		return
+	}
+	s.revokedMu.Lock()
+	if s.revoked == nil {
+		s.revoked = map[int64]struct{}{}
+	}
+	s.revoked[id] = struct{}{}
+	s.revokedMu.Unlock()
+}
+
+// isRevoked reports whether this process has deleted the given token id.
+//
+// One read-lock and one map lookup, per socket, per ping period. Nothing here
+// touches the database, and it must not start to: see Server.revoked.
+func (s *Server) isRevoked(id int64) bool {
+	if s == nil || id == 0 {
+		return false
+	}
+	s.revokedMu.RLock()
+	_, ok := s.revoked[id]
+	s.revokedMu.RUnlock()
+	return ok
+}
+
+// sessionEpochChanged reports whether a session signed at `was` has since been
+// revoked, which for a session means the user's password was changed.
+//
+// Deliberately NOT modelled on the revoked set above. That set is an in-process
+// note of something this process did, and it is documented as never being an
+// authorisation source; the epoch is the opposite -- the database is the only
+// thing that knows it, a bump can arrive from another process or from sqlite3,
+// and there is nothing in memory that would hear about it. So this reads the
+// store, once per socket per ping period.
+//
+// Fails CLOSED, exactly as auth.(*Manager).checkEpoch does on the request path:
+// a store that cannot answer is not a store that has said yes.
+func (s *Server) sessionEpochChanged(userID, was int64) bool {
+	if s == nil || userID == 0 {
+		return false
+	}
+	current, err := s.store.TokenEpoch(userID)
+	if err != nil {
+		s.log.Warn("cannot read the session epoch for an open socket; closing it",
+			"user", userID, "err", err)
+		return true
+	}
+	return current != was
+}
+
+// pingEvery is how often a socket pings, and therefore how long a revoked
+// token's socket can survive. Tests shorten it; nothing else does.
+func (s *Server) pingEvery() time.Duration {
+	if s == nil {
+		return pingPeriod
+	}
+	s.revokedMu.RLock()
+	d := s.wsPingEvery
+	s.revokedMu.RUnlock()
+	if d > 0 {
+		return d
+	}
+	return pingPeriod
+}
+
 // principal is who the current request is acting as. Both routes lead to the
 // same single administrator; what differs is how the claim was made, which is
 // what the CSRF and token-management rules key off.
@@ -683,6 +978,17 @@ type principal struct {
 	username string
 	// token is set only for Bearer authentication.
 	token *db.APIToken
+	// userID and epoch describe a SESSION principal, and are both zero for
+	// Bearer authentication.
+	//
+	// They are carried here rather than re-read where they are needed because
+	// re-reading them means calling s.authenticate again, and
+	// TestOnlyTwoFunctionsAuthenticate exists to keep the number of places that
+	// resolve a principal at two. The one consumer is handleWS, which needs to
+	// ask, on a socket that is already open, whether the epoch this session was
+	// signed against is still current -- see the note there (#159).
+	userID int64
+	epoch  int64
 }
 
 type ctxKey int
@@ -721,7 +1027,203 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &principal{username: claims.Username}, nil
+	// Subject is the user id, written by Issue. A token that got this far has a
+	// valid signature and has already passed checkEpoch, so a subject that will
+	// not parse is not a credential problem -- it is a token this build did not
+	// mint. Zero then.
+	//
+	// A zero here makes the socket check in handleWS fail OPEN, not closed:
+	// both `sessionUser != 0` there and `if userID == 0 { return false }` in
+	// sessionEpochChanged skip the re-check, so such a socket would never be
+	// closed by a password change. That is unreachable in this build --
+	// auth.checkEpoch (internal/auth/auth.go:141) refuses an unparseable
+	// subject before authenticate returns, pinned by
+	// TestATokenWithAnUnparseableSubjectIsRefused -- and it is written down
+	// this way round because the previous wording claimed the opposite. A
+	// comment that says "fails closed" over code that fails open is worth less
+	// than no comment: it is the thing a reader trusts instead of checking, and
+	// this PR closed five defects of exactly that shape.
+	//
+	// If checkEpoch ever stops guarding this, the fix belongs there or in an
+	// explicit refusal here -- not in restoring the sentence.
+	userID, _ := strconv.ParseInt(claims.Subject, 10, 64)
+	return &principal{username: claims.Username, userID: userID, epoch: claims.Epoch}, nil
+}
+
+// readScopeWritePatterns are the POST routes a read-scoped token may still
+// reach: the ones that answer a question rather than change anything.
+//
+// They are POSTs because they carry a body or make an outbound call, not
+// because they write. Each was read before it was listed, and one candidate did
+// not survive that reading: POST /destinations/{id}/expert/dry-run SPAWNS
+// FFMPEG with an argument list the caller supplied, which is the opposite of
+// writing nothing whatever its route name suggests. POST
+// /platforms/credentials/{platform}/check is absent for the same kind of
+// reason -- it handles stored credentials.
+//
+// Keyed by chi's route PATTERN rather than the request path, so an id in the
+// URL cannot smuggle a request onto the list and no string matching has to be
+// invented for the {id} segment.
+//
+// The list is additive and that is its safety property: a route missing from it
+// is denied to read tokens, so the failure mode of forgetting to maintain it is
+// a monitoring script getting a 403 that somebody notices, never a write
+// getting through unannounced.
+//
+// The expert preview route USED TO BE ON THIS LIST and is deliberately not any
+// more. Its response is the resolved FFmpeg argv, which contains the
+// destination's stream key in the output target -- so a read token reached the
+// credential through a POST this list was hand-built to permit. The comment
+// above reasons entirely about whether each candidate WRITES; it never asks
+// what the route RETURNS, which is the method-shaped rule's blind spot
+// reproduced inside its own exception list. The argv is not masked, because
+// expert mode's contract is that the command shown is the command that runs;
+// the route is denied to read tokens instead. See readScopeDeniedPatterns.
+var readScopeWritePatterns = map[string]bool{
+	"/api/v1/version/check":   true,
+	"/api/v1/routing/compile": true,
+}
+
+// readScopeDeniedPatterns are the GETs a read-scoped token may NOT make.
+//
+// The method rule says a GET is a read. For these five it is false, in one of
+// two ways, and both were found by enumerating the route table rather than by
+// sampling it:
+//
+//	THE RESPONSE IS A CREDENTIAL. GET /destinations/{id}/expert returns the
+//	resolved argv, whose output target is rtmps://host/app/<streamKey>. Every
+//	other egress of an argv in this process is masked by alerts.Redact inside
+//	supervisor; this one is deliberately raw because expert mode's whole
+//	promise is that the command an operator approves is the command that runs.
+//	Masking it would break that approval, so the route is denied instead.
+//
+//	THE GET IS NOT A READ. /clipper/.../keyframes spawns one ffprobe per
+//	overlapping timeline part, with no cap on requests.
+//	/platforms/accounts/{id}/stats and /metadata/broadcast-window each call a
+//	third party and can REFRESH AND PERSIST an OAuth token -- GETs that write
+//	the database and burn somebody else's quota, one call per connected account
+//	in the broadcast-window case.
+//
+// Keyed by chi's route PATTERN for the same reason the allowlist is: an id in
+// the URL must not be able to smuggle a request past the check.
+//
+// This list is SUBTRACTIVE, which is the opposite safety property to the
+// allowlist above, and that asymmetry is deliberate rather than sloppy:
+// forgetting to add a route here leaves a read token reaching something it
+// perhaps should not, so the recurrence guard for this half is a TEST that
+// drives each of these through the real router and asserts the 403 -- paired
+// with the same route reaching an admin, so a change that merely broke the
+// route for everybody cannot pass. See
+// TestReadTokenIsDeniedTheRoutesThatAreNotReads.
+//
+// The three playout routes are ABSENT from this list and the reason is not
+// that they were judged harmless. It is that this map CANNOT REACH THEM. It is
+// consulted in exactly one place, inside requireScope, and requireScope is
+// middleware on the authenticated group; /playout/*, /playout/public and
+// /playout/poster.jpg are all registered outside it, because a viewer has no
+// session. An entry added here for any of them would be a rule that reads as
+// enforcement and enforces nothing -- which is what this whole round of work
+// has been about deleting.
+//
+// What actually gates them is playoutOperator, inside authorizePlayout, which
+// each of the three handlers calls per request. See TestPlayoutGateMatrix and
+// TestPlayoutPosterVerdict.
+//
+// The poster's throttling was the old argument for leaving it alone and it is
+// still true -- a 10-second cache under a mutex and an 8-second timeout, so ~6
+// execs a minute however many callers ask -- but it was an answer to "is this
+// GET really a read", and the question that mattered was who gets the frame.
+// THE RESPONSE IS CONTENT, NOT METADATA is the third reason a GET is denied,
+// added for #154, and it is a different claim from the two above: these routes
+// are reads, they are cheap, and they leak no credential. They are denied
+// because of what `read` was decided to MEAN -- a monitoring script, a
+// dashboard, a status page. None of those need the bytes.
+//
+// The line is drawn at content, not at the archive: a read token still lists
+// recordings, clips, stems and sessions, still sees durations, sizes and
+// status, and still sees WHETHER a recording has a transcript. What it no
+// longer gets is the media itself or the words.
+//
+// /library/search is on this list and it is the reason the list is eight
+// entries rather than seven. The two /transcript routes are the obvious ones;
+// search is not, because it reads as a metadata query. It returns
+// db.TranscriptHit, which carries Text -- the full segment text -- plus
+// Context (the neighbouring segments joined) and Speaker. A read token that
+// iterated common words would reconstruct whole transcripts without ever
+// naming a /transcript route. Denying only the endpoints whose PATH says
+// transcript would have been a fix shaped by the URL rather than by the bytes,
+// which is the same mistake as gating on the HTTP verb.
+//
+// GET /library still returns Speakers, the bare list of labels in the archive.
+// That is left reachable deliberately: it is who appears, not what was said,
+// and a dashboard that groups by speaker needs it. If that judgement is wrong
+// it is one more line here, not a redesign.
+var readScopeDeniedPatterns = map[string]bool{
+	"/api/v1/destinations/{id}/expert":          true,
+	"/api/v1/destinations/{id}/expert/preview":  true,
+	"/api/v1/clipper/recordings/{id}/keyframes": true,
+	"/api/v1/platforms/accounts/{id}/stats":     true,
+	"/api/v1/metadata/broadcast-window":         true,
+
+	// #154: content, not metadata. Media bytes.
+	"/api/v1/recordings/{id}/download":             true,
+	"/api/v1/recordings/stems/{name}/download":     true,
+	"/api/v1/clips/{name}/download":                true,
+	"/api/v1/clipper/jobs/{id}/download":           true,
+	"/api/v1/library/recordings/{id}/media/{file}": true,
+	// #154: content, not metadata. The words.
+	"/api/v1/clipper/recordings/{id}/transcript": true,
+	"/api/v1/library/recordings/{id}/transcript": true,
+	"/api/v1/library/search":                     true,
+}
+
+// requireScope enforces what a token is ALLOWED to do, once requireAuth has
+// settled who it is. It must run after requireAuth, which is what puts the
+// principal in the context.
+//
+// The rule is shaped by METHOD, not by a table of routes: a read-scoped token
+// gets GET and HEAD plus the short allowlist above, and everything else is 403.
+// The alternative considered and rejected was classifying every route in the
+// API as monitor/admin/session, which is a large diff whose real cost is
+// permanent -- every route added afterwards has to be classified correctly by
+// whoever adds it, and a route someone forgets to classify would default to
+// reachable. Here a route added tomorrow is denied to read tokens by
+// construction, with no list to remember to update.
+//
+// Session principals pass untouched. Scopes describe a token; the operator
+// signed in at the console is not one, and the session-only group is a
+// different question asked in a different place.
+func (s *Server) requireScope(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFrom(r.Context())
+		if !ok || p.token == nil || p.token.Scope == db.ScopeAdmin {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Anything that is not admin is treated as read-only, including a
+		// scope string this build does not recognise. A value that arrived
+		// from a newer schema or a hand-edited row should narrow what a
+		// credential can do, never widen it.
+		//
+		// The denials are checked BEFORE the method, because their whole point
+		// is that the method is the wrong question for them.
+		if rc := chi.RouteContext(r.Context()); rc != nil && readScopeDeniedPatterns[rc.RoutePattern()] {
+			writeError(w, http.StatusForbidden,
+				"this API token is read-only; this endpoint returns a credential or "+
+					"does real work, so it needs a token with the \"admin\" scope")
+			return
+		}
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if rc := chi.RouteContext(r.Context()); rc != nil && readScopeWritePatterns[rc.RoutePattern()] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeError(w, http.StatusForbidden,
+			"this API token is read-only; mint a token with the \"admin\" scope to make changes")
+	})
 }
 
 func (s *Server) requireCSRF(next http.Handler) http.Handler {
@@ -764,6 +1266,26 @@ type apiError struct {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, apiError{Error: msg})
+}
+
+// writeNoSuchEndpoint answers exactly as an unrouted /api path does.
+//
+// The bytes are duplicated from internal/web's API-miss branch rather than
+// imported, because they are a WIRE CONTRACT between two packages that must not
+// depend on each other: web is the embedded SPA and knows nothing about the
+// route table, and api must not reach into the UI bundle to write a 404. The
+// duplication is held honest by a test that drives BOTH through the real router
+// and compares them byte for byte, so the copies cannot drift silently -- see
+// TestWrongKickSecretIsIndistinguishableFromAnUnroutedPath.
+//
+// It exists for the one handler whose ROUTE IS ITS SECRET: a wrong secret on
+// /api/v1/chat/kick/{secret} has to be indistinguishable from a path that is
+// not mounted, and http.NotFound's text/plain body was not (#158).
+func writeNoSuchEndpoint(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(`{"error":"no such endpoint"}` + "\n"))
 }
 
 // writeStoreError maps store errors onto sensible statuses so handlers do not

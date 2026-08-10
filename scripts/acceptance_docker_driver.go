@@ -95,6 +95,18 @@ func main() {
 		}
 		login()
 		destFor(os.Args[3], os.Args[4], os.Args[5], os.Args[6])
+	case "deldest":
+		if len(os.Args) < 4 {
+			die("deldest needs <name>")
+		}
+		login()
+		delDest(os.Args[3])
+	case "rtmpdest":
+		if len(os.Args) < 7 {
+			die("rtmpdest needs <name> <url> <streamKey> <track>")
+		}
+		login()
+		rtmpDest(os.Args[3], os.Args[4], os.Args[5], os.Args[6])
 	case "oneport":
 		if len(os.Args) < 4 {
 			die("oneport needs a port")
@@ -277,6 +289,18 @@ func tracks() {
 		} `json:"tracks"`
 	}
 	_ = json.Unmarshal(out, &src)
+	// PROBED, OR THE COUNT MEANS NOTHING.
+	//
+	// An unprobed source still carries a track list: routing.DefaultSource() is
+	// six placeholder tracks, so the routing editor has something to draw before
+	// a stream arrives. This function decoded `probed` and then printed the
+	// length regardless, so "6" was returned for a source that had never seen a
+	// packet — and the RTMP step's `>= 1` assertion was satisfied by it. The
+	// engine was answering honestly; the driver was throwing the answer away.
+	if !src.Probed {
+		fmt.Println("unprobed")
+		return
+	}
 	fmt.Println(len(src.Tracks))
 }
 
@@ -300,8 +324,16 @@ func listIDs() []int64 {
 func count() { fmt.Println(len(listIDs())) }
 
 func all(action string) {
+	// The status is CHECKED. This used to discard it and print _OK regardless,
+	// so a 500 on start-all was reported to the shell as success -- and steps
+	// 4c/4d call `drive startall` with its output redirected to /dev/null, so
+	// the only thing between that and a green run was a downstream byte-count
+	// assertion that not every caller has.
 	for _, id := range listIDs() {
-		do(http.MethodPost, fmt.Sprintf("/destinations/%d/%s", id, action), nil)
+		code, out := do(http.MethodPost, fmt.Sprintf("/destinations/%d/%s", id, action), nil)
+		if code != http.StatusOK && code != http.StatusNoContent && code != http.StatusAccepted {
+			die(fmt.Sprintf("%s destination %d failed: %d %s", action, id, code, out))
+		}
 	}
 	fmt.Println(strings.ToUpper(action) + "_OK")
 }
@@ -331,6 +363,62 @@ func addSource(name string) {
 // destFor creates a file destination that belongs to one source and carries a
 // single ingest track. This is what proves separation: two destinations on two
 // sources, each mixing only its own programme's audio.
+// delDest removes a destination by name.
+//
+// 4c/4d need it because the destination they create points at a sink container
+// that is torn down with them. Left on the books, step 7's `startall` brings it
+// back up against a hostname that no longer resolves, and the crash-looping
+// FFmpeg that results is counted by the graceful-shutdown check as a child the
+// server failed to stop -- a test polluting a later test's measurement.
+func delDest(name string) {
+	// Same envelope listIDs reads: the list is objects WRAPPING a destination,
+	// not bare destinations. Parsing {id,name} at the top level silently yields
+	// zero-valued rows and "no destination named ...", which is how this first
+	// failed.
+	_, out := do(http.MethodGet, "/destinations", nil)
+	var rows []struct {
+		Destination struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"destination"`
+	}
+	_ = json.Unmarshal(out, &rows)
+	for _, r := range rows {
+		if r.Destination.Name == name {
+			code, body := do(http.MethodDelete, fmt.Sprintf("/destinations/%d", r.Destination.ID), nil)
+			if code != http.StatusOK && code != http.StatusNoContent {
+				die(fmt.Sprintf("delete %s failed: %d %s", name, code, body))
+			}
+			fmt.Println("DELDEST_OK")
+			return
+		}
+	}
+	die("no destination named " + name)
+}
+
+// rtmpDest creates a destination that PUBLISHES rather than writes a file.
+//
+// Every routing proof in this suite until now measured a file destination, so
+// the routed audio never went through an RTMP muxer on the way out. That is a
+// different code path -- a file destination writes what the routing graph
+// produced, an RTMP one re-encodes and publishes it -- and "the routing works"
+// was being inferred across it rather than measured through it.
+func rtmpDest(name, url, key, track string) {
+	tr, err := strconv.Atoi(track)
+	if err != nil {
+		die("bad track " + track)
+	}
+	code, out := do(http.MethodPost, "/destinations", map[string]any{
+		"name": name, "kind": "rtmp", "url": url, "streamKey": key,
+		"enabled": true, "audioBitrate": 160,
+		"profile": profile(tr),
+	})
+	if code != http.StatusOK && code != http.StatusCreated {
+		die(fmt.Sprintf("create %s failed: %d %s", name, code, out))
+	}
+	fmt.Println("RTMPDEST_OK")
+}
+
 func destFor(srcID, name, file, track string) {
 	sid, err := strconv.ParseInt(srcID, 10, 64)
 	if err != nil {
@@ -391,20 +479,46 @@ func tokens() {
 	}
 }
 
+// setMode switches every source's ingest mode.
+//
+// THE SOURCE ROW, NOT THE SETTINGS SINGLETON. This wrote settings.ingest.mode
+// for most of its life, which does nothing: the engine reads its ingest from
+// the source (`settings.Ingest = src.Ingest` in engine.go), and both the
+// listener gate and rtmpserver's Target.Ready test `s.Ingest.Mode` on the row.
+// So "switch to RTMP" set a field nothing consults, every RTMP publish was
+// refused for having no ready target, and the suite's RTMP step still passed —
+// it asserted only that the probe reported at least one track, and an
+// un-probed source reports the six-track placeholder layout. Six is not zero,
+// so the step was green while never once ingesting RTMP.
 func setMode(mode string) {
-	_, out := do(http.MethodGet, "/settings", nil)
-	var s map[string]any
-	if err := json.Unmarshal(out, &s); err != nil {
-		die("settings unreadable: " + err.Error())
+	_, out := do(http.MethodGet, "/sources", nil)
+	var rows []map[string]any
+	if err := json.Unmarshal(out, &rows); err != nil {
+		die("sources unreadable: " + err.Error())
 	}
-	ing, _ := s["ingest"].(map[string]any)
-	if ing == nil {
-		die("settings carried no ingest block")
+	if len(rows) == 0 {
+		die("no sources to switch")
 	}
-	ing["mode"] = mode
-	code, body := do(http.MethodPut, "/settings", s)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("switch to %s failed: %d %s", mode, code, body))
+	for _, row := range rows {
+		src, _ := row["source"].(map[string]any)
+		if src == nil {
+			src = row // some builds return the row unwrapped
+		}
+		id, _ := src["id"].(float64)
+		ing, _ := src["ingest"].(map[string]any)
+		if ing == nil {
+			die("source carried no ingest block")
+		}
+		ing["mode"] = mode
+		// Only the ingest block. handleUpdateSource decodes over the stored row,
+		// so a partial body is the supported shape — and sending the whole view
+		// back fails, because /sources returns a row wrapped with fields like
+		// `destinations` that the source itself does not have.
+		code, body := do(http.MethodPut, fmt.Sprintf("/sources/%d", int64(id)),
+			map[string]any{"ingest": ing})
+		if code != http.StatusOK {
+			die(fmt.Sprintf("switch source %d to %s failed: %d %s", int64(id), mode, code, body))
+		}
 	}
 	fmt.Println("MODE_" + strings.ToUpper(mode))
 }

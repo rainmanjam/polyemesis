@@ -62,18 +62,28 @@ func synthTrack() routing.Source {
 
 // wantSilence reports whether the tier should be running, and its signature.
 //
-// An empty signature means "not wanted". The probe must have SUCCEEDED and
-// reported zero tracks: `probed` false covers an ingest nobody has streamed to
-// yet and a probe that could not run, and neither is evidence of anything. That
+// An empty signature means "not wanted". A probe must have SUCCEEDED and
+// reported zero tracks: unmeasured covers an ingest nobody has streamed to yet
+// and a probe that could not run, and neither is evidence of anything. That
 // asymmetry is the whole safety argument for this tier.
+//
+// MEASURED, not probed, and the difference is a bug this used to have. `probed`
+// means "a layout is arriving right now", and probeLoop clears it a few rounds
+// after a stream stops while deliberately leaving e.source alone. So a
+// video-only source that went idle stopped wanting silence, the tier was torn
+// down, and reconcileOutputs then planned against e.source's ZERO tracks with
+// no synthTrack() substitution -- routing.Compile answers ErrNoAudio for that,
+// and every destination on the source was torn down for as long as the encoder
+// was quiet. `measured` is set only by a successful probe, so it carries the
+// same evidence while surviving the idle gap.
 func (e *Engine) wantSilence(s db.Settings) string {
 	if !s.Synth.SilenceOnVideoOnly {
 		return ""
 	}
 	e.mu.RLock()
-	probed, tracks := e.probed, len(e.source.Tracks)
+	measured, tracks := e.measured, len(e.source.Tracks)
 	e.mu.RUnlock()
-	if !probed || tracks != 0 {
+	if !measured || tracks != 0 {
 		return ""
 	}
 	// Nothing configurable feeds the command line yet, so the signature is a
@@ -133,7 +143,19 @@ func (e *Engine) effectiveSource() routing.Source {
 func (e *Engine) effectiveSourceKnown() (routing.Source, bool) {
 	e.mu.RLock()
 	src, live := e.source, e.silence != nil && e.silence.hub != nil
-	probed := e.probed
+	// MEASURED, not probed. The question here is whether e.source is a
+	// measurement or the placeholder, and that is exactly what measured
+	// answers: the two invalidation sites put DefaultSource() back and clear
+	// measured together, so one is true if and only if the other is.
+	//
+	// probed asks something different -- is a stream arriving RIGHT NOW -- and
+	// probeLoop's idle branch clears it after three quiet rounds while
+	// deliberately leaving the layout alone, because a layout that was measured
+	// stays measured. Reading it here meant that roughly nine seconds into any
+	// outage the meters were torn down, the captioner was rebuilt against an
+	// unknown layout, and the API's routing preview started calling a real
+	// measured layout placeholder-derived.
+	known := e.measured
 	e.mu.RUnlock()
 	if live {
 		src = synthTrack()
@@ -143,7 +165,7 @@ func (e *Engine) effectiveSourceKnown() (routing.Source, bool) {
 	// layout gets them too: a single tier track can still be labelled, and
 	// dropping them would make a role exclusion silently stop applying the
 	// moment the ingest lost its video.
-	return e.annotate(src), probed || live
+	return e.annotate(src), known || live
 }
 
 // reconcileSilence starts, stops or leaves the tier alone.

@@ -1,0 +1,163 @@
+---
+import Base from "../layouts/Base.astro";
+
+const REPO = "https://github.com/rainmanjam/polyemesis";
+---
+
+<Base
+  title="Install polyemesis — Docker, one-line installer, or static binary"
+  description="Run polyemesis with Docker, a one-line installer, or a single static binary. No account, nothing phoning home, no hosted tier. MIT licensed."
+  path="/download"
+>
+  <section class="wrap py-16 sm:py-20">
+    <p class="eyebrow">Install</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      One binary, or one container.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      No account to create, nothing phoning home, no hosted tier to graduate
+      to. It can publish its own state over MQTT, but that is off by default and
+      goes to a broker you name. The
+      only runtime dependency is FFmpeg, and the container bundles it —
+      transcription is the one optional extra that wants a second binary,
+      whisper.cpp.
+    </p>
+  </section>
+
+  <section class="wrap grid gap-6 pb-16 lg:grid-cols-2">
+    <div class="card p-6" data-reveal>
+      <div class="flex items-baseline justify-between gap-3">
+        <h2 class="text-lg font-medium">Docker</h2>
+        <span class="chip">recommended</span>
+      </div>
+      <p class="mt-2 text-sm leading-relaxed text-muted">
+        FFmpeg is pinned and bundled, so the SRT support is known-good. This is
+        the build the container test suites run against.
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded border border-line bg-ink p-4 font-mono text-xs leading-relaxed text-muted"><code>docker run -d \
+  --name polyemesis \
+  -p 8080:8080 \
+  -p 6000:6000/udp \
+  -v polyemesis-data:/data \
+  rainmanjam/polyemesis</code></pre>
+      <p class="mt-3 font-mono text-[11px] text-subtle">
+        UI on :8080 · SRT ingest on :6000/udp
+      </p>
+      <p class="mt-2 text-[11px] leading-relaxed text-subtle">
+        Add <span class="font-mono">-p 1935:1935</span> if you will use the RTMP
+        fallback. A container's port mappings are fixed when it is created, so
+        adding it now is cheaper than recreating the container later.
+      </p>
+    </div>
+
+    <div class="card p-6" data-reveal>
+      <h2 class="text-lg font-medium">Installer script</h2>
+      <p class="mt-2 text-sm leading-relaxed text-muted">
+        Asks what you want, then sets up Docker or a static binary with a
+        systemd unit, a data directory and TLS. Read it before you pipe it to a
+        root shell — it is long, but it is one file and declares every flag up
+        front.
+      </p>
+      <pre class="mt-4 overflow-x-auto rounded border border-line bg-ink p-4 font-mono text-xs leading-relaxed text-muted"><code>curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/\
+rainmanjam/polyemesis/main/scripts/install.sh \
+  | sudo bash -s -- --tls selfsigned</code></pre>
+      <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+        It installs a self-signed certificate unless told otherwise. For Let's
+        Encrypt pass <span class="font-mono">--tls acme</span> with
+        <span class="font-mono">--hostname</span> and
+        <span class="font-mono">--email</span>; it refuses acme without both.
+        Behind a reverse proxy that already terminates TLS, pass
+        <span class="font-mono">--tls off</span>.
+      </p>
+    </div>
+
+    <div class="card p-6" data-reveal>
+      <h2 class="text-lg font-medium">Static binary</h2>
+      <p class="mt-2 text-sm leading-relaxed text-muted">
+        The UI is embedded. Pure-Go SQLite, no cgo. You supply FFmpeg — and it
+        needs one built with <span class="font-mono">--enable-libsrt</span> if
+        you want multitrack ingest.
+      </p>
+      <p class="mt-4">
+        <a href={`${REPO}/releases/latest`} rel="noopener" class="btn btn-ghost text-sm">
+          Releases on GitHub →
+        </a>
+      </p>
+      <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+        Homebrew's FFmpeg on macOS ships without SRT. Ubuntu 24.04's stock
+        FFmpeg 6.1.1 carries it, but predates multitrack FLV, so a publisher
+        sending several audio tracks over Enhanced RTMP arrives as one on it.
+        SRT is unaffected and carries every track on either version. (OBS does
+        not send multitrack audio over RTMP at any version we have tested, so
+        this affects FFmpeg-class publishers rather than OBS users.)
+      </p>
+      <p class="mt-2 text-[11px] leading-relaxed text-subtle">
+        Linux is the operated target, and the broadcast path is tested on
+        Windows and macOS in CI too — that suite has caught Windows-only bugs
+        before they shipped. What is not yet proven on Windows is long-running
+        service operation: the service wrapper is unexercised and recording can
+        truncate on service stop. Run it on Linux for production, and on Windows
+        or macOS to build and evaluate.
+      </p>
+    </div>
+
+    <div class="card p-6" data-reveal>
+      <h2 class="text-lg font-medium">Then point OBS at it</h2>
+      <ol class="mt-3 space-y-2.5 text-sm leading-relaxed text-muted">
+        <li>
+          <span class="font-mono text-subtle">1.</span> Open the UI and set an admin
+          password. If it is ever lost, <span class="font-mono">-reset-admin</span> on
+          the box sets a new one — there is no recovery from anywhere else.
+        </li>
+        <li>
+          <span class="font-mono text-subtle">2.</span> Choose an ingest mode. A fresh
+          install has none: SRT carries many tracks from many sources and is what the
+          routing needs; RTMP shares its port between sources the same way, told apart
+          by the stream key, but carries one audio track on any FFmpeg below 7.1. Then
+          copy the ingest URL — it carries the credential that addresses this source.
+        </li>
+        <li>
+          <span class="font-mono text-subtle">3.</span> In OBS, Settings → Output →
+          Advanced → Recording, set Type to “Custom Output (FFmpeg)”, FFmpeg Output
+          Type to “Output to URL”, container <span class="font-mono">mpegts</span>,
+          and tick the audio tracks to send. Paste the ingest URL, then press Start
+          <em>Recording</em> — with Output to URL, that is the SRT push.
+        </li>
+        <li>
+          <span class="font-mono text-subtle">4.</span> Add destinations, then tick
+          which tracks each one receives.
+        </li>
+      </ol>
+      <p class="mt-4">
+        <a
+          href="https://github.com/rainmanjam/polyemesis/blob/main/docs/OBS.md"
+          rel="noopener"
+          class="text-sm text-primary-bright hover:underline"
+        >
+          The full OBS guide →
+        </a>
+      </p>
+    </div>
+  </section>
+
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap max-w-3xl">
+      <h2 class="text-2xl font-medium">What it needs from the machine</h2>
+      <dl class="mt-6 divide-y divide-line border-y border-line">
+        {
+          [
+            ["FFmpeg", "The only dependency the server itself needs. Needs libsrt for SRT ingest. Without it you fall back to RTMP, which carries one audio track on classic RTMP or on any FFmpeg below 7.1. FFmpeg 8.x is what the container ships and what CI tests against."],
+            ["CPU", "Video is copied, not re-encoded, so cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC. Renditions are the exception — those are a real encode, and the UI estimates what one will cost before you save it."],
+            ["Ports", "One TCP port for the UI and API. One UDP port for SRT, shared by every source. RTMP is optional and works the same way — one TCP port, shared by every source that uses it."],
+            ["Disk", "Only if you record. Retention is bounded by age, total size, and a free-space floor that accounts for files polyemesis did not write."],
+          ].map(([t, d]) => (
+            <div class="py-4">
+              <dt class="text-[15px] font-medium text-fg">{t}</dt>
+              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+</Base>

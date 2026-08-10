@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
 )
 
@@ -32,11 +34,18 @@ type sourceView struct {
 	PublishURLs map[string]string `json:"publishUrls"`
 	IsDefault   bool              `json:"isDefault"`
 	// TokenEnforced reports whether the publish token actually gates anything.
-	// It is false in this build: sources are separated by port, and the
-	// enforced secrets are the RTMP stream key and the SRT passphrase. The UI
-	// reads this rather than assuming, so nobody is told a rotated token
-	// protects an ingest that it does not.
+	// True for SRT and RTMP alike now -- both are one listener demultiplexed by
+	// token -- and only when that listener is actually bound. The UI reads this
+	// rather than assuming, so nobody is told a rotated token protects an
+	// ingest that it does not.
 	TokenEnforced bool `json:"tokenEnforced"`
+	// LegacyRTMPKey is a pre-one-port stream key that still reaches this source,
+	// empty when none does. Set only on an install upgraded from a build where
+	// the stream key WAS the address; see engine.legacyRTMPKeys. Surfaced so
+	// the page can tell an operator their encoder is on a grandfathered
+	// address, rather than leaving the URL on screen and the URL in OBS
+	// disagreeing with nothing to say which is real.
+	LegacyRTMPKey string `json:"legacyRtmpKey,omitempty"`
 	// Publishing reports whether an encoder is live on the shared listener for
 	// this source right now.
 	Publishing bool `json:"publishing"`
@@ -46,6 +55,16 @@ type sourceView struct {
 	// uplink and not about the server -- and answering it per programme is
 	// something Restreamer's UI does not do.
 	Link *srtserver.LinkStats `json:"link,omitempty"`
+	// RTMPLink is the same thing for a source on the RTMP listener.
+	//
+	// A SECOND FIELD rather than one union type, because the two carry
+	// genuinely different facts. SRT reports RTT, loss and retransmits because
+	// the protocol measures them; TCP has none of those numbers to report, so a
+	// merged struct would be half zero for every RTMP source and a reader could
+	// not tell "no loss" from "loss is not a thing here". A second field also
+	// keeps `link` meaning exactly what it meant before, which is what stops
+	// this from being a breaking change to every existing consumer.
+	RTMPLink *rtmpserver.LinkStats `json:"rtmpLink,omitempty"`
 	// Destinations and Renditions are what a delete would take with it.
 	//
 	// Counts rather than prose, and computed server-side rather than guessed by
@@ -59,18 +78,67 @@ type sourceView struct {
 	// a UI that showed it as configured-and-fine would be lying about why
 	// nothing arrives.
 	Running bool `json:"running"`
+	// ListenerHealth is the THIRD state between bound and absent, and it is
+	// here because TokenEnforced and Running are both booleans derived from a
+	// listener that can be half up.
+	//
+	// A wildcard SRT listener binds one socket per address family and survives
+	// one of them failing -- deliberately, because a container without IPv6 is
+	// a legitimate deployment. Everything on this card then reported the source
+	// as running with its token enforced, which is true for the family that
+	// bound and a flat lie to the operator whose encoder is on the other one.
+	// Omitted from the JSON when there is nothing to say. See #105.
+	ListenerHealth *engine.ListenerHealth `json:"listenerHealth,omitempty"`
 }
 
-func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
+// readScopeCannotSeePublishTokens reports whether this request's principal must
+// have the source's publish credential withheld.
+//
+// A read-scoped token is promised to be read-only, and a source's token is the
+// one piece of readable state that breaks that promise: the token IS the
+// address on both listeners, so anything holding it can PUBLISH -- inject video
+// into somebody's live programme -- using nothing but a GET it was explicitly
+// allowed to make. "Read-only" would then mean "read-only, plus it can take
+// over your broadcast", which is not a sentence worth shipping.
+//
+// The scope model refuses writes by HTTP method, and that is the right shape
+// for a rule about routes; it cannot see that one GET's response body is itself
+// a credential. This is the exception, and it is handled where the credential
+// is serialised rather than by carving GET /sources out of the read scope --
+// the listing is genuinely useful to a monitoring script, and it stays useful
+// with the secret removed.
+//
+// Session principals and admin tokens are unaffected: the console needs the
+// token to show the operator, and an admin token could rotate it anyway.
+func readScopeCannotSeePublishTokens(r *http.Request) bool {
+	p, ok := principalFrom(r.Context())
+	return ok && p.token != nil && p.token.Scope != db.ScopeAdmin
+}
+
+func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) sourceView {
 	var link *srtserver.LinkStats
+	var rtmpLink *rtmpserver.LinkStats
+	legacyKey := ""
 	publishing := false
 	// Derived from the RUNNING listener, never from configuration. Tokens are
-	// how every SRT source is addressed now, so the only way they are not
-	// enforced is that the listener is not up -- and reporting "enforced" while
-	// nothing is bound is the exact false assurance this field exists to
-	// prevent.
-	tokenEnforced := src.Ingest.Mode == db.IngestSRT &&
-		s.mgr != nil && s.mgr.SharedIngestListening()
+	// how every SRT and every RTMP source is addressed now, so the only way
+	// they are not enforced is that the listener for that protocol is not up --
+	// and reporting "enforced" while nothing is bound is the exact false
+	// assurance this field exists to prevent.
+	//
+	// It asks per protocol because the two listeners fail independently: 1935
+	// being held by something else says nothing about 6000.
+	tokenEnforced := (src.Ingest.Mode == db.IngestSRT || src.Ingest.Mode == db.IngestRTMP) &&
+		s.mgr != nil && s.mgr.ListenerBound(src.Ingest.Mode)
+	// Reported beside tokenEnforced rather than folded into it: a half-bound
+	// listener DOES enforce the token for everyone who can reach it, so turning
+	// that boolean off would answer a different question wrongly. See #105.
+	var health *engine.ListenerHealth
+	if s.mgr != nil {
+		if h := s.mgr.ListenerHealth(src.Ingest.Mode); h.State != "" {
+			health = &h
+		}
+	}
 	// The ports are install-wide, so the publish URL comes from the settings
 	// rather than from the source. Defaults on a read failure: a URL with the
 	// wrong port is more useful than no URL at all, and the Sources page is
@@ -82,16 +150,80 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 	if s.mgr != nil {
 		publishing = s.mgr.SharedIngestPublishing(src.ID)
 		link = linkForCard(s.mgr.SRTLinks(), src.ID)
+		rtmpLink = rtmpLinkForCard(s.mgr.RTMPLinks(), src.ID)
+		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
-	return sourceView{
-		Publishing:    publishing,
-		Link:          link,
-		Source:        src,
-		PublishURLs:   publishURLs(src, listeners),
-		IsDefault:     src.ID == defaultID,
-		TokenEnforced: tokenEnforced,
-		Running:       s.mgr != nil && s.mgr.Engine(src.ID) != nil,
+	view := sourceView{
+		Publishing:     publishing,
+		Link:           link,
+		RTMPLink:       rtmpLink,
+		Source:         src,
+		PublishURLs:    publishURLs(src, listeners),
+		IsDefault:      src.ID == defaultID,
+		TokenEnforced:  tokenEnforced,
+		LegacyRTMPKey:  legacyKey,
+		Running:        s.mgr != nil && s.mgr.Engine(src.ID) != nil,
+		ListenerHealth: health,
 	}
+	if readScopeCannotSeePublishTokens(r) {
+		view = readSafeSourceView(view)
+	}
+	return view
+}
+
+// readSafeSourceView is the read-scoped projection of a sourceView, as a PURE
+// FUNCTION of the view.
+//
+// Extracted from the middle of viewSource for one reason, and it is the whole of
+// #150's second blocker. While the redaction lived inline it could not be driven
+// by a test without a *http.Request carrying a real read-scoped bearer and a
+// whole engine-backed fixture that populated every optional field -- so the
+// drift guard was written against redactSourceViewLikeViewSource, a HAND COPY of
+// these lines sitting in the test file. Reverting the production code to its
+// pre-fix form left the whole repository green. A guard that watches a copy is
+// decorative, and the copy is the bug.
+//
+// A pure function over the view has no such excuse available. The guard calls
+// THIS, on a fully populated value, and a change here is a change the guard sees.
+//
+// No *http.Request parameter, deliberately and permanently: taking one would put
+// the fixture requirement straight back and the AST guard in redact_drift_test.go
+// fails the build if a readSafe*View ever grows one.
+func readSafeSourceView(v sourceView) sourceView {
+	if v.Source != nil {
+		// A COPY, because v.Source points at the caller's row and blanking the
+		// token in place would hand the next reader -- including the store's own
+		// update path -- a source whose credential has been erased.
+		//
+		// readSafeSource covers the STORED ingest block, which is the half this
+		// originally missed. sourceView embeds *db.Source, so every leaf of
+		// db.Source marshals at the top level of the response -- including
+		// ingest.srt.passphrase, ingest.rtmp.streamKey and an ingest.pull.url
+		// carrying rtsp://user:pass@ userinfo.
+		//
+		// Blanking legacyRtmpKey below without this was measurably a NO-OP:
+		// engine.legacyRTMPKeys computes that key as exactly
+		// src.Ingest.RTMP.StreamKey, so the identical string came straight back
+		// two JSON fields away. See internal/api/redact.go.
+		//
+		// PrevToken is NOT blanked, and deliberately so: it carries `json:"-"`
+		// and has never left the process, so clearing it would suggest to the
+		// next reader that it once did.
+		redacted := readSafeSource(*v.Source)
+		v.Source = &redacted
+	}
+	// The URLs go too, and they are the reason this cannot be a one-line
+	// blanking of the token field: every publish URL has the token EMBEDDED in
+	// it, because the token IS the address. Leaving them would hand back the
+	// same secret in a different shape, and there is no masked form of
+	// srt://host?streamid=TOKEN that is still a URL.
+	v.PublishURLs = nil
+	// legacyRtmpKey is REDACTED IN PLACE rather than blanked, because it carries
+	// `omitempty`: assigning "" deleted the key outright, so the read-scoped
+	// body was a different SHAPE from the admin one and #150's own "the wire
+	// shape does not change" claim was false here.
+	v.LegacyRTMPKey = redactInPlace(v.LegacyRTMPKey)
+	return v
 }
 
 // linkForCard picks the one uplink a source card should show.
@@ -110,13 +242,35 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 // and a blank uplink panel at that moment is the least useful thing it could
 // do.
 func linkForCard(links []srtserver.LinkStats, sourceID int64) *srtserver.LinkStats {
-	var backup *srtserver.LinkStats
+	return pickLink(links, sourceID, func(l srtserver.LinkStats) (int64, bool) {
+		return l.SourceID, l.Backup
+	})
+}
+
+// rtmpLinkForCard is the same choice on the RTMP listener. It delegates rather
+// than repeating the rule, because "the primary wins, a standby beats nothing"
+// is a product decision and two copies of it would eventually disagree about
+// which card shows what.
+func rtmpLinkForCard(links []rtmpserver.LinkStats, sourceID int64) *rtmpserver.LinkStats {
+	return pickLink(links, sourceID, func(l rtmpserver.LinkStats) (int64, bool) {
+		return l.SourceID, l.Backup
+	})
+}
+
+// pickLink is linkForCard's rule, over any link type.
+//
+// Generic with an accessor rather than a shared interface: the two LinkStats
+// types deliberately carry different fields (see sourceView.RTMPLink), so there
+// is nothing to unify except the two facts this function actually reads.
+func pickLink[T any](links []T, sourceID int64, of func(T) (id int64, backup bool)) *T {
+	var backup *T
 	for _, l := range links {
-		if l.SourceID != sourceID {
+		id, isBackup := of(l)
+		if id != sourceID {
 			continue
 		}
 		stat := l
-		if !stat.Backup {
+		if !isBackup {
 			return &stat
 		}
 		if backup == nil {
@@ -128,23 +282,40 @@ func linkForCard(links []srtserver.LinkStats, sourceID int64) *srtserver.LinkSta
 
 // publishURLs is what the operator pastes into an encoder.
 //
-// The SRT URL carries the TOKEN as the streamid, because the token is now the
-// only thing that identifies a source: every source is reached on one listener
-// and told apart by it. A URL without the token addresses nothing.
+// Both protocols carry the TOKEN, because the token is the only thing that
+// identifies a source: every source is reached on one listener per protocol and
+// told apart by it. A URL without the token addresses nothing.
 //
 // What separates and protects each source:
 //
-//   - SRT: the token. One listener, demultiplexed by streamid, matched in
-//     constant time against every source's current and grace-period token. A
-//     publisher presenting nothing, or something unrecognised, is refused with
-//     a typed reason rather than quietly accepted into the wrong programme.
+//   - SRT: the token, as the streamid. One listener, demultiplexed by it,
+//     matched in constant time against every source's current and grace-period
+//     token. A publisher presenting nothing, or something unrecognised, is
+//     refused with a typed reason rather than quietly accepted into the wrong
+//     programme.
 //   - SRT, additionally: the passphrase, which is real AES encryption rather
 //     than a string comparison.
-//   - RTMP: the stream key, baked into the listener URL as
-//     rtmp://0.0.0.0:PORT/APP/KEY so FFmpeg rejects a mismatched playpath.
-//     RTMP has one listener and therefore one source; see checkRTMPExclusive.
+//   - RTMP: the same token, as the path -- rtmp://host:PORT/APP/<token> --
+//     matched the same way by internal/rtmpserver. It used to be
+//     ingest.rtmp.streamKey checked as an FFmpeg playpath, which capped an
+//     install at one RTMP source and could not be rotated.
+//
+// The RTMP entry is SPLIT: the map value is the server half and "streamKey"
+// carries the token, because that is the two-box form OBS asks for. Putting the
+// token in both would give the operator who fills in both /APP/<token>/<token>.
 func publishURLs(src *db.Source, listeners db.ListenerSettings) map[string]string {
 	const host = "<server>"
+
+	// Nothing chosen, nothing to publish to.
+	//
+	// Without this, an unchosen source still produced a URL: IngestSpec's zero
+	// Kind falls through to the SRT branch, so the map came back as
+	// {"": "srt://<server>:6000?..."} and the Sources page showed an SRT
+	// address on an install that had never chosen SRT. That is the silent
+	// default this whole change exists to remove, arriving by the back door.
+	if src.Ingest.Mode == db.IngestUnset {
+		return map[string]string{}
+	}
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(src.Ingest.Mode),
 		SRTPort:       listeners.SRTPort,
@@ -152,7 +323,6 @@ func publishURLs(src *db.Source, listeners db.ListenerSettings) map[string]strin
 		SRTLatencyMS:  src.Ingest.SRT.LatencyMS,
 		RTMPPort:      listeners.RTMPPort,
 		RTMPApp:       src.Ingest.RTMP.App,
-		RTMPStreamKey: src.Ingest.RTMP.StreamKey,
 		PullURL:       src.Ingest.Pull.URL,
 	}
 	u := spec.PublicIngestURL(host)
@@ -170,8 +340,11 @@ func publishURLs(src *db.Source, listeners db.ListenerSettings) map[string]strin
 	out := map[string]string{string(src.Ingest.Mode): u}
 	if src.Ingest.Mode == db.IngestRTMP {
 		// Separate field: OBS wants the server and the key in two boxes, and
-		// the key is the thing that actually gates this source.
-		out["streamKey"] = src.Ingest.RTMP.StreamKey
+		// the key is what addresses this source. The TOKEN, not
+		// ingest.rtmp.streamKey -- that field addresses nothing now, and
+		// emitting it here would hand the operator a key their encoder cannot
+		// reach anything with.
+		out["streamKey"] = src.Token
 	}
 	return out
 }
@@ -185,8 +358,9 @@ func (s *Server) handleListSources(w http.ResponseWriter, r *http.Request) {
 	defaultID, _ := s.store.DefaultSourceID()
 	out := make([]sourceView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, s.viewSource(row, defaultID))
+		out = append(out, s.viewSource(r, row, defaultID))
 	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -202,7 +376,8 @@ func (s *Server) handleGetSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(row, defaultID))
+	principalVaryingResponse(w)
+	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 
 func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
@@ -237,7 +412,7 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("reconcile after source create", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusCreated, s.viewSource(&row, defaultID))
+	writeJSON(w, http.StatusCreated, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +441,7 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("reconcile after source update", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(&row, defaultID))
+	writeJSON(w, http.StatusOK, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +483,7 @@ func (s *Server) handleRotateSourceToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(row, defaultID))
+	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 
 func sourceStatus(err error) int {

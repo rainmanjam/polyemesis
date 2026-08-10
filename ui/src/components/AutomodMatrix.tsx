@@ -190,8 +190,8 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
         </div>
 
         {anyIrreversibleArmed && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" aria-hidden />
+          <div className="flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 p-2 text-xs">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
             <span>
               An irreversible action is armed. Deleting a message and banning a
               viewer cannot be undone by polyemesis — a ban needs a human to
@@ -277,7 +277,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                               {ACTION_LABELS[action]}
                               {IRREVERSIBLE.includes(action) && (
                                 <span
-                                  className="rounded bg-amber-500/15 px-1 text-[10px] text-amber-600 dark:text-amber-400"
+                                  className="rounded bg-warn/15 px-1 text-[10px] text-warn"
                                   title="This cannot be undone by polyemesis"
                                 >
                                   no undo

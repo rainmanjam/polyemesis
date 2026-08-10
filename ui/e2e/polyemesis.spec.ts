@@ -138,12 +138,31 @@ test.describe("sources", () => {
     }
   });
 
-  test("editing a port does NOT commit on blur", async ({ page }) => {
+  test("editing an ingest field does NOT commit on blur", async ({ page }) => {
     // This is the one that dropped broadcasts: every blur wrote through and
     // restarted the ingest, so tabbing out of a field was an outage.
     await signIn(page);
     await page.goto("/sources");
 
+    // Ingest mode is now an explicit first-run choice with no default, so a
+    // fresh source renders ONLY the mode picker — none of the per-mode fields
+    // exist until one is chosen. This test used to grab "the first number
+    // input" on the page and got a 30s timeout instead, because on an
+    // unconfigured install there is no longer any number input to find.
+    //
+    // Choosing the mode is itself an edit, so it is committed first. Otherwise
+    // the Apply button asserted on below would already be showing and the blur
+    // would prove nothing.
+    const mode = page.getByTestId("ingest-mode").first();
+    await mode.click();
+    await page.getByRole("option", { name: "SRT", exact: true }).click();
+    const apply = page.getByRole("button", { name: /^Apply/ }).first();
+    await apply.click();
+    await expect(page.getByRole("button", { name: /^Apply/ })).toBeHidden();
+
+    // The SRT latency field. The port this test was named for moved to
+    // Settings when listeners stopped being per-source; what is under test is
+    // the draft mechanism, which is the same for every field on the card.
     const port = page.locator('input[type="number"]').first();
     await port.fill("6042");
     await port.blur();

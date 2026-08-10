@@ -83,8 +83,22 @@ jobs:
       - name: Install FFmpeg
         timeout-minutes: 6
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          # Ubuntu's own package is 6.1.1, and the Docker image ships 8.1.2.
+          # Testing against 6.1.1 meant CI never exercised the FFmpeg users
+          # actually get, and the two differ in ways that matter: 6.1.1 accepts
+          # an 80-channel amerge where 8.1 stops at 64, and 6.1.1 cannot demux
+          # multitrack FLV at all. Pin the same 8.1 line the image uses.
+          set -euo pipefail
+          cd /tmp
+          # -c rather than a heredoc: inside a YAML block the heredoc body and
+          # its terminator are indented, which Python reads as a bad indent and
+          # bash does not accept as a delimiter.
+          python3 -c 'import urllib.request; urllib.request.urlretrieve("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz", "/tmp/ff.tar.xz")'
+          mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+          sudo install -m 0755 ffbuild/bin/ffmpeg  /usr/local/bin/ffmpeg
+          sudo install -m 0755 ffbuild/bin/ffprobe /usr/local/bin/ffprobe
+          # Fail loudly rather than silently testing a build without SRT.
+          ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
 
       # The gate is "gofmt named no files", and it has to rest on gofmt having
@@ -122,7 +136,14 @@ jobs:
       # goroutine dump naming the test that was running; the job timeout just
       # kills the runner and tells you nothing. Whichever fires first decides
       # how much you learn, so Go's has to.
-      - run: go test -race -timeout 15m ./...
+      # POLYEMESIS_LEDGER=strict makes internal/api's route coverage ledger run
+      # its counterpart proofs from inside the ledger test as well as from their
+      # own. The registry's whole value is that an excuse cannot discharge on a
+      # test NAME, only on bytes that actually left the process -- and a `-run`
+      # filter matching one of the two tests and not the other would leave every
+      # counterpart undischarged while still printing ok. The full suite runs
+      # here with no filter, so strict mode costs nothing and closes that door.
+      - run: POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...
 
       # The acceptance suites' shared diagnostic helpers, tested here rather
       # than in their own job: it is pure shell, needs nothing installed and
@@ -142,6 +163,14 @@ jobs:
       # watchdog is a background process holding the suite's stdout, so a bug
       # in it does not merely fail to report -- it becomes the hang.
       - run: ./scripts/test-lib-watchdog.sh
+
+      # The SBOM guard, which only ever runs for real inside a release. That is
+      # exactly how it came to be wrong: it asserted a floor of 100 against a
+      # document containing 437, so it could not fail on the scenario its own
+      # comment described, and no one could discover that without cutting a
+      # release. Running its tests on every PR is the part that makes the fix
+      # a fix rather than a better guess. Pure jq and shell, about a second.
+      - run: ./scripts/test-sbom-guard.sh
 
       # The acceptance suites' shared teardown. Same argument as the guard
       # above, and a sharper one: this teardown was silently leaking the ingest
@@ -196,7 +225,24 @@ jobs:
       - name: Install FFmpeg (Linux)
         timeout-minutes: 6
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+        run: |
+          # Ubuntu's own package is 6.1.1, and the Docker image ships 8.1.2.
+          # Testing against 6.1.1 meant CI never exercised the FFmpeg users
+          # actually get, and the two differ in ways that matter: 6.1.1 accepts
+          # an 80-channel amerge where 8.1 stops at 64, and 6.1.1 cannot demux
+          # multitrack FLV at all. Pin the same 8.1 line the image uses.
+          set -euo pipefail
+          cd /tmp
+          # -c rather than a heredoc: inside a YAML block the heredoc body and
+          # its terminator are indented, which Python reads as a bad indent and
+          # bash does not accept as a delimiter.
+          python3 -c 'import urllib.request; urllib.request.urlretrieve("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz", "/tmp/ff.tar.xz")'
+          mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+          sudo install -m 0755 ffbuild/bin/ffmpeg  /usr/local/bin/ffmpeg
+          sudo install -m 0755 ffbuild/bin/ffprobe /usr/local/bin/ffprobe
+          # Fail loudly rather than silently testing a build without SRT.
+          ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
+          ffmpeg -hide_banner -version | head -1
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
@@ -219,7 +265,27 @@ jobs:
       # on a Windows runner than on a developer machine: ~6s locally against
       # ~265-300s there.
       #
-      # 15m is ~3x the typical Windows run for the slowest package, and it is
+      # What that cost actually WAS: schema DDL plus six migrations, executed
+      # once per test rather than once per package. The test helpers now build
+      # one migrated database and copy the file. Measured on this runner after
+      # that change, against the 265-300s above:
+      #
+      #   internal/db          46s
+      #   internal/api         69s
+      #   internal/engine      23s
+      #   internal/recording    7s
+      #
+      # The whole windows-latest job is now under three minutes, so the ~40x
+      # platform ratio that made this package a coin flip against Go's
+      # per-package ceiling is gone -- it is the same pure-Go SQLite on the same
+      # slow filesystem, asked to do the work once instead of 181 times.
+      #
+      # 15m stays. It is now ~20x the slowest package rather than ~3x, which is
+      # slack rather than a reason to retune: the failure it exists for is a
+      # test that HANGS, and that failure does not get less likely because the
+      # suite got faster.
+      #
+      # 15m is well past any observed Windows run for the slowest package, and it is
       # deliberately BELOW this job's timeout-minutes. Go's timeout panics with
       # a goroutine dump naming the running test; the job timeout just kills the
       # runner and tells you nothing. Whichever fires first decides how much you
@@ -328,6 +394,11 @@ jobs:
       - run: npx --no-install tsc -b --noEmit
       - run: npm run lint
       - run: npm run build
+      # Unit tests for the pure logic the browser suite cannot enumerate --
+      # platform link construction has five platforms times several missing-field
+      # cases, and driving each through a real browser would cost minutes to
+      # assert what a millisecond of vitest does.
+      - run: npm test
       # A vulnerable direct dependency should fail the build, not sit in a
       # report nobody opens. --audit-level=high so a low-severity transitive
       # advisory does not block a hotfix.
@@ -496,6 +567,11 @@ jobs:
   acceptance:
     name: "acceptance: ${{ matrix.suite }}"
     runs-on: ubuntu-latest
+    env:
+      # See the deadline note on the suite step below. The library's 900s
+      # default is for a laptop, where nothing outranks it; here it has to fire
+      # before the job ceiling, and its clock starts minutes after the job's.
+      POLY_WATCHDOG_SECS: 600
     # A ceiling, because GitHub's default is SIX HOURS. These suites publish
     # real streams and wait on them, so the failure mode when something does
     # not arrive is a wait, not a crash -- exactly the shape that sits there
@@ -560,12 +636,113 @@ jobs:
       # the real build rather than `go build ./cmd/...`.
       - run: make build
 
+      # THE THREE DEADLINES, AND WHY THEY ARE IN THIS ORDER.
+      #
+      # There are three things that can stop a stuck suite: lib-watchdog.sh's
+      # own budget, this step timeout, and the job's timeout-minutes: 20. Only
+      # the first produces a useful answer -- it prints the step it was in and
+      # the tail of server.log before it kills anything. So the watchdog has to
+      # fire FIRST, and the other two exist only for the case where it cannot.
+      #
+      # It could not, and that is the bug found while measuring #94.
+      # lib-watchdog.sh justifies its 900s as "against ci.yml's
+      # timeout-minutes: 20, leaving five minutes for the report". That
+      # arithmetic quietly assumes the suite starts when the job does. It does
+      # not: checkout, setup-go, setup-node, apt and `make build` run first,
+      # and the watchdog's clock only starts at `poly_watchdog_arm`. Measured
+      # over the successful acceptance jobs in the last dozen runs, setup is
+      # 58-102s -- so the watchdog would fire at 16-17 minutes of job time, and
+      # against an apt that is merely slow rather than hung it could not fire
+      # before the ceiling at all.
+      #
+      # POLY_WATCHDOG_SECS is set on the job below to 600 instead. Measured
+      # over the same runs, the slowest suite step that ever PASSED was
+      # acceptance-failover at 206s, and most are 10-60s. 600 is ~3x the
+      # slowest real run and now fits inside the ceiling with room for the
+      # report and the teardown trap whatever setup did.
+      #
+      # This step timeout sits ABOVE the watchdog on purpose. Set equal to it
+      # the two would race and the step timeout would win, killing the suite
+      # before it could say what it was waiting for -- which is the failure
+      # this whole change exists to stop. 12 minutes is the backstop for a
+      # watchdog that itself wedges, and it still leaves the always() upload
+      # below its chance to run, which a job-level cancel does not.
       - name: ./scripts/${{ matrix.suite }}.sh
+        timeout-minutes: 12
         run: ./scripts/${{ matrix.suite }}.sh
+
+      # What was the process actually doing when the deadline fired?
+      #
+      # SIGQUIT is the point of this step. Go's default handler dumps every
+      # goroutine's stack and exits, so a server blocked on a read nobody will
+      # satisfy names the function it is blocked in. Without it the artifact
+      # holds the suite's own log, which by definition stops at the line before
+      # the thing that never happened.
+      #
+      # if: failure() rather than always(): on a green run there is no process
+      # left to signal and nothing to explain.
+      - name: Diagnostics (what was it waiting for)
+        if: failure()
+        # Never fail the job from here. This step exists to describe a failure
+        # that already happened; a diagnostic that turns a legible suite
+        # failure into a confusing one about ps flags is worse than none.
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set +e
+          echo "=== processes ==="
+          ps -eo pid,ppid,etime,stat,args | grep -E "polyemesis|ffmpeg|ffprobe|mosquitto" | grep -v grep
+
+          echo
+          echo "=== goroutine dumps ==="
+          # Every polyemesis, not just one: several suites run an ingest and a
+          # destination side, and the stalled one is not reliably the first.
+          pids=$(pgrep -x polyemesis)
+          if [ -z "$pids" ]; then
+            echo "no polyemesis process is running -- the stall is in the SCRIPT,"
+            echo "not the server: a wait on a file, a port or an ffmpeg that already exited."
+          else
+            for pid in $pids; do
+              echo "--- SIGQUIT $pid ---"
+              kill -QUIT "$pid"
+            done
+            # The dump goes to the process's own stderr, which the suites
+            # redirect into their log directory, so it lands in the artifact
+            # below rather than here. Give it a moment to be written.
+            sleep 5
+          fi
+
+          echo
+          echo "=== listening sockets ==="
+          ss -lntup 2>/dev/null | head -40
+
+          echo
+          echo "=== tail of every suite log ==="
+          # Last lines only: these get large, and the useful part of a stall is
+          # always the end -- the last thing that happened before nothing did.
+          for f in $(find /tmp artifacts logs -maxdepth 3 -name '*.log' -newermt '-30 minutes' 2>/dev/null | head -40); do
+            echo "--- $f ---"
+            tail -30 "$f"
+          done
+          exit 0
 
       # The logs are where a measurement failure is actually diagnosed: the RMS
       # figures, the process output, what FFmpeg said. Losing them turns a red
       # check into a guess.
+      #
+      # THE TIMELINE EVIDENCE GOES WITH THEM, and #126 is why. The only occurrence
+      # of that bug anybody has seen outside a deliberate measurement happened
+      # here, in CI, and it left nothing behind but a count in the step output --
+      # no recording to re-probe, no packet list, no ledger. So the derived
+      # artifacts travel too: dts.csv is the packet list both halves of the check
+      # read, seams.txt is the engine's handover ledger, and onair.mkv is the
+      # recording, which is the only one of the three that can answer a question
+      # nobody thought to ask before the run.
+      #
+      # The mkv was 13 MB on a full local run of the failover suite, measured
+      # rather than guessed. That is the price of not waiting another three weeks
+      # for the next occurrence. Only that suite writes one; the others match
+      # nothing here and if-no-files-found already covers it.
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -574,5 +751,8 @@ jobs:
           path: |
             /tmp/polyemesis-acceptance*/**/*.log
             /tmp/polyemesis-acceptance*/**/server.log
+            /tmp/polyemesis-acceptance*/dts.csv
+            /tmp/polyemesis-acceptance*/seams.txt
+            /tmp/polyemesis-acceptance*/data/recordings/onair.mkv
           if-no-files-found: ignore
           retention-days: 7

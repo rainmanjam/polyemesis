@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,18 +16,40 @@ import (
 // port from a unit test.
 func sourceServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	t.Helper()
-	return renditionServer(t, defaultTools())
+	h, store, sign := renditionServer(t, defaultTools())
+
+	// Say SRT out loud.
+	//
+	// A fresh install now starts at db.IngestUnset — nothing is chosen for the
+	// operator — so a source created by the fixture has no ingest mode and
+	// therefore no publish URL and no token enforcement. That is the point of
+	// the change, and it means a test that wants SRT behaviour has to ask for
+	// it rather than inherit it from a default that no longer exists.
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("fixture source: %v", err)
+	}
+	src.Ingest.Mode = db.IngestSRT
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("fixture: choose SRT: %v", err)
+	}
+	return h, store, sign
 }
 
 type sourceRow struct {
-	ID            int64             `json:"id"`
-	Name          string            `json:"name"`
-	Token         string            `json:"token"`
-	Enabled       bool              `json:"enabled"`
-	Publishing    bool              `json:"publishing"`
-	IsDefault     bool              `json:"isDefault"`
-	TokenEnforced bool              `json:"tokenEnforced"`
-	PublishURLs   map[string]string `json:"publishUrls"`
+	ID             int64             `json:"id"`
+	Name           string            `json:"name"`
+	Token          string            `json:"token"`
+	Enabled        bool              `json:"enabled"`
+	Publishing     bool              `json:"publishing"`
+	IsDefault      bool              `json:"isDefault"`
+	TokenEnforced  bool              `json:"tokenEnforced"`
+	PublishURLs    map[string]string `json:"publishUrls"`
+	Running        bool              `json:"running"`
+	ListenerHealth *struct {
+		State  string `json:"state"`
+		Detail string `json:"detail"`
+	} `json:"listenerHealth"`
 }
 
 func listSources(t *testing.T, h http.Handler, sign func(*http.Request)) []sourceRow {
@@ -90,6 +113,231 @@ func TestTheSRTPublishURLCarriesTheToken(t *testing.T) {
 		t.Errorf("the SRT publish URL does not carry the token, so it addresses nothing: %s", srt)
 	}
 }
+
+// RTMP is addressed by the same token, split across OBS's two boxes: the map
+// value is the server half and streamKey carries the address.
+//
+// It used to emit ingest.rtmp.streamKey, which was "stream" for every source
+// created from the defaults. Handing that to an operator now would give them a
+// key that reaches nothing -- and if it did reach something, it would be
+// whichever source the map happened to yield.
+func TestTheRTMPPublishURLsCarryTheToken(t *testing.T) {
+	h, store, sign := sourceServer(t)
+
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Ingest.Mode = db.IngestRTMP
+	src.Ingest.RTMP.App = "live"
+	src.Ingest.RTMP.StreamKey = "stream" // what an older build stored
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+
+	row := listSources(t, h, sign)[0]
+	if got := row.PublishURLs["streamKey"]; got != row.Token {
+		t.Errorf("streamKey = %q, want the token %q: anything else addresses nothing", got, row.Token)
+	}
+	server := row.PublishURLs["rtmp"]
+	if server == "" {
+		t.Fatal("no RTMP publish URL offered")
+	}
+	// The server half must NOT also carry the address. An operator who fills in
+	// both boxes would publish to /live/<token>/<token>, which reaches nothing
+	// and looks exactly like it should work.
+	if strings.Contains(server, row.Token) {
+		t.Errorf("the RTMP server URL carries the token as well as the key box: %s", server)
+	}
+	if !strings.HasSuffix(server, "/live") {
+		t.Errorf("rtmp server URL = %q, want it to end at the app", server)
+	}
+}
+
+// tokenEnforced must be true for RTMP too. It used to be hard-coded to SRT,
+// which was honest while RTMP was addressed by a stream key and is a lie now:
+// an RTMP source told "your token is not enforced" would have its operator
+// leave a rotated token alone believing it protects nothing.
+func TestTokenEnforcedCoversRTMPSources(t *testing.T) {
+	h, store, sign := sourceServer(t)
+
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Ingest.Mode = db.IngestRTMP
+	src.Ingest.RTMP.App = "live"
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+	srv := serverUnderTest(t, h)
+	if srv.mgr == nil {
+		t.Fatal("no manager in the fixture")
+	}
+	if err := srv.mgr.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if !srv.mgr.ListenerBound(db.IngestRTMP) {
+		t.Skip("the RTMP listener could not bind in this environment; nothing to assert")
+	}
+	if !listSources(t, h, sign)[0].TokenEnforced {
+		t.Error("tokenEnforced is false for an RTMP source while its listener is bound")
+	}
+}
+
+// #105: a half-bound SRT listener has to reach the operator, not just the log.
+//
+// srtserver.Start binds one socket per address family for a wildcard and
+// survives one of them failing, deliberately -- a container without IPv6 is a
+// legitimate deployment. What it did not do was tell anything downstream, so
+// the source card showed running, token-enforced and healthy while every
+// encoder on the family that never bound could not connect.
+//
+// The test occupies the IPv6 wildcard on a real port first, then points the
+// install's SRT listener at it and reconciles, so what is asserted is the
+// response of the production handler to a genuinely degraded listener.
+func TestDegradedSRTListenerIsReportedOnTheSourceCard(t *testing.T) {
+	occupied, err := net.ListenPacket("udp6", "[::]:0")
+	if err != nil {
+		t.Skipf("SKIPPING: this host cannot bind udp6 at all (%v), so a "+
+			"partial bind cannot be staged here", err)
+	}
+	defer occupied.Close()
+	_, portStr, err := net.SplitHostPort(occupied.LocalAddr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("port %q: %v", portStr, err)
+	}
+
+	h, store, sign := sourceServer(t)
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Listeners.SRTPort = port
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+
+	srv := serverUnderTest(t, h)
+	if srv.mgr == nil {
+		t.Fatal("no manager in the fixture")
+	}
+	if err := srv.mgr.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !srv.mgr.ListenerBound(db.IngestSRT) {
+		t.Skip("the SRT listener bound no family at all here; nothing to assert")
+	}
+
+	row := listSources(t, h, sign)[0]
+	if row.ListenerHealth == nil {
+		t.Fatal("the source card carried no listenerHealth for a half-bound listener")
+	}
+	if row.ListenerHealth.State != "degraded" {
+		t.Errorf("listenerHealth.state = %q, want %q", row.ListenerHealth.State, "degraded")
+	}
+	// A bare "degraded" sends the operator to the logs, which is the situation
+	// this field exists to end.
+	if !strings.Contains(row.ListenerHealth.Detail, "::") {
+		t.Errorf("the detail does not name the address family that failed: %q",
+			row.ListenerHealth.Detail)
+	}
+	// And the source is still running and still enforcing its token, because
+	// both are true. Folding this into those booleans would answer a different
+	// question wrongly.
+	if !row.Running {
+		t.Error("a half-bound listener reported the source as not running; the " +
+			"IPv4 half is serving and its publishers are fine")
+	}
+}
+
+// A read-scoped token must not be able to read its way to publishing.
+//
+// The scope model refuses writes by HTTP method, which is the right shape for a
+// rule about routes and blind to a GET whose RESPONSE is a credential. A
+// source's publish token is exactly that: the token IS the address on both
+// listeners, so a monitoring credential that could read it could inject video
+// into a live programme using only a GET it was explicitly allowed to make.
+//
+// Both shapes are asserted, because the publish URLs embed the token and
+// blanking only the field would hand the same secret back in a different form.
+func TestReadScopedTokenCannotReadAPublishToken(t *testing.T) {
+	h, store, sign := sourceServer(t)
+
+	// The fixture used to leave the ingest block empty, and that made this test
+	// a FALSE POSITIVE: it asserted on Source.Token alone, over a body that
+	// carried an empty passphrase and an empty legacy RTMP key, so it passed
+	// happily while both of those credentials were being handed to a read token
+	// on any real install. Plant them, so the assertion below is made against a
+	// response that has something to leak.
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("fixture source: %v", err)
+	}
+	src.Ingest.SRT.Passphrase = "fixture-srt-passphrase-1234"
+	src.Ingest.RTMP.StreamKey = "fixture-legacy-rtmp-key"
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("plant ingest credentials: %v", err)
+	}
+
+	// What the operator's own session sees, which must be unchanged: the
+	// console needs the token to show it.
+	seen := listSources(t, h, sign)[0]
+	if seen.Token == "" {
+		t.Fatal("the fixture source has no token, so this test proves nothing")
+	}
+
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+	r := jsonRequest(t, http.MethodGet, "/api/v1/sources", nil)
+	r.Header.Set("Authorization", "Bearer "+read)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("read token could not list sources: %d %s", w.Code, w.Body.String())
+	}
+	// Against the raw body, not the decoded struct: the point is that the
+	// secret does not appear ANYWHERE in what left the process.
+	if strings.Contains(w.Body.String(), seen.Token) {
+		t.Errorf("the publish token reached a read-scoped token: %s", w.Body.String())
+	}
+	// And neither does the stored ingest block the embedded *db.Source carries.
+	// The legacy RTMP key is the sharper of the two: engine.Manager honours a
+	// stored one as a publish address on an install upgraded from a pre-one-port
+	// build, so it is a working ingest credential, and the redaction that only
+	// blanked the DERIVED legacyRtmpKey field was handing back the identical
+	// string two JSON fields away.
+	for _, secret := range []string{"fixture-srt-passphrase-1234", "fixture-legacy-rtmp-key"} {
+		if strings.Contains(w.Body.String(), secret) {
+			t.Errorf("the ingest credential %q reached a read-scoped token: %s",
+				secret, w.Body.String())
+		}
+	}
+
+	var rows []sourceRow
+	decodeInto(t, w.Body.Bytes(), &rows)
+	if rows[0].Token != "" {
+		t.Errorf("token field = %q, want empty for a read-scoped principal", rows[0].Token)
+	}
+	// The listing still has to be worth making, or the redaction has just
+	// broken the use case the read scope exists for.
+	if rows[0].Name == "" {
+		t.Error("redaction emptied the source listing; a monitoring token still needs to see its sources")
+	}
+
+	// An admin token keeps the old behaviour: it can rotate the token anyway,
+	// so withholding it would be a lock with the key taped to it.
+	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
+	ra := jsonRequest(t, http.MethodGet, "/api/v1/sources", nil)
+	ra.Header.Set("Authorization", "Bearer "+admin)
+	if wa := do(t, h, ra); !strings.Contains(wa.Body.String(), seen.Token) {
+		t.Error("an admin token was denied the publish token it can already rotate")
+	}
+}
+
 func TestUpdatingASourceWithoutATokenKeepsTheStoredOne(t *testing.T) {
 	h, _, sign := sourceServer(t)
 

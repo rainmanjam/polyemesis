@@ -1,0 +1,92 @@
+---
+const links = [
+  { href: "/features", label: "Features" },
+  { href: "/comparison", label: "Comparison" },
+  { href: "/docs", label: "Docs" },
+  { href: "/download", label: "Install" },
+];
+const here = Astro.url.pathname;
+const active = (href: string) => here === href || here.startsWith(href + "/");
+---
+
+<header class="sticky top-0 z-40 border-b border-line/80 bg-ink/85 backdrop-blur">
+  <nav class="wrap flex h-14 items-center gap-6" aria-label="Main">
+    <a href="/" class="flex items-center gap-2.5 font-medium" aria-label="polyemesis home">
+      {/* The mark is the product: ingest tracks at unequal levels, summing left
+          to right. Five bars, not the six the page's example uses — a sixth at
+          this spacing falls outside the 22-wide viewBox, and the mark reads as
+          "several tracks" rather than counting them. Inline SVG so it costs no
+          request and inherits currentColor. */}
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+        <rect x="1" y="8" width="2.5" height="6" rx="1.25" fill="#5b7fc7" />
+        <rect x="5" y="4" width="2.5" height="14" rx="1.25" fill="#5b7fc7" />
+        <rect x="9" y="6.5" width="2.5" height="9" rx="1.25" fill="#3ecf6d" />
+        <rect x="13" y="2" width="2.5" height="18" rx="1.25" fill="#3ecf6d" />
+        <rect x="17" y="7" width="2.5" height="8" rx="1.25" fill="#45b5d0" />
+      </svg>
+      <span>polyemesis</span>
+    </a>
+
+    <div class="ml-auto hidden items-center gap-1 md:flex">
+      {
+        links.map((l) => (
+          <a
+            href={l.href}
+            aria-current={active(l.href) ? "page" : undefined}
+            class:list={[
+              "rounded-md px-3 py-1.5 text-sm transition-colors",
+              active(l.href) ? "text-fg" : "text-muted hover:text-fg",
+            ]}
+          >
+            {l.label}
+          </a>
+        ))
+      }
+      <a
+        href="https://github.com/rainmanjam/polyemesis"
+        class="ml-2 flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-1.5 text-sm text-fg transition-colors hover:border-primary"
+        rel="noopener"
+      >
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+          ></path>
+        </svg>
+        GitHub
+      </a>
+    </div>
+
+    {/* No JS: a checkbox drives the mobile menu, so it works before hydration
+        and keeps this page at zero client-side script. */}
+    <input type="checkbox" id="menu" class="peer sr-only md:hidden" />
+    <label
+      for="menu"
+      class="ml-auto cursor-pointer rounded-md border border-line-strong p-2 md:hidden"
+      aria-label="Toggle menu"
+    >
+      <svg width="18" height="18" viewBox="0 0 18 18" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M2 5h14M2 9h14M2 13h14" stroke-linecap="round"></path>
+      </svg>
+    </label>
+    <div
+      class="absolute left-0 right-0 top-14 hidden border-b border-line bg-ink peer-checked:block md:!hidden"
+    >
+      <div class="wrap flex flex-col py-2">
+        {
+          links.map((l) => (
+            <a href={l.href} class="rounded-md px-2 py-2.5 text-sm text-muted hover:text-fg">
+              {l.label}
+            </a>
+          ))
+        }
+        <a
+          href="https://github.com/rainmanjam/polyemesis"
+          rel="noopener"
+          class="rounded-md px-2 py-2.5 text-sm text-muted hover:text-fg"
+        >
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+</header>

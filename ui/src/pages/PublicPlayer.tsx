@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
 import { api, ApiError } from "@/lib/api";
 import type { PlayoutPublicView } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 /** The public player page, served at /watch and /watch/:token.
  *
@@ -51,6 +52,7 @@ type Phase =
   | { kind: "ready"; view: PlayoutPublicView };
 
 export function PublicPlayer() {
+  const t = useT();
   const [token] = useState<string | undefined>(tokenFromLocation);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [playing, setPlaying] = useState(false);
@@ -167,7 +169,7 @@ export function PublicPlayer() {
   if (phase.kind === "loading") {
     return (
       <Shell>
-        <p className="text-sm text-neutral-400">Loading…</p>
+        <p className="text-sm text-neutral-400">{t("player.loading")}</p>
       </Shell>
     );
   }
@@ -189,7 +191,7 @@ export function PublicPlayer() {
   if (phase.kind === "waiting") {
     return (
       <Shell>
-        <h1 className="text-base font-semibold text-neutral-100">Not live right now</h1>
+        <h1 className="text-base font-semibold text-neutral-100">{t("player.notLive")}</h1>
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
           This page will start playing on its own when the broadcast begins.
         </p>
@@ -246,7 +248,7 @@ export function PublicPlayer() {
 
         <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
           <span>
-            {view.viewers} {view.viewers === 1 ? "viewer" : "viewers"}
+            {view.viewers} {view.viewers === 1 ? t("player.viewer") : t("player.viewers")}
           </span>
           {view.variants && view.variants.length > 1 && (
             <span>
@@ -274,7 +276,7 @@ export function PublicPlayer() {
               onClick={() => void copyEmbed()}
               className="mt-2 rounded bg-neutral-800 px-2.5 py-1 text-[11px] text-neutral-200 hover:bg-neutral-700"
             >
-              {copied ? "Copied" : "Copy"}
+              {copied ? t("clipedit.copied") : t("common.copy")}
             </button>
           </details>
         )}

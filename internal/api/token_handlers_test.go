@@ -3,12 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,6 +14,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -41,11 +40,7 @@ func testServer(t *testing.T, cfg config.Config) (*Server, http.Handler, *db.DB)
 func testServerWith(t *testing.T, o Options) (*Server, http.Handler, *db.DB) {
 	t.Helper()
 
-	store, err := db.Open(filepath.Join(t.TempDir(), "polyemesis.db"), db.WithPasswordCost(bcrypt.MinCost))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	store := dbtest.OpenCheap(t)
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
@@ -120,9 +115,23 @@ func login(t *testing.T, h http.Handler) func(*http.Request) {
 	}
 }
 
+// createToken mints an ADMIN-scoped token, because that is what every test
+// using it was written about: before #104 a token had no scope and could do
+// everything, so "a token" in these tests means the full-power one.
+//
+// The API's own default is the opposite -- a create request that omits the
+// scope mints a read-only token -- which is the point of the feature and is
+// asserted directly in TestOmittedScopeMintsAReadToken rather than left to be
+// inferred from a helper.
 func createToken(t *testing.T, h http.Handler, sign func(*http.Request), name string) string {
 	t.Helper()
-	r := jsonRequest(t, http.MethodPost, "/api/v1/auth/tokens", map[string]string{"name": name})
+	return createScopedToken(t, h, sign, name, db.ScopeAdmin)
+}
+
+func createScopedToken(t *testing.T, h http.Handler, sign func(*http.Request), name, scope string) string {
+	t.Helper()
+	r := jsonRequest(t, http.MethodPost, "/api/v1/auth/tokens",
+		map[string]string{"name": name, "scope": scope})
 	sign(r)
 	w := do(t, h, r)
 	if w.Code != http.StatusCreated {
@@ -177,7 +186,7 @@ func TestBearerAuthIsRejectedFor(t *testing.T) {
 	sign := login(t, h)
 	plaintext := createToken(t, h, sign, "ci runner")
 
-	revoked, revokedPlaintext, err := store.CreateAPIToken("old laptop")
+	revoked, revokedPlaintext, err := store.CreateAPIToken("old laptop", db.ScopeAdmin)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -231,6 +240,30 @@ func TestABearerTokenCannotMintOrRevokeTokens(t *testing.T) {
 	}
 }
 
+// The account password is not something a machine credential gets to touch.
+//
+// handleChangePassword demands the current password, so this was never
+// exploitable with a token alone; the route joined the session-only group
+// anyway, because after #140 "no code enforces it but the handler happens to
+// ask for something else" is not a security property this package states out
+// loud. The 403 comes from the router, before the handler reads a body.
+func TestABearerTokenCannotChangeThePassword(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	plaintext := createToken(t, h, sign, "ci runner")
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/auth/password",
+		map[string]string{"current": testPassword, "new": "a whole new password"})
+	r.Header.Set("Authorization", "Bearer "+plaintext)
+	if w := do(t, h, r); w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body %s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+
+	// And the password genuinely did not change: the old one still signs in.
+	// Asserting the status alone would pass even if the handler had run.
+	login(t, h)
+}
+
 func TestRevokedTokenStopsWorkingImmediately(t *testing.T) {
 	_, h, _ := testServer(t, config.Config{})
 	sign := login(t, h)
@@ -259,6 +292,141 @@ func TestRevokedTokenStopsWorkingImmediately(t *testing.T) {
 
 	if code := probe(); code != http.StatusUnauthorized {
 		t.Errorf("revoked token status = %d, want 401", code)
+	}
+}
+
+// #104: a token used to be able to do everything the operator could, which is
+// a poor fit for the thing people actually mint one for -- a monitoring script
+// that reads /status every ten seconds and should not be able to delete a
+// destination if the box it runs on is compromised.
+//
+// Every case here goes through the production router, so what is being asserted
+// is the middleware chain rather than a helper nobody calls.
+func TestReadScopedTokenReachesReadsAndNothingElse(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+
+	tests := []struct {
+		name     string
+		method   string
+		path     string
+		body     any
+		wantRead int
+	}{
+		// The reads a monitoring token exists for. Not /status: this fixture
+		// has no engine, so that route answers 500 for every caller and would
+		// be asserting the fixture rather than the scope.
+		{name: "GET platform presets", method: http.MethodGet, path: "/api/v1/platforms/presets", wantRead: http.StatusOK},
+		{name: "GET me", method: http.MethodGet, path: "/api/v1/auth/me", wantRead: http.StatusOK},
+		// Mutations, refused by method with no route list consulted.
+		{name: "PUT settings", method: http.MethodPut, path: "/api/v1/settings",
+			body: map[string]any{}, wantRead: http.StatusForbidden},
+		{name: "POST destinations", method: http.MethodPost, path: "/api/v1/destinations",
+			body: map[string]any{"name": "x"}, wantRead: http.StatusForbidden},
+		{name: "DELETE destination", method: http.MethodDelete, path: "/api/v1/destinations/1",
+			wantRead: http.StatusForbidden},
+		// A POST that is not on the write-nothing allowlist. It spawns FFmpeg
+		// with a caller-supplied argument list, which is exactly why it is not.
+		{name: "POST expert dry-run", method: http.MethodPost,
+			path: "/api/v1/destinations/1/expert/dry-run", body: map[string]any{},
+			wantRead: http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := jsonRequest(t, tc.method, tc.path, tc.body)
+			r.Header.Set("Authorization", "Bearer "+read)
+			if w := do(t, h, r); w.Code != tc.wantRead {
+				t.Errorf("read token: status = %d, want %d, body %s",
+					w.Code, tc.wantRead, w.Body.String())
+			}
+		})
+	}
+}
+
+// The other direction, which is what stops the scope check from being a
+// blanket refusal that happens to satisfy the test above: an admin token keeps
+// the behaviour every token had before #104.
+//
+// POST /auth/logout is the mutation used here because the scope check is the
+// only gate in front of it -- no engine, no store row, nothing else that could
+// answer for a reason of its own. Asserting on a route that needs a running
+// pipeline would be asserting about the fixture.
+func TestAdminScopedTokenStillMutates(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
+
+	probe := func(token string) *httptest.ResponseRecorder {
+		r := jsonRequest(t, http.MethodPost, "/api/v1/auth/logout", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		return do(t, h, r)
+	}
+	if w := probe(admin); w.Code != http.StatusOK {
+		t.Errorf("admin token: status = %d, want 200, body %s", w.Code, w.Body.String())
+	}
+	if w := probe(read); w.Code != http.StatusForbidden {
+		t.Errorf("read token: status = %d, want 403, body %s", w.Code, w.Body.String())
+	}
+}
+
+// The allowlist is the one place the method rule is relaxed, so it gets its own
+// test: these POSTs answer a question and write nothing, and a read token would
+// be needlessly crippled without them.
+func TestReadScopedTokenReachesTheWriteNothingPosts(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+
+	// /version/check is the one allowlisted route reachable on a server with no
+	// engine and no destinations, so it is the one that can be asserted end to
+	// end here. It reaches GitHub or fails quietly; either way the scope layer
+	// must not be what stops it.
+	r := jsonRequest(t, http.MethodPost, "/api/v1/version/check", nil)
+	r.Header.Set("Authorization", "Bearer "+read)
+	w := do(t, h, r)
+	if w.Code == http.StatusForbidden {
+		t.Fatalf("allowlisted POST refused for a read token: %s", w.Body.String())
+	}
+}
+
+// The default is the feature. A client that has never heard of scopes -- an
+// older UI build, a curl line from a blog post -- must get the weaker
+// credential, or the release protects only the people who already knew.
+func TestOmittedScopeMintsAReadToken(t *testing.T) {
+	_, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/auth/tokens", map[string]string{"name": "legacy client"})
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: status %d, body %s", w.Code, w.Body.String())
+	}
+
+	tokens, err := store.ListAPITokens()
+	if err != nil {
+		t.Fatalf("ListAPITokens: %v", err)
+	}
+	if len(tokens) != 1 {
+		t.Fatalf("got %d tokens, want 1", len(tokens))
+	}
+	if tokens[0].Scope != db.ScopeRead {
+		t.Errorf("scope = %q, want %q", tokens[0].Scope, db.ScopeRead)
+	}
+}
+
+func TestUnknownScopeIsRefused(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/auth/tokens",
+		map[string]string{"name": "typo", "scope": "readonly"})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d, body %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
 }
 

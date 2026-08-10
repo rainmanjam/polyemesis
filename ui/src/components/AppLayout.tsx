@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
+
+import { UpdateBanner } from "./UpdateBanner";
 import {
   Activity,
   AudioLines,
@@ -39,7 +41,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
-import { useLiveData } from "@/hooks/useLiveData";
+import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
 import { duration, kbps } from "@/lib/format";
@@ -100,13 +102,29 @@ export function AppLayout({
   useEffect(() => setMobileOpen(false), [location.pathname]);
 
   const ingest = status?.ingest;
-  const ingestTone = toneForState(ingest?.state);
+  // BYTES ARRIVING, not a process running.
+  //
+  // useIngestLive is the app's one definition of "a broadcast is going out",
+  // and its own comment says `status.ingest.state === "running"` is not it.
+  // This header was the last place still asking the wrong question, and for SRT
+  // the answer was not merely imprecise but inverted: engine.reconcileIngest
+  // returns early for SRT on purpose — srtserver delivers datagrams straight
+  // into the hub, and a second thing on that socket would crash-loop — so
+  // `ingest` is null, `stateLabel(undefined)` is "Offline", and every healthy
+  // SRT install said its ingest was down in the most prominent status in the
+  // chrome. A committed screenshot showed it beside three live destinations.
+  //
+  // The process is still consulted for the bitrate below, where it exists.
+  const ingestLive = useIngestLive();
+  const ingestTone = ingestLive ? "live" : toneForState(ingest?.state);
   const liveCount =
     status?.destinations.filter((d) => d.process?.state === "running").length ?? 0;
 
   return (
     <div className="flex h-dvh flex-col bg-surface">
       {/* ---- top bar: the always-visible answer to "am I on air?" ---- */}
+      <UpdateBanner />
+
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
         <Button
           variant="ghost"
@@ -129,9 +147,15 @@ export function AppLayout({
           <StatusDot tone={ingestTone} />
           <span className="text-[11px] text-muted-foreground">{t("chrome.ingest")}</span>
           <span className="tnum font-mono text-[11px]">
+            {/* The bitrate when there is a process to read it from, and the
+                state otherwise. An SRT source is live without a child, so it
+                has no bitrate to show here — saying "Running" is the honest
+                answer rather than printing 0 kbps at a stream that is fine. */}
             {ingest?.state === "running"
               ? kbps(ingest.progress?.bitrateKbps ?? 0)
-              : stateLabel(ingest?.state)}
+              : ingestLive
+                ? stateLabel("running")
+                : stateLabel(ingest?.state)}
           </span>
         </div>
 
@@ -318,7 +342,24 @@ export function AppLayout({
           </nav>
         </TooltipProvider>
 
-        <main className="min-w-0 flex-1 overflow-y-auto">
+        {/* `relative` is load-bearing, not decoration.
+
+            The shell is h-dvh, so nothing should ever scroll the document —
+            only this pane and the sidebar. An absolutely positioned descendant
+            with no positioned ancestor resolves against the initial containing
+            block instead, which is the html element, so it extends
+            documentElement.scrollHeight without touching body's. That produces
+            a second scrollbar down the right-hand side next to this pane's own,
+            and measuring body tells you nothing because body is still exactly
+            the viewport height.
+
+            The Dashboard's aria-live <output> did precisely this: Tailwind's
+            .sr-only is `position: absolute` with no top/left, so it sat at its
+            static position ~951px down and stretched the document to 952px
+            against a 900px viewport. Making this pane a containing block keeps
+            that — and anything else a page renders — inside the scroller where
+            it belongs. */}
+        <main className="relative min-w-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>

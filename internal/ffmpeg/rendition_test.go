@@ -104,6 +104,11 @@ func TestRenditionArgsScale(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			s := baseRendition()
+			// FPS off: this test is about the scale chain, and a frame-rate
+			// filter in front of it would make every expectation below a
+			// statement about two features at once. The ordering of fps
+			// against scale has its own test.
+			s.FPS = 0
 			s.Width, s.Height = tc.w, tc.h
 			args := RenditionArgs(s)
 
@@ -149,6 +154,11 @@ func TestRenditionArgsAspectDefaultIsTheOldScale(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			s := baseRendition()
+			// FPS off: this test is about the scale chain, and a frame-rate
+			// filter in front of it would make every expectation below a
+			// statement about two features at once. The ordering of fps
+			// against scale has its own test.
+			s.FPS = 0
 			s.Width, s.Height = 1920, 1080
 			s.Aspect = tc.aspect
 			got, ok := argsAfter(RenditionArgs(s), "-vf")
@@ -177,6 +187,11 @@ func TestRenditionArgsAspectNeedsBothDimensions(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(string(mode)+"/"+tc.name, func(t *testing.T) {
 				s := baseRendition()
+				// FPS off: this test is about the scale chain, and a frame-rate
+				// filter in front of it would make every expectation below a
+				// statement about two features at once. The ordering of fps
+				// against scale has its own test.
+				s.FPS = 0
 				s.Width, s.Height, s.Aspect = tc.w, tc.h, mode
 				got, ok := argsAfter(RenditionArgs(s), "-vf")
 				if tc.wantVF == "" {
@@ -241,6 +256,11 @@ func TestRenditionArgsAspectFilterStrings(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			s := baseRendition()
+			// FPS off: this test is about the scale chain, and a frame-rate
+			// filter in front of it would make every expectation below a
+			// statement about two features at once. The ordering of fps
+			// against scale has its own test.
+			s.FPS = 0
 			s.Width, s.Height, s.Aspect, s.PadColor = tc.w, tc.h, tc.mode, tc.color
 			args := RenditionArgs(s)
 
@@ -680,6 +700,11 @@ func TestRenditionArgsVAAPINeedsDeviceAndUpload(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			s := baseRendition()
+			// FPS off: this test is about the scale chain, and a frame-rate
+			// filter in front of it would make every expectation below a
+			// statement about two features at once. The ordering of fps
+			// against scale has its own test.
+			s.FPS = 0
 			s.Encoder, s.VAAPIDevice = EncoderVAAPI, tc.device
 			s.Width, s.Height = tc.w, tc.h
 			args := RenditionArgs(s)
@@ -1113,5 +1138,81 @@ func TestAnUnknownDeinterlaceModeDegradesToOff(t *testing.T) {
 	}
 	if !strings.Contains(got, "scale=1280:720") {
 		t.Errorf("an unknown mode broke the rest of the chain: %s", got)
+	}
+}
+
+// Frames are dropped BEFORE they are scaled.
+//
+// -r decimates at the encoder, which is after the filter graph, so a 60 -> 30
+// rendition used to scale all sixty frames of the source and discard half.
+// Every one of those scales was work spent on a frame that never reached the
+// encoder.
+//
+// Measured on a 6-core Haswell VPS, 4K60 -> 1080p30 at veryfast/6000k:
+// 2.13x realtime before, 2.49x after. The control -- 4K60 -> 1080p60, where
+// nothing is dropped -- moved 1.50x to 1.53x, which is what says the gain is
+// avoided scaling rather than drift.
+func TestFramesAreDecimatedBeforeTheyAreScaled(t *testing.T) {
+	s := baseRendition()
+	s.Width, s.Height, s.FPS = 1920, 1080, 30
+
+	vf, ok := argsAfter(RenditionArgs(s), "-vf")
+	if !ok {
+		t.Fatal("no -vf at all on a scaled rendition")
+	}
+	fps, scale := strings.Index(vf, "fps="), strings.Index(vf, "scale=")
+	if fps < 0 {
+		t.Fatalf("no fps filter in %q; the rate is set only by -r, which drops frames "+
+			"after the graph and so pays to scale frames it then throws away", vf)
+	}
+	if scale < 0 {
+		t.Fatalf("no scale filter in %q", vf)
+	}
+	if fps > scale {
+		t.Errorf("fps comes after scale in %q: every dropped frame is still scaled first", vf)
+	}
+}
+
+// ...but after the deinterlace, never before it. Dropping fields before they
+// have been woven throws away half the information the deinterlacer needs, and
+// the combing it then fails to remove is baked into every scaled frame.
+func TestDecimationHappensAfterDeinterlacing(t *testing.T) {
+	s := baseRendition()
+	s.Width, s.Height, s.FPS = 1920, 1080, 30
+	s.Deinterlace = DeinterlaceAll
+
+	vf, ok := argsAfter(RenditionArgs(s), "-vf")
+	if !ok {
+		t.Fatal("no -vf on a deinterlaced rendition")
+	}
+	di, fps := strings.Index(vf, "bwdif"), strings.Index(vf, "fps=")
+	if di < 0 {
+		t.Fatalf("no deinterlace (bwdif) in %q", vf)
+	}
+	if fps >= 0 && fps < di {
+		t.Errorf("fps comes before the deinterlace in %q: half the fields are gone "+
+			"before yadif can weave them, and the combing it cannot remove is then "+
+			"baked into every scaled frame", vf)
+	}
+}
+
+// -r stays on the command line. The filter sets the rate the ENCODER sees; -r
+// is what the muxer writes into the container, and a stream whose header
+// disagrees with its frames is one some players refuse.
+func TestTheOutputRateIsStillDeclaredToTheMuxer(t *testing.T) {
+	s := baseRendition()
+	s.Width, s.Height, s.FPS = 1920, 1080, 30
+	if r, ok := argsAfter(RenditionArgs(s), "-r"); !ok || r != "30" {
+		t.Errorf("-r = %q (present=%v), want 30", r, ok)
+	}
+}
+
+// A rendition that does not change the rate must not gain a filter for it.
+func TestNoFpsFilterWhenTheRateIsUnset(t *testing.T) {
+	s := baseRendition()
+	s.Width, s.Height, s.FPS = 1920, 1080, 0
+	vf, _ := argsAfter(RenditionArgs(s), "-vf")
+	if strings.Contains(vf, "fps=") {
+		t.Errorf("-vf = %q: an unset rate should add no filter", vf)
 	}
 }

@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -81,7 +82,7 @@ func TestDownmixMatrix(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := DownmixMatrix(tc.channels)
+			m := DownmixMatrix(tc.channels, "")
 			if len(m[OutL]) != tc.channels || len(m[OutR]) != tc.channels {
 				t.Fatalf("matrix width = %d/%d, want %d", len(m[OutL]), len(m[OutR]), tc.channels)
 			}
@@ -103,7 +104,7 @@ func TestDownmixMatrix(t *testing.T) {
 // exceed full scale after the fold-down.
 func TestDownmixCannotClipCorrelatedSource(t *testing.T) {
 	for _, ch := range []int{3, 4, 5, 6, 7, 8} {
-		m := DownmixMatrix(ch)
+		m := DownmixMatrix(ch, "")
 		for out := 0; out < OutChannels; out++ {
 			var sum float64
 			for _, v := range m[out] {
@@ -126,27 +127,27 @@ func TestPanFilter(t *testing.T) {
 	}{
 		{
 			name:  "stereo passthrough",
-			cells: CellsForTrack(0, 2, 1.0),
+			cells: CellsForTrack(0, Track{Channels: 2}, 1.0),
 			want:  "pan=stereo|c0=1*c0|c1=1*c1",
 		},
 		{
 			name:  "stereo at 50% gain",
-			cells: CellsForTrack(0, 2, 0.5),
+			cells: CellsForTrack(0, Track{Channels: 2}, 0.5),
 			want:  "pan=stereo|c0=0.5*c0|c1=0.5*c1",
 		},
 		{
 			name:  "mono to both legs",
-			cells: CellsForTrack(3, 1, 1.0),
+			cells: CellsForTrack(3, Track{Channels: 1}, 1.0),
 			want:  "pan=stereo|c0=1*c0|c1=1*c0",
 		},
 		{
 			name:  "5.1 downmix",
-			cells: CellsForTrack(0, 6, 1.0),
+			cells: CellsForTrack(0, Track{Channels: 6}, 1.0),
 			want:  "pan=stereo|c0=0.4143*c0+0.2929*c2+0.2929*c4|c1=0.4143*c1+0.2929*c2+0.2929*c5",
 		},
 		{
 			name:  "5.1 downmix at 120% gain scales every coefficient",
-			cells: CellsForTrack(0, 6, 1.2),
+			cells: CellsForTrack(0, Track{Channels: 6}, 1.2),
 			want:  "pan=stereo|c0=0.4971*c0+0.3514*c2+0.3514*c4|c1=0.4971*c1+0.3514*c2+0.3514*c5",
 		},
 		{
@@ -381,8 +382,13 @@ func TestCompileMatrixChannelBeyondTrackWidthWarns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "channel 6") {
+	if len(res.Warnings) != 2 || !strings.Contains(res.Warnings[0], "channel 6") {
 		t.Fatalf("warnings = %v", res.Warnings)
+	}
+	// Dropping that cell halves the right leg, and saying so is the whole point
+	// of the second warning: the channel number alone reads like bookkeeping.
+	if !strings.Contains(res.Warnings[1], "6.0 dB quieter") {
+		t.Errorf("second warning does not quantify the level: %q", res.Warnings[1])
 	}
 	if strings.Contains(res.FilterComplex, "c5") {
 		t.Errorf("dropped channel leaked into filter: %s", res.FilterComplex)
@@ -421,9 +427,13 @@ func TestValidate(t *testing.T) {
 			wantErr: "unsupported sample rate 96000",
 		},
 		{
-			name:    "track index above the six-track ceiling",
-			profile: Profile{Mode: ModeSimple, Normalize: NormOff, SampleRate: 48000, Tracks: []TrackSel{{Track: 9, Enabled: true, Gain: 1}}},
-			wantErr: "track 9 out of range",
+			name:    "track index above the ceiling",
+			profile: Profile{Mode: ModeSimple, Normalize: NormOff, SampleRate: 48000, Tracks: []TrackSel{{Track: MaxTracks, Enabled: true, Gain: 1}}},
+			wantErr: fmt.Sprintf("track %d out of range", MaxTracks),
+		},
+		{
+			name:    "the highest legal track index is accepted",
+			profile: Profile{Mode: ModeSimple, Normalize: NormOff, SampleRate: 48000, Tracks: []TrackSel{{Track: MaxTracks - 1, Enabled: true, Gain: 1}}},
 		},
 		{
 			name:    "negative track index",

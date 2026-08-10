@@ -472,8 +472,16 @@ section after the gosrt one:
 Added for WHEP self-monitoring (`internal/webrtcx`). It clears the bar gosrt
 set — **FFmpeg cannot do this job**: there is no `ffmpeg` invocation that
 performs ICE, DTLS-SRTP and an SDP offer/answer with a browser. That is the
-same reason gosrt was accepted and the opposite of why `yutopp/go-rtmp` was
-refused, where `ffmpeg -listen 1` was already a complete answer.
+same reason gosrt was accepted and, at the time this plan was written, the
+opposite of why `yutopp/go-rtmp` was refused — `ffmpeg -listen 1` being taken
+as a complete answer for RTMP.
+
+> **Correction, 2026-08-06.** It was not a complete answer. `-listen 1` accepts
+> one publisher and cannot demultiplex by `app/streamkey`, so RTMP failed the
+> same bar SRT did, and `internal/rtmpserver` now wraps `bluenviron/gortmplib`.
+> The paragraph above still holds for WebRTC — FFmpeg genuinely cannot serve a
+> browser PeerConnection — but the RTMP contrast it leans on was mistaken, and
+> pion would be the *fourth* protocol dependency rather than the second.
 
 The costs, written down here rather than discovered later:
 

@@ -80,11 +80,12 @@ Set the encoder you normally use. Do *not* set a low keyframe interval on
 account of polyemesis — video is passed through untouched, so your encoder
 settings are what every destination receives.
 
-Press **Start Recording**, not Start Streaming. [OBS.md](OBS.md) has the full
-field-by-field table, including the `latency` unit that catches everybody.
+Press **Start Recording**, not Start Streaming — with *Output to URL* that
+button is the SRT push. [OBS.md](OBS.md) has the full field-by-field table,
+including the `latency` unit that catches everybody.
 
-Press **Start Streaming**. The polyemesis dashboard should show the ingest live
-within a couple of seconds, with a meter per incoming track.
+The polyemesis dashboard should show the ingest live within a couple of
+seconds, with a meter per incoming track.
 
 ## 4. Tell it what each track is
 

@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import { accentFor } from "@/lib/chat";
+import { accentFor, TIMEOUTS } from "@/lib/chat";
 import { capabilityFor, supportOf } from "@/lib/capabilities";
 import { clockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -37,16 +37,6 @@ import type { ChatMessage, ChatPlatform, ChatUserCard as CardData } from "@/lib/
    deliberate: least damage first, and the two that cannot be undone are last and
    ask again.
    =========================================================================== */
-
-/** Timeout choices. Seconds on the wire, always — the server converts for Kick,
- *  which counts in minutes. The list stops at a day because past that a timeout
- *  is a ban with extra steps, and Kick refuses beyond seven days anyway. */
-const TIMEOUTS: { label: string; seconds: number }[] = [
-  { label: "1 min", seconds: 60 },
-  { label: "10 min", seconds: 600 },
-  { label: "1 hour", seconds: 3600 },
-  { label: "1 day", seconds: 86400 },
-];
 
 export function ChatUserCard({
   platform,

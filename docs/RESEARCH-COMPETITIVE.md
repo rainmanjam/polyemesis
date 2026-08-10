@@ -45,7 +45,7 @@ instead.
 | On-demand streaming | 4 (closed) | have | |
 | Decklink video output | 4 | **GAP** | |
 | Combined chat | 4 (closed) | have | Four platforms, one hub |
-| Playlist files | 4 (closed) | partial | Pull ingest takes `file://`, no playlist sequencing |
+| Playlist files | 4 (closed) | **have** | Ordered uploads through the concat demuxer, looped, normalised on import; scheduled via `playlist.start`. Rides the failover tier |
 | Add stream recording | 4 | have | Plus catalogue, clips, transcripts |
 | Overlay channel logo and name | 4 | **have** | Both halves: image watermark plus text overlay |
 | Scheduling | 3 (closed) | have | Schedules API |
@@ -58,7 +58,7 @@ instead.
 | Video grid / multiple inputs | 1 (closed) | **GAP** | |
 | Deinterlacing | 1 (closed) | **have** | Was built-but-unreachable; the control landed 2026-07-28. See the correction below |
 | MQTT (core tracker) | — | **have** | Retained telemetry with Home Assistant discovery, alongside alert webhooks |
-| Single token per RTMP endpoint (core) | — | **GAP** | Falls out of multi-source |
+| Single token per RTMP endpoint (core) | — | **have** | Closed 2026-08-06 by `internal/rtmpserver`: one RTMP port, each source addressed by its own stream key, any number of them |
 
 Verified against the code, not assumed. Two initial readings were wrong and are
 corrected here: the only `overlay=` in the tree is inside the blurred-pad
@@ -185,6 +185,10 @@ anyway and retrofitting a key is worse than designing it in:
   reach the port can publish to any source" stops being acceptable. This is the
   Core tracker's "Single Token per RTMP Endpoint", and it is nearly free while
   the schema is already being changed.
+
+  > **Done.** SRT on 2026-07-30 (the publish token *is* the address), RTMP on
+  > 2026-08-06 (the stream key is). Both matched in constant time against every
+  > source's key, so an unrecognised publisher is refused rather than guessed at.
 - **Source-scoped everything** — destinations, renditions, recordings, clips,
   transcripts, chat. The migration is the expensive part; doing it once is much
   cheaper than doing it per-feature later.

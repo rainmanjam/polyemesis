@@ -10,7 +10,7 @@ import (
 func TestCreatedTokenIsUsableAndCarriesTheDisplayPrefix(t *testing.T) {
 	d := testDB(t)
 
-	tok, plaintext, err := d.CreateAPIToken("ci runner")
+	tok, plaintext, err := d.CreateAPIToken("ci runner", ScopeAdmin)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestCreatedTokenIsUsableAndCarriesTheDisplayPrefix(t *testing.T) {
 func TestOnlyTheHashOfATokenIsPersisted(t *testing.T) {
 	d := testDB(t)
 
-	_, plaintext, err := d.CreateAPIToken("ci runner")
+	_, plaintext, err := d.CreateAPIToken("ci runner", ScopeAdmin)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -63,11 +63,11 @@ func TestOnlyTheHashOfATokenIsPersisted(t *testing.T) {
 func TestLookupAPITokenRejects(t *testing.T) {
 	d := testDB(t)
 
-	_, valid, err := d.CreateAPIToken("ci runner")
+	_, valid, err := d.CreateAPIToken("ci runner", ScopeAdmin)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	revoked, revokedPlaintext, err := d.CreateAPIToken("old laptop")
+	revoked, revokedPlaintext, err := d.CreateAPIToken("old laptop", ScopeAdmin)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestEachTokenIsDistinct(t *testing.T) {
 
 	seen := map[string]bool{}
 	for i := 0; i < 16; i++ {
-		_, plaintext, err := d.CreateAPIToken("runner")
+		_, plaintext, err := d.CreateAPIToken("runner", ScopeAdmin)
 		if err != nil {
 			t.Fatalf("CreateAPIToken: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestCreateAPITokenRejectsBadNames(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := d.CreateAPIToken(tc.input); err == nil {
+			if _, _, err := d.CreateAPIToken(tc.input, ScopeAdmin); err == nil {
 				t.Error("CreateAPIToken accepted the name, want an error")
 			}
 		})
@@ -135,7 +135,7 @@ func TestListAPITokensReturnsNewestFirstAndNeverTheSecret(t *testing.T) {
 
 	var plaintexts []string
 	for _, name := range []string{"first", "second", "third"} {
-		_, p, err := d.CreateAPIToken(name)
+		_, p, err := d.CreateAPIToken(name, ScopeAdmin)
 		if err != nil {
 			t.Fatalf("CreateAPIToken(%s): %v", name, err)
 		}
@@ -165,7 +165,7 @@ func TestListAPITokensReturnsNewestFirstAndNeverTheSecret(t *testing.T) {
 func TestLookupRecordsLastUse(t *testing.T) {
 	d := testDB(t)
 
-	tok, plaintext, err := d.CreateAPIToken("ci runner")
+	tok, plaintext, err := d.CreateAPIToken("ci runner", ScopeAdmin)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}

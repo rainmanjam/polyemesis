@@ -275,9 +275,35 @@ type AudioEncoding struct {
 	// OutR and this sums them. Halves the bitrate on talk content for no
 	// perceptual loss.
 	Mono bool `json:"mono,omitempty"`
+	// Copy forwards the SELECTED ingest audio tracks to this destination
+	// untouched -- `-c:a copy`, no decode, no mix, no encoder -- so the archive
+	// or contribution feed carries the same bits the encoder sent us.
+	//
+	// It is called Copy and not "passthrough" deliberately. Passthrough already
+	// means something else everywhere else in this repo: a NULL rendition_id,
+	// i.e. video at the ingest's own resolution. Reusing the word for audio
+	// would make "a passthrough destination" ambiguous in exactly the
+	// conversations where it matters.
+	//
+	// Copy still SELECTS. The compiled routing profile decides which tracks go
+	// out and the role policy still removes the excluded ones, so the DMCA
+	// switch keeps working; what is given up is everything the mix stage does
+	// to the samples. That is why the validation below refuses a profile whose
+	// mix stages would be silently discarded rather than accepting it and
+	// producing audio the operator did not ask for.
+	Copy bool `json:"copy,omitempty"`
 }
 
-func (a AudioEncoding) problems(kind DestKind) []string {
+// problems reports everything wrong with the encoding block, judged against the
+// destination kind AND its routing profile.
+//
+// The profile is here because Copy is the first setting on this struct whose
+// validity depends on it: `-c:a copy` cannot honour a single thing the mix stage
+// does, so a profile that asks for loudness while the destination asks for copy
+// is two settings that contradict each other. Taking the profile is cheaper than
+// the alternative, which is a second validation hook that would drift from this
+// one.
+func (a AudioEncoding) problems(kind DestKind, p routing.Profile) []string {
 	var probs []string
 	add := func(f string, v ...any) { probs = append(probs, fmt.Sprintf(f, v...)) }
 
@@ -301,6 +327,92 @@ func (a AudioEncoding) problems(kind DestKind) []string {
 			"but no mainstream RTMP ingest accepts it, so the stream would " +
 			"upload cleanly and be rejected")
 	}
+	if a.Copy {
+		probs = append(probs, a.copyProblems(kind, p)...)
+	}
+	return probs
+}
+
+// copyProblems lists every reason this destination cannot copy its audio.
+//
+// The doctrine is the one the Opus-on-RTMP refusal above set: a setting that is
+// silently ignored is worse than a setting that is refused, because the operator
+// is then looking at a form that says one thing and a stream that does another
+// with nothing anywhere reconciling them. Copy removes the entire mix stage, so
+// EVERY mix-stage setting the profile carries becomes such a lie, and each one
+// is named individually rather than rolled into "profile incompatible with
+// copy" -- the operator has to know which control to turn off.
+//
+// NOT REFUSED, deliberately: track selection and ExcludeRoles. Both survive
+// copy intact, because the compiled Result still decides which tracks are
+// mapped. Refusing them would take the DMCA switch away from the destinations
+// most likely to want it, which are the archive and contribution feeds.
+//
+// ALSO NOT REFUSED: a container that cannot carry the ingest's codec. That is a
+// real failure and it is left to fail loudly at start instead, because the
+// ingest codec is simply not known at save time -- nothing has connected yet.
+// Guessing at save time would mean either refusing combinations that work (I
+// measured FFmpeg 8.1.2 muxing two copied AAC tracks into flv, mpegts, matroska
+// and mp4 without complaint) or blessing ones that do not.
+func (a AudioEncoding) copyProblems(kind DestKind, p routing.Profile) []string {
+	var probs []string
+	add := func(f string, v ...any) { probs = append(probs, fmt.Sprintf(f, v...)) }
+
+	switch kind {
+	case DestRTMP:
+		// Same failure class as Opus on RTMP: it muxes and the platform
+		// rejects it. #141 exists to measure whether that is still true for a
+		// second track on E-RTMP; until it has a measured answer, the honest
+		// position is that one AAC stereo track is what RTMP ingests take.
+		add("copying audio is not available on an RTMP destination: platform " +
+			"ingests expect one encoded stereo track, so a copied multitrack " +
+			"stream would upload cleanly and be rejected")
+	case DestAudio:
+		// An audio-only destination has no video stream to hang a copied track
+		// beside, and its codec comes from the target extension or the Icecast
+		// mount rather than from the ingest -- so "copy" has no meaning that
+		// could be honoured here.
+		add("copying audio is not available on an audio-only destination: its " +
+			"codec is chosen by the output container, not by the ingest")
+	}
+
+	if a.Codec != DestAudioAAC {
+		add("audio codec %q cannot be set on a destination that copies its audio: "+
+			"nothing is encoded, so the codec is whatever the ingest sent", a.Codec)
+	}
+	if a.Mono {
+		add("mono cannot be set on a destination that copies its audio: " +
+			"folding to one channel requires decoding and re-encoding")
+	}
+
+	// Every mix stage, named. resolveNorm turns NormAuto into a real filter
+	// only when it has something to protect against, and for copy there is no
+	// sum to clip -- so "auto" is the one normalization value that means "no
+	// opinion" and is left alone. The other two are explicit requests.
+	switch p.Normalize {
+	case routing.NormLimiter:
+		add("the limiter cannot run on a destination that copies its audio: " +
+			"set normalization to off or auto")
+	case routing.NormLoudnorm:
+		add("loudness normalization cannot run on a destination that copies its " +
+			"audio: set normalization to off or auto")
+	}
+	if p.Loudness != nil {
+		add("a loudness target cannot be applied on a destination that copies " +
+			"its audio: the samples are forwarded untouched")
+	}
+	if p.Ducking != nil {
+		add("ducking cannot run on a destination that copies its audio: it " +
+			"needs the mix stage this destination does not have")
+	}
+	if p.DelayMS != 0 {
+		add("an audio delay of %d ms cannot be applied on a destination that "+
+			"copies its audio: shifting audio requires a filter on the decoded "+
+			"samples", p.DelayMS)
+	}
+	// The level and channel-routing instructions, named by the package that
+	// owns the coefficients rather than re-derived here.
+	probs = append(probs, routing.CopyMixProblems(p)...)
 	return probs
 }
 
@@ -457,7 +569,7 @@ func (d Destination) Validate() error {
 	for _, p := range d.Resilience.problems() {
 		add("%s", p)
 	}
-	for _, p := range d.Audio.problems(d.Kind) {
+	for _, p := range d.Audio.problems(d.Kind, d.Profile) {
 		add("%s", p)
 	}
 	// Refused at save time rather than at go-live. A compliance field that
@@ -497,7 +609,7 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
 		&d.Resilience.MinBackoffSeconds, &d.Resilience.MaxBackoffSeconds,
 		&d.Resilience.GiveUpAfter,
-		&d.Audio.Codec, &d.Audio.Mono, &complianceJSON, &facebookJSON,
+		&d.Audio.Codec, &d.Audio.Mono, &d.Audio.Copy, &complianceJSON, &facebookJSON,
 		&d.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -552,7 +664,7 @@ const destColumns = `id, name, kind, platform, account_id, url, stream_key,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
-	au_codec, au_mono, compliance, facebook,
+	au_codec, au_mono, au_copy, compliance, facebook,
 	position, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
@@ -701,9 +813,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
-		 au_codec, au_mono, compliance, facebook,
+		 au_codec, au_mono, au_copy, compliance, facebook,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.BackupURL, dst.BackupStreamKey, dst.BackupIngestWanted,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
@@ -712,7 +824,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
-		dst.Audio.Codec, dst.Audio.Mono, string(compliance), string(facebook),
+		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -756,7 +868,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
 		tr_rw_timeout_seconds=?,
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
-		au_codec=?, au_mono=?, compliance=?, facebook=?,
+		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
 		updated_at=? WHERE id=?`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
 		dst.BackupURL, dst.BackupStreamKey, dst.BackupIngestWanted,
@@ -766,7 +878,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
-		dst.Audio.Codec, dst.Audio.Mono, string(compliance), string(facebook),
+		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
 		time.Now().Unix(), dst.ID)
 	if err != nil {
 		return nil, err
@@ -988,6 +1100,10 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		// destination emitted before these existed.
 		{"au_codec", `ALTER TABLE destinations ADD COLUMN au_codec TEXT NOT NULL DEFAULT ''`},
 		{"au_mono", `ALTER TABLE destinations ADD COLUMN au_mono INTEGER NOT NULL DEFAULT 0`},
+		// Bit-exact audio copy. 0 is the mix path, which is what every existing
+		// row ran on, so an upgraded install emits the same command it did
+		// yesterday for every destination that has not opted in.
+		{"au_copy", `ALTER TABLE destinations ADD COLUMN au_copy INTEGER NOT NULL DEFAULT 0`},
 		// Compliance rides as one JSON blob rather than four columns: it is a
 		// map plus two scalars, edited as a unit, and '{}' is "touch nothing".
 		{"compliance", `ALTER TABLE destinations ADD COLUMN compliance TEXT NOT NULL DEFAULT '{}'`},

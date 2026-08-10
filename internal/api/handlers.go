@@ -220,13 +220,19 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		SRTLatencyMS:  settings.Ingest.SRT.LatencyMS,
 		RTMPPort:      settings.Listeners.RTMPPort,
 		RTMPApp:       settings.Ingest.RTMP.App,
-		RTMPStreamKey: settings.Ingest.RTMP.StreamKey,
-		// Verbatim, userinfo and all. An rtsp://user:pass@cam/ source does
-		// carry a credential, but this endpoint is authenticated and the same
-		// caller can read the identical string out of GET /settings, so
-		// redacting only here would be theatre — and it would leave the
-		// operator unable to see which source is actually being dialled, which
-		// is the entire reason this field exists.
+		// No RTMPAddress. Only PublicIngestURL is read below, and that renders
+		// the server half alone -- the address is per source and belongs on the
+		// Sources page, next to the button that rotates it.
+		// Verbatim for an operator, masked for a read-scoped token below.
+		//
+		// An rtsp://user:pass@cam/ source carries a credential in its userinfo,
+		// and the operator has to see which source is actually being dialled --
+		// that is the entire reason this field exists. What used to stand here
+		// was an argument that redacting it would be theatre "because the same
+		// caller can read the identical string out of GET /settings". Scopes
+		// falsified that premise: both readers are now a read-scoped bearer, so
+		// the two disclosures reinforced each other rather than excusing each
+		// other. Both are masked now.
 		PullURL: settings.Ingest.Pull.URL,
 	}
 	host := r.Host
@@ -234,6 +240,20 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		host = h
 	}
 
+	// The one field on this endpoint that is a credential, and it is a
+	// CONSTRUCTED one, which is why struct tags could never have covered it:
+	// PublicIngestURL renders srt://host:port?...&passphrase=<cleartext> in SRT
+	// mode and returns the pull URL verbatim, userinfo and all, in pull mode.
+	// alerts.RedactURL masks both shapes, and it is the same function
+	// supervisor already runs over every FFmpeg argv -- which is exactly why
+	// GET /processes was clean through this whole review and this route was
+	// not.
+	ingestURL := spec.PublicIngestURL(host)
+	if readScopeCannotSeePublishTokens(r) {
+		ingestURL = maskURL(ingestURL)
+	}
+
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version": s.version,
 		"ffmpeg":  s.eng().Tools(),
@@ -243,7 +263,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		// editor offer NVENC on an AMD box in the first place. Cached after the
 		// first scan, so this stays a cheap endpoint.
 		"gpu":        machineGPUs(r.Context()),
-		"ingestUrl":  spec.PublicIngestURL(host),
+		"ingestUrl":  ingestURL,
 		"ingestMode": settings.Ingest.Mode,
 		"maxTracks":  routing.MaxTracks,
 		"tlsEnabled": s.cfg.ServesTLS(),
@@ -296,6 +316,15 @@ type versionInfo struct {
 	Comparable  bool   `json:"comparable"`
 	CheckedAt   string `json:"checkedAt,omitempty"`
 	CheckFailed bool   `json:"checkFailed,omitempty"`
+	// OnAir is what a restart would interrupt, reported alongside the version so
+	// the answer to "should I upgrade now" arrives with the answer to "is there
+	// an upgrade". Two round trips would let a UI show an enabled button while
+	// a broadcast was starting between them.
+	OnAir engine.OnAir `json:"onAir"`
+	// OnAirSummary is the sentence to show, empty when nothing is at stake. The
+	// server owns the wording because the same refusal has to reach a terminal
+	// as well as a browser, and two phrasings is how they come to disagree.
+	OnAirSummary string `json:"onAirSummary,omitempty"`
 }
 
 // handleVersion reports the running build plus whatever a previous check found.
@@ -341,6 +370,14 @@ func (s *Server) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) versionInfo() versionInfo {
 	info := versionInfo{Version: s.version}
+	// Surveyed on EVERY call, including the ones that return before the cache
+	// is consulted. What is on air changes minute to minute; the release feed
+	// changes weekly, and caching them together would let a stale "nothing is
+	// live" outlive the broadcast it described.
+	if s.mgr != nil {
+		info.OnAir = s.mgr.OnAir()
+		info.OnAirSummary = info.OnAir.Summary()
+	}
 
 	updateCache.Lock()
 	defer updateCache.Unlock()
@@ -695,6 +732,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.log.Warn("cannot tell whether an automod model key is stored", "err", err)
 	}
+	// The ingest credentials are sealed the same way the MQTT password and the
+	// automod key already were, except that they cannot be moved out of the
+	// blob -- the settings page reads and writes them -- so they are blanked on
+	// the way out for a read-scoped token instead. See internal/api/redact.go.
+	if readScopeCannotSeePublishTokens(r) {
+		settings = readSafeSettings(settings)
+	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, settings)
 }
 
@@ -798,6 +843,31 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// validation failures, whichever of the two found it.
 		if err := settings.Validate(); err != nil {
 			return db.InvalidSettingsError{Err: err}
+		}
+		// A save that touches the ingest section may not leave the mode unset.
+		//
+		// db.IngestUnset is storable on purpose — it is what a fresh install is
+		// before anyone has chosen, and the migration writes it during DB open,
+		// so the store cannot refuse it. But it is a starting state, never a
+		// choice: nobody opens this form and decides on "none". Refusing it here
+		// is what turns "no default" into "you have to pick", without which the
+		// unset state would just be a silent no-ingest.
+		//
+		// Scoped to CLEARING a mode that was already chosen, not to every save
+		// made before one is. The settings page PUTs the whole document, so
+		// refusing any unset ingest would fail the first unrelated change an
+		// operator makes on a fresh install — for a reason that has nothing to
+		// do with what they touched. What forces the choice on a fresh install
+		// is that nothing ingests until it is made, and the UI says so.
+		if settings.Ingest.Mode == db.IngestUnset {
+			var stored struct {
+				Ingest struct {
+					Mode db.IngestMode `json:"mode"`
+				} `json:"ingest"`
+			}
+			if json.Unmarshal(storedJSON, &stored) == nil && stored.Ingest.Mode != db.IngestUnset {
+				return badRequestError{"choose an ingest mode: srt, rtmp or pull"}
+			}
 		}
 		// The half of playlist validation that needs a filesystem.
 		// Settings.Validate checks an item's SHAPE and cannot check its
@@ -986,21 +1056,47 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 		writeStoreError(w, err)
 		return
 	}
-	src := s.eng().Source()
+	src, srcKnown := s.eng().SourceKnown()
+
+	// A read-scoped token gets the destination with its publish credentials
+	// blanked. db.Destination has no MarshalJSON, so `{"destination": row}` is
+	// a raw dump of every leaf -- streamKey, backupStreamKey, and for an audio
+	// destination a url whose icecast://user:pass@ userinfo IS the credential.
+	// See internal/api/redact.go for why this is a copy at the handler rather
+	// than a property of the type.
+	hide := readScopeCannotSeePublishTokens(r)
 
 	// Each row is returned with its compiled routing, so the UI can render the
 	// "Tracks 1, 2, 4 → stereo" summary and the generated filter string
 	// without a second round trip.
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		item := map[string]any{"destination": row}
+		shown := row
+		if hide {
+			safe := readSafeDestination(*row)
+			shown = &safe
+		}
+		item := map[string]any{"destination": shown}
 		if c, err := routing.Compile(row.Profile, src); err == nil {
 			item["routing"] = c
+			// PROVISIONAL until something has been measured. Until then this is
+			// compiled from the placeholder -- six stereo tracks that exist so
+			// the editor has something to draw -- and reconcileOutputs refuses
+			// to run that very graph. Handing it over unlabelled made the screen
+			// and the process disagree, in the direction that makes the
+			// placeholder look authoritative.
+			//
+			// Flagged, not withheld: configuring a destination before going live
+			// is when most people configure them (see refuseIfSilent below).
+			if !srcKnown {
+				item["routingProvisional"] = true
+			}
 		} else {
 			item["routingError"] = err.Error()
 		}
 		out = append(out, item)
 	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1015,12 +1111,25 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	resp := map[string]any{"destination": row}
-	if c, err := routing.Compile(row.Profile, s.eng().Source()); err == nil {
+	shown := row
+	if readScopeCannotSeePublishTokens(r) {
+		safe := readSafeDestination(*row)
+		shown = &safe
+	}
+	resp := map[string]any{"destination": shown}
+	getSrc, getKnown := s.eng().SourceKnown()
+	// Compiled off the ORIGINAL row, not the redacted copy: the routing profile
+	// carries no credential and compiling the copy would only invite a future
+	// reader to wonder whether it differs.
+	if c, err := routing.Compile(row.Profile, getSrc); err == nil {
 		resp["routing"] = c
+		if !getKnown {
+			resp["routingProvisional"] = true
+		}
 	} else {
 		resp["routingError"] = err.Error()
 	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1201,8 +1310,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := map[string]any{"destination": updated}
-	if c, err := routing.Compile(updated.Profile, s.eng().Source()); err == nil {
+	updSrc, updKnown := s.eng().SourceKnown()
+	if c, err := routing.Compile(updated.Profile, updSrc); err == nil {
 		resp["routing"] = c
+		if !updKnown {
+			resp["routingProvisional"] = true
+		}
 	}
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings

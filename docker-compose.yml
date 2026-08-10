@@ -32,8 +32,10 @@ services:
       - "6000:6000/udp"    # SRT ingest — UDP, not TCP. ONE port for every
                            # source; they are told apart by publish token,
                            # so adding a source never changes this file.
-      - "1935:1935"        # RTMP ingest (fallback, single stereo pair,
-                           # and serves at most one source)
+      - "1935:1935"        # RTMP ingest. One port, any number of sources,
+                           # told apart by stream key — same as SRT above.
+                           # Classic RTMP carries one stereo pair; Enhanced
+                           # RTMP carries more on FFmpeg 7.1+.
 
       # ACME ONLY. Uncomment together with the config mount below if you want
       # polyemesis to obtain its own Let's Encrypt certificate: HTTP-01

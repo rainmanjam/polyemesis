@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	srt "github.com/datarhei/gosrt"
 )
 
 const base = "http://127.0.0.1:8099/api/v1"
@@ -60,7 +63,7 @@ func main() {
 	fmt.Printf("     relay hub listening on udp://127.0.0.1:%d\n", relayPort)
 
 	step("push synthetic 3-track MPEG-TS stream (300 / 900 / 2000 Hz)")
-	src := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+	src := exec.Command(ffmpegPath(), "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
 		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
 		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
@@ -150,11 +153,320 @@ func main() {
 	ok = verify("a.mkv", "A (tracks 1+2)", map[int]bool{300: true, 900: true, 2000: false}) && ok
 	ok = verify("b.mkv", "B (tracks 1+3)", map[int]bool{300: true, 900: false, 2000: true}) && ok
 
+	// ---------------------------------------------------------------- E-RTMP
+	//
+	// Phase 1 above injects into the relay hub, which deliberately substitutes
+	// the ingest hop so it runs on any FFmpeg whatever its protocol list. That
+	// leaves the one-port RTMP listener -- admission, the Ready gate, the setup
+	// cache, and multitrack FLV demux -- covered only by the bash suites, which
+	// run on ubuntu alone.
+	//
+	// It does not have to be that way. internal/rtmpserver is pure Go
+	// (gortmplib): no libsrt, no native dependency, and FLV muxing is in every
+	// FFmpeg build. So the RTMP leg runs on macOS and Windows too, and it is
+	// where the riskiest machinery lives. SRT stays out for the toolchain
+	// reason above; RTMP has no such excuse.
+	ok = ertmpPhase() && ok
+	ok = srtPhase() && ok
+
 	if !ok {
 		fmt.Println("\nSMOKE TEST FAILED")
 		os.Exit(1)
 	}
 	fmt.Println("\nSMOKE TEST PASSED")
+}
+
+// ertmpPhase publishes multitrack FLV at the one-port listener and measures what
+// each destination made of it.
+//
+// Three things it proves that phase 1 cannot: the publisher is ADMITTED (the
+// Ready gate consults the listener for a live subscriber, so a source whose
+// ingest child never dialled in is refused); several audio tracks survive
+// Enhanced RTMP, whose sequence starts for tracks 2..N arrive wrapped in
+// AudioExMultitrack and were once not recognised as setup; and the routing
+// graph compiled from an RTMP-probed layout is the same graph an SRT-probed one
+// produces.
+func ertmpPhase() bool {
+	step("E-RTMP: switching the source to the one-port RTMP listener")
+
+	srcs := doGetList("/sources")
+	if len(srcs) == 0 {
+		fmt.Println("     no sources; cannot exercise RTMP ingest")
+		return false
+	}
+	src0 := srcs[0].(map[string]any)
+	sid := int(src0["id"].(float64))
+	token, _ := src0["token"].(string)
+	if token == "" {
+		fmt.Println("     source has no publish token; RTMP has no address")
+		return false
+	}
+
+	ing, _ := src0["ingest"].(map[string]any)
+	if ing == nil {
+		ing = map[string]any{}
+	}
+	ing["mode"] = "rtmp"
+	do("PUT", fmt.Sprintf("/sources/%d", sid), map[string]any{"ingest": ing})
+
+	port := 1935
+	if ls, ok := doGet("/settings")["listeners"].(map[string]any); ok {
+		if p, ok := ls["rtmpPort"].(float64); ok && p > 0 {
+			port = int(p)
+		}
+	}
+	fmt.Printf("     source %d on rtmp, listener port %d\n", sid, port)
+
+	// Wait for the listener to ACCEPT, not for a log line. The mode change
+	// restarts the source's engine and its ingest child dials the listener on
+	// loopback, so there is a window where the port is open and nothing is
+	// subscribed -- publishing into it is refused by design.
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	up := false
+	for i := 0; i < 40; i++ {
+		if c, err := net.DialTimeout("tcp", addr, 2*time.Second); err == nil {
+			_ = c.Close()
+			up = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !up {
+		fmt.Printf("     nothing accepting on %s\n", addr)
+		return false
+	}
+	time.Sleep(6 * time.Second)
+
+	step("E-RTMP: publishing 3 audio tracks as multitrack FLV")
+	// -f flv, not mpegts. Pointing an MPEG-TS muxer at an rtmp:// URL sends TS
+	// bytes down an RTMP connection and the server drops the session in 0s with
+	// "invalid message type: 255". FFmpeg 7.1+ writes multitrack FLV whenever
+	// more than one audio stream is mapped, so this is E-RTMP without asking
+	// for it by name.
+	pub := exec.Command(ffmpegPath(), "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
+		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=2000:sample_rate=48000",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+		"-g", "30", "-pix_fmt", "yuv420p", "-b:v", "800k",
+		"-c:a", "aac", "-b:a", "128k", "-ac", "2", "-t", "40", "-f", "flv",
+		fmt.Sprintf("rtmp://127.0.0.1:%d/live/%s", port, token))
+	pub.Stderr = os.Stderr
+	if err := pub.Start(); err != nil {
+		fmt.Printf("     start publisher: %v\n", err)
+		return false
+	}
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
+
+	step("E-RTMP: waiting for the layout to be probed")
+	// THREE, not ">= 1". Six is the placeholder layout a source reports when
+	// nothing has been probed, so a loose check passes on an ingest that never
+	// happened -- and one track is what a REFUSED multitrack publish looks like
+	// after FFmpeg falls back.
+	got := -1
+	for i := 0; i < 40; i++ {
+		time.Sleep(1500 * time.Millisecond)
+		si := doGet("/source")
+		tr, _ := si["tracks"].([]any)
+		if si["probed"] == true {
+			got = len(tr)
+			if got == 3 {
+				break
+			}
+		}
+	}
+	if got != 3 {
+		fmt.Printf("     E-RTMP probed %d audio tracks, want 3\n", got)
+		fmt.Println("     1 can mean the publisher was refused; 6 means no probe landed at all")
+		return false
+	}
+	fmt.Println("     E-RTMP layout probed correctly: 3 audio tracks")
+
+	step("E-RTMP: two destinations, differently routed")
+	do("POST", "/destinations", destBody("C-rtmp-1-2", "c.mkv", []int{0, 1}))
+	do("POST", "/destinations", destBody("D-rtmp-1-3", "d.mkv", []int{0, 2}))
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(1500 * time.Millisecond)
+		n := 0
+		for _, d := range doGet("/status")["destinations"].([]any) {
+			dm := d.(map[string]any)
+			if p, ok := dm["process"].(map[string]any); ok && p["state"] == "running" {
+				n++
+			}
+		}
+		if n >= 2 {
+			break
+		}
+	}
+	step("E-RTMP: streaming 12s so each destination accumulates audio")
+	time.Sleep(12 * time.Second)
+	for _, d := range doGet("/status")["destinations"].([]any) {
+		dm := d.(map[string]any)
+		if n, _ := dm["name"].(string); n == "C-rtmp-1-2" || n == "D-rtmp-1-3" {
+			do("POST", fmt.Sprintf("/destinations/%v/stop", dm["id"]), nil)
+		}
+	}
+	time.Sleep(3 * time.Second)
+
+	fmt.Println("\n=== E-RTMP VERIFICATION ===")
+	okc := verify("c.mkv", "C over E-RTMP (tracks 1+2)", map[int]bool{300: true, 900: true, 2000: false})
+	okd := verify("d.mkv", "D over E-RTMP (tracks 1+3)", map[int]bool{300: true, 900: false, 2000: true})
+	return okc && okd
+}
+
+// srtPhase publishes over the one-port SRT listener WITHOUT needing libsrt.
+//
+// The hub injection in phase 1 exists because a runner's FFmpeg is not
+// guaranteed to carry the srt protocol -- Homebrew's genuinely does not, checked
+// -- so the SRT hop was the one part of the product that only ever ran on
+// ubuntu, in the bash suites.
+//
+// It does not need FFmpeg at all. internal/srtserver is built on
+// github.com/datarhei/gosrt, already a direct dependency, so the publisher can
+// be a Go SRT client speaking to the server's own listener. FFmpeg is left doing
+// the one thing every build can do -- muxing MPEG-TS to stdout -- and the SRT
+// hop itself is pure Go on every platform.
+func srtPhase() bool {
+	step("SRT: switching the source back to the SRT listener")
+
+	srcs := doGetList("/sources")
+	if len(srcs) == 0 {
+		fmt.Println("     no sources")
+		return false
+	}
+	src0 := srcs[0].(map[string]any)
+	sid := int(src0["id"].(float64))
+	token, _ := src0["token"].(string)
+	ing, _ := src0["ingest"].(map[string]any)
+	if ing == nil {
+		ing = map[string]any{}
+	}
+	ing["mode"] = "srt"
+	do("PUT", fmt.Sprintf("/sources/%d", sid), map[string]any{"ingest": ing})
+
+	port := 6000
+	if ls, ok := doGet("/settings")["listeners"].(map[string]any); ok {
+		if p, ok := ls["srtPort"].(float64); ok && p > 0 {
+			port = int(p)
+		}
+	}
+	fmt.Printf("     source %d on srt, listener port %d\n", sid, port)
+	time.Sleep(8 * time.Second)
+
+	step("SRT: dialling the listener from Go (gosrt), no libsrt anywhere")
+	cfg := srt.DefaultConfig()
+	cfg.StreamId = token
+	cfg.Latency = 200 * time.Millisecond
+	var conn srt.Conn
+	var err error
+	for i := 0; i < 20; i++ {
+		conn, err = srt.Dial("srt", fmt.Sprintf("127.0.0.1:%d", port), cfg)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if err != nil {
+		fmt.Printf("     SRT dial refused: %v\n", err)
+		return false
+	}
+	defer conn.Close()
+	fmt.Println("     SRT publisher ADMITTED by the one-port listener")
+
+	// FFmpeg muxes TS to STDOUT -- no protocol support required -- and this
+	// copies it into the SRT connection.
+	mux := exec.Command(ffmpegPath(), "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
+		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=2000:sample_rate=48000",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+		"-g", "30", "-pix_fmt", "yuv420p", "-b:v", "800k",
+		"-c:a", "aac", "-b:a", "128k", "-t", "45",
+		"-f", "mpegts", "-flush_packets", "1", "pipe:1")
+	out, err := mux.StdoutPipe()
+	if err != nil {
+		fmt.Printf("     stdout pipe: %v\n", err)
+		return false
+	}
+	mux.Stderr = os.Stderr
+	if err := mux.Start(); err != nil {
+		fmt.Printf("     start muxer: %v\n", err)
+		return false
+	}
+	defer func() { _ = mux.Process.Kill(); _ = mux.Wait() }()
+
+	// 1316 is the SRT payload size; larger writes are rejected outright.
+	go func() {
+		buf := make([]byte, 1316)
+		for {
+			n, rerr := io.ReadFull(out, buf)
+			if n > 0 {
+				if _, werr := conn.Write(buf[:n]); werr != nil {
+					return
+				}
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+
+	step("SRT: waiting for the layout to be probed")
+	got := -1
+	for i := 0; i < 40; i++ {
+		time.Sleep(1500 * time.Millisecond)
+		si := doGet("/source")
+		if si["probed"] == true {
+			tr, _ := si["tracks"].([]any)
+			got = len(tr)
+			if got == 3 {
+				break
+			}
+		}
+	}
+	if got != 3 {
+		fmt.Printf("     SRT probed %d audio tracks, want 3 (6 = no probe landed)\n", got)
+		return false
+	}
+	fmt.Println("     SRT layout probed correctly: 3 audio tracks")
+
+	step("SRT: two destinations, differently routed")
+	do("POST", "/destinations", destBody("E-srt-1-2", "e.mkv", []int{0, 1}))
+	do("POST", "/destinations", destBody("F-srt-1-3", "f.mkv", []int{0, 2}))
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(1500 * time.Millisecond)
+		n := 0
+		for _, d := range doGet("/status")["destinations"].([]any) {
+			dm := d.(map[string]any)
+			if p, ok := dm["process"].(map[string]any); ok && p["state"] == "running" {
+				n++
+			}
+		}
+		if n >= 2 {
+			break
+		}
+	}
+	step("SRT: streaming 12s so each destination accumulates audio")
+	time.Sleep(12 * time.Second)
+	for _, d := range doGet("/status")["destinations"].([]any) {
+		dm := d.(map[string]any)
+		if n, _ := dm["name"].(string); n == "E-srt-1-2" || n == "F-srt-1-3" {
+			do("POST", fmt.Sprintf("/destinations/%v/stop", dm["id"]), nil)
+		}
+	}
+	time.Sleep(3 * time.Second)
+
+	fmt.Println("\n=== SRT VERIFICATION ===")
+	oke := verify("e.mkv", "E over SRT (tracks 1+2)", map[int]bool{300: true, 900: true, 2000: false})
+	okf := verify("f.mkv", "F over SRT (tracks 1+3)", map[int]bool{300: true, 900: false, 2000: true})
+	return oke && okf
 }
 
 func destBody(name, file string, tracks []int) map[string]any {
@@ -233,7 +545,7 @@ func verify(file, label string, want map[int]bool) bool {
 // bandEnergy returns overall RMS dBFS after a narrow bandpass at f.
 // astats logs at info level, so -v error would silently suppress it.
 func bandEnergy(path string, f int) float64 {
-	out, err := exec.Command("ffmpeg", "-v", "info", "-i", path,
+	out, err := exec.Command(ffmpegPath(), "-v", "info", "-i", path,
 		"-af", fmt.Sprintf("bandpass=frequency=%d:width_type=h:width=50,astats=metadata=0:measure_perchannel=none", f),
 		"-f", "null", "-").CombinedOutput()
 	if err != nil {
@@ -306,6 +618,26 @@ func do(method, path string, body any) map[string]any {
 	return out
 }
 
+// doGetList is doGet for endpoints that answer a bare JSON ARRAY. /sources does,
+// and decoding that into a map fails with "cannot unmarshal array into Go value
+// of type map[string]interface {}" -- which is how this was found.
+func doGetList(path string) []any {
+	resp, err := client.Get(base + path)
+	if err != nil {
+		fail("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		fail("GET %s -> %d: %s", path, resp.StatusCode, raw)
+	}
+	var out []any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		fail("GET %s: decode: %v (%s)", path, err, raw)
+	}
+	return out
+}
+
 func doGet(path string) map[string]any {
 	resp, err := client.Get(base + path)
 	if err != nil {
@@ -321,6 +653,21 @@ func doGet(path string) map[string]any {
 		fail("GET %s: decode: %v (%s)", path, err, raw)
 	}
 	return out
+}
+
+// ffmpegPath resolves the binary ONCE, to an absolute path.
+//
+// exec.Command("ffmpeg", ...) leaves resolution to PATH at exec time, which
+// SonarCloud flags under go:S4036 and is right to: this program is run by CI
+// and by operators, and a writable directory earlier in PATH than the real
+// ffmpeg is a way to have something else entirely run with their privileges.
+// LookPath resolves it here, once, and every later call names the result.
+func ffmpegPath() string {
+	p, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		fail("ffmpeg is not on PATH: %v", err)
+	}
+	return p
 }
 
 func step(s string) { fmt.Printf("\n>> %s\n", s) }
