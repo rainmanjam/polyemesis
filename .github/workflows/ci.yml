@@ -174,7 +174,23 @@ jobs:
       # product failure" -- and a diagnostic that says that about a REAL failure
       # sends the next person to the wrong component with the authority of a
       # printed conclusion. The negative case is the one under test.
+      #
+      # THE FOUR SCRIPT STEPS IN THIS JOB CARRY STEP TIMEOUTS, for the reason
+      # :327-334 and :393-396 give for the two smoke steps: a job timeout names
+      # nothing, a step timeout names the step. Each of these four runs a shell
+      # harness that starts and kills processes, so each can hang exactly the way
+      # #179 hung, and behind this job's timeout-minutes: 25 a hang here costs 25
+      # minutes and reports "the job was cancelled".
+      #
+      # HONEST ABOUT THE NUMBERS: only one of the four has a measurement --
+      # test-lib-cleanup.sh at 35s, up from 20s when its SIGTERM-deaf case was
+      # added. The other three were not re-measured here, because running the
+      # teardown harnesses on a shared developer machine kills processes
+      # belonging to whatever else is running on it. So these are blast-radius
+      # ceilings, not fitted bounds: sized to be unreachable by a healthy run and
+      # far below the job's 25, which is the only property being claimed.
       - run: ./scripts/test-lib-observe.sh
+        timeout-minutes: 6
 
       # The acceptance suites' own deadline, which fires below this workflow's
       # timeout-minutes so a hung suite reports instead of being cancelled.
@@ -182,6 +198,7 @@ jobs:
       # watchdog is a background process holding the suite's stdout, so a bug
       # in it does not merely fail to report -- it becomes the hang.
       - run: ./scripts/test-lib-watchdog.sh
+        timeout-minutes: 6
 
       # The SBOM guard, which only ever runs for real inside a release. That is
       # exactly how it came to be wrong: it asserted a floor of 100 against a
@@ -190,6 +207,7 @@ jobs:
       # release. Running its tests on every PR is the part that makes the fix
       # a fix rather than a better guess. Pure jq and shell, about a second.
       - run: ./scripts/test-sbom-guard.sh
+        timeout-minutes: 5
 
       # The acceptance suites' shared teardown. Same argument as the guard
       # above, and a sharper one: this teardown was silently leaking the ingest
@@ -198,6 +216,7 @@ jobs:
       # harness, because a real regression gets dismissed as "that suite is
       # flaky". Needs lsof, which this job does not otherwise install.
       - name: ./scripts/test-lib-cleanup.sh
+        timeout-minutes: 10
         run: |
           sudo apt-get install -y --no-install-recommends lsof
           ./scripts/test-lib-cleanup.sh
@@ -405,13 +424,46 @@ jobs:
           # Same shape as the step above: a trap, and the verdict before the
           # cleanup. The shell `wait` that used to sit between `rc` and the
           # report was unbounded, and on Windows it is unbounded against a kill
-          # that may never land. This step is the last in the job and binds a
-          # different port (8099) from the one above, so a best-effort kill
-          # leaves nothing that anything later depends on.
+          # that may never land.
+          #
+          # THE PREVIOUS VERSION OF THIS COMMENT SAID "this step is the last in
+          # the job", AND THAT WAS FALSE. `Upload broadcast artefacts on failure`
+          # follows it in this same job and uploads bcast-server.log and
+          # data/recordings/ -- the two paths the server still holds open. The
+          # trap fires when this step ends, so on the failure path the artefacts
+          # used to be read while the writer was live, and on Windows the kill
+          # may never land at all. Low impact (if-no-files-found: ignore, failure
+          # path only) but the justification rested on an untrue claim, so the
+          # failure path below now does the work the claim assumed: verdict
+          # first, then a BOUNDED stop, then the diagnostics.
+          #
+          # The trap stays as the backstop for every other exit path, and
+          # best-effort is still sufficient there: nothing later binds 8099, the
+          # binary is built once and never rebuilt so there is no Windows sharing
+          # violation to fear, and the runner VM is destroyed at the end.
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           go run scripts/smoketest.go
           rc=$?
           if [ "$rc" -ne 0 ]; then
+            # THE VERDICT, BEFORE ANY CLEANUP. #179 is what happens when this
+            # ordering is the other way round.
+            echo "the broadcast smoke test failed on ${{ matrix.os }} (rc=$rc)"
+            # Now quiesce the writer, BOUNDED, so the log and the recordings the
+            # upload step is about to collect are not being appended to while it
+            # reads them. 10s against a server that shuts down in well under one;
+            # the ceiling exists because on Windows this kill may never be
+            # delivered, and an unbounded wait here is the whole of #179.
+            kill "$pid" 2>/dev/null || true
+            gone=no
+            for _ in $(seq 1 40); do
+              if ! kill -0 "$pid" 2>/dev/null; then gone=yes; break; fi
+              sleep 0.25
+            done
+            if [ "$gone" != yes ]; then
+              echo "NOTE: the server was still running 10s after the kill, so the"
+              echo "artefacts below and in the upload step were read from under a"
+              echo "live writer and may be truncated mid-write."
+            fi
             echo "--- server log ---"
             cat bcast-server.log || true
             exit 1
@@ -590,7 +642,13 @@ jobs:
           npm ci --ignore-scripts
           npx --no-install playwright install --with-deps chromium
 
+      # The same step timeout the `acceptance` job's suite step carries at
+      # :724, and missing here until now. This job's ceiling is 45 minutes,
+      # so a suite that hangs costs 45 minutes and names no step -- the exact
+      # cost #179 priced at 28. 35 leaves the image build and the log upload
+      # their share of the job budget while still firing first.
       - run: ./scripts/${{ matrix.suite }}.sh
+        timeout-minutes: 35
 
       - name: Upload logs
         if: always()
@@ -761,8 +819,30 @@ jobs:
             done
             # The dump goes to the process's own stderr, which the suites
             # redirect into their log directory, so it lands in the artifact
-            # below rather than here. Give it a moment to be written.
-            sleep 5
+            # below rather than here.
+            #
+            # OBSERVED, NOT ASSUMED. This used to be a bare `sleep 5` -- a fixed
+            # interval standing in for an observation, in the file this round
+            # edited, in the diagnostic that exists to explain hangs. SIGQUIT to
+            # a Go program writes the dump and then exits, so the process no
+            # longer existing IS the dump having been written; poll for that and
+            # stop as soon as it is true.
+            #
+            # The 5s ceiling is kept as the give-up, not as the wait: a process
+            # wedged in uninterruptible I/O may never take the signal, and this
+            # step must not become the hang it was written to explain.
+            for _ in $(seq 1 20); do
+              still=""
+              for pid in $pids; do
+                kill -0 "$pid" 2>/dev/null && still="$still $pid"
+              done
+              [ -z "$still" ] && break
+              sleep 0.25
+            done
+            if [ -n "$still" ]; then
+              echo "still alive 5s after SIGQUIT:$still -- the dump for these may be"
+              echo "absent or truncated in the uploaded logs."
+            fi
           fi
 
           echo

@@ -190,8 +190,48 @@ else
 	fi
 fi
 
+step "8. poly_wait_jobs is bounded, and gives up loudly instead of hanging"
+# poly_cleanup used to end its sweep with a bare `wait`, which is #179's
+# mechanism -- an unbounded wait in a teardown -- in the library that all twelve
+# suites share. MEASURED before the fix, on darwin: with a `sleep 300`
+# backgrounded, poly_cleanup had not returned after 12 seconds, and the suite's
+# own watchdog is disarmed by then (`trap 'poly_watchdog_disarm; cleanup' EXIT`),
+# so nothing local bounded it at all.
+#
+# TWO-SIDED ON PURPOSE. The first half stages a job that will NOT finish and
+# requires the helper to give up inside its bound; the second requires it to
+# return success promptly when there is nothing to wait for, so a helper that
+# simply always gave up would fail here.
+sleep 300 &
+STUCK=$!
+t0=$(date +%s)
+if poly_wait_jobs 2 >/dev/null 2>&1; then
+	bad "poly_wait_jobs reported success while a background job was still running"
+else
+	ok "poly_wait_jobs gives up on a job that will not finish"
+fi
+elapsed=$(( $(date +%s) - t0 ))
+# 5 rather than 2: the bound is 2s of polling and the shell is not a real-time
+# system. The number that matters is that it is nowhere near the 300s the job
+# would have taken, and nowhere near the 12s measured before the bound existed.
+if [ "$elapsed" -le 5 ]; then
+	ok "it gave up after ${elapsed}s, not after the job's own 300s"
+else
+	bad "poly_wait_jobs took ${elapsed}s against a 2s bound"
+fi
+# No `wait "$STUCK"` here, deliberately: this file is the guard against
+# unbounded waits, and `jobs -rp` lists only RUNNING jobs, so the poll below is
+# both the reap and the observation.
+kill -9 "$STUCK" 2>/dev/null
+
+if poly_wait_jobs 2 >/dev/null 2>&1; then
+	ok "with nothing left to wait for it returns success"
+else
+	bad "poly_wait_jobs failed with no background jobs running"
+fi
+
 total=$((pass + fail))
-EXPECTED_CHECKS=9
+EXPECTED_CHECKS=12
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

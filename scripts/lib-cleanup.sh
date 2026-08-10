@@ -158,6 +158,42 @@ poly_free_port() {
 	return 1
 }
 
+# poly_wait_jobs waits for this shell's background jobs, BOUNDED.
+#
+# It replaces a bare `wait` in poly_cleanup, which was #179's mechanism sitting
+# in the shared teardown of all twelve suites: an unbounded wait in a teardown,
+# in the library that both of the CI steps #179 fixed are conceptually
+# downstream of.
+#
+# The bound is not belt-and-braces. Every suite traps
+# `poly_watchdog_disarm; cleanup`, so the suite's OWN deadline is already off by
+# the time this runs; locally nothing else bounds it at all, and in CI only the
+# `acceptance` job's step timeout does. MEASURED on darwin before this existed:
+# with a `sleep 300` backgrounded, poly_cleanup had not returned after 12s.
+#
+# Polling `jobs -rp` rather than `wait -n` with a timeout, because `wait -n`
+# needs bash 4.3+ and the developer machines run Apple's bash 3.2. Reading
+# `jobs` is also what reaps a finished child, so this is a real wait and not
+# merely a sleep.
+#
+# Giving up is LOUD and then continues: the remaining sweeps below are exactly
+# what a leftover job needs, so refusing to run them would be the wrong answer
+# to finding one.
+poly_wait_jobs() {
+	local secs="${1:-5}" left
+	for _ in $(seq 1 $((secs * 4))); do
+		left=$(jobs -rp 2>/dev/null)
+		[ -z "$left" ] && return 0
+		sleep 0.25
+	done
+	left=$(jobs -rp 2>/dev/null | tr '\n' ' ')
+	[ -z "$left" ] && return 0
+	printf "  \033[33mWARN\033[0m  background job(s) still running %ss into teardown: %s\n" "$secs" "$left"
+	printf "        Not waiting any longer -- an unbounded wait here is the defect\n"
+	printf "        #179 cost 28 minutes of CI to. The sweeps below still run.\n"
+	return 1
+}
+
 # poly_cleanup stops the server(s) and reports anything that outlived them.
 #
 # The stray check is source inspection rather than a broader kill: a sweep wide
@@ -166,22 +202,28 @@ poly_free_port() {
 # was not before.
 poly_cleanup() {
   local ports="$1" work="${2:-}" bindports="${3:-}"
-  local p
+  local p stopfail=0
   for p in $ports; do
-    poly_stop_server "$p"
+    # The return value is READ. poly_stop_server's loud failure -- "the server
+    # is STILL running after kill -9" -- used to be discarded here, by its only
+    # production caller, which made it a printed opinion by the standard
+    # flake-report.sh:43 sets for itself. Aggregated below into one banner,
+    # because a teardown that failed changes what every check after it means.
+    poly_stop_server "$p" || stopfail=$((stopfail + 1))
   done
 
   if [ -n "$work" ]; then
     # Ours by definition: no other suite has this path on its command line.
     pkill -9 -f "ffmpeg.*$work" 2>/dev/null
   fi
-  wait 2>/dev/null
+  poly_wait_jobs 5
 
   # AFTER the work-dir sweep, because that is what releases the ports a
   # well-behaved teardown was always going to release. What is left here is
   # what the sweep cannot see.
+  local portfail=0
   for p in $bindports; do
-    poly_free_port "$p"
+    poly_free_port "$p" || portfail=$((portfail + 1))
   done
 
   local left=0
@@ -193,4 +235,24 @@ poly_cleanup() {
     printf "        They hold relay ports and will corrupt the next run.\n"
     printf "        Clear them with: pkill -9 -x ffmpeg\n"
   fi
+
+  # ONE VERDICT FOR THE TEARDOWN, and it is deliberately a RETURN and not an
+  # `exit`.
+  #
+  # Every suite installs this as `trap '... cleanup' EXIT`, and an EXIT trap that
+  # exits REPLACES the script's own exit status. Making teardown failures fail
+  # the suite from here would therefore also let a teardown hiccup overwrite a
+  # green run's status and, worse, overwrite a RED one -- turning a specific
+  # product failure into a generic teardown failure. Wiring the verdict through
+  # to the exit status needs each suite's own trap to combine it with $?, which
+  # is twelve edits and its own review. Tracked; see the issue linked from the
+  # PR that added this. Until then this is honest about being a report.
+  if [ "$stopfail" -gt 0 ] || [ "$portfail" -gt 0 ]; then
+    printf "  \033[31mFAIL\033[0m  teardown did not complete: %s server(s) survived kill -9, %s port(s) still held.\n" "$stopfail" "$portfail"
+    printf "        Everything this run reported after the point of failure was\n"
+    printf "        measured against a machine that is not in the state the\n"
+    printf "        teardown claimed. Treat the results as unsound, not as flaky.\n"
+    return 1
+  fi
+  return 0
 }
