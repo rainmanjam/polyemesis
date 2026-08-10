@@ -49,6 +49,7 @@ const (
 var leafSensitivity = map[string]sensitivity{
 	"destination.accountId":                                  sPublic,
 	"destination.audio.codec":                                sPublic,
+	"destination.audio.copy":                                 sPublic,
 	"destination.audio.mono":                                 sPublic,
 	"destination.audioBitrate":                               sPublic,
 	"destination.backupIngestWanted":                         sPublic,

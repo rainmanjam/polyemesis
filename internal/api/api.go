@@ -373,6 +373,20 @@ func (s *Server) Handler() http.Handler {
 				r.Post("/media", s.handleUploadMedia)
 				r.Delete("/media/{name}", s.handleDeleteMedia)
 
+				// Replacing the server's own binary, and putting the previous
+				// one back. #149 added these calling requireSession from
+				// inside the handler, for the reason the group's opening
+				// paragraph gives: requireCSRF passes a token-authenticated
+				// request straight through by design, so membership of the
+				// merely-authenticated group would have left a leaked token
+				// able to overwrite the binary. That reasoning is right and
+				// the placement was the pre-#140 one -- a check the handler
+				// remembers rather than a rule the router imposes. Here the
+				// router imposes it. GET /upgrade/plan stays outside: reading
+				// what an upgrade WOULD do is a read.
+				r.Post("/upgrade/stage", s.handleUpgradeStage)
+				r.Post("/upgrade/rollback", s.handleUpgradeRollback)
+
 				// PUT /settings/automod-key is deliberately NOT here, and the
 				// question was asked rather than skipped. It seals a
 				// third-party API key, which sounds like credential management
@@ -396,14 +410,12 @@ func (s *Server) Handler() http.Handler {
 			// writable BY CREATING A FILE IN IT, and /version is read by the
 			// update banner on every page load. See handleUpgradePlan.
 			//
-			// The two mutating routes call requireSession themselves. Being
-			// inside this group is NOT enough — requireCSRF passes a
-			// token-authenticated request straight through, by design, so a
-			// leaked API token would otherwise be able to replace the server's
-			// own binary. See upgrade.go.
+			// The two MUTATING routes are registered in the session-only group
+			// above, not here: being inside this group is NOT enough --
+			// requireCSRF passes a token-authenticated request straight
+			// through, by design, so a leaked API token would otherwise be
+			// able to replace the server's own binary. See upgrade.go.
 			r.Get("/upgrade/plan", s.handleUpgradePlan)
-			r.Post("/upgrade/stage", s.handleUpgradeStage)
-			r.Post("/upgrade/rollback", s.handleUpgradeRollback)
 			r.Get("/status", s.handleStatus)
 			r.Get("/source", s.handleSource)
 			// What each incoming track is. Per-ingest, not per-destination:

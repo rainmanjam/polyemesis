@@ -225,6 +225,7 @@ func leakRoutes() []string {
 		"/api/v1/schedules",
 		"/api/v1/schedules/runs",
 		"/api/v1/tls",
+		"/api/v1/upgrade/plan",
 	}
 }
 
