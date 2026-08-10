@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -232,8 +233,22 @@ func TestUploadAcceptsRealMediaAndRecordsWhatItIs(t *testing.T) {
 //
 // It touches `started` on entry so a test can wait for the probe to actually be
 // in flight instead of sleeping and hoping.
+//
+// POSIX ONLY, and the cost is stated rather than hidden: on Windows this is a
+// text file with a #! line that CreateProcess will not run, so every test
+// below that needs a probe with a controllable lifetime is skipped there. What
+// goes unverified on Windows is the client-disconnect survival, the probe
+// timeout, the staged-not-listable window and the two WARN lines -- all of
+// which are platform-independent Go over a platform-independent os/exec, but
+// "should be fine" is not a measurement. Issue filed; the fix is a small
+// helper binary built by the test rather than a shell script, which is real
+// work and is not being guessed at here.
 func fakeProbe(t *testing.T, started string, body string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake probe is a POSIX shell script; see the comment on fakeProbe " +
+			"for what this leaves unverified on Windows")
+	}
 	p := filepath.Join(t.TempDir(), "fake-ffprobe")
 	script := "#!/bin/sh\ntouch " + started + "\n" + body + "\n"
 	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {

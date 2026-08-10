@@ -3,6 +3,7 @@ package uploads
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -81,7 +82,11 @@ func TestCommitPublishesAndDiscardAfterwardsIsANoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the committed file is missing: %v", err)
 	}
-	if st.Mode().Perm() != 0o600 {
+	// Windows has no Unix permission bits: os.Chmod there can only toggle the
+	// read-only attribute, so a committed file reports 0666 and the assertion
+	// would be about the platform rather than about Commit. The 0600 is a real
+	// property everywhere it means anything, which is where it is checked.
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v, want 0600", st.Mode().Perm())
 	}
 

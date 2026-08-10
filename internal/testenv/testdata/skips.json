@@ -4,19 +4,19 @@
     {
       "pr": 118,
       "from": 83,
-      "to": 88,
+      "to": 89,
       "packages": {
-        "internal/api": "4 -> 7",
+        "internal/api": "4 -> 8",
         "internal/ffmpeg": "18 -> 20"
       },
-      "why": "The upload probe gate needs a real ffprobe to gate with and a real ffmpeg to build media to feed it, and neither is a property of the code. The five sites are: ffprobeOrSkip (no ffprobe, so there is nothing to gate with); sampleMedia's two (no ffmpeg, and an ffmpeg that cannot mux h264/aac); buildSample's one (same, for internal/ffmpeg); and TestProbeFileReturnsWhenItsContextIsCancelled on Windows, whose fixture is a #!/bin/sh wrapper script chosen precisely because it leaves a grandchild holding the stdout pipe. Every one is 'this environment cannot run the test', none is 'the thing under test changed'.",
-      "alreadyPaidDown": "The first draft of the same tests added ELEVEN sites. sampleMedia and buildSample were extracted so that each environmental reason has exactly one site for the whole file instead of one per test, which also took two pre-existing per-test build skips with it. See issue #187: the real fix is making these fail rather than skip when POLYEMESIS_REQUIRE_FFMPEG is set in CI, at which point all five can come back out."
+      "why": "The upload probe gate needs a real ffprobe to gate with and a real ffmpeg to build media to feed it, and neither is a property of the code. The six sites are: ffprobeOrSkip (no ffprobe, so there is nothing to gate with); sampleMedia's two (no ffmpeg, and an ffmpeg that cannot mux h264/aac); buildSample's one (same, for internal/ffmpeg); and TWO Windows ones -- TestProbeFileReturnsWhenItsContextIsCancelled, whose fixture is a #!/bin/sh wrapper script chosen precisely because it leaves a grandchild holding the stdout pipe, and internal/api's fakeProbe, which is the same shape and which Windows will not execute. Every one is 'this environment cannot run the test', none is 'the thing under test changed'.",
+      "alreadyPaidDown": "The first draft of the same tests added ELEVEN sites. sampleMedia and buildSample were extracted so that each environmental reason has exactly one site for the whole file instead of one per test, which also took two pre-existing per-test build skips with it. See issue #187: the real fix is making these fail rather than skip when POLYEMESIS_REQUIRE_FFMPEG is set in CI, at which point the four FFmpeg ones can come back out. The two Windows ones need a different fix -- a small helper binary built by the test instead of a shell script -- and are issue #190."
     }
   ],
-  "total": 88,
+  "total": 89,
   "byPackage": {
     "cmd/polyemesis": 1,
-    "internal/api": 7,
+    "internal/api": 8,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
