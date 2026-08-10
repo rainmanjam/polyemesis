@@ -323,22 +323,44 @@ jobs:
       #
       # bash on all three: windows-latest ships Git Bash, so one script serves
       # every runner rather than a PowerShell fork nobody maintains.
+      # timeout-minutes because this step BACKGROUNDS A PROCESS, and a step that
+      # holds a pid can wait on something that never comes. 10 against a
+      # measured 2-4s (n=21) is enormous headroom, and it is sized for the
+      # unbounded `go build` inside rather than the server: a cold Windows build
+      # cache is the long pole here. Deliberately below the job's
+      # timeout-minutes: 30, per the discipline at :154-158 and :305-311 --
+      # whichever timeout fires first decides how much you learn, so the
+      # narrowest one has to.
       - name: Start the server and check it serves
+        timeout-minutes: 10
         shell: bash
         run: |
           set -uo pipefail
           go build -o polyemesis-smoke ./cmd/polyemesis
           ./polyemesis-smoke -addr 127.0.0.1:8123 -data ./smoke-data -log warn &
           pid=$!
+          # THE CLEANUP IS A TRAP, AND THE VERDICT IS EMITTED BEFORE IT RUNS.
+          #
+          # This step used to kill the server and then block in an unbounded
+          # shell `wait` on the server pid before printing its answer. That wait
+          # never returns against a `kill` Git-Bash cannot deliver to a native
+          # .exe: it hung for 28 minutes and was cancelled by the job timeout,
+          # discarding an answer the loop below had already decided in 2 seconds.
+          # Establishing that the branch was innocent then took building both
+          # refs, hashing binaries and surveying 14 runs, to recover a fact this
+          # step knew and threw away.
+          #
+          # A trap covers more than the old inline kill did (any early exit, not
+          # just the one path), and best-effort is sufficient: nothing later in
+          # this job binds 8123, polyemesis-smoke is built once and never
+          # rebuilt so there is no Windows sharing violation to fear, and the
+          # runner VM is destroyed at the end of the job.
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
           ok=no
           for _ in $(seq 1 40); do
             sleep 0.5
             if curl -fsS http://127.0.0.1:8123/api/v1/health >/dev/null 2>&1; then ok=yes; break; fi
           done
-          # Killed before the assertion so a failure cannot leave a runner with
-          # an orphaned server holding a port for the rest of the job.
-          kill "$pid" 2>/dev/null || true
-          wait "$pid" 2>/dev/null || true
           if [ "$ok" != yes ]; then
             echo "the server never answered /health on ${{ matrix.os }}"
             exit 1
@@ -366,17 +388,27 @@ jobs:
       # per-band energy back out of the file. A destination that silently
       # carried the wrong mix would pass any check that only asked whether
       # FFmpeg exited 0.
+      # timeout-minutes for the same reason as the step above: it backgrounds a
+      # process. 8 against a measured 91-93s (n=21) is roughly 5x headroom, and
+      # it is below the job's 30 on purpose -- a step timeout names the step
+      # that hung, a job timeout names nothing.
       - name: Push a broadcast through it and measure the output
+        timeout-minutes: 8
         shell: bash
         run: |
           set -uo pipefail
           rm -rf ./data
           ./polyemesis-smoke -addr 127.0.0.1:8099 -data ./data -log warn > bcast-server.log 2>&1 &
           pid=$!
+          # Same shape as the step above: a trap, and the verdict before the
+          # cleanup. The unbounded shell `wait` that used to sit between `rc` and the
+          # report was unbounded, and on Windows it is unbounded against a kill
+          # that may never land. This step is the last in the job and binds a
+          # different port (8099) from the one above, so a best-effort kill
+          # leaves nothing that anything later depends on.
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
           go run scripts/smoketest.go
           rc=$?
-          kill "$pid" 2>/dev/null || true
-          wait "$pid" 2>/dev/null || true
           if [ "$rc" -ne 0 ]; then
             echo "--- server log ---"
             cat bcast-server.log || true
