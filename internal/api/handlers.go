@@ -1455,10 +1455,38 @@ func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
-	var opts routing.PresetOpts
-	// A body is optional: without one the OBS-convention defaults apply.
-	if r.ContentLength > 0 && !decodeJSON(w, r, &opts) {
+	// A body is optional: without one the OBS-convention defaults apply --
+	// which is what GET /routing/presets advertises under "defaults", and what
+	// this handler's own comment has always claimed.
+	//
+	// It was not true. The old code started from `var opts routing.PresetOpts`,
+	// so a bodyless apply ran with every track index at Go's zero value, and
+	// "mic only" compiled [0:a:0] -- the full mix -- while the catalogue two
+	// routes away advertised micTrack 2. The advertised value and the applied
+	// value disagreed, and only a client that sent a body ever got the one it
+	// was promised.
+	opts := routing.DefaultPresetOpts()
+
+	// Read the body unconditionally rather than gating on Content-Length.
+	// A chunked request has ContentLength -1 WHATEVER it is carrying, so the
+	// old `r.ContentLength > 0` guard silently discarded a preset body that
+	// was really there and applied the defaults instead.
+	body, ok := readJSONBody(w, r)
+	if !ok {
 		return
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		// FULL REPLACEMENT, not a patch over the defaults. A body means the
+		// client is stating every option it cares about, and an omitted field
+		// has always meant zero: {"micTrack":1} selects track 2 and leaves
+		// cleanTrack at 0, not at the advertised 1. Decoding on top of the
+		// defaults would quietly change what every existing partial body
+		// means, which is a larger break than the one being fixed.
+		opts = routing.PresetOpts{}
+		if err := decodeJSONInto(body, &opts); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), s.eng().Source(), opts)
 	if err != nil {
