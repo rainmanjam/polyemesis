@@ -91,17 +91,36 @@ type coverageLedger struct {
 	// max()-clamped on regeneration, exactly like DifferentialFloor, which is
 	// what stops `-update-coverage` from shrinking the committed evidence to fit
 	// a regression.
-	SentinelWitnessFloor  int             `json:"sentinelWitnessFloor"`
-	UnstableCeiling       int             `json:"unstableCeiling"`
-	InertCeiling          int             `json:"inertCeiling"`
-	VarianceExemptCeiling int             `json:"varianceExemptCeiling"`
-	Totals                coverageTotals  `json:"totals"`
-	Partition             partitionTotals `json:"partition"`
-	Routes                []coverageRoute `json:"routes"`
-	SweepVerdicts         []sweepVerdict  `json:"sweepVerdicts"`
-	Excuses               []coverageExcus `json:"excuses"`
-	Shapes                []coverageShape `json:"shapes"`
-	Deferred              []coverageDefer `json:"deferred"`
+	SentinelWitnessFloor  int `json:"sentinelWitnessFloor"`
+	UnstableCeiling       int `json:"unstableCeiling"`
+	InertCeiling          int `json:"inertCeiling"`
+	VarianceExemptCeiling int `json:"varianceExemptCeiling"`
+	// THE SHAPE REGISTRY HAD NO RATCHET AT ALL, and it is the surface #169 is
+	// about. Seven numbers here were clamped and all seven were about routes.
+	// Deleting a shape row -- the documented response to a shape check that
+	// fires -- and running the documented regeneration command moved
+	// `shapesEmitted` 11 -> 10 inside a 2,064-line JSON and left the whole
+	// strict suite green. `-update-coverage` cannot launder a route and
+	// laundered a shape without complaint.
+	//
+	// ShapeFloor is max()-clamped like the two differential floors: the number
+	// of shapes this API is known to emit may rise freely and falls only by a
+	// hand edit that says, on purpose, "this API stopped emitting this shape".
+	ShapeFloor int `json:"shapeFloor"`
+	// And the mirror, min()-clamped like every ceiling: the number of emitted
+	// shapes nobody inspects may fall freely and rises only by hand. This is
+	// the one number this round moved in the loosening direction (4 -> 6, two
+	// jurisdiction downgrades) and it was the one number with nothing resisting
+	// it -- computed by fillDerivedTotals, written, and compared only for
+	// equality against a copy that regeneration rewrites.
+	ShapesNotInspectedCeiling int             `json:"shapesNotInspectedCeiling"`
+	Totals                    coverageTotals  `json:"totals"`
+	Partition                 partitionTotals `json:"partition"`
+	Routes                    []coverageRoute `json:"routes"`
+	SweepVerdicts             []sweepVerdict  `json:"sweepVerdicts"`
+	Excuses                   []coverageExcus `json:"excuses"`
+	Shapes                    []coverageShape `json:"shapes"`
+	Deferred                  []coverageDefer `json:"deferred"`
 	// CitedIssues is every issue number any excuse or deferral names. It is
 	// HAND-MAINTAINED in the direction that adds, and regenerable only in the
 	// direction that removes: writeLedger intersects the live citations with the
@@ -205,7 +224,55 @@ type coverageShape struct {
 	Emitted   bool   `json:"emitted"`
 	Inspected bool   `json:"inspected"`
 	By        string `json:"by"`
-	Note      string `json:"note"`
+	// Issue is the STRUCTURED deferral for an emitted-but-uninspected shape,
+	// and it replaces a substring search over Note.
+	//
+	// The predicate it replaces was `Index(note,"Deferred:") >= 0 &&
+	// Contains(note[i:], "#")`, which is discharge by punctuation: "Deferred: #",
+	// "Deferred: #0" and "Deferred: the Set-Cookie # header, which defers
+	// nothing" all discharged, and the last of those was the negative case the
+	// guard's own table listed as must-fail. Worse, a citation living inside
+	// free text never reached citedIssues(), so shape deferrals were the one
+	// class of citation in this ledger that skipped BOTH the form check
+	// (^#[0-9]{1,5}$) and the git liveness scan. Two shapes downgraded in this
+	// round cited #168 in exactly that unchecked channel.
+	//
+	// Being a field rather than prose is what makes both of those free: it is
+	// fed to citedIssues() like every other citation, and it is what step 7
+	// reads, so blanking every Note cannot move a verdict. See
+	// TestBlankingEveryShapeNoteChangesNoVerdict, which now mutates this
+	// registry and re-runs the real decision rather than a helper written to
+	// ignore prose.
+	Issue string `json:"issue,omitempty"`
+	Note  string `json:"note"`
+}
+
+// shapeVerdict is THE decision step 7 acts on, extracted so that the guard
+// against prose-derived coverage can re-run the real thing.
+//
+// It reads Emitted, Inspected and Issue. It does not read Note, and the test
+// that proves so blanks Note across the live registry and re-runs THIS
+// function -- which is what makes that test capable of failing.
+func shapeVerdict(sh coverageShape) string {
+	switch {
+	case !sh.Emitted:
+		return "absent"
+	case sh.Inspected:
+		return "inspected"
+	case issueRef.MatchString(sh.Issue):
+		return "deferred"
+	default:
+		return "FAILS-THE-LEDGER"
+	}
+}
+
+// shapeVerdicts is shapeVerdict over a whole registry, keyed by shape.
+func shapeVerdicts(shapes []coverageShape) map[string]string {
+	out := make(map[string]string, len(shapes))
+	for _, sh := range shapes {
+		out[sh.Shape] = shapeVerdict(sh)
+	}
+	return out
 }
 
 type coverageDefer struct {
@@ -465,8 +532,15 @@ type excuseObservation struct {
 	Method     string
 	ReadStatus int
 	ReadBody   string
-	AnonBody   string
-	Identical  bool
+	// ReadRaw is the rawResponse the identity predicate actually compares.
+	// The failure message used to print ReadBody against AnonBody -- a body
+	// against a whole rendered response -- so the two sides of "byte-identical"
+	// were never the two things it compared. With rawResponse now rendering
+	// every header, that asymmetry stopped being survivable: the leaked header
+	// appeared on one side of the diff and the other side had no headers at all.
+	ReadRaw   string
+	AnonBody  string
+	Identical bool
 }
 
 // driveExcuse issues the excuse's claim as a real request, for ONE method.
@@ -494,7 +568,7 @@ func driveExcuse(t *testing.T, h http.Handler, read, key, method string) excuseO
 	w := do(t, h, r)
 	return excuseObservation{
 		Key: key, Method: method,
-		ReadStatus: w.Code, ReadBody: w.Body.String(),
+		ReadStatus: w.Code, ReadBody: w.Body.String(), ReadRaw: rd,
 		AnonBody: anon, Identical: rd == anon,
 	}
 }
@@ -614,7 +688,7 @@ func assertExcusesDischargeByRunning(t *testing.T, h http.Handler, s *Server, re
 					"a read-scoped token receive byte-identical responses, and they do not. "+
 					"That predicate is the ONLY thing standing between this route and the "+
 					"value sweep, so it is not decorative.\nread: %s\nanon: %s",
-					pair, truncateForFailure(obs.ReadBody), truncateForFailure(obs.AnonBody))
+					pair, truncateForFailure(obs.ReadRaw), truncateForFailure(obs.AnonBody))
 			}
 			// (c) THE RULE THAT CANNOT BE EXCUSED AWAY.
 			if obs.ReadStatus/100 == 2 && strings.TrimSpace(obs.ReadBody) != "" && !want.AnonMatchesRead {
@@ -967,38 +1041,61 @@ func methodNotAllowedProbes() []nonTrieProbe {
 // a ledger that only counted routes would have called both covered.
 func emittedShapes() []coverageShape {
 	return []coverageShape{
-		{"json-body", true, true, "TestReadTokenReceivesNoCredentialOnAnyRoute",
+		{"json-body", true, true, "TestReadTokenReceivesNoCredentialOnAnyRoute", "",
 			"the value sweep: real read-bearer bytes scanned for every planted sentinel"},
-		{"response-header/Location", true, true, "TestAConfiguredRedirectNeverCachesAWatchToken",
-			"the HTTPS redirect's Location carries the request URI verbatim, watch token included"},
-		{"response-header/Set-Cookie", true, true, "TestPlayoutCookieHandoff",
+		// NOT inspected, corrected from Inspected:true. This row named
+		// TestAConfiguredRedirectNeverCachesAWatchToken, which is declared in
+		// cmd/polyemesis/redirect_test.go -- package main. It is a real test and
+		// it really does assert this header, but it is not reachable from this
+		// ledger: it does not run when this ledger runs, no -run filter here
+		// selects it, and the TestMain preflight that gives these obligations
+		// jurisdiction does not cover it. Recording it as this package's
+		// inspection was a claim about another package's test suite.
+		//
+		// Downgraded rather than deleted, because the SHAPE is still emitted here
+		// and still uninspected here, which is the fact the ledger exists to
+		// carry. See TestEveryInspectedShapeNamesAProofThisPackageCanRun.
+		{"response-header/Location", true, false, "", "#168",
+			"the HTTPS redirect's Location carries the request URI verbatim, watch token " +
+				"included. The assertion lives in cmd/polyemesis (package main), out of " +
+				"this ledger's jurisdiction. rawResponse now renders EVERY response header, " +
+				"so the invariance sweep does read headers -- but only for the routes it " +
+				"sweeps, and the redirect is not one of them."},
+		// Re-pointed, not downgraded: TestPlayoutCookieHandoff does not exist and
+		// never did. The real test is TestPlayoutCookieHandoffSurvives, in this
+		// package. A bare string naming a proof was free to be wrong because
+		// nothing resolved it.
+		{"response-header/Set-Cookie", true, true, "TestPlayoutCookieHandoffSurvives", "",
 			"the playout watch cookie"},
-		{"response-header/Cache-Control", true, true, "TestAConfiguredRedirectNeverCachesAWatchToken",
-			"whether a credential-bearing response may be stored"},
-		{"response-header/Content-Disposition", true, false, "",
+		{"response-header/Cache-Control", true, false, "", "#168",
+			"whether a credential-bearing response may be stored. Same jurisdiction " +
+				"problem as response-header/Location above: asserted in package main, " +
+				"unasserted here for the routes outside the invariance sweep."},
+		{"response-header/Content-Disposition", true, false, "", "#168",
 			"download filenames; media names only, no stored credential. RE-POINTED from " +
-				"#154, which commit ae8df24 announces closing: what remains is the general " +
-				"fact that response HEADERS are not inspected by any sweep. Deferred: #168"},
-		{"streaming-media", true, true, "playoutManifestBytes",
+				"#154, which commit ae8df24 announces closing: what remains is that the " +
+				"download routes are excused from the sweep entirely, so no principal-pair " +
+				"comparison reads their headers."},
+		{"streaming-media", true, true, "playoutManifestBytes", "",
 			"the HLS manifest and its segments -- the shape a body sweep reads none of, " +
 				"and the one that escaped the previous audit"},
-		{"file-download", true, false, "",
+		{"file-download", true, false, "", "#168",
 			"recordings, stems, clips and exports. #154 decided this and is CLOSED by " +
 				"ae8df24: every download route now answers a read token 403, which the " +
 				"excuse registry drives. What is still uninspected is the shape itself " +
-				"for the principals entitled to it. Deferred: #168"},
-		{"websocket-frame", true, true, "websocketFrames + TestEveryEventTypeHasAWebSocketPolicy",
+				"for the principals entitled to it."},
+		{"websocket-frame", true, true, "websocketFrames + TestEveryEventTypeHasAWebSocketPolicy", "",
 			"one policy row per events.Type over a CLOSED table; an unclassified type " +
 				"fails the build and is dropped for a read scope"},
-		{"sse", false, false, "", "ABSENT: this API emits no server-sent events"},
-		{"mqtt-retained-topic", true, false, "",
+		{"sse", false, false, "", "", "ABSENT: this API emits no server-sent events"},
+		{"mqtt-retained-topic", true, false, "", "#160",
 			"cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal " +
 				"and never any. Scrubbed at source by supervisor.scrub; the broker-side " +
-				"consumer audit is deferred: #160"},
-		{"on-disk-process-log", true, true, "TestRunningDestinationLeaksNoSentinelOnAnyEgress",
+				"consumer audit is the deferral."},
+		{"on-disk-process-log", true, true, "TestRunningDestinationLeaksNoSentinelOnAnyEgress", "",
 			"the file that goes into support tarballs; asserted from disk"},
-		{"slog-output", true, false, "",
-			"the server's own structured log. Deferred: #160"},
+		{"slog-output", true, false, "", "#160",
+			"the server's own structured log."},
 	}
 }
 
@@ -1291,10 +1388,10 @@ func TestLedgerPreflight(t *testing.T) {
 		// route is excused." passed a full strict run before this line existed --
 		// prose asserting the exact opposite of the 57 excused pairs recorded
 		// three keys below it.
-		if want.Note != ledgerNote {
+		if live := ledgerNote(t); want.Note != live {
 			t.Errorf("the note in %s is not the one this build writes. It is the first "+
 				"thing a reader trusts and nothing was comparing it.\ncommitted: %q\nlive: %q",
-				coveragePath, want.Note, ledgerNote)
+				coveragePath, want.Note, live)
 		}
 		assertProseSectionsEcho(t, want)
 	}
@@ -1375,6 +1472,50 @@ func TestLedgerPreflight(t *testing.T) {
 		t.Errorf("%d (pattern, pointer) pairs are exempted from the variance rule and the "+
 			"committed ceiling is %d.", len(nonCredentialVariance), want.VarianceExemptCeiling)
 	}
+	// THE SHAPE RATCHETS. Everything above this line is about routes, which is
+	// exactly why deleting a shape row and regenerating was green.
+	liveShapes := fillDerivedTotals(coverageTotals{}, nil)
+	if liveShapes.ShapesEmitted < want.ShapeFloor {
+		t.Errorf("A SHAPE ROW DISAPPEARED. This API is recorded as emitting %d shapes and "+
+			"the committed floor is %d. Deleting the row is the documented response to a "+
+			"shape check firing, and until this floor existed `%s` banked the deletion: "+
+			"shapesEmitted moved inside 2000 lines of JSON and the strict suite stayed "+
+			"green. A shape that genuinely stopped being emitted is a hand edit of "+
+			"shapeFloor in %s, and the sentence somebody has to write is \"this API no "+
+			"longer produces this kind of output\".",
+			liveShapes.ShapesEmitted, want.ShapeFloor, ledgerRegenCommand(t), coveragePath)
+	}
+	if liveShapes.ShapesNotInspected > want.ShapesNotInspectedCeiling {
+		t.Errorf("%d emitted shapes are inspected by nothing and the committed ceiling is "+
+			"%d. Downgrading a shape to Inspected:false is sometimes the honest move -- "+
+			"two rows in this registry were downgraded because their proof lives in "+
+			"package main -- but it is a LOOSENING, and regeneration may not bank it. "+
+			"Raise shapesNotInspectedCeiling in %s by hand.",
+			liveShapes.ShapesNotInspected, want.ShapesNotInspectedCeiling, coveragePath)
+	}
+
+	// THE RATCHETS' OWN GUARD, called from here rather than left as a free-
+	// standing test. Two reasons, both found by measurement: `rm
+	// internal/api/ledger_ratchet_test.go` deleted 152 lines and left the whole
+	// suite green because nothing referenced it, and the TestMain preflight
+	// forces only ^TestLedgerPreflight$, so a guard outside it does not run in
+	// the filtered invocation the preflight exists to survive. A compile-time
+	// call fixes both.
+	assertRatchetFieldsAreClamped(t)
+
+	// The same two reasons, for the file that holds THIS ROUND's headline fix.
+	// Measured: `rm internal/api/shape_reference_test.go` deletes 314 lines
+	// containing both shape guards and leaves `POLYEMESIS_LEDGER=strict go test
+	// ./internal/api` at ok. The round diagnosed the hatch for
+	// ledger_ratchet_test.go and closed it, then wrote a new file for the
+	// headline defect and left the same hatch open in it — which is the pattern
+	// this whole exercise is about, appearing one file to the left.
+	//
+	// Calling the Test functions directly rather than extracting helpers: the
+	// call IS the compile-time reference, and it is the smallest change that
+	// buys both properties.
+	TestEveryInspectedShapeNamesAProofThisPackageCanRun(t)
+	TestBlankingEveryShapeNoteChangesNoVerdict(t)
 
 	// 6. STRICT MODE. CI sets POLYEMESIS_LEDGER=strict and the counterpart
 	// proofs run from HERE as well, so no single -run filter silences both.
@@ -1389,15 +1530,25 @@ func TestLedgerPreflight(t *testing.T) {
 	// 7. SHAPES. A shape that is emitted and neither inspected nor accompanied by
 	// a note recording the deferral fails.
 	for _, sh := range emittedShapes() {
-		if !sh.Emitted || sh.Inspected {
+		// shapeVerdict, NOT a substring search over the note. The predicate
+		// this replaces was Index(note,"Deferred:") >= 0 && Contains(note[i:],
+		// "#"), under which "Deferred: #", "Deferred: #0" and "Deferred: the
+		// Set-Cookie # header, which defers nothing" all discharged. The
+		// deferral is now the Issue FIELD, which means it is also carried into
+		// citedIssues() and therefore inherits the form check and the git
+		// liveness scan that every other citation in this ledger already had.
+		if shapeVerdict(sh) != "FAILS-THE-LEDGER" {
 			continue
 		}
-		if !strings.Contains(sh.Note, "Deferred:") && !strings.Contains(sh.Note, "#") {
-			t.Errorf("the shape %q is emitted, is not inspected, and carries no deferral. "+
-				"The playout manifest was a streaming response and the argv leak travelled "+
-				"through a WebSocket frame -- both are SHAPES, not routes, and a ledger "+
-				"that counted only routes called both covered.", sh.Shape)
-		}
+		t.Errorf("the shape %q is emitted, is not inspected, and its Issue field is not an "+
+			"issue reference (got %q). Set `Issue: \"#NNN\"` on the row -- a bare number, "+
+			"one to five digits, hash included -- and add that number to citedIssues in %s "+
+			"by hand.\n"+
+			"The playout manifest was a streaming response and the argv leak travelled "+
+			"through a WebSocket frame; both are SHAPES, not routes, and a ledger that "+
+			"counted only routes called both covered. A deferral written in the note "+
+			"instead of the field discharges nothing, and deliberately: prose is not "+
+			"reachable by the citation checks.", sh.Shape, sh.Issue, coveragePath)
 	}
 
 	// 8. CITATIONS ran at step 4, before the write. The liveness half is the git
@@ -1559,6 +1710,15 @@ func citedIssues() []string {
 			set[d.Issue] = true
 		}
 	}
+	// Shapes cite here too, which they did not until this round. Their
+	// deferrals used to be free text inside Note, so they reached neither the
+	// form check nor the git liveness scan -- the only citations in this ledger
+	// that were checked by nothing. Reading the field puts them under both.
+	for _, sh := range emittedShapes() {
+		if sh.Issue != "" {
+			set[sh.Issue] = true
+		}
+	}
 	out := make([]string, 0, len(set))
 	for k := range set {
 		out = append(out, k)
@@ -1662,8 +1822,8 @@ func readLedger(t *testing.T) coverageLedger {
 	t.Helper()
 	b, err := os.ReadFile(coveragePath)
 	if err != nil {
-		t.Fatalf("read %s: %v\nRun `go test ./internal/api -run TestRouteCoverageLedger "+
-			"-update-coverage` to create it.", coveragePath, err)
+		t.Fatalf("read %s: %v\nRun `%s` to create it.",
+			coveragePath, err, ledgerRegenCommand(t))
 	}
 	var l coverageLedger
 	if err := json.Unmarshal(b, &l); err != nil {
@@ -1687,7 +1847,7 @@ func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute,
 	shapes := emittedShapes()
 
 	out := coverageLedger{
-		Note:          ledgerNote,
+		Note:          ledgerNote(t),
 		Totals:        totals,
 		Partition:     part,
 		Routes:        routes,
@@ -1735,6 +1895,11 @@ func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute,
 	// of its four witnessed credentials is a `-update-coverage` away from being
 	// committed as the new truth.
 	out.SentinelWitnessFloor = max(countSentinelWitnesses(verdicts), prev.SentinelWitnessFloor)
+	// The shape registry's two ratchets. Deleting a row lowers ShapeFloor and
+	// max() refuses to bank it; downgrading a row to not-inspected raises
+	// shapesNotInspected and min() refuses to bank that.
+	out.ShapeFloor = max(totals.ShapesEmitted, prev.ShapeFloor)
+	out.ShapesNotInspectedCeiling = min(totals.ShapesNotInspected, prev.ShapesNotInspectedCeiling)
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal ledger: %v", err)
@@ -2151,17 +2316,25 @@ func assertRouteSetsEqual(t *testing.T, want, got []coverageRoute) {
 	}
 }
 
-const ledgerNote = "The route coverage ledger for internal/api. Regenerated ONLY by " +
-	"`go test ./internal/api -run TestRouteCoverageLedger -update-coverage`, which " +
-	"refreshes the route list and the derived totals and NOTHING else -- it cannot " +
-	"suppress a missing counterpart, a failing positive control, or a raised ceiling. " +
-	"Read `excuses` to answer \"what is NOT covered, and why is that safe\". " +
-	"MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter " +
-	"credential, which is a real permanent residual on the stderr path for very short " +
-	"secrets, covered only by the best-effort alerts.Redact pass. Every credential this " +
-	"system mints or accepts is longer (SRT refuses a passphrase under 10, publish " +
-	"tokens are 24), and the failure direction of the floor itself is over-masking, " +
-	"never disclosure."
+// ledgerNote is a FUNCTION rather than a const because the regeneration command
+// it quotes is derived from the running test's name. The previous version was a
+// const naming TestRouteCoverageLedger, which had been renamed to
+// TestLedgerPreflight; the note stayed, and the command it published printed
+// "[no tests to run]". Committed prose does not follow a rename. A t.Name() does.
+func ledgerNote(t *testing.T) string {
+	t.Helper()
+	return "The route coverage ledger for internal/api. Regenerated ONLY by " +
+		"`" + ledgerRegenCommand(t) + "`, which " +
+		"refreshes the route list and the derived totals and NOTHING else -- it cannot " +
+		"suppress a missing counterpart, a failing positive control, or a raised ceiling. " +
+		"Read `excuses` to answer \"what is NOT covered, and why is that safe\". " +
+		"MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter " +
+		"credential, which is a real permanent residual on the stderr path for very short " +
+		"secrets, covered only by the best-effort alerts.Redact pass. Every credential this " +
+		"system mints or accepts is longer (SRT refuses a passphrase under 10, publish " +
+		"tokens are 24), and the failure direction of the floor itself is over-masking, " +
+		"never disclosure."
+}
 
 // deferredWithReasons is I6: everything knowingly not done, each stating what is
 // deferred, why it is safe to defer, and what would make it unsafe.
@@ -2178,11 +2351,63 @@ func deferredWithReasons() []coverageDefer {
 			What: "chi.Walk is complete over the routing TRIE, and the trie is not the MUX.",
 			WhySafe: "r.NotFound is the build-time embedded UI: an embed.FS with no server " +
 				"state behind it, and anonymous and read-scoped responses are " +
-				"byte-identical across nine executed probes. The GUARD is fixed in this " +
-				"PR; the architectural residual is not.",
+				"byte-identical across nine executed probes. rawResponse now renders " +
+				"EVERY response header rather than a hand-listed five, so a header that " +
+				"varies by principal on any swept or probed route is a failure by name; " +
+				"the hand-listed set was measured to miss an Authorization echo into " +
+				"X-Principal-Echo on an immutable, publicly-cacheable asset response. " +
+				"The GUARD is fixed; the architectural residual is not.",
 			WhatWouldMakeItUnsafe: "the UI handler reading server state, or varying by " +
 				"principal. Either turns an unenumerated surface into an unguarded one.",
 			Issue: "#156",
+		},
+		{
+			// RECORDED, NOT FIXED, and recorded because the honest artifact is
+			// worth more than a half-wired guard. Two independent runs measured
+			// it: with internal/web/dist populated, a Cache-Control that varies
+			// by principal FAILS the notFound probe by name; with dist carrying
+			// only .gitkeep -- which is the state of a CI checkout and of this
+			// repository -- the same mutation passes in 0.71s. fs.WalkDir over
+			// web.FS() returns "." and ".gitkeep", so eight of the nine probes
+			// take the "UI not built" branch.
+			ID: "not-found-probes-do-not-enter-the-asset-branch",
+			What: "TestTheNonTrieSurfacesAreDriven/notFound reports coverage of the " +
+				"embedded-UI asset branch and, in every configuration this suite is " +
+				"actually run in, never enters it. internal/web/dist contains only " +
+				".gitkeep unless the UI has been built, and CI does not build it before " +
+				"the Go job.",
+			WhySafe: "the branch that IS driven -- \"UI not built\" -- is the one a " +
+				"deployment without a built UI serves, and it is genuinely principal-" +
+				"invariant across the probes. The asset branch serves bytes from an " +
+				"embed.FS with no server state behind it.",
+			WhatWouldMakeItUnsafe: "any principal-dependent behaviour in the asset branch " +
+				"of web.Handler, which is exactly what this probe claims to cover and " +
+				"does not. Closing it needs the UI built before the Go job runs, which " +
+				"is a second CI build and a change outside this package; it is not " +
+				"half-wired here on purpose, because a probe that sometimes enters the " +
+				"branch is worse evidence than one that says it never does.",
+			Issue: "#167",
+		},
+		{
+			// The residual of THIS round's own run-filter scanner, stated at the
+			// width the guard actually has rather than the width its name
+			// suggests.
+			ID: "run-filter-scan-is-limited-to-regeneration-commands",
+			What: "TestEveryDocumentedRunFilterNamesALiveTest reads every .go file in " +
+				"this package and the artifact, but only matches a -run whose line also " +
+				"carries -update-coverage. A -run naming a dead test in any other kind " +
+				"of sentence is not checked.",
+			WhySafe: "the failure this catches is a maintainer copying a regeneration " +
+				"command that silently regenerates nothing, and -update-coverage is what " +
+				"makes a mention that instruction. The package contains at least one " +
+				"genuine illustration (main_test.go's sentence about arbitrary -run " +
+				"filters) that a wider pattern would report as a failure.",
+			WhatWouldMakeItUnsafe: "a documented workflow other than regeneration that " +
+				"tells a reader to run a named test. Nothing here can tell an " +
+				"illustration from an instruction, and the version of this guard that " +
+				"answered that by hand-picking two files missed the identical dead " +
+				"string in a third.",
+			Issue: "#168",
 		},
 		{
 			ID: "G3",
@@ -2322,7 +2547,8 @@ func deferredWithReasons() []coverageDefer {
 			ID: "ratchet-raises-rest-on-ordinary-review",
 			What: "every ratchet in this file -- excusedCeiling, " +
 				"counterpartlessExcusedCeiling, differentialFloor, sentinelWitnessFloor, " +
-				"unstableCeiling, inertCeiling, varianceExemptCeiling, and now citedIssues " +
+				"unstableCeiling, inertCeiling, varianceExemptCeiling, shapeFloor, " +
+				"shapesNotInspectedCeiling, and citedIssues " +
 				"-- is enforced by making the loosening direction a HAND EDIT of the " +
 				"committed artifact. That is a control only to the extent that somebody " +
 				"reads the diff.",
@@ -2379,9 +2605,24 @@ func rawBody(t *testing.T, h http.Handler, sign func(*http.Request), path string
 	return do(t, h, r).Body.String()
 }
 
-// rawResponse renders status, the headers that can carry a credential, and the
-// body into one comparable string, so "byte-identical for two principals" is an
-// assertion about the whole response rather than about its body.
+// rawResponse renders status, EVERY response header, and the body into one
+// comparable string, so "byte-identical for two principals" is an assertion
+// about the whole response rather than about its body.
+//
+// It used to render a HAND-LISTED five headers -- Content-Type, Location,
+// Set-Cookie, Cache-Control, Allow -- which is this ledger's own thesis (a
+// guard complete over a set that excludes something) sitting inside the proof
+// cited as bringing the NotFound surface into frame. Measured: with
+// internal/web/dist populated, echoing the caller's bearer token into
+// `X-Principal-Echo` on an immutable, publicly-cacheable asset response passed
+// the entire suite. That is the same species as the cacheable 301 carrying a
+// watch token in Location that this project has already shipped once.
+//
+// Enumerating the map instead of a list is smaller AND complete, and it is
+// direction-safe: a header that legitimately varies by principal now has to be
+// argued for in nonCredentialVariance rather than omitted silently. The keys
+// are sorted because http.Header is a map and an unsorted render would make
+// this comparison order-dependent -- a flake that reads as a leak.
 func rawResponse(t *testing.T, h http.Handler, sign func(*http.Request), method, path string) string {
 	t.Helper()
 	r := httptest.NewRequest(method, path, nil)
@@ -2391,8 +2632,13 @@ func rawResponse(t *testing.T, h http.Handler, sign func(*http.Request), method,
 	w := do(t, h, r)
 	var b strings.Builder
 	b.WriteString(strconv.Itoa(w.Code))
-	for _, k := range []string{"Content-Type", "Location", "Set-Cookie", "Cache-Control", "Allow"} {
-		if v := w.Header().Get(k); v != "" {
+	keys := make([]string, 0, len(w.Header()))
+	for k := range w.Header() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, v := range w.Header().Values(k) {
 			b.WriteString("|" + k + ": " + v)
 		}
 	}
