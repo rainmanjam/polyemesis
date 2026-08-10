@@ -360,7 +360,15 @@ func (p *Pending) Commit() (File, error) {
 	// serves it over the API and the FFmpeg children it spawns run as the same
 	// user. os.CreateTemp already makes the file 0600, so the earlier 0644 was
 	// actively WIDENING permissions on operator media for no reader that exists.
+	//
+	// A failure here UNDOES the rename rather than leaving the file. It is the
+	// one window where the file is published and the caller is about to be told
+	// the upload failed, and a listable file nobody was told about is the state
+	// this whole path was reshaped to make impossible. Save's old shape leaked
+	// exactly this: its cleanup was a Remove of the temp name, which the rename
+	// had already emptied.
 	if err := os.Chmod(final, 0o600); err != nil {
+		_ = os.Remove(final)
 		return File{}, fmt.Errorf("chmod upload: %w", err)
 	}
 	return File{

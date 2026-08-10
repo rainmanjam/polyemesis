@@ -122,6 +122,54 @@ func TestDiscardRemovesTheBytesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// A Commit that fails leaves NOTHING listed, including when it fails after the
+// rename has already published the file.
+//
+// The rename is the moment the file becomes real, and chmod runs after it. A
+// caller that gets an error from Commit is going to answer 500, so anything
+// left behind is a file in the Library that nobody was ever told about -- the
+// same class as the publish-before-probe window, reached by a different route.
+//
+// The failure is induced by making the final path un-chmod-able, which is done
+// by turning it into a directory: the rename then fails outright. That covers
+// the earlier of the two failure points; the chmod branch is the one the Remove
+// was added for and it is unreachable without root or an exotic filesystem, so
+// what is pinned here is the invariant both branches must keep.
+func TestAFailedCommitLeavesNothingListed(t *testing.T) {
+	s := newStore(t)
+	p, err := s.Stage(strings.NewReader("bytes"), "show.mkv", 0, 0)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	final, err := s.Resolve(p.Name())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	// A non-empty directory cannot be replaced by a rename.
+	if err := os.MkdirAll(filepath.Join(final, "blocker"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if _, err := p.Commit(); err == nil {
+		t.Fatal("Commit onto a non-empty directory succeeded")
+	}
+	// The Pending still owns the bytes, so the caller's deferred Discard clears
+	// them. A Commit that failed must not have consumed the upload.
+	if err := p.Discard(); err != nil {
+		t.Fatalf("Discard after a failed Commit: %v", err)
+	}
+	if _, err := os.Stat(p.Path()); !os.IsNotExist(err) {
+		t.Errorf("the staged bytes survived: %v", err)
+	}
+	list, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, f := range list {
+		t.Errorf("a failed Commit left %q listed", f.Name)
+	}
+}
+
 // Listable is the one rule two packages ask, so it is pinned directly rather
 // than only through List.
 func TestListableSkipsStagedFilesAndSidecars(t *testing.T) {
