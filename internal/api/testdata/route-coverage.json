@@ -3,7 +3,9 @@
   "excusedCeiling": 57,
   "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 8,
+  "sentinelWitnessFloor": 24,
   "unstableCeiling": 3,
+  "inertCeiling": 11,
   "varianceExemptCeiling": 2,
   "totals": {
     "methodPatternPairs": 211,
@@ -1480,6 +1482,13 @@
         "status": 401,
         "anonMatchesRead": true
       },
+      "perMethod": {
+        "OPTIONS": {
+          "as": "read",
+          "status": 204,
+          "anonMatchesRead": true
+        }
+      },
       "counterpart": "playoutManifestBytes"
     },
     {
@@ -2014,9 +2023,23 @@
     {
       "id": "counterpart-proofs-outside-the-preflight",
       "what": "the two counterpart proofs that spawn a real FFmpeg stand-in -- runningDestinationLogs and websocketFrames -- run as ordinary tests and are therefore defeatable by `go test -run`, unlike everything else the ledger asserts.",
-      "whySafe": "CI sets POLYEMESIS_LEDGER=strict, which runs them from inside the preflight as well, so no single -run filter silences both paths.",
+      "whySafe": "CI sets POLYEMESIS_LEDGER=strict, which runs them from inside the preflight as well, so no single -run filter silences both paths. Once per process, not twice: the preflight returns immediately in TestMain's second pass. Measured, because the first version of this change reported +2% from `go test ./internal/api` and never ran the configuration CI uses. `POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...`, median of three: origin/main 301s, this branch before the fix 314s (+4.3%), after 299s. The preflight alone costs 22.2s in that configuration and 1.4s without it, which is the whole of the difference.",
       "whatWouldMakeItUnsafe": "CI dropping that variable. The reason they are not in the default preflight is ~15s of wall clock on every invocation, and a preflight nobody can afford to run is a preflight somebody deletes -- which returns all five issues at once.",
       "issue": "#161"
+    },
+    {
+      "id": "options-above-the-playout-gate",
+      "what": "OPTIONS /playout/* is answered 204 with no body ABOVE authorizePlayout, so it is the one method+pattern pair of that mount that does not reach the gate the other nine reach.",
+      "whySafe": "found by DRIVING it, which is the point: the excuse registry used to collapse an ANY entry to a single GET, so this pair's premise had never been issued as a request. It is now driven with a perMethod Want stating the 204 it really returns, byte-identical to an anonymous stranger's, with no body -- an existence oracle at worst, of the same class as the 405 surface in G4.",
+      "whatWouldMakeItUnsafe": "the preflight response carrying anything derived from the playout configuration -- a CORS allowlist echoing a configured origin would do it. The behavioural fix is #170's and lands on another branch; when it does, this Want fails with the new status and whoever rebases has to look at it.",
+      "issue": "#170"
+    },
+    {
+      "id": "ratchet-raises-rest-on-ordinary-review",
+      "what": "every ratchet in this file -- excusedCeiling, counterpartlessExcusedCeiling, differentialFloor, sentinelWitnessFloor, unstableCeiling, inertCeiling, varianceExemptCeiling, and now citedIssues -- is enforced by making the loosening direction a HAND EDIT of the committed artifact. That is a control only to the extent that somebody reads the diff.",
+      "whySafe": "the edit is one line of JSON in a file whose only purpose is to be read, next to a failure message that says in words what the edit means. Every automatic path -- regeneration, the -update-coverage flag, the clamps in writeLedger -- moves these numbers only in the tightening direction, so the artifact cannot loosen itself.",
+      "whatWouldMakeItUnsafe": "nothing mechanical; the residual is entirely social. This repository has no CODEOWNERS file, so no tooling requires a particular reviewer on a ceiling raise. That is recorded here rather than fixed, because inventing a review process in a test file is not this change's business, and NO ISSUE IS CITED because none is filed -- a number typed here to fill the field would be the prose discharge this file spent a round deleting.",
+      "issue": ""
     },
     {
       "id": "invariant-is-weaker-than-differential",
@@ -2035,6 +2058,7 @@
     "#161",
     "#162",
     "#163",
-    "#168"
+    "#168",
+    "#170"
   ]
 }
