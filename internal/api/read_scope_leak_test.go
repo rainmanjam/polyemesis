@@ -264,6 +264,31 @@ func leakRoutes() []string {
 		"/api/v1/schedules/runs",
 		"/api/v1/tls",
 		"/api/v1/upgrade/plan",
+
+		// PROMOTED OUT OF excusedRoutes BY THE DISCHARGE RULE, and every one of
+		// them was excused on a premise that is false when driven. The rule is
+		// one sentence: a pair that answers a read principal 2xx WITH A BODY is
+		// swept, and no excuse is available for it.
+		//
+		//	/health and /setup were excused as "unauthenticated and carrying
+		//	nothing stored". Both answer a read token 200 with a body, and
+		//	"carries nothing stored" is precisely the claim a sweep exists to
+		//	check rather than to accept.
+		//
+		//	/jobs/overview and /jobs/policy were excused as "503 without a job
+		//	queue wired". Driven on this fixture they answer 200 with 2759 and
+		//	2375 bytes respectively. The premise was simply false, and it was
+		//	false for two of the three routes sharing that constructor.
+		//
+		//	/hooks/1/deliveries was excused as "needs a hook row". It answers
+		//	200 with an empty list whether or not a row exists. Its counterpart
+		//	proof, which plants a real hook and uses the server-minted signing
+		//	secret as the positive control, still runs -- see sweptCounterparts.
+		"/api/v1/health",
+		"/api/v1/setup",
+		"/api/v1/jobs/overview",
+		"/api/v1/jobs/policy",
+		"/api/v1/hooks/1/deliveries",
 	}
 }
 

@@ -71,8 +71,27 @@ dev: build-go ## Run the backend only (pair with `make ui-dev`)
 # -------------------------------------------------------------------- test
 
 .PHONY: test
-test: ## Run the Go test suite
+test: preflight-guard ## Run the Go test suite
 	go test ./...
+
+.PHONY: preflight-guard
+preflight-guard: ## Prove the route-coverage preflight still runs under any -run
+	@# internal/api runs a preflight before whatever the caller selected, so that a
+	@# -run filter cannot switch the route coverage ledger off. That guard is only
+	@# worth anything while it is WIRED, and a TestMain is a quiet thing to delete.
+	@#
+	@# So its liveness is proven the same way everything else in the ledger is
+	@# proven: by running something that fails if it stopped. -run XXXNoSuchTest
+	@# selects no test at all, and the marker must still appear.
+	@go test ./internal/api -run XXXNoSuchTest -count=1 -v 2>&1 \
+		| grep -q 'polyemesis: route-coverage preflight ran' \
+		|| { echo 'THE ROUTE COVERAGE PREFLIGHT IS GONE.'; \
+		     echo 'internal/api/main_test.go forces ^TestLedgerPreflight$$ before the'; \
+		     echo 'caller'"'"'s own -run, so that no filter can leave the ledger unchecked.'; \
+		     echo 'Its marker no longer prints, which means TestMain was removed, renamed'; \
+		     echo 'or stopped running the preflight. Restore it; do not delete this check.'; \
+		     exit 1; }
+	@echo 'preflight-guard: the route-coverage preflight still runs under any -run'
 
 .PHONY: test-v
 test-v: ## Run the Go test suite verbosely
