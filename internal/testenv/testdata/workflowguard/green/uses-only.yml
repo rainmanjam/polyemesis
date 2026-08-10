@@ -1,0 +1,15 @@
+# GREEN. Steps with no `run:` at all, and a job with no steps (a reusable
+# workflow call). Both are shapes the parser has to survive without either
+# crashing or inventing a finding.
+name: green-uses
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+  delegated:
+    uses: ./.github/workflows/other.yml

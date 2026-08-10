@@ -1,0 +1,17 @@
+# GREEN. Backgrounds a process and says how long it may take. This is what
+# ci.yml's two smoke steps look like after #179.
+name: green-timed
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Start a server and check it serves
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          ./server &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          curl -fsS http://127.0.0.1:8123/health

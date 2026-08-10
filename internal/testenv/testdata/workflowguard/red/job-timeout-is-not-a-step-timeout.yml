@@ -1,0 +1,19 @@
+# RED, and the most important fixture here. The JOB has a timeout, so the run
+# does eventually stop -- which is precisely what happened in #179 and precisely
+# what was worthless: the job timeout cancelled the runner, named no step, and
+# GitHub returned BlobNotFound for the partial log. A step timeout names the
+# step and keeps its output. A rule that accepted a job-level timeout as
+# satisfaction would pass the exact incident it was written for.
+name: red-job-level-only
+on: [push]
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Start a server behind a job-level timeout only
+        shell: bash
+        run: |
+          ./server &
+          pid=$!
+          sleep 1

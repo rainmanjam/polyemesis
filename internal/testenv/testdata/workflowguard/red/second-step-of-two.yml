@@ -1,0 +1,19 @@
+# RED. The offending step is not the first, and the step before it DOES carry a
+# timeout. A rule that stopped at the first step, or that let a neighbour's
+# timeout count, would miss this -- and it is the real ci.yml layout, where a
+# well-behaved step precedes the one that backgrounds.
+name: red-second-step
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Innocent first step
+        timeout-minutes: 5
+        run: go build ./...
+      - name: The one that backgrounds
+        shell: bash
+        run: |
+          ./server > log 2>&1 &
+          pid=$!
+          go run ./scripts/smoketest.go

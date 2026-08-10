@@ -1,0 +1,16 @@
+# RED. No `name:` on the offending step. The finding still has to identify it,
+# or the failure message sends a reader to a file and leaves them to find the
+# step themselves -- which is how a gate acquires the reputation that gets it
+# deleted.
+name: red-unnamed
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go build ./...
+      - shell: bash
+        run: |
+          ./server &
+          pid=$!
+          wait "$pid"
