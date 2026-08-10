@@ -134,6 +134,57 @@ type Server struct {
 	// connected Kick channels share the fetch.
 	kickKeys *chat.KickKeyFetcher
 
+	// revokedMu guards revoked and wsPingEvery.
+	revokedMu sync.RWMutex
+	// revoked is the set of api_tokens.id values this process has deleted.
+	//
+	// IT EXISTS FOR ONE READER: the /ws ping tick (#159). A socket's principal
+	// is captured once, at upgrade, and requireAuth never runs again -- so
+	// revoking a token, which is the operator's ONLY lever after a leak, did
+	// not reach a socket that was already open. It stayed open, and it stayed
+	// at the scope it was opened with, until the client went away. Under a
+	// single-administrator product that is defensible; "revoke does not revoke"
+	// is not a sentence to leave in the product.
+	//
+	// IN-PROCESS AND WRITE-ONLY-ON-REVOKE, and the three alternatives were all
+	// worse:
+	//
+	//	Re-looking the token up on each tick (LookupAPIToken) means retaining
+	//	the PLAINTEXT bearer for the life of the socket so there is something
+	//	to look up with, and firing a last_used_at write per socket per minute
+	//	at a single SQLite connection, and adding a database-error path to a
+	//	loop where the only safe answer to an error is "do not close the
+	//	socket" -- which is a branch that must never be got wrong and would
+	//	never be exercised.
+	//
+	//	A process-global epoch counter bumped on every mutation does not
+	//	survive a restart, has to be touched by every future mutation site, and
+	//	invites somebody to treat the counter as the authorisation decision.
+	//
+	//	Broadcasting revocations over a channel couples the socket loop to the
+	//	store's lifecycle for a signal that is one map lookup.
+	//
+	// UNBOUNDED BY DESIGN, and the bound is the process. An entry is ~8 bytes
+	// and is added only when an operator revokes a token by hand; an install
+	// that revoked ten thousand tokens between restarts would be holding 80 kB.
+	// Pruning would need to know that no socket still holds the id, which is
+	// the state this map exists to avoid tracking.
+	//
+	// It is NOT an authorisation source. Absence from this set means "this
+	// process has not seen that token deleted", which is not the same as "the
+	// token is valid" -- a token deleted by another process, or by an operator
+	// editing the database, is absent here. Every REQUEST still goes through
+	// requireAuth, which asks the database. This only ever CLOSES a socket
+	// early; it never keeps one open.
+	revoked map[int64]struct{}
+	// wsPingEvery overrides pingPeriod, and is set only by tests.
+	//
+	// The revocation check rides the existing ping tick, so a test of it has to
+	// wait a tick, and the real tick is 25 seconds. The alternative was to
+	// export the check and call it directly, which would test the map and not
+	// the thing that was broken -- that a socket already open stops receiving.
+	wsPingEvery time.Duration
+
 	// settingsMu is the one serialisation boundary between a playlist
 	// reference existing and an upload it names being removable.
 	// handlePutSettings holds it across validating and storing a settings
@@ -249,6 +300,7 @@ func New(o Options) *Server {
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
 		kickKeys:  &chat.KickKeyFetcher{},
+		revoked:   map[int64]struct{}{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
@@ -835,6 +887,79 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 	})
 }
 
+// markRevoked records that this process deleted an API token, so any /ws socket
+// still holding it can be closed on its next ping tick. See Server.revoked.
+//
+// Called AFTER the delete succeeds, never before: a failed delete leaves the
+// token working, and an entry here would then close a socket whose credential
+// is still valid -- a self-inflicted outage in the one code path an operator
+// reaches for during an incident.
+func (s *Server) markRevoked(id int64) {
+	if s == nil || id == 0 {
+		return
+	}
+	s.revokedMu.Lock()
+	if s.revoked == nil {
+		s.revoked = map[int64]struct{}{}
+	}
+	s.revoked[id] = struct{}{}
+	s.revokedMu.Unlock()
+}
+
+// isRevoked reports whether this process has deleted the given token id.
+//
+// One read-lock and one map lookup, per socket, per ping period. Nothing here
+// touches the database, and it must not start to: see Server.revoked.
+func (s *Server) isRevoked(id int64) bool {
+	if s == nil || id == 0 {
+		return false
+	}
+	s.revokedMu.RLock()
+	_, ok := s.revoked[id]
+	s.revokedMu.RUnlock()
+	return ok
+}
+
+// sessionEpochChanged reports whether a session signed at `was` has since been
+// revoked, which for a session means the user's password was changed.
+//
+// Deliberately NOT modelled on the revoked set above. That set is an in-process
+// note of something this process did, and it is documented as never being an
+// authorisation source; the epoch is the opposite -- the database is the only
+// thing that knows it, a bump can arrive from another process or from sqlite3,
+// and there is nothing in memory that would hear about it. So this reads the
+// store, once per socket per ping period.
+//
+// Fails CLOSED, exactly as auth.(*Manager).checkEpoch does on the request path:
+// a store that cannot answer is not a store that has said yes.
+func (s *Server) sessionEpochChanged(userID, was int64) bool {
+	if s == nil || userID == 0 {
+		return false
+	}
+	current, err := s.store.TokenEpoch(userID)
+	if err != nil {
+		s.log.Warn("cannot read the session epoch for an open socket; closing it",
+			"user", userID, "err", err)
+		return true
+	}
+	return current != was
+}
+
+// pingEvery is how often a socket pings, and therefore how long a revoked
+// token's socket can survive. Tests shorten it; nothing else does.
+func (s *Server) pingEvery() time.Duration {
+	if s == nil {
+		return pingPeriod
+	}
+	s.revokedMu.RLock()
+	d := s.wsPingEvery
+	s.revokedMu.RUnlock()
+	if d > 0 {
+		return d
+	}
+	return pingPeriod
+}
+
 // principal is who the current request is acting as. Both routes lead to the
 // same single administrator; what differs is how the claim was made, which is
 // what the CSRF and token-management rules key off.
@@ -843,6 +968,17 @@ type principal struct {
 	username string
 	// token is set only for Bearer authentication.
 	token *db.APIToken
+	// userID and epoch describe a SESSION principal, and are both zero for
+	// Bearer authentication.
+	//
+	// They are carried here rather than re-read where they are needed because
+	// re-reading them means calling s.authenticate again, and
+	// TestOnlyTwoFunctionsAuthenticate exists to keep the number of places that
+	// resolve a principal at two. The one consumer is handleWS, which needs to
+	// ask, on a socket that is already open, whether the epoch this session was
+	// signed against is still current -- see the note there (#159).
+	userID int64
+	epoch  int64
 }
 
 type ctxKey int
@@ -881,7 +1017,27 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &principal{username: claims.Username}, nil
+	// Subject is the user id, written by Issue. A token that got this far has a
+	// valid signature and has already passed checkEpoch, so a subject that will
+	// not parse is not a credential problem -- it is a token this build did not
+	// mint. Zero then.
+	//
+	// A zero here makes the socket check in handleWS fail OPEN, not closed:
+	// both `sessionUser != 0` there and `if userID == 0 { return false }` in
+	// sessionEpochChanged skip the re-check, so such a socket would never be
+	// closed by a password change. That is unreachable in this build --
+	// auth.checkEpoch (internal/auth/auth.go:141) refuses an unparseable
+	// subject before authenticate returns, pinned by
+	// TestATokenWithAnUnparseableSubjectIsRefused -- and it is written down
+	// this way round because the previous wording claimed the opposite. A
+	// comment that says "fails closed" over code that fails open is worth less
+	// than no comment: it is the thing a reader trusts instead of checking, and
+	// this PR closed five defects of exactly that shape.
+	//
+	// If checkEpoch ever stops guarding this, the fix belongs there or in an
+	// explicit refusal here -- not in restoring the sentence.
+	userID, _ := strconv.ParseInt(claims.Subject, 10, 64)
+	return &principal{username: claims.Username, userID: userID, epoch: claims.Epoch}, nil
 }
 
 // readScopeWritePatterns are the POST routes a read-scoped token may still
@@ -1100,6 +1256,26 @@ type apiError struct {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, apiError{Error: msg})
+}
+
+// writeNoSuchEndpoint answers exactly as an unrouted /api path does.
+//
+// The bytes are duplicated from internal/web's API-miss branch rather than
+// imported, because they are a WIRE CONTRACT between two packages that must not
+// depend on each other: web is the embedded SPA and knows nothing about the
+// route table, and api must not reach into the UI bundle to write a 404. The
+// duplication is held honest by a test that drives BOTH through the real router
+// and compares them byte for byte, so the copies cannot drift silently -- see
+// TestWrongKickSecretIsIndistinguishableFromAnUnroutedPath.
+//
+// It exists for the one handler whose ROUTE IS ITS SECRET: a wrong secret on
+// /api/v1/chat/kick/{secret} has to be indistinguishable from a path that is
+// not mounted, and http.NotFound's text/plain body was not (#158).
+func writeNoSuchEndpoint(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(`{"error":"no such endpoint"}` + "\n"))
 }
 
 // writeStoreError maps store errors onto sensible statuses so handlers do not

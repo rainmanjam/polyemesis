@@ -229,6 +229,8 @@ a decision about the resource that a role-level scope must not override.
 | `GET` | `/source` | Probed track layout |
 | `PUT` | `/source/annotations` | Label what each incoming track is |
 | `GET` | `/version`, `POST` `/version/check` | |
+| `GET` | `/upgrade/plan` | What an in-place upgrade would do on this install, and whether it can |
+| `POST` | `/upgrade/stage`, `/upgrade/rollback` | Session-only. Staging writes the new binary; rollback restores the saved one |
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
@@ -349,6 +351,7 @@ does.
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/failover/source` | `{"source": "primary\|backup\|slate\|auto"}` |
+| `GET` | `/failover/playlist` | The slate playlist's current item and its position |
 
 `auto` clears a manual pin and returns control to the detector. `400` when
 failover is off — there is no tier to switch.
@@ -509,6 +512,7 @@ told so. The schedule still saves and still runs.
 | `GET` | `/platforms/presets`, `/capabilities`, `/guides` |
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
+| `POST` | `/platforms/credentials/{platform}/check` |
 | `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
@@ -521,6 +525,12 @@ told so. The schedule still saves and still runs.
 | `POST` `DELETE` | `/chat/bans` |
 | `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
+
+`POST /platforms/credentials/{platform}/check` asks the platform whether the
+stored client credentials for it are still good, and answers with a verdict —
+never with the credential. It is a `POST` because it makes an outbound call, and
+it is refused to `read` tokens for the same reason: a route that exercises a
+stored secret is not a read, whatever its verb.
 
 `/metadata/broadcast-window` reports the period each platform will accept a
 scheduled broadcast in, because they disagree and the composer has to say so

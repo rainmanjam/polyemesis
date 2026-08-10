@@ -48,13 +48,65 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// principal anywhere in its signature, which is why every event reached
 	// every socket in its admin shape.
 	//
-	// A SNAPSHOT, and knowingly so: requireAuth and requireScope have already
-	// run on the upgrade request, and the scope is not re-checked afterwards, so
-	// a token revoked or downgraded mid-session keeps this scope until the
-	// socket closes. That is pre-existing rather than a regression -- the same
-	// was true when there was no rendering policy at all -- and it is filed
-	// rather than fixed here; see the deferred issues in testdata/route-coverage.json.
+	// A SNAPSHOT of the SCOPE, and knowingly so: requireAuth and requireScope
+	// have already run on the upgrade request, and the scope is not re-derived
+	// afterwards, so a token whose scope is DOWNGRADED mid-session keeps this
+	// value until the socket closes. That residual is now bounded rather than
+	// unbounded, and the bound is stated below.
 	readOnly := isReadScopedToken(r)
+
+	// The token this socket was opened with, or 0 for a session (cookie)
+	// principal (#159).
+	//
+	// REVOCATION IS THE OPERATOR'S ONLY LEVER after a credential leaks, and
+	// until now it did not reach an open socket at all: the principal was
+	// resolved once, here, and a socket opened a second before the revoke went
+	// on streaming status, logs and levels indefinitely. Deleting the row
+	// stopped the NEXT request and did nothing about the one already in flight
+	// forever.
+	//
+	// A TOKEN revoke and a SESSION revoke are two different levers, and this
+	// socket has to answer to whichever one applies to the principal that opened
+	// it. Both are captured here and compared on the ping tick below.
+	//
+	// The token half is the revoked set: deleting a token stops the next request
+	// through requireAuth, and this is what stops the connection already in
+	// flight.
+	//
+	// The session half is the token EPOCH. An earlier draft of this fix skipped
+	// session principals with the reasoning that "sessions are already revoked
+	// wholesale by TokenEpoch on a password change" -- which is true of
+	// REQUESTS and false of an open socket, because nothing on this path ever
+	// read the epoch. Measured end to end: after a password change the old
+	// cookie got a 401 on GET /status while the /ws socket opened with that same
+	// cookie went on delivering telemetry. That is the #159 defect exactly, left
+	// in place for the one principal whose only revocation lever IS a password
+	// change. handleChangePassword says the bump "has to actually end that
+	// session"; this is where it ends.
+	//
+	// The concern that produced the carve-out is real and is preserved: the
+	// console opens two of these per tab, and closing them for anything routine
+	// would read as a dashboard fault. So the comparison is against the epoch
+	// this socket's own cookie was signed with -- it moves only when somebody
+	// changes the password, never on ordinary session rotation, and never when
+	// an API token is revoked. TestRevokingATokenLeavesASessionSocketAlone pins
+	// that second property.
+	//
+	// The scope is NOT re-evaluated on the tick, only the existence of the
+	// token, and that is a deliberate narrowing rather than an oversight.
+	// internal/db has no scope-update path -- api_tokens are created, listed,
+	// looked up and deleted, and that is all -- so there is no downgrade to
+	// catch. If one is added, this is where it goes, and the set below is the
+	// structure it layers onto.
+	var tokenID int64
+	var sessionUser, sessionEpoch int64
+	if p, ok := principalFrom(r.Context()); ok {
+		if p.token != nil {
+			tokenID = p.token.ID
+		} else {
+			sessionUser, sessionEpoch = p.userID, p.epoch
+		}
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -103,7 +155,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	ping := time.NewTicker(pingPeriod)
+	ping := time.NewTicker(s.pingEvery())
 	defer ping.Stop()
 
 	for {
@@ -120,6 +172,52 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-ping.C:
+			// Revocation, on the tick that already exists (#159).
+			//
+			// BEFORE the ping write, not after: the point is to stop talking to
+			// this client, and pinging a socket that is about to be closed for
+			// policy reasons is one more frame than it should get.
+			//
+			// One read-locked map lookup, no database, no allocation, per socket
+			// per ping period. The exposure window is therefore ONE PING PERIOD
+			// -- 25 seconds -- where it used to be the lifetime of the
+			// connection. That is a bound rather than an elimination and it is
+			// the honest description of what this buys.
+			//
+			// The close frame is sent and its error ignored on purpose. A client
+			// that has already gone away cannot be told why, and the return
+			// below closes the connection either way; treating the write failure
+			// as a reason not to return would keep the socket that this branch
+			// exists to end.
+			if s.isRevoked(tokenID) {
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				_ = conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.ClosePolicyViolation,
+						"the API token this socket was opened with has been revoked"))
+				return
+			}
+			// The session half of the same lever (#159).
+			//
+			// One indexed read of users.token_epoch per socket per ping period.
+			// That is a database round trip where the token check above is a map
+			// lookup, and it is the price of the only revocation a cookie
+			// principal has: the epoch is not published anywhere in process, and
+			// caching it here would reintroduce exactly the staleness this
+			// closes.
+			//
+			// FAIL CLOSED on a read error, which is what auth.checkEpoch already
+			// does for requests: an unreachable store is not a reason to keep
+			// streaming to a client we can no longer check. The blast radius is
+			// bounded by the fact that a store this socket cannot read is a
+			// store requireAuth cannot read either, so the dashboard behind it
+			// is already 401ing on every request.
+			if sessionUser != 0 && s.sessionEpochChanged(sessionUser, sessionEpoch) {
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				_ = conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.ClosePolicyViolation,
+						"this session has been revoked"))
+				return
+			}
 			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
