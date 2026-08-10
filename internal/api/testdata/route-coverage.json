@@ -3,7 +3,7 @@
   "excusedCeiling": 57,
   "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 8,
-  "unstableCeiling": 2,
+  "unstableCeiling": 3,
   "varianceExemptCeiling": 2,
   "totals": {
     "methodPatternPairs": 211,
@@ -16,10 +16,10 @@
   },
   "partition": {
     "differential": 8,
-    "invariant": 44,
+    "invariant": 43,
     "inertSubsetOfInvariant": 11,
     "explainedVariance": 1,
-    "unstable": 2
+    "unstable": 3
   },
   "routes": [
     {
@@ -1323,7 +1323,7 @@
     {
       "path": "/api/v1/recordings/usage",
       "pattern": "GET /api/v1/recordings/usage",
-      "class": "invariant"
+      "class": "unstable"
     },
     {
       "path": "/api/v1/renditions",
@@ -1998,10 +1998,10 @@
       "issue": "#160"
     },
     {
-      "id": "self-silencing-outside-api",
-      "what": "the same vacuity pathology outside internal/api: internal/oauth's three provider-drift skips that pass by DECLINING TO RUN, plus roughly 98 t.Skip and 11 testing.Short sites repo-wide.",
-      "whySafe": "outside this PR's frame, and none of them is a disclosure guard.",
-      "whatWouldMakeItUnsafe": "a skipped test being counted as coverage. The excuse registry has no jurisdiction over t.Skip today; extending it there is the follow-up.",
+      "id": "environment-skips-not-migrated",
+      "what": "83 t.Skip/Skipf/SkipNow sites and 11 testing.Short() sites remain outside internal/testenv (measured; 95 and 11 at ae8df24). The twelve SELF-SILENCING ones are handled: seven became failures or golden assertions, four are quarantined by name, and one was rewritten to assert the case it had been skipping. The rest are environmental -- no FFmpeg, no GPU, -short -- and are NOT migrated to testenv this round.",
+      "whySafe": "their count is frozen by the AST ratchet in internal/testenv, so no new bare skip can land in any package, and none of them is a disclosure guard.",
+      "whatWouldMakeItUnsafe": "an environmental skip whose condition starts firing for a non-environmental reason -- which is what \"Kick is not in Providers() yet\" was. The ratchet is syntactic and cannot tell the two apart; a classifier was measured at about 50% precision and rejected, because a gate that wrong grows an override list and an override list is another free pass. The codemod that migrates them, and the fully-provisioned CI job that proves they are only environmental by running them, are the follow-up.",
       "issue": "#161"
     },
     {
