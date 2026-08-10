@@ -221,14 +221,14 @@ var excusedRoutes = map[string]coverageExcus{
 	// to leaf fields and carries no stored credential: recordings, clips, jobs,
 	// library sessions and transcripts are media and text. Deferred rather than
 	// excused-with-a-counterpart, and the deferral is FILED so it is visible.
-	"GET /api/v1/recordings/{id}/download":             needsRow("#154"),
-	"GET /api/v1/recordings/stems/{name}/download":     needsRow("#154"),
-	"GET /api/v1/clips/{name}/download":                needsRow("#154"),
+	"GET /api/v1/recordings/{id}/download":             denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
+	"GET /api/v1/recordings/stems/{name}/download":     denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
+	"GET /api/v1/clips/{name}/download":                denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
 	"GET /api/v1/clipper/recordings/{id}":              needsRow("#154"),
-	"GET /api/v1/clipper/recordings/{id}/transcript":   needsRow("#154"),
-	"GET /api/v1/clipper/jobs/{id}/download":           needsRow("#154"),
-	"GET /api/v1/library/recordings/{id}/transcript":   needsRow("#154"),
-	"GET /api/v1/library/recordings/{id}/media/{file}": needsRow("#154"),
+	"GET /api/v1/clipper/recordings/{id}/transcript":   denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
+	"GET /api/v1/clipper/jobs/{id}/download":           denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
+	"GET /api/v1/library/recordings/{id}/transcript":   denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
+	"GET /api/v1/library/recordings/{id}/media/{file}": denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
 	"GET /api/v1/library/recordings/{id}":              needsRow("#154"),
 	"GET /api/v1/library/sessions/{id}":                needsRow("#154"),
 	"GET /api/v1/jobs/{id}":                            needsRow("#163"),
@@ -237,7 +237,7 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/hooks/{id}":                           needsRow("#163"),
 	"GET /api/v1/schedules/{id}":                       needsRow("#163"),
 	"GET /api/v1/renditions/{id}":                      needsRow("#163"),
-	"GET /api/v1/library/search":                       needsRow("#163"),
+	"GET /api/v1/library/search":                       denied("TestReadTokenIsDeniedTheRoutesThatAreNotReads"),
 }
 
 func denied(by string) coverageExcus {

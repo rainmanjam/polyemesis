@@ -82,6 +82,20 @@ the software actually promises.
   decision about the resource, and a role-level scope must not silently override
   it.
 
+  **Recorded content is content too.** A `read` token lists recordings, clips,
+  stems and sessions, sees their durations, sizes and status, and sees *whether*
+  a recording has a transcript. It does not get the media bytes and it does not
+  get the words: the download routes and both transcript routes are refused, and
+  so is `GET /library/search`. Search is on that list because
+  `db.TranscriptHit` carries the segment `Text`, its neighbouring `Context` and
+  the `Speaker` — so a token that iterated common words would reconstruct whole
+  transcripts without ever naming a route with `transcript` in its path. The
+  line is drawn at the bytes, not at the URL.
+
+  `GET /library` still returns the bare list of speaker labels. That is who
+  appears in the archive rather than what was said, and a dashboard that groups
+  by speaker needs it.
+
   **Five GETs are not reads, and a `read` token is refused them outright.** The
   two expert-command endpoints return the FFmpeg argv with the stream key in it,
   and masking that would break the operator's guarantee that the command shown
