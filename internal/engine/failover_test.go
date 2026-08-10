@@ -520,8 +520,21 @@ func failoverOnSettings() db.Settings {
 	return s
 }
 
-// step runs one sweep of the detector at a chosen instant, which is what the
-// selector loop does every half second.
+// step runs the DECISION at a chosen instant, from whatever liveness the tier
+// is already carrying.
+//
+// NOT FOR ACQUISITION. The production sweep is sweepSelector, and step skips
+// the first half of it: sampleSources, which is where each candidate's liveness
+// comes from a HUB's byte counter. A test built on step therefore cannot see
+// the sweep reading the wrong hub, cannot see a counter that goes backwards,
+// and cannot see a source that stopped delivering -- it can only see what
+// chooseSource does with numbers the test wrote itself. That blind spot is
+// exactly how a wrong-hub failover regression could have shipped with the whole
+// package green; see engine_gap_sweep_test.go, which calls sweepSelector and
+// pushes real datagrams through relay.Hub.Deliver instead.
+//
+// Use it for what it is good for: the decision's own branches, at instants a
+// wall clock could not produce.
 func (e *Engine) step(s db.Settings, now time.Time) {
 	e.selMu.Lock()
 	defer e.selMu.Unlock()
@@ -542,7 +555,15 @@ func waitUntil(t *testing.T, cond func() bool, what string) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// deliver marks one source as having just delivered bytes.
+// deliver marks one source as having just delivered bytes, by writing the
+// liveness the sweep would have sampled.
+//
+// NOT FOR ACQUISITION, for the same reason as step: it writes the ANSWER
+// sampleSources is supposed to compute, so it bypasses the question of which
+// hub that answer is read from. A test that pairs deliver with step never
+// executes a byte counter at all. To assert that a source is or is not
+// delivering, put real datagrams on the real hub with relay.Hub.Deliver and
+// call e.sweepSelector(now).
 func (e *Engine) deliver(k sourceKind, now time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
