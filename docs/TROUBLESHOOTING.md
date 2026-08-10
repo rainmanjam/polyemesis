@@ -299,7 +299,11 @@ So the state is **recorded**, not merely logged:
 
 The remedy is to upload the file again on a connection that stays up. There is
 no way to mark a stored file as checked without re-uploading it, deliberately:
-the server would be recording a pass it did not perform.
+the server would be recording a pass it did not perform. A job that re-runs the
+check against a file already on disk is issue #202.
+
+One thing this does **not** cover: an unchecked file's pull URL still works, so
+pasting it into a pull source bypasses all of the above. That is issue #201.
 
 **Every one of them also writes a WARN line naming the upload:**
 

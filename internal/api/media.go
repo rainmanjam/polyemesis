@@ -201,8 +201,9 @@ const probeUploadTimeout = 30 * time.Second
 // and more of it in parallel is not more throughput.
 //
 // The bound is on CHILDREN. The request goroutines still queue behind it, and
-// bounding those is a separate job for a middleware that does not exist yet;
-// what this stops is 25 uploads becoming 25 simultaneous subprocesses.
+// bounding those is a separate job for a middleware that does not exist yet --
+// issue #203, which also records what would make the residual unsafe. What this
+// stops is 25 uploads becoming 25 simultaneous subprocesses.
 const MaxConcurrentUploadProbes = 4
 
 var probeSlots = make(chan struct{}, MaxConcurrentUploadProbes)

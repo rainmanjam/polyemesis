@@ -243,6 +243,13 @@ type File struct {
 	Modified time.Time `json:"modified"`
 	// PullURL is what to paste into a pull source: relative to the data
 	// directory, which is what ffmpeg's file:// handling resolves against.
+	//
+	// IT IS PRESENT FOR AN UNVERIFIED FILE TOO, and that is issue #201. The
+	// engine's own FFmpeg is not ffmpeg.ProbeFile and carries neither the format
+	// allowlist nor -protocol_whitelist, so this is the one consumer of an
+	// upload that still assumes stored implies checked. It takes a deliberate
+	// copy-paste out of a Library row that says "Not checked", which is why it
+	// was not the path the review's chain ran through -- but it is a path.
 	PullURL string `json:"pullUrl"`
 	// Media is what ffprobe said about this file when it was accepted, or nil
 	// when there is nothing to say -- which now means the file was not
@@ -500,10 +507,12 @@ func (p *Pending) Commit(v Verdict) (File, error) {
 	// loudly instead of overwriting.
 	//
 	// The claim is a zero-byte file under the final name, so it is briefly
-	// listable. That is a sub-millisecond window on a file whose verdict is
-	// already on disk, and it is strictly the better of the two states to be
-	// caught in: an operator who refreshes at exactly the wrong moment sees a
-	// 0-byte entry, rather than a full-looking one that is somebody else's.
+	// listable. That is one os.Rename wide, and it is strictly the better of the
+	// two states to be caught in: an operator who refreshes at exactly the wrong
+	// moment sees an obviously-empty row, rather than a full-looking one that is
+	// somebody else's file. Closing it properly needs either a second rename
+	// through a non-Listable name or renameat2(RENAME_NOREPLACE) with this as
+	// the portable fallback; issue #203.
 	claim, err := os.OpenFile(final, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
@@ -610,6 +619,15 @@ func (s *Store) Stage(r io.Reader, hint string, maxBytes int64, minFreeBytes uin
 		// with exactly the 2 GiB reserve free, writes until ENOSPC, and eats
 		// the reserve the database and the recorder depend on -- which is the
 		// entire thing the floor exists to protect.
+		//
+		// STILL TOCTOU ACROSS CONCURRENT UPLOADS, and that is issue #200 rather
+		// than an oversight here. Every request reads the same number and
+		// nothing subtracts what the others have already promised to write:
+		// eight concurrent Stages were measured admitted against a volume
+		// reported as having room for one. Closing it needs a process-wide
+		// reservation, because api.Server.uploadStore builds a NEW Store per
+		// request by design, so a lock on this struct would bound nothing. The
+		// issue records why it was safe to leave and what would change that.
 		needed := minFreeBytes
 		if maxBytes > 0 {
 			needed += uint64(maxBytes)
