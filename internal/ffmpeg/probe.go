@@ -213,6 +213,15 @@ var selfContainedFormats = map[string]bool{
 // read this". Somebody who uploaded the wrong thing is best served by ffprobe's
 // own words about it.
 func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, error) {
+	return probeFile(ctx, ffprobeBin, path, probeStdoutCap)
+}
+
+// probeFile is ProbeFile with the stdout cap as an argument, so a test can
+// reach the over-the-cap branch against real media and a real ffprobe instead
+// of building a file that makes ffprobe print eight megabytes -- which would
+// take longer than the rest of the suite and would be measuring the fixture.
+// Nothing else passes anything but probeStdoutCap.
+func probeFile(ctx context.Context, ffprobeBin, path string, stdoutCap int) (*ProbeResult, error) {
 	cmd := exec.CommandContext(ctx, ffprobeBin,
 		"-hide_banner",
 		"-loglevel", "error",
@@ -253,7 +262,7 @@ func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, erro
 	// second way for a probe to fail that the caller would have to learn to tell
 	// from the first; dropping it means the JSON is truncated, ParseProbe says
 	// so, and probeStdoutCap is far above anything real media produces.
-	stdout := &cappedBuffer{max: probeStdoutCap}
+	stdout := &cappedBuffer{max: stdoutCap}
 	stderrBuf := &cappedBuffer{max: probeStderrCap}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderrBuf
@@ -271,7 +280,7 @@ func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, erro
 		return nil, err
 	}
 	if stdout.over {
-		return nil, fmt.Errorf("ffprobe printed more than %d bytes about this file", probeStdoutCap)
+		return nil, fmt.Errorf("ffprobe printed more than %d bytes about this file", stdoutCap)
 	}
 	res, err := ParseProbe(stdout.buf.Bytes())
 	if err != nil {

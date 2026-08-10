@@ -122,8 +122,25 @@ func TestAProbeThatPrintsTooMuchIsRefusedRatherThanBuffered(t *testing.T) {
 	if probeStdoutCap <= 0 {
 		t.Fatal("probeStdoutCap is not a cap")
 	}
-	// The cap is exercised at its own boundary rather than by building a file
-	// that produces 8 MiB of JSON, which would take longer than the whole suite.
+	ffprobe := needFFmpeg(t, "ffmpeg", "ffprobe")[1]
+	sample := buildSample(t, filepath.Join(t.TempDir(), "sample.mp4"), "-t", "1")
+
+	// DRIVEN THROUGH THE REAL FUNCTION, against a real ffprobe reading real
+	// media, with the cap lowered rather than the reply inflated. An earlier
+	// version of this test exercised cappedBuffer alone and left ProbeFile's own
+	// `if stdout.over` arm unpinned -- a mutation that deleted the check
+	// survived it.
+	if _, err := probeFile(context.Background(), ffprobe, sample, 32); err == nil {
+		t.Fatal("a reply past the cap was parsed rather than refused")
+	} else if !strings.Contains(err.Error(), "printed more than") {
+		t.Fatalf("wrong refusal: %v", err)
+	}
+	// THE CONTROL: the same file at the real cap is read normally, so the
+	// refusal above is the cap and not the file.
+	if _, err := probeFile(context.Background(), ffprobe, sample, probeStdoutCap); err != nil {
+		t.Fatalf("the same media at the real cap was refused: %v", err)
+	}
+
 	c := &cappedBuffer{max: 4}
 	n, err := c.Write([]byte("abcdef"))
 	if n != 6 || err != nil {
