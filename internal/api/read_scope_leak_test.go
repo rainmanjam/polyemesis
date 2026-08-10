@@ -291,13 +291,32 @@ func TestReadTokenSweepCoversEveryReachableGET(t *testing.T) {
 			"the credential and a mismatch is a bare 404",
 
 		// Unauthenticated by design and carrying nothing stored.
-		"/api/v1/health":         "unauthenticated liveness probe",
-		"/api/v1/setup":          "unauthenticated; needsSetup and a password length",
-		"/api/v1/tls/ca":         "unauthenticated; the PUBLIC half of the local CA",
-		"/api/v1/playout/public": "unauthenticated; the read-safe playout view",
-		"/playout/*":             "the public media origin, guarded per-request",
-		"/watch":                 "the player SPA bundle",
-		"/watch/*":               "the player SPA bundle",
+		"/api/v1/health": "unauthenticated liveness probe",
+		"/api/v1/setup":  "unauthenticated; needsSetup and a password length",
+		"/api/v1/tls/ca": "unauthenticated; the PUBLIC half of the local CA",
+		// The three playout mounts. They are excused rather than swept because
+		// the sweep reads a 200 body for credentials, and against the fixture
+		// this file plants -- Public=false -- a read token now receives no body
+		// at all: authorizePlayout hides the stream from it exactly as it hides
+		// it from a stranger. Moving them into leakRoutes() would require a
+		// 200, which would mean either publishing the fixture's stream or
+		// re-widening the gate, and either way the guard would then be
+		// asserting over a response the deployment it protects never produces.
+		//
+		// What holds them is a different test, and it is stronger than a body
+		// sweep: TestPlayoutGateMatrix drives all three over the real router
+		// for nine principals against three configurations and asserts an exact
+		// status per cell, TestReadBearerIsByteIdenticalToAnonymousOnPlayout
+		// asserts the read token's whole response equals the anonymous one, and
+		// TestPlayoutPosterVerdict asserts the poster where the difference is
+		// observable, since at the wire an allowed poster and a denied one are
+		// both 404 without a segment on disk.
+		"/api/v1/playout/public": "the read-safe playout view; gated by authorizePlayout, " +
+			"see TestPlayoutGateMatrix",
+		"/playout/*": "the public media origin; gated per-request by authorizePlayout, " +
+			"see TestPlayoutGateMatrix",
+		"/watch":   "the player SPA bundle",
+		"/watch/*": "the player SPA bundle",
 
 		// Reached with a row id this fixture does not create. Each was traced
 		// to leaf fields and carries no stored credential: recordings, clips,
@@ -318,10 +337,11 @@ func TestReadTokenSweepCoversEveryReachableGET(t *testing.T) {
 		"/api/v1/schedules/{id}":                       "needs a schedule row",
 		"/api/v1/processes/{name}/logs":                "needs a running child process",
 		"/api/v1/renditions/{id}":                      "covered by GET /renditions",
-		"/api/v1/playout/poster.jpg":                   "renders a JPEG from media this fixture has none of",
-		"/api/v1/library/search":                       "an FTS query over an empty index",
-		"/api/v1/library/sessions/{id}":                "needs a session row",
-		"/api/v1/library/recordings/{id}":              "needs a recording row",
+		"/api/v1/playout/poster.jpg": "a JPEG, and this fixture has no segment to render one " +
+			"from; gated by authorizePlayout, see TestPlayoutPosterVerdict",
+		"/api/v1/library/search":          "an FTS query over an empty index",
+		"/api/v1/library/sessions/{id}":   "needs a session row",
+		"/api/v1/library/recordings/{id}": "needs a recording row",
 	}
 
 	swept := map[string]bool{}

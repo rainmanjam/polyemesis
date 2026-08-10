@@ -937,11 +937,23 @@ var readScopeWritePatterns = map[string]bool{
 // route for everybody cannot pass. See
 // TestReadTokenIsDeniedTheRoutesThatAreNotReads.
 //
-// GET /playout/poster.jpg is considered and deliberately ABSENT. It does exec
-// FFmpeg, but it is self-throttled -- a 10-second cache under a mutex and an
-// 8-second timeout, so ~6 execs a minute however many callers ask -- and it is
-// already reachable with no credential at all when the operator sets
-// protection=open. Denying a read token buys nothing there.
+// The three playout routes are ABSENT from this list and the reason is not
+// that they were judged harmless. It is that this map CANNOT REACH THEM. It is
+// consulted in exactly one place, inside requireScope, and requireScope is
+// middleware on the authenticated group; /playout/*, /playout/public and
+// /playout/poster.jpg are all registered outside it, because a viewer has no
+// session. An entry added here for any of them would be a rule that reads as
+// enforcement and enforces nothing -- which is what this whole round of work
+// has been about deleting.
+//
+// What actually gates them is playoutOperator, inside authorizePlayout, which
+// each of the three handlers calls per request. See TestPlayoutGateMatrix and
+// TestPlayoutPosterVerdict.
+//
+// The poster's throttling was the old argument for leaving it alone and it is
+// still true -- a 10-second cache under a mutex and an 8-second timeout, so ~6
+// execs a minute however many callers ask -- but it was an answer to "is this
+// GET really a read", and the question that mattered was who gets the frame.
 var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/destinations/{id}/expert":          true,
 	"/api/v1/destinations/{id}/expert/preview":  true,

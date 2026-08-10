@@ -298,17 +298,24 @@ func (a playoutAccess) ok() bool { return a >= playoutAllowAdmin }
 func (s *Server) authorizePlayout(r *http.Request) playoutAccess {
 	set := s.playoutSettings()
 
-	// An administrator can always watch their own output, including while it is
+	// An OPERATOR can always watch their own output, including while it is
 	// private — otherwise the Playout page could not preview what it is about
-	// to publish. Checked before Enabled so a disabled stream still 404s for
+	// to publish. Read "operator" strictly: the signed-in console, or a bearer
+	// whose scope is admin. See playoutOperator, and note what this branch
+	// SKIPS -- allowing here jumps the `!set.Public` test three lines below, so
+	// whoever satisfies this predicate is being handed the media of a stream
+	// the operator has not published. That is the right answer for the console
+	// and it was the wrong answer for everybody else the old predicate let in.
+	//
+	// Computed before Enabled is consulted so a disabled stream still 404s for
 	// everyone rather than 401ing for an admin, which would be a confusing way
 	// to say "playout is off".
-	admin := s.authenticatedPlayout(r)
+	operator := s.playoutOperator(r)
 
 	if !set.Enabled {
 		return playoutDenyHidden
 	}
-	if admin {
+	if operator {
 		return playoutAllowAdmin
 	}
 	if !set.Public {
@@ -325,13 +332,58 @@ func (s *Server) authorizePlayout(r *http.Request) playoutAccess {
 	return playoutDenyChallenge
 }
 
-// authenticatedPlayout reports whether the request carries an administrator's
-// credential. CSRF is not consulted: these are read-only GETs, and a cross-site
-// forgery whose entire effect is that somebody else's browser fetches a video
-// segment is not a threat worth a token exchange a player cannot perform.
-func (s *Server) authenticatedPlayout(r *http.Request) bool {
-	_, err := s.authenticate(r)
-	return err == nil
+// playoutOperator reports whether the request carries the AUTHORITY OF THE
+// OPERATOR: the signed-in console, or a bearer token minted with the admin
+// scope. Nothing else.
+//
+// It used to be `_, err := s.authenticate(r); return err == nil` -- named
+// authenticatedPlayout, and that name was an accurate description of a
+// question that was the wrong one to ask. It resolved the principal and then
+// threw it away, so every distinction #104 had just introduced was erased at
+// this one call site: a read-scoped token, whose entire promise is that it can
+// read METADATA and not CONTENT (#154), satisfied a predicate whose caller
+// treats a true as "this is the operator previewing their own private stream"
+// and hands over the media. /playout/* is registered outside every
+// authenticated group, so requireScope never runs on it and there was nowhere
+// else the scope could have been consulted. Discarding the principal WAS the
+// bug; keeping it is the fix.
+//
+// Positive against admin rather than negative against read. A scope string this
+// build does not recognise -- from a newer schema, or a hand-edited row --
+// narrows what the credential can do instead of widening it, which is the same
+// rule requireScope states and the reason it is restated here rather than
+// inverted.
+//
+// Deliberately NOT extracted into a predicate shared with requireScope or with
+// readScopeCannotSeePublishTokens. Those live inside the disclosure fix and
+// re-expressing them to serve a third caller would put a verified boundary at
+// the mercy of a fourth. TestOnlyTwoFunctionsAuthenticate pins that this and
+// requireAuth are the only two places in the package that resolve a principal,
+// which is the durability that matters here.
+//
+// Bearer beats session and does NOT fall back: s.authenticate resolves an
+// Authorization header first, so a request carrying BOTH a read token and a
+// valid session cookie is refused. That is deliberate. Falling back to the
+// cookie would mean a REVOKED token still watched the stream for as long as its
+// holder's browser had a session, which is precisely the property revocation is
+// bought for, and this is the one route in the product that serves video.
+//
+// CSRF is not consulted: these are read-only GETs, and a cross-site forgery
+// whose entire effect is that somebody else's browser fetches a video segment
+// is not a threat worth a token exchange a player cannot perform.
+func (s *Server) playoutOperator(r *http.Request) bool {
+	p, err := s.authenticate(r)
+	if err != nil {
+		// Anonymous, a garbage bearer, an expired session. A viewer, in other
+		// words, and a viewer is judged by the rules below this call.
+		return false
+	}
+	if p.token == nil {
+		// The signed-in console. Scopes describe a token; the operator at the
+		// keyboard is not one.
+		return true
+	}
+	return p.token.Scope == db.ScopeAdmin
 }
 
 // playoutTokenMatches checks every channel a token may arrive on.
