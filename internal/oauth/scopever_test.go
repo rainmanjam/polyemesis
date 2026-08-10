@@ -23,23 +23,51 @@ func TestAnAccountConnectedNowNeedsNothing(t *testing.T) {
 
 // The case the whole mechanism exists for.
 func TestATokenIssuedBeforeAScopeWasAddedIsFlagged(t *testing.T) {
+	// THIS SKIP WAS FIRING ON MAIN. It read
+	//
+	//	if (&Twitch{}).ScopeVersion() != 1 { t.Skip("...needs updating") }
+	//
+	// and Twitch has been at 4 for some time, so the test whose own comment
+	// calls it "the case the whole mechanism exists for" has been passing by
+	// declining to run. That is the worst species of skip: it fires BECAUSE
+	// the thing under test changed, which is precisely the moment somebody
+	// needed to look.
+	//
+	// The version is pinned in testdata/provider-scopes.json now, and drift
+	// FAILS TestProviderGolden with a diff. Here the case is written against
+	// whatever the current version is, so it can never go stale again.
+	cur := (&Twitch{}).ScopeVersion()
 	got := AccountNeedsReconnect(db.PlatformAccount{
 		Platform: db.PlatformTwitch,
-		ScopeVer: 1,
+		ScopeVer: cur,
+		Scopes:   strings.Join((&Twitch{}).Scopes(), " "),
 	})
-	if (&Twitch{}).ScopeVersion() != 1 {
-		t.Skip("Twitch's scope version has moved; this case needs updating")
-	}
 	if got.Needed {
-		t.Errorf("an account at the CURRENT version was flagged: %s", got.Reason)
+		t.Errorf("an account at the CURRENT scope version (%d) holding every current "+
+			"scope was flagged: %s", cur, got.Reason)
 	}
 
-	// Now the same account against a build that asks for more.
-	got = AccountNeedsReconnect(db.PlatformAccount{
+	// AND THE CASE THE MECHANISM ACTUALLY EXISTS FOR, which nothing in this
+	// function asserted while the skip was live: a token minted at an EARLIER
+	// scope version must be flagged. The old code built exactly this account,
+	// then skipped before looking at it, then rebuilt it at version 0 and threw
+	// the result away with `_ = got`. Three lines that computed the answer and
+	// never asked it.
+	if cur < 2 {
+		t.Fatalf("Twitch is at scope version %d, so there is no earlier version to "+
+			"test against. Bumping past 1 is what this case is for; a build that has "+
+			"not is a build where this assertion needs rewriting, not switching off.", cur)
+	}
+	stale := AccountNeedsReconnect(db.PlatformAccount{
 		Platform: db.PlatformTwitch,
-		ScopeVer: 0, // legacy row, handled below
+		ScopeVer: cur - 1,
+		Scopes:   strings.Join((&Twitch{}).Scopes(), " "),
 	})
-	_ = got
+	if !stale.Needed {
+		t.Errorf("an account minted at scope version %d was NOT told to reconnect "+
+			"against a build at %d. This is the whole mechanism: a granted consent is "+
+			"not upgraded by the server asking for more later.", cur-1, cur)
+	}
 
 	// A stored version BELOW the provider's current one is the direct case.
 	// Simulated by claiming a version the provider has not reached going
@@ -79,8 +107,15 @@ func TestALegacyRowWithEveryScopeIsLeftAlone(t *testing.T) {
 func TestALegacyRowMissingAScopeIsFlaggedWithTheScopeNamed(t *testing.T) {
 	tw := &Twitch{}
 	all := tw.Scopes()
+	// Was a t.Skip. A test whose subject is "a legacy row missing ONE of
+	// several scopes" cannot be satisfied by declining to run when there is
+	// only one scope: that is the configuration in which the case it covers
+	// has silently stopped existing, and it should say so.
 	if len(all) < 2 {
-		t.Skip("Twitch asks for fewer than two scopes; this case needs updating")
+		t.Fatalf("Twitch asks for %d scope(s), and this case needs at least two to "+
+			"remove one and still have a list. The scope list shrinking that far is a "+
+			"real change -- see testdata/provider-scopes.json -- and this test must be "+
+			"rewritten for it rather than switched off by it.", len(all))
 	}
 	// Everything except the first.
 	got := AccountNeedsReconnect(db.PlatformAccount{

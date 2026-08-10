@@ -53,8 +53,15 @@ func TestAccountListSurfacesTheReconnectVerdict(t *testing.T) {
 	stampAccount(t, store, s.box, db.PlatformTwitch, "current", tw.ScopeVersion(), "")
 	// Stale: a legacy row whose grant is missing a scope we now request.
 	all := tw.Scopes()
+	// Was a t.Skip, and the same self-silencing shape as the two in
+	// internal/oauth: it fires when the scope list -- the thing this fixture is
+	// built out of -- has shrunk, which is a real change somebody should read.
+	// The list is pinned in internal/oauth/testdata/provider-scopes.json now,
+	// so drift lands as a golden diff and this can simply insist.
 	if len(all) < 2 {
-		t.Skip("Twitch requests fewer than two scopes; this case needs updating")
+		t.Fatalf("Twitch requests %d scope(s), and this case needs at least two so the "+
+			"stale account can be missing exactly one. See "+
+			"internal/oauth/testdata/provider-scopes.json.", len(all))
 	}
 	stampAccount(t, store, s.box, db.PlatformTwitch, "stale", 0, joinScopes(all[1:]))
 

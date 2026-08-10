@@ -11,6 +11,8 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The one-port RTMP listener is addressed by the source's publish TOKEN, the
@@ -485,8 +487,11 @@ func TestAPlaceholderShapedDestinationDoesNotSurviveAnUnmeasuredWindow(t *testin
 	started := len(e.dests)
 	e.mu.RUnlock()
 	if started == 0 {
-		t.Skip("the fixture started no destination, so there is nothing for the " +
-			"unmeasured pass to wrongly keep")
+		// Was a bare t.Skip, and it is the SAME SHAPE as #150's /processes
+		// finding: a fixture that started nothing, an assertion with nothing
+		// to look at, and a green run. Quarantined so it is counted rather
+		// than invisible; the fix is to assert the fixture built something.
+		testenv.Quarantine(t, "engine-rtmp-ingest-fixture-started-no-destination")
 	}
 
 	// Now the ingest restarts: placeholder back, nothing measured.
@@ -608,8 +613,9 @@ func TestASilenceTierLiftsTheHoldOnAnUnmeasuredLayout(t *testing.T) {
 	}
 
 	if e.wantSilence(e.settings) == "" {
-		t.Skip("this build does not raise a silence tier for a video-only source; " +
-			"the branch under test is unreachable from here")
+		// Was a bare t.Skip. It fires when the behaviour under test stopped
+		// happening, which is the finding rather than the exemption.
+		testenv.Quarantine(t, "engine-rtmp-ingest-no-silence-tier")
 	}
 	if len(e.dests) == 0 {
 		t.Error("the hold was applied even though a silence tier was standing in. " +

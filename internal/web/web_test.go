@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The SPA fallback used to answer every unmatched path with index.html,
@@ -17,7 +19,13 @@ import (
 // /api/v1/sourcez and /api/v2/sources all returned 200 text/html.
 func TestUnmatchedAPIPathIsJSON404NotTheSPA(t *testing.T) {
 	if !Built() {
-		t.Skip("UI not built; nothing to fall back to")
+		// Was a bare t.Skip. It fires in every CI job in this
+		// repository -- the embed.FS is empty without a UI build -- so the
+		// guard for a live-verified bug has never once run there while
+		// printing ok. Quarantined rather than fixed: the embed.FS seam is
+		// #167 and out of scope for this round. What changes is that it is
+		// now counted, ceiling-clamped and printed by name.
+		testenv.Quarantine(t, "web-spa-fallback-needs-a-built-ui")
 	}
 	h, err := Handler()
 	if err != nil {
@@ -59,7 +67,13 @@ func TestUnmatchedAPIPathIsJSON404NotTheSPA(t *testing.T) {
 // link has to survive a reload.
 func TestUnknownUIPathStillFallsBackToTheSPA(t *testing.T) {
 	if !Built() {
-		t.Skip("UI not built; nothing to fall back to")
+		// Was a bare t.Skip. It fires in every CI job in this
+		// repository -- the embed.FS is empty without a UI build -- so the
+		// guard for a live-verified bug has never once run there while
+		// printing ok. Quarantined rather than fixed: the embed.FS seam is
+		// #167 and out of scope for this round. What changes is that it is
+		// now counted, ceiling-clamped and printed by name.
+		testenv.Quarantine(t, "web-spa-fallback-needs-a-built-ui")
 	}
 	h, err := Handler()
 	if err != nil {
