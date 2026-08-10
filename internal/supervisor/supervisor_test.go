@@ -237,9 +237,18 @@ func TestStopReapsTheChildWhenItHasTimeTo(t *testing.T) {
 	// reaped" only because this test established StateRunning first. Without
 	// that, Stop on a process that never started also returns nil.
 	//
-	// Do not restore a liveness probe here in any form. Measured vacuous: a
-	// bounded poll for !alive(pid) passes 10/10 against a supervisor mutated
-	// to never wait at all.
+	// Do not restore a liveness probe here in any form. Measured: a bounded
+	// 2s poll for !alive(pid) in place of this assertion passes 10/10 against
+	// a stop() mutated to kill and return without waiting at all -- the exact
+	// defect it would be there to catch.
+	//
+	// AND, MEASURED IN THE SAME BREATH SO NOBODY OVERSELLS THIS ONE: the
+	// assertion below passes 10/10 against that mutant too, because the mutant
+	// returns nil. No assertion can survive a rewrite that makes the code lie
+	// about its own return value. The reason to prefer the error is not that it
+	// resists more mutations; it is that in the code as written, nil is
+	// PRODUCED ONLY by the branch that waited, so reading it is reading the
+	// branch. A probe never had that property under any version of the code.
 	if err != nil {
 		t.Fatalf("Stop on a child that honours SIGTERM returned %v; this test pins the "+
 			"reap path (case <-done), and a deadline here is a regression in the stop "+
