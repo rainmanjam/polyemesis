@@ -1,0 +1,48 @@
+[
+  {
+    "platform": "facebook",
+    "scopeVersion": 1,
+    "scopes": [
+      "public_profile",
+      "publish_video",
+      "pages_show_list",
+      "pages_manage_posts",
+      "pages_read_engagement"
+    ]
+  },
+  {
+    "platform": "kick",
+    "scopeVersion": 2,
+    "scopes": [
+      "user:read",
+      "channel:read",
+      "channel:write",
+      "chat:write",
+      "moderation:chat_message:manage",
+      "moderation:ban",
+      "events:subscribe",
+      "streamkey:read"
+    ],
+    "manualKeyReason": "This Kick account was connected before polyemesis asked for the stream-key scope, and granting a scope never upgrades a token that has already been issued. Disconnect the account and connect it again — once, and the key is fetched automatically from then on. Until then, paste the stream URL and key from your Kick dashboard under Settings → Stream."
+  },
+  {
+    "platform": "twitch",
+    "scopeVersion": 4,
+    "scopes": [
+      "channel:read:stream_key",
+      "channel:manage:broadcast",
+      "chat:read",
+      "chat:edit",
+      "moderator:manage:chat_messages",
+      "moderator:manage:banned_users",
+      "moderator:manage:chat_settings"
+    ]
+  },
+  {
+    "platform": "youtube",
+    "scopeVersion": 1,
+    "scopes": [
+      "https://www.googleapis.com/auth/youtube"
+    ]
+  }
+]

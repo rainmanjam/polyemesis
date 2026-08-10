@@ -1,0 +1,34 @@
+{
+  "note": "Tests that have something to say and are not saying it. Every entry is printed BY NAME on every run, counted, and ceiling-clamped: the ceiling may fall freely and raising it is a hand edit of this file. The target is zero. This register is NOT for environmental skips -- no FFmpeg, no GPU, -short -- which are honest and are frozen in place by testdata/skips.json instead.",
+  "ceiling": 4,
+  "entries": [
+    {
+      "id": "web-spa-fallback-needs-a-built-ui",
+      "site": "internal/web/web_test.go:20 and :62",
+      "why": "TestUnmatchedAPIPathIsJSON404NotTheSPA and TestUnknownUIPathStillFallsBackToTheSPA are the guards for a live-verified bug: every unmatched path, /api included, returned 200 text/html, so res.ok was true and JSON.parse failed on '<'. With no built UI the embed.FS is empty, Built() is false and both decline to run -- which is every CI job in this repository.",
+      "whatItWouldTake": "either a UI build step before the Go suite, or a test-only fs.FS seam so the fallback can be driven against a two-file stand-in. The second is cheap and is what #167 is about. NOT fixed here: #167 is out of scope for this round and quarantining it is the honest interim, because the previous state was a skip nobody counted.",
+      "issue": "#167"
+    },
+    {
+      "id": "engine-placeholder-layout-track-hazard",
+      "site": "internal/engine/rendition_test.go:544",
+      "why": "TestTheUnprobedPlaceholderLayoutWouldMapTracksThatDoNotExist documents WHY the stem guard exists: the placeholder layout claims six tracks, so a plan built from it references streams a normal ingest lacks. It skipped when DefaultSource() yields three or fewer tracks -- i.e. when the hazard it documents has gone away, which is a real change in the product that should be read rather than shrugged at.",
+      "whatItWouldTake": "decide whether the hazard is genuinely gone. If it is, delete this test and the guard it justifies; if it is not, assert the track count directly against a pinned layout rather than against whatever DefaultSource happens to return.",
+      "issue": "#161"
+    },
+    {
+      "id": "engine-rtmp-ingest-fixture-started-no-destination",
+      "site": "internal/engine/rtmp_ingest_test.go:488",
+      "why": "the fixture started no destination, so the assertion below has nothing to look at. This is the SAME SHAPE as #150's /processes finding -- a sweep against a fixture that started nothing, reported as covered -- and it is a skip rather than a failure, so it never appeared in any count.",
+      "whatItWouldTake": "assert that the fixture DID start a destination, and fail if it did not. A fixture that silently builds nothing is the finding, not the reason to stand down.",
+      "issue": "#161"
+    },
+    {
+      "id": "engine-rtmp-ingest-no-silence-tier",
+      "site": "internal/engine/rtmp_ingest_test.go:611",
+      "why": "skips when this build raises no silence tier for a video-only source, which is exactly the behaviour the test exists to pin. It fires because the subject changed.",
+      "whatItWouldTake": "pin the expected tier for a video-only source and fail on drift, the way internal/oauth now pins scope versions in a golden.",
+      "issue": "#161"
+    }
+  ]
+}

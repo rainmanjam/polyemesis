@@ -79,11 +79,26 @@ func TestTheGuideDriftCheckStillAllowsLegitimateCaveats(t *testing.T) {
 			fb = g
 		}
 	}
+	// BOTH OF THESE WERE t.Skip. This test exists to prove the manual-key
+	// phrase list is not so broad that it swallows a legitimate caveat, and
+	// Facebook's per-broadcast note is the only specimen. "The guide is gone"
+	// and "the wording moved" are exactly the two events that invalidate the
+	// calibration -- so stepping aside for them left the phrase list
+	// uncalibrated while printing ok.
+	//
+	// The note is pinned in testdata/guide-notes.json now: a reword fails
+	// TestProviderGolden with a readable diff, and this asserts the specimen
+	// still exists.
 	if fb.Platform == "" {
-		t.Skip("no Facebook guide")
+		t.Fatal("there is no Facebook setup guide, so the phrase list below has no " +
+			"legitimate caveat to be calibrated against and the drift check above is " +
+			"unverified. Pick another specimen or delete both.")
 	}
 	if !strings.Contains(strings.ToLower(fb.Note), "ingest url and key for every broadcast") {
-		t.Skip("the Facebook caveat has been reworded; nothing to assert")
+		t.Fatalf("Facebook's per-broadcast caveat has been reworded, which is the moment "+
+			"the manual-key phrase list needs re-checking rather than the moment to stop "+
+			"looking. Re-read the phrases against the new wording, update this probe, "+
+			"and regenerate testdata/guide-notes.json.\nnote: %q", fb.Note)
 	}
 	hay := strings.ToLower(fb.Note + " " + strings.Join(fb.Steps, " "))
 	for _, phrase := range manualPhrases {
