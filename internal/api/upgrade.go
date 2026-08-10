@@ -232,15 +232,13 @@ func cachedLatestTag() string {
 // handleUpgradeStage downloads, verifies and installs the release the last
 // check found, without restarting anything.
 func (s *Server) handleUpgradeStage(w http.ResponseWriter, r *http.Request) {
-	// FIRST, and not left to the route group. requireCSRF waves a
-	// token-authenticated request through -- correctly, because nothing
-	// attaches an Authorization header on its own -- so membership of the
-	// authenticated group is not the property this endpoint needs. Replacing
-	// the server's binary is at least as grave as minting a token, and token
-	// minting is behind the password for a reason requireSession states.
-	if !requireSession(w, r) {
-		return
-	}
+	// Session-only, and enforced by the ROUTE GROUP this is registered in
+	// rather than by a line here. requireCSRF waves a token-authenticated
+	// request through -- correctly, because nothing attaches an Authorization
+	// header on its own -- so membership of the merely-authenticated group is
+	// not the property this endpoint needs. Replacing the server's binary is
+	// at least as grave as minting a token. See the session-only group in
+	// api.go, and requireSession for why the check is middleware.
 	var body upgradeAction
 	if !decodeUpgradeAction(w, r, &body) {
 		return
@@ -310,9 +308,7 @@ func (s *Server) handleUpgradeStage(w http.ResponseWriter, r *http.Request) {
 
 // handleUpgradeRollback puts the previous binary back, without restarting.
 func (s *Server) handleUpgradeRollback(w http.ResponseWriter, r *http.Request) {
-	if !requireSession(w, r) {
-		return
-	}
+	// Session-only via the route group; see handleUpgradeStage.
 	var body upgradeAction
 	if !decodeUpgradeAction(w, r, &body) {
 		return

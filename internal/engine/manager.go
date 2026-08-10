@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -956,5 +957,106 @@ func (m *Manager) ListenerBound(mode db.IngestMode) bool {
 		// to be enforced by, and saying "yes" would tell an operator a token
 		// gates an ingest that no publisher ever reaches.
 		return false
+	}
+}
+
+// ListenerHealth describes HOW WELL a listener is bound, where ListenerBound
+// answers only whether it is.
+//
+// The two are separate because the boolean cannot be fixed without lying. A
+// wildcard SRT listener binds one socket per address family and survives one of
+// them failing on purpose -- see srtserver.Start -- so "bound" is true for a
+// listener serving half the encoders pointed at it. Making ListenerBound answer
+// false there would report a working IPv4 ingest as absent, which is worse.
+// This reports the third state that actually exists.
+type ListenerHealth struct {
+	// State is "ok", "degraded", or "" when there is no listener at all. The
+	// vocabulary is internal/chat's, deliberately: the UI already knows how to
+	// render a degraded badge with a detail beside it, and a second set of
+	// words for the same idea would be two things to keep in step.
+	State string `json:"state,omitempty"`
+	// Detail is why, in the operator's language, and is always set when State
+	// is degraded. A bare "degraded" tells nobody what to do.
+	Detail string `json:"detail,omitempty"`
+}
+
+// Degraded state values, matching internal/chat's State vocabulary.
+const (
+	listenerOK       = "ok"
+	listenerDegraded = "degraded"
+)
+
+// ListenerHealth reports how completely the listener for a mode came up.
+func (m *Manager) ListenerHealth(mode db.IngestMode) ListenerHealth {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	switch mode {
+	case db.IngestSRT:
+		if m.srt == nil {
+			return ListenerHealth{}
+		}
+		return listenerHealthFor(m.srt.Report())
+	case db.IngestRTMP:
+		if m.rtmp == nil {
+			return ListenerHealth{}
+		}
+		// RTMP has no half-bound state to report: it is a single TCP listener,
+		// so it either came up or it did not, and "did not" is already the nil
+		// above. Re-checked against rtmpserver.Start rather than assumed.
+		return ListenerHealth{State: listenerOK}
+	default:
+		return ListenerHealth{}
+	}
+}
+
+// listenerHealthFor turns a bind report into what the source card shows.
+//
+// A free function over the report, rather than the body of the switch above,
+// because the interesting cases cannot be staged as real listeners. A test can
+// occupy the IPv6 wildcard on a port and produce a genuine EADDRINUSE -- the
+// api and srtserver suites both do -- but there is no way to make a CI runner
+// that HAS IPv6 pretend it does not, and that absent-family case is the whole
+// of #105's badge ruling. Separating the decision from the socket is what lets
+// it be asserted at all. The wiring above it stays covered end to end by
+// TestDegradedSRTListenerIsReportedOnTheSourceCard.
+//
+// ACTIONABLE RATHER THAN DEGRADED, and that is the ruling. Degraded answers
+// "did every requested address bind", which is the right question for the log
+// line and the wrong one for a badge. A wildcard expands to 0.0.0.0 AND [::],
+// so on an IPv4-only host -- a container with IPv6 off, a completely ordinary
+// way to run this -- Degraded is permanently true and there is nothing whatever
+// to fix. The UI badges on this field, so such a host wore an orange "Partly
+// bound" for its entire life. A warning that is always on is a warning nobody
+// reads, and the cost of that lands on the one occasion it means something: the
+// port held by another process, a permission denied.
+//
+// So: ok when every family that failed is a family this machine does not have,
+// degraded when even one of them is present and refused the bind anyway. The
+// errno already carried that distinction and nothing read it.
+//
+// The ERROR LOG in srtserver.Start is unchanged, on purpose and by ruling. It
+// is read by somebody working out why an encoder will not connect, and for them
+// "there is no IPv6 on this host" is the answer rather than the noise. The
+// badge and the log line are for two different people at two different moments.
+func listenerHealthFor(rep srtserver.BindReport) ListenerHealth {
+	if !rep.Actionable() {
+		return ListenerHealth{State: listenerOK}
+	}
+	// The first ACTIONABLE failure, not simply the first. In a mixed report --
+	// [::] unavailable and 0.0.0.0 already in use -- naming Failed[0] would put
+	// "address family not supported" in front of the operator while the thing
+	// they can actually fix went unmentioned.
+	f := rep.Failed[0]
+	for _, cand := range rep.Failed {
+		if !cand.Unavailable {
+			f = cand
+			break
+		}
+	}
+	return ListenerHealth{
+		State: listenerDegraded,
+		Detail: fmt.Sprintf(
+			"listening on %s but not %s (%s); encoders reaching this server over that address family will not connect",
+			strings.Join(rep.Bound, ", "), f.Addr, f.Err),
 	}
 }

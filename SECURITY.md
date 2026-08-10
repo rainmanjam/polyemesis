@@ -41,6 +41,63 @@ the software actually promises.
   the change stops working immediately — a stolen cookie does not outlive the
   password it was obtained under. The check fails closed: a token whose epoch
   cannot be established is refused rather than admitted.
+- **Scoped API tokens.** A token is created `read` or `admin`, and omitting the
+  choice gives `read`. A `read` token reaches `GET` and `HEAD` plus two POSTs
+  that compute an answer and write nothing; anything else is refused with a 403.
+  The rule is by HTTP method rather than by a list of routes, so a route added
+  later is refused by construction instead of by somebody remembering to
+  classify it, and the small allowlist is additive — forgetting to extend it
+  denies, never permits.
+
+  No token of either scope can manage tokens, change the password, upload or
+  delete media, or complete an OAuth connect flow. Those are session-only.
+
+  **A rule about the HTTP verb cannot see what a response contains.** That is a
+  real limit rather than a theoretical one, and it is the second half of this
+  feature. A `read` token is additionally refused every stored CREDENTIAL, in
+  the response body rather than by hiding the route: the source publish tokens
+  and publish URLs, the SRT passphrase and legacy RTMP stream key on both the
+  primary and the standby ingest, pull URLs carrying `user:pass@`, the MQTT
+  broker URL, destination stream keys and an Icecast mount's password, the
+  automod model endpoint when it carries an `?api_key=`, a destination's expert
+  FFmpeg arguments, the constructed ingest URL on `/system`, and the playout
+  playback token together with the three URLs that embed it. Each of those *is*
+  a publish or watch credential, so a credential that could read one could use
+  it — and "read-only" has to mean it cannot put video into your programme or
+  watch a private one.
+
+  The listings still work: **values are blanked or masked, and the JSON path of
+  every field is the same for a `read` token as for an admin.** Where a field
+  carries `omitempty`, redaction puts `[redacted]` in it rather than emptying
+  it, because an empty string would delete the key and change the shape of the
+  document. A `kind: file` destination's `url` is a filename rather than a URL
+  and comes back intact — masking it would destroy a field that never held a
+  credential. A session or `admin` token sees exactly what it saw before.
+
+  **Live playout media is content, and a `read` token does not get it.** The
+  three playout routes sit outside every authenticated group by necessity — a
+  viewer has no account — so the check runs per request in the handler, and a
+  bearer token buys nothing there: on a stream you have not published, a `read`
+  token receives byte for byte what a stranger receives. `Public: false` is a
+  decision about the resource, and a role-level scope must not silently override
+  it.
+
+  **Five GETs are not reads, and a `read` token is refused them outright.** The
+  two expert-command endpoints return the FFmpeg argv with the stream key in it,
+  and masking that would break the operator's guarantee that the command shown
+  is the command that runs. `/clipper/.../keyframes` spawns `ffprobe`;
+  `/platforms/accounts/{id}/stats` and `/metadata/broadcast-window` call the
+  platform and can refresh **and persist** an OAuth token. `?redetect=` on
+  `/encoders` needs `admin` for the same reason. The dashboard's `/hls/*`
+  preview is session-only: fetching a playlist starts an encoder and polling
+  keeps it running.
+
+  Client secrets and the MQTT password were already never serialised outward,
+  and platform OAuth secrets carry `json:"-"`.
+
+  Tokens that predate scopes are `admin`, because they already could do
+  everything and narrowing them on upgrade would break a running script without
+  telling anyone. Revoke and re-mint to narrow one.
 - **Login brute force.** Five free attempts per client address, then a delay
   doubling from 2s, capped at 5 minutes, with `Retry-After` on the 429. The cap
   and the one-hour idle reset are deliberate: an uncapped lockout is a
@@ -75,8 +132,17 @@ the software actually promises.
   existing one by guessing it. The separator check tests both `/` and `\` on
   every platform rather than `os.PathSeparator`, whose meaning changes with the
   build target — that exact bug once let a forward slash through on Windows.
-  Uploads are behind the session, so an API token cannot write bytes to the
-  disk, and an oversized, empty or cancelled upload leaves nothing behind.
+  Uploading and deleting media are session-only, so an API token cannot write
+  bytes to the disk; a token can still `GET /api/v1/media` to list what is
+  stored. An oversized, empty or cancelled upload leaves nothing behind.
+
+  This paragraph claimed the session requirement before anything enforced it.
+  The routes sat in the ordinary authenticated group, and the CSRF middleware
+  passes token-authenticated requests through on purpose — nothing attaches an
+  `Authorization` header on its own, so there is no cross-site forgery left to
+  stop — which meant a token-only `POST` stored a file for as long as the claim
+  went unchallenged. The routes now sit in a session-only router group, so the
+  route table states the rule instead of the prose doing it alone.
 - **Inbound webhooks.** Kick's chat webhook is verified against Kick's published
   RSA public key before its body is read, and the handler refuses the request
   outright when no verifier is configured. An unverifiable webhook endpoint is

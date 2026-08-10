@@ -64,7 +64,12 @@ func TestPlayoutAccessDecision(t *testing.T) {
 		pub  playoutPublish
 		// mutate presents a credential on the request.
 		mutate func(*http.Request)
-		want   playoutAccess
+		// bearerScope, when set, mints an API token of that scope against the
+		// fixture and puts it in the Authorization header. It is a separate
+		// field rather than something mutate does because minting needs the
+		// handler and a session, and neither is in scope there.
+		bearerScope string
+		want        playoutAccess
 	}{
 		{
 			name:   "playout disabled hides the stream from anonymous callers",
@@ -144,6 +149,91 @@ func TestPlayoutAccessDecision(t *testing.T) {
 				r.Header.Set(playoutTokenHeader, "")
 			},
 		},
+
+		// --- API tokens ---
+		//
+		// One row per scope per configuration, asserting the ENUM rather than
+		// a status, because the two refusals are different security claims and
+		// an HTTP assertion cannot tell playoutDenyHidden from a 404 that
+		// happened for some other reason. A drift from denyHidden to
+		// denyChallenge would turn "there is nothing here" into "there is
+		// something here and you need a credential for it", which is exactly
+		// the existence oracle the unpublished stream must not hand out.
+		//
+		// The read rows are the ones this file was missing. Before the gate,
+		// every one of them read playoutAllowAdmin.
+		{
+			name:        "a read token gets nothing from a disabled stream",
+			set:         db.PlayoutSettings{Enabled: false, Public: true},
+			pub:         playoutPublish{Protection: PlayoutProtectOpen, Token: testToken},
+			bearerScope: db.ScopeRead,
+			want:        playoutDenyHidden,
+			mutate:      func(*http.Request) {},
+		},
+		{
+			name:        "an admin token gets nothing from a disabled stream either",
+			set:         db.PlayoutSettings{Enabled: false, Public: true},
+			pub:         playoutPublish{Protection: PlayoutProtectOpen, Token: testToken},
+			bearerScope: db.ScopeAdmin,
+			want:        playoutDenyHidden,
+			mutate:      func(*http.Request) {},
+		},
+		{
+			name:        "a read token is hidden from an unpublished stream, not challenged",
+			set:         enabledPlayout(false),
+			pub:         playoutPublish{Protection: PlayoutProtectToken, Token: testToken},
+			bearerScope: db.ScopeRead,
+			want:        playoutDenyHidden,
+			mutate:      func(*http.Request) {},
+		},
+		{
+			name:        "an admin token previews an unpublished stream, like the console",
+			set:         enabledPlayout(false),
+			pub:         playoutPublish{Protection: PlayoutProtectToken, Token: testToken},
+			bearerScope: db.ScopeAdmin,
+			want:        playoutAllowAdmin,
+			mutate:      func(*http.Request) {},
+		},
+		{
+			name:        "a read token is challenged on a protected stream, like a viewer",
+			set:         enabledPlayout(true),
+			pub:         playoutPublish{Protection: PlayoutProtectToken, Token: testToken},
+			bearerScope: db.ScopeRead,
+			want:        playoutDenyChallenge,
+			mutate:      func(*http.Request) {},
+		},
+		{
+			name:        "a read token presenting the playback token is a viewer who has it",
+			set:         enabledPlayout(true),
+			pub:         playoutPublish{Protection: PlayoutProtectToken, Token: testToken},
+			bearerScope: db.ScopeRead,
+			want:        playoutAllowToken,
+			mutate:      func(r *http.Request) { r.URL.RawQuery = "t=" + testToken },
+		},
+		{
+			name:        "an admin token needs no playback token on a protected stream",
+			set:         enabledPlayout(true),
+			pub:         playoutPublish{Protection: PlayoutProtectToken, Token: testToken},
+			bearerScope: db.ScopeAdmin,
+			want:        playoutAllowAdmin,
+			mutate:      func(*http.Request) {},
+		},
+		{
+			name:        "a read token watches an open stream, because anyone does",
+			set:         enabledPlayout(true),
+			pub:         playoutPublish{Protection: PlayoutProtectOpen, Token: testToken},
+			bearerScope: db.ScopeRead,
+			want:        playoutAllowOpen,
+			mutate:      func(*http.Request) {},
+		},
+		{
+			name:        "an admin token on an open stream is still the operator",
+			set:         enabledPlayout(true),
+			pub:         playoutPublish{Protection: PlayoutProtectOpen, Token: testToken},
+			bearerScope: db.ScopeAdmin,
+			want:        playoutAllowAdmin,
+			mutate:      func(*http.Request) {},
+		},
 	}
 
 	for _, tt := range tests {
@@ -151,7 +241,7 @@ func TestPlayoutAccessDecision(t *testing.T) {
 			// normalize would mint a token for the empty-token row, which is
 			// the one case that has to reach the check with nothing set.
 			pub := tt.pub
-			s, _ := playoutTestServer(t, tt.set, pub)
+			s, h := playoutTestServer(t, tt.set, pub)
 			if pub.Token == "" {
 				st := s.playoutStore()
 				st.mu.Lock()
@@ -162,6 +252,10 @@ func TestPlayoutAccessDecision(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/playout/master.m3u8", nil)
 			r.RemoteAddr = "203.0.113.9:5555"
 			tt.mutate(r)
+			if tt.bearerScope != "" {
+				r.Header.Set("Authorization", "Bearer "+
+					createScopedToken(t, h, login(t, h), "fixture", tt.bearerScope))
+			}
 
 			if got := s.authorizePlayout(r); got != tt.want {
 				t.Fatalf("authorizePlayout = %v, want %v", got, tt.want)

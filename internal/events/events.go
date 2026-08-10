@@ -79,6 +79,26 @@ const (
 	TypeChatRetract Type = "chatRetract"
 )
 
+// AllTypes is every Type declared above, in declaration order.
+//
+// It exists so a consumer can be required to have an opinion about ALL of them
+// rather than about the ones its author happened to think of. internal/api
+// renders these to a WebSocket whose subscriber may hold a READ-scoped token,
+// and its policy table is keyed by Type: without an enumerable universe, a
+// thirteenth event type is sent to every principal by default, which is the
+// fail-OPEN direction and is how an unredacted log frame reached a read token.
+//
+// Kept in step with the const block by an AST guard rather than by care --
+// TestAllTypesIsTheWholeConstBlock parses this file and compares. A list a
+// human maintains is exactly the shape that silently falls behind.
+func AllTypes() []Type {
+	return []Type{
+		TypeStatus, TypeLevels, TypeLog, TypeStats, TypeSource,
+		TypeRecordings, TypeLoudness, TypeClips, TypeCaption,
+		TypeChat, TypeChatState, TypeChatRetract,
+	}
+}
+
 // Event is one message.
 type Event struct {
 	Type Type      `json:"type"`

@@ -1,0 +1,1539 @@
+{
+  "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run TestRouteCoverageLedger -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
+  "excusedCeiling": 76,
+  "deferredCeiling": 22,
+  "totals": {
+    "methodPatternPairs": 211,
+    "swept": 49,
+    "excused": 76,
+    "denied": 86,
+    "nonTrieProbes": 11,
+    "shapesEmitted": 11,
+    "shapesNotInspected": 4
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "pattern": "/api/v1/alerts/meta",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/alerts/rules",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/alerts/rules",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/alerts/rules/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/alerts/rules/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/alerts/rules/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/alerts/rules/{id}/test",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/auth/login",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/auth/logout",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/auth/me",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/auth/password",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/auth/tokens",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/auth/tokens",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/auth/tokens/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/automod/matrix",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/automod/stats",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat",
+      "coverage": "swept"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/chat/bans",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/bans",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "CONNECT",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "HEAD",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "OPTIONS",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PATCH",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "QUERY",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "TRACE",
+      "pattern": "/api/v1/chat/kick/{secret}",
+      "coverage": "excused"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/chat/messages",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/messages",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/messages/hide",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/search",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/chat/send",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "PATCH",
+      "pattern": "/api/v1/chat/settings",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/chat/users",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/clipper/jobs/{id}/download",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/clipper/recordings/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/clipper/recordings/{id}/export",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/clipper/recordings/{id}/keyframes",
+      "coverage": "denied"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/clipper/recordings/{id}/plan",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/clipper/recordings/{id}/transcript",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/clips",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/clips",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/clips/buffer",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/clips/{name}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/clips/{name}/download",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/destinations",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/destinations/order",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/destinations/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/destinations/{id}",
+      "coverage": "swept"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/destinations/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/destinations/{id}/expert",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/destinations/{id}/expert",
+      "coverage": "denied"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/destinations/{id}/expert",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/expert/dry-run",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/expert/preview",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/refresh-key",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/restart",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/start",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/stop",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/encoders",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/failover/playlist",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/failover/source",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/fonts",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/health",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/hooks",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/hooks",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/hooks/meta",
+      "coverage": "swept"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/hooks/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/hooks/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/hooks/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/hooks/{id}/deliveries",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/hooks/{id}/test",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/jobs",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/jobs/overview",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/jobs/pause",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/jobs/policy",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/jobs/policy",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/jobs/purge",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/jobs/resume",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/jobs/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/jobs/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/jobs/{id}/cancel",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/jobs/{id}/release",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/jobs/{id}/retry",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/levels",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library/recordings/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/library/recordings/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/library/recordings/{id}/jobs/{kind}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library/recordings/{id}/media/{file}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/library/recordings/{id}/speaker",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/library/recordings/{id}/transcript",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library/recordings/{id}/transcript",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library/search",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/library/sessions",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/library/sessions/regroup",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/library/sessions/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library/sessions/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/library/sessions/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/loudness",
+      "coverage": "swept"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/loudness",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/media",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/media",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/media/{name}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/metadata",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/metadata/broadcast-window",
+      "coverage": "denied"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/metadata/push",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/metadata/push/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/metrics",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/oauth/{platform}/callback",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/oauth/{platform}/start",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/platforms/accounts",
+      "coverage": "swept"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/platforms/accounts/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/platforms/accounts/{id}/stats",
+      "coverage": "denied"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/platforms/capabilities",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/platforms/credentials",
+      "coverage": "swept"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/platforms/credentials/{platform}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/platforms/credentials/{platform}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/platforms/credentials/{platform}/check",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/platforms/guides",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/platforms/presets",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/playout",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/playout/analytics/reset",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/playout/poster.jpg",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/playout/public",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/playout/publish",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/playout/token",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/processes",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/processes/{name}/logs",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/recordings",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/recordings/stems",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/recordings/stems/{name}/download",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/recordings/usage",
+      "coverage": "swept"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/recordings/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/recordings/{id}/download",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/renditions",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/renditions",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/renditions/presets",
+      "coverage": "swept"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/renditions/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/renditions/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/renditions/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/renditions/{id}/restart",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/routing/compile",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/routing/presets",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/routing/presets/{preset}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/schedules",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/schedules",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/schedules/runs",
+      "coverage": "swept"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/schedules/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/schedules/{id}",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/schedules/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/settings",
+      "coverage": "swept"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/settings",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/settings/automod-key",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/settings/mqtt-password",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/setup",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/setup",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/source",
+      "coverage": "swept"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/source/annotations",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/sources",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/sources",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/sources/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/sources/{id}",
+      "coverage": "swept"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/sources/{id}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/sources/{id}/token",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/stats",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/status",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/system",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/tls",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/tls/ca",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/upgrade/plan",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/upgrade/rollback",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/upgrade/stage",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/version",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/version/check",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/ws",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/hls/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "HEAD",
+      "pattern": "/hls/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "CONNECT",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "HEAD",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "OPTIONS",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "PATCH",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "QUERY",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "TRACE",
+      "pattern": "/playout/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "CONNECT",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "HEAD",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "OPTIONS",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "PATCH",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "QUERY",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "TRACE",
+      "pattern": "/watch",
+      "coverage": "excused"
+    },
+    {
+      "method": "CONNECT",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "GET",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "HEAD",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "OPTIONS",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "PATCH",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "POST",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "QUERY",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    },
+    {
+      "method": "TRACE",
+      "pattern": "/watch/*",
+      "coverage": "excused"
+    }
+  ],
+  "excuses": [
+    {
+      "route": "ANY /api/v1/chat/kick/{secret}",
+      "scope": "route",
+      "reason": "unauthenticated by necessity: the path segment IS the credential and a mismatch is a bare 404, for every method chi registered",
+      "counterpart": "",
+      "deferredIssue": "n/a: no stored value is served"
+    },
+    {
+      "route": "ANY /playout/*",
+      "scope": "route",
+      "reason": "the public media origin under every method chi registered on the mount. Gated per request by authorizePlayout; the GET row carries the streaming counterpart and the rest reach the same gate.",
+      "counterpart": "playoutManifestBytes",
+      "deferredIssue": ""
+    },
+    {
+      "route": "ANY /watch",
+      "scope": "route",
+      "reason": "the player SPA bundle: build-time embed.FS, byte-identical for every principal",
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent",
+      "deferredIssue": ""
+    },
+    {
+      "route": "ANY /watch/*",
+      "scope": "route",
+      "reason": "the player SPA bundle: build-time embed.FS, byte-identical for every principal",
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent",
+      "deferredIssue": ""
+    },
+    {
+      "route": "GET /api/v1/alerts/rules/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/auth/tokens",
+      "scope": "route",
+      "reason": "session-only; no bearer of either scope reaches it",
+      "counterpart": "",
+      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+    },
+    {
+      "route": "GET /api/v1/clipper/jobs/{id}/download",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/clipper/recordings/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/clipper/recordings/{id}/keyframes",
+      "scope": "route",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
+      "counterpart": "",
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
+    },
+    {
+      "route": "GET /api/v1/clipper/recordings/{id}/transcript",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/clips/{name}/download",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/destinations/{id}/expert",
+      "scope": "route",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
+      "counterpart": "",
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
+    },
+    {
+      "route": "GET /api/v1/health",
+      "scope": "route",
+      "reason": "an unauthenticated liveness probe: a status word and an uptime",
+      "counterpart": "",
+      "deferredIssue": "n/a: no stored value is served"
+    },
+    {
+      "route": "GET /api/v1/hooks/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/hooks/{id}/deliveries",
+      "scope": "route",
+      "reason": "needs a hook row. Written NOW rather than deferred because it is alerts.Redact consumer #5 -- the same dependency class as the argv leak -- and deferring the one excuse that shares the bug's shape is how the bug comes back.",
+      "counterpart": "hookDeliveries",
+      "deferredIssue": ""
+    },
+    {
+      "route": "GET /api/v1/jobs",
+      "scope": "route",
+      "reason": "503 without a job queue wired; carries no stored credential",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/jobs/overview",
+      "scope": "route",
+      "reason": "503 without a job queue wired; carries no stored credential",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/jobs/policy",
+      "scope": "route",
+      "reason": "503 without a job queue wired; carries no stored credential",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/jobs/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/library/recordings/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/library/recordings/{id}/media/{file}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/library/recordings/{id}/transcript",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/library/search",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/library/sessions/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/metadata/broadcast-window",
+      "scope": "route",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
+      "counterpart": "",
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
+    },
+    {
+      "route": "GET /api/v1/metadata/push/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/oauth/{platform}/callback",
+      "scope": "route",
+      "reason": "session-only; no bearer of either scope reaches it",
+      "counterpart": "",
+      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+    },
+    {
+      "route": "GET /api/v1/oauth/{platform}/start",
+      "scope": "route",
+      "reason": "session-only; no bearer of either scope reaches it",
+      "counterpart": "",
+      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+    },
+    {
+      "route": "GET /api/v1/platforms/accounts/{id}/stats",
+      "scope": "route",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
+      "counterpart": "",
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
+    },
+    {
+      "route": "GET /api/v1/playout/poster.jpg",
+      "scope": "route",
+      "reason": "a JPEG rendered from a segment, and this fixture has no segment. Gated by authorizePlayout; the verdict is asserted rather than the bytes, because at the wire an allowed poster with nothing to render and a denied one are both 404.",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/playout/public",
+      "scope": "route",
+      "reason": "gated by authorizePlayout; against this fixture a read token receives no body at all, exactly as a stranger does, so a 200-body sweep would be asserting over a response the deployment never produces.",
+      "counterpart": "playoutPublicView",
+      "deferredIssue": ""
+    },
+    {
+      "route": "GET /api/v1/processes/{name}/logs",
+      "scope": "route",
+      "reason": "the fixture the value sweep runs against starts no destination child, so this route answers 404 there. It is NOT excused from inspection: a separate fixture spawns a real child and drives it.",
+      "counterpart": "runningDestinationLogs",
+      "deferredIssue": ""
+    },
+    {
+      "route": "GET /api/v1/recordings/stems/{name}/download",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/recordings/{id}/download",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#154"
+    },
+    {
+      "route": "GET /api/v1/renditions/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/schedules/{id}",
+      "scope": "route",
+      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "counterpart": "",
+      "deferredIssue": "#163"
+    },
+    {
+      "route": "GET /api/v1/setup",
+      "scope": "route",
+      "reason": "unauthenticated; needsSetup and a minimum password length",
+      "counterpart": "",
+      "deferredIssue": "n/a: no stored value is served"
+    },
+    {
+      "route": "GET /api/v1/tls/ca",
+      "scope": "route",
+      "reason": "unauthenticated; the PUBLIC half of the local CA",
+      "counterpart": "",
+      "deferredIssue": "n/a: no stored value is served"
+    },
+    {
+      "route": "GET /api/v1/ws",
+      "scope": "route",
+      "reason": "a WebSocket upgrade, so it emits frames rather than a response body and the body sweep cannot read it at all.",
+      "counterpart": "websocketFrames",
+      "deferredIssue": ""
+    },
+    {
+      "route": "GET /hls/*",
+      "scope": "route",
+      "reason": "session-only; no bearer of either scope reaches it",
+      "counterpart": "",
+      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+    },
+    {
+      "route": "GET /playout/*",
+      "scope": "route",
+      "reason": "the public media origin. A STREAMING response -- an HLS manifest and MPEG-TS segments -- which is the shape that escaped the sweep before, since a body scan reads none of it. Gated per request by authorizePlayout.",
+      "counterpart": "playoutManifestBytes",
+      "deferredIssue": ""
+    },
+    {
+      "route": "HEAD /hls/*",
+      "scope": "route",
+      "reason": "session-only; no bearer of either scope reaches it",
+      "counterpart": "",
+      "deferredIssue": "n/a: unreachable by the principal this sweep is about"
+    },
+    {
+      "route": "POST /api/v1/auth/login",
+      "scope": "route",
+      "reason": "unauthenticated by necessity: it is how a session is obtained. Throttled; see login_throttle_test.go",
+      "counterpart": "",
+      "deferredIssue": "n/a: no stored value is served"
+    },
+    {
+      "route": "POST /api/v1/setup",
+      "scope": "route",
+      "reason": "unauthenticated; refuses once an admin exists",
+      "counterpart": "",
+      "deferredIssue": "n/a: no stored value is served"
+    },
+    {
+      "route": "POST /api/v1/version/check",
+      "scope": "route",
+      "reason": "readScopeWritePatterns admits a read token, so this IS reachable and does return a body -- but the body comes from an outbound call to the release feed, and value-sweeping it would make this suite depend on the network. Its payload is a version string, a URL and release notes; no stored configuration is read.",
+      "counterpart": "",
+      "deferredIssue": "#157"
+    }
+  ],
+  "shapes": [
+    {
+      "shape": "json-body",
+      "emitted": true,
+      "inspected": true,
+      "by": "TestReadTokenReceivesNoCredentialOnAnyRoute",
+      "note": "the value sweep: real read-bearer bytes scanned for every planted sentinel"
+    },
+    {
+      "shape": "response-header/Location",
+      "emitted": true,
+      "inspected": true,
+      "by": "TestAConfiguredRedirectNeverCachesAWatchToken",
+      "note": "the HTTPS redirect's Location carries the request URI verbatim, watch token included"
+    },
+    {
+      "shape": "response-header/Set-Cookie",
+      "emitted": true,
+      "inspected": true,
+      "by": "TestPlayoutCookieHandoff",
+      "note": "the playout watch cookie"
+    },
+    {
+      "shape": "response-header/Cache-Control",
+      "emitted": true,
+      "inspected": true,
+      "by": "TestAConfiguredRedirectNeverCachesAWatchToken",
+      "note": "whether a credential-bearing response may be stored"
+    },
+    {
+      "shape": "response-header/Content-Disposition",
+      "emitted": true,
+      "inspected": false,
+      "by": "",
+      "note": "download filenames; media names only, no stored credential. Deferred: #154"
+    },
+    {
+      "shape": "streaming-media",
+      "emitted": true,
+      "inspected": true,
+      "by": "playoutManifestBytes",
+      "note": "the HLS manifest and its segments -- the shape a body sweep reads none of, and the one that escaped the previous audit"
+    },
+    {
+      "shape": "file-download",
+      "emitted": true,
+      "inspected": false,
+      "by": "",
+      "note": "recordings, stems, clips and exports. Deferred: #154, already decided"
+    },
+    {
+      "shape": "websocket-frame",
+      "emitted": true,
+      "inspected": true,
+      "by": "websocketFrames + TestEveryEventTypeHasAWebSocketPolicy",
+      "note": "one policy row per events.Type over a CLOSED table; an unclassified type fails the build and is dropped for a read scope"
+    },
+    {
+      "shape": "sse",
+      "emitted": false,
+      "inspected": false,
+      "by": "",
+      "note": "ABSENT: this API emits no server-sent events"
+    },
+    {
+      "shape": "mqtt-retained-topic",
+      "emitted": true,
+      "inspected": false,
+      "by": "",
+      "note": "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal and never any. Scrubbed at source by supervisor.scrub; the broker-side consumer audit is deferred: #160"
+    },
+    {
+      "shape": "on-disk-process-log",
+      "emitted": true,
+      "inspected": true,
+      "by": "TestRunningDestinationLeaksNoSentinelOnAnyEgress",
+      "note": "the file that goes into support tarballs; asserted from disk"
+    },
+    {
+      "shape": "slog-output",
+      "emitted": true,
+      "inspected": false,
+      "by": "",
+      "note": "the server's own structured log. Deferred: #160"
+    }
+  ],
+  "deferred": [
+    {
+      "id": "G2",
+      "what": "chi.Walk is complete over the routing TRIE, and the trie is not the MUX.",
+      "whySafe": "r.NotFound is the build-time embedded UI: an embed.FS with no server state behind it, and anonymous and read-scoped responses are byte-identical across nine executed probes. The GUARD is fixed in this PR; the architectural residual is not.",
+      "whatWouldMakeItUnsafe": "the UI handler reading server state, or varying by principal. Either turns an unenumerated surface into an unguarded one.",
+      "issue": "#156"
+    },
+    {
+      "id": "G3",
+      "what": "the VALUE sweep is GET-only. The non-GET method+pattern pairs are enumerated and classified in this ledger, but their response BODIES are not scanned for sentinels.",
+      "whySafe": "swept by hand this round: only admin principals receive sentinels from a non-GET handler, and a read token is refused every non-GET route by the scope rule before a body is built at all.",
+      "whatWouldMakeItUnsafe": "a non-GET handler that a read scope may call and that returns a body built from stored configuration.",
+      "issue": "#157"
+    },
+    {
+      "id": "G4",
+      "what": "chi's methodNotAllowed short-circuits BEFORE group middleware, so requireAuth never runs and 405-vs-401 is an anonymous oracle for whether a (method, path) pair is registered.",
+      "whySafe": "low severity: docs/API.md publishes the route table already. The response class is now enumerated and asserted rather than invisible.",
+      "whatWouldMakeItUnsafe": "a route whose EXISTENCE is the secret. /api/v1/chat/kick/{secret} already has that shape.",
+      "issue": "#158"
+    },
+    {
+      "id": "ws-scope-snapshot",
+      "what": "the /ws principal is captured once at upgrade; a token revoked or downgraded mid-session keeps its scope until the socket closes.",
+      "whySafe": "pre-existing and not a regression -- requireAuth already ran once at upgrade and never again -- and safe under a single-administrator product.",
+      "whatWouldMakeItUnsafe": "multi-operator installs, or revocation being relied on as an incident-response control. Suggested fix: re-check the token row on the ~25s ping tick.",
+      "issue": "#159"
+    },
+    {
+      "id": "redact-per-argument",
+      "what": "alerts.Redact remains available to future callers now that CommandString has stopped applying it per argument.",
+      "whySafe": "no caller loops it over tokens today; its doc comment now says whole-text-only and that it is never a boundary.",
+      "whatWouldMakeItUnsafe": "a new caller applying it per token. The canonical `-headers Authorization: Bearer X` is clean whole-string and LEAKS per-argument, so this is a shape, not a hypothetical.",
+      "issue": "#162"
+    },
+    {
+      "id": "redact-consumers",
+      "what": "the remaining best-effort alerts.Redact consumers with no principal-varying counterpart: the retained MQTT IngestError topic, and the server's own slog output.",
+      "whySafe": "both are scrubbed at source now by supervisor.scrub, which removes the exact declared literals before Redact ever runs.",
+      "whatWouldMakeItUnsafe": "a credential that reaches those sinks WITHOUT passing through a supervised process -- an OAuth refresh error, a hook delivery body. The hook-deliveries fixture is written in this PR; the broader consumer audit is not.",
+      "issue": "#160"
+    },
+    {
+      "id": "self-silencing-outside-api",
+      "what": "the same vacuity pathology outside internal/api: internal/oauth's three provider-drift skips that pass by DECLINING TO RUN, plus roughly 98 t.Skip and 11 testing.Short sites repo-wide.",
+      "whySafe": "outside this PR's frame, and none of them is a disclosure guard.",
+      "whatWouldMakeItUnsafe": "a skipped test being counted as coverage. The excuse registry has no jurisdiction over t.Skip today; extending it there is the follow-up.",
+      "issue": "#161"
+    },
+    {
+      "id": "empty-counterpart-rows",
+      "what": "the excuses that ship with a filed deferral rather than a counterpart proof: the recordings, clips, jobs, rules, schedules and library-session routes reached only with a row this fixture does not create.",
+      "whySafe": "each was traced to its leaf fields and carries no stored credential; they are media, transcripts and text.",
+      "whatWouldMakeItUnsafe": "any of those payloads gaining a configuration field. Deferred but no longer invisible, which is the whole difference.",
+      "issue": "#163"
+    },
+    {
+      "id": "read-token-media-envelope",
+      "what": "a read token can still download recordings, stems, clips and exports, and read full transcripts.",
+      "whySafe": "already decided and explicitly out of scope for this PR.",
+      "whatWouldMakeItUnsafe": "n/a: this is a product decision, not an oversight.",
+      "issue": "#154"
+    }
+  ]
+}

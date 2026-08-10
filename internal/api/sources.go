@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
@@ -77,9 +78,44 @@ type sourceView struct {
 	// a UI that showed it as configured-and-fine would be lying about why
 	// nothing arrives.
 	Running bool `json:"running"`
+	// ListenerHealth is the THIRD state between bound and absent, and it is
+	// here because TokenEnforced and Running are both booleans derived from a
+	// listener that can be half up.
+	//
+	// A wildcard SRT listener binds one socket per address family and survives
+	// one of them failing -- deliberately, because a container without IPv6 is
+	// a legitimate deployment. Everything on this card then reported the source
+	// as running with its token enforced, which is true for the family that
+	// bound and a flat lie to the operator whose encoder is on the other one.
+	// Omitted from the JSON when there is nothing to say. See #105.
+	ListenerHealth *engine.ListenerHealth `json:"listenerHealth,omitempty"`
 }
 
-func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
+// readScopeCannotSeePublishTokens reports whether this request's principal must
+// have the source's publish credential withheld.
+//
+// A read-scoped token is promised to be read-only, and a source's token is the
+// one piece of readable state that breaks that promise: the token IS the
+// address on both listeners, so anything holding it can PUBLISH -- inject video
+// into somebody's live programme -- using nothing but a GET it was explicitly
+// allowed to make. "Read-only" would then mean "read-only, plus it can take
+// over your broadcast", which is not a sentence worth shipping.
+//
+// The scope model refuses writes by HTTP method, and that is the right shape
+// for a rule about routes; it cannot see that one GET's response body is itself
+// a credential. This is the exception, and it is handled where the credential
+// is serialised rather than by carving GET /sources out of the read scope --
+// the listing is genuinely useful to a monitoring script, and it stays useful
+// with the secret removed.
+//
+// Session principals and admin tokens are unaffected: the console needs the
+// token to show the operator, and an admin token could rotate it anyway.
+func readScopeCannotSeePublishTokens(r *http.Request) bool {
+	p, ok := principalFrom(r.Context())
+	return ok && p.token != nil && p.token.Scope != db.ScopeAdmin
+}
+
+func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) sourceView {
 	var link *srtserver.LinkStats
 	var rtmpLink *rtmpserver.LinkStats
 	legacyKey := ""
@@ -94,6 +130,15 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 	// being held by something else says nothing about 6000.
 	tokenEnforced := (src.Ingest.Mode == db.IngestSRT || src.Ingest.Mode == db.IngestRTMP) &&
 		s.mgr != nil && s.mgr.ListenerBound(src.Ingest.Mode)
+	// Reported beside tokenEnforced rather than folded into it: a half-bound
+	// listener DOES enforce the token for everyone who can reach it, so turning
+	// that boolean off would answer a different question wrongly. See #105.
+	var health *engine.ListenerHealth
+	if s.mgr != nil {
+		if h := s.mgr.ListenerHealth(src.Ingest.Mode); h.State != "" {
+			health = &h
+		}
+	}
 	// The ports are install-wide, so the publish URL comes from the settings
 	// rather than from the source. Defaults on a read failure: a URL with the
 	// wrong port is more useful than no URL at all, and the Sources page is
@@ -108,17 +153,77 @@ func (s *Server) viewSource(src *db.Source, defaultID int64) sourceView {
 		rtmpLink = rtmpLinkForCard(s.mgr.RTMPLinks(), src.ID)
 		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
-	return sourceView{
-		Publishing:    publishing,
-		Link:          link,
-		RTMPLink:      rtmpLink,
-		Source:        src,
-		PublishURLs:   publishURLs(src, listeners),
-		IsDefault:     src.ID == defaultID,
-		TokenEnforced: tokenEnforced,
-		LegacyRTMPKey: legacyKey,
-		Running:       s.mgr != nil && s.mgr.Engine(src.ID) != nil,
+	view := sourceView{
+		Publishing:     publishing,
+		Link:           link,
+		RTMPLink:       rtmpLink,
+		Source:         src,
+		PublishURLs:    publishURLs(src, listeners),
+		IsDefault:      src.ID == defaultID,
+		TokenEnforced:  tokenEnforced,
+		LegacyRTMPKey:  legacyKey,
+		Running:        s.mgr != nil && s.mgr.Engine(src.ID) != nil,
+		ListenerHealth: health,
 	}
+	if readScopeCannotSeePublishTokens(r) {
+		view = readSafeSourceView(view)
+	}
+	return view
+}
+
+// readSafeSourceView is the read-scoped projection of a sourceView, as a PURE
+// FUNCTION of the view.
+//
+// Extracted from the middle of viewSource for one reason, and it is the whole of
+// #150's second blocker. While the redaction lived inline it could not be driven
+// by a test without a *http.Request carrying a real read-scoped bearer and a
+// whole engine-backed fixture that populated every optional field -- so the
+// drift guard was written against redactSourceViewLikeViewSource, a HAND COPY of
+// these lines sitting in the test file. Reverting the production code to its
+// pre-fix form left the whole repository green. A guard that watches a copy is
+// decorative, and the copy is the bug.
+//
+// A pure function over the view has no such excuse available. The guard calls
+// THIS, on a fully populated value, and a change here is a change the guard sees.
+//
+// No *http.Request parameter, deliberately and permanently: taking one would put
+// the fixture requirement straight back and the AST guard in redact_drift_test.go
+// fails the build if a readSafe*View ever grows one.
+func readSafeSourceView(v sourceView) sourceView {
+	if v.Source != nil {
+		// A COPY, because v.Source points at the caller's row and blanking the
+		// token in place would hand the next reader -- including the store's own
+		// update path -- a source whose credential has been erased.
+		//
+		// readSafeSource covers the STORED ingest block, which is the half this
+		// originally missed. sourceView embeds *db.Source, so every leaf of
+		// db.Source marshals at the top level of the response -- including
+		// ingest.srt.passphrase, ingest.rtmp.streamKey and an ingest.pull.url
+		// carrying rtsp://user:pass@ userinfo.
+		//
+		// Blanking legacyRtmpKey below without this was measurably a NO-OP:
+		// engine.legacyRTMPKeys computes that key as exactly
+		// src.Ingest.RTMP.StreamKey, so the identical string came straight back
+		// two JSON fields away. See internal/api/redact.go.
+		//
+		// PrevToken is NOT blanked, and deliberately so: it carries `json:"-"`
+		// and has never left the process, so clearing it would suggest to the
+		// next reader that it once did.
+		redacted := readSafeSource(*v.Source)
+		v.Source = &redacted
+	}
+	// The URLs go too, and they are the reason this cannot be a one-line
+	// blanking of the token field: every publish URL has the token EMBEDDED in
+	// it, because the token IS the address. Leaving them would hand back the
+	// same secret in a different shape, and there is no masked form of
+	// srt://host?streamid=TOKEN that is still a URL.
+	v.PublishURLs = nil
+	// legacyRtmpKey is REDACTED IN PLACE rather than blanked, because it carries
+	// `omitempty`: assigning "" deleted the key outright, so the read-scoped
+	// body was a different SHAPE from the admin one and #150's own "the wire
+	// shape does not change" claim was false here.
+	v.LegacyRTMPKey = redactInPlace(v.LegacyRTMPKey)
+	return v
 }
 
 // linkForCard picks the one uplink a source card should show.
@@ -253,8 +358,9 @@ func (s *Server) handleListSources(w http.ResponseWriter, r *http.Request) {
 	defaultID, _ := s.store.DefaultSourceID()
 	out := make([]sourceView, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, s.viewSource(row, defaultID))
+		out = append(out, s.viewSource(r, row, defaultID))
 	}
+	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -270,7 +376,8 @@ func (s *Server) handleGetSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(row, defaultID))
+	principalVaryingResponse(w)
+	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 
 func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +412,7 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("reconcile after source create", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusCreated, s.viewSource(&row, defaultID))
+	writeJSON(w, http.StatusCreated, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +441,7 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("reconcile after source update", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(&row, defaultID))
+	writeJSON(w, http.StatusOK, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
@@ -376,7 +483,7 @@ func (s *Server) handleRotateSourceToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(row, defaultID))
+	writeJSON(w, http.StatusOK, s.viewSource(r, row, defaultID))
 }
 
 func sourceStatus(err error) int {

@@ -25,7 +25,15 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     token_hash   TEXT    NOT NULL UNIQUE,        -- hex SHA-256 of the plaintext
     prefix       TEXT    NOT NULL DEFAULT '',    -- leading chars, so the UI can name a token
     created_at   INTEGER NOT NULL,
-    last_used_at INTEGER NOT NULL DEFAULT 0
+    last_used_at INTEGER NOT NULL DEFAULT 0,
+    -- 'read' or 'admin'. The DEFAULT is 'admin' and the API layer defaults a
+    -- newly minted token to 'read' instead; the mismatch is deliberate. This
+    -- default exists for the ALTER TABLE that backfills tokens created before
+    -- scopes did, and those tokens have been full-power since the day they were
+    -- issued -- silently narrowing them on upgrade would break whatever script
+    -- is holding one. New tokens get the safe default at the only place that
+    -- can ask the operator which they want. See MigrateAPITokenScope.
+    scope        TEXT    NOT NULL DEFAULT 'admin'
 );
 
 -- Single-row table holding the JSON-encoded runtime settings blob. Keeping it

@@ -136,7 +136,14 @@ jobs:
       # goroutine dump naming the test that was running; the job timeout just
       # kills the runner and tells you nothing. Whichever fires first decides
       # how much you learn, so Go's has to.
-      - run: go test -race -timeout 15m ./...
+      # POLYEMESIS_LEDGER=strict makes internal/api's route coverage ledger run
+      # its counterpart proofs from inside the ledger test as well as from their
+      # own. The registry's whole value is that an excuse cannot discharge on a
+      # test NAME, only on bytes that actually left the process -- and a `-run`
+      # filter matching one of the two tests and not the other would leave every
+      # counterpart undischarged while still printing ok. The full suite runs
+      # here with no filter, so strict mode costs nothing and closes that door.
+      - run: POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...
 
       # The acceptance suites' shared diagnostic helpers, tested here rather
       # than in their own job: it is pure shell, needs nothing installed and

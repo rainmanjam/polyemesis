@@ -1818,6 +1818,7 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "backup-ingest", Kind: "ingest", Bin: e.tools.FFmpeg,
 		Args:        ffmpeg.IngestArgs(spec),
+		Secrets:     ingestSecrets(b.SRT, b.RTMP, b.Pull, token+backupTokenSuffix),
 		AutoRestart: true,
 		// Same reasoning as the primary listener: it exits whenever its
 		// streamer stops, and the backup of all things must be waiting again

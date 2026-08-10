@@ -673,6 +673,7 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 		Bin:         e.tools.FFmpeg,
 		Args:        buildArgs(target),
 		NextArgs:    nextArgs,
+		Secrets:     destSecrets(row),
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
 		// own defaults in place, which is what every destination ran on before
@@ -881,6 +882,7 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 		Kind:        "destination",
 		Bin:         e.tools.FFmpeg,
 		Args:        e.destArgs(d.row, compiled, url, backupTarget(d.row)),
+		Secrets:     destSecrets(d.row),
 		AutoRestart: true,
 		MinBackoff:  destPolicy(d.row).MinBackoff,
 		MaxBackoff:  destPolicy(d.row).MaxBackoff,

@@ -1143,6 +1143,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		Kind:        "ingest",
 		Bin:         e.tools.FFmpeg,
 		Args:        spec,
+		Secrets:     ingestSecrets(s.Ingest.SRT, s.Ingest.RTMP, s.Ingest.Pull, e.ingestToken()),
 		AutoRestart: true,
 		// The ingest listener is expected to exit whenever the streamer stops,
 		// so it must come back fast rather than backing off toward 30s and

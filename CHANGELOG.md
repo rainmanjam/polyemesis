@@ -8,6 +8,58 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Changed
+
+- **A `read` API token no longer reaches the live media of a stream you have not
+  published.** `read` means metadata, not content, and live playout is content.
+
+  The three playout routes sit outside every authenticated group by necessity —
+  a viewer has no account — so the scope check runs per request in the handler,
+  and it was asking the wrong question: it resolved the caller and then threw
+  the principal away, so any valid bearer was treated as the operator previewing
+  their own private stream. A `read` token is now treated exactly as an
+  anonymous viewer on `/playout/*`, `/playout/public` and `/playout/poster.jpg`
+  — the same status, the same body, the same headers.
+
+  Two consequences worth knowing before you upgrade. On a stream with
+  `Public: false`, a `read` token now gets `404` where it used to get the media.
+  On a published stream protected by the playback token, a `read` token that
+  does **not** present that playback token now gets the `401` challenge instead
+  of being served; presenting it in `?t=`, the header, the cookie or as a basic
+  password works as it always did. Anonymous viewers, the signed-in console and
+  `admin` tokens are unaffected, and an open stream is unaffected for everyone.
+
+- **The "Partly bound" badge on a source card now appears only when there is
+  something to fix.** A wildcard SRT listener binds one socket per address
+  family and survives one of them failing, which on an IPv4-only host — a
+  container with IPv6 disabled — meant a permanent orange badge on a perfectly
+  healthy install. The badge now distinguishes an address family this machine
+  does not have from one it has and could not bind, and only warns about the
+  second. The log line is unchanged and still records both, because whoever is
+  working out why an encoder will not connect needs the first one too.
+
+### Fixed
+
+- **Three more values a `read` token could read.** The automod model endpoint
+  when it carries an `?api_key=` in the query string, and a destination's
+  `extraInputArgs` / `extraOutputArgs` — which are the resolved FFmpeg argv, the
+  same bytes `GET /destinations/{id}/expert` already refuses that token for.
+
+- **A `kind: file` destination no longer loses its filename for a `read`
+  token.** That field is a filename rather than a URL, and running it through
+  the URL masker replaced the whole thing with `[redacted]`.
+
+- **Redacted fields keep their JSON key.** Four fields carry `omitempty`, so
+  blanking them removed them from the document entirely and a `read` token's
+  response was a different shape from an admin's. They now come back as
+  `[redacted]`.
+
+- **`Vary` on principal-dependent responses now names `Cookie` as well as
+  `Authorization`.** The signed-in operator — the principal that receives the
+  unredacted body — arrives in a cookie, so a shared cache keyed on
+  `Authorization` alone filed their response under the same key as every
+  anonymous caller's.
+
 ## [0.6.0] — 2026-08-09
 
 An operator-facing release: the server now tells you an update exists and what a

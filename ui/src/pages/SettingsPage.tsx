@@ -60,6 +60,7 @@ import { LIMITS } from "@/lib/limits";
 import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
   ApiToken,
+  TokenScope,
   CertInfo,
   ChatRetentionSettings,
   CredentialCheck,
@@ -2102,6 +2103,10 @@ function ApiTokens() {
   const t = useT();
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [name, setName] = useState("");
+  // Read by default, matching the server: a token minted without a thought
+  // should be the one that cannot change anything. Choosing admin is a
+  // deliberate act here, which is the whole point of offering the choice.
+  const [scope, setScope] = useState<TokenScope>("read");
   const [busy, setBusy] = useState(false);
   // Held in state and nowhere else: the server keeps only a hash, so this is
   // the one and only time the plaintext exists.
@@ -2117,9 +2122,10 @@ function ApiTokens() {
     e.preventDefault();
     setBusy(true);
     try {
-      setMinted(await api.createToken(name.trim()));
+      setMinted(await api.createToken(name.trim(), scope));
       setCopied(false);
       setName("");
+      setScope("read");
       load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("set.couldNotCreateTheToken"));
@@ -2166,10 +2172,25 @@ function ApiTokens() {
               required
             />
           </div>
+          <div className="flex min-w-40 flex-col gap-1">
+            <Label htmlFor="tok-scope">{t("set.tokenScope")}</Label>
+            <Select value={scope} onValueChange={(v) => setScope(v as TokenScope)}>
+              <SelectTrigger id="tok-scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="read">{t("set.tokenScopeRead")}</SelectItem>
+                <SelectItem value="admin">{t("set.tokenScopeAdmin")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <Button type="submit" size="sm" disabled={busy || !name.trim()}>
             {busy ? <Loader2 className="animate-spin" /> : <KeyRound />} Create token
           </Button>
         </form>
+        <span className="text-[10px] text-muted-foreground">
+          {scope === "read" ? t("set.tokenScopeReadHint") : t("set.tokenScopeAdminHint")}
+        </span>
 
         {minted && (
           <div className="flex flex-col gap-1.5 rounded border border-warn/50 bg-warn/5 p-2">
@@ -2198,7 +2219,15 @@ function ApiTokens() {
                 className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-[12px]">{t.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-[12px]">{t.name}</span>
+                    {/* Admin is the one worth spotting in a list, so it is the
+                        one that gets the loud variant. A read token is the
+                        expected case and reads as ordinary. */}
+                    <Badge variant={t.scope === "admin" ? "warn" : "outline"}>
+                      {t.scope}
+                    </Badge>
+                  </div>
                   <div className="font-mono text-[10px] text-muted-foreground">
                     {t.prefix}… · created {new Date(t.createdAt).toLocaleDateString()} ·{" "}
                     {tokenLastUsed(t)}
