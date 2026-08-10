@@ -1,5 +1,5 @@
 {
-  "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run TestRouteCoverageLedger -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
+  "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
   "excusedCeiling": 57,
   "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 8,
@@ -7,6 +7,8 @@
   "unstableCeiling": 3,
   "inertCeiling": 11,
   "varianceExemptCeiling": 2,
+  "shapeFloor": 11,
+  "shapesNotInspectedCeiling": 6,
   "totals": {
     "methodPatternPairs": 211,
     "swept": 55,
@@ -14,7 +16,7 @@
     "denied": 99,
     "nonTrieProbes": 11,
     "shapesEmitted": 11,
-    "shapesNotInspected": 4
+    "shapesNotInspected": 6
   },
   "partition": {
     "differential": 8,
@@ -1888,30 +1890,33 @@
     {
       "shape": "response-header/Location",
       "emitted": true,
-      "inspected": true,
-      "by": "TestAConfiguredRedirectNeverCachesAWatchToken",
-      "note": "the HTTPS redirect's Location carries the request URI verbatim, watch token included"
+      "inspected": false,
+      "by": "",
+      "issue": "#168",
+      "note": "the HTTPS redirect's Location carries the request URI verbatim, watch token included. The assertion lives in cmd/polyemesis (package main), out of this ledger's jurisdiction. rawResponse now renders EVERY response header, so the invariance sweep does read headers -- but only for the routes it sweeps, and the redirect is not one of them."
     },
     {
       "shape": "response-header/Set-Cookie",
       "emitted": true,
       "inspected": true,
-      "by": "TestPlayoutCookieHandoff",
+      "by": "TestPlayoutCookieHandoffSurvives",
       "note": "the playout watch cookie"
     },
     {
       "shape": "response-header/Cache-Control",
       "emitted": true,
-      "inspected": true,
-      "by": "TestAConfiguredRedirectNeverCachesAWatchToken",
-      "note": "whether a credential-bearing response may be stored"
+      "inspected": false,
+      "by": "",
+      "issue": "#168",
+      "note": "whether a credential-bearing response may be stored. Same jurisdiction problem as response-header/Location above: asserted in package main, unasserted here for the routes outside the invariance sweep."
     },
     {
       "shape": "response-header/Content-Disposition",
       "emitted": true,
       "inspected": false,
       "by": "",
-      "note": "download filenames; media names only, no stored credential. RE-POINTED from #154, which commit ae8df24 announces closing: what remains is the general fact that response HEADERS are not inspected by any sweep. Deferred: #168"
+      "issue": "#168",
+      "note": "download filenames; media names only, no stored credential. RE-POINTED from #154, which commit ae8df24 announces closing: what remains is that the download routes are excused from the sweep entirely, so no principal-pair comparison reads their headers."
     },
     {
       "shape": "streaming-media",
@@ -1925,7 +1930,8 @@
       "emitted": true,
       "inspected": false,
       "by": "",
-      "note": "recordings, stems, clips and exports. #154 decided this and is CLOSED by ae8df24: every download route now answers a read token 403, which the excuse registry drives. What is still uninspected is the shape itself for the principals entitled to it. Deferred: #168"
+      "issue": "#168",
+      "note": "recordings, stems, clips and exports. #154 decided this and is CLOSED by ae8df24: every download route now answers a read token 403, which the excuse registry drives. What is still uninspected is the shape itself for the principals entitled to it."
     },
     {
       "shape": "websocket-frame",
@@ -1946,7 +1952,8 @@
       "emitted": true,
       "inspected": false,
       "by": "",
-      "note": "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal and never any. Scrubbed at source by supervisor.scrub; the broker-side consumer audit is deferred: #160"
+      "issue": "#160",
+      "note": "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal and never any. Scrubbed at source by supervisor.scrub; the broker-side consumer audit is the deferral."
     },
     {
       "shape": "on-disk-process-log",
@@ -1960,16 +1967,31 @@
       "emitted": true,
       "inspected": false,
       "by": "",
-      "note": "the server's own structured log. Deferred: #160"
+      "issue": "#160",
+      "note": "the server's own structured log."
     }
   ],
   "deferred": [
     {
       "id": "G2",
       "what": "chi.Walk is complete over the routing TRIE, and the trie is not the MUX.",
-      "whySafe": "r.NotFound is the build-time embedded UI: an embed.FS with no server state behind it, and anonymous and read-scoped responses are byte-identical across nine executed probes. The GUARD is fixed in this PR; the architectural residual is not.",
+      "whySafe": "r.NotFound is the build-time embedded UI: an embed.FS with no server state behind it, and anonymous and read-scoped responses are byte-identical across nine executed probes. rawResponse now renders EVERY response header rather than a hand-listed five, so a header that varies by principal on any swept or probed route is a failure by name; the hand-listed set was measured to miss an Authorization echo into X-Principal-Echo on an immutable, publicly-cacheable asset response. The GUARD is fixed; the architectural residual is not.",
       "whatWouldMakeItUnsafe": "the UI handler reading server state, or varying by principal. Either turns an unenumerated surface into an unguarded one.",
       "issue": "#156"
+    },
+    {
+      "id": "not-found-probes-do-not-enter-the-asset-branch",
+      "what": "TestTheNonTrieSurfacesAreDriven/notFound reports coverage of the embedded-UI asset branch and, in every configuration this suite is actually run in, never enters it. internal/web/dist contains only .gitkeep unless the UI has been built, and CI does not build it before the Go job.",
+      "whySafe": "the branch that IS driven -- \"UI not built\" -- is the one a deployment without a built UI serves, and it is genuinely principal-invariant across the probes. The asset branch serves bytes from an embed.FS with no server state behind it.",
+      "whatWouldMakeItUnsafe": "any principal-dependent behaviour in the asset branch of web.Handler, which is exactly what this probe claims to cover and does not. Closing it needs the UI built before the Go job runs, which is a second CI build and a change outside this package; it is not half-wired here on purpose, because a probe that sometimes enters the branch is worse evidence than one that says it never does.",
+      "issue": "#167"
+    },
+    {
+      "id": "run-filter-scan-is-limited-to-regeneration-commands",
+      "what": "TestEveryDocumentedRunFilterNamesALiveTest reads every .go file in this package and the artifact, but only matches a -run whose line also carries -update-coverage. A -run naming a dead test in any other kind of sentence is not checked.",
+      "whySafe": "the failure this catches is a maintainer copying a regeneration command that silently regenerates nothing, and -update-coverage is what makes a mention that instruction. The package contains at least one genuine illustration (main_test.go's sentence about arbitrary -run filters) that a wider pattern would report as a failure.",
+      "whatWouldMakeItUnsafe": "a documented workflow other than regeneration that tells a reader to run a named test. Nothing here can tell an illustration from an instruction, and the version of this guard that answered that by hand-picking two files missed the identical dead string in a third.",
+      "issue": "#168"
     },
     {
       "id": "G3",
@@ -2058,6 +2080,7 @@
     "#161",
     "#162",
     "#163",
+    "#167",
     "#168",
     "#170"
   ]
