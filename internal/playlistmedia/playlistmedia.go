@@ -1074,14 +1074,21 @@ func (p *Processor) verifySource(ctx context.Context, path string) (float64, err
 	res, err := ffmpeg.ProbeFile(ctx, p.cfg.FFprobe, path)
 	if err != nil {
 		name := filepath.Base(path)
-		switch {
-		case errors.Is(err, ffmpeg.ErrIndirectContainer):
-			return 0, jobs.Permanent(fmt.Errorf(
-				"%s is a playlist or script naming other files, not media itself, "+
-					"so it cannot be a playlist item; remove it and upload the file it names", name))
-		case errors.Is(err, ffmpeg.ErrUnsupportedContainer):
-			return 0, jobs.Permanent(fmt.Errorf(
-				"%s: %v; re-save it as MP4 or MPEG-TS", name, err))
+		// ffmpeg.Refused, not a list of arms, and for the reason spelled out at
+		// that function: the default here is RETRYABLE, so every refusal shape
+		// this handler has not learned about would otherwise be retried forever
+		// against a file that can never pass.
+		if ffmpeg.Refused(err) {
+			switch {
+			case errors.Is(err, ffmpeg.ErrIndirectContainer):
+				return 0, jobs.Permanent(fmt.Errorf(
+					"%s is a playlist or script naming other files, not media itself, "+
+						"so it cannot be a playlist item; remove it and upload the file it names", name))
+			case errors.Is(err, ffmpeg.ErrUnsupportedContainer):
+				return 0, jobs.Permanent(fmt.Errorf(
+					"%s: %v; re-save it as MP4 or MPEG-TS", name, err))
+			}
+			return 0, jobs.Permanent(fmt.Errorf("%s cannot be used as a playlist item: %v", name, err))
 		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

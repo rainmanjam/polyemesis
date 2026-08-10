@@ -358,24 +358,36 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 				"name", name, "cause", ctx.Err(), "err", err)
 			return uploads.UnverifiedVerdict(uploads.ReasonInterrupted), nil
 		}
-		if errors.Is(err, ffmpeg.ErrIndirectContainer) {
-			// Not "could not read": ffprobe read it fine and reported another
-			// file's streams. Saying "could not be read as media" here would be
-			// the false diagnosis all over again.
-			return uploads.Verdict{}, errors.New(
-				"this file is a playlist or script naming other files, not media itself")
-		}
-		if errors.Is(err, ffmpeg.ErrUnsupportedContainer) {
-			// A REAL FILE IN A FORMAT WE DO NOT TAKE, which used to get the
-			// sentence above. AIFF, DV, y4m, IVF, CAF and GIF were all measured
-			// being told they were "a playlist or script naming other files" --
-			// untrue about every one of them, and unactionable, because the
-			// operator goes looking for a script that does not exist. See
-			// ffmpeg.ErrUnsupportedContainer. If an operator is refused here for
-			// something they should be able to upload, the fix is an entry in
-			// ffmpeg.selfContainedFormats, not a widening of the gate.
-			return uploads.Verdict{}, fmt.Errorf(
-				"%s; re-save it as MP4 or MPEG-TS", err)
+		// ASKED AS ONE QUESTION, not as a sequence of arms. ffmpeg.Refused owns
+		// the list of "ffprobe ran and this is a verdict about the file",
+		// because the default below is FAIL-OPEN and a handler has no way to
+		// know when it has missed a case. Measured: with the
+		// ErrUnsupportedContainer arm disabled, a GIF was not refused with a
+		// worse message -- it was stored, 201, unchecked.
+		if ffmpeg.Refused(err) {
+			switch {
+			case errors.Is(err, ffmpeg.ErrIndirectContainer):
+				// Not "could not read": ffprobe read it fine and reported
+				// another file's streams. Saying "could not be read as media"
+				// here would be the false diagnosis all over again.
+				return uploads.Verdict{}, errors.New(
+					"this file is a playlist or script naming other files, not media itself")
+			case errors.Is(err, ffmpeg.ErrUnsupportedContainer):
+				// A REAL FILE IN A FORMAT WE DO NOT TAKE, which used to get the
+				// sentence above. AIFF, DV, y4m, IVF, CAF and GIF were all
+				// measured being told they were "a playlist or script naming
+				// other files" -- untrue about every one of them, and
+				// unactionable, because the operator goes looking for a script
+				// that does not exist. If an operator is refused here for
+				// something they should be able to upload, the fix is an entry
+				// in ffmpeg.selfContainedFormats, not a widening of the gate.
+				return uploads.Verdict{}, fmt.Errorf("%s; re-save it as MP4 or MPEG-TS", err)
+			}
+			// A refusal this handler has no sentence of its own for. ffprobe's
+			// words, and a REJECTION -- the point of routing through Refused is
+			// that a new refusal shape lands here rather than in the fail-open
+			// arm below.
+			return uploads.Verdict{}, fmt.Errorf("this file could not be read as media: %s", err)
 		}
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {

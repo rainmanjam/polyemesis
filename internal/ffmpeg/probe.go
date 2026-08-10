@@ -127,6 +127,35 @@ var ErrIndirectContainer = errors.New("this file names other files instead of ca
 // which of the two sentences a refusal gets.
 var ErrUnsupportedContainer = errors.New("polyemesis does not accept this container format")
 
+// ErrProbeTooVerbose is returned when ffprobe ran fine and printed more about
+// this file than probeStdoutCap allows. It is a verdict about the FILE: nothing
+// an operator uploads makes a correct ffprobe print megabytes, and the reply is
+// truncated, so the alternative is parsing a fragment as though it were whole.
+var ErrProbeTooVerbose = errors.New("ffprobe printed more about this file than polyemesis will read")
+
+// Refused reports whether err is ProbeFile's verdict ABOUT THE FILE, as opposed
+// to this server failing to inspect it.
+//
+// IT EXISTS BECAUSE THE CALLER'S DEFAULT IS FAIL-OPEN, and that is the right
+// default for the thing it was chosen for. internal/api treats an error it
+// cannot attribute to ffprobe having RUN AND DISAGREED as a fact about the
+// server -- a fork that failed, a binary that is not there, output that is not
+// JSON -- and stores the upload unchecked rather than deleting a completed
+// transfer over it. Correct, and it means every NEW error shape this function
+// learns to return is fail-open at that caller until somebody remembers to add
+// an arm for it. Measured: disabling the ErrUnsupportedContainer arm did not
+// turn a GIF into a refusal with a worse message, it turned it into a 201 with
+// the file stored.
+//
+// So the list of "this is about the file" lives HERE, beside the errors it
+// names, rather than as a sequence of arms in a handler that has no way to know
+// when it has missed one. TestEveryProbeFileRefusalIsClassified is the pin.
+func Refused(err error) bool {
+	return errors.Is(err, ErrIndirectContainer) ||
+		errors.Is(err, ErrUnsupportedContainer) ||
+		errors.Is(err, ErrProbeTooVerbose)
+}
+
 // indirectFormats are the demuxer names whose whole job is resolving a NAME to
 // bytes somewhere else. They are the reason selfContainedFormats is an
 // allowlist, and naming them here buys exactly one thing: a refusal that says
@@ -280,7 +309,7 @@ func probeFile(ctx context.Context, ffprobeBin, path string, stdoutCap int) (*Pr
 		return nil, err
 	}
 	if stdout.over {
-		return nil, fmt.Errorf("ffprobe printed more than %d bytes about this file", stdoutCap)
+		return nil, fmt.Errorf("%w (over %d bytes)", ErrProbeTooVerbose, stdoutCap)
 	}
 	res, err := ParseProbe(stdout.buf.Bytes())
 	if err != nil {

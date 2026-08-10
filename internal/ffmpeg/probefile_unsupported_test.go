@@ -109,6 +109,78 @@ func TestARealFileInAFormatWeDoNotTakeIsNotCalledAPlaylist(t *testing.T) {
 	}
 }
 
+// EVERY REFUSAL ProbeFile CAN RETURN IS CLASSIFIED, and this is the test that
+// stops a new one being fail-open at both of its callers.
+//
+// internal/api treats an error it cannot attribute to ffprobe having run and
+// disagreed as a fact about the SERVER, and stores the upload unchecked;
+// internal/playlistmedia treats the same shape as retryable. Both are the right
+// default for what they were chosen for, and both mean a refusal shape that is
+// not on ffmpeg.Refused's list silently stops being a refusal. Measured:
+// disabling the handler's ErrUnsupportedContainer arm turned a GIF from a 400
+// into a 201 with the file stored.
+//
+// The list is enumerated here so that adding a sentinel and forgetting to
+// classify it fails, rather than quietly opening a gate. Read the source of
+// this package for `= errors.New(` at package scope: any sentinel that is a
+// ProbeFile refusal must appear in Refused, and any that is not must say why in
+// the exemption list below.
+func TestEveryProbeFileRefusalIsClassified(t *testing.T) {
+	// Exempt, with the reason. ErrProbeTooVerbose, ErrIndirectContainer and
+	// ErrUnsupportedContainer are the refusals; anything else exported from this
+	// package is either not an error or not one ProbeFile returns.
+	exempt := map[string]string{}
+
+	src, err := os.ReadFile("probe.go")
+	if err != nil {
+		t.Fatalf("read probe.go: %v", err)
+	}
+	var found []string
+	for _, line := range strings.Split(string(src), "\n") {
+		if !strings.HasPrefix(line, "var Err") {
+			continue
+		}
+		name := strings.Fields(strings.TrimPrefix(line, "var "))[0]
+		found = append(found, name)
+	}
+	if len(found) == 0 {
+		t.Fatal("no Err sentinels found in probe.go, so this test asserted nothing")
+	}
+	byName := map[string]error{
+		"ErrIndirectContainer":    ErrIndirectContainer,
+		"ErrUnsupportedContainer": ErrUnsupportedContainer,
+		"ErrProbeTooVerbose":      ErrProbeTooVerbose,
+	}
+	for _, name := range found {
+		if _, ok := exempt[name]; ok {
+			continue
+		}
+		sentinel, known := byName[name]
+		if !known {
+			t.Errorf("probe.go declares %s and this test does not know what it is. "+
+				"If it is a ProbeFile refusal, add it to Refused AND to byName here. "+
+				"If it is not, add it to exempt with the reason -- an unclassified "+
+				"refusal is fail-open at internal/api and retried forever at "+
+				"internal/playlistmedia.", name)
+			continue
+		}
+		if !Refused(sentinel) {
+			t.Errorf("%s is a ProbeFile refusal that Refused does not name, so a file "+
+				"refused with it is STORED UNCHECKED by the upload handler", name)
+		}
+	}
+	// THE CONTROL: Refused says no to the things that are not refusals, or the
+	// assertions above are satisfied by a function that returns true.
+	for _, e := range []error{nil, errors.New("fork/exec: no such file"),
+		context.Canceled, context.DeadlineExceeded} {
+		if Refused(e) {
+			t.Errorf("Refused(%v) is true; a server-side failure would be reported to "+
+				"the operator as a verdict about their file", e)
+		}
+	}
+	t.Logf("classified %d ProbeFile refusal sentinels: %v", len(found), found)
+}
+
 // F6. ffprobe's stdout is bounded, and the bound is on the SIZE OF THE REPLY
 // rather than on the size of the file.
 //
@@ -132,8 +204,12 @@ func TestAProbeThatPrintsTooMuchIsRefusedRatherThanBuffered(t *testing.T) {
 	// survived it.
 	if _, err := probeFile(context.Background(), ffprobe, sample, 32); err == nil {
 		t.Fatal("a reply past the cap was parsed rather than refused")
-	} else if !strings.Contains(err.Error(), "printed more than") {
+	} else if !errors.Is(err, ErrProbeTooVerbose) {
 		t.Fatalf("wrong refusal: %v", err)
+	} else if !Refused(err) {
+		// A truncated reply is a verdict about the FILE. Unclassified, the
+		// upload handler would store the file unchecked instead of refusing it.
+		t.Fatalf("an over-the-cap reply is not classified as a refusal: %v", err)
 	}
 	// THE CONTROL: the same file at the real cap is read normally, so the
 	// refusal above is the cap and not the file.
