@@ -76,6 +76,40 @@ var redactAllowlist = map[string]string{
 		"over the elements. It calls Redact on both sides to measure the difference.",
 }
 
+// skipWalkDir decides which directories the walk below does not descend into.
+//
+// BY PATH, not by basename, and that distinction is the whole function. The
+// first version of this walk matched on d.Name(), so `web` skipped the
+// front-end source at the repository root AND internal/web -- a first-party Go
+// package (web.go, web_test.go, i18n_drift_test.go) whose 404 body this very
+// PR copies a wire contract from. Verified before the change: a file planted at
+// internal/web/zz_probe.go containing
+//
+//	for i, a := range argv { out[i] = alerts.Redact(a) }
+//
+// -- the exact per-element loop this guard exists to stop -- and
+// TestRedactIsCalledOnlyFromTheAllowlist PASSED. A guard with a
+// directory-shaped hole in it is worse than none, because the allowlist below
+// reads as exhaustive.
+//
+// So the four that are not Go at all are matched at the ROOT ONLY, where they
+// actually live, and any future internal/<same name> is walked like anything
+// else. `.git` and `node_modules` stay name-matched because neither ever
+// contains a Go file of this module at any depth, and `testdata` because the Go
+// tool itself excludes those from a build -- a call site that cannot be
+// compiled is not a call site.
+func skipWalkDir(rel, name string) bool {
+	switch rel {
+	case "ui", "web", "deploy", "docs":
+		return true
+	}
+	switch name {
+	case ".git", "node_modules", "testdata":
+		return true
+	}
+	return false
+}
+
 // TestRedactIsCalledOnlyFromTheAllowlist fails the build when a new file calls
 // alerts.Redact.
 //
@@ -93,9 +127,14 @@ func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			rel = path
+		}
+		rel = filepath.ToSlash(rel)
+
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", "ui", "web", "testdata", "deploy", "docs":
+			if skipWalkDir(rel, d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
@@ -108,12 +147,6 @@ func TestRedactIsCalledOnlyFromTheAllowlist(t *testing.T) {
 			return nil // a file that does not parse is not a call site
 		}
 		inAlerts := file.Name.Name == "alerts"
-
-		rel, rerr := filepath.Rel(root, path)
-		if rerr != nil {
-			rel = path
-		}
-		rel = filepath.ToSlash(rel)
 
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)

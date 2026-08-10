@@ -920,6 +920,31 @@ func (s *Server) isRevoked(id int64) bool {
 	return ok
 }
 
+// sessionEpochChanged reports whether a session signed at `was` has since been
+// revoked, which for a session means the user's password was changed.
+//
+// Deliberately NOT modelled on the revoked set above. That set is an in-process
+// note of something this process did, and it is documented as never being an
+// authorisation source; the epoch is the opposite -- the database is the only
+// thing that knows it, a bump can arrive from another process or from sqlite3,
+// and there is nothing in memory that would hear about it. So this reads the
+// store, once per socket per ping period.
+//
+// Fails CLOSED, exactly as auth.(*Manager).checkEpoch does on the request path:
+// a store that cannot answer is not a store that has said yes.
+func (s *Server) sessionEpochChanged(userID, was int64) bool {
+	if s == nil || userID == 0 {
+		return false
+	}
+	current, err := s.store.TokenEpoch(userID)
+	if err != nil {
+		s.log.Warn("cannot read the session epoch for an open socket; closing it",
+			"user", userID, "err", err)
+		return true
+	}
+	return current != was
+}
+
 // pingEvery is how often a socket pings, and therefore how long a revoked
 // token's socket can survive. Tests shorten it; nothing else does.
 func (s *Server) pingEvery() time.Duration {
@@ -943,6 +968,17 @@ type principal struct {
 	username string
 	// token is set only for Bearer authentication.
 	token *db.APIToken
+	// userID and epoch describe a SESSION principal, and are both zero for
+	// Bearer authentication.
+	//
+	// They are carried here rather than re-read where they are needed because
+	// re-reading them means calling s.authenticate again, and
+	// TestOnlyTwoFunctionsAuthenticate exists to keep the number of places that
+	// resolve a principal at two. The one consumer is handleWS, which needs to
+	// ask, on a socket that is already open, whether the epoch this session was
+	// signed against is still current -- see the note there (#159).
+	userID int64
+	epoch  int64
 }
 
 type ctxKey int
@@ -981,7 +1017,13 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &principal{username: claims.Username}, nil
+	// Subject is the user id, written by Issue. A token that got this far has a
+	// valid signature and has already passed checkEpoch, so a subject that will
+	// not parse is not a credential problem -- it is a token this build did not
+	// mint. Zero then, which never matches a real user id, so the socket check
+	// in handleWS fails closed rather than comparing against nothing.
+	userID, _ := strconv.ParseInt(claims.Subject, 10, 64)
+	return &principal{username: claims.Username, userID: userID, epoch: claims.Epoch}, nil
 }
 
 // readScopeWritePatterns are the POST routes a read-scoped token may still

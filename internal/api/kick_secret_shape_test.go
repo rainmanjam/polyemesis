@@ -2,6 +2,9 @@ package api
 
 import (
 	"net/http"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -86,11 +89,22 @@ func TestTheMethodOracleStillBehavesAsDocumented(t *testing.T) {
 	h, _, _ := sourceServer(t)
 
 	// The oracle, anonymous, exactly as measured.
+	//
+	// `allow` is a SET, and the comparison below is order-insensitive, because
+	// chi's Allow header is not ordered. chi builds methodsAllowed by ranging
+	// over a map (tree.go) and calls Header().Add once PER METHOD (mux.go), so a
+	// path registered for more than one verb emits several Allow headers in Go
+	// map order -- which is randomised per process. Header().Get returns only
+	// the first of those, so asserting on it made /api/v1/settings a coin flip
+	// between "GET" and "PUT": measured at 4 failures in 40 fresh processes
+	// before this was changed. What the test means to pin is WHICH METHODS the
+	// oracle discloses, and that is a set.
 	oracle := []struct {
-		method, path, allow string
+		method, path string
+		allow        []string
 	}{
-		{http.MethodHead, "/api/v1/settings", "GET"},
-		{http.MethodPut, "/api/v1/upgrade/stage", "POST"},
+		{http.MethodHead, "/api/v1/settings", []string{"GET", "PUT"}},
+		{http.MethodPut, "/api/v1/upgrade/stage", []string{"POST"}},
 	}
 	for _, c := range oracle {
 		w := do(t, h, jsonRequest(t, c.method, c.path, nil))
@@ -99,8 +113,13 @@ func TestTheMethodOracleStillBehavesAsDocumented(t *testing.T) {
 				"oversight; see the comment on this test before changing it.",
 				c.method, c.path, w.Code)
 		}
-		if got := w.Header().Get("Allow"); got != c.allow {
-			t.Errorf("%s %s Allow = %q, want %q", c.method, c.path, got, c.allow)
+		got := allowSet(w.Header().Values("Allow"))
+		want := append([]string(nil), c.allow...)
+		sort.Strings(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s %s Allow = %v, want %v (as a set). The oracle's disclosure is "+
+				"the set of registered methods; if this changed, a route gained or lost "+
+				"a verb.", c.method, c.path, got, want)
 		}
 	}
 
@@ -119,10 +138,34 @@ func TestTheMethodOracleStillBehavesAsDocumented(t *testing.T) {
 	} {
 		w := do(t, h, jsonRequest(t, m, "/api/v1/chat/kick/notthesecretatall0000", nil))
 		if w.Code == http.StatusMethodNotAllowed {
-			t.Errorf("%s /api/v1/chat/kick/{secret} = 405 with Allow=%q. The route is no "+
+			t.Errorf("%s /api/v1/chat/kick/{secret} = 405 with Allow=%v. The route is no "+
 				"longer registered for every method, so the 405 oracle now DOES reach the "+
 				"one route whose existence is the secret -- which invalidates reason 2 for "+
-				"accepting the oracle. Re-open #158.", m, w.Header().Get("Allow"))
+				"accepting the oracle. Re-open #158.", m, allowSet(w.Header().Values("Allow")))
 		}
 	}
+}
+
+// allowSet normalises an Allow header into a sorted set of methods.
+//
+// RFC 9110 permits both spellings and chi has used one of them: several Allow
+// headers, one method each. A comma-joined single header is equally valid, so
+// both are flattened here rather than pinning the shape chi happens to emit --
+// what these tests assert is which METHODS are disclosed, never how the bytes
+// were split.
+func allowSet(values []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range values {
+		for _, m := range strings.Split(v, ",") {
+			m = strings.TrimSpace(m)
+			if m == "" || seen[m] {
+				continue
+			}
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -512,6 +512,7 @@ told so. The schedule still saves and still runs.
 | `GET` | `/platforms/presets`, `/capabilities`, `/guides` |
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
+| `POST` | `/platforms/credentials/{platform}/check` |
 | `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
@@ -524,6 +525,12 @@ told so. The schedule still saves and still runs.
 | `POST` `DELETE` | `/chat/bans` |
 | `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
+
+`POST /platforms/credentials/{platform}/check` asks the platform whether the
+stored client credentials for it are still good, and answers with a verdict —
+never with the credential. It is a `POST` because it makes an outbound call, and
+it is refused to `read` tokens for the same reason: a route that exercises a
+stored secret is not a read, whatever its verb.
 
 `/metadata/broadcast-window` reports the period each platform will accept a
 scheduled broadcast in, because they disagree and the composer has to say so
