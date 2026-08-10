@@ -1706,13 +1706,23 @@ func deferredWithReasons() []coverageDefer {
 			Issue: "#160",
 		},
 		{
-			ID: "self-silencing-outside-api",
-			What: "the same vacuity pathology outside internal/api: internal/oauth's three " +
-				"provider-drift skips that pass by DECLINING TO RUN, plus roughly 98 " +
-				"t.Skip and 11 testing.Short sites repo-wide.",
-			WhySafe: "outside this PR's frame, and none of them is a disclosure guard.",
-			WhatWouldMakeItUnsafe: "a skipped test being counted as coverage. The excuse " +
-				"registry has no jurisdiction over t.Skip today; extending it there is the " +
+			ID: "environment-skips-not-migrated",
+			What: "83 t.Skip/Skipf/SkipNow sites and 11 testing.Short() sites remain outside " +
+				"internal/testenv (measured; 95 and 11 at ae8df24). The twelve " +
+				"SELF-SILENCING ones are handled: seven became failures or golden " +
+				"assertions, four are quarantined by name, and one was rewritten to " +
+				"assert the case it had been skipping. The rest are environmental -- no " +
+				"FFmpeg, no GPU, -short -- and are NOT migrated to testenv this round.",
+			WhySafe: "their count is frozen by the AST ratchet in internal/testenv, so no " +
+				"new bare skip can land in any package, and none of them is a disclosure " +
+				"guard.",
+			WhatWouldMakeItUnsafe: "an environmental skip whose condition starts firing for " +
+				"a non-environmental reason -- which is what \"Kick is not in Providers() " +
+				"yet\" was. The ratchet is syntactic and cannot tell the two apart; a " +
+				"classifier was measured at about 50% precision and rejected, because a " +
+				"gate that wrong grows an override list and an override list is another " +
+				"free pass. The codemod that migrates them, and the fully-provisioned CI " +
+				"job that proves they are only environmental by running them, are the " +
 				"follow-up.",
 			Issue: "#161",
 		},

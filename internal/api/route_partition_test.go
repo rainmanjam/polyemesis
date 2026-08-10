@@ -113,6 +113,16 @@ var unstableSweeps = map[string]string{
 		"tier, seconds on every run; the runningDestinationLogs and " +
 		"TestRunningDestinationLeaksNoSentinelOnAnyEgress counterparts carry this route " +
 		"instead. Swept for sentinels regardless.",
+	// FOUND BY RUNNING, not predicted. It was stable in six consecutive solo
+	// runs of this package and unstable in two of three full-suite runs: the
+	// body reports FREE BYTES on the filesystem, and the rest of the suite is
+	// writing to it. A guard that is stable only when nothing else is happening
+	// is the same species as a guard that is thorough over a set excluding the
+	// bug, so it is declared rather than left to flap.
+	"/api/v1/recordings/usage": "reports free bytes on the recordings filesystem, which " +
+		"moves under any concurrent write -- including the rest of this test suite. " +
+		"Principal-independent by inspection of handleRecordingUsage, and swept for " +
+		"sentinels regardless.",
 }
 
 // samplesPerPrincipal is three rather than two: two samples cannot distinguish
@@ -194,17 +204,27 @@ func sweepCensus(t *testing.T, h http.Handler, sign func(*http.Request)) []sweep
 				path, len(needle), truncateForFailure(readBody))
 		}
 
+		_, declaredUnstable := unstableSweeps[path]
 		switch {
+		// DECLARATION FIRST, observation second. A registered path is unstable
+		// by declaration even on a run where three samples happened to agree,
+		// because the instability is load-dependent: /recordings/usage reports
+		// free bytes on the filesystem the whole test suite is writing to, and
+		// it was stable in six consecutive solo runs and unstable in two of
+		// three full-suite runs. Classifying on observation alone would make
+		// the committed verdict flap, which is a flaky test wearing a ratchet's
+		// clothes. The ceiling is what keeps the register honest: declaring one
+		// costs a hand edit.
+		case declaredUnstable:
+			v.Class = classUnstable
 		case !readStable || !adminStable || !sessStable:
 			v.Class = classUnstable
-			if why, ok := unstableSweeps[path]; !ok || why == "" {
-				t.Errorf("GET %s returned different bytes to the SAME principal on two of "+
-					"%d consecutive samples, so no equality claim about principals can be "+
-					"made about it at all. Either make it stable, or register it in "+
-					"unstableSweeps saying WHAT moves -- and raise unstableCeiling in %s by "+
-					"hand, which is the reviewable act.",
-					path, samplesPerPrincipal, coveragePath)
-			}
+			t.Errorf("GET %s returned different bytes to the SAME principal on two of "+
+				"%d consecutive samples, so no equality claim about principals can be "+
+				"made about it at all. Either make it stable, or register it in "+
+				"unstableSweeps saying WHAT moves -- and raise unstableCeiling in %s by "+
+				"hand, which is the reviewable act.",
+				path, samplesPerPrincipal, coveragePath)
 		case readBody == adminBody && readBody == sessBody:
 			v.Class = classInvariant
 			v.Inert = len(strings.TrimSpace(readBody)) <= 3
