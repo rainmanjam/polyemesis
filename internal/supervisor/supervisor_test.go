@@ -356,7 +356,13 @@ func TestStopReapsTheChildWhenItHasTimeTo(t *testing.T) {
 			"it: the selector starts a replacement feed into the same hub the moment this "+
 			"returns, and a leaked FFmpeg keeps holding the capture device and the "+
 			"destination socket. The bound is deliberately under the %s grace escalation, "+
-			"so a pass here cannot be the backstop answering on stop's behalf.",
+			"so a pass here cannot be the backstop answering on stop's behalf AFTER Stop "+
+			"returned -- it says nothing about the wait INSIDE Stop, where the backstop "+
+			"legitimately can and does answer (measured: signalGroup made inert and "+
+			"nothing else, this test passes at 9.11s instead of 1.11s because the grace "+
+			"goroutine reaps within Stop's own deadline). That gap is inherent, because "+
+			"the deadline must exceed the grace for the deadline arm to be reachable at "+
+			"all; TestStopReportsWhenItHadToKillTheChild is what covers it.",
 			reapObserveBound, shutdownGrace)
 	}
 	// Drain any later EOF (a restart would produce one) and keep the last, so

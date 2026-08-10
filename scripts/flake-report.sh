@@ -166,15 +166,34 @@ awk -F'\t' -v thr="$THRESHOLD_PCT" '
   # "14% flake rate" on the first version of this script, which was entirely
   # this repository merging six PRs in an afternoon.
   #
-  # So an attempt counts only if at least one job SUCCEEDED in it.
-  # That is the difference between "this run was replaced" and "this run ran,
-  # and something in it went wrong".
+  # So an attempt counts only if at least one job SUCCEEDED in it -- AND most of
+  # its jobs were not cancelled.
+  #
+  # The second clause is not belt-and-braces; without it the first one stopped
+  # working when this the script filter widened from the 12 acceptance jobs to all
+  # 22. `which container suites` takes about five seconds and therefore almost
+  # always finishes before a concurrency cancellation lands, so a wholly
+  # superseded run now contains exactly one success and certifies itself.
+  #
+  # MEASURED over all 34 cancelled runs on main: three attempts leaked through
+  # the one-success gate and contributed 60 not-ok observations against a table
+  # whose total not-ok was 140. Run 31293861794 is the clearest -- 21 cancelled
+  # jobs, one success, and every one of those 21 counted as flakiness. 43% of
+  # the reported rate was the thing this gate was written to exclude, which is
+  # how `cross-compile all release targets` came to read 5.88%.
+  #
+  # A ratio rather than a run-level conclusion because the input has none: the
+  # fields are attempt, job, conclusion. A genuine flake cancels nothing, so the
+  # rule costs real observations nothing.
   NR==FNR {
     if ($3 == "success") ok[$1] = 1
+    if ($3 == "cancelled") ncancel[$1]++
+    njobs[$1]++
     seen[$1] = 1
     next
   }
   !($1 in ok) { skipped[$1] = 1; next }
+  ncancel[$1] * 2 >= njobs[$1] { skipped[$1] = 1; next }
   {
     total[$2]++
     if ($3 != "success" && $3 != "skipped") bad[$2]++
