@@ -2058,7 +2058,7 @@
     },
     {
       "id": "ratchet-raises-rest-on-ordinary-review",
-      "what": "every ratchet in this file -- excusedCeiling, counterpartlessExcusedCeiling, differentialFloor, sentinelWitnessFloor, unstableCeiling, inertCeiling, varianceExemptCeiling, and now citedIssues -- is enforced by making the loosening direction a HAND EDIT of the committed artifact. That is a control only to the extent that somebody reads the diff.",
+      "what": "every ratchet in this file -- excusedCeiling, counterpartlessExcusedCeiling, differentialFloor, sentinelWitnessFloor, unstableCeiling, inertCeiling, varianceExemptCeiling, shapeFloor, shapesNotInspectedCeiling, and citedIssues -- is enforced by making the loosening direction a HAND EDIT of the committed artifact. That is a control only to the extent that somebody reads the diff.",
       "whySafe": "the edit is one line of JSON in a file whose only purpose is to be read, next to a failure message that says in words what the edit means. Every automatic path -- regeneration, the -update-coverage flag, the clamps in writeLedger -- moves these numbers only in the tightening direction, so the artifact cannot loosen itself.",
       "whatWouldMakeItUnsafe": "nothing mechanical; the residual is entirely social. This repository has no CODEOWNERS file, so no tooling requires a particular reviewer on a ceiling raise. That is recorded here rather than fixed, because inventing a review process in a test file is not this change's business, and NO ISSUE IS CITED because none is filed -- a number typed here to fill the field would be the prose discharge this file spent a round deleting.",
       "issue": ""

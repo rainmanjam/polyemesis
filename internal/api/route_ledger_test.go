@@ -1310,7 +1310,7 @@ func classifyRoutes(t *testing.T, h http.Handler, s *Server) ([]coverageRoute, c
 
 // TestLedgerPreflight is the whole ledger, and TestMain runs it BEFORE whatever
 // the caller asked for -- see main_test.go. That is #161's jurisdiction problem
-// solved for this package: `go test ./internal/api -run SomeOtherTest` no
+// solved for this package: `go test ./internal/api -run TestSomethingElse` no
 // longer leaves every one of these obligations unchecked.
 //
 // Every failure message below names the route, the observed status, the byte
@@ -1502,6 +1502,20 @@ func TestLedgerPreflight(t *testing.T) {
 	// the filtered invocation the preflight exists to survive. A compile-time
 	// call fixes both.
 	assertRatchetFieldsAreClamped(t)
+
+	// The same two reasons, for the file that holds THIS ROUND's headline fix.
+	// Measured: `rm internal/api/shape_reference_test.go` deletes 314 lines
+	// containing both shape guards and leaves `POLYEMESIS_LEDGER=strict go test
+	// ./internal/api` at ok. The round diagnosed the hatch for
+	// ledger_ratchet_test.go and closed it, then wrote a new file for the
+	// headline defect and left the same hatch open in it — which is the pattern
+	// this whole exercise is about, appearing one file to the left.
+	//
+	// Calling the Test functions directly rather than extracting helpers: the
+	// call IS the compile-time reference, and it is the smallest change that
+	// buys both properties.
+	TestEveryInspectedShapeNamesAProofThisPackageCanRun(t)
+	TestBlankingEveryShapeNoteChangesNoVerdict(t)
 
 	// 6. STRICT MODE. CI sets POLYEMESIS_LEDGER=strict and the counterpart
 	// proofs run from HERE as well, so no single -run filter silences both.
@@ -2533,7 +2547,8 @@ func deferredWithReasons() []coverageDefer {
 			ID: "ratchet-raises-rest-on-ordinary-review",
 			What: "every ratchet in this file -- excusedCeiling, " +
 				"counterpartlessExcusedCeiling, differentialFloor, sentinelWitnessFloor, " +
-				"unstableCeiling, inertCeiling, varianceExemptCeiling, and now citedIssues " +
+				"unstableCeiling, inertCeiling, varianceExemptCeiling, shapeFloor, " +
+				"shapesNotInspectedCeiling, and citedIssues " +
 				"-- is enforced by making the loosening direction a HAND EDIT of the " +
 				"committed artifact. That is a control only to the extent that somebody " +
 				"reads the diff.",
