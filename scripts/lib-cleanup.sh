@@ -59,7 +59,28 @@ poly_stop_server() {
     pgrep -f "polyemesis -addr :$port" >/dev/null 2>&1 || return 0
     sleep 0.5
   done
+
+  # THE LAST STEP WAS MISSING: this used to send -9 and return, which asserted
+  # nothing. A signal is a request, and on every platform there is an interval
+  # between asking a process to die and observing it dead -- that is the whole
+  # subject of #179/#180. Even SIGKILL is not instant: the kernel still has to
+  # tear down the address space, and a process wedged in uninterruptible I/O
+  # does not leave until it returns.
+  #
+  # So re-observe, exactly as poly_free_port below already does. The bound is
+  # 3s, generous against a measured teardown of well under one, and the failure
+  # is LOUD: a server that survived -9 will hold its port and its recordings,
+  # and the next thing that happens is a caller acting as though it were gone.
   pkill -9 -f "polyemesis -addr :$port" 2>/dev/null
+  for _ in $(seq 1 12); do
+    pgrep -f "polyemesis -addr :$port" >/dev/null 2>&1 || return 0
+    sleep 0.25
+  done
+  printf "  \033[31mFAIL\033[0m  the server on port %s is STILL running after kill -9.\n" "$port"
+  printf "        It holds the port and whatever recordings it had open, and every\n"
+  printf "        check that follows is about to be run against a machine that is\n"
+  printf "        not in the state this teardown reported.\n"
+  return 1
 }
 
 # poly_port_holders prints the PIDs holding a port, or nothing.

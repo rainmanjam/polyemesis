@@ -64,7 +64,16 @@ start() {
   return 1
 }
 
-stop() { pkill -f "polyemesis -addr :$1" 2>/dev/null; sleep 0.6; }
+# stop asks, then OBSERVES. `pkill; sleep 0.6` asked and assumed, and this
+# script rebinds: PORT_SELF is stopped at :296 and started again at :299 to
+# prove a second run reuses the same leaf certificate. A fixed sleep that is
+# 0.6s too short there makes the restart fail to bind and the suite report a
+# certificate problem it has no evidence of.
+#
+# poly_free_port is the exemplar already in the tree (lib-cleanup.sh): it waits
+# for the port to be released, escalates only if it is not, and says so loudly
+# when it had to.
+stop() { pkill -f "polyemesis -addr :$1" 2>/dev/null; poly_free_port "$1"; }
 
 # mode_line <dir> -> whatever the startup banner said tls resolved to.
 mode_line() { awk '/^  tls /{print $2; exit}' "$1/server.log"; }
