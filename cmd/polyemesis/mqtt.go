@@ -300,7 +300,17 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 			ds := mqtt.DestState{
 				ID: d.ID, Name: d.Name, Slug: mqtt.Slug(d.Name),
 				Platform: string(d.Platform), Kind: string(d.Kind),
-				Enabled: d.Enabled, Running: running, Error: d.Error,
+				Enabled: d.Enabled, Running: running,
+				// Scrubbed HERE and not in Status (#160). Everything else on
+				// this topic tree was already covered -- SourceState.IngestError
+				// comes from supervisor Status.LastError, which Process.scrub
+				// has already put through the ingest's exact secret set -- and
+				// this one field arrived from the engine untouched. Same
+				// retained topic, so the same rule has to hold: a retained
+				// message outlives the process and is redelivered to every
+				// future subscriber, which makes a credential landing here
+				// unfixable by rotation.
+				Error:     e.ScrubDestinationText(d.ID, d.Error),
 				Rendition: d.RenditionName, At: now,
 			}
 			if d.Process != nil {

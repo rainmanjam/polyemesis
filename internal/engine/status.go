@@ -13,6 +13,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/playout"
@@ -274,6 +275,55 @@ func (e *Engine) destByID(list []*destination, id int64) *destination {
 		}
 	}
 	return nil
+}
+
+// ScrubDestinationText masks a destination's own declared credential literals
+// in a status string, then applies the residual pass.
+//
+// IT EXISTS FOR ONE SINK AND THE SINK IS THE REASON (#160). DestStatus.Error
+// reaches cmd/polyemesis/mqtt.go, which publishes it to a RETAINED topic. A
+// retained message is not a disclosure to whoever happened to be subscribed
+// when it was sent; it persists on the broker and is delivered to EVERY FUTURE
+// SUBSCRIBER, so a credential that lands there is not fixable after the fact by
+// rotating a token -- the old value is still sitting on somebody else's broker.
+// That is a different severity from the same string appearing in an API
+// response, and it is why this one field gets a pass the API path does not.
+//
+// The credential risk in the text itself is LOW: the strings that reach
+// DestStatus.Error are compile diagnostics and start failures, not URLs. Low is
+// not zero, and the coverage here was zero, on a sink that has no expiry. One
+// function is the right price.
+//
+// The two passes are the same shape and the same order as
+// supervisor.(*Process).scrub, for the same reasons: the exact set is the
+// boundary and cannot be defeated by how the credential was spelled; Redact is
+// the residual for what nobody declared. See the doc on alerts.Redact for what
+// that second pass can and cannot do.
+//
+// Applied at the PUBLISH SITE rather than inside Status, deliberately. The same
+// DestStatus.Error is served to the admin console, where masking a compile
+// diagnostic would cost an operator the message and buy nothing -- that
+// response has a principal, an expiry and a session behind it. The retained
+// topic has none of the three.
+//
+// A destination with no RUNNING entry gets the residual only. That is correct
+// rather than a gap: without a live row there is no compiled argv, so the text
+// came from routing.Compile, which is handed the profile and the source layout
+// and never sees a credential.
+func (e *Engine) ScrubDestinationText(id int64, text string) string {
+	if text == "" {
+		return text
+	}
+	e.mu.RLock()
+	var row *db.Destination
+	if d := e.dests[id]; d != nil {
+		row = d.row
+	}
+	e.mu.RUnlock()
+	if row == nil {
+		return alerts.Redact(text)
+	}
+	return alerts.Redact(alerts.NewSecretSet(nil, destSecrets(row)...).Scrub(text))
 }
 
 // Processes returns every supervised process, for the monitoring page.

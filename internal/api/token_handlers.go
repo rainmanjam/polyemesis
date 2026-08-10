@@ -121,6 +121,15 @@ func (s *Server) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// The socket half of revocation (#159). Deleting the row stops the token
+	// authenticating the NEXT request, and that used to be the whole of it: a
+	// /ws socket resolves its principal once, at upgrade, and then never again,
+	// so a token revoked during an incident went on feeding a live telemetry
+	// stream to whoever held it for as long as they kept the connection open.
+	// This is the only writer of the revoked set, and it is the reason
+	// DeleteAPIToken having exactly one call site was worth checking: a second
+	// deletion path that did not do this would be a silent hole.
+	s.markRevoked(id)
 	s.log.Info("api token revoked", "id", id)
 	s.publishAudit(auditAPITokenRevoked(name, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})

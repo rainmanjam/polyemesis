@@ -1,0 +1,242 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/events"
+)
+
+// wsTestPing is short enough to keep the suite fast and long enough that a
+// socket gets its initial burst out before the first tick.
+const wsTestPing = 40 * time.Millisecond
+
+// tokenIDByName finds the id of a minted token, which the create response does
+// not return alongside the plaintext.
+func tokenIDByName(t *testing.T, h http.Handler, sign func(*http.Request), name string) int64 {
+	t.Helper()
+	r := jsonRequest(t, http.MethodGet, "/api/v1/auth/tokens", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list tokens: status %d: %s", w.Code, w.Body.String())
+	}
+	var toks []db.APIToken
+	if err := json.Unmarshal(w.Body.Bytes(), &toks); err != nil {
+		t.Fatalf("decode token list: %v: %s", err, w.Body.String())
+	}
+	for _, tok := range toks {
+		if tok.Name == name {
+			return tok.ID
+		}
+	}
+	t.Fatalf("no token named %q in %v", name, toks)
+	return 0
+}
+
+// dialWS opens a socket against a live server, with an optional bearer.
+func dialWS(t *testing.T, srv *httptest.Server, header http.Header) *websocket.Conn {
+	t.Helper()
+	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/ws"
+	c, _, err := websocket.DefaultDialer.Dial(u, header)
+	if err != nil {
+		t.Fatalf("dial /api/v1/ws: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+// drainUntilClosed reads until the socket closes or the deadline passes. It
+// returns the close code, or -1 if the socket was still open and delivering.
+func drainUntilClosed(t *testing.T, c *websocket.Conn, within time.Duration) int {
+	t.Helper()
+	_ = c.SetReadDeadline(time.Now().Add(within))
+	for {
+		if _, _, err := c.ReadMessage(); err != nil {
+			var ce *websocket.CloseError
+			if ok := asCloseError(err, &ce); ok {
+				return ce.Code
+			}
+			return -1
+		}
+	}
+}
+
+func asCloseError(err error, out **websocket.CloseError) bool {
+	ce, ok := err.(*websocket.CloseError)
+	if ok {
+		*out = ce
+	}
+	return ok
+}
+
+// TestRevokingATokenClosesItsOpenSocket is #159, driven end to end.
+//
+// The defect: /ws resolves its principal ONCE, at upgrade, and never again. So
+// the operator's only lever after a credential leaks -- revoke the token -- did
+// not reach a socket that was already open. Deleting the row stopped the next
+// REQUEST and did nothing about a connection that had already become a
+// long-lived stream of status, logs and audio levels.
+//
+// This drives the real router, mints a real token, opens a real socket with it,
+// revokes it through the real route, and asserts the socket CLOSES with a
+// policy-violation code rather than merely going quiet. "Goes quiet" would pass
+// against a server that had simply stopped publishing.
+func TestRevokingATokenClosesItsOpenSocket(t *testing.T) {
+	for _, scope := range []string{db.ScopeRead, db.ScopeAdmin} {
+		t.Run(scope, func(t *testing.T) {
+			h, _, sign := renditionServer(t, defaultTools())
+			s := serverUnderTest(t, h)
+			s.revokedMu.Lock()
+			s.wsPingEvery = wsTestPing
+			s.revokedMu.Unlock()
+
+			const name = "leaked"
+			tok := createScopedToken(t, h, sign, name, scope)
+			id := tokenIDByName(t, h, sign, name)
+
+			srv := httptest.NewServer(s.Handler())
+			defer srv.Close()
+
+			c := dialWS(t, srv, http.Header{"Authorization": {"Bearer " + tok}})
+
+			// The positive control. Before the revoke the socket is LIVE, so a
+			// close afterwards cannot be explained by the socket never having
+			// worked. Without this the test would pass against a build where
+			// /ws was broken outright.
+			_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+			if _, _, err := c.ReadMessage(); err != nil {
+				t.Fatalf("the socket delivered nothing before the revoke, so this test "+
+					"cannot tell a revocation from a dead socket: %v", err)
+			}
+
+			r := jsonRequest(t, http.MethodDelete,
+				"/api/v1/auth/tokens/"+strconv.FormatInt(id, 10), nil)
+			sign(r)
+			if w := do(t, h, r); w.Code != http.StatusOK {
+				t.Fatalf("revoke: status %d: %s", w.Code, w.Body.String())
+			}
+
+			// The bound is ONE ping period. Ten of them is generous enough for a
+			// loaded CI box and still fails loudly against a build that never
+			// closes.
+			code := drainUntilClosed(t, c, 10*wsTestPing+2*time.Second)
+			if code != websocket.ClosePolicyViolation {
+				t.Fatalf("close code = %d, want %d (policy violation). A revoked token's "+
+					"socket must be CLOSED, not merely starved: a client that is still "+
+					"connected is still authorised as far as anything else can tell.",
+					code, websocket.ClosePolicyViolation)
+			}
+		})
+	}
+}
+
+// TestRevokingATokenLeavesASessionSocketAlone is the other half, and it is the
+// regression this fix could most easily have caused.
+//
+// The console opens two sockets per tab on a COOKIE, not a token. Session
+// principals are deliberately not re-evaluated on the tick: they are already
+// revoked wholesale by TokenEpoch when the password changes, and closing them
+// here would make routine session handling look like a dashboard fault. A
+// session socket must survive a token revocation completely -- including one
+// that revokes every token on the box.
+func TestRevokingATokenLeavesASessionSocketAlone(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+	s := serverUnderTest(t, h)
+	s.revokedMu.Lock()
+	s.wsPingEvery = wsTestPing
+	s.revokedMu.Unlock()
+
+	const name = "leaked"
+	_ = createScopedToken(t, h, sign, name, db.ScopeAdmin)
+	id := tokenIDByName(t, h, sign, name)
+
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	// A cookie socket, the way the console opens one. The dialer needs the
+	// session cookie on the upgrade request, which is what sign attaches.
+	req := jsonRequest(t, http.MethodGet, "/api/v1/ws", nil)
+	sign(req)
+	header := http.Header{}
+	for _, ck := range req.Cookies() {
+		header.Add("Cookie", ck.Name+"="+ck.Value)
+	}
+	c := dialWS(t, srv, header)
+
+	r := jsonRequest(t, http.MethodDelete,
+		"/api/v1/auth/tokens/"+strconv.FormatInt(id, 10), nil)
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("revoke: status %d: %s", w.Code, w.Body.String())
+	}
+
+	// Past several ticks, the session socket is still delivering. Publishing on
+	// the bus rather than waiting for ambient traffic, so "still open" is
+	// asserted by a frame arriving rather than by the absence of a close.
+	time.Sleep(4 * wsTestPing)
+	s.bus.Publish(events.TypeChatState, map[string]any{"state": "still here"})
+
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		_, msg, err := c.ReadMessage()
+		if err != nil {
+			t.Fatalf("the SESSION socket was closed by a token revocation (%v). The "+
+				"console opens two of these per tab and holds no API token; closing them "+
+				"here turns a security fix into a dashboard that drops out whenever an "+
+				"operator tidies up their tokens.", err)
+		}
+		var ev struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(msg, &ev) == nil && ev.Type == string(events.TypeChatState) {
+			return
+		}
+	}
+}
+
+// TestTheRevokedSetIsNotConsultedForAuthorisation states the limit of the set,
+// so nobody promotes it into an authorisation source.
+//
+// Absence from the set means "this process has not seen that token deleted",
+// which is NOT "the token is valid": a token deleted by another process, or by
+// an operator with sqlite3, is absent from it. Every request still asks the
+// database through requireAuth. The set only ever CLOSES a socket early.
+func TestTheRevokedSetIsNotConsultedForAuthorisation(t *testing.T) {
+	h, store, sign := renditionServer(t, defaultTools())
+	s := serverUnderTest(t, h)
+
+	const name = "deleted-behind-our-back"
+	tok := createScopedToken(t, h, sign, name, db.ScopeAdmin)
+	id := tokenIDByName(t, h, sign, name)
+
+	// Delete through the STORE, bypassing the handler, which is what another
+	// process or a hand-edited database looks like from in here.
+	if err := store.DeleteAPIToken(id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if s.isRevoked(id) {
+		t.Fatal("the revoked set knows about a deletion that did not go through the " +
+			"handler; if something else now writes to it, this test's premise is stale")
+	}
+
+	// The request is still refused, because requireAuth asks the database and
+	// not the set.
+	r := jsonRequest(t, http.MethodGet, "/api/v1/status", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	if w := do(t, h, r); w.Code != http.StatusUnauthorized {
+		t.Errorf("GET /api/v1/status with a token deleted outside the handler: status %d, "+
+			"want 401. The revoked set must never become the thing that decides -- it "+
+			"cannot see a deletion it was not told about, so consulting it INSTEAD of the "+
+			"database would turn a missed notification into an authorisation bypass.",
+			w.Code)
+	}
+}

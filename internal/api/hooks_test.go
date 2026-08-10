@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -87,9 +88,40 @@ func TestUpdatingAHookWithTheMaskedURLKeepsTheRealOne(t *testing.T) {
 	// given -- the masked one -- and submits it back untouched. Storing that
 	// would point the hook at a URL that has never existed, and firing would
 	// stop with no error anywhere.
+	//
+	// THE DISCRIMINATOR CHANGED, and the reason is worth reading before
+	// changing it back. This test used to fire a test delivery at an
+	// unresolvable host and assert that alerts.Mask did NOT appear in the 502
+	// body: a hook whose URL had become "https://ci.example.com/[redacted]"
+	// produced a *url.Error quoting that string, mask and all.
+	//
+	// #160 made that proxy blind. Dispatcher.Test now returns the error through
+	// alerts.ClientErrorText, which masks the endpoint PATH on purpose --
+	// because net/http's wrapper quotes the whole URL and a Slack-shaped hook
+	// keeps its entire credential there. So the masked-URL case and the
+	// real-URL case now render IDENTICALLY, both as
+	// "Post https://ci.example.com/[redacted]: ...". The old assertion did not
+	// start failing because the behaviour regressed; it started failing because
+	// it was measuring the leak it depended on.
+	//
+	// The replacement is stronger than what it replaces: the hook points at a
+	// REAL server on a secret path, and the assertion is that the delivery
+	// ARRIVED THERE. A hook pointed at the mask cannot arrive at all, and no
+	// amount of error-text redaction can make a request that was never made
+	// look like one that was.
 	h, _, sign := hookServer(t)
 
-	created := createHook(t, h, sign, map[string]any{"name": "deploy", "url": hookURL})
+	const secretPath = "/build/XXXXsecretXXXX"
+	arrived := make(chan string, 4)
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer endpoint.Close()
+
+	created := createHook(t, h, sign, map[string]any{
+		"name": "deploy", "url": endpoint.URL + secretPath,
+	})
 	id := int64(created["id"].(float64))
 	path := "/api/v1/hooks/" + strconv.FormatInt(id, 10)
 
@@ -99,18 +131,25 @@ func TestUpdatingAHookWithTheMaskedURLKeepsTheRealOne(t *testing.T) {
 	if !strings.Contains(masked, alerts.Mask) {
 		t.Fatalf("url = %q, expected a masked one", masked)
 	}
+	if strings.Contains(masked, secretPath) {
+		t.Fatalf("url = %q still carries the path, so the round trip below proves nothing", masked)
+	}
 	send(t, h, sign, http.MethodPut, path, map[string]any{
 		"name": "renamed", "url": masked,
 	}, http.StatusOK)
 
-	// Proven through behaviour rather than by reading the column back: a test
-	// delivery goes to the stored URL, and a hook pointed at "[redacted]" would
-	// fail to build a request at all.
-	var res map[string]any
-	raw := send(t, h, sign, http.MethodPost, path+"/test", nil, http.StatusBadGateway)
-	decodeInto(t, raw, &res)
-	if msg, _ := res["error"].(string); strings.Contains(msg, alerts.Mask) {
-		t.Fatalf("the stored URL became the mask: %v", res)
+	// Behaviour, not the column: a test delivery goes to the STORED url.
+	send(t, h, sign, http.MethodPost, path+"/test", nil, http.StatusOK)
+
+	select {
+	case got := <-arrived:
+		if got != secretPath {
+			t.Fatalf("the delivery arrived at %q, want %q: the stored URL was rewritten "+
+				"by the masked value the form submitted back", got, secretPath)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no delivery arrived at the endpoint at all, so the stored URL is not the " +
+			"one that was created -- which is exactly the regression this test exists for")
 	}
 }
 

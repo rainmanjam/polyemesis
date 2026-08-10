@@ -229,6 +229,8 @@ a decision about the resource that a role-level scope must not override.
 | `GET` | `/source` | Probed track layout |
 | `PUT` | `/source/annotations` | Label what each incoming track is |
 | `GET` | `/version`, `POST` `/version/check` | |
+| `GET` | `/upgrade/plan` | What an in-place upgrade would do on this install, and whether it can |
+| `POST` | `/upgrade/stage`, `/upgrade/rollback` | Session-only. Staging writes the new binary; rollback restores the saved one |
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
@@ -349,6 +351,7 @@ does.
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/failover/source` | `{"source": "primary\|backup\|slate\|auto"}` |
+| `GET` | `/failover/playlist` | The slate playlist's current item and its position |
 
 `auto` clears a manual pin and returns control to the detector. `400` when
 failover is off — there is no tier to switch.
