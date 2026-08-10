@@ -1032,12 +1032,22 @@ func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute, tota
 		Shapes:          shapes,
 		Deferred:        deferredWithReasons(),
 	}
-	// The ceilings RATCHET DOWN on regeneration and never up: a run that excuses
-	// fewer routes rebanks the ceiling to the lower number, and a run that
-	// excuses more has already failed the assertion in the caller before
-	// reaching here on a subsequent, non-updating run.
-	out.ExcusedCeiling = totals.Excused
-	out.DeferredCeiling = deferredCount()
+	// The ceilings RATCHET DOWN on regeneration and never up. This CLAMPS rather
+	// than assigns, and the difference is the whole guarantee.
+	//
+	// Assigning looked equivalent because the caller asserts the ceiling too --
+	// but it writes the file BEFORE that assertion runs, so `-update-coverage`
+	// banked the raised number and the next plain run passed against it. The
+	// laundering needed no bad intent: fail, do what the message says and
+	// regenerate, re-run, green. The evidence was a two-character diff inside
+	// 1539 lines of JSON, which is exactly the silent raise the ratchet exists
+	// to prevent. A ratchet that does not ratchet is worse than none, because it
+	// is cited as though it did.
+	//
+	// Raising a ceiling is still possible and still allowed -- by editing this
+	// file by hand, which is a reviewable act. That is the point.
+	out.ExcusedCeiling = min(totals.Excused, prev.ExcusedCeiling)
+	out.DeferredCeiling = min(deferredCount(), prev.DeferredCeiling)
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal ledger: %v", err)
