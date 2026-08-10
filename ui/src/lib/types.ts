@@ -737,7 +737,17 @@ export interface SourceView extends Source {
    *  and deliberately survives one of them failing, so a source can be running,
    *  token-enforced, and unreachable for every encoder on the family that did
    *  not bind. `detail` is always set when the state is degraded — a bare
-   *  "degraded" tells an operator nothing they can act on. */
+   *  "degraded" tells an operator nothing they can act on.
+   *
+   *  `degraded` means a family this HOST HAS was refused anyway — the port held
+   *  by another process, a permission denied — and not merely that some
+   *  requested address did not bind. An IPv4-only container cannot bind `[::]`
+   *  and never will, so reporting that as degraded put a permanent orange badge
+   *  on a perfectly healthy install, which teaches an operator to ignore the
+   *  badge and costs them the one time it means something. The server draws
+   *  that distinction from the errno; see engine.listenerHealthFor. The log
+   *  line still records BOTH, because whoever is working out why an encoder
+   *  will not connect needs the IPv4-only case too. */
   listenerHealth?: {
     state: "ok" | "degraded";
     detail?: string;

@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	srt "github.com/datarhei/gosrt"
@@ -161,6 +162,23 @@ type BindReport struct {
 type BindFailure struct {
 	Addr string
 	Err  string
+	// Unavailable means the HOST DOES NOT HAVE this address family, as opposed
+	// to having it and something being wrong with it.
+	//
+	// This is the distinction the errno was already carrying and nothing was
+	// reading. "address family not supported by protocol" on [::] is an
+	// IPv4-only container, which is a completely ordinary way to run this
+	// software; "address already in use" on the same address is another process
+	// holding the port, which is a fault. Both produce an identical BindReport
+	// otherwise, and #105's badge treated them identically -- a permanent orange
+	// "Partly bound" on every legitimately IPv4-only host, which teaches the
+	// operator to ignore the badge and so costs them the one time it means
+	// something.
+	//
+	// The LOG LINE does not vary on this and deliberately so. It is read by
+	// somebody trying to work out why an encoder will not connect, and for them
+	// the IPv4-only case IS the answer.
+	Unavailable bool
 }
 
 // Degraded reports whether some but not all of the requested addresses bound.
@@ -170,6 +188,56 @@ type BindFailure struct {
 // distinction only the operator can act on.
 func (r BindReport) Degraded() bool {
 	return len(r.Failed) > 0 && len(r.Bound) > 0
+}
+
+// Actionable reports a degradation the operator can DO something about, as
+// opposed to one that is just what this host is.
+//
+// Degraded answers "did every requested address bind". That is the right
+// question for the log and the wrong one for a badge, because the answer is
+// permanently no on an IPv4-only host and there is nothing to fix. This asks
+// the question a badge is actually for: is some address family present on this
+// machine that this listener asked for and did not get.
+//
+// False when every failure is an absent family. True when even one of them is
+// a port already held, a permission denied, or anything else that says the
+// family exists and the bind still failed.
+func (r BindReport) Actionable() bool {
+	if !r.Degraded() {
+		return false
+	}
+	for _, f := range r.Failed {
+		if !f.Unavailable {
+			return true
+		}
+	}
+	return false
+}
+
+// familyUnavailable reports whether an error from Listen means the host has no
+// such address family.
+//
+// Three errnos, because three kernels spell it differently. EAFNOSUPPORT is the
+// straightforward one -- socket(AF_INET6) on a kernel built without it.
+// EPFNOSUPPORT is the same refusal from a protocol-family check on the BSDs.
+// EADDRNOTAVAIL is what Linux gives when IPv6 is present in the kernel but
+// disabled by sysctl, which is how most IPv4-only containers are actually
+// configured: the socket opens and there is no [::] to bind it to.
+//
+// Matched with errors.Is against the syscall values rather than by comparing
+// the message text, so a translated or reworded strerror does not turn a normal
+// host into an alarm.
+//
+// EADDRNOTAVAIL against a SPECIFIC address would mean something else -- an IP
+// this host does not own, which is a real configuration error. It cannot mean
+// that here: this classification is only ever consulted through Actionable,
+// which requires Degraded, which requires two or more requested addresses, and
+// the only case that produces two is the wildcard expansion into 0.0.0.0 and
+// [::]. See bindAddrs.
+func familyUnavailable(err error) bool {
+	return errors.Is(err, syscall.EAFNOSUPPORT) ||
+		errors.Is(err, syscall.EPFNOSUPPORT) ||
+		errors.Is(err, syscall.EADDRNOTAVAIL)
 }
 
 // Report returns what Start bound. The zero value means Start has not run.
@@ -245,7 +313,9 @@ func (s *Server) Start() error {
 			s.log.Error("srt ingest could not bind one address family",
 				"addr", addr, "err", err,
 				"consequence", "encoders reaching this server over that family will not connect")
-			report.Failed = append(report.Failed, BindFailure{Addr: addr, Err: err.Error()})
+			report.Failed = append(report.Failed, BindFailure{
+				Addr: addr, Err: err.Error(), Unavailable: familyUnavailable(err),
+			})
 			continue
 		}
 		s.srvs = append(s.srvs, srv)

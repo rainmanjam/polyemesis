@@ -1,10 +1,13 @@
 package srtserver
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
+	"syscall"
 	"testing"
 )
 
@@ -71,6 +74,131 @@ func TestPartialBindStartsAndReportsDegraded(t *testing.T) {
 	if host, _, _ := net.SplitHostPort(report.Failed[0].Addr); host != "::" {
 		t.Errorf("the failed address was %q, want the IPv6 wildcard",
 			report.Failed[0].Addr)
+	}
+	// This host DOES have IPv6 -- the test could not have staged the condition
+	// otherwise -- and the family was refused because something else holds the
+	// port. That is the case an operator can act on, and it is the case the
+	// badge exists for. See BindReport.Actionable and #105.
+	if report.Failed[0].Unavailable {
+		t.Errorf("the failure was classified as an absent address family, but this "+
+			"host bound udp6 a moment ago to set the test up: %+v", report.Failed[0])
+	}
+	if !report.Actionable() {
+		t.Errorf("Actionable() = false for a port held by another process; that is "+
+			"exactly what the operator can fix, so it must reach the badge: %+v", report)
+	}
+}
+
+// TestActionableSeparatesAnAbsentFamilyFromABrokenOne is #105's badge ruling,
+// asserted where the classification lives.
+//
+// Degraded and Actionable answer two different questions and the difference is
+// the whole change: Degraded asks whether every requested address bound, which
+// on an IPv4-only host is permanently no and permanently nothing to fix;
+// Actionable asks whether any address family this machine HAS was refused
+// anyway. The first is the right input to the log line and the wrong input to
+// an orange badge that never goes away.
+//
+// A table over reports rather than over listeners, because the case that
+// matters cannot be staged: no CI runner with IPv6 can be made to pretend it
+// has none. TestPartialBindStartsAndReportsDegraded above covers the other
+// direction against a real socket.
+func TestActionableSeparatesAnAbsentFamilyFromABrokenOne(t *testing.T) {
+	const (
+		v4 = "0.0.0.0:6000"
+		v6 = "[::]:6000"
+	)
+	tests := []struct {
+		name string
+		rep  BindReport
+		want bool
+	}{
+		{"a clean bind", BindReport{Requested: []string{v4, v6}, Bound: []string{v4, v6}}, false},
+		{
+			"an IPv4-only host: normal, and no operator action exists",
+			BindReport{
+				Requested: []string{v4, v6}, Bound: []string{v4},
+				Failed: []BindFailure{{Addr: v6, Err: "address family not supported", Unavailable: true}},
+			},
+			false,
+		},
+		{
+			"a family this host has, refused anyway",
+			BindReport{
+				Requested: []string{v4, v6}, Bound: []string{v4},
+				Failed: []BindFailure{{Addr: v6, Err: "bind: address already in use"}},
+			},
+			true,
+		},
+		{
+			"one of each: the fixable one wins",
+			BindReport{
+				Requested: []string{v4, v6}, Bound: []string{"127.0.0.1:6000"},
+				Failed: []BindFailure{
+					{Addr: v6, Err: "address family not supported", Unavailable: true},
+					{Addr: v4, Err: "bind: permission denied"},
+				},
+			},
+			true,
+		},
+		{
+			"nothing bound at all is not degraded; Start returns an error instead",
+			BindReport{
+				Requested: []string{v4, v6},
+				Failed: []BindFailure{
+					{Addr: v4, Err: "bind: address already in use"},
+					{Addr: v6, Err: "bind: address already in use"},
+				},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.rep.Actionable(); got != tt.want {
+				t.Fatalf("Actionable() = %v, want %v (Degraded() = %v)",
+					got, tt.want, tt.rep.Degraded())
+			}
+		})
+	}
+}
+
+// TestFamilyUnavailableReadsTheErrnoAndNotTheMessage pins how the two cases are
+// told apart.
+//
+// Three errnos because three kernels spell it differently, and errors.Is
+// against the syscall values rather than a substring of strerror -- a reworded
+// or translated message must not turn a normal IPv4-only host into a permanent
+// alarm, which is the failure mode this whole item is about.
+//
+// The errors are wrapped the way net actually delivers them, through
+// *net.OpError and *os.SyscallError, because an unwrapped syscall.Errno would
+// prove that errors.Is compares two constants and nothing else.
+func TestFamilyUnavailableReadsTheErrnoAndNotTheMessage(t *testing.T) {
+	wrap := func(errno syscall.Errno) error {
+		return &net.OpError{
+			Op: "listen", Net: "udp6", Addr: nil,
+			Err: os.NewSyscallError("socket", errno),
+		}
+	}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"EAFNOSUPPORT: no such address family in this kernel", wrap(syscall.EAFNOSUPPORT), true},
+		{"EPFNOSUPPORT: the BSD spelling of the same refusal", wrap(syscall.EPFNOSUPPORT), true},
+		{"EADDRNOTAVAIL: IPv6 compiled in and disabled by sysctl", wrap(syscall.EADDRNOTAVAIL), true},
+		{"EADDRINUSE: the family exists and something else has the port", wrap(syscall.EADDRINUSE), false},
+		{"EACCES: the family exists and this process may not bind it", wrap(syscall.EACCES), false},
+		{"an error carrying no errno at all", errors.New("listen udp6: something else entirely"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := familyUnavailable(tt.err); got != tt.want {
+				t.Fatalf("familyUnavailable(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 
