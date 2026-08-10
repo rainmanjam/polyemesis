@@ -1020,8 +1020,22 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 	// Subject is the user id, written by Issue. A token that got this far has a
 	// valid signature and has already passed checkEpoch, so a subject that will
 	// not parse is not a credential problem -- it is a token this build did not
-	// mint. Zero then, which never matches a real user id, so the socket check
-	// in handleWS fails closed rather than comparing against nothing.
+	// mint. Zero then.
+	//
+	// A zero here makes the socket check in handleWS fail OPEN, not closed:
+	// both `sessionUser != 0` there and `if userID == 0 { return false }` in
+	// sessionEpochChanged skip the re-check, so such a socket would never be
+	// closed by a password change. That is unreachable in this build --
+	// auth.checkEpoch (internal/auth/auth.go:141) refuses an unparseable
+	// subject before authenticate returns, pinned by
+	// TestATokenWithAnUnparseableSubjectIsRefused -- and it is written down
+	// this way round because the previous wording claimed the opposite. A
+	// comment that says "fails closed" over code that fails open is worth less
+	// than no comment: it is the thing a reader trusts instead of checking, and
+	// this PR closed five defects of exactly that shape.
+	//
+	// If checkEpoch ever stops guarding this, the fix belongs there or in an
+	// explicit refusal here -- not in restoring the sentence.
 	userID, _ := strconv.ParseInt(claims.Subject, 10, 64)
 	return &principal{username: claims.Username, userID: userID, epoch: claims.Epoch}, nil
 }

@@ -161,12 +161,21 @@ func TestRevokingATokenClosesItsOpenSocket(t *testing.T) {
 // TestRevokingATokenLeavesASessionSocketAlone is the other half, and it is the
 // regression this fix could most easily have caused.
 //
-// The console opens two sockets per tab on a COOKIE, not a token. Session
-// principals are deliberately not re-evaluated on the tick: they are already
-// revoked wholesale by TokenEpoch when the password changes, and closing them
-// here would make routine session handling look like a dashboard fault. A
-// session socket must survive a token revocation completely -- including one
-// that revokes every token on the box.
+// The console opens two sockets per tab on a COOKIE, not a token. What must
+// hold is that revoking an API TOKEN -- any token, all of them -- never touches
+// a socket opened on a session. The two credentials are separate and a token
+// revocation is not a statement about the operator's own browser.
+//
+// The rationale that used to sit here said session principals are "deliberately
+// not re-evaluated on the tick". That was true when it was written and is false
+// now: this same PR made the tick read the session's epoch, because a password
+// change that left a socket streaming was the operator's emergency lever
+// failing. The behaviour this test pins did not change; only the reason did.
+// Corrected rather than deleted, because a stale rationale on a correct test is
+// how the next reader concludes the tick does less than it does.
+//
+// TestChangingThePasswordClosesAnOpenSessionSocket is the other side: a token
+// revocation leaves this socket alone, a password change does not.
 func TestRevokingATokenLeavesASessionSocketAlone(t *testing.T) {
 	h, _, sign := renditionServer(t, defaultTools())
 	s := serverUnderTest(t, h)

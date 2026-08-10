@@ -166,8 +166,24 @@ func TestTestDeliveryReturnsWhatTheEndpointSaid(t *testing.T) {
 	var out map[string]any
 	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/hooks/"+id+"/test", nil,
 		http.StatusBadGateway), &out)
-	if _, ok := out["error"]; !ok {
+	msg, ok := out["error"].(string)
+	if !ok {
 		t.Fatalf("no error explaining the failure: %v", out)
+	}
+	// AND THE PATH IS NOT IN IT. This assertion is one line and it was missing,
+	// on a test already holding the exact response that would have carried the
+	// leak. Dispatcher.Test redacts correctly today -- but both of its redacting
+	// calls could be deleted and every package still passed, while the two
+	// structurally identical twins (Dispatcher.deliver and the alerts notifier)
+	// each fail a named test when mutated the same way. A redaction whose only
+	// proof is that someone wrote it is the shape this PR spent five defects
+	// removing; the asymmetry is what made it worth closing rather than noting.
+	//
+	// The URL PATH is the secret: a webhook endpoint's path is frequently the
+	// whole credential, which is why hookURL ends in one.
+	if strings.Contains(msg, "XXXXsecretXXXX") {
+		t.Errorf("POST /hooks/{id}/test handed back the endpoint path, which IS the "+
+			"credential for most webhook providers: %s", msg)
 	}
 }
 
