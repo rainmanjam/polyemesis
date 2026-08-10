@@ -197,6 +197,14 @@ jobs:
       # the first attempt, and it was only caught because the scan runs against
       # committed history rather than the working tree. The parts below carry
       # no keyword before the `=`, so the rule does not fire on them.
+      #
+      # Both invocations below are `--no-git`: they read the WORKING TREE and
+      # never open the object database. That makes this step immune, by
+      # construction, to the cross-branch contamination the `scan` step below
+      # had to be fixed for — a commit on somebody else's branch is not in the
+      # working tree, so it cannot reach either the baseline or the assertion.
+      # Do not "helpfully" give these two a --log-opts; there is no log here to
+      # scope.
       - name: verify the allowlist is not over-broad
         run: |
           target=internal/alerts/redact_test.go
@@ -212,6 +220,19 @@ jobs:
             exit 1
           fi
 
+          # The IDENTIFIER NAME is load-bearing here, not just the value. The
+          # generic-api-key rule fires on a credential-shaped string that is
+          # KEYWORD-ADJACENT: it is the `...Key =` to the left of the literal
+          # that arms it. Measured 2026-08-10 against this repository, this
+          # config and this pinned gitleaks 8.30.1, same value both times:
+          #
+          #   const plantedKey   = "<value>"  ->  1 finding (generic-api-key)
+          #   const plantedThing = "<value>"  ->  0 findings
+          #
+          # So tidying this constant's name would silently convert the whole
+          # step into a check that proves nothing: the plant would go
+          # undetected for the plant's OWN reasons, and the resulting failure
+          # would be read as "the allowlist is too broad". Keep the Key suffix.
           prefix="live_999888777"
           body="zQ1wErTyUiOpAsDfGhJkL"
           printf '\nconst plantedKey = "%s_%s"\n' "$prefix" "$body" >> "$target"
@@ -224,13 +245,22 @@ jobs:
           import json, sys
           target = sys.argv[1]
           found = json.load(open('after.json'))
-          hits = [f for f in found if f.get('File') == target]
+          # Both halves matter. Matching on the FILE alone would accept a
+          # finding from any rule at all in that file — including some future
+          # rule that fires on something else entirely — and report it as
+          # proof that generic-api-key still sees through the allowlist. The
+          # plant is shaped for generic-api-key specifically; that is the rule
+          # that has to be the one catching it.
+          hits = [f for f in found
+                  if f.get('File') == target and f.get('RuleID') == 'generic-api-key']
           if not hits:
-              print("::error::A secret planted in an allowlisted file was NOT detected.")
+              print("::error::A secret planted in an allowlisted file was NOT detected by generic-api-key.")
               print("::error::.gitleaks.toml is too broad: it is exempting the file, not the fixtures.")
-              print(f"::error::findings seen: {[f.get('File') for f in found]}")
+              print("::error::(or the plant lost its keyword adjacency — see the note above the printf)")
+              print(f"::error::findings seen: {[(f.get('RuleID'), f.get('File')) for f in found]}")
               sys.exit(1)
-          print(f"planted secret detected in {target}; the allowlist is scoped to values, not files")
+          print(f"planted secret detected in {target} by generic-api-key; "
+                "the allowlist is scoped to values, not files")
           PY
 
           # Scoped to the file this step touched. A whole-tree check would fail
@@ -242,7 +272,92 @@ jobs:
           }
           rm -f before.json after.json
 
-      - name: scan
+      # `gitleaks detect` with no --log-opts walks `git log -p --full-history
+      # --all` — ALL refs, not this branch's. Combined with the `fetch-depth: 0`
+      # checkout above, that means every branch the runner has fetched is
+      # reachable, and a secret-shaped test fixture on somebody ELSE'S branch
+      # fails THIS pull request.
+      #
+      # Measured 2026-08-10: PR #173 failed with two findings, in
+      # internal/engine/dest_retained_scrub_test.go and
+      # internal/api/ws_policy_array_test.go — files that exist only on PR
+      # #172's branch, at commit 9a0b3dc, which is not an ancestor of #173.
+      # #173's own tree, own history and own merge ref were all clean under
+      # this same pinned gitleaks and this same config. When #172 later rewrote
+      # its history, a rerun of #173 went green without #173 changing a line.
+      #
+      # The diagnostic cost is the damage. The failure names files the author
+      # has never opened, in a pull request that did not touch them, and the
+      # only way to establish that is to reproduce the walk by hand.
+      #
+      # So: on a pull request, scan the commits the pull request actually adds.
+      - name: scan (pull request — this branch's own commits)
+        if: github.event_name == 'pull_request'
+        env:
+          # Via env rather than spliced inline, so the value arrives as data to
+          # the shell instead of as text pasted into the script. GitHub will
+          # not create a branch whose name carries shell metacharacters, so
+          # this is habit rather than a live hole — but it is the habit that
+          # keeps the next edit to this block safe.
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          # base_ref, NOT a hardcoded origin/main: this repository has
+          # release/0.4.0, the `pull_request` trigger above carries no branch
+          # filter, and stacked pull requests target other fix/* branches —
+          # #173's own stack is where this bug surfaced.
+          #
+          # base_ref, and not github.event.pull_request.base.sha either.
+          # base.sha is the base tip FROZEN at PR-event time, but the thing
+          # actually checked out is a merge ref rebuilt against the CURRENT
+          # base tip. When the base branch is being actively pushed to — the
+          # normal case for a stack — base advances after the event, its new
+          # commits become reachable from HEAD but not from base.sha, and
+          # base.sha..HEAD re-scans the base branch's own new commits. That is
+          # the same cross-blame this step exists to remove, only slower and
+          # harder to spot. An explicitly fetched origin/$BASE_REF tracks the
+          # tip HEAD was really merged against.
+          if ! git fetch --no-tags --quiet origin \
+                 "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"; then
+            echo "::error::could not fetch base branch ${BASE_REF} from origin; refusing to scan an undefined range"
+            exit 1
+          fi
+
+          # Belt and braces. The fetch above is the thing that normally fails,
+          # but a fetch can succeed and still leave the ref unresolvable, and
+          # the failure mode this guards against is silent: a missing base ref
+          # makes the range invalid, and the tempting recovery — drop
+          # --log-opts — is precisely the bug being fixed here.
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/${BASE_REF}^{commit}" >/dev/null; then
+            echo "::error::base branch origin/${BASE_REF} is absent even after an explicit fetch; refusing to scan an undefined range"
+            exit 1
+          fi
+
+          range="origin/${BASE_REF}..HEAD"
+          count="$(git rev-list --count "$range")"
+          echo "scanning $count commit(s) in $range"
+
+          # An empty range scans zero commits and exits 0 — a green tick from a
+          # scan that read nothing, which is the exact failure mode this whole
+          # workflow is written against. Refuse it rather than bank it.
+          if [ "$count" -eq 0 ]; then
+            echo "::error::$range is empty; gitleaks would scan 0 commits and report success having read nothing"
+            exit 1
+          fi
+
+          gitleaks detect --no-banner --redact --config .gitleaks.toml --log-opts "$range"
+
+      # push / schedule / workflow_dispatch: the FULL unscoped walk, deliberately.
+      #
+      # Do not "unify" these two by handing this one a range as well. On a push
+      # to main the natural range is origin/main..origin/main, which is empty,
+      # which scans 0 commits and exits 0 — measured. A blanket range would
+      # make the post-merge and scheduled scans structurally vacuous, and those
+      # are the two runs whose entire job is to look at all of main's history.
+      # Here the full history genuinely IS this ref's own problem.
+      - name: scan (push, schedule, dispatch — full history)
+        if: github.event_name != 'pull_request'
         run: gitleaks detect --no-banner --redact --config .gitleaks.toml
 
   # Static analysis.
