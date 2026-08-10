@@ -478,6 +478,55 @@ func TestATTACK_UnprobedFileBecomesPlaylistItem(t *testing.T) {
 	}
 }
 
+// FINDING B AT THE LAYER THE OPERATOR READS.
+//
+// internal/ffmpeg pins which sentinel a refusal gets; this pins what the
+// handler turns that sentinel into, which is the sentence in the toast. A real
+// self-contained file in a format the allowlist does not name used to be
+// refused with "this file is a playlist or script naming other files, not media
+// itself" -- untrue about it, and unactionable, because the operator goes
+// looking for a script that does not exist.
+//
+// The fixture is 43 bytes of literal GIF89a rather than something muxed, so
+// this needs ffprobe and not ffmpeg, and adds no new skip site.
+func TestARefusedContainerIsNotDescribedAsAPlaylist(t *testing.T) {
+	ffprobe := ffprobeOrSkip(t)
+	_, h, dataDir, auth := probeServer(t, ffprobe)
+
+	gif := []byte{
+		0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x21, 0xF9, 0x04, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+		0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3B,
+	}
+	r := uploadBytesRequest(t, "logo.gif", gif)
+	auth(r)
+	w := do(t, h, r)
+	// A FAILURE, NOT A SKIP. "gif" is absent from ffmpeg.selfContainedFormats,
+	// which is a map in this repository rather than a property of the build, and
+	// every ffprobe carries the gif demuxer -- so a 201 here means the allowlist
+	// was widened with an image demuxer, which is the one change its own comment
+	// says must not be made. A skip would let that land quietly.
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("a GIF was accepted (status %d): %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "playlist") || strings.Contains(body, "naming other files") {
+		t.Errorf("a GIF, which names no other file, is described as a playlist: %s", body)
+	}
+	if !strings.Contains(body, "does not accept this container") {
+		t.Errorf("the refusal does not say what is actually wrong: %s", body)
+	}
+	if !strings.Contains(body, "re-save") {
+		t.Errorf("the refusal does not say what to do about it: %s", body)
+	}
+	// Still refused, and still leaves nothing: the allowlist is the gate and
+	// splitting the message did not widen it.
+	if names := uploadsDirEntries(t, dataDir); len(names) != 0 {
+		t.Errorf("left on disk after rejection: %v", names)
+	}
+}
+
 // F5. Nothing bounded how many ffprobe children one operator session could have
 // alive at once. 25 concurrent uploads spawned 25, each holding its request
 // goroutine for the full 30 seconds, measured.

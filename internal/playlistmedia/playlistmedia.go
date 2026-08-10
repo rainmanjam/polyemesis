@@ -1081,7 +1081,7 @@ func (p *Processor) verifySource(ctx context.Context, path string) (float64, err
 					"so it cannot be a playlist item; remove it and upload the file it names", name))
 		case errors.Is(err, ffmpeg.ErrUnsupportedContainer):
 			return 0, jobs.Permanent(fmt.Errorf(
-				"polyemesis cannot use %s; re-save it as MP4 or MPEG-TS (%v)", name, err))
+				"%s: %v; re-save it as MP4 or MPEG-TS", name, err))
 		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

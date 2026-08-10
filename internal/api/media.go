@@ -375,7 +375,7 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 			// something they should be able to upload, the fix is an entry in
 			// ffmpeg.selfContainedFormats, not a widening of the gate.
 			return uploads.Verdict{}, fmt.Errorf(
-				"polyemesis cannot use this container; re-save it as MP4 or MPEG-TS (%s)", err)
+				"%s; re-save it as MP4 or MPEG-TS", err)
 		}
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
