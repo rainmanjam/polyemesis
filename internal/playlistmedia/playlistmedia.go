@@ -353,22 +353,39 @@ func buildNormalise(in, out string, silent bool, videoSecs, audioSecs float64, m
 	// sources did. -muxdelay/-muxpreload 0 remove the muxer's default 0.7 s
 	// offset, which would otherwise appear at the front of every item and add
 	// up over a long playlist.
-	// -fs IS A HARD STOP ON THE WRITER, and it is here because nothing else in
-	// this argv is one.
+	// -fs STOPS THE WRITER, and it is here because nothing else in this argv
+	// does.
 	//
 	// Everything above bounds the output's SHAPE -- resolution, frame rate,
 	// bitrate ceiling -- and nothing bounds its LENGTH, which is whatever the
 	// input turns out to be. That was survivable only while the input was
 	// assumed to be media. It is not assumed any more (see SourceVerifier), and
-	// -fs is what makes the disk guard an enforced bound rather than a
-	// prediction: checkSpace demands room for maxBytes and FFmpeg physically
-	// cannot write more than maxBytes, so the two cannot disagree.
+	// this is what turns the disk guard from a prediction into something FFmpeg
+	// is actually held to.
 	//
-	// FFmpeg stops CLEANLY at the limit and exits 0, so this alone would publish
-	// a short derivative. RunNormalise compares the finished size against the
-	// same figure and refuses to publish one that reached it -- the cap catches
-	// the runaway, that check stops the runaway becoming an item that dies
-	// halfway through on air.
+	// IT IS NOT BYTE-EXACT, and saying it was would be the sort of claim this
+	// whole change exists to stop making. FFmpeg stops writing further chunks
+	// once the limit is passed, so the finished file is a little OVER it.
+	// Measured against this exact profile, 640x360 at the 6000k ceiling:
+	//
+	//	cap        finished     over by
+	//	100 KB       116184      16184
+	//	500 KB       589756      89756
+	//	  2 MB      2117256     117256
+	//	  8 MB      8162584     162584
+	//	 32 MB     32356868     356868
+	//
+	// The overshoot is mux-flush granularity, not a fraction: it grows by 340 KB
+	// across a 320x range of caps. So the real bound is maxBytes plus a few
+	// hundred kilobytes, which is inside estimateBytes' own headroom (10% of the
+	// duration plus 30 seconds) at every size a playlist item has. The guard is
+	// sound; the sentence about it now matches what was measured.
+	//
+	// FFmpeg exits 0 when it stops, so this alone would publish a SHORT
+	// derivative. RunNormalise compares the finished size against the same
+	// figure and refuses to publish one that reached it -- the cap catches the
+	// runaway, that check stops the runaway becoming an item that dies halfway
+	// through on air. The overshoot is why that comparison is >= rather than >.
 	//
 	// Zero means no cap, for a caller that has no estimate to give. Every
 	// production path has one.
@@ -884,9 +901,18 @@ func (p *Processor) RunNormalise(ctx context.Context, job jobs.Job, rep jobs.Rep
 	// DID THE OUTPUT CAP FIRE? -fs stops FFmpeg cleanly, so a run that hit it
 	// exits 0 with a SHORT file, and publishing that would put a derivative on
 	// air that stops in the middle. The cap is far above what the profile
-	// produces for a source of the measured duration, so reaching it means the
-	// estimate and the reality have parted company -- which is the state the cap
-	// exists to catch, and is not a state to paper over by publishing anyway.
+	// produces for a source of the measured duration -- estimateBytes carries
+	// 10% of the duration plus 30 seconds of headroom -- so reaching it means
+	// the estimate and the reality have parted company, which is the state the
+	// cap exists to catch and not one to paper over by publishing anyway.
+	//
+	// >= rather than >, because -fs is not byte-exact: it stops after the limit
+	// is passed, so a run that hit it lands a few hundred kilobytes OVER the
+	// figure rather than exactly on it. See buildNormalise for the measurements.
+	// The converse -- a legitimate encode landing exactly on the estimate
+	// without the cap firing -- would mean it consumed the whole headroom, and
+	// the cost of being wrong about that is a permanent refusal with a sentence
+	// the operator can act on rather than a truncated item at air.
 	if st, err := os.Stat(partial); err == nil && st.Size() >= estimate {
 		p.discard(partial)
 		return jobs.Permanent(fmt.Errorf(
