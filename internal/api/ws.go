@@ -42,6 +42,20 @@ func sameHost(origin, host string) bool {
 
 // handleWS streams live telemetry: status, audio levels, logs and stats.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	// The principal, captured BEFORE the upgrade while there is still a request
+	// to read it from. Everything written to this socket goes through eventView
+	// with this flag; writeEvent used to be a bare json.Marshal with no
+	// principal anywhere in its signature, which is why every event reached
+	// every socket in its admin shape.
+	//
+	// A SNAPSHOT, and knowingly so: requireAuth and requireScope have already
+	// run on the upgrade request, and the scope is not re-checked afterwards, so
+	// a token revoked or downgraded mid-session keeps this scope until the
+	// socket closes. That is pre-existing rather than a regression -- the same
+	// was true when there was no rendering policy at all -- and it is filed
+	// rather than fixed here; see the deferred issues in testdata/route-coverage.json.
+	readOnly := isReadScopedToken(r)
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.log.Debug("websocket upgrade failed", "err", err)
@@ -62,8 +76,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			"bitrate": s.eng().Monitor().Bitrate(),
 		}},
 	}
+	// The initial burst goes through the same policy as the stream. It did not,
+	// and that alone would have kept the socket principal-independent for the
+	// first three frames of every connection -- which are the frames a page
+	// renders from.
 	for _, ev := range initial {
-		if err := writeEvent(conn, ev); err != nil {
+		if err := writeEvent(conn, ev, readOnly); err != nil {
 			return
 		}
 	}
@@ -98,7 +116,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if err := writeEvent(conn, ev); err != nil {
+			if err := writeEvent(conn, ev, readOnly); err != nil {
 				return
 			}
 		case <-ping.C:
@@ -110,8 +128,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeEvent(conn *websocket.Conn, ev events.Event) error {
-	b, err := json.Marshal(ev)
+// writeEvent renders one event for this socket's principal and sends it.
+//
+// The nil return on a withheld event is deliberate: a frame the policy refuses
+// is not an error, and treating it as one would close the socket of any
+// read-scoped client the moment an unclassified event was published -- turning
+// a fail-closed redaction into a fail-closed connection.
+func writeEvent(conn *websocket.Conn, ev events.Event, readOnly bool) error {
+	view, ok := eventView(ev, readOnly)
+	if !ok {
+		return nil
+	}
+	b, err := json.Marshal(view)
 	if err != nil {
 		return err
 	}

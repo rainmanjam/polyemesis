@@ -192,6 +192,29 @@ func TestFamilyUnavailableReadsTheErrnoAndNotTheMessage(t *testing.T) {
 		{"EADDRINUSE: the family exists and something else has the port", wrap(syscall.EADDRINUSE), false},
 		{"EACCES: the family exists and this process may not bind it", wrap(syscall.EACCES), false},
 		{"an error carrying no errno at all", errors.New("listen udp6: something else entirely"), false},
+		// THE DISCRIMINATING ROW, and without it this table proved nothing about
+		// the claim in its own name.
+		//
+		// Every row above derives its message FROM its errno, so a naive
+		// implementation -- strings.Contains over strerror rather than errors.Is
+		// over the syscall values -- passed the whole table. Measured: replacing
+		// familyUnavailable with substring matching left it green. The production
+		// code was correct; the guarantee was simply unasserted.
+		//
+		// This message carries EAFNOSUPPORT's exact wording and no errno at all,
+		// so a substring implementation says true and errors.Is says false.
+		//
+		// The wording is deliberately the one that is stable across kernels.
+		// EADDRNOTAVAIL is spelled "can't assign requested address" on darwin and
+		// "cannot assign requested address" on linux, so a row built from that
+		// text would pin the guarantee on one platform's strerror and pass
+		// vacuously on the other -- the same species of accident as the rest of
+		// the table.
+		{
+			"the words without the errno",
+			errors.New("listen udp6: address family not supported by protocol"),
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

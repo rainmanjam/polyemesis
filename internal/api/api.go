@@ -719,9 +719,22 @@ func (s *Server) Handler() http.Handler {
 		// the upgrade request, so CSRF middleware would reject it.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
-			// A read-scoped token is welcome here: the socket's read pump
-			// discards whatever the client sends, so this is telemetry out and
-			// nothing in. See the read pump in ws.go.
+			// A read-scoped token is welcome here, and stays welcome: watching a
+			// stream go out is the monitoring use case scopes exist for.
+			//
+			// The reasoning that USED to stand here -- "the read pump discards
+			// whatever the client sends, so this is telemetry out and nothing
+			// in" -- was true and beside the point. It argued only about the
+			// INBOUND direction, and the socket's problem was outbound: every
+			// event was rendered by a bare json.Marshal with no principal
+			// anywhere in the call, so a read token received the admin shape of
+			// everything, including FFmpeg log lines carrying an argv.
+			//
+			// What makes the read scope safe here is now a thing rather than a
+			// sentence: handleWS captures the principal at upgrade and every
+			// frame goes through eventView over a CLOSED policy table, which
+			// fails closed on an event type nobody has classified. See
+			// ws_policy.go.
 			r.Use(s.requireScope)
 			r.Get("/ws", s.handleWS)
 		})

@@ -153,54 +153,77 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 		rtmpLink = rtmpLinkForCard(s.mgr.RTMPLinks(), src.ID)
 		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
-	urls := publishURLs(src, listeners)
-	if readScopeCannotSeePublishTokens(r) {
-		// A COPY, because src points at the caller's row and blanking the
-		// token in place would hand the next reader -- including the store's
-		// own update path -- a source whose credential has been erased.
-		redacted := *src
-		redacted.Token = ""
-		// And the STORED ingest block, which is the half this originally
-		// missed. sourceView embeds *db.Source, so every leaf of db.Source
-		// marshals at the top level of the response -- including
-		// ingest.srt.passphrase, ingest.rtmp.streamKey and an
-		// ingest.pull.url carrying rtsp://user:pass@ userinfo.
-		//
-		// Blanking legacyRtmpKey below without this was measurably a NO-OP:
-		// engine.legacyRTMPKeys computes that key as exactly
-		// src.Ingest.RTMP.StreamKey, so the identical string came straight
-		// back two JSON fields away. See internal/api/redact.go.
-		redacted = readSafeSource(redacted)
-		src = &redacted
-		// PrevToken is NOT blanked here, and deliberately so: it carries
-		// `json:"-"` and has never left the process, so clearing it would
-		// suggest to the next reader that it once did.
-		// The URLs go too, and they are the reason this cannot be a one-line
-		// blanking of the token field: every publish URL has the token EMBEDDED
-		// in it, because the token is the address. Leaving them would hand back
-		// the same secret in a different shape.
-		urls = nil
-		// legacyRtmpKey is REDACTED IN PLACE rather than blanked, because it
-		// carries `omitempty`: assigning "" deleted the key outright, so the
-		// read-scoped body was a different SHAPE from the admin one and #150's
-		// own "the wire shape does not change" claim was false here. The old
-		// guard could not see it -- it compared zero-value fixtures, where the
-		// field is absent either way, and only at the top level. See
-		// TestViewShapesAreIdenticalByPrincipal.
-		legacyKey = redactInPlace(legacyKey)
-	}
-	return sourceView{
+	view := sourceView{
 		Publishing:     publishing,
 		Link:           link,
 		RTMPLink:       rtmpLink,
 		Source:         src,
-		PublishURLs:    urls,
+		PublishURLs:    publishURLs(src, listeners),
 		IsDefault:      src.ID == defaultID,
 		TokenEnforced:  tokenEnforced,
 		LegacyRTMPKey:  legacyKey,
 		Running:        s.mgr != nil && s.mgr.Engine(src.ID) != nil,
 		ListenerHealth: health,
 	}
+	if readScopeCannotSeePublishTokens(r) {
+		view = readSafeSourceView(view)
+	}
+	return view
+}
+
+// readSafeSourceView is the read-scoped projection of a sourceView, as a PURE
+// FUNCTION of the view.
+//
+// Extracted from the middle of viewSource for one reason, and it is the whole of
+// #150's second blocker. While the redaction lived inline it could not be driven
+// by a test without a *http.Request carrying a real read-scoped bearer and a
+// whole engine-backed fixture that populated every optional field -- so the
+// drift guard was written against redactSourceViewLikeViewSource, a HAND COPY of
+// these lines sitting in the test file. Reverting the production code to its
+// pre-fix form left the whole repository green. A guard that watches a copy is
+// decorative, and the copy is the bug.
+//
+// A pure function over the view has no such excuse available. The guard calls
+// THIS, on a fully populated value, and a change here is a change the guard sees.
+//
+// No *http.Request parameter, deliberately and permanently: taking one would put
+// the fixture requirement straight back and the AST guard in redact_drift_test.go
+// fails the build if a readSafe*View ever grows one.
+func readSafeSourceView(v sourceView) sourceView {
+	if v.Source != nil {
+		// A COPY, because v.Source points at the caller's row and blanking the
+		// token in place would hand the next reader -- including the store's own
+		// update path -- a source whose credential has been erased.
+		//
+		// readSafeSource covers the STORED ingest block, which is the half this
+		// originally missed. sourceView embeds *db.Source, so every leaf of
+		// db.Source marshals at the top level of the response -- including
+		// ingest.srt.passphrase, ingest.rtmp.streamKey and an ingest.pull.url
+		// carrying rtsp://user:pass@ userinfo.
+		//
+		// Blanking legacyRtmpKey below without this was measurably a NO-OP:
+		// engine.legacyRTMPKeys computes that key as exactly
+		// src.Ingest.RTMP.StreamKey, so the identical string came straight back
+		// two JSON fields away. See internal/api/redact.go.
+		//
+		// PrevToken is NOT blanked, and deliberately so: it carries `json:"-"`
+		// and has never left the process, so clearing it would suggest to the
+		// next reader that it once did.
+		redacted := readSafeSource(*v.Source)
+		v.Source = &redacted
+	}
+	// The URLs go too, and they are the reason this cannot be a one-line
+	// blanking of the token field: every publish URL has the token EMBEDDED in
+	// it, because the token IS the address. Leaving them would hand back the
+	// same secret in a different shape, and there is no masked form of
+	// srt://host?streamid=TOKEN that is still a URL.
+	v.PublishURLs = nil
+	// legacyRtmpKey is REDACTED IN PLACE rather than blanked, because it carries
+	// `omitempty`: assigning "" deleted the key outright, so the read-scoped
+	// body was a different SHAPE from the admin one and #150's own "the wire
+	// shape does not change" claim was false here.
+	v.LegacyRTMPKey = redactInPlace(v.LegacyRTMPKey)
+	return v
 }
 
 // linkForCard picks the one uplink a source card should show.

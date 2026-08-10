@@ -552,43 +552,67 @@ func TestScrubbingIsNotAWholesaleWipe(t *testing.T) {
 }
 
 // TestViewShapesAreIdenticalByPrincipal is the same claim for the two VIEW
-// types, which the guard above never covered and which is where the second
-// vanishing field was.
+// types, which the leaf-classification guard never covered and which is where
+// the second vanishing field was.
 //
 // sourceView and playoutAdminView are not stored types, so they are not in the
-// leaf-classification table, and they do their own redaction inline in
-// viewSource and handleGetPlayout rather than through a readSafe* function.
-// That is exactly why they needed asserting: sourceView.LegacyRTMPKey is
-// `json:"legacyRtmpKey,omitempty"` and viewSource sets it to "" for a read
-// token, so the field disappeared -- the same species as backupStreamKey, in a
-// place no guard was looking.
+// leaf table, and their redaction used to be written inline in viewSource and
+// handleGetPlayout. That is exactly why they needed asserting:
+// sourceView.LegacyRTMPKey is `json:"legacyRtmpKey,omitempty"` and viewSource
+// set it to "" for a read token, so the field DISAPPEARED -- the same species as
+// backupStreamKey, in a place no guard was looking.
+//
+// IT DRIVES THE PRODUCTION PROJECTION. The previous version of this test did
+// not: it asserted against redactSourceViewLikeViewSource, a hand copy of the
+// handler's lines living in this file. Reverting internal/api/sources.go from
+// `legacyKey = redactInPlace(legacyKey)` to the pre-fix `legacyKey = ""` left
+// `go test ./...` green across the whole repository -- measured. A guard that
+// watches a copy is decorative, and the copy IS the bug. Both restatements are
+// deleted; readSafeSourceView and readSafePlayoutView are pure functions of the
+// view for the sole purpose of being callable from here.
+//
+// THE SHAPE CHECK IS NOT ENOUGH ON ITS OWN and does not pretend to be. It
+// compares JSON path SETS, not values, so `legacyKey = legacyKey` would pass it.
+// The value half is the route sweep, which scans real read-bearer bytes for
+// planted sentinels. /api/v1/sources therefore carries BOTH counterparts in the
+// coverage ledger, and neither is sufficient alone.
 func TestViewShapesAreIdenticalByPrincipal(t *testing.T) {
 	cases := []struct {
 		name       string
 		full       any
 		redacted   any
 		exceptions map[string]string
+		// mustPopulate are JSON paths the fixture is REQUIRED to produce on the
+		// admin side. This is the anti-vacuity check: every assertion in this
+		// test is of the form "a path present before is present after", and a
+		// path that was never present before is silently vacuous. The field this
+		// test exists for -- legacyRtmpKey -- is precisely one that vanishes
+		// when unpopulated, so a fill() that stopped reaching it would turn the
+		// whole case into a tautology.
+		mustPopulate []string
 	}{
 		{
 			name:     "sourceView",
 			full:     populated[sourceView](t),
-			redacted: redactSourceViewLikeViewSource(populated[sourceView](t)),
+			redacted: readSafeSourceView(populated[sourceView](t)),
 			exceptions: map[string]string{
-				// publishUrls is a MAP, and viewSource nils it wholesale rather
-				// than masking its values. That is deliberate and cannot be
-				// otherwise: each entry is a publish URL in which the token IS
-				// the address -- srt://host?streamid=TOKEN -- so there is no
+				// publishUrls is a MAP, and the projection nils it wholesale
+				// rather than masking its values. That is deliberate and cannot
+				// be otherwise: each entry is a publish URL in which the token
+				// IS the address -- srt://host?streamid=TOKEN -- so there is no
 				// masked form of it that remains a URL. The key survives as
 				// null; what disappears is the per-protocol keys UNDER it, and
 				// those are derived names rather than stored fields, so no
 				// client reads them back.
 				"publishUrls": "a derived map whose every value embeds the token as its address",
 			},
+			mustPopulate: []string{"legacyRtmpKey", "token", "publishUrls"},
 		},
 		{
-			name:     "playoutAdminView",
-			full:     populated[playoutAdminView](t),
-			redacted: redactPlayoutViewLikeHandler(populated[playoutAdminView](t)),
+			name:         "playoutAdminView",
+			full:         populated[playoutAdminView](t),
+			redacted:     readSafePlayoutView(populated[playoutAdminView](t)),
+			mustPopulate: []string{"token", "urls.master", "urls.watch", "urls.embed"},
 		},
 	}
 
@@ -596,6 +620,18 @@ func TestViewShapesAreIdenticalByPrincipal(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			before := jsonPaths(t, c.full)
 			after := jsonPaths(t, c.redacted)
+
+			// ANTI-VACUITY FIRST. If the fixture does not populate the field,
+			// nothing below is asserting anything about it.
+			for _, p := range c.mustPopulate {
+				if !contains(before, p) {
+					t.Errorf("%s: the fixture does not populate %q, so every assertion "+
+						"below about that path is vacuous. This test exists BECAUSE an "+
+						"omitempty field disappeared unnoticed; a fixture that leaves it "+
+						"unset reproduces the blindness it was written to end.", c.name, p)
+				}
+			}
+
 			for _, p := range before {
 				if !contains(after, p) && !excepted(c.exceptions, p) {
 					t.Errorf("%s: the JSON path %q is present for an admin and ABSENT for "+
@@ -610,31 +646,6 @@ func TestViewShapesAreIdenticalByPrincipal(t *testing.T) {
 			}
 		})
 	}
-}
-
-// redactSourceViewLikeViewSource and redactPlayoutViewLikeHandler apply the
-// same blanking their handlers do.
-//
-// Duplicated rather than factored out of the handler, and the duplication is
-// the lesser evil here: the handlers need a *http.Request carrying a real
-// read-scoped bearer and a whole engine-backed fixture to reach those lines,
-// and a fixture that could not populate every optional field would put this
-// test straight back into the zero-value trap it was written to escape. What
-// they must stay in step with is asserted where it can be: the end-to-end
-// bodies are already covered by TestReadTokenReceivesNoCredentialOnAnyRoute.
-func redactSourceViewLikeViewSource(v sourceView) sourceView {
-	redacted := *v.Source
-	redacted = readSafeSource(redacted)
-	v.Source = &redacted
-	v.PublishURLs = nil
-	v.LegacyRTMPKey = redactInPlace(v.LegacyRTMPKey)
-	return v
-}
-
-func redactPlayoutViewLikeHandler(v playoutAdminView) playoutAdminView {
-	v.Token = ""
-	v.URLs = playoutURLs{}
-	return v
 }
 
 // populated returns a T with every leaf set to a non-zero value, so that a

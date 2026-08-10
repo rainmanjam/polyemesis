@@ -768,17 +768,37 @@ func (s *Server) handleGetPlayout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if readScopeCannotSeePublishTokens(r) {
-		// The token is a WATCH credential: with it a read-scoped holder can
-		// pull the media of a stream the operator has not made public. There
-		// is no read-safe shape to fall back to that keeps it, so all four
-		// carriers go -- the field, and the master, watch and embed URLs that
-		// each contain it. playoutPublicView is what a caller without the
-		// operator's authority is meant to read.
-		view.Token = ""
-		view.URLs = playoutURLs{}
+		view = readSafePlayoutView(view)
 	}
 	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, view)
+}
+
+// readSafePlayoutView is the read-scoped projection of a playoutAdminView, as a
+// PURE FUNCTION of the view.
+//
+// Extracted for the same reason as readSafeSourceView: the drift guard used to
+// be written against redactPlayoutViewLikeHandler, a hand copy of these two
+// lines living in the test file. Nothing was at risk THAT day, because neither
+// field carries omitempty -- but the guard was equally blind either way, and a
+// guard whose correctness depends on a struct tag nobody has changed yet is not
+// a guard.
+//
+// The token is a WATCH credential: with it a read-scoped holder can pull the
+// media of a stream the operator has not made public. There is no read-safe
+// shape that keeps it, so all four carriers go -- the field, and the master,
+// watch and embed URLs that each embed it. playoutPublicView is what a caller
+// without the operator's authority is meant to read.
+//
+// Blanked rather than redacted in place, and that is the deliberate difference
+// from sourceView.LegacyRTMPKey: neither `token` nor `urls` carries omitempty,
+// so assigning the zero value keeps the key present and the wire shape
+// unchanged. If either tag ever gains omitempty, the drift guard fails and this
+// has to become redactInPlace.
+func readSafePlayoutView(v playoutAdminView) playoutAdminView {
+	v.Token = ""
+	v.URLs = playoutURLs{}
+	return v
 }
 
 // playoutURLsFor builds absolute URLs from the request, because the operator is

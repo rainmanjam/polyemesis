@@ -292,143 +292,25 @@ func TestReadTokenReceivesNoCredentialOnAnyRoute(t *testing.T) {
 	}
 }
 
-// TestReadTokenSweepCoversEveryReachableGET is the reconciliation half.
+// THE RECONCILIATION HALF NOW LIVES IN route_ledger_test.go, and this note is
+// what stands where TestReadTokenSweepCoversEveryReachableGET used to.
 //
-// Without it the sweep above is a list somebody has to remember to extend, and
-// the failure of the previous audit was exactly that nobody did. This walks the
-// router chi actually built and requires every /api/v1 GET pattern to be either
-// swept or explicitly excused. A route added tomorrow fails this test on the
-// day it lands, which is when its author is still holding the context to
-// classify it.
-func TestReadTokenSweepCoversEveryReachableGET(t *testing.T) {
-	h, _, _ := plantedServer(t)
-	s := serverUnderTest(t, h)
-
-	// Reasons, not just names. An entry with no reason is how a list like this
-	// rots into a way of silencing the test.
-	excused := map[string]string{
-		// Denied to read tokens outright; TestReadTokenIsDeniedTheRoutesThatAreNotReads
-		// asserts the 403 instead of a body.
-		"/api/v1/destinations/{id}/expert":          "denied to read tokens",
-		"/api/v1/clipper/recordings/{id}/keyframes": "denied to read tokens",
-		"/api/v1/platforms/accounts/{id}/stats":     "denied to read tokens",
-		"/api/v1/metadata/broadcast-window":         "denied to read tokens",
-
-		// Session-only: no bearer of either scope reaches these.
-		"/api/v1/auth/tokens":               "session-only",
-		"/hls/*":                            "session-only",
-		"/api/v1/oauth/{platform}/start":    "session-only",
-		"/api/v1/oauth/{platform}/callback": "session-only",
-
-		// Not an HTTP response body at all.
-		"/api/v1/ws":            "a WebSocket upgrade; its frames are asserted in ws_test.go",
-		"/api/v1/jobs":          "503 without a job queue wired; carries no stored credential",
-		"/api/v1/jobs/overview": "503 without a job queue wired; carries no stored credential",
-		"/api/v1/jobs/policy":   "503 without a job queue wired; carries no stored credential",
-		"/api/v1/chat/kick/{secret}": "unauthenticated by necessity; the path segment IS " +
-			"the credential and a mismatch is a bare 404",
-
-		// Unauthenticated by design and carrying nothing stored.
-		"/api/v1/health": "unauthenticated liveness probe",
-		"/api/v1/setup":  "unauthenticated; needsSetup and a password length",
-		"/api/v1/tls/ca": "unauthenticated; the PUBLIC half of the local CA",
-		// The three playout mounts. They are excused rather than swept because
-		// the sweep reads a 200 body for credentials, and against the fixture
-		// this file plants -- Public=false -- a read token now receives no body
-		// at all: authorizePlayout hides the stream from it exactly as it hides
-		// it from a stranger. Moving them into leakRoutes() would require a
-		// 200, which would mean either publishing the fixture's stream or
-		// re-widening the gate, and either way the guard would then be
-		// asserting over a response the deployment it protects never produces.
-		//
-		// What holds them is a different test, and it is stronger than a body
-		// sweep: TestPlayoutGateMatrix drives all three over the real router
-		// for nine principals against three configurations and asserts an exact
-		// status per cell, TestReadBearerIsByteIdenticalToAnonymousOnPlayout
-		// asserts the read token's whole response equals the anonymous one, and
-		// TestPlayoutPosterVerdict asserts the poster where the difference is
-		// observable, since at the wire an allowed poster and a denied one are
-		// both 404 without a segment on disk.
-		"/api/v1/playout/public": "the read-safe playout view; gated by authorizePlayout, " +
-			"see TestPlayoutGateMatrix",
-		"/playout/*": "the public media origin; gated per-request by authorizePlayout, " +
-			"see TestPlayoutGateMatrix",
-		"/watch":   "the player SPA bundle",
-		"/watch/*": "the player SPA bundle",
-
-		// Reached with a row id this fixture does not create. Each was traced
-		// to leaf fields and carries no stored credential: recordings, clips,
-		// jobs, library sessions and transcripts are media and text.
-		"/api/v1/recordings/{id}/download":             "needs a recording row",
-		"/api/v1/recordings/stems/{name}/download":     "needs a stem file",
-		"/api/v1/clips/{name}/download":                "needs a clip file",
-		"/api/v1/clipper/recordings/{id}":              "needs a recording row",
-		"/api/v1/clipper/recordings/{id}/transcript":   "needs a recording row",
-		"/api/v1/clipper/jobs/{id}/download":           "needs an export job",
-		"/api/v1/library/recordings/{id}/transcript":   "needs a recording row",
-		"/api/v1/library/recordings/{id}/media/{file}": "needs derived media",
-		"/api/v1/jobs/{id}":                            "needs a job row",
-		"/api/v1/metadata/push/{id}":                   "needs a push id",
-		"/api/v1/alerts/rules/{id}":                    "needs a rule row",
-		"/api/v1/hooks/{id}":                           "needs a hook row",
-		"/api/v1/hooks/{id}/deliveries":                "needs a hook row",
-		"/api/v1/schedules/{id}":                       "needs a schedule row",
-		"/api/v1/processes/{name}/logs":                "needs a running child process",
-		"/api/v1/renditions/{id}":                      "covered by GET /renditions",
-		"/api/v1/playout/poster.jpg": "a JPEG, and this fixture has no segment to render one " +
-			"from; gated by authorizePlayout, see TestPlayoutPosterVerdict",
-		"/api/v1/library/search":          "an FTS query over an empty index",
-		"/api/v1/library/sessions/{id}":   "needs a session row",
-		"/api/v1/library/recordings/{id}": "needs a recording row",
-	}
-
-	swept := map[string]bool{}
-	for _, p := range leakRoutes() {
-		swept[patternOf(t, s, p)] = true
-	}
-
-	var uncovered []string
-	walked := map[string]bool{}
-	err := chi.Walk(s.Handler().(chi.Routes),
-		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-			if method != http.MethodGet {
-				return nil
-			}
-			route = strings.TrimSuffix(route, "/")
-			if route == "" {
-				return nil
-			}
-			walked[route] = true
-			if swept[route] || excused[route] != "" {
-				return nil
-			}
-			uncovered = append(uncovered, route)
-			return nil
-		})
-	if err != nil {
-		t.Fatalf("walk the router: %v", err)
-	}
-
-	for _, route := range uncovered {
-		t.Errorf("GET %s is reachable and neither swept for credentials nor excused. "+
-			"Add it to leakRoutes() if a read token may call it, or to the excused map "+
-			"with the reason it cannot leak.", route)
-	}
-
-	// The excuses have to name real routes, or the map becomes a place stale
-	// entries go to die and the next reader cannot tell which of them are still
-	// load-bearing.
-	for route := range excused {
-		if !walked[route] {
-			t.Errorf("the excused map names GET %s, which the router does not serve. "+
-				"Delete the entry rather than leaving a dead excuse in place.", route)
-		}
-	}
-	if len(walked) < 60 {
-		t.Errorf("the walk found only %d GET routes, which is far fewer than this API "+
-			"has; the reconciliation is looking at the wrong router", len(walked))
-	}
-}
+// That test walked the router and required every GET pattern to be swept or
+// excused, which was the right idea and three things short of enough:
+//
+//   - It asserted `len(walked) < 60` as its own sanity check, against a router
+//     with 88 GET patterns. A floor 28 below reality would not have noticed
+//     two-thirds of the API disappearing.
+//   - It filtered to GET, leaving 123 method+pattern pairs outside the frame.
+//   - Its excuses were bare strings. "needs a running child process" and "a
+//     WebSocket upgrade; its frames are asserted in ws_test.go" -- the second
+//     naming a file that does not exist in this package -- were between them
+//     hiding a live stream key on three egresses.
+//
+// The ledger asserts EQUALITY over all 211 pairs, drives the NotFound and 405
+// surfaces chi.Walk cannot see, and discharges an excuse only on a runtime proof
+// with a differential positive control. leakRoutes() below is still the VALUE
+// sweep and is still where a new read-reachable GET goes.
 
 // patternOf resolves a concrete path back to the chi pattern it matches, so
 // leakRoutes can stay readable as URLs while the reconciliation compares

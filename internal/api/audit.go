@@ -38,8 +38,16 @@ import (
 // a field.
 //
 // The second is that a NAME travels and a VALUE never does. alerts.Redact is a
-// syntax matcher -- it finds URLs, key=value pairs and Bearer headers -- and it
-// provably cannot see a bare scalar: Redact("hunter2") returns "hunter2". For a
+// syntax matcher, and the description that used to stand here -- "it finds URLs,
+// key=value pairs and Bearer headers" -- was true only of the spellings its
+// table happens to hold. It finds a Bearer header written with a SPACE and not
+// one written `Authorization:Bearer\ X`; it finds `passphrase=X` and not
+// `-passphrase X` or `-rtmp_conn S:X`. It is a residual best-effort pass over
+// free text and is NEVER a boundary; where a boundary is needed the exact
+// credential literals are removed first (see supervisor.Spec.Secrets).
+//
+// It provably cannot see a bare scalar either: Redact("hunter2") returns
+// "hunter2". For a
 // settings value there would be nothing at all between the SRT passphrase and
 // the channel except a hand-maintained allowlist, which is exactly the
 // per-call-site enforcement redact.go's Redacted refuses to rely on. Naming the

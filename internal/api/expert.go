@@ -288,10 +288,20 @@ func quoteArgv(bin string, args []string) string {
 // THIS ONE IS DELIBERATELY NOT REDACTED, and the difference from every other
 // egress of these bytes is worth stating so nobody "fixes" it later.
 //
-// Process.CommandString, Process.Logs and Status.LastError are all masked
-// inside supervisor now, because no caller of those wanted the raw form and one
-// of them was reaching an MQTT broker retained. Args() stays raw for callers
-// that must reason about the arguments themselves, and this is that caller.
+// Process.CommandString, Process.Logs, Process.appendLog and Status.LastError
+// are all masked inside supervisor now, because no caller of those wanted the
+// raw form and two of them leave the process entirely with no principal
+// attached: the on-disk process.log and a RETAINED MQTT topic. Args() stays raw
+// for callers that must reason about the arguments themselves, and this is that
+// caller.
+//
+// What those four do is NOT what the previous version of this comment implied.
+// They do not run alerts.Redact and call it masked -- that is what shipped, and
+// it left `-rtmp_conn S:<key>` and `Authorization:Bearer\ <key>` in the clear on
+// three read-reachable egresses. They remove the destination's EXACT credential
+// literals first, declared on the Spec, and run Redact only as a residual pass
+// afterwards. This route is the deliberate exception to that, and it is
+// admin-only for exactly that reason.
 //
 // Expert mode's whole contract is that the command the operator confirms cannot
 // drift from the one that runs -- see resolveExpertCommand, which splices
