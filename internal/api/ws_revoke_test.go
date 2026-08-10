@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -54,8 +56,21 @@ func dialWS(t *testing.T, srv *httptest.Server, header http.Header) *websocket.C
 	return c
 }
 
+// The two non-code results drainUntilClosed can report.
+//
+// They are separated because they mean opposite things and both used to come
+// back as -1: a TIMEOUT is the socket still being open, which is the failure
+// these tests exist to catch, while any other read error is the socket having
+// ended without a close frame -- which is a different fault entirely and is
+// worth naming when it happens, because "close code = -1" sent a reader looking
+// for a revocation that had in fact occurred.
+const (
+	wsStillOpen = -1
+	wsAbruptEnd = -2
+)
+
 // drainUntilClosed reads until the socket closes or the deadline passes. It
-// returns the close code, or -1 if the socket was still open and delivering.
+// returns the close code, wsStillOpen or wsAbruptEnd.
 func drainUntilClosed(t *testing.T, c *websocket.Conn, within time.Duration) int {
 	t.Helper()
 	_ = c.SetReadDeadline(time.Now().Add(within))
@@ -65,7 +80,11 @@ func drainUntilClosed(t *testing.T, c *websocket.Conn, within time.Duration) int
 			if ok := asCloseError(err, &ce); ok {
 				return ce.Code
 			}
-			return -1
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				return wsStillOpen
+			}
+			return wsAbruptEnd
 		}
 	}
 }

@@ -69,6 +69,24 @@ func TestChangingThePasswordClosesAnOpenSessionSocket(t *testing.T) {
 			"test cannot tell a revocation from a dead socket: %v", err)
 	}
 
+	// The drain starts BEFORE the password change and runs alongside it, which
+	// is not stylistic. Leaving the socket unread across the change means the
+	// server's 40ms pings pile up in the client's receive buffer while the
+	// handler spends its time in bcrypt; the client then answers the whole
+	// backlog with pongs at the moment the server has decided to close, and a
+	// close frame racing inbound data on a socket that is being torn down
+	// arrives as a reset rather than as a close code. That is what
+	// `close code = -1` meant when this test failed once under -race on CI:
+	// not a socket left open, but a closure the client could not read. Reading
+	// throughout removes the backlog and the race with it.
+	//
+	// The budget covers the password change too now, so it is generous: the
+	// hash is the slowest single thing in this package.
+	closed := make(chan int, 1)
+	go func() {
+		closed <- drainUntilClosed(t, c, 20*wsTestPing+10*time.Second)
+	}()
+
 	chg := jsonRequest(t, http.MethodPost, "/api/v1/auth/password",
 		map[string]string{"current": testPassword, "new": testPassword + "-rotated"})
 	sign(chg)
@@ -88,14 +106,22 @@ func TestChangingThePasswordClosesAnOpenSessionSocket(t *testing.T) {
 	}
 
 	// HALF TWO: and it reaches the socket that was already open.
-	code := drainUntilClosed(t, c, 10*wsTestPing+2*time.Second)
-	if code != websocket.ClosePolicyViolation {
-		t.Fatalf("close code = %d, want %d (policy violation).\n\n"+
-			"A password change bumped the session epoch -- the request above got a 401 -- "+
-			"and this socket, opened with the very cookie that just stopped working, was "+
-			"still connected. A revocation that leaves a live telemetry stream open is the "+
-			"operator's emergency lever failing (#159).",
-			code, websocket.ClosePolicyViolation)
+	switch code := <-closed; code {
+	case websocket.ClosePolicyViolation:
+		// What the fix is for.
+	case wsStillOpen:
+		t.Fatalf("the socket was never closed.\n\n" +
+			"A password change bumped the session epoch -- the request above got a 401 -- " +
+			"and this socket, opened with the very cookie that just stopped working, went " +
+			"on delivering. A revocation that leaves a live telemetry stream open is the " +
+			"operator's emergency lever failing (#159).")
+	case wsAbruptEnd:
+		t.Fatalf("the socket ended without a close frame. It was closed, which is the " +
+			"security property, but the client was not told why -- so this is reported " +
+			"rather than accepted: a client that cannot read the reason cannot tell a " +
+			"revocation from a crash.")
+	default:
+		t.Fatalf("close code = %d, want %d (policy violation)", code, websocket.ClosePolicyViolation)
 	}
 }
 
