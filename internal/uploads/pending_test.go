@@ -61,7 +61,7 @@ func TestCommitPublishesAndDiscardAfterwardsIsANoOp(t *testing.T) {
 	}
 	staged := p.Path()
 
-	f, err := p.Commit()
+	f, err := p.Commit(VerifiedVerdict(MediaInfo{AudioTracks: 1}))
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestDiscardRemovesTheBytesAndIsIdempotent(t *testing.T) {
 
 	// And it cannot be published afterwards. A handler that answered 400 and
 	// then committed anyway would put back exactly the file it refused.
-	if _, err := p.Commit(); err == nil {
+	if _, err := p.Commit(VerifiedVerdict(MediaInfo{})); err == nil {
 		t.Error("Commit succeeded after Discard")
 	}
 }
@@ -155,7 +155,7 @@ func TestAFailedCommitLeavesNothingListed(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	if _, err := p.Commit(); err == nil {
+	if _, err := p.Commit(VerifiedVerdict(MediaInfo{})); err == nil {
 		t.Fatal("Commit onto a non-empty directory succeeded")
 	}
 	// The Pending still owns the bytes, so the caller's deferred Discard clears

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -130,35 +132,49 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 		pending, err := store.Stage(part, part.FileName(), MaxUploadBytes, UploadFreeFloor)
 		part.Close()
 		if err != nil {
-			writeUploadError(w, err)
+			writeUploadError(w, s.log, err)
 			return
 		}
 		// Safe next to the Commit below: Discard is a no-op once committed.
 		defer func() { _ = pending.Discard() }()
 
-		info, probeErr := s.probeUpload(r.Context(), pending.Path(), pending.Name())
+		verdict, probeErr := s.probeUpload(r.Context(), pending.Path(), pending.Name())
 		if probeErr != nil {
 			s.log.Info("media rejected", "name", pending.Name(), "err", probeErr)
 			writeError(w, http.StatusBadRequest, probeErr.Error())
 			return
 		}
 
-		file, err := pending.Commit()
+		// THE VERDICT GOES DOWN WITH THE FILE, in one call, before the file is
+		// listable. See uploads.Pending.Commit. The two used to be separate --
+		// commit, then best-effort write the metadata -- which meant an upload
+		// nobody had inspected and an upload whose record had not landed yet
+		// were the same thing on disk, and "no record" could therefore mean
+		// nothing at all.
+		file, err := pending.Commit(verdict)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			// The detail is LOGGED, not returned. Every error that reaches here
+			// carries an absolute server path -- the data directory, the
+			// ".partial-" temp name, or both -- and the caller who just filled
+			// the volume is the last person who needs the layout of it. See
+			// writeUploadError, which had the same leak on the same path.
+			s.log.Error("could not finalise an upload", "name", pending.Name(), "err", err)
+			writeError(w, http.StatusInternalServerError, "this upload could not be stored")
 			return
 		}
-		if info != nil {
-			// Best-effort: the file is good and already stored, so failing the
-			// upload because a cache could not be written would throw away
-			// minutes of the operator's time to protect a nicety.
-			if err := store.PutMedia(file.Name, *info); err != nil {
-				s.log.Warn("could not record media info", "name", file.Name, "err", err)
-			}
-			file.Media = info
+		if !verdict.Verified {
+			// STATED AT WARN AND STATED IN THE RESPONSE. The log line alone was
+			// the whole of the previous design and it is not enough: nothing in
+			// the product reads logs, so a file accepted unchecked was
+			// indistinguishable from one that passed to every consumer that
+			// mattered. The record on disk is what fixes that; this line is for
+			// the operator watching the process.
+			s.log.Warn("an upload was stored without being inspected",
+				"name", file.Name, "reason", verdict.Reason)
 		}
 		s.log.Info("media uploaded",
-			"name", file.Name, "bytes", file.Bytes, "origin", file.Origin)
+			"name", file.Name, "bytes", file.Bytes, "origin", file.Origin,
+			"verified", file.Verified)
 		writeJSON(w, http.StatusCreated, file)
 		return
 	}
@@ -175,12 +191,47 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 // the cost of waiting.
 const probeUploadTimeout = 30 * time.Second
 
-// probeUpload inspects staged bytes and reports whether they are media.
+// MaxConcurrentUploadProbes bounds how many ffprobe children the upload
+// endpoint may have alive at once, across every session.
 //
-// A nil error with a nil result means "could not check" rather than "not
-// media": with no ffprobe on the box there is nothing to judge with, and
+// Package-level rather than per-Server, because the resource being bounded is
+// the MACHINE -- cores that a live encode is also using, and process slots --
+// and a process serves one machine. Four is chosen the same way NormaliseLimit
+// is chosen: this is work that competes with an encoder that must not stutter,
+// and more of it in parallel is not more throughput.
+//
+// The bound is on CHILDREN. The request goroutines still queue behind it, and
+// bounding those is a separate job for a middleware that does not exist yet;
+// what this stops is 25 uploads becoming 25 simultaneous subprocesses.
+const MaxConcurrentUploadProbes = 4
+
+var probeSlots = make(chan struct{}, MaxConcurrentUploadProbes)
+
+// probeUpload inspects staged bytes and reports the VERDICT to store beside
+// them.
+//
+// A nil error with an unverified verdict means "could not check" rather than
+// "not media": with no ffprobe on the box there is nothing to judge with, and
 // refusing every upload because the server cannot inspect them would break a
 // working install for the sake of a check it cannot perform.
+//
+// THE THIRD STATE IS NOW WRITTEN DOWN, and that is what this function returns
+// rather than the (nil, nil) it used to. An upload is in exactly one of three
+// states -- inspected and accepted, refused, or STORED WITHOUT BEING INSPECTED
+// -- and the third one is reachable on demand by a remote client, because the
+// context this probe runs under is the REQUEST's context and the client decides
+// when that ends. Send a complete multipart body, RST the socket, and the probe
+// is cancelled, and a cancelled probe is not a verdict, so the bytes are kept.
+// That is the correct outcome for the bytes and it was an invisible one for
+// everything downstream: `media` was simply absent from the listing, which is
+// also how every upload predating this feature looks, so a 44-byte ffconcat
+// script published this way was byte-identical in the API to a real file and
+// was a legal playlist item. Driven over a real socket, twice.
+//
+// The fix is not to go back to deleting. It is to make the state SAYABLE:
+// uploads.Verdict, written beside the file before the file exists under its
+// final name, and read by every consumer that used to assume stored implied
+// checked. See uploads.Verdict and playlistUploadProblems.
 //
 // THE GATE CLOSES WHEN FFPROBE RAN AND DISAGREED, AND ONLY THEN. That sentence
 // used to be here as a description and was false: every non-nil error took the
@@ -213,7 +264,7 @@ const probeUploadTimeout = 30 * time.Second
 // ".partial-" temp name that appears nowhere else in the product, so an
 // operator who greps for the warning below could not match it to anything they
 // can see in the Library.
-func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.MediaInfo, error) {
+func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Verdict, error) {
 	bin := s.probeBin
 	if bin == "" {
 		// EVERY ONE OF THESE LOGS BEFORE IT RETURNS, and that is the whole
@@ -227,10 +278,13 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.M
 		// same paragraph that introduced the gate. The line below is what the
 		// documentation now points at, and it is per upload rather than per
 		// boot, so it appears next to the upload it applies to.
-		unchecked := func(reason string) (*uploads.MediaInfo, error) {
+		unchecked := func(reason string) (uploads.Verdict, error) {
 			s.log.Warn("no ffprobe available; accepting this upload unchecked",
 				"reason", reason, "name", name)
-			return nil, nil
+			// The operator-facing sentence is uploads.ReasonNoProber, which is
+			// what goes on disk and into the API; reason above is the internal
+			// detail, which stays in the log where it is useful.
+			return uploads.UnverifiedVerdict(uploads.ReasonNoProber), nil
 		}
 		// s.mgr is nil in every test in this package, and Manager.Default takes
 		// a read lock on the manager, so an unguarded s.eng() turns POST
@@ -259,6 +313,28 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.M
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// ONE SLOT PER CONCURRENT PROBE, and the wait is inside the timeout on
+	// purpose. Nothing bounded this: 25 concurrent uploads spawned 25 ffprobe
+	// children and held 25 request goroutines for the full 30 seconds each,
+	// measured. The same branch argues in playlist_normalise.go that a
+	// synchronous subprocess in the request path is "a price this endpoint
+	// should not pay" -- this endpoint pays it, so the least it can do is pay it
+	// a bounded number of times at once.
+	//
+	// Waiting counts against the probe's own deadline rather than extending it,
+	// so a queue of uploads cannot turn into a queue of request goroutines that
+	// outlives any of them: a request that waits out its deadline lands on the
+	// interrupted path, which stores the file unchecked and SAYS SO, which is
+	// exactly what the third state is for.
+	select {
+	case probeSlots <- struct{}{}:
+		defer func() { <-probeSlots }()
+	case <-ctx.Done():
+		s.log.Warn("upload probe was interrupted; accepting the file unchecked",
+			"name", name, "cause", ctx.Err(), "err", "waiting for a probe slot")
+		return uploads.UnverifiedVerdict(uploads.ReasonInterrupted), nil
+	}
+
 	res, err := ffmpeg.ProbeFile(ctx, bin, path)
 	if err != nil {
 		// Interruption first, because it is not a verdict about the file.
@@ -279,14 +355,52 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.M
 			ctx.Err() != nil {
 			s.log.Warn("upload probe was interrupted; accepting the file unchecked",
 				"name", name, "cause", ctx.Err(), "err", err)
-			return nil, nil
+			return uploads.UnverifiedVerdict(uploads.ReasonInterrupted), nil
 		}
 		if errors.Is(err, ffmpeg.ErrIndirectContainer) {
 			// Not "could not read": ffprobe read it fine and reported another
 			// file's streams. Saying "could not be read as media" here would be
 			// the false diagnosis all over again.
-			return nil, errors.New(
+			return uploads.Verdict{}, errors.New(
 				"this file is a playlist or script naming other files, not media itself")
+		}
+		if errors.Is(err, ffmpeg.ErrUnsupportedContainer) {
+			// A REAL FILE IN A FORMAT WE DO NOT TAKE, which used to get the
+			// sentence above. AIFF, DV, y4m, IVF, CAF and GIF were all measured
+			// being told they were "a playlist or script naming other files" --
+			// untrue about every one of them, and unactionable, because the
+			// operator goes looking for a script that does not exist. See
+			// ffmpeg.ErrUnsupportedContainer. If an operator is refused here for
+			// something they should be able to upload, the fix is an entry in
+			// ffmpeg.selfContainedFormats, not a widening of the gate.
+			return uploads.Verdict{}, fmt.Errorf(
+				"polyemesis cannot use this container; re-save it as MP4 or MPEG-TS (%s)", err)
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			// FFPROBE NEVER RAN, OR RAN AND SAID SOMETHING THIS PROCESS CANNOT
+			// READ. Both are facts about this server, and neither is a verdict
+			// about the operator's bytes -- which is the same rule the
+			// interruption arm above enforces, on the routes that arm does not
+			// reach.
+			//
+			// It was reachable and it destroyed data: with probeBin pointing at
+			// a path that does not exist, is not executable, or is a directory,
+			// every upload got 400 "this file could not be read as media:
+			// fork/exec ...: no such file or directory" and the uploads
+			// directory was empty afterwards. exec's start failures are
+			// *exec.Error and fs.ErrPermission, never *exec.ExitError, and
+			// ctx.Err() is nil for them, so both existing guards missed. A fork
+			// that fails with EAGAIN on a box that is also encoding live video
+			// reaches this without any misconfiguration at all.
+			//
+			// A probe that exits 0 and prints something that is not JSON lands
+			// here too, and for the same reason: "parse ffprobe output: invalid
+			// character 'o'" is a sentence about the binary this server was
+			// pointed at, and it was being reported as a verdict about a file.
+			s.log.Warn("the upload probe could not be run; accepting the file unchecked",
+				"name", name, "err", err)
+			return uploads.UnverifiedVerdict(uploads.ReasonProbeUnusable), nil
 		}
 		// ffprobe's own words, because "could not read this file" tells the
 		// operator nothing they can act on and ffprobe's message usually does.
@@ -302,12 +416,12 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.M
 		// fails on the missing index rather than on being short. The boundary
 		// is pinned by internal/ffmpeg.TestProbeFileAcceptsMostTruncatedMedia
 		// and written down in docs/TROUBLESHOOTING.md.
-		return nil, fmt.Errorf("this file could not be read as media: %s", err)
+		return uploads.Verdict{}, fmt.Errorf("this file could not be read as media: %s", err)
 	}
 	if res.Video == nil && len(res.Audio) == 0 {
 		// ffprobe parsed it and found nothing playable. A container with no
 		// streams is the shape a renamed archive or document arrives in.
-		return nil, errors.New("this file carries no video or audio stream")
+		return uploads.Verdict{}, errors.New("this file carries no video or audio stream")
 	}
 
 	info := uploads.MediaInfo{
@@ -329,7 +443,7 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (*uploads.M
 		info.AudioChannels = res.Audio[0].Channels
 		info.AudioLayout = res.Audio[0].Layout
 	}
-	return &info, nil
+	return uploads.VerifiedVerdict(info), nil
 }
 
 // handleListMedia returns the stored uploads, newest first.
@@ -484,7 +598,18 @@ func (s *Server) uploadStore() (*uploads.Store, error) {
 // Each of these is the caller's problem or the machine's, and they are told
 // apart because "your file is too big" and "this server has no disk left" call
 // for completely different responses from whoever is looking at the toast.
-func writeUploadError(w http.ResponseWriter, err error) {
+//
+// THE DEFAULT ARM NO LONGER ECHOES THE ERROR. Everything that reaches it is an
+// os.PathError over a path this server chose, so the body carried the absolute
+// data directory and the internal ".partial-" temp name out to whoever sent the
+// request. It was reachable without any misconfiguration: filling the volume
+// mid-write produced `write upload: write /srv/data/uploads/.partial-1216776868.ts:
+// no space left on device` with a 500 attached, where the pre-check path for the
+// same condition is careful to answer 507 and say nothing about paths. That
+// particular case is now classified as ErrNoSpace at the source
+// (uploads.Stage); this arm covers the rest of the class rather than the one
+// instance of it.
+func writeUploadError(w http.ResponseWriter, log *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, uploads.ErrTooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge,
@@ -497,6 +622,9 @@ func writeUploadError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusInsufficientStorage,
 			"not enough free disk space to store this upload")
 	default:
-		writeError(w, http.StatusInternalServerError, err.Error())
+		if log != nil {
+			log.Error("an upload could not be stored", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "this upload could not be stored")
 	}
 }

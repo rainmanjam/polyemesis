@@ -11,9 +11,19 @@
       },
       "why": "The upload probe gate needs a real ffprobe to gate with and a real ffmpeg to build media to feed it, and neither is a property of the code. The six sites are: ffprobeOrSkip (no ffprobe, so there is nothing to gate with); sampleMedia's two (no ffmpeg, and an ffmpeg that cannot mux h264/aac); buildSample's one (same, for internal/ffmpeg); and TWO Windows ones -- TestProbeFileReturnsWhenItsContextIsCancelled, whose fixture is a #!/bin/sh wrapper script chosen precisely because it leaves a grandchild holding the stdout pipe, and internal/api's fakeProbe, which is the same shape and which Windows will not execute. Every one is 'this environment cannot run the test', none is 'the thing under test changed'.",
       "alreadyPaidDown": "The first draft of the same tests added ELEVEN sites. sampleMedia and buildSample were extracted so that each environmental reason has exactly one site for the whole file instead of one per test, which also took two pre-existing per-test build skips with it. See issue #187: the real fix is making these fail rather than skip when POLYEMESIS_REQUIRE_FFMPEG is set in CI, at which point the four FFmpeg ones can come back out. The two Windows ones need a different fix -- a small helper binary built by the test instead of a shell script -- and are issue #190."
+    },
+    {
+      "pr": 118,
+      "from": 89,
+      "to": 90,
+      "packages": {
+        "internal/playlistmedia": "3 -> 4"
+      },
+      "why": "The normalise worker now re-runs internal/ffmpeg.ProbeFile's format allowlist on its source before it transcodes anything, which is the SECOND gate an upload the client kept the server from inspecting has to get past. The test that proves an ffconcat script cannot get past it needs a real ffprobe to gate with and a real ffmpeg to build the media the script names, and neither is a property of the code. ONE site, realMediaOrSkip, naming all three environmental reasons at once (no ffmpeg, no ffprobe, an ffmpeg that cannot mux h264/aac); three separate ones would be three free passes for the same condition.",
+      "alreadyPaidDown": "The same round added a Finding-B test to internal/ffmpeg with two more environmental reasons -- a build that cannot mux AIFF/y4m/GIF, and a build that puts one of them on the allowlist -- and neither is a skip. They log and return, and the parent asserts that at least one of the three formats reached the branch under test, which is a stronger statement than three skips could make. internal/api's new tests added none: they reuse the existing fakeProbe and ffprobeOrSkip sites. Issues #187 and #190 still cover turning the remaining FFmpeg and Windows ones into failures."
     }
   ],
-  "total": 89,
+  "total": 90,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 8,
@@ -25,7 +35,7 @@
     "internal/ffmpeg": 20,
     "internal/media": 5,
     "internal/meters": 3,
-    "internal/playlistmedia": 3,
+    "internal/playlistmedia": 4,
     "internal/relay": 3,
     "internal/routing": 5,
     "internal/rtmpserver": 10,

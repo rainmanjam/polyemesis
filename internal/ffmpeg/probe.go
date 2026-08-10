@@ -1,6 +1,7 @@
 package ffmpeg
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,8 +25,14 @@ type ProbeResult struct {
 	// input -- a relay that never ends has no duration to report, which is the
 	// case this type was written for. It is meaningful for a file.
 	DurationSeconds float64 `json:"durationSeconds"`
-	Raw             string  `json:"-"`
 }
+
+// There was a Raw string here holding ffprobe's whole JSON reply, and nothing
+// in the repository ever read it. It was not free: ffprobe's output scales with
+// the STREAM COUNT rather than the file size, and a legitimate, allowlisted
+// Matroska carrying 300 audio tracks was measured producing 464 KB of JSON from
+// a 121 KB container -- 3.8x, before this field kept a second copy of it in the
+// same process. Removing it halves that, and probeStdoutCap bounds what is left.
 
 // VideoStream describes the (single) video track, which polyemesis only ever
 // copies.
@@ -100,6 +107,50 @@ func Probe(ctx context.Context, ffprobeBin, input string, timeoutSeconds int) (*
 // are bytes ffprobe read perfectly well and reported somebody ELSE's streams
 // for. Use errors.Is; the wrapped text carries the format name.
 var ErrIndirectContainer = errors.New("this file names other files instead of carrying media")
+
+// ErrUnsupportedContainer is returned by ProbeFile for a format that is real,
+// self-contained media and simply is not on the allowlist.
+//
+// SPLIT OUT BECAUSE THE OTHER SENTENCE WAS A LIE ABOUT MOST OF THE FILES IT WAS
+// SHOWN FOR. ErrIndirectContainer was returned for EVERY format the allowlist
+// did not name, and the handler renders it as "this file is a playlist or
+// script naming other files, not media itself". Measured on files muxed for the
+// purpose: AIFF, DV, y4m, IVF, CAF and GIF all got that sentence. Not one of
+// them names another file. An operator handed it about their own camera's DV
+// footage is being told something untrue about their file, by the feature whose
+// entire purpose is that the product stops asserting things about uploads it
+// has not established -- and the honest answer, "polyemesis does not accept
+// this container", is also the actionable one, because it says the fix is a
+// remux rather than a hunt for a script that does not exist.
+//
+// The allowlist is still the gate and it still fails closed. What changed is
+// which of the two sentences a refusal gets.
+var ErrUnsupportedContainer = errors.New("polyemesis does not accept this container format")
+
+// indirectFormats are the demuxer names whose whole job is resolving a NAME to
+// bytes somewhere else. They are the reason selfContainedFormats is an
+// allowlist, and naming them here buys exactly one thing: a refusal that says
+// what is actually wrong.
+//
+// IT IS NOT A DENYLIST AND MUST NEVER BECOME ONE. Anything not on
+// selfContainedFormats is refused whether or not it appears below; this map
+// only chooses the WORDING. A demuxer this list has never heard of is still
+// refused, which is the property a denylist cannot have.
+var indirectFormats = map[string]bool{
+	"concat": true, "hls": true, "applehttp": true, "dash": true,
+	"sdp": true, "rtsp": true, "image2": true, "m3u8": true,
+}
+
+// indirect reports whether ffprobe's format_name names a known indirection
+// demuxer. Element-wise, for the same reason selfContained is.
+func indirect(formatName string) bool {
+	for _, n := range strings.Split(formatName, ",") {
+		if indirectFormats[strings.TrimSpace(n)] {
+			return true
+		}
+	}
+	return false
+}
 
 // selfContainedFormats is the set of demuxer names ProbeFile will admit.
 //
@@ -186,13 +237,29 @@ func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, erro
 	// Real ffprobe forks nothing, so this costs a correct install nothing. It
 	// bounds the case where the configured binary is not the one assumed.
 	cmd.WaitDelay = 5 * time.Second
-	out, err := cmd.Output()
+	// BOTH PIPES ARE CAPPED, which cmd.Output() does for only one of them.
+	//
+	// Output() gives stdout an uncapped bytes.Buffer and reserves its 32 KiB cap
+	// for stderr, which is backwards for this call: ffprobe's stdout is JSON
+	// whose size scales with the STREAM COUNT, not with the file. Measured on
+	// legitimate, allowlisted media -- a 121 KB Matroska carrying 300 audio
+	// tracks -- ffprobe printed 464 KB of JSON, 3.8x the container, at 1.5 KB
+	// per stream. That is heap in this process, not in the child, it arrives
+	// once per concurrent upload, and nothing in the shape of the file warns
+	// that it is coming.
+	//
+	// Over the cap the excess is DRAINED AND DROPPED rather than the pipe being
+	// closed. Closing it would kill the child with EPIPE mid-write, which is a
+	// second way for a probe to fail that the caller would have to learn to tell
+	// from the first; dropping it means the JSON is truncated, ParseProbe says
+	// so, and probeStdoutCap is far above anything real media produces.
+	stdout := &cappedBuffer{max: probeStdoutCap}
+	stderrBuf := &cappedBuffer{max: probeStderrCap}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderrBuf
+	err := cmd.Run()
 	if err != nil {
-		var ee *exec.ExitError
-		stderr := ""
-		if ok := asExitError(err, &ee); ok {
-			stderr = strings.TrimSpace(string(ee.Stderr))
-		}
+		stderr := strings.TrimSpace(stderrBuf.buf.String())
 		// %w on both branches. The caller has to be able to tell an interrupted
 		// probe from a file ffprobe disliked -- one of those must not delete the
 		// operator's upload -- and flattening the error with %s took that
@@ -203,14 +270,55 @@ func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, erro
 		}
 		return nil, err
 	}
-	res, err := ParseProbe(out)
+	if stdout.over {
+		return nil, fmt.Errorf("ffprobe printed more than %d bytes about this file", probeStdoutCap)
+	}
+	res, err := ParseProbe(stdout.buf.Bytes())
 	if err != nil {
 		return nil, err
 	}
 	if !selfContained(res.FormatName) {
-		return nil, fmt.Errorf("%w (ffprobe read it as %q)", ErrIndirectContainer, res.FormatName)
+		if indirect(res.FormatName) {
+			return nil, fmt.Errorf("%w (ffprobe read it as %q)", ErrIndirectContainer, res.FormatName)
+		}
+		return nil, fmt.Errorf("%w (ffprobe read it as %q)", ErrUnsupportedContainer, res.FormatName)
 	}
 	return res, nil
+}
+
+// probeStdoutCap and probeStderrCap bound what one ffprobe may hand back.
+//
+// 8 MiB of stdout is roughly 5,000 streams at the 1.5 KB per stream that was
+// measured, which is far past any file an operator has and far short of a
+// number that matters to a server's heap. 32 KiB of stderr is what
+// exec.Cmd.Output() already used, kept so the message an operator sees does not
+// change.
+const (
+	probeStdoutCap = 8 << 20
+	probeStderrCap = 32 << 10
+)
+
+// cappedBuffer collects up to max bytes and drops the rest, recording that it
+// did. It never errors, so the writer on the other end is never killed by a
+// short write -- see ProbeFile for why that matters.
+type cappedBuffer struct {
+	buf  bytes.Buffer
+	max  int
+	over bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if room := c.max - c.buf.Len(); room > 0 {
+		if len(p) > room {
+			c.buf.Write(p[:room])
+			c.over = true
+		} else {
+			c.buf.Write(p)
+		}
+	} else if len(p) > 0 {
+		c.over = true
+	}
+	return len(p), nil
 }
 
 // selfContained reports whether an ffprobe format_name is on the allowlist.
@@ -237,7 +345,6 @@ func ParseProbe(raw []byte) (*ProbeResult, error) {
 	}
 
 	res := &ProbeResult{
-		Raw:        string(raw),
 		Audio:      []AudioStream{},
 		FormatName: strings.TrimSpace(p.Format.FormatName),
 	}

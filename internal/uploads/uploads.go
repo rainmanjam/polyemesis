@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -129,12 +130,31 @@ func SafeName(hint string) string {
 	if len(stem) > MaxNameLength {
 		stem = stem[:MaxNameLength]
 	}
-	var buf [4]byte
+	var buf [nameSuffixBytes]byte
 	// crypto/rand rather than math/rand: this suffix is what makes the name
 	// unguessable, so it should not come from a predictable sequence.
 	_, _ = rand.Read(buf[:])
 	return fmt.Sprintf("%s-%s%s", stem, hex.EncodeToString(buf[:]), ext)
 }
+
+// nameSuffixBytes is the random part of a stored name, and it is a COLLISION
+// budget rather than a secrecy one.
+//
+// It was four bytes. Thirty-two bits with a caller-controlled stem is inside
+// birthday range for a directory an operator fills over a year: 200,000 draws
+// of SafeName("show.ts") produced four colliding names when it was measured.
+// A collision is not a cosmetic problem here, because Commit renames onto the
+// name -- so the loser's bytes become the winner's file while the winner's
+// recorded verdict still describes the bytes that are gone, which is exactly
+// the "tell two similar files apart" property this feature exists to provide,
+// inverted.
+//
+// Eight bytes puts the same 200,000 draws at roughly one collision in ten
+// billion runs. Commit ALSO refuses to overwrite (see its O_EXCL claim), so
+// this is the first of two defences rather than the only one: entropy makes a
+// collision not happen, and the claim makes one that happens anyway a loud
+// failure rather than silent content substitution.
+const nameSuffixBytes = 8
 
 // allowedExt is what may be preserved from a client filename: containers
 // polyemesis can plausibly read. Anything else is stored as ".bin".
@@ -225,9 +245,32 @@ type File struct {
 	// directory, which is what ffmpeg's file:// handling resolves against.
 	PullURL string `json:"pullUrl"`
 	// Media is what ffprobe said about this file when it was accepted, or nil
-	// for one stored before that was recorded. The Library shows it so an
-	// operator can tell two similar-looking files apart before scheduling one.
+	// when there is nothing to say -- which now means the file was not
+	// inspected, never "it was inspected and found to be nothing". The Library
+	// shows it so an operator can tell two similar-looking files apart before
+	// scheduling one.
 	Media *MediaInfo `json:"media,omitempty"`
+	// Verified reports whether these bytes were inspected and accepted as media.
+	//
+	// DELIBERATELY NOT omitempty, and that is the whole point of the field. A
+	// stored upload is in one of three states -- inspected and accepted,
+	// refused (in which case it is not here at all), and STORED WITHOUT BEING
+	// INSPECTED. The third state is reachable on demand by a remote client: send
+	// a complete body and drop the connection, and the probe is interrupted, and
+	// an interrupted probe is not a verdict about the file, so the bytes are
+	// kept. That is correct -- deleting a completed transfer because the
+	// inspection of it was cut short is the data loss this path was reshaped to
+	// stop -- but before this field the result was INDISTINGUISHABLE from a file
+	// that had passed: `media` was simply absent, which is also how every upload
+	// stored before probing existed looks.
+	//
+	// An absent boolean would have re-created that exactly, so it is always
+	// present and always answered, and `false` is a statement rather than a gap.
+	Verified bool `json:"verified"`
+	// UnverifiedReason says WHY, in the operator's words, when Verified is
+	// false. Empty for a file with no recorded verdict at all -- one stored
+	// before verdicts existed, or placed in the directory by hand.
+	UnverifiedReason string `json:"unverifiedReason,omitempty"`
 }
 
 // MediaInfo is the probe result as the Library needs it.
@@ -269,43 +312,116 @@ const sidecarPrefix = ".probe-"
 
 func sidecarName(stored string) string { return sidecarPrefix + stored + ".json" }
 
-// PutMedia records what a probe found about a stored upload.
+// Reasons a stored upload carries no inspection. Spelled once, because they are
+// shown to an operator and matched in tests, and a second copy of a sentence is
+// a second place for it to drift from the behaviour it describes.
+const (
+	// ReasonNoProber is the install that has nothing to inspect with.
+	ReasonNoProber = "this server had no ffprobe available when the file arrived"
+	// ReasonInterrupted is the client that went away, or a probe that ran out
+	// of time. Both leave the same state and neither is a verdict about the
+	// bytes.
+	ReasonInterrupted = "the inspection was cut short before it finished"
+	// ReasonProbeUnusable is a probe that could not be STARTED or whose output
+	// could not be read -- a missing binary, a permission error, a fork that
+	// failed, output that is not JSON. Every one of those is a fact about this
+	// server, not about the operator's file.
+	ReasonProbeUnusable = "this server could not run its media inspection"
+	// ReasonNotInspected is the bare Store.Save path, which publishes without
+	// looking. It has no production caller; the sentence exists so that a file
+	// it wrote is still ANSWERED rather than silent.
+	ReasonNotInspected = "this file was stored without being inspected"
+)
+
+// Verdict is the record that sits beside every upload this server publishes.
 //
-// Best-effort by design, and the caller is expected to ignore the error. The
-// upload itself is already on disk and usable; failing the request because a
-// cache could not be written would throw away a file the operator has just
-// spent minutes sending, to protect a nicety.
-func (s *Store) PutMedia(stored string, info MediaInfo) error {
+// IT IS A VERDICT, NOT A METADATA CACHE, and the difference is the entire fix.
+// The sidecar used to hold a MediaInfo and nothing else, so "no sidecar" and
+// "an upload nobody checked" were the same bytes on disk as "an upload from
+// before sidecars existed". Three states were stored as two, and the one that
+// went missing is the one a remote client can reach on demand.
+//
+// So the record always says which it is. Verified true carries Info; verified
+// false carries Reason and no Info, because a file nobody read has no duration
+// and no track count, and inventing zeroes for it is how a Library column comes
+// to state a falsehood about a file.
+//
+// A record that cannot be read AT ALL -- absent, truncated, not JSON -- reads
+// as unverified with an empty Reason. That is fail-closed in the only direction
+// that is safe, and it is distinguishable from a recorded refusal to inspect:
+// see Store.Verdict's second return.
+type Verdict struct {
+	Verified bool       `json:"verified"`
+	Reason   string     `json:"reason,omitempty"`
+	Info     *MediaInfo `json:"info,omitempty"`
+}
+
+// VerifiedVerdict is the record for bytes that were inspected and accepted.
+func VerifiedVerdict(info MediaInfo) Verdict { return Verdict{Verified: true, Info: &info} }
+
+// UnverifiedVerdict is the record for bytes that were stored without a verdict
+// being reachable, and why.
+func UnverifiedVerdict(reason string) Verdict { return Verdict{Reason: reason} }
+
+// PutVerdict records what this server concluded about a stored upload.
+//
+// Best-effort at the call site by design where the file is already published:
+// the upload is on disk and usable, and failing the request because a record
+// could not be written would throw away a file the operator has just spent
+// minutes sending. Pending.Commit writes it BEFORE it publishes, which is the
+// ordering that makes the best-effort case rare rather than routine -- see
+// there.
+func (s *Store) PutVerdict(stored string, v Verdict) error {
 	if strings.ContainsAny(stored, `/\`) || stored == "" {
 		return fmt.Errorf("uploads: refusing a media record for %q", stored)
 	}
-	b, err := json.Marshal(info)
+	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(s.dir, sidecarName(stored)), b, 0o600)
 }
 
-// readMedia returns the recorded probe, or nil when there is not one.
-//
-// Every failure is nil rather than an error: a missing sidecar is the normal
-// state for anything uploaded before this existed, and an unreadable one should
-// cost the operator a blank column rather than the whole listing.
-func (s *Store) readMedia(stored string) *MediaInfo {
-	b, err := os.ReadFile(filepath.Join(s.dir, sidecarName(stored)))
-	if err != nil {
-		return nil
-	}
-	var m MediaInfo
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil
-	}
-	return &m
+// PutMedia records a PASSING inspection. Kept as the narrow spelling of the
+// common case; PutVerdict is what can also record a failure to inspect.
+func (s *Store) PutMedia(stored string, info MediaInfo) error {
+	return s.PutVerdict(stored, VerifiedVerdict(info))
 }
 
-// removeMedia drops the sidecar. Called on the paths that remove an upload, so
-// a name reused by a later upload cannot inherit the previous file's numbers.
-func (s *Store) removeMedia(stored string) {
+// Verdict returns the recorded conclusion about a stored upload, and whether
+// there was a record at all.
+//
+// THE SECOND RETURN IS NOT A CONVENIENCE. "This server looked at these bytes,
+// could not inspect them, and said so" is a different thing from "nobody ever
+// wrote anything about this file", and a caller deciding whether to refuse an
+// operator's playlist item has to be able to tell them apart: the first is a
+// file this build published unchecked and can tell the operator to send again,
+// the second is every upload an install made before verdicts existed, and
+// refusing those would strand data the operator has had for a year over a
+// record that was never written.
+//
+// Both are unverified. Only the first is EVIDENCE of being unverified.
+func (s *Store) Verdict(stored string) (Verdict, bool) {
+	b, err := os.ReadFile(filepath.Join(s.dir, sidecarName(stored)))
+	if err != nil {
+		return Verdict{}, false
+	}
+	var v Verdict
+	if err := json.Unmarshal(b, &v); err != nil {
+		// Unreadable is not "fine". A record this process cannot parse is a
+		// record, and the safe reading of one is the unverified one.
+		return Verdict{Reason: ReasonProbeUnusable}, true
+	}
+	if !v.Verified {
+		v.Info = nil
+	}
+	return v, true
+}
+
+// removeVerdict drops the sidecar. Called on the paths that remove an upload,
+// so a name reused by a later upload cannot inherit the previous file's
+// numbers -- or, worse, the previous file's PASS.
+func (s *Store) removeVerdict(stored string) {
 	_ = os.Remove(filepath.Join(s.dir, sidecarName(stored)))
 }
 
@@ -343,8 +459,24 @@ func (p *Pending) Name() string { return p.name }
 // Bytes is what was actually written.
 func (p *Pending) Bytes() int64 { return p.bytes }
 
-// Commit publishes the staged file under its final name.
-func (p *Pending) Commit() (File, error) {
+// Commit publishes the staged file under its final name, with the verdict this
+// server reached about its bytes.
+//
+// THE VERDICT IS WRITTEN FIRST, and the order is the fix rather than a tidy-up.
+// It used to be published by the caller AFTER the rename, which left a window
+// -- short, but a window -- in which a file was listed, had a working pullUrl
+// and was a legal playlist item while nothing on disk said whether anyone had
+// read it. That window is small enough to be dismissed and it is exactly the
+// wrong thing to dismiss, because it means "no record" can never be relied on
+// to mean anything: a reader finding one has no way to tell a file nobody
+// checked from a file whose record has not landed yet. Writing the record while
+// the bytes are still under ".partial-" -- which List skips and
+// playlistUploadProblems refuses -- costs one fsync-less write and makes the
+// rename the single moment the file becomes real, verdict and all.
+//
+// The verdict is a REQUIRED argument for the same reason. A caller that could
+// forget it would re-create the state this whole change exists to remove.
+func (p *Pending) Commit(v Verdict) (File, error) {
 	if p.done {
 		return File{}, errors.New("uploads: this upload was already committed or discarded")
 	}
@@ -352,7 +484,41 @@ func (p *Pending) Commit() (File, error) {
 	if err != nil {
 		return File{}, err
 	}
+	// CLAIM THE NAME FIRST, THEN WRITE THE VERDICT, THEN RENAME, and the order
+	// of the first two is not interchangeable. Writing the verdict first means a
+	// Commit that then LOSES the name has already overwritten the winner's
+	// record with its own -- so the surviving file would carry a description of
+	// the bytes that were refused. Measured: the loser's cleanup removed the
+	// winner's sidecar outright.
+	//
+	// os.Rename replaces silently on every platform this runs on, so two
+	// uploads that drew the same stored name would leave one operator's bytes
+	// under the other's name -- with the loser's verdict already written and now
+	// describing bytes that are gone. SafeName's suffix makes that astronomically
+	// unlikely (see nameSuffixBytes) and this makes it impossible rather than
+	// unlikely: O_EXCL is the atomic reservation, so the second Commit fails
+	// loudly instead of overwriting.
+	//
+	// The claim is a zero-byte file under the final name, so it is briefly
+	// listable. That is a sub-millisecond window on a file whose verdict is
+	// already on disk, and it is strictly the better of the two states to be
+	// caught in: an operator who refreshes at exactly the wrong moment sees a
+	// 0-byte entry, rather than a full-looking one that is somebody else's.
+	claim, err := os.OpenFile(final, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return File{}, fmt.Errorf("finalise upload: %q already exists", p.name)
+		}
+		return File{}, fmt.Errorf("finalise upload: %w", err)
+	}
+	_ = claim.Close()
+	if err := p.store.PutVerdict(p.name, v); err != nil {
+		_ = os.Remove(final)
+		return File{}, fmt.Errorf("record what is known about this upload: %w", err)
+	}
 	if err := os.Rename(p.tmp, final); err != nil {
+		_ = os.Remove(final)
+		p.store.removeVerdict(p.name)
 		return File{}, fmt.Errorf("finalise upload: %w", err)
 	}
 	p.done = true
@@ -369,14 +535,18 @@ func (p *Pending) Commit() (File, error) {
 	// had already emptied.
 	if err := os.Chmod(final, 0o600); err != nil {
 		_ = os.Remove(final)
+		p.store.removeVerdict(p.name)
 		return File{}, fmt.Errorf("chmod upload: %w", err)
 	}
 	return File{
-		Name:     p.name,
-		Origin:   OriginUploaded,
-		Bytes:    p.bytes,
-		Modified: time.Now().UTC(),
-		PullURL:  PullURL(p.name),
+		Name:             p.name,
+		Origin:           OriginUploaded,
+		Bytes:            p.bytes,
+		Modified:         time.Now().UTC(),
+		PullURL:          PullURL(p.name),
+		Media:            v.Info,
+		Verified:         v.Verified,
+		UnverifiedReason: v.Reason,
 	}, nil
 }
 
@@ -402,13 +572,19 @@ func (p *Pending) Discard() error {
 // Stage plus Commit with nothing in between, kept because that is genuinely
 // all some callers want. A caller that must inspect the bytes before the file
 // becomes listable wants Stage.
+//
+// It records the file as UNINSPECTED, because that is what it is. Save looks at
+// nothing, so a Save that recorded a pass would be this package asserting a
+// fact it did not establish. There is no production caller today -- the upload
+// handler stages, probes and commits its own verdict -- and this is what a
+// future one would get by default, which is the safe default to have.
 func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint64) (File, error) {
 	p, err := s.Stage(r, hint, maxBytes, minFreeBytes)
 	if err != nil {
 		return File{}, err
 	}
 	defer p.Discard()
-	return p.Commit()
+	return p.Commit(UnverifiedVerdict(ReasonNotInspected))
 }
 
 // Stage streams r into a temp file in the uploads directory without publishing
@@ -478,6 +654,21 @@ func (s *Store) Stage(r io.Reader, hint string, maxBytes int64, minFreeBytes uin
 		written, err = io.Copy(tmp, r)
 	}
 	if err != nil {
+		// ENOSPC IS THE SAME ANSWER WHETHER IT IS PREDICTED OR DISCOVERED.
+		//
+		// The pre-check above returns ErrNoSpace, which the handler turns into
+		// 507 Insufficient Storage. Running out DURING the write took the
+		// default arm instead -- 500, with the message being the raw os.PathError
+		// and therefore the absolute data-directory path and the internal
+		// ".partial-" temp name in the response body. Two defects from one
+		// missing classification: the wrong status for a condition the code
+		// already knows how to describe, and a server path handed to whoever
+		// filled the disk. The pre-check is a guard against the common case, not
+		// a proof, so this arm is reachable whenever anything else is writing to
+		// the volume.
+		if errors.Is(err, syscall.ENOSPC) {
+			return fail(ErrNoSpace)
+		}
 		return fail(fmt.Errorf("write upload: %w", err))
 	}
 	if maxBytes > 0 && written > maxBytes {
@@ -544,16 +735,22 @@ func (s *Store) List() ([]File, error) {
 		if err != nil {
 			continue
 		}
+		// The recorded verdict, not a metadata lookup. A file with no record
+		// reads as unverified with no reason, which is the honest description
+		// of an upload stored before verdicts existed or placed here by hand.
+		v, _ := s.Verdict(e.Name())
 		out = append(out, File{
 			Name:     e.Name(),
 			Origin:   OriginUploaded,
 			Bytes:    info.Size(),
 			Modified: info.ModTime().UTC(),
 			PullURL:  PullURL(e.Name()),
-			// Absent for anything stored before probing existed, which is why
-			// the field is a pointer and the UI has to cope with nil rather
-			// than being handed zeroes it would render as "0x0".
-			Media: s.readMedia(e.Name()),
+			// Absent unless the file was inspected AND passed, which is why the
+			// field is a pointer and the UI has to cope with nil rather than
+			// being handed zeroes it would render as "0x0".
+			Media:            v.Info,
+			Verified:         v.Verified,
+			UnverifiedReason: v.Reason,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
@@ -569,6 +766,6 @@ func (s *Store) Delete(name string) error {
 	// The sidecar goes with it. Stored names carry a random suffix so a reuse
 	// is vanishingly unlikely, but a stale probe surviving its file would be a
 	// listing that describes something that is gone.
-	s.removeMedia(name)
+	s.removeVerdict(name)
 	return os.Remove(full)
 }

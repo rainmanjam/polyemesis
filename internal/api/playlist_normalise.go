@@ -126,6 +126,34 @@ func (s *Server) playlistUploadProblems(want, stored db.PlaylistSettings) error 
 			return fmt.Errorf("playlist item %d: there is no upload named %q; "+
 				"upload the file again or remove the item", i, name)
 		}
+		// STORED DOES NOT IMPLY CHECKED, and this is where that stops being an
+		// assumption.
+		//
+		// A remote client decides whether the upload gate runs: the probe uses
+		// the REQUEST's context, so sending a complete body and dropping the
+		// connection interrupts it, and an interrupted probe is not a verdict,
+		// so the bytes are kept. Keeping them is right. What was wrong is that
+		// the result was then indistinguishable -- it stat'd, it was Listable,
+		// and this function returned nil for it, which made a 44-byte ffconcat
+		// script a legal playlist item on its way to an FFmpeg with no format
+		// allowlist. Driven end to end over a real socket.
+		//
+		// So an item the operator is INTRODUCING whose upload carries a recorded
+		// "nobody read this" is refused, with the remedy in the sentence.
+		//
+		// THE TEST IS "RECORDED AS UNVERIFIED", NOT "NOT RECORDED AS VERIFIED",
+		// and the difference is deliberate. Every upload stored before verdicts
+		// existed has no record at all, and refusing those would strand media an
+		// operator has had for a year over a file that was never written. Those
+		// are covered instead by the normalise worker, which re-runs the format
+		// allowlist on whatever it is handed -- see playlistmedia's verifySource.
+		// That is the gate that holds for files this validator never sees:
+		// inherited items, which are skipped above by design, and anything
+		// placed in the directory by hand.
+		if v, recorded := store.Verdict(name); recorded && !v.Verified {
+			return fmt.Errorf("playlist item %d: %q was stored without being checked "+
+				"(%s), so it cannot be added to a playlist; upload it again", i, name, v.Reason)
+		}
 	}
 	return nil
 }

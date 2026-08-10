@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, Trash2, Upload, X } from "lucide-react";
+import { Copy, ShieldAlert, Trash2, Upload, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { bytes, duration, timestamp } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -226,6 +226,30 @@ export function MediaUploads() {
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
                     {bytes(f.bytes)} · {timestamp(f.modified)}
                   </div>
+                  {/* THE THIRD STATE, said out loud.
+                      An upload can be stored WITHOUT having been inspected —
+                      the server's check runs while the request is open, so a
+                      connection that drops after the bytes have landed cuts it
+                      short, and a check that did not finish is not a verdict
+                      about the file. The bytes are kept, which is right. What
+                      was wrong is that the result looked exactly like a file
+                      that had passed: `media` was simply absent, which is also
+                      how every upload from before the check existed looks.
+                      A row that says nothing here is a row that lets an
+                      operator schedule a file nobody has read. */}
+                  {!f.verified && (
+                    <div
+                      className="mt-0.5 flex items-center gap-1 text-[11px] text-warn"
+                      title={
+                        f.unverifiedReason
+                          ? `${f.unverifiedReason}. Upload it again to have it checked; it cannot be used as a playlist item until it has been.`
+                          : "This file was stored before uploads were checked, so nothing here describes what is in it."
+                      }
+                    >
+                      <ShieldAlert className="size-3 shrink-0" aria-hidden />
+                      <span>Not checked</span>
+                    </div>
+                  )}
                   {/* What the file actually is, which a name and a size cannot
                       say. The track count leads because routing is per track:
                       selecting track 3 of a file that carries one is silence

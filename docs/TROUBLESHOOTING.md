@@ -258,23 +258,56 @@ ten minutes long while holding one. The check answers "is this media", not "is
 this all of it". `internal/ffmpeg.TestProbeFileAcceptsMostTruncatedMedia` pins
 each of the three rows above.
 
-#### When the check is skipped
+#### When the check is skipped — and what the file looks like afterwards
 
 **The check is skipped rather than failed when it cannot run**, and the upload
-is accepted unchecked. There are four ways that happens: the server has no
-`ffprobe`, it has no running engine (an install whose video pipeline will not
-build logs the reason and keeps serving), the client disconnected while the
-probe was running, or the probe took longer than 30 seconds. Refusing every
-upload in any of those cases would be a worse outage than the one it guards
-against — and deleting the file, which is what the first version of this did on
-a disconnect, destroys a transfer that had already completed.
+is stored *unchecked* rather than refused. Refusing every upload in any of these
+cases would be a worse outage than the one it guards against — and deleting the
+file, which is what the first version of this did on a disconnect, destroys a
+transfer that had already completed.
 
-**Every one of them writes a WARN line naming the upload**, and that is the way
-to find out it happened:
+There are five ways it happens:
+
+| what happened | why the file is kept |
+| --- | --- |
+| the server has no `ffprobe` | nothing to judge with |
+| it has no running engine (an install whose video pipeline will not build logs the reason and keeps serving) | nothing to judge with |
+| **the client disconnected while the probe was running** | the transfer completed; the inspection did not |
+| the probe took longer than 30 seconds | a slow disk must not delete valid media |
+| the probe could not be started, or printed something the server could not read | a fork that failed is a fact about this server, not about your file |
+
+The third row is the one worth understanding, because **it is under the
+caller's control, not the server's**. The check runs while the request is still
+open, so anything that ends the request early — a dropped connection, a proxy
+timeout, a browser tab closing — ends the check. It is not only an operational
+condition; a client that sends a complete body and then hangs up gets the file
+stored with nothing having read it, on purpose if it likes.
+
+So the state is **recorded**, not merely logged:
+
+- `GET /api/v1/media` carries `"verified": false` for it, always present, plus
+  `unverifiedReason` saying which row above applies. A file that passed carries
+  `"verified": true` and its `media` block. **`media` being absent is not the
+  signal** — that is also how an upload from before this feature looks.
+- The Library shows a **Not checked** marker on the row.
+- A settings save that **adds** such a file to a playlist is refused, naming the
+  file and telling the operator to upload it again. Items already in the stored
+  playlist are not refused — see below.
+- The normalise worker re-runs the same format check on whatever it is handed
+  before it transcodes anything, so an item that reaches it by any other route
+  is caught there instead.
+
+The remedy is to upload the file again on a connection that stays up. There is
+no way to mark a stored file as checked without re-uploading it, deliberately:
+the server would be recording a pass it did not perform.
+
+**Every one of them also writes a WARN line naming the upload:**
 
 ```
 level=WARN msg="no ffprobe available; accepting this upload unchecked" reason="the engine reports no ffprobe binary" name=show-629507cb.mkv
 level=WARN msg="upload probe was interrupted; accepting the file unchecked" name=show-4aee482d.mkv cause="context deadline exceeded" err="signal: killed"
+level=WARN msg="the upload probe could not be run; accepting the file unchecked" name=show-1f0c22a1.mkv err="fork/exec /usr/bin/ffprobe: no such file or directory"
+level=WARN msg="an upload was stored without being inspected" name=show-4aee482d.mkv reason="the inspection was cut short before it finished"
 ```
 
 `name` is the stored filename, so it matches what the Library shows.
@@ -282,6 +315,19 @@ level=WARN msg="upload probe was interrupted; accepting the file unchecked" name
 The startup log will not tell you: it prints ffmpeg's version and path and says
 nothing about ffprobe, and there is no "engine came up" line to look for. Grep
 the running server's log for `unchecked`.
+
+#### "polyemesis cannot use this container"
+
+The file is real media in a format the upload path does not accept — the check
+is an allowlist of containers whose streams live in the bytes we were handed,
+so a legitimate AIFF, y4m, IVF or GIF is refused by it. Re-save it as MP4 or
+MPEG-TS.
+
+This is a different refusal from *"this file is a playlist or script naming
+other files"*, which means the opposite thing: ffprobe read the file perfectly
+and reported some **other** file's streams as its own. The two used to share one
+message, so an operator refused a DV file was told to go looking for a script
+that did not exist.
 
 ### "Error binding filtergraph inputs/outputs"
 
