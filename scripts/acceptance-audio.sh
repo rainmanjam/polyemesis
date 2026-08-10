@@ -86,6 +86,19 @@ band() {
     -f null - 2>&1 | grep "RMS level dB" | tail -1 | awk '{print $NF}'
 }
 
+# bandtrack <file> <freq> <track> -> RMS dB of one frequency in ONE audio track.
+#
+# band above measures whatever FFmpeg's default stream selection picks, which is
+# a single track and is the right thing everywhere else in this suite: every
+# other destination here folds its selection into one stereo pair. A copied
+# destination is the one case with several, and asking band about it would
+# measure track 0 and silently report nothing about the rest.
+bandtrack() {
+  ffmpeg -v info -i "$1" -map "0:a:$3" \
+    -af "bandpass=frequency=$2:width_type=h:width=50,astats=metadata=0:measure_perchannel=none" \
+    -f null - 2>&1 | grep "RMS level dB" | tail -1 | awk '{print $NF}'
+}
+
 # present <db> -> yes/no, on the same -35 dB threshold acceptance.sh uses: a
 # carried tone sits near -21 dB and an excluded one at the bandpass leakage
 # floor, 28-37 dB below it.
@@ -316,6 +329,62 @@ else
                     || bad "the music track is still present (300Hz ${db3}dB)"
   [ "$g9" = "yes" ] && ok "the other selected track survived (900Hz ${db9}dB)" \
                     || bad "role exclusion took the wrong track too (900Hz ${db9}dB)"
+fi
+
+# -------------------------------------------------- 7b. copied audio (#144)
+step "7b. Copy: do the ingest tracks arrive separately, and does the DMCA switch still work?"
+C="$REC/copied.mkv"
+if [ ! -s "$C" ]; then
+  bad "the copy destination produced no file"
+else
+  # THE FIRST CLAIM: separate tracks, not a mix. Every other destination in
+  # this suite folds its selection into ONE stereo pair; this is the only one
+  # that must not, and a count of 1 would mean the mix path ran after all.
+  # Deduped by stream index (the sort -u): for containers with a program
+  # layer (MPEG-TS/SRT) ffprobe lists each stream again inside its program,
+  # so a plain line count reports 6 for 3 tracks. Stream indexes are unique
+  # within a file, so deduping them is exact. Matroska has no program layer,
+  # so this is a no-op for the .mkv asserted here -- the dedup matters the
+  # moment the copy destination points at TS/SRT, the container family #144
+  # is about. NA is also the loop bound below, so an inflated count would
+  # probe track indexes that do not exist.
+  NA=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$C" \
+        | tr -d ' ' | sort -u | grep -c '[0-9]')
+  NV=$(ffprobe -v error -select_streams v -show_entries stream=index -of csv=p=0 "$C" \
+        | tr -d ' ' | sort -u | grep -c '[0-9]')
+  [ "$NA" = "2" ] && ok "two separate audio tracks survived the copy" \
+                  || bad "expected 2 separate audio tracks, found $NA (a mix would give 1)"
+  [ "$NV" = "1" ] && ok "video is still there and still copied" \
+                  || bad "expected 1 video stream, found $NV"
+
+  # THE SECOND CLAIM: the role exclusion still applies. All three tracks were
+  # selected and "music" was excluded, so the 300 Hz bed must be absent from
+  # EVERY track of the file — this is the compliance assertion, and it is the
+  # reason copy maps tracks explicitly instead of using `-map 0`.
+  # EVERY track is checked, not just the first: an exclusion that leaked into
+  # track 1 while track 0 was clean is exactly the failure this is here to
+  # catch, and a whole-file measurement would miss it.
+  gone=yes; got900=no; got2000=no
+  i=0
+  while [ "$i" -lt "$NA" ]; do
+    d3=$(bandtrack "$C" 300 "$i")
+    d9=$(bandtrack "$C" 900 "$i")
+    d2=$(bandtrack "$C" 2000 "$i")
+    note "track $i: 300Hz ${d3}dB  900Hz ${d9}dB  2000Hz ${d2}dB"
+    [ "$(present "$d3")" = "yes" ] && gone=no
+    [ "$(present "$d9")" = "yes" ] && got900=yes
+    [ "$(present "$d2")" = "yes" ] && got2000=yes
+    i=$((i+1))
+  done
+  [ "$gone" = "yes" ] && ok "the music track is absent from every copied track (300Hz)" \
+                      || bad "the excluded music track reached a copied destination (300Hz)"
+
+  # And the tracks that SHOULD be there. Survival, not ordering — ordering is
+  # what scripts/verify_ertmp_multitrack.go exists for.
+  [ "$got900" = "yes" ]  && ok "the control tone survived the copy (900Hz)" \
+                         || bad "the control tone did not survive the copy (900Hz)"
+  [ "$got2000" = "yes" ] && ok "the mic track survived the copy (2000Hz)" \
+                         || bad "the mic track did not survive the copy (2000Hz)"
 fi
 
 # ------------------------------------------------------------- 8. stems

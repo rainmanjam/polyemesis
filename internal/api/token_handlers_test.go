@@ -3,12 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,6 +14,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
@@ -41,11 +40,7 @@ func testServer(t *testing.T, cfg config.Config) (*Server, http.Handler, *db.DB)
 func testServerWith(t *testing.T, o Options) (*Server, http.Handler, *db.DB) {
 	t.Helper()
 
-	store, err := db.Open(filepath.Join(t.TempDir(), "polyemesis.db"), db.WithPasswordCost(bcrypt.MinCost))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	store := dbtest.OpenCheap(t)
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}

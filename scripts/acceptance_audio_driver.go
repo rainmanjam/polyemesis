@@ -220,8 +220,26 @@ probed:
 	pe["excludeRoles"] = []string{"music"}
 	call("POST", "/destinations", dest("No music", "file", "no-music.mkv", pe))
 
+	// 8. COPY, WITH A ROLE EXCLUSION ON TOP. #144. The two claims that matter
+	// are that the tracks arrive SEPARATELY -- not summed into one stereo pair,
+	// which is what every other destination here does -- and that the DMCA
+	// switch still works when nothing is being mixed. So tracks 0, 1 and 2 are
+	// all selected and "music" is excluded: two tracks must come out, carrying
+	// 900 Hz and 2000 Hz, and the 300 Hz music bed must be nowhere in the file.
+	//
+	// Normalization is set to off explicitly. "auto" would also be accepted --
+	// it means "no opinion" and resolves to nothing without a sum to protect --
+	// but a driver that relied on that would stop testing the day the default
+	// changed.
+	pc := profile([]int{0, 1, 2}, 1.0)
+	pc["normalize"] = "off"
+	pc["excludeRoles"] = []string{"music"}
+	copyDest := dest("Copied", "file", "copied.mkv", pc)
+	copyDest["audio"] = map[string]any{"copy": true}
+	call("POST", "/destinations", copyDest)
+
 	fmt.Println("waiting for every destination to run")
-	want := 8
+	want := 9
 	deadline = time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(1500 * time.Millisecond)

@@ -51,6 +51,13 @@ import { useLiveData } from "@/hooks/useLiveData";
 import { autoApi } from "@/lib/autoApi";
 import { timestamp } from "@/lib/format";
 import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
+import {
+  SCHEDULE_ACTIONS,
+  isPlaylistAction,
+  isStartAction,
+  scheduleActionLabel,
+  type ScheduleAction,
+} from "@/lib/scheduleActions";
 
 export type AlertFormat = "json" | "discord" | "slack";
 export type AlertSeverity = "info" | "warning" | "critical";
@@ -91,7 +98,7 @@ interface AlertsMeta {
   stats: AlertStats;
 }
 
-type ScheduleAction = "start" | "stop" | "playlist.start" | "playlist.stop";
+
 type ScheduleKind = "once" | "daily" | "weekly";
 
 // "start" names two different things now -- starting destinations and starting
@@ -100,8 +107,7 @@ type ScheduleKind = "once" | "daily" | "weekly";
 // which kind of target the row has. Comparing against the bare string "start"
 // is what gave playlist.start the stopped badge and the "every destination"
 // subtitle, which is precisely what its validation forbids.
-const isPlaylistAction = (a: ScheduleAction) => a.startsWith("playlist.");
-const isStartAction = (a: ScheduleAction) => a === "start" || a === "playlist.start";
+
 
 export interface Schedule {
   id: number;
@@ -1064,10 +1070,11 @@ function ScheduleDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="start">{t("auto.startDestinations")}</SelectItem>
-                  <SelectItem value="stop">{t("auto.stopDestinations")}</SelectItem>
-                  <SelectItem value="playlist.start">{t("auto.startPlaylist")}</SelectItem>
-                  <SelectItem value="playlist.stop">{t("auto.stopPlaylist")}</SelectItem>
+                  {SCHEDULE_ACTIONS.map((a) => (
+                    <SelectItem key={a} value={a}>
+                      {scheduleActionLabel(a, t)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

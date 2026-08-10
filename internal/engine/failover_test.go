@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -506,11 +507,7 @@ func failoverEngine(t *testing.T) *Engine {
 	}
 	t.Cleanup(func() { _ = hub.Close() })
 
-	store, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	store := dbtest.OpenAt(t, filepath.Join(t.TempDir(), "test.db"))
 
 	return &Engine{log: log, store: store, bus: events.NewBroker(), hub: hub, alloc: relay.NewPortAllocator(relayPortBase+relayPortSpan, 64), tools: &ffmpeg.Tools{FFmpeg: "polyemesis-no-such-binary"}, dests: map[int64]*destination{}, rends: map[int64]*rendition{}, playProcs: map[string]*supervisor.Process{}, sourceState: sourceState{source: routing.DefaultSource()}}
 }

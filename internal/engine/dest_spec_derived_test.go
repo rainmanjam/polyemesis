@@ -267,7 +267,17 @@ func setLeaf(v reflect.Value, path string) {
 	case reflect.Bool:
 		v.SetBool(!v.Bool())
 	case reflect.Slice:
-		v.Set(reflect.ValueOf([]string{"-changed"}))
+		// Per element type, because DestSpec now carries both []string (the
+		// expert arguments) and []int (AudioTracks). A single []string bump
+		// panicked on the second one the moment it was added, which is the
+		// walker doing its job: an unhandled field would otherwise be a field
+		// this guard silently stopped covering.
+		switch v.Type().Elem().Kind() {
+		case reflect.Int:
+			v.Set(reflect.ValueOf([]int{3}))
+		default:
+			v.Set(reflect.ValueOf([]string{"-changed"}))
+		}
 	default:
 		panic("setLeaf: unhandled kind " + v.Kind().String() + " at " + path)
 	}
