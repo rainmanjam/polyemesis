@@ -42,7 +42,19 @@ const (
 	sentinelDestBackupKey = "SENTINEL-destination-backupkey-9f3a"
 	sentinelIcecastPwd    = "SENTINEL-icecast-password-9f3a"
 	sentinelPlayoutToken  = "SENTINEL-playout-watch-token-9f3a"
+	sentinelAutomodKey    = "SENTINEL-automod-endpoint-apikey-9f3a"
+	sentinelExpertArgs    = "SENTINEL-expert-argv-streamkey-9f3a"
 )
+
+// destFileName is a file destination's filename, and it is here as a
+// NON-secret sentinel: the one thing the sweep must find INTACT.
+//
+// alerts.RedactURL is conservative about anything it cannot parse as a URL,
+// which is right for a log line and wrong for this field: "shows/monday-night.
+// mp4" came back as the bare word "[redacted]". Destination.url is a filename
+// for kind:file and for the file form of kind:audio, so redacting it destroyed
+// a field that never held a credential. See maskDestinationTarget.
+const destFileName = "shows/monday-night-9f3a.mp4"
 
 // allSentinels is what every response body is swept for. One list, so a
 // credential added to the fixture is automatically checked on every route
@@ -54,6 +66,7 @@ func allSentinels() []string {
 		sentinelBackupSRT, sentinelBackupRTMP, sentinelBackupPullPwd,
 		sentinelMQTTPwd, sentinelDestKey, sentinelDestBackupKey,
 		sentinelIcecastPwd, sentinelPlayoutToken,
+		sentinelAutomodKey, sentinelExpertArgs,
 	}
 }
 
@@ -97,6 +110,12 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	// the validator.
 	st.MQTT.Enabled = false
 	st.MQTT.BrokerURL = "mqtt://mqttuser:" + sentinelMQTTPwd + "@broker.example:1883"
+	// The automod model ENDPOINT, which the table called public because the
+	// block also carries a derived hasApiKey boolean and the sealed key lives
+	// in its own table. The endpoint is free text an operator pastes, and a
+	// self-hosted or proxied inference endpoint most often arrives carrying the
+	// key in the query string -- which reached a read token verbatim.
+	st.Automod.Model.Endpoint = "https://llm.example/v1/chat/completions?api_key=" + sentinelAutomodKey
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("plant settings credentials: %v", err)
 	}
@@ -106,6 +125,12 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 		StreamKey:       sentinelDestKey,
 		BackupURL:       "rtmp://backup.example/app",
 		BackupStreamKey: sentinelDestBackupKey,
+		// Expert mode. The resolved argv is why GET
+		// /destinations/{id}/expert is 403 to a read token, and these are that
+		// argv as the operator typed it, reachable through GET /destinations
+		// by the same principal.
+		ExtraOutputArgs: "-f flv rtmp://ingest.example/app/" + sentinelExpertArgs,
+		ExtraInputArgs:  "-headers Authorization:Bearer\\ " + sentinelExpertArgs,
 		AudioBitrate:    160, Enabled: false,
 	})
 	if err != nil {
@@ -125,9 +150,21 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	// than assume them, so a fixture change that renumbers them fails here
 	// instead of turning every /destinations/{id} assertion into a 404 nobody
 	// reads carefully.
-	if dest.ID != 1 || radio.ID != 2 {
-		t.Fatalf("fixture destinations are %d and %d, but the tests address 1 and 2",
-			dest.ID, radio.ID)
+	// A FILE destination, whose url is a filename and not a URL at all. It is
+	// here as the negative of everything else in this fixture: the sweep proves
+	// no sentinel survives, and TestFileDestinationKeepsItsFilename proves this
+	// one does. Without it, a redaction that replaced the whole field with
+	// "[redacted]" -- which is what shipped -- looked like a clean sweep.
+	file, err := store.CreateDestination(&db.Destination{
+		Name: "archive", Kind: db.DestFile, URL: destFileName,
+		AudioBitrate: 128, Enabled: false,
+	})
+	if err != nil {
+		t.Fatalf("create file destination: %v", err)
+	}
+	if dest.ID != 1 || radio.ID != 2 || file.ID != 3 {
+		t.Fatalf("fixture destinations are %d, %d and %d, but the tests address 1, 2 and 3",
+			dest.ID, radio.ID, file.ID)
 	}
 
 	s := serverUnderTest(t, h)
@@ -186,6 +223,7 @@ func leakRoutes() []string {
 		"/api/v1/destinations",
 		"/api/v1/destinations/1",
 		"/api/v1/destinations/2",
+		"/api/v1/destinations/3",
 		"/api/v1/playout",
 		"/api/v1/failover/playlist",
 		"/api/v1/processes",
@@ -435,6 +473,8 @@ func TestSessionAndAdminStillReceiveEveryCredential(t *testing.T) {
 		{"/api/v1/destinations", sentinelDestBackupKey},
 		{"/api/v1/destinations", sentinelIcecastPwd},
 		{"/api/v1/destinations/1", sentinelDestKey},
+		{"/api/v1/destinations/1", sentinelExpertArgs},
+		{"/api/v1/settings", sentinelAutomodKey},
 		{"/api/v1/playout", sentinelPlayoutToken},
 	}
 
@@ -457,6 +497,52 @@ func TestSessionAndAdminStillReceiveEveryCredential(t *testing.T) {
 				t.Errorf("%s was denied %s on GET %s; the redaction is meant to be "+
 					"principal-dependent and this principal is entitled to it",
 					principal.name, c.secret, c.path)
+			}
+		}
+	}
+}
+
+// TestFileDestinationKeepsItsFilename is the other direction of the redaction,
+// and it is the one the sweep can never assert.
+//
+// Every other test in this file asks whether a secret got OUT. This asks
+// whether something that was never a secret got DESTROYED, and the answer
+// shipped as no. Destination.url is a URL for kind rtmp and srt and a FILENAME
+// for kind:file and for the file form of kind:audio, and readSafeDestination
+// ran the whole field through alerts.RedactURL. That function is deliberately
+// conservative about strings it cannot parse -- right for a log line, and here
+// it turned "shows/monday-night-9f3a.mp4" into the bare word "[redacted]". A
+// read-only console showed a file destination with no filename.
+//
+// It is also a shape the drift table cannot catch: the leaf is classified
+// sMasked and it WAS masked. Nothing about the classification is wrong. The
+// question the table does not ask is whether what came out is still useful,
+// and that has to be asserted with a value.
+func TestFileDestinationKeepsItsFilename(t *testing.T) {
+	h, _, sign := plantedServer(t)
+	read := createScopedToken(t, h, sign, "monitoring", db.ScopeRead)
+	admin := createScopedToken(t, h, sign, "deploy", db.ScopeAdmin)
+
+	for _, principal := range []struct {
+		name string
+		sign func(*http.Request)
+	}{
+		{"read token", bearer(read)},
+		{"admin token", bearer(admin)},
+		{"session", sign},
+	} {
+		for _, path := range []string{"/api/v1/destinations", "/api/v1/destinations/3"} {
+			r := jsonRequest(t, http.MethodGet, path, nil)
+			principal.sign(r)
+			w := do(t, h, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s: GET %s returned %d: %s",
+					principal.name, path, w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), destFileName) {
+				t.Errorf("%s: GET %s lost the file destination's filename %q. "+
+					"Masking a filename does not protect anything; it deletes the field.\n"+
+					"body: %s", principal.name, path, destFileName, w.Body.String())
 			}
 		}
 	}

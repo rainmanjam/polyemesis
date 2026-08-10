@@ -180,7 +180,14 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 		// in it, because the token is the address. Leaving them would hand back
 		// the same secret in a different shape.
 		urls = nil
-		legacyKey = ""
+		// legacyRtmpKey is REDACTED IN PLACE rather than blanked, because it
+		// carries `omitempty`: assigning "" deleted the key outright, so the
+		// read-scoped body was a different SHAPE from the admin one and #150's
+		// own "the wire shape does not change" claim was false here. The old
+		// guard could not see it -- it compared zero-value fixtures, where the
+		// field is absent either way, and only at the top level. See
+		// TestViewShapesAreIdenticalByPrincipal.
+		legacyKey = redactInPlace(legacyKey)
 	}
 	return sourceView{
 		Publishing:     publishing,
