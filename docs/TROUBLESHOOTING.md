@@ -229,8 +229,8 @@ Two refusals are polyemesis's own words rather than ffprobe's:
 - **"this file is a playlist or script naming other files, not media itself"** —
   the file is an ffconcat script, an HLS playlist or similar. These are refused
   even though ffprobe reports streams for them, because the streams belong to
-  the files they NAME. A four-line text file would otherwise be stored with
-  another video's codecs, resolution and duration shown as its own.
+  the files they NAME. A two-line, 44-byte text file would otherwise be stored
+  with another video's codecs, resolution and duration shown as its own.
 
 This is stricter than it used to be. The extension list was never a gate: an
 unrecognised extension was stored as `.bin` and listed as media anyway, so a
