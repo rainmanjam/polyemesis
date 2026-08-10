@@ -509,6 +509,15 @@ func TestConcurrentUploadsDoNotSpawnUnboundedProbes(t *testing.T) {
 	auth := login(t, h)
 
 	const n = 16
+	// THE TEST'S OWN PRECONDITION, and it is not decoration. The assertion below
+	// compares against MaxConcurrentUploadProbes, so raising that constant
+	// raises the expectation with it -- a mutation that set it to 1000 survived
+	// this test until this check existed, which is the self-referential shape
+	// that makes a bound test say nothing at all.
+	if MaxConcurrentUploadProbes >= n {
+		t.Fatalf("the bound is %d and this drives %d concurrent uploads; a bound at or "+
+			"above the load measures nothing", MaxConcurrentUploadProbes, n)
+	}
 	done := make(chan struct{}, n)
 	for i := 0; i < n; i++ {
 		go func(i int) {
