@@ -316,8 +316,36 @@ step "11. The will message: polyemesis is killed, not stopped"
 # whole design exists for: nothing of ours runs here.
 pid=$(pgrep -f "polyemesis -addr :$PORT" | head -1)
 if [ -n "$pid" ]; then
+  # THE SIGNAL IS A REQUEST AND THE `ok` BELOW IS A VERDICT, so the observation
+  # has to sit between them. This is the shape acceptance-postprod.sh:125 was
+  # rewritten into for #179/#180 and this site was left standing in.
+  #
+  # It is not cosmetic here. Step 11's entire premise is that the TCP connection
+  # to the broker DIES, so that the keep-alive expires and the broker publishes
+  # the will. If the kill has not landed, the socket is still open, the broker
+  # never times the client out, and the check 14 seconds below reports
+  # "the status topic reads 'online' ... want 'offline'" -- a verdict about the
+  # BROKER produced by a teardown of OURS that had not happened.
+  #
+  # poly_free_port is the observation rather than `kill -0`: a killed child of
+  # this script can be a zombie for a moment, and a zombie answers `kill -0`
+  # with success while holding no sockets at all. The port being released is the
+  # fact this step actually depends on.
+  #
+  # The lsof branch is not defensive bookkeeping. poly_port_holders returns
+  # nothing when lsof is absent, and poly_free_port reads "nothing holds it" as
+  # success -- so without this the observation would silently degrade back into
+  # the assumption it replaces, and print the same confident `ok`. CI installs
+  # lsof for this job (ci.yml:738); a machine without it gets told the check
+  # could not be made, rather than told it passed.
   kill -9 "$pid" 2>/dev/null
-  ok "polyemesis was SIGKILLed with no chance to say goodbye"
+  if ! command -v lsof >/dev/null 2>&1; then
+    bad "lsof is missing, so the SIGKILL could not be observed; install it rather than reading the will-message verdict below as a broker result"
+  elif poly_free_port "$PORT"; then
+    ok "polyemesis was SIGKILLed with no chance to say goodbye"
+  else
+    bad "polyemesis still holds port $PORT after SIGKILL; its broker connection is still open, so the will-message check below would be measuring our teardown rather than the broker"
+  fi
 else
   bad "could not find the server process to kill"
 fi

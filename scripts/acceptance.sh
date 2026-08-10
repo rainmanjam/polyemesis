@@ -117,7 +117,21 @@ check() { # check <file> <label> <present300> <present900> <present2000>
 
 check "data/recordings/file-dest.mkv" "FILE dest (tracks 1+2)" yes yes no
 sleep 1
-pkill -f "listen 1 -i rtmp://127.0.0.1:1937" 2>/dev/null; sleep 2
+# The sink has to be GONE before rtmp-out.mkv is read, not merely asked to go:
+# it is the process writing that file, and ffprobe against a half-flushed
+# Matroska reports missing audio bands -- a wrong routing verdict produced by a
+# teardown that had not finished. `sleep 2` was an assumption about how long
+# that takes; poly_free_port is an observation, since the sink is exactly the
+# process holding 1937.
+#
+# One caveat, stated rather than discovered later: poly_free_port is a no-op
+# without lsof, so on a machine that lacks it this stops waiting at all rather
+# than waiting 2s. That is not a new dependency -- poly_cleanup's port reclaim
+# has needed lsof since it was written, and ci.yml installs it for this job at
+# :678 -- but it is the reason the helper reports what it did instead of
+# guessing.
+pkill -f "listen 1 -i rtmp://127.0.0.1:1937" 2>/dev/null
+poly_free_port 1937
 check "rtmp-out.mkv" "RTMP dest (tracks 1+3)" yes no yes
 
 # ------------------------------------------------------------------ summary

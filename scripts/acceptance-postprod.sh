@@ -112,9 +112,22 @@ if [ -z "$JOB" ]; then
 else
   ok "job $JOB is running"
 
+  # SIGKILL and then a fixed 2s, and the `ok` line below used to print on the
+  # strength of the sleep alone. It is not a small distinction here: the whole
+  # case is "the server died without tidying up, and the queue recovers", so
+  # the restart immediately after has to bind the same port. If the kill has not
+  # landed, start_server fails to bind and the suite reports a RECOVERY failure
+  # for a teardown problem.
+  #
+  # poly_free_port waits for the port to actually be released and escalates only
+  # if it is not, so the claim below is made after the observation rather than
+  # before it.
   pkill -9 -f "polyemesis -addr :$PORT" 2>/dev/null
-  sleep 2
-  ok "server killed mid-job (SIGKILL, no clean shutdown, no chance to tidy up)"
+  if poly_free_port "$PORT"; then
+    ok "server killed mid-job (SIGKILL, no clean shutdown, no chance to tidy up)"
+  else
+    bad "the server did not release port $PORT after SIGKILL; the restart below cannot bind it"
+  fi
 
   if start_server; then
     ok "server restarted after the kill"

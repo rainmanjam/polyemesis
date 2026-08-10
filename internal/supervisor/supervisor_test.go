@@ -155,39 +155,237 @@ func TestBackoffDoublesUpToTheCeiling(t *testing.T) {
 
 // --------------------------------------------------------------------- stop
 
-func TestStopKillsTheChildAndReportsStopped(t *testing.T) {
+// reapDeadline is the context deadline given to Stop by the test below, and it
+// is load-bearing at a value nobody would guess.
+//
+// IT MUST EXCEED shutdownGrace (8s, supervisor.go:48). stop() signals the group
+// and then selects on {child reaped, deadline}. When the signal does not land --
+// a child that ignores SIGTERM, a Git-Bash `kill` that cannot deliver a real
+// SIGTERM to a native .exe at all -- the ONLY thing that still ends the child is
+// terminate()'s grace goroutine, which sleeps shutdownGrace and then kills the
+// group. A deadline below 8s therefore expires BEFORE the rescue can fire, and
+// the deadline arm is not merely possible but guaranteed: the test would be
+// asserting the wrong arm every time, on every platform, whenever a signal is
+// slow or ignored.
+//
+// That is what the old 3s value did, and why this test flaked on Windows
+// (issue #180, "pid N survived Stop" on a byte-identical supervisor). Do not
+// lower it back under 8s. Raising it costs nothing: it is a ceiling that a
+// healthy run never approaches, paid in full only by a genuinely failing test,
+// the same bargain waitTimeout makes in testfake_test.go.
+const reapDeadline = 20 * time.Second
+
+// reapHold, minReapLead and reapObserveBound are the three numbers the liveness
+// half of the test below is built out of. They are an instrument, not padding,
+// and the instrument is the point: it converts "Stop finished the reap" from a
+// claim about internal control flow into an interval this test can measure.
+//
+// reapHold is how long the stdout drain is deliberately held open PAST the
+// child's exit. runOnce (supervisor.go:744-745) does wg.Wait() BEFORE
+// cmd.Wait(), so the supervisor cannot finish reaping until every pipe reader
+// has returned; supervise() closes `done` only after runOnce returns; and stop()
+// returns nil only on `case <-done`. Holding the drain therefore widens the gap
+// between "the child died" and "Stop returned" to a value this test chose,
+// exactly as fakeDeaf widens "the signal was ignored" into something observable.
+//
+// This is not an invented mechanism. It is the one issue #194 is about -- a
+// descendant holding an inherited pipe makes `<-done` wait for the drain rather
+// than for the child -- exercised deliberately, at a duration this test picks,
+// instead of arriving unannounced in production.
+//
+// minReapLead is what the test then requires of that gap. THE MARGIN IS
+// ONE-SIDED AND GUARANTEED BY time.Sleep: the true path's lead is at least
+// reapHold, because the handler sleeps that long after EOF and everything else
+// on the way back to the caller only adds to it. A slow or loaded machine can
+// only make the lead LARGER, so this assertion has no flaky direction -- which
+// is the property a bounded liveness poll never had.
+//
+// reapObserveBound is how long the test will wait, after Stop has returned, for
+// the child's pipes to close at all. IT MUST STAY BELOW shutdownGrace (8s,
+// supervisor.go:48) for the same reason the 2s bound in
+// TestStopReportsWhenItHadToKillTheChild must: terminate()'s grace goroutine
+// reaps an unheeded child at 8s on stop's behalf, so any bound at or past 8s is
+// satisfied by the backstop rather than by Stop.
+const (
+	reapHold         = 1 * time.Second
+	minReapLead      = 250 * time.Millisecond
+	reapObserveBound = 2 * time.Second
+)
+
+// TestStopReapsTheChildWhenItHasTimeTo pins ONE of stop()'s two arms, by name.
+//
+// stop() has two exits and sets StateStopped on both:
+//
+//	case <-done:      supervise() finished cmd.Wait() -- the child IS reaped
+//	case <-ctx.Done(): SIGKILL is issued and this returns without waiting;
+//	                   returns ErrStopDeadline "may still be running"
+//
+// So the STATE cannot say which one ran. The error can, and it is the only
+// thing that can, which is why this test captures it instead of discarding it.
+// A test that throws it away cannot distinguish "Stop is broken" from "Stop
+// correctly reported it ran out of time" -- the exact ambiguity that made #180
+// take a day to read.
+//
+// AND THE ERROR IS NOT ENOUGH ON ITS OWN. An earlier revision of this test
+// deleted the liveness check on the argument that err == nil is reachable only
+// through `case <-done:`, which entails cmd.Wait() returned. That argument is
+// about the code as written, and a test's job is to fail on code that is NOT as
+// written. Measured against two mutations of stop(), the error assertion alone
+// is green while the child is still running:
+//
+//	skip terminate(), the kill and the wait, return nil   -> PASS, child alive
+//	signalGroup made inert + the reap arm returns nil     -> the whole package
+//	                                                        is green, child alive
+//
+// Both are the hazard Stop's own doc comment names: the selector starts a
+// replacement feed into the same hub the moment this returns, so a child that
+// is still alive and still writing is two publishers on one input. So the
+// liveness property is restored below -- but NOT as the check that used to be
+// here, because the two objections to that check were both correct:
+//
+//  1. PID REUSE. alive(pid) is Kill(pid, 0) on Unix: between cmd.Wait() and the
+//     probe the kernel may hand that pid to somebody else, so a true answer can
+//     be about a process this test never started. It is also true for a zombie,
+//     the precise state it was written to exclude.
+//  2. VACUOUS PASS. Measured: a bounded 2s poll for !alive(pid) passes 10/10
+//     against a stop() that kills and returns WITHOUT waiting -- the child dies
+//     in about a millisecond, so the poll is satisfied by the kill rather than
+//     by the reap. A check that a bug satisfies faster than the correct code
+//     does is worse than no check.
+//
+// The assertion below answers both. It NAMES NO PID: the observation is the
+// child's stdout pipe reaching EOF, which the kernel does by closing the fd at
+// process teardown, and no recycled pid can hold that fd open. And it is not a
+// poll for a state the mutant reaches sooner -- it is a MEASUREMENT OF THE
+// ORDER of two timestamps, required to differ by at least minReapLead, a lead
+// that only the full reap path can produce. See the constants above for why the
+// margin cannot flake in the passing direction.
+func TestStopReapsTheChildWhenItHasTimeTo(t *testing.T) {
+	// childGoneAt receives the instant the child's stdout reached EOF, sent from
+	// inside the supervisor's own drain goroutine. EOF on that pipe means every
+	// writer closed it, and the only writer is the child, so this timestamp is
+	// "the child process no longer exists" observed by the kernel rather than
+	// inferred from a pid.
+	//
+	// The handler then SLEEPS, which is what makes the reap measurable: see
+	// reapHold. A non-blocking send so a restart can never wedge the drain.
+	childGoneAt := make(chan time.Time, 8)
 	p := testProcess(t, fakeSleep(30*time.Second), Spec{
 		AutoRestart: true,
 		MinBackoff:  10 * time.Millisecond,
+		StdoutHandler: func(r io.Reader) error {
+			_, _ = io.Copy(io.Discard, r)
+			select {
+			case childGoneAt <- time.Now():
+			default:
+			}
+			time.Sleep(reapHold)
+			return nil
+		},
 	})
 	p.Start()
 
 	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
-	pid := p.Status().PID
-	if pid == 0 {
+	if pid := p.Status().PID; pid == 0 {
 		t.Fatal("a running process must report its pid")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), reapDeadline)
 	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		p.Stop(ctx)
-		close(done)
-	}()
+	errc := make(chan error, 1)
+	go func() { errc <- p.Stop(ctx) }()
+
+	var err error
+	var stopReturnedAt time.Time
 	select {
-	case <-done:
-	case <-time.After(4 * time.Second):
+	case err = <-errc:
+		stopReturnedAt = time.Now()
+	case <-time.After(reapDeadline + 5*time.Second):
 		t.Fatal("Stop did not return")
+	}
+
+	// ASSERTION ONE: WHICH ARM RAN. err == nil is reachable only through
+	// `case <-done:`, and done is closed by supervise() after runOnce()
+	// returned, which happens only after wg.Wait() and cmd.Wait() both
+	// returned. Nothing else in this package can tell the reap arm from the
+	// deadline arm -- the state is StateStopped on both -- so this assertion
+	// stays, and stays first: it is the one that turns a failure into a
+	// diagnosis instead of a symptom.
+	//
+	// The one caveat on the entailment: it reads "the tracked child was reaped"
+	// only because this test established StateRunning first. Without that, Stop
+	// on a process that never started also returns nil.
+	if err != nil {
+		t.Fatalf("Stop on a child that honours SIGTERM returned %v; this test pins the "+
+			"reap path (case <-done), and a deadline here is a regression in the stop "+
+			"path or an undersized deadline, not a slow runner. The deadline is %s and "+
+			"the grace escalation that rescues an unheeded signal is %s.",
+			err, reapDeadline, shutdownGrace)
+	}
+
+	// ASSERTION TWO: THE CHILD IS ACTUALLY GONE, AND STOP WAITED FOR IT.
+	//
+	// Assertion one is a statement about the code as written. This one holds
+	// under rewriting, which is the only kind of assertion a regression test is
+	// for. It is two claims, and each kills a different mutant:
+	//
+	//   the EOF arrived at all, within reapObserveBound
+	//     -> kills "skip terminate, the kill and the wait, return nil" and
+	//        "signalGroup inert + the reap arm returns nil": in both the child
+	//        is still running when Stop returns and its stdout stays open --
+	//        for ever in the first case, until the 8s grace backstop in the
+	//        second, and reapObserveBound is under 8s precisely so the backstop
+	//        cannot answer for stop().
+	//
+	//   the EOF preceded Stop's return by at least minReapLead
+	//     -> kills "kill the child and return nil without waiting", the mutant
+	//        that a bounded liveness poll passes 10/10 because a SIGKILLed
+	//        child dies in about a millisecond. There the order INVERTS: Stop
+	//        returns first and the EOF lands after it, so the lead is negative
+	//        against a requirement of +250ms.
+	//
+	// No pid appears in either claim, so neither can be satisfied by a pid the
+	// kernel handed to somebody else, and neither is confused by a zombie: an
+	// unreaped-but-dead child has already had its fds closed.
+	var childGone time.Time
+	select {
+	case childGone = <-childGoneAt:
+	case <-time.After(reapObserveBound):
+		t.Fatalf("Stop returned nil, but %s later the child's stdout is STILL OPEN, so the "+
+			"child is still running. Stop must reap the child, not merely stop watching "+
+			"it: the selector starts a replacement feed into the same hub the moment this "+
+			"returns, and a leaked FFmpeg keeps holding the capture device and the "+
+			"destination socket. The bound is deliberately under the %s grace escalation, "+
+			"so a pass here cannot be the backstop answering on stop's behalf AFTER Stop "+
+			"returned -- it says nothing about the wait INSIDE Stop, where the backstop "+
+			"legitimately can and does answer (measured: signalGroup made inert and "+
+			"nothing else, this test passes at 9.11s instead of 1.11s because the grace "+
+			"goroutine reaps within Stop's own deadline). That gap is inherent, because "+
+			"the deadline must exceed the grace for the deadline arm to be reachable at "+
+			"all; TestStopReportsWhenItHadToKillTheChild is what covers it.",
+			reapObserveBound, shutdownGrace)
+	}
+	// Drain any later EOF (a restart would produce one) and keep the last, so
+	// the lead below is measured against the child Stop actually reaped.
+	for draining := true; draining; {
+		select {
+		case childGone = <-childGoneAt:
+		default:
+			draining = false
+		}
+	}
+	if lead := stopReturnedAt.Sub(childGone); lead < minReapLead {
+		t.Fatalf("the child's stdout reached EOF only %s before Stop returned (want at least "+
+			"%s). Stop returned on something other than the completed reap -- it issued a "+
+			"kill and did not wait, or it stopped waiting early. The drain in this test "+
+			"holds runOnce open for %s past the child's exit, and stop() blocks on `done`, "+
+			"which supervise() closes only after runOnce returns; a correct Stop therefore "+
+			"cannot show a lead below that. A negative lead means Stop returned BEFORE the "+
+			"child was gone.", lead, minReapLead, reapHold)
 	}
 
 	if st := p.Status(); st.State != StateStopped {
 		t.Errorf("state = %q, want %q", st.State, StateStopped)
-	}
-	// Stop must reap the child, not merely stop watching it: a leaked FFmpeg
-	// keeps holding the capture device and the destination socket.
-	if alive(pid) {
-		t.Errorf("pid %d survived Stop", pid)
 	}
 	// AutoRestart must not resurrect a deliberately stopped process.
 	time.Sleep(100 * time.Millisecond)
@@ -476,27 +674,54 @@ func TestStartDelayIsInterruptedByAStop(t *testing.T) {
 // line, which nothing can branch on. See issue #138.
 func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("no SIGTERM semantics on Windows")
+		// NOT "no SIGTERM semantics on Windows" -- that was false, and being
+		// false it made the deadline arm look like a Unix curiosity when it is
+		// the arm Windows takes in PRODUCTION: under the SCM (service_windows.go
+		// :50-82) a stop request arrives with a deadline already ticking.
+		//
+		// The real reason to skip is that arm selection here is not yet proven
+		// deterministic on a console-less runner. signalGroup's Windows path is
+		// GenerateConsoleCtrlEvent (proc_windows.go:66-74), and when that fails
+		// -- which it does with no attached console -- it falls straight
+		// through to killGroup. TerminateProcess is asynchronous by contract,
+		// but the child may still be reaped fast enough for `done` to race the
+		// already-expired ctx at the select, and this test would then fail
+		// claiming Stop reported a clean stop on an expired deadline.
+		//
+		// Preconditions for un-skipping, recorded so the next person does not
+		// have to rediscover them: prove deterministic arm selection on a
+		// console-less runner, and land the fakeDeaf readiness handshake first
+		// (done: see testfake_test.go) so "deaf" is verified rather than
+		// assumed. Tracked as its own issue; deliberately not gambled on the
+		// day this repository is prosecuting flakes.
+		t.Skip("deadline-arm selection is not yet proven deterministic on a console-less Windows runner")
 	}
 	p := testProcess(t, fakeDeaf(30*time.Second), Spec{})
 	p.Start()
 	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
+	// StateRunning only means cmd.Start() returned. Wait for the child to say
+	// its handlers are up, or "deaf" is an aspiration.
+	waitForDeaf(t, p)
 	pid := p.Status().PID
 
 	// AN ALREADY-EXPIRED DEADLINE, and the reason is worth recording.
 	//
-	// Reaching this branch with a live child is harder than it looks: stop()
-	// cancels the process's own context before it signals, and exec.CommandContext
-	// answers that cancellation with SIGKILL regardless of what the child does
-	// about SIGTERM. So a child ignoring SIGTERM still dies almost at once and
-	// `done` closes first. That is why no run in the #126 investigation ever
-	// logged this path, and it is a good thing about the design rather than a
-	// gap in it.
+	// The comment that used to sit here credited the context-aware exec
+	// constructor with killing the child on cancellation. This package does not
+	// use it: runOnce builds children with plain exec.Command (supervisor.go
+	// :671) and sets no WaitDelay, so cancelling the process's own context
+	// signals nothing by itself, and the old comment described a mechanism that
+	// is not present. (Grep the package for the constructor's name and the only
+	// hit was that comment.) The true mechanism is narrower: signalGroup asks, and
+	// the ONLY thing that follows up on a child that does not listen is
+	// terminate()'s grace goroutine, which sleeps shutdownGrace (8s) and then
+	// kills the group. Any deadline shorter than that reaches the select first.
 	//
-	// What must still be true is that when the deadline DOES win -- a child
+	// So an already-expired context forces the deadline arm deterministically,
+	// which is what this test wants: when the deadline DOES win -- a child
 	// whose exit is blocked on something SIGKILL cannot hurry, a wedged pipe
-	// with a grandchild holding it open -- Stop says so instead of reporting a
-	// clean stop. Handing it a spent deadline exercises exactly that select
+	// with a grandchild holding it open -- Stop must say so instead of
+	// reporting a clean stop. A spent deadline exercises exactly that select
 	// arm without pretending to reproduce the wedge.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -514,7 +739,28 @@ func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
 	}
 	// The kill still has to land, or this reports a problem while also leaking
 	// the child.
-	waitFor(t, "the killed child to be reaped", func() bool { return !alive(pid) })
+	//
+	// THE BOUND IS 2s AND THAT IS THE WHOLE POINT OF THE ASSERTION. waitFor's
+	// 15s ceiling made this test pass for the wrong reason, measured: with
+	// p.kill() deleted from the deadline arm, the poll still went green at
+	// ~17s of wall clock, because terminate()'s grace goroutine reaps the child
+	// at shutdownGrace (8s) on stop's behalf. A leak check that any 8s backstop
+	// satisfies is not checking the kill this arm is documented to issue.
+	//
+	// 2s is below shutdownGrace by enough that only stop()'s own p.kill() can
+	// satisfy it, and far above the ~1ms a SIGKILL'd fake child actually takes.
+	// If this ever needs raising, it may not go to or past 8: it would stop
+	// distinguishing the kill from the grace period and become the ninth test
+	// in this repository that passes for a reason nobody intended.
+	//
+	// alive() is used HERE AND NOWHERE ELSE, as a leak check, never as a Stop
+	// postcondition -- see the comment in TestStopReapsTheChildWhenItHasTimeTo
+	// for the two ways it lies. Here its weakness does not matter: the failing
+	// direction (a pid that stays alive) is the one being excluded, and 2s of
+	// pid reuse on a just-killed child is not a hazard worth trading the
+	// mutation sensitivity for.
+	waitForBounded(t, 2*time.Second, "the killed child to be reaped by stop's own kill",
+		func() bool { return !alive(pid) })
 }
 
 // And the ordinary path must stay quiet, or the selector would log a warning on

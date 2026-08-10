@@ -1,0 +1,15 @@
+# RED. The plain case: a step starts a server, keeps its pid, and has no
+# step-level timeout-minutes. This is ci.yml's shape before #179.
+name: red-plain
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start a server and check it serves
+        shell: bash
+        run: |
+          ./server &
+          pid=$!
+          curl -fsS http://127.0.0.1:8123/health
+          kill "$pid" || true

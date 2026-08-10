@@ -145,8 +145,93 @@ else
 	bad "an empty port argument returned non-zero"
 fi
 
+step "7. poly_stop_server's kill -9 is re-observed, not assumed"
+# The last step of that helper used to be `pkill -9` followed by a return, which
+# asserted nothing: a signal is a request, and every caller of poly_stop_server
+# proceeds as though the server were gone -- rebinding its port, reading the
+# recordings it had open. That is the #179/#180 family in shell form.
+#
+# The fake ignores SIGTERM (so the graceful loop is exhausted and the escalation
+# is actually reached) and carries the command line the helper matches on. exec
+# keeps it to one process, and an ignored disposition survives exec.
+#
+# WHAT THIS CAN AND CANNOT SHOW. It shows the success path: when the helper
+# returns, the server is already gone, checked at that instant with no sleep in
+# between. It cannot stage a process that survives SIGKILL, so the loud-failure
+# path is verified by mutation instead -- replace the `pkill -9` line with `:`
+# and this case reports the FAIL banner within ~3s. Do that if you change the
+# helper.
+deaf_server() {
+	bash -c 'trap "" TERM; exec -a "polyemesis -addr :'"$PORT"'" sleep 300' &
+	DEAF=$!
+	disown "$DEAF" 2>/dev/null || true
+	for _ in $(seq 1 20); do
+		pgrep -f "polyemesis -addr :$PORT" >/dev/null 2>&1 && return 0
+		sleep 0.1
+	done
+	return 1
+}
+
+if ! deaf_server; then
+	bad "could not stage a server that ignores SIGTERM"
+else
+	if poly_stop_server "$PORT" >/dev/null 2>&1; then
+		ok "poly_stop_server reports success after escalating to kill -9"
+	else
+		bad "poly_stop_server reported failure against a server that SIGKILL does end"
+	fi
+	# IMMEDIATELY, with nothing in between: the point is that the helper does
+	# not return until it has observed the death itself.
+	if pgrep -f "polyemesis -addr :$PORT" >/dev/null 2>&1; then
+		bad "poly_stop_server returned while the server was still running"
+		pkill -9 -f "polyemesis -addr :$PORT" 2>/dev/null
+	else
+		ok "the server is already gone at the moment poly_stop_server returns"
+	fi
+fi
+
+step "8. poly_wait_jobs is bounded, and gives up loudly instead of hanging"
+# poly_cleanup used to end its sweep with a bare `wait`, which is #179's
+# mechanism -- an unbounded wait in a teardown -- in the library that all twelve
+# suites share. MEASURED before the fix, on darwin: with a `sleep 300`
+# backgrounded, poly_cleanup had not returned after 12 seconds, and the suite's
+# own watchdog is disarmed by then (`trap 'poly_watchdog_disarm; cleanup' EXIT`),
+# so nothing local bounded it at all.
+#
+# TWO-SIDED ON PURPOSE. The first half stages a job that will NOT finish and
+# requires the helper to give up inside its bound; the second requires it to
+# return success promptly when there is nothing to wait for, so a helper that
+# simply always gave up would fail here.
+sleep 300 &
+STUCK=$!
+t0=$(date +%s)
+if poly_wait_jobs 2 >/dev/null 2>&1; then
+	bad "poly_wait_jobs reported success while a background job was still running"
+else
+	ok "poly_wait_jobs gives up on a job that will not finish"
+fi
+elapsed=$(( $(date +%s) - t0 ))
+# 5 rather than 2: the bound is 2s of polling and the shell is not a real-time
+# system. The number that matters is that it is nowhere near the 300s the job
+# would have taken, and nowhere near the 12s measured before the bound existed.
+if [ "$elapsed" -le 5 ]; then
+	ok "it gave up after ${elapsed}s, not after the job's own 300s"
+else
+	bad "poly_wait_jobs took ${elapsed}s against a 2s bound"
+fi
+# No `wait "$STUCK"` here, deliberately: this file is the guard against
+# unbounded waits, and `jobs -rp` lists only RUNNING jobs, so the poll below is
+# both the reap and the observation.
+kill -9 "$STUCK" 2>/dev/null
+
+if poly_wait_jobs 2 >/dev/null 2>&1; then
+	ok "with nothing left to wait for it returns success"
+else
+	bad "poly_wait_jobs failed with no background jobs running"
+fi
+
 total=$((pass + fail))
-EXPECTED_CHECKS=7
+EXPECTED_CHECKS=12
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

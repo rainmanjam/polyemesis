@@ -1,0 +1,18 @@
+# GREEN. Long-running, and mentions kill and wait, but never holds a pid. The
+# rule must not fire on the words: most steps in this repository have no step
+# timeout and are right not to, and a rule that flagged them would be answered
+# with an allowlist rather than a timeout.
+name: green-foreground
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: A long foreground command
+        run: go test -timeout 15m ./...
+      - name: Cleanup that kills without backgrounding
+        shell: bash
+        run: |
+          pkill -f server || true
+          wait || true

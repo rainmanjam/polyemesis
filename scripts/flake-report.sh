@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# What fraction of acceptance-suite runs on main fail for no reason.
+# What fraction of CI job runs on a branch fail for no reason.
 #
 # WHY THIS CAN EXIST AT ALL
 #
@@ -63,12 +63,20 @@ THRESHOLD_PCT=0.5
 command -v gh >/dev/null || { echo "gh is required"; exit 1; }
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
 
-echo "Examining up to $LIMIT ci runs on main in $REPO ..."
+# BRANCH is a variable now, and the default is still main.
+#
+# #179 happened on a branch, and this script queried branch=main only, so the
+# incident it was later used to reason about contributed zero observations. A
+# default is the right shape for a trend line; a hard-coded value is not, when
+# the question is sometimes "is THIS branch flaky before I merge it".
+BRANCH="${POLYEMESIS_FLAKE_BRANCH:-main}"
 
-runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?branch=main&per_page=$LIMIT" \
+echo "Examining up to $LIMIT ci runs on $BRANCH in $REPO ..."
+
+runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?branch=$BRANCH&per_page=$LIMIT" \
   --jq '.workflow_runs[] | "\(.id) \(.run_attempt)"' 2>/dev/null)
 if [ -z "$runs" ]; then
-  echo "no runs found; is the workflow name still ci.yml?" >&2
+  echo "no runs found on $BRANCH; is the workflow name still ci.yml?" >&2
   exit 1
 fi
 
@@ -100,8 +108,28 @@ while read -r id attempts; do
     # history with no failures in it. A partial dataset must not be presented
     # as a complete one.
     nfetch=$((nfetch + 1))
+    #
+    # EVERY JOB, NOT ONLY `acceptance:`. This filter used to be
+    # `startswith("acceptance:")`, and that is a structural blindness rather than
+    # a coarse one. MEASURED on run 31422948245: 22 jobs exist and 12 matched.
+    # Not matched: `test: ubuntu-latest`, `test: macos-latest`,
+    # `test: windows-latest`, `go build, vet, test`, the three `container:` jobs,
+    # `ui`, `cross-compile`.
+    #
+    # Which means this script could not, IN PRINCIPLE AND AT ANY N, observe the
+    # two incidents it was then used to reason about: #180 was a Go test in
+    # `test: windows-latest` and #179 was two steps of the same job. Both
+    # contributed exactly zero observations. A discipline that cannot see the
+    # class it is prosecuting is not a weak measurement, it is the wrong
+    # instrument, and no number of runs fixes it.
+    #
+    # The `acceptance: ` prefix is still stripped so those rows read as they
+    # always did; every other job keeps its own name as the key. Note the
+    # consequence, so nobody reads the first wider run as a regression: the table
+    # gains ten rows, and jobs that were never measured before may well appear
+    # over the threshold on their first appearance.
     if ! gh api "repos/$REPO/actions/runs/$id/attempts/$a/jobs?per_page=100" \
-      --jq '.jobs[]? | select(.name | startswith("acceptance:")) | "\(.name|sub("acceptance: ";""))\t\(.conclusion)"' \
+      --jq '.jobs[]? | "\(.name|sub("^acceptance: ";""))\t\(.conclusion)"' \
       2>/dev/null | sed "s/^/$id-$a\t/" >> "$tally"; then
       nfetchfail=$((nfetchfail + 1))
     fi
@@ -123,8 +151,8 @@ observations=$(grep -c . "$tally" || true)
 if [ "${observations:-0}" -lt "$MIN_OBSERVATIONS" ]; then
   echo "Only ${observations:-0} observation(s) from $nruns run(s) -- under the floor of $MIN_OBSERVATIONS." >&2
   echo "This is NOT a clean bill of health; it is too little data to have one." >&2
-  echo "The likeliest cause is that the acceptance jobs are no longer named" >&2
-  echo "\"acceptance: <suite>\", which is what this script matches on." >&2
+  echo "The likeliest causes are a branch with little history (try" >&2
+  echo "POLYEMESIS_FLAKE_BRANCH=main) or a renamed/rescoped workflow file." >&2
   exit 1
 fi
 
@@ -132,21 +160,40 @@ echo
 awk -F'\t' -v thr="$THRESHOLD_PCT" '
   # PASS 1: decide which attempts are usable at all.
   #
-  # A superseded run has EVERY acceptance job cancelled at once -- that is the
+  # A superseded run has EVERY job cancelled at once -- that is the
   # concurrency group killing a run someone replaced, not eleven suites
   # independently deciding to fail. Counting those produced an 11-suite
   # "14% flake rate" on the first version of this script, which was entirely
   # this repository merging six PRs in an afternoon.
   #
-  # So an attempt counts only if at least one acceptance suite SUCCEEDED in it.
-  # That is the difference between "this run was replaced" and "this run ran,
-  # and something in it went wrong".
+  # So an attempt counts only if at least one job SUCCEEDED in it -- AND most of
+  # its jobs were not cancelled.
+  #
+  # The second clause is not belt-and-braces; without it the first one stopped
+  # working when this the script filter widened from the 12 acceptance jobs to all
+  # 22. `which container suites` takes about five seconds and therefore almost
+  # always finishes before a concurrency cancellation lands, so a wholly
+  # superseded run now contains exactly one success and certifies itself.
+  #
+  # MEASURED over all 34 cancelled runs on main: three attempts leaked through
+  # the one-success gate and contributed 60 not-ok observations against a table
+  # whose total not-ok was 140. Run 31293861794 is the clearest -- 21 cancelled
+  # jobs, one success, and every one of those 21 counted as flakiness. 43% of
+  # the reported rate was the thing this gate was written to exclude, which is
+  # how `cross-compile all release targets` came to read 5.88%.
+  #
+  # A ratio rather than a run-level conclusion because the input has none: the
+  # fields are attempt, job, conclusion. A genuine flake cancels nothing, so the
+  # rule costs real observations nothing.
   NR==FNR {
     if ($3 == "success") ok[$1] = 1
+    if ($3 == "cancelled") ncancel[$1]++
+    njobs[$1]++
     seen[$1] = 1
     next
   }
   !($1 in ok) { skipped[$1] = 1; next }
+  ncancel[$1] * 2 >= njobs[$1] { skipped[$1] = 1; next }
   {
     total[$2]++
     if ($3 != "success" && $3 != "skipped") bad[$2]++
@@ -154,7 +201,7 @@ awk -F'\t' -v thr="$THRESHOLD_PCT" '
   END {
     n = 0
     for (k in skipped) n++
-    printf "%-32s %6s %8s %9s   %s\n", "suite", "runs", "not-ok", "rate", "verdict"
+    printf "%-32s %6s %8s %9s   %s\n", "job", "runs", "not-ok", "rate", "verdict"
     nsuites = 0
     over = 0
     for (s in total) {
