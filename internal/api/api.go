@@ -967,12 +967,48 @@ var readScopeWritePatterns = map[string]bool{
 // still true -- a 10-second cache under a mutex and an 8-second timeout, so ~6
 // execs a minute however many callers ask -- but it was an answer to "is this
 // GET really a read", and the question that mattered was who gets the frame.
+// THE RESPONSE IS CONTENT, NOT METADATA is the third reason a GET is denied,
+// added for #154, and it is a different claim from the two above: these routes
+// are reads, they are cheap, and they leak no credential. They are denied
+// because of what `read` was decided to MEAN -- a monitoring script, a
+// dashboard, a status page. None of those need the bytes.
+//
+// The line is drawn at content, not at the archive: a read token still lists
+// recordings, clips, stems and sessions, still sees durations, sizes and
+// status, and still sees WHETHER a recording has a transcript. What it no
+// longer gets is the media itself or the words.
+//
+// /library/search is on this list and it is the reason the list is eight
+// entries rather than seven. The two /transcript routes are the obvious ones;
+// search is not, because it reads as a metadata query. It returns
+// db.TranscriptHit, which carries Text -- the full segment text -- plus
+// Context (the neighbouring segments joined) and Speaker. A read token that
+// iterated common words would reconstruct whole transcripts without ever
+// naming a /transcript route. Denying only the endpoints whose PATH says
+// transcript would have been a fix shaped by the URL rather than by the bytes,
+// which is the same mistake as gating on the HTTP verb.
+//
+// GET /library still returns Speakers, the bare list of labels in the archive.
+// That is left reachable deliberately: it is who appears, not what was said,
+// and a dashboard that groups by speaker needs it. If that judgement is wrong
+// it is one more line here, not a redesign.
 var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/destinations/{id}/expert":          true,
 	"/api/v1/destinations/{id}/expert/preview":  true,
 	"/api/v1/clipper/recordings/{id}/keyframes": true,
 	"/api/v1/platforms/accounts/{id}/stats":     true,
 	"/api/v1/metadata/broadcast-window":         true,
+
+	// #154: content, not metadata. Media bytes.
+	"/api/v1/recordings/{id}/download":             true,
+	"/api/v1/recordings/stems/{name}/download":     true,
+	"/api/v1/clips/{name}/download":                true,
+	"/api/v1/clipper/jobs/{id}/download":           true,
+	"/api/v1/library/recordings/{id}/media/{file}": true,
+	// #154: content, not metadata. The words.
+	"/api/v1/clipper/recordings/{id}/transcript": true,
+	"/api/v1/library/recordings/{id}/transcript": true,
+	"/api/v1/library/search":                     true,
 }
 
 // requireScope enforces what a token is ALLOWED to do, once requireAuth has

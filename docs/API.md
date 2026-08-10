@@ -35,7 +35,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the five denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
@@ -105,9 +105,11 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Five routes are refused outright.** Masking would have been wrong for the
-first two (expert mode's contract is that the command shown is the command that
-runs) and pointless for the rest, which are `403` because of what they *do*:
+**Thirteen routes are refused outright**, for three different reasons. Masking
+would have been wrong for the first two (expert mode's contract is that the
+command shown is the command that runs) and pointless for the next three, which
+are `403` because of what they *do*. The last eight are `403` because of what
+`read` was decided to mean:
 
 | Route | Why |
 |---|---|
@@ -116,6 +118,24 @@ runs) and pointless for the rest, which are `403` because of what they *do*:
 | `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
+| `GET /recordings/{id}/download` | the recording itself |
+| `GET /recordings/stems/{name}/download` | a separated audio stem |
+| `GET /clips/{name}/download` | an exported clip |
+| `GET /clipper/jobs/{id}/download` | the clipper's output |
+| `GET /library/recordings/{id}/media/{file}` | a media file inside a library recording |
+| `GET /clipper/recordings/{id}/transcript` | the verbatim transcript |
+| `GET /library/recordings/{id}/transcript` | the same, by the library's route |
+| `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
+
+The last of those is the one worth reading twice. `GET /library/search` looks
+like a metadata query and is not: iterating common words would rebuild whole
+transcripts without ever requesting a route with `transcript` in its path. The
+list is drawn from what the bytes are, not from what the URL says.
+
+Listing still works. A `read` token sees recordings, clips, stems and sessions,
+their durations, sizes and status, and whether a transcript exists — and
+`GET /library` still returns the bare list of speaker labels, which is who
+appears rather than what was said.
 
 `GET /encoders` stays available, but `?redetect=` needs `admin`: it runs a test
 encode per candidate encoder and rewrites the install's capability cache.

@@ -57,6 +57,52 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"calls a third party and can refresh-and-persist an OAuth token"},
 		{http.MethodGet, "/api/v1/metadata/broadcast-window", nil,
 			"one third-party call per connected account, each able to persist a refresh"},
+
+		// #154: content, not metadata. Media bytes.
+		{http.MethodGet, "/api/v1/recordings/1/download", nil,
+			"the recording itself"},
+		{http.MethodGet, "/api/v1/recordings/stems/stem.wav/download", nil,
+			"a separated audio stem of the recording"},
+		{http.MethodGet, "/api/v1/clips/clip.mp4/download", nil,
+			"an exported clip"},
+		{http.MethodGet, "/api/v1/clipper/jobs/1/download", nil,
+			"the clipper's export output"},
+		{http.MethodGet, "/api/v1/library/recordings/1/media/take.mkv", nil,
+			"a media file inside a library recording"},
+
+		// #154: content, not metadata. The words.
+		{http.MethodGet, "/api/v1/clipper/recordings/1/transcript", nil,
+			"the verbatim transcript"},
+		{http.MethodGet, "/api/v1/library/recordings/1/transcript", nil,
+			"the verbatim transcript, by the library's route to it"},
+		{http.MethodGet, "/api/v1/library/search?q=the", nil,
+			"db.TranscriptHit carries Text, Context and Speaker, so iterating common " +
+				"words reconstructs the transcript without naming a /transcript route"},
+	}
+
+	// EVERY denied pattern must appear above. The deny list is subtractive, so
+	// its failure mode is a route that quietly never gets asserted -- and this
+	// table WAS hand-written and five entries stale when #154 added eight more.
+	// Matching on the pattern's literal prefix before the first "{" is enough to
+	// pair a concrete path with the pattern it exercises.
+	covered := func(pattern string) bool {
+		prefix := pattern
+		if i := strings.Index(prefix, "{"); i >= 0 {
+			prefix = prefix[:i]
+		}
+		for _, c := range cases {
+			if strings.HasPrefix(c.path, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+	for pattern := range readScopeDeniedPatterns {
+		if !covered(pattern) {
+			t.Errorf("readScopeDeniedPatterns has %q and no case above drives it. "+
+				"A denial nothing asserts is a denial that can be deleted by accident.",
+				pattern)
+		}
 	}
 
 	for _, c := range cases {

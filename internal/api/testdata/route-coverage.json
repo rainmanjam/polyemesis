@@ -1,12 +1,12 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run TestRouteCoverageLedger -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 76,
-  "deferredCeiling": 22,
+  "excusedCeiling": 68,
+  "deferredCeiling": 14,
   "totals": {
     "methodPatternPairs": 211,
     "swept": 49,
-    "excused": 76,
-    "denied": 86,
+    "excused": 68,
+    "denied": 94,
     "nonTrieProbes": 11,
     "shapesEmitted": 11,
     "shapesNotInspected": 4
@@ -195,7 +195,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/clipper/jobs/{id}/download",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
@@ -220,7 +220,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/clipper/recordings/{id}/transcript",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
@@ -245,7 +245,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/clips/{name}/download",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
@@ -475,7 +475,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}/media/{file}",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "PUT",
@@ -490,12 +490,12 @@
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}/transcript",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/library/search",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "POST",
@@ -685,7 +685,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/recordings/stems/{name}/download",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
@@ -700,7 +700,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/recordings/{id}/download",
-      "coverage": "excused"
+      "coverage": "denied"
     },
     {
       "method": "GET",
@@ -1114,9 +1114,9 @@
     {
       "route": "GET /api/v1/clipper/jobs/{id}/download",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#154"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/clipper/recordings/{id}",
@@ -1135,16 +1135,16 @@
     {
       "route": "GET /api/v1/clipper/recordings/{id}/transcript",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#154"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/clips/{name}/download",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#154"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/destinations/{id}/expert",
@@ -1212,23 +1212,23 @@
     {
       "route": "GET /api/v1/library/recordings/{id}/media/{file}",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#154"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/library/recordings/{id}/transcript",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#154"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/library/search",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#163"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/library/sessions/{id}",
@@ -1296,16 +1296,16 @@
     {
       "route": "GET /api/v1/recordings/stems/{name}/download",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#154"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/recordings/{id}/download",
       "scope": "route",
-      "reason": "reached only with a row this fixture does not create; traced to leaf fields and carrying no stored credential (media, transcripts and text)",
+      "reason": "denied to read tokens outright; the 403 is asserted in TestReadTokenIsDeniedTheRoutesThatAreNotReads",
       "counterpart": "",
-      "deferredIssue": "#154"
+      "deferredIssue": "n/a: nothing is disclosed to assert about"
     },
     {
       "route": "GET /api/v1/renditions/{id}",
