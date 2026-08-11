@@ -430,6 +430,50 @@ func (s *Server) playoutOperator(r *http.Request) bool {
 	return p.token.Scope == db.ScopeAdmin
 }
 
+// playoutVaryingResponse names every REQUEST HEADER authorizePlayout reads, on
+// every response the gate produces.
+//
+// #155. Segments go out as `Cache-Control: public, max-age=<segmentSeconds>`
+// and the poster as `public, max-age=10`, and all three of segments, manifests
+// and poster sit behind authorizePlayout. Public plus no Vary is an instruction
+// to a shared cache to key the response on the URL ALONE -- and the URL is the
+// same for the token holder and for the stranger. A proxy that stored the token
+// holder's 200 then served it to the next caller would have defeated the gate
+// without anything in this process misbehaving, and operators front this with
+// nginx and Caddy.
+//
+// The three names are exactly the three channels playoutTokenMatches reads that
+// are NOT already part of the cache key:
+//
+//	Cookie             polyemesis_playout, which setPlayoutTokenCookie mints on
+//	                   the first authorised request -- so it is the channel
+//	                   almost every subsequent segment request actually uses
+//	Authorization      the Basic form, which is what a bare /playout/ URL pasted
+//	                   into an address bar turns into
+//	X-Playout-Token    the header form, for a player that sets it
+//
+// The fourth channel, ?t=<token>, is deliberately absent: it is in the URL, so
+// it is in the cache key already and naming it would be noise. It is also why
+// the guard for this drives the COOKIE -- a test using ?t= would pass over a
+// missing Vary because the two requests it compares would have different URLs.
+//
+// `Vary: Origin` is NOT added here, and that is measured rather than
+// overlooked. All three CORS sites in this file and the one in
+// internal/playout/handler.go emit the CONSTANT `Access-Control-Allow-Origin:
+// *`, never a reflected origin, so Origin is not an input to any response the
+// gate produces. Naming it would fragment a shared cache per origin and assert
+// a dependency that does not exist -- and an untrue Vary is the same defect as
+// an untrue comment.
+//
+// Add rather than Set: chi and the inner file handler both write headers on the
+// same ResponseWriter, and a later Set by anything else would silently drop the
+// names written here.
+func playoutVaryingResponse(w http.ResponseWriter) {
+	w.Header().Add("Vary", "Cookie")
+	w.Header().Add("Vary", "Authorization")
+	w.Header().Add("Vary", playoutTokenHeader)
+}
+
 // playoutTokenMatches checks every channel a token may arrive on.
 //
 // Constant-time throughout, and an empty configured token never matches, so a
@@ -506,6 +550,14 @@ func (s *Server) playoutHandler() http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Before the gate rather than beside the 200, because the answers this
+		// mount gives DIVERGE on the credential -- 401 to a stranger, media to
+		// a token holder, on the identical URL. A Vary written only on the
+		// success path would leave a cache free to store the 401 under the bare
+		// URL and replay it to the viewer who does hold the token. See
+		// playoutVaryingResponse (#155).
+		playoutVaryingResponse(w)
+
 		// A preflight carries no credentials by definition, so it is held to the
 		// CONFIGURATION half of the gate and not to the credential half.
 		//
@@ -629,6 +681,9 @@ var watchCSP = func() string {
 // so a poster costs one short-lived FFmpeg read of a local file and no port, no
 // subscription and nothing on the destination path.
 func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
+	// #155: `Cache-Control: public, max-age=10` on a response the gate below
+	// decides. See playoutVaryingResponse.
+	playoutVaryingResponse(w)
 	if !s.authorizePlayout(r).ok() {
 		// Deliberately no basic-auth challenge: a poster is decoration, and a
 		// password prompt fired by an <img> tag on somebody's blog would be a
@@ -1030,6 +1085,12 @@ type playoutPublicVariant struct {
 // token learns nothing — not the title, not whether anyone is watching, not even
 // whether the stream is live.
 func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
+	// The third thing authorizePlayout gates. It sets no Cache-Control of its
+	// own, which is worse rather than better: a response with neither
+	// Cache-Control nor Vary is the one a heuristic cache is most free to
+	// invent a lifetime for. See playoutVaryingResponse (#155).
+	playoutVaryingResponse(w)
+
 	set := s.playoutSettings()
 	if set.AllowCrossOrigin {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
