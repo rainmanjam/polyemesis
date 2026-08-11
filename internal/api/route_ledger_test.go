@@ -114,8 +114,8 @@ type coverageLedger struct {
 	// route stopped disclosing this credential to anybody".
 	NonGetDifferentialFloor int `json:"nonGetDifferentialFloor"`
 	UnstableCeiling         int `json:"unstableCeiling"`
-	InertCeiling          int `json:"inertCeiling"`
-	VarianceExemptCeiling int `json:"varianceExemptCeiling"`
+	InertCeiling            int `json:"inertCeiling"`
+	VarianceExemptCeiling   int `json:"varianceExemptCeiling"`
 	// THE SHAPE REGISTRY HAD NO RATCHET AT ALL, and it is the surface #169 is
 	// about. Seven numbers here were clamped and all seven were about routes.
 	// Deleting a shape row -- the documented response to a shape check that

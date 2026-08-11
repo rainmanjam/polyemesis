@@ -30,8 +30,8 @@ import (
 // principal saw no sentinel' is a statement about an empty fixture" -- and the
 // write surface had no equivalent.
 //
-// So each row below drives the SAME pair twice, against the same fixture, with
-// the same request body:
+// So each row below drives the SAME pair twice, against one fixture of its own,
+// with the same request body:
 //
 //   - as ADMIN, and every sentinel named on the row must be PRESENT. This is
 //     the positive control. It is what makes the 403 next to it mean
@@ -55,9 +55,9 @@ type nonGetDifferentialRow struct {
 	Method, Pattern string
 	// Body is the request payload. An empty JSON object is deliberate on the
 	// PUT rows: every one of those handlers decodes over the STORED document,
-	// so {} is the payload that changes nothing -- which is what lets the whole
-	// census share one fixture and what makes the witness check at the end an
-	// assertion rather than a formality.
+	// so {} is the payload that asks for no change -- which is what makes
+	// Destroys below a statement about the handler rather than about what this
+	// census happened to send it.
 	Body any
 	// Sentinels MUST ALL appear in the admin response. A row with an empty list
 	// is rejected: it would drive two requests and assert nothing about
@@ -174,9 +174,9 @@ func nonGetDifferentialCensus() []nonGetDifferentialRow {
 //
 // That word is what wires this file into the machinery that already exists:
 // assertRouteSetsEqual compares the coverage string of every pair on every
-// plain run, so deleting a row here moves six pairs back to
-// "denied-by-method" in the live classification and fails by name against the
-// committed artifact -- independently of, and in addition to, the floor below.
+// plain run, so deleting a row here moves that pair back to "denied-by-method"
+// in the live classification and fails by name against the committed artifact
+// -- independently of, and in addition to, the floor below.
 // One detector is a thing somebody can regenerate around; the floor is
 // max()-clamped and the equality is not launderable by -update-coverage in the
 // direction that matters, so a deletion has to survive both.
