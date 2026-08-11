@@ -76,7 +76,12 @@ func maskURL(raw string) string {
 	if strings.TrimSpace(raw) == "" {
 		return raw
 	}
-	return alerts.RedactURL(raw)
+	// ForPrincipal, not RedactURL: this masks for a READ-SCOPED READER, not for
+	// an operator reading a diagnostic. RedactURL masks only the LAST path segment
+	// and only for rtmp/rtsp/srt-like schemes, so an https HLS pull URL whose
+	// credential sits mid-path came back verbatim. That is what fed a pull
+	// credential to a read token through GET /api/v1/sources.
+	return alerts.RedactURLForPrincipal(raw)
 }
 
 // maskDestinationTarget masks a destination's url or backupUrl, EXCEPT when
