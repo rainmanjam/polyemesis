@@ -528,8 +528,20 @@ note "with the filler on air: $FILLER_STATUS"
 # Same measurement as step 6, against the same baseline: a switch that restarts
 # a destination drops the platform connection, and it does that whether the
 # source arriving is a slate or a scheduled programme.
-if [ "$restarts_filler" = "-1" ]; then
-  bad "no destination process was reported across the filler switch"
+# The BASELINE is checked as well as the reading, and that asymmetry was a real
+# false failure. Observed on run 6 of 14 while measuring #126: restarts_before
+# came back -1 -- step 6 caught that and said "nothing was measured" -- and then
+# this comparison read -1 against a perfectly healthy 0 and reported "the
+# destination restarted when the filler went on air (-1 -> 0)". Nothing had
+# restarted. A missing measurement was being rendered as the exact failure this
+# suite exists to detect, in a suite whose whole value is that it is trusted
+# when it says that.
+#
+# Reported as unmeasured rather than passed: the destination may genuinely have
+# restarted and we would not know. The one thing it must not do is claim a
+# restart it did not observe.
+if [ "$restarts_filler" = "-1" ] || [ "$restarts_before" = "-1" ]; then
+  bad "no destination process was reported across the filler switch; nothing was measured"
 elif [ "$restarts_filler" -eq "$restarts_before" ]; then
   ok "the destination rode the switch to filler without restarting ($restarts_filler restarts)"
 else
