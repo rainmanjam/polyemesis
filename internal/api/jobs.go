@@ -706,6 +706,12 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 // statement. A job that is claimed in the window between them is still deleted.
 // That window is the two statements wide; the one this replaces was the whole
 // life of the job.
+// What it also does, since #222: takes the exported file with the row. A
+// clip.export's row is the ONLY reference to its file -- the download route is
+// keyed on the job, and the exports directory is deliberately outside the
+// rolling buffer's pruning -- so a row-only delete stranded the file forever,
+// unservable and unsweepable. The file goes AFTER the row, so a failed delete
+// leaves both.
 func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	s.jobAction(w, r, func(id int64) error {
 		j, err := s.jobq.Get(id)
@@ -716,8 +722,31 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("%w: cannot delete job %d: it is running, cancel it first",
 				db.ErrStateConflict, id)
 		}
-		return s.jobq.Delete(id)
+		if err := s.jobq.Delete(id); err != nil {
+			return err
+		}
+		s.removeClipExport(*j)
+		return nil
 	})
+}
+
+// removeClipExport deletes the file a finished clip export produced, and logs
+// rather than fails when it cannot.
+//
+// The row is already gone by the time this runs. Returning an error here would
+// report a delete that did happen as a failure, and the operator's retry would
+// then 404 -- so the honest outcome for a stranded file is a log line naming
+// it, which is strictly better than the silence this replaces.
+func (s *Server) removeClipExport(j jobs.Job) {
+	removed, err := clipper.RemoveExport(s.clipExportDir(), j)
+	if err != nil {
+		s.log.Warn("deleted a clip export job but could not delete its file",
+			"job", j.ID, "err", err)
+		return
+	}
+	if removed {
+		s.log.Info("deleted a clip export file with its job", "job", j.ID)
+	}
 }
 
 // jobAction is the shared shape of every single-job control: parse, act, hand
@@ -783,10 +812,16 @@ func (s *Server) handlePurgeJobs(w http.ResponseWriter, r *http.Request) {
 	if days > 0 {
 		cutoff = time.Now().AddDate(0, 0, -days)
 	}
-	n, err := s.jobq.Purge(cutoff, keep)
+	purged, err := s.jobq.Purge(cutoff, keep)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"purged": n})
+	// Same reasoning as handleDeleteJob, in bulk: this button is the one that
+	// strands exports by the dozen, and it is the reason a delete-only fix for
+	// #222 would have read as a fix without being one.
+	for _, j := range purged {
+		s.removeClipExport(j)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"purged": len(purged)})
 }

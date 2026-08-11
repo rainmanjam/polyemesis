@@ -41,7 +41,11 @@ const (
 	// prunes its own directory by count and by size, and an export a human
 	// deliberately made must not be swept away to make room for an instant
 	// replay nobody kept.
-	clipExportSubdir = "exports"
+	//
+	// It lives in internal/clipper now because the retention sweep in
+	// cmd/polyemesis has to delete these files too, and a second copy of the
+	// directory rule is how the two halves would drift apart.
+	clipExportSubdir = clipper.ExportSubdir
 
 	// maxKeyframeWindow bounds one keyframe request. The probe is a demux, not
 	// a decode, but a scrubber asking for four hours at once would still read
@@ -680,12 +684,7 @@ func (s *Server) clipExportDir() string {
 // that leaves the caller with the message they would have got anyway instead of
 // inventing a second way for the same thing to break.
 func clipExportDirIn(recordingsDir string) string {
-	dir := filepath.Join(recordingsDir, clipExportSubdir)
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return dir
-	}
-	return abs
+	return clipper.ExportDirIn(recordingsDir)
 }
 
 // safeClipName reduces operator text to something that is safe as a filename on
@@ -968,18 +967,7 @@ func (s *Server) clipExportPath(stored string) (path, name string, err error) {
 // clipPathIn is the guard itself, split out so it can be tested without a
 // server or a filesystem.
 func clipPathIn(dir, stored string) (path, name string, err error) {
-	base, err := filepath.Abs(dir)
-	if err != nil {
-		return "", "", err
-	}
-	full, err := filepath.Abs(stored)
-	if err != nil {
-		return "", "", err
-	}
-	if !strings.HasPrefix(full, base+string(os.PathSeparator)) {
-		return "", "", errors.New("that clip is not in the exports directory")
-	}
-	return full, filepath.Base(full), nil
+	return clipper.ExportPathIn(dir, stored)
 }
 
 // --------------------------------------------------------------------- helpers
