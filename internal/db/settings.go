@@ -915,6 +915,25 @@ type MQTTSettings struct {
 	Discovery bool `json:"discovery"`
 }
 
+// unwrapURLError peels a *url.Error down to its reason.
+//
+// It exists because url.Error.Error() is `parse "<input>": <reason>` -- it
+// embeds the ENTIRE input URL. Every validation message built from a parse
+// failure of an operator-supplied URL therefore echoes that URL back, and when
+// the URL carries `user:password@` the password travels with it into whatever
+// the message reaches: here, a 400 response body.
+//
+// The reason alone is the whole diagnostic. "invalid character \" \" in host
+// name" tells the operator exactly what to fix; repeating the string they just
+// typed adds nothing they cannot see and carries everything they cannot unsay.
+func unwrapURLError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+	return err
+}
+
 // problems reports everything wrong with the MQTT block.
 //
 // Nothing here is checked when MQTT is switched off. A half-configured block an
@@ -931,14 +950,28 @@ func (m MQTTSettings) problems() []string {
 	case strings.TrimSpace(m.BrokerURL) == "":
 		add("mqtt is enabled but no broker URL is set")
 	case err != nil:
-		add("mqtt broker URL is unparseable: %v", err)
-	case u.Host == "":
-		add("mqtt broker URL %q has no host", m.BrokerURL)
+		// The url.Error is UNWRAPPED before it is formatted. Its Error() renders
+		// as `parse "<the whole URL>": <reason>`, so `%v` of the wrapper put the
+		// operator's password into this string -- and these strings are returned
+		// to the caller as a 400 body, not merely logged. `mqtt://user:pw@ho
+		// st:1883` is the measured shape. Reordering the cases below cannot help
+		// here: `u` is nil in this branch, so the credentials guard is
+		// unreachable by construction.
+		add("mqtt broker URL is unparseable: %v", unwrapURLError(err))
+	// BEFORE the no-host case, which is the same reordering internal/mqtt's
+	// parseBroker needed and for the same reason: `mqtt://user:pw@` parses
+	// cleanly, carries a credential and has no host, so the no-host message --
+	// which echoed %q of the raw URL -- fired first and put the password in a
+	// 400 response body. The guard below promises the password is "never
+	// logged"; it was never reached for this shape.
 	case u.User != nil:
 		// Refused rather than quietly moved into the username and password
 		// fields, because the operator needs to know the URL they pasted would
 		// have been written to a log.
 		add("mqtt broker URL carries credentials; put the username and password in their own fields so the password is sealed and never logged")
+	case u.Host == "":
+		// No %q of the raw URL: see above. The operator can see what they typed.
+		add("mqtt broker URL has no host")
 	default:
 		switch u.Scheme {
 		case "mqtt", "tcp", "mqtts", "ssl", "ws", "wss":

@@ -409,8 +409,11 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          go build -o polyemesis-smoke ./cmd/polyemesis
-          ./polyemesis-smoke -addr 127.0.0.1:8123 -data ./smoke-data -log warn &
+          # -cover, so this run MEASURES itself. See the covdata step at the end
+          # of this job for what that is for and what it costs.
+          go build -cover -o polyemesis-smoke ./cmd/polyemesis
+          mkdir -p covdata/serve
+          GOCOVERDIR=covdata/serve ./polyemesis-smoke -addr 127.0.0.1:8123 -data ./smoke-data -log warn &
           pid=$!
           # THE CLEANUP IS A TRAP, AND THE VERDICT IS EMITTED BEFORE IT RUNS.
           #
@@ -472,7 +475,8 @@ jobs:
         run: |
           set -uo pipefail
           rm -rf ./data
-          ./polyemesis-smoke -addr 127.0.0.1:8099 -data ./data -log warn > bcast-server.log 2>&1 &
+          mkdir -p covdata/bcast
+          GOCOVERDIR=covdata/bcast ./polyemesis-smoke -addr 127.0.0.1:8099 -data ./data -log warn > bcast-server.log 2>&1 &
           pid=$!
           # Same shape as the step above: a trap, and the verdict before the
           # cleanup. The shell `wait` that used to sit between `rc` and the
@@ -521,6 +525,65 @@ jobs:
             cat bcast-server.log || true
             exit 1
           fi
+
+      # What the two runs above ACTUALLY executed in cmd/polyemesis.
+      #
+      # WHY THIS EXISTS. `go test -cover ./cmd/polyemesis` reports ~38%, and
+      # from that number sixteen functions look untested -- main, run, watch,
+      # reconcile, disconnect, stop, startMQTT, runService, reportStartup,
+      # reportTLS, newTLSProvider, managerEngines among them. That number is an
+      # INSTRUMENT ARTEFACT, the same class as #217 in internal/api: `go test`
+      # can only see what the test binary runs, and package main's entry points
+      # are by construction driven by the PROCESS, which the two steps above
+      # start on all three platforms on every PR. Measured from a real
+      # instrumented run (darwin/arm64, local):
+      #
+      #   main 66.7  run 75.7  watch 85.7  startMQTT 100  stop 100
+      #   runService 100  reportStartup 67.5  reportTLS 31.2  disconnect 58.3
+      #
+      # Twelve of the sixteen are executed today. The gap was never in the code,
+      # it was in what we were able to see, and a coverage gap you cannot see is
+      # the one that gets filled with tests that assert nothing.
+      #
+      # THIS STEP NEVER FAILS THE JOB, and that is deliberate. It is an
+      # instrument, not a gate. A ratchet here would be a threshold nobody
+      # measured on three platforms yet, and the first thing it would do is fail
+      # a PR for a reason unrelated to the PR. It also cannot assume data
+      # exists: a cover-instrumented binary writes its profile at NORMAL EXIT,
+      # and the steps above stop the server with `kill`, which Git Bash may
+      # never deliver to a native .exe (the same fact the trap comments above
+      # are built around). If windows-latest reports nothing, that is a real
+      # answer about the platform and is printed as one rather than swallowed.
+      #
+      # The module-wide total is deliberately NOT printed. A bare server start
+      # touches little of internal/*, so that number would be low, meaningless,
+      # and immediately mistaken for the project's coverage.
+      - name: Report what the smoke run executed in cmd/polyemesis
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          dirs=""
+          for d in covdata/serve covdata/bcast; do
+            if [ -d "$d" ] && [ -n "$(ls -A "$d" 2>/dev/null)" ]; then
+              dirs="${dirs:+$dirs,}$d"
+            fi
+          done
+          if [ -z "$dirs" ]; then
+            echo "no coverage data was written on ${{ matrix.os }}."
+            echo "A -cover binary flushes its profile at normal exit; if the stop"
+            echo "signal was never delivered there is nothing to report. This is"
+            echo "informational and does not fail the job."
+            exit 0
+          fi
+          echo "merging coverage from: $dirs"
+          go tool covdata textfmt -i="$dirs" -o=smoke-cmd.cov || {
+            echo "covdata textfmt failed on ${{ matrix.os }}; informational only."
+            exit 0
+          }
+          echo "--- cmd/polyemesis, as executed by the smoke run on ${{ matrix.os }} ---"
+          go tool cover -func=smoke-cmd.cov | grep 'cmd/polyemesis' || \
+            echo "(no cmd/polyemesis rows in the profile)"
 
       - name: Upload broadcast artefacts on failure
         if: failure()

@@ -170,7 +170,13 @@ func RedactURLForPrincipal(raw string) string {
 		}
 	}
 	u.Path = strings.Join(parts, "/")
-	return u.String() + trailer
+	// unescapeMask for the same reason RedactURL uses it, and it was missing
+	// here only because this function was written later. url.String percent-
+	// encodes the mask's brackets, so without this every masked segment renders
+	// as `%5Bredacted%5D` -- in a /sources and /settings RESPONSE BODY, which is
+	// the one place a reader is least equipped to tell a deliberate omission
+	// from a bug. RedactURL's own comment on unescapeMask makes the argument.
+	return unescapeMask(u.String()) + trailer
 }
 
 func maskLastSegment(path string) string {
