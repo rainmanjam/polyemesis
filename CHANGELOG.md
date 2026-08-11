@@ -61,10 +61,6 @@ its first tagged release.
   (200, defaults) where it used to be `400 invalid request body: EOF` — it is
   not a "full replacement", because there is nothing in it to replace with.
 
-  The same edit fixes a second case: a **chunked** request carries
-  `Content-Length: -1` whatever it is holding, and the old `ContentLength > 0`
-  guard discarded a preset body that was really there.
-
 - **Three more values a `read` token could read.** The automod model endpoint
   when it carries an `?api_key=` in the query string, and a destination's
   `extraInputArgs` / `extraOutputArgs` — which are the resolved FFmpeg argv, the
