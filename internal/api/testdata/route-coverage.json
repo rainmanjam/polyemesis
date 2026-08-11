@@ -1482,7 +1482,7 @@
     {
       "route": "ANY /playout/*",
       "scope": "route",
-      "why": "the public media origin under every method chi registered on the mount. Gated per request by authorizePlayout; the GET row carries the streaming counterpart and the rest reach the same gate.",
+      "why": "the public media origin under every method chi registered on the mount. Gated per request by authorizePlayout; the GET row carries the streaming counterpart. OPTIONS reaches a gate of its own: playoutPreflightAllowed applies the CONFIGURATION half -- enabled, and public unless the caller is the operator -- and denies with the same 404 GET gives, so the two agree. It omits the CREDENTIAL half deliberately: a preflight carries no credentials by specification, and answering one 401 would break cross-origin playback of a token-protected public stream.",
       "want": {
         "as": "read",
         "status": 401,
@@ -2054,13 +2054,6 @@
       "issue": "#161"
     },
     {
-      "id": "options-above-the-playout-gate",
-      "what": "OPTIONS /playout/* is answered 204 with no body ABOVE authorizePlayout, so it is the one method+pattern pair of that mount that does not reach the gate the other nine reach.",
-      "whySafe": "found by DRIVING it, which is the point: the excuse registry used to collapse an ANY entry to a single GET, so this pair's premise had never been issued as a request. It is now driven with a perMethod Want stating the 204 it really returns, byte-identical to an anonymous stranger's, with no body -- an existence oracle at worst, of the same class as the 405 surface in G4.",
-      "whatWouldMakeItUnsafe": "the preflight response carrying anything derived from the playout configuration -- a CORS allowlist echoing a configured origin would do it. The behavioural fix is #170's and lands on another branch; when it does, this Want fails with the new status and whoever rebases has to look at it.",
-      "issue": "#170"
-    },
-    {
       "id": "ratchet-raises-rest-on-ordinary-review",
       "what": "every ratchet in this file -- excusedCeiling, counterpartlessExcusedCeiling, differentialFloor, sentinelWitnessFloor, unstableCeiling, inertCeiling, varianceExemptCeiling, shapeFloor, shapesNotInspectedCeiling, and citedIssues -- is enforced by making the loosening direction a HAND EDIT of the committed artifact. That is a control only to the extent that somebody reads the diff.",
       "whySafe": "the edit is one line of JSON in a file whose only purpose is to be read, next to a failure message that says in words what the edit means. Every automatic path -- regeneration, the -update-coverage flag, the clamps in writeLedger -- moves these numbers only in the tightening direction, so the artifact cannot loosen itself.",
@@ -2085,7 +2078,6 @@
     "#162",
     "#163",
     "#167",
-    "#168",
-    "#170"
+    "#168"
   ]
 }
