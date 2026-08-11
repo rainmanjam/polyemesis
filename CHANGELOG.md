@@ -40,6 +40,24 @@ its first tagged release.
 
 ### Fixed
 
+- **`POST /routing/presets/{preset}` now applies the defaults it advertises.**
+  A request with no body used to run on Go's zero value for every track index
+  rather than on the OBS-convention defaults `GET /routing/presets` publishes
+  under `defaults`, so a bodyless `mic-only` compiled `[0:a:0]` — the full mix —
+  where the catalogue two routes away said track 3. Both routes answered `200`
+  and neither disagreed out loud.
+
+  **Behaviour change worth knowing before you upgrade.** A bodyless apply of
+  `mic-only` now selects track 3 instead of track 1, and `clean-feed` track 2
+  instead of track 1. Anything that sends a body — including the console, which
+  always sends the full option set — is unaffected. A body is still a FULL
+  REPLACEMENT rather than a patch over the defaults, so a partial body means
+  exactly what it always meant: an omitted field is zero.
+
+  The same edit fixes a second case: a **chunked** request carries
+  `Content-Length: -1` whatever it is holding, and the old `ContentLength > 0`
+  guard discarded a preset body that was really there.
+
 - **Three more values a `read` token could read.** The automod model endpoint
   when it carries an `?api_key=` in the query string, and a destination's
   `extraInputArgs` / `extraOutputArgs` — which are the resolved FFmpeg argv, the
