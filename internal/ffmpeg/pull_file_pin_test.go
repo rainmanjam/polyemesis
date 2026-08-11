@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -55,10 +56,45 @@ func TestFilePullPinsTheFileProtocolBeforeTheInput(t *testing.T) {
 func TestFilePullReachesTheRelayWithTheProtocolPinOn(t *testing.T) {
 	ffmpegBin := needFFmpeg(t, "ffmpeg")[0]
 
-	// t.TempDir before anything opens a handle under it: on Windows the cleanup
-	// cannot remove a directory something still has open, and the child process
-	// below holds the sample for as long as it runs.
-	dir := t.TempDir()
+	// NOT t.TempDir, and this is the third attempt at the same Windows failure.
+	//
+	// t.TempDir's cleanup is an unconditional, unretried RemoveAll that FAILS
+	// THE TEST. On Windows a process killed with TerminateProcess keeps its
+	// handles for a while after cmd.Wait has returned -- so stop() reaping the
+	// child, which it does, is not enough. Measured twice on windows-latest:
+	// first on the stderr file, and then, once that became a buffer, on
+	// sample.ts -- the file the child was READING. The failure moving from one
+	// file to the other is what identified the cause: not a scanner, the child
+	// itself, still letting go.
+	//
+	// This is the only test in the package that hits it, because it is the only
+	// one that KILLS a running FFmpeg. probefile_test.go and its neighbours use
+	// buildSample under t.TempDir too and are fine: ffprobe exits on its own and
+	// closes its handles on the way out.
+	//
+	// So the directory is managed here, removed with patience, and NOT failed
+	// over. The claim under test is about the argv and has already been made by
+	// the time this runs; a leaked temp directory on a CI runner does not
+	// deserve a red suite. It is logged, so that if it ever becomes the norm
+	// rather than the exception somebody can see it.
+	dir, err := os.MkdirTemp("", "pullpin")
+	if err != nil {
+		t.Fatalf("cannot create a work directory: %v", err)
+	}
+	t.Cleanup(func() {
+		began := time.Now()
+		for {
+			if rmErr := os.RemoveAll(dir); rmErr == nil {
+				return
+			} else if time.Since(began) > 30*time.Second {
+				t.Logf("could not remove %s within 30s: %v -- on Windows a "+
+					"terminated child's handles outlive cmd.Wait, and this test "+
+					"kills one. Leaked rather than failed on purpose.", dir, rmErr)
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 	buildSample(t, filepath.Join(dir, "sample.ts"), "-t", "1")
 
 	// The relay socket is bound HERE, and the port comes out of the bind rather
@@ -100,8 +136,11 @@ func TestFilePullReachesTheRelayWithTheProtocolPinOn(t *testing.T) {
 	// brief on-access-scanner window uploads.renameStaged retries for and says
 	// the handle outlives the process by longer than a test should wait.
 	//
-	// A buffer has no handle for anything to hold. That is the whole fix: not a
-	// longer wait for the file to be released, but no file.
+	// A buffer has no handle for anything to hold. It was NOT the whole fix --
+	// the next run failed on sample.ts instead, which is what proved the holder
+	// is the dying child rather than anything about this file in particular.
+	// It removes one of the two holders; the directory above deals with the
+	// other. Kept because a buffer is simply the right shape here.
 	var stderr bytes.Buffer
 
 	ctx, cancel := context.WithCancel(context.Background())
