@@ -661,3 +661,98 @@ func TestDeleteJob(t *testing.T) {
 		t.Errorf("DeleteJob twice = %v, want ErrNotFound", err)
 	}
 }
+
+// TestDeleteJobRemovesOnlyThatRow is the scoping half TestDeleteJob above
+// cannot express.
+//
+// That test seeds exactly ONE row. With n=1, "delete the row you were asked
+// for" and "delete every row in the table" are the same observation: the target
+// is gone and a second delete reports ErrNotFound either way. Dropping the WHERE
+// clause from DeleteJob's statement therefore survives it, and — measured — the
+// whole ./internal/... suite. A witness row is the entire point of this test.
+func TestDeleteJobRemovesOnlyThatRow(t *testing.T) {
+	d := testDB(t)
+	target := mustEnqueue(t, d, jobs.Job{Kind: "target"})
+	witness := mustEnqueue(t, d, jobs.Job{Kind: "witness"})
+
+	if err := d.DeleteJob(target.ID); err != nil {
+		t.Fatalf("DeleteJob(%d): %v", target.ID, err)
+	}
+	if _, err := d.GetJob(target.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetJob(target %d) after delete = %v, want ErrNotFound", target.ID, err)
+	}
+	if _, err := d.GetJob(witness.ID); err != nil {
+		t.Fatalf("witness job %d was deleted too: deleting one job took the whole table with it (%v)",
+			witness.ID, err)
+	}
+	// The witness must still be deletable in its own right, which is what says
+	// the row above is really there rather than merely unreadable.
+	if err := d.DeleteJob(witness.ID); err != nil {
+		t.Errorf("DeleteJob(witness %d): %v", witness.ID, err)
+	}
+	if err := d.DeleteJob(witness.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("DeleteJob(witness) twice = %v, want ErrNotFound", err)
+	}
+}
+
+// TestPurgeSparesJobsFinishedSinceTheCutoff pins the CUTOFF, which
+// TestPurgeJobsKeepsTheNewestAndSparesLiveWork above does not.
+//
+// There, every terminal row is older than the cutoff (3h/2h/1h against 30
+// minutes) and keep=1 does all the work, so a purge whose date predicate was
+// inert would still report 2 and still spare the newest. Here keep is 0 and the
+// only thing that can spare a row is its finished_at, so the date predicate is
+// the sole survivor-selecting mechanism under test.
+//
+// The unset-finished_at row is the second half: a job in a terminal state that
+// never recorded when it ended has an epoch timestamp, which is older than every
+// cutoff. `finished_at > 0` is what stops it being swept, and nothing else does.
+func TestPurgeSparesJobsFinishedSinceTheCutoff(t *testing.T) {
+	d := testDB(t)
+	now := time.Now()
+	cutoff := now.Add(-90 * time.Minute)
+
+	finishAt := func(kind jobs.Kind, ago time.Duration) int64 {
+		t.Helper()
+		j := mustEnqueue(t, d, jobs.Job{Kind: kind})
+		if err := d.FinishJob(j.ID, jobs.StateDone, "", now.Add(-ago)); err != nil {
+			t.Fatalf("FinishJob: %v", err)
+		}
+		return j.ID
+	}
+	oldA := finishAt("old-a", 3*time.Hour)
+	oldB := finishAt("old-b", 2*time.Hour)
+	freshA := finishAt("fresh-a", time.Hour)
+	freshB := finishAt("fresh-b", 30*time.Minute)
+
+	// Terminal, but with no finishing timestamp: FinishJob is bypassed so the
+	// column stays 0. This is the row `finished_at > 0` exists for.
+	unfinished := mustEnqueue(t, d, jobs.Job{Kind: "no-timestamp"})
+	if _, err := d.SQL().Exec(
+		`UPDATE jobs SET state='cancelled', finished_at=0 WHERE id=?`, unfinished.ID); err != nil {
+		t.Fatalf("seed terminal row without a finished_at: %v", err)
+	}
+
+	n, err := d.PurgeJobs(cutoff, 0)
+	if err != nil {
+		t.Fatalf("PurgeJobs: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("purged %d rows, want exactly the 2 that finished before the cutoff", n)
+	}
+	for _, id := range []int64{oldA, oldB} {
+		if _, err := d.GetJob(id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("job %d finished before the cutoff but survived the purge: %v", id, err)
+		}
+	}
+	for _, id := range []int64{freshA, freshB} {
+		if _, err := d.GetJob(id); err != nil {
+			t.Errorf("job %d finished AFTER the cutoff but was purged: the purge is not "+
+				"reading finished_at at all (%v)", id, err)
+		}
+	}
+	if _, err := d.GetJob(unfinished.ID); err != nil {
+		t.Errorf("job %d is terminal with no finished_at and was purged; an unset "+
+			"timestamp is not evidence of age (%v)", unfinished.ID, err)
+	}
+}

@@ -49,14 +49,17 @@ its first tagged release.
 
   **Behaviour change worth knowing before you upgrade.** A bodyless apply of
   `mic-only` now selects track 3 instead of track 1, and `clean-feed` track 2
-  instead of track 1. Anything that sends a body — including the console, which
-  always sends the full option set — is unaffected. A body is still a FULL
-  REPLACEMENT rather than a patch over the defaults, so a partial body means
-  exactly what it always meant: an omitted field is zero.
+  instead of track 1. Anything that sends a body with a Content-Length —
+  including the console, which always sends the full option set — is unaffected.
+  A body is still a FULL REPLACEMENT rather than a patch over the defaults, so a
+  partial body means exactly what it always meant: an omitted field is zero.
 
-  The same edit fixes a second case: a **chunked** request carries
-  `Content-Length: -1` whatever it is holding, and the old `ContentLength > 0`
-  guard discarded a preset body that was really there.
+  Two smaller changes fall out of the same fix, and the first paragraph used to
+  imply neither happened. A **chunked** body now takes effect: it reports
+  `Content-Length: -1` whatever it carries, so the old gate discarded it and
+  applied the defaults. And a **whitespace-only** body is now treated as absent
+  (200, defaults) where it used to be `400 invalid request body: EOF` — it is
+  not a "full replacement", because there is nothing in it to replace with.
 
 - **Three more values a `read` token could read.** The automod model endpoint
   when it carries an `?api_key=` in the query string, and a destination's
