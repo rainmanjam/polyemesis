@@ -1386,6 +1386,15 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 	// destination whose URL the platform refuses is enabled and not running,
 	// and the UI, told only "enabled", drew it as started. Reading the process
 	// state back means a success response is evidence that something happened.
+	//
+	// AND WHICH EFFECT (#209). "Reading the process state back" is only evidence
+	// that something happened -- it is not evidence of WHICH thing, because
+	// supervisor.stop() sets StateStopped on BOTH of its arms: the one where the
+	// child was reaped, and the one where the deadline expired, SIGKILL was
+	// issued and nobody waited. Those have different consequences for whoever
+	// asked: the second means a process that may still be running is still
+	// holding, and still publishing to, what this response has just declared
+	// free. So a stop reports `reaped`, and says why when it is false.
 	resp := map[string]any{"enabled": enabled}
 	for _, d := range s.eng().Status().Destinations {
 		if d.ID != id {
@@ -1396,6 +1405,12 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		}
 		if d.Error != "" {
 			resp["error"] = d.Error
+		}
+		if !enabled {
+			resp["reaped"] = d.StopWarning == ""
+			if d.StopWarning != "" {
+				resp["warning"] = d.StopWarning
+			}
 		}
 		break
 	}

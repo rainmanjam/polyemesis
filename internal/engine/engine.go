@@ -52,7 +52,25 @@ const (
 	relayPortBase = 21000
 	relayPortSpan = 500
 	// stopTimeout bounds how long we wait for one child to exit.
-	stopTimeout = 12 * time.Second
+	//
+	// It must stay above supervisor.shutdownGrace (8s), which is the only thing
+	// that ends a child that does not heed the signal: a teardown that gives up
+	// first turns every unheeded stop into ErrStopDeadline and abandons a child
+	// the grace escalation would have reaped a moment later.
+	//
+	// EVERY TEARDOWN IN THIS PACKAGE WRITES `_ = proc.Stop(ctx)`, deliberately
+	// and with one exception. The teardowns below are all "this tier is going
+	// away": the port and the subscription are released whatever the answer, and
+	// there is no second thing to try, so ErrStopDeadline changes nothing they
+	// do. The exception is teardownDest, whose caller -- POST
+	// /destinations/{id}/stop -- reports the outcome to a human and therefore
+	// needs to know which of Stop's two arms ran (#209). The `_ =` is not a
+	// shrug: internal/testenv's TestEveryDiscardedStopSaysSo requires it, so
+	// that a discard nobody thought about looks different from these (#196).
+	//
+	// It is a package var rather than a const for one reason: a test that needs
+	// Stop's DEADLINE arm cannot afford to wait 12 real seconds for it, and 12s
+	// is not the property such a test is about. Nothing outside a test writes it.
 
 	// previewIdleDefault is how long the preview encoder outlives the last
 	// playlist request when settings do not say.
@@ -68,6 +86,10 @@ const (
 	// hold up starting an encode.
 	gpuDetectTimeout = 5 * time.Second
 )
+
+// stopTimeout bounds how long we wait for one child to exit. See the comment in
+// the const block above for why it is 12s and why it is a var.
+var stopTimeout = 12 * time.Second
 
 // Engine owns the whole streaming pipeline.
 type Engine struct {
@@ -129,6 +151,26 @@ type Engine struct {
 	lastReload atomic.Pointer[ReloadReport]
 	sinkMu     sync.Mutex
 	sinkCfg    db.LoggingSettings
+
+	// stopMu guards unreaped.
+	//
+	// Its own lock and not e.mu: it is written from teardownDest, which already
+	// runs under a reconcile, and read from Status(), which runs per WebSocket
+	// push. Folding it into e.mu would put a per-push read behind a reconcile.
+	stopMu sync.Mutex
+	// unreaped records, per destination id, that the LAST stop of that
+	// destination ended on Stop's DEADLINE arm rather than on its reap arm --
+	// SIGKILL issued and not waited for, the child possibly still running.
+	//
+	// It exists because both arms set StateStopped, so the process state cannot
+	// answer the one question a caller of POST /destinations/{id}/stop actually
+	// has: may I reuse what it was holding? The supervisor already produces the
+	// fact as ErrStopDeadline; before this, teardownDest threw it away one line
+	// after it was computed and the API answered "stopped" either way (#209).
+	//
+	// Keyed by destination id and cleared when that destination next starts, so
+	// it describes the current situation rather than accumulating history.
+	unreaped map[int64]string
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -744,7 +786,7 @@ func (e *Engine) Stop() {
 			return
 		}
 		wg.Add(1)
-		go func() { defer wg.Done(); p.Stop(ctx) }()
+		go func() { defer wg.Done(); _ = p.Stop(ctx) }()
 	}
 	// Through teardownDest rather than a second stop path, so there is exactly
 	// one definition of "take a destination down" -- and so the REDUNDANT
@@ -815,7 +857,7 @@ func (e *Engine) Stop() {
 	e.teardownPlaylist(playlist)
 
 	if ingest != nil {
-		ingest.Stop(ctx)
+		_ = ingest.Stop(ctx)
 	}
 
 	e.wg.Wait()
@@ -1134,7 +1176,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 
 	if cur != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		cur.Stop(ctx)
+		_ = cur.Stop(ctx)
 		cancel()
 	}
 
@@ -1186,7 +1228,7 @@ func (e *Engine) stopIngestProcess() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-	cur.Stop(ctx)
+	_ = cur.Stop(ctx)
 	cancel()
 }
 
@@ -2419,7 +2461,7 @@ func (e *Engine) teardownRendition(r *rendition) {
 		"its encode signature changed, or nothing selects it any more")
 	if r.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		r.proc.Stop(ctx)
+		_ = r.proc.Stop(ctx)
 		cancel()
 	}
 	if r.subName != "" {
@@ -2465,7 +2507,7 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 
 	if proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		proc.Stop(ctx)
+		_ = proc.Stop(ctx)
 		cancel()
 	}
 	hub.Unsubscribe(name)
@@ -2984,7 +3026,7 @@ func (e *Engine) teardownLoudness(m *loudnessMon) {
 	}
 	if m.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		m.proc.Stop(ctx)
+		_ = m.proc.Stop(ctx)
 		cancel()
 	}
 	if m.subName != "" {
