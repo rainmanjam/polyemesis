@@ -146,27 +146,34 @@ func TestNotifierStatsNeverDisclosesTheWebhookPath(t *testing.T) {
 				WithDoer(doer), WithRetry(1, time.Millisecond, time.Millisecond),
 				WithFlushInterval(2*time.Millisecond))
 
-			// The real loop: Run consumes n.send and calls deliver, which is
-			// the only writer of Stats.LastError. The coalescer is fed and
-			// flushed directly rather than waiting on the debounce clock, the
-			// same way TestFlushDeliversThroughTheWholePathOnce does -- what is
-			// under test is what deliver records, not when it runs.
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			go n.Run(ctx)
-
+			// The whole real path, minus the clock: Add, Flush, the sender
+			// channel, and deliver -- which is the only writer of
+			// Stats.LastError and the thing under test. What is asserted is
+			// what deliver RECORDS, not when it runs, so the ticker buys
+			// nothing here and the debounce is stepped over by handing Flush a
+			// later time.
+			//
+			// Run is deliberately NOT started. The coalescer is
+			// single-goroutine by design (see its doc), so feeding it directly
+			// beside a live Run is a data race on its maps by construction --
+			// #249, which fired on a PR that does not touch this package.
+			// Calling deliver here instead of waiting for Run's sender to get
+			// round to it also makes the assertion below unconditional rather
+			// than a three-second poll.
 			now := time.Now()
 			n.co.Add([]Rule{rule}, downEvent("1", now), now)
 			n.Flush(now.Add(time.Duration(rule.DebounceSeconds+1) * time.Second))
 
-			var last string
-			deadline := time.Now().Add(3 * time.Second)
-			for time.Now().Before(deadline) {
-				if last = n.Stats().LastError; last != "" {
-					break
-				}
-				time.Sleep(2 * time.Millisecond)
+			var d Delivery
+			select {
+			case d = <-n.send:
+			default:
+				t.Fatal("the flush handed the sender nothing, so deliver never ran " +
+					"and this test asserted nothing about Stats.LastError")
 			}
+			n.deliver(context.Background(), d)
+
+			last := n.Stats().LastError
 			if last == "" {
 				t.Fatal("no delivery failure was recorded, so this test asserted nothing")
 			}

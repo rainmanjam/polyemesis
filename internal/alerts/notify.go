@@ -142,6 +142,8 @@ type Notifier struct {
 	send   chan Delivery
 
 	// co is touched only by the run loop, so it needs no lock of its own.
+	// That is a contract, not an observation -- see the doc on coalescer for
+	// what it costs a test to break it.
 	co *coalescer
 
 	mu        sync.Mutex
