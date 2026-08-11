@@ -623,28 +623,74 @@ func TestZeroMaxRestartsRetriesForever(t *testing.T) {
 // StartDelay holds the FIRST spawn back and nothing else. A destination that
 // drops at 3am has to come back immediately, not wait its turn behind
 // processes that are already healthy.
+//
+// The "and nothing else" half is measured DIFFERENTIALLY, against the same
+// three restarts run with no start delay at all, and the reason is the whole
+// point of this comment.
+//
+// Three restarts are three real process spawns. A spawn costs single-digit
+// milliseconds here and ~95ms on a GitHub Windows runner, whose speed varies
+// about 3x across the pool. The version of this test that compared the elapsed
+// time of those three restarts against ONE 120ms delay therefore failed on
+// Windows -- 288ms measured -- while the supervisor was behaving correctly: it
+// was reading platform spawn cost as evidence the delay had been reapplied.
+// That is a false failure on a correct implementation, which is the worst kind
+// of test, and no absolute budget can fix it, because there is no number that
+// is both above Windows spawn cost and below the signal on a fast Linux box.
+//
+// Subtracting a no-delay run cancels the spawn cost, because both runs pay it.
+// What survives the subtraction is the delay, or nothing.
 func TestStartDelayAppliesToTheFirstSpawnOnly(t *testing.T) {
-	const delay = 120 * time.Millisecond
-	begin := time.Now()
-	p := testProcess(t, fakeExit(1), Spec{
-		AutoRestart: true,
-		StartDelay:  delay,
-		MinBackoff:  5 * time.Millisecond,
-		MaxBackoff:  5 * time.Millisecond,
-	})
-	p.Start()
+	const delay = 200 * time.Millisecond
 
-	waitFor(t, "the first spawn", func() bool { return p.Status().Restarts >= 1 })
-	if waited := time.Since(begin); waited < delay {
-		t.Errorf("first spawn happened after %s, want at least the %s start delay", waited, delay)
+	// restartsAfterTheFirst times the three restarts that FOLLOW the first
+	// spawn. The start delay is paid before the first spawn, so it is outside
+	// this window by construction; what is inside is spawn cost plus backoff.
+	// A correct supervisor returns the same duration for any startDelay.
+	restartsAfterTheFirst := func(startDelay time.Duration) time.Duration {
+		t.Helper()
+		begin := time.Now()
+		p := testProcess(t, fakeExit(1), Spec{
+			AutoRestart: true,
+			StartDelay:  startDelay,
+			MinBackoff:  5 * time.Millisecond,
+			MaxBackoff:  5 * time.Millisecond,
+		})
+		p.Start()
+		// Stopped as soon as its window closes rather than left to t.Cleanup:
+		// a process still restarting through the other run's measurement is
+		// spawn contention landing exactly on the number being read.
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			p.Stop(ctx)
+		}()
+
+		waitFor(t, "the first spawn", func() bool { return p.Status().Restarts >= 1 })
+		if waited := time.Since(begin); waited < startDelay {
+			t.Errorf("first spawn happened after %s, want at least the %s start delay",
+				waited, startDelay)
+		}
+
+		afterFirst := time.Now()
+		waitFor(t, "three more restarts", func() bool { return p.Status().Restarts >= 4 })
+		return time.Since(afterFirst)
 	}
 
-	// The restarts that follow must NOT each pay the delay again.
-	afterFirst := time.Now()
-	waitFor(t, "three more restarts", func() bool { return p.Status().Restarts >= 4 })
-	if elapsed := time.Since(afterFirst); elapsed > delay {
-		t.Errorf("three restarts took %s, longer than a single %s start delay: "+
-			"the delay is being applied to reconnects", elapsed, delay)
+	baseline := restartsAfterTheFirst(0)
+	withDelay := restartsAfterTheFirst(delay)
+
+	// A delay applied per restart would add THREE of them to the window, so
+	// the regression this guards against shows up as +600ms. The threshold is
+	// two delays: comfortably below the 3x a regression adds, and far above
+	// the run-to-run spawn variance the subtraction leaves behind (~100ms at
+	// the Windows numbers in #103). Both margins are deliberate -- a threshold
+	// at exactly 3 delays would sit on the regression boundary, and one at a
+	// single delay would be back within variance.
+	if extra := withDelay - baseline; extra > 2*delay {
+		t.Errorf("three restarts took %s with a %s start delay against %s without one, "+
+			"%s more than the same three spawns cost on this machine: the delay is "+
+			"being applied to reconnects", withDelay, delay, baseline, extra)
 	}
 }
 
