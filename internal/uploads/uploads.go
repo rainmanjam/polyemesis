@@ -466,6 +466,48 @@ func (p *Pending) Name() string { return p.name }
 // Bytes is what was actually written.
 func (p *Pending) Bytes() int64 { return p.bytes }
 
+// renameOverClaim renames the staged file onto the name claimed above it,
+// retrying briefly while something else holds a handle to the target.
+//
+// WHY THIS IS NOT A PLAIN os.Rename. On Unix a rename over an open file is
+// fine -- the name is rebound and the old inode lives until its last handle
+// closes. On Windows it is not: the target is a real file (the O_EXCL claim a
+// few lines above created it), and MoveFileEx fails with "Access is denied"
+// while ANY handle to it is open, including a read-only one.
+//
+// Measured, twice in one hour on CI, from a test whose own observer goroutine
+// polled os.Stat on the target in a tight loop:
+//
+//	finalise upload: rename ...\.partial-790352203.mkv ...\show-c37688205ca09aa2.mkv:
+//	Access is denied.
+//
+// The test made it reproducible; it did not invent it. Production has the same
+// window and worse company in it -- Windows Defender scans a newly created file,
+// the Search indexer opens it, a backup agent reads it, an operator has the
+// folder open in Explorer. Any of them holding the claim file for a few
+// milliseconds turned a completed multi-gigabyte upload into a 500 and threw
+// the bytes away.
+//
+// A few tries over a short window, because the holders above are transient by
+// nature. It is deliberately not a long loop: a rename that fails because the
+// path is wrong must still reach the caller quickly, and only a rename that
+// fails because someone else is *reading* deserves patience. There is no way to
+// distinguish those two from the error alone on Windows, so the bound is what
+// keeps the wrong one cheap.
+//
+// On Unix the first attempt succeeds and this costs one function call.
+func renameOverClaim(from, to string) error {
+	const attempts = 20
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = os.Rename(from, to); err == nil {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return err
+}
+
 // Commit publishes the staged file under its final name, with the verdict this
 // server reached about its bytes.
 //
@@ -525,7 +567,7 @@ func (p *Pending) Commit(v Verdict) (File, error) {
 		_ = os.Remove(final)
 		return File{}, fmt.Errorf("record what is known about this upload: %w", err)
 	}
-	if err := os.Rename(p.tmp, final); err != nil {
+	if err := renameOverClaim(p.tmp, final); err != nil {
 		_ = os.Remove(final)
 		p.store.removeVerdict(p.name)
 		return File{}, fmt.Errorf("finalise upload: %w", err)
