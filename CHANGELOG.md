@@ -142,6 +142,55 @@ its first tagged release.
 
 ### Fixed
 
+- **A pull source could name an upload this server was never allowed to
+  inspect.** An upload's `pullUrl` is offered copyable in the Library, and
+  pasting it into **Settings → Ingest → Pull** handed the path to the engine's
+  own FFmpeg — which is not the inspection path, and carries neither the format
+  allowlist nor the protocol pin. So a file whose inspection a dropped
+  connection cut short could be routed to air with nothing having read a byte
+  of it.
+
+  Saving a pull source — primary or backup — that names an upload **recorded as
+  unchecked** is now refused, with the file and the reason in the message. It is
+  the same test a playlist item already gets, scoped the same way: only a URL
+  this save *changes* is checked, so an unrelated settings change is never
+  refused over a source configured before the gate existed. An upload with no
+  record at all — every file stored before inspection existed — is still
+  allowed, because refusing those would strand media an operator has had for a
+  year.
+
+- **A killed upload left bytes on your disk that nothing would ever remove.**
+  Nothing in the product swept the uploads directory. A staged file stranded by
+  a process that died mid-transfer, or by a cleanup that failed, stayed
+  forever — invisible and unreferenceable, but occupying up to 8 GiB of the
+  volume the database, the recorder and the HLS preview share, with the
+  free-space floor unaware of it and nothing anywhere reporting the total. The
+  same for an inspection record whose upload was removed out of band.
+
+  Startup now clears both, once, before anything can accept an upload, and
+  **logs what it removed and how much space came back** — the boot after the
+  crash is the one where that line matters. Only leftovers older than an hour
+  are touched, so a sweep can never race a transfer that is still arriving.
+
+- **An upload was briefly listable as an empty file while it was being
+  published.** Finalising an upload reserved its final name with an exclusive
+  create, which is what makes two uploads drawing one name a loud failure
+  instead of one operator's bytes silently replacing another's. But the
+  reservation was a zero-byte file *under that final name*, so until the bytes
+  were renamed into place `GET /api/v1/media` showed an empty row with a working
+  `pullUrl`, and a settings save would accept it as a playlist item. The window
+  was a file write wide on every platform and tens of milliseconds on Windows.
+  The reservation now uses a name the listing refuses, so nothing is ever
+  visible under the final name except the finished file — and a name that is
+  genuinely already taken is still refused.
+
+- **A media record could be written for a name no upload has.** The call that
+  records what was found in a file checked only that the name had no path
+  separator, so any other string wrote a sidecar that nothing in the product
+  ever reads or removes. No caller could produce one, which is exactly why the
+  contract was narrowed now: it refuses a name that is not a listable upload,
+  and a name with no file beside it.
+
 - **A `read` token could read a pull URL's credential from `GET /sources`.** The
   masking ran, and masked the wrong part: it blanked only the last path segment
   and only for `rtmp`/`rtsp`/`srt`-like schemes, so an HLS pull URL over `https`

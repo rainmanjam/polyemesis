@@ -201,6 +201,10 @@ func run(h *hooks) error {
 	if err := migrateLegacyPlaylistFilePath(store, cfg.DataDir, log); err != nil {
 		return err
 	}
+	// Also one-shot, and before anything can accept an upload: nothing else in
+	// the product ever removes a staged file a killed process left behind. See
+	// sweepUploadLeftovers.
+	sweepUploadLeftovers(cfg.DataDir, log)
 
 	box, err := secrets.LoadOrCreate(cfg.SecretPath())
 	if err != nil {

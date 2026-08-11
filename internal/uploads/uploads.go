@@ -379,9 +379,21 @@ func UnverifiedVerdict(reason string) Verdict { return Verdict{Reason: reason} }
 // minutes sending. Pending.Commit writes it BEFORE it publishes, which is the
 // ordering that makes the best-effort case rare rather than routine -- see
 // there.
+//
+// IT REFUSES A NAME NO UPLOAD HAS. #186: this used to check only that the name
+// had no separator and was non-empty, so any other string wrote a
+// ".probe-<name>.json" that nothing in the product ever reads or removes --
+// readMedia is only consulted for names List returned, and removeVerdict is
+// only called from Delete on a real upload. There is no caller that can produce
+// one today, which is exactly why this is the moment to narrow the contract:
+// the function is deliberately best-effort and its error is deliberately
+// ignored at the one site that calls it, so tightening it cannot change any
+// existing behaviour. What it stops is the SECOND caller -- a re-probe
+// endpoint, a metadata backfill, a migration -- passing a name that did not
+// just come out of Commit.
 func (s *Store) PutVerdict(stored string, v Verdict) error {
-	if strings.ContainsAny(stored, `/\`) || stored == "" {
-		return fmt.Errorf("uploads: refusing a media record for %q", stored)
+	if err := s.verdictTarget(stored); err != nil {
+		return err
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -394,6 +406,37 @@ func (s *Store) PutVerdict(stored string, v Verdict) error {
 // common case; PutVerdict is what can also record a failure to inspect.
 func (s *Store) PutMedia(stored string, info MediaInfo) error {
 	return s.PutVerdict(stored, VerifiedVerdict(info))
+}
+
+// verdictTarget reports whether stored is a name a verdict may be written for.
+//
+// TWO QUESTIONS, AND BOTH HAVE TO BE ASKED. Resolve answers the first -- is
+// this a bare filename inside the uploads directory -- and Listable answers the
+// second, which Resolve cannot: ".probe-x.ts.json" and ".partial-1234.ts" are
+// both perfectly legal bare filenames, and a verdict written ABOUT one of them
+// is a sidecar for a sidecar. Listable is asked rather than a private prefix
+// test for the reason its own comment gives: the rule has one home.
+//
+// Then the name has to belong to something. A regular file under the name
+// itself is the published case; a claim (see Pending.Commit) is the file that
+// is a rename away from being published, and is why this is not simply a Stat
+// of the final name -- Commit deliberately writes the verdict while the bytes
+// are still staged, so at the moment of the write the only thing on disk under
+// the final name is the claim.
+//
+// A directory is not an upload, which is what IsRegular is for: Listable(".")
+// is true and Stat(".") succeeds, so without it "." would be a legal target and
+// would write ".probe-..json".
+func (s *Store) verdictTarget(stored string) error {
+	if _, err := s.Resolve(stored); err != nil || !Listable(stored) {
+		return fmt.Errorf("uploads: refusing a media record for %q", stored)
+	}
+	for _, name := range []string{stored, claimName(stored)} {
+		if st, err := os.Lstat(filepath.Join(s.dir, name)); err == nil && st.Mode().IsRegular() {
+			return nil
+		}
+	}
+	return fmt.Errorf("uploads: refusing a media record for %q: no upload has that name", stored)
 }
 
 // Verdict returns the recorded conclusion about a stored upload, and whether
@@ -467,14 +510,13 @@ func (p *Pending) Name() string { return p.name }
 // Bytes is what was actually written.
 func (p *Pending) Bytes() int64 { return p.bytes }
 
-// renameOverClaim renames the staged file onto the name claimed above it,
-// retrying briefly while something else holds a handle to the target.
+// renameStaged renames the staged file into place, retrying briefly while
+// something else holds a handle to either end of it.
 //
-// WHY THIS IS NOT A PLAIN os.Rename. On Unix a rename over an open file is
+// WHY THIS IS NOT A PLAIN os.Rename. On Unix a rename involving an open file is
 // fine -- the name is rebound and the old inode lives until its last handle
-// closes. On Windows it is not: the target is a real file (the O_EXCL claim a
-// few lines above created it), and MoveFileEx fails with "Access is denied"
-// while ANY handle to it is open, including a read-only one.
+// closes. On Windows it is not: MoveFileEx fails with "Access is denied" while
+// ANY handle to the file is open, including a read-only one.
 //
 // Measured, twice in one hour on CI, from a test whose own observer goroutine
 // polled os.Stat on the target in a tight loop:
@@ -485,9 +527,17 @@ func (p *Pending) Bytes() int64 { return p.bytes }
 // The test made it reproducible; it did not invent it. Production has the same
 // window and worse company in it -- Windows Defender scans a newly created file,
 // the Search indexer opens it, a backup agent reads it, an operator has the
-// folder open in Explorer. Any of them holding the claim file for a few
-// milliseconds turned a completed multi-gigabyte upload into a 500 and threw
-// the bytes away.
+// folder open in Explorer. Any of them holding a file for a few milliseconds
+// turned a completed multi-gigabyte upload into a 500 and threw the bytes away.
+//
+// THE TARGET IS NO LONGER A FILE THIS PACKAGE CREATED. It used to be: the claim
+// was made under the FINAL name, so every rename here was a rename over a real
+// file and the measurement above was of a handle on the target. #203 item 1
+// moved the claim to a non-listable name, so the target is now absent and the
+// remaining exposure is a handle on the SOURCE -- the .partial- file whose last
+// byte was written milliseconds ago, which is precisely what an on-access
+// scanner opens. Same retry, narrower cause, and it is not a cause this package
+// can remove.
 //
 // A few tries over a short window, because the holders above are transient by
 // nature. It is deliberately not a long loop: a rename that fails because the
@@ -497,7 +547,7 @@ func (p *Pending) Bytes() int64 { return p.bytes }
 // keeps the wrong one cheap.
 //
 // On Unix the first attempt succeeds and this costs one function call.
-func renameOverClaim(from, to string) error {
+func renameStaged(from, to string) error {
 	const attempts = 20
 	var err error
 	for i := 0; i < attempts; i++ {
@@ -549,37 +599,50 @@ func (p *Pending) Commit(v Verdict) (File, error) {
 	// unlikely: O_EXCL is the atomic reservation, so the second Commit fails
 	// loudly instead of overwriting.
 	//
-	// The claim is a zero-byte file under the final name, so it is briefly
-	// listable.
+	// THE CLAIM IS NOT UNDER THE FINAL NAME. It used to be, and that is #203
+	// item 1: a zero-byte file under the final name is a LISTABLE file, so
+	// between the claim and the rename GET /api/v1/media returned an empty row
+	// with a working pullUrl and PUT /api/v1/settings would take it as a
+	// playlist item. That window was never "one os.Rename wide" either -- the
+	// claim is followed by a marshal and a sidecar write, and then by a rename
+	// that retries with 10ms sleeps on Windows -- so it is a file write wide on
+	// every platform and can be tens of milliseconds on one of them.
 	//
-	// THAT WINDOW IS NOT "ONE os.Rename WIDE", which is what this comment used
-	// to say and what #203 item 1 repeats. Read the three statements below it:
-	// the claim is followed by PutVerdict -- a create, a marshal and a write of
-	// a sidecar file -- and only THEN by renameOverClaim, which is itself a
-	// retry loop with 10ms sleeps on Windows. The window is a file write wide on
-	// every platform and can be tens of milliseconds on one of them. The
-	// original wording made it sound like a scheduling accident; it is an I/O
-	// operation, and a reader deciding whether #203 is worth doing was being
-	// given the wrong order of magnitude.
+	// claimName is derived from the final name and carries the ".partial-"
+	// prefix, so it keeps BOTH properties at once: O_EXCL on a name two Commits
+	// drawing the same stored name must agree on is still the atomic
+	// reservation, and Listable refuses it, so List skips it and
+	// playlistUploadProblems refuses it. Nothing is ever visible under the final
+	// name except the finished file.
 	//
-	// It is still strictly the better of the two states to be caught in: an
-	// operator who refreshes at exactly the wrong moment sees an obviously-empty
-	// row, rather than a full-looking one that is somebody else's file. Closing
-	// it properly needs either a second rename through a non-Listable name or
-	// renameat2(RENAME_NOREPLACE) with this as the portable fallback; #203.
-	claim, err := os.OpenFile(final, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	// The Lstat below is what the O_EXCL used to do for the other case: a file
+	// ALREADY at the final name, from an earlier run rather than a concurrent
+	// Commit. It is not itself a race, because the claim above serialises every
+	// Commit that could create one.
+	claimPath := filepath.Join(p.store.dir, claimName(p.name))
+	claim, err := os.OpenFile(claimPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
-			return File{}, fmt.Errorf("finalise upload: %q already exists", p.name)
+			return File{}, fmt.Errorf("finalise upload: %q is already being published", p.name)
 		}
 		return File{}, fmt.Errorf("finalise upload: %w", err)
 	}
 	_ = claim.Close()
+	// Every return below this line drops the claim. A claim that outlived its
+	// Commit would make the name permanently unusable, where a ".partial-" file
+	// that outlives its upload is merely invisible -- and Sweep clears it.
+	defer func() { _ = os.Remove(claimPath) }()
+
+	switch _, err := os.Lstat(final); {
+	case err == nil:
+		return File{}, fmt.Errorf("finalise upload: %q already exists", p.name)
+	case !os.IsNotExist(err):
+		return File{}, fmt.Errorf("finalise upload: %w", err)
+	}
 	if err := p.store.PutVerdict(p.name, v); err != nil {
-		_ = os.Remove(final)
 		return File{}, fmt.Errorf("record what is known about this upload: %w", err)
 	}
-	if err := renameOverClaim(p.tmp, final); err != nil {
+	if err := renameStaged(p.tmp, final); err != nil {
 		_ = os.Remove(final)
 		p.store.removeVerdict(p.name)
 		return File{}, fmt.Errorf("finalise upload: %w", err)
@@ -840,9 +903,63 @@ func releaseSpace(dir string, n uint64) {
 // the platform that uses it as a separator.
 func PullURL(name string) string { return "file://" + Dir + "/" + name }
 
+// UploadFromPullURL is PullURL read backwards: the stored upload a pull source
+// names, or ok=false when it names something else.
+//
+// IT LIVES BESIDE PullURL SO THE TWO CANNOT DRIFT. #201: the Library offers
+// this URL copyable, and pasting it into Settings -> Ingest -> Pull hands the
+// path to the engine's own FFmpeg, which is not ffmpeg.ProbeFile and carries
+// neither the format allowlist nor -protocol_whitelist. The gate that closes
+// that is api.pullSourceUploadProblems, and it can only ask uploads.Verdict a
+// question about a NAME -- so something has to turn the URL back into one, and
+// a private copy of this parse in internal/api is a second spelling of the
+// format PullURL writes.
+//
+// TOLERANT IN EXACTLY THE WAYS ffmpeg.pullSource IS, and no others, because a
+// spelling that validation accepts and this rejects is a spelling that reaches
+// air ungated:
+//
+//   - surrounding whitespace, which pullSource trims;
+//   - a scheme in any case, which pullSource lowercases;
+//   - backslashes, which pullSource normalises to "/" before its own traversal
+//     check, so "file://uploads\show.ts" is a legal pull source on the platform
+//     where it is also a path.
+//
+// The directory segment is compared case-insensitively for the same reason:
+// two of the three platforms this builds for have case-insensitive filesystems,
+// so "file://Uploads/show.ts" reaches the same bytes there.
+//
+// It is deliberately NOT a validator. A name it returns has been through none
+// of Resolve's checks; every caller asks the store about it, and the store
+// refuses what is not a bare name inside the directory.
+func UploadFromPullURL(raw string) (string, bool) {
+	scheme, rest, ok := strings.Cut(strings.TrimSpace(raw), "://")
+	if !ok || !strings.EqualFold(scheme, "file") {
+		return "", false
+	}
+	dir, name, ok := strings.Cut(strings.ReplaceAll(rest, `\`, "/"), "/")
+	if !ok || !strings.EqualFold(dir, Dir) || name == "" || strings.Contains(name, "/") {
+		return "", false
+	}
+	return name, true
+}
+
 // partialPrefix marks bytes that are on disk but not published: a Pending, or
 // the leavings of a process that died mid-upload.
 const partialPrefix = ".partial-"
+
+// claimPrefix marks a name reservation held by a Commit in progress. It is
+// deliberately a partialPrefix name rather than a third prefix of its own:
+// Listable, List and playlistUploadProblems already refuse everything under
+// ".partial-", and Sweep already clears it, so a claim inherits all four rules
+// instead of needing them written again. A fourth rule would be a fourth place
+// to forget.
+const claimPrefix = partialPrefix + "claim-"
+
+// claimName is the reservation for a final name. Derived from the name rather
+// than random, because its whole job is that two Commits drawing the same
+// stored name collide on it -- see Pending.Commit.
+func claimName(stored string) string { return claimPrefix + stored }
 
 // Listable reports whether a stored filename is one this package will ever
 // offer as an upload.
@@ -901,6 +1018,110 @@ func (s *Store) List() ([]File, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
 	return out, nil
+}
+
+// SweepAfter is how old a leftover has to be before Sweep will remove it.
+//
+// An hour, which is far beyond anything a live upload can legitimately be
+// mid-flight for: MaxUploadBytes is 8 GiB and the probe that follows it is
+// bounded at thirty seconds, so a ".partial-" file older than this is not an
+// upload in progress under any transfer rate the endpoint will hold open.
+//
+// The age gate is what makes Sweep safe to call from somewhere other than
+// startup later without re-deriving the argument. Called at startup today,
+// where nothing is in flight at all.
+const SweepAfter = time.Hour
+
+// SweepResult is what one Sweep removed, for the caller to log.
+type SweepResult struct {
+	// Staged is the count of ".partial-" files removed -- staged bytes and
+	// name claims alike -- and StagedBytes is what they occupied.
+	Staged      int
+	StagedBytes int64
+	// Sidecars is the count of ".probe-" verdict records removed because the
+	// upload they describe is gone.
+	Sidecars int
+}
+
+// Empty reports whether this sweep found nothing, so a caller can stay quiet.
+func (r SweepResult) Empty() bool { return r.Staged == 0 && r.Sidecars == 0 }
+
+// Sweep removes what nothing else in the product ever will.
+//
+// #185. Two leftovers accumulate here and neither has an owner. A ".partial-"
+// file survives a process killed mid-upload, or a Discard whose os.Remove
+// failed; a ".probe-" sidecar survives an upload removed by something outside
+// this process. Neither is listable, selectable or nameable by a playlist item
+// -- that is what Listable bought, and it is why this was safe to defer -- but
+// both occupy the volume the database and the recorder share, forever, and the
+// free-space floor has no idea they are there. Bounded per incident by
+// MaxUploadBytes, which is 8 GiB, and unbounded across restarts.
+//
+// IT DOES NOT WALK, GLOB OR RECURSE. os.ReadDir of one directory and an
+// equality test per entry. A pattern built from a filename is a pattern
+// whatever wrote the filename controls, which this repository has already paid
+// for once (see api.handleDeleteMedia).
+//
+// A REMOVE THAT FAILS IS NOT AN ERROR THAT STOPS THE SWEEP. The one thing worse
+// than a leftover is a startup that refuses to boot over one, so a file that
+// cannot be removed is left, counted out, and the sweep goes on. The error
+// return is for a directory that cannot be read at all, which is a fact about
+// the volume the caller needs regardless.
+func (s *Store) Sweep(olderThan time.Duration) (SweepResult, error) {
+	var res SweepResult
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return res, err
+	}
+	// Present names, so a sidecar can be matched against the upload it claims
+	// to describe without a Stat per sidecar.
+	present := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			present[e.Name()] = true
+		}
+	}
+	cutoff := time.Now().Add(-olderThan)
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			continue
+		}
+		staged := strings.HasPrefix(name, partialPrefix)
+		sidecar := strings.HasPrefix(name, sidecarPrefix) && strings.HasSuffix(name, ".json")
+		if !staged && !sidecar {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		// AGE FIRST, for both. A staged file younger than the cutoff may be an
+		// upload still arriving; a sidecar younger than it may be the one
+		// Pending.Commit has just written and not yet renamed a file in beside
+		// -- and removing that one would turn a verified upload into an
+		// unrecorded one, which is a downgrade this package exists to prevent.
+		if info.ModTime().After(cutoff) {
+			continue
+		}
+		if sidecar {
+			// The name the sidecar describes: ".probe-" + stored + ".json".
+			stored := strings.TrimSuffix(strings.TrimPrefix(name, sidecarPrefix), ".json")
+			if stored == "" || present[stored] || present[claimName(stored)] {
+				continue
+			}
+		}
+		if err := os.Remove(filepath.Join(s.dir, name)); err != nil {
+			continue
+		}
+		if staged {
+			res.Staged++
+			res.StagedBytes += info.Size()
+		} else {
+			res.Sidecars++
+		}
+	}
+	return res, nil
 }
 
 // Delete removes one stored upload.
