@@ -165,6 +165,12 @@ func TestApplyingAPresetWithNoBodyUsesTheDefaultsTheListingAdvertises(t *testing
 			},
 		},
 		{
+			// NOTE: this case cannot discriminate on its own, and the sub-test
+			// below it is what does. A body carrying the advertised defaults is
+			// indistinguishable from a body that was thrown away, because the
+			// discard path applies those same defaults. Kept because it pins
+			// that a chunked body is at least not an ERROR; see
+			// TestAChunkedPresetBodyIsNotDiscarded for the half that bites.
 			name: "chunked, carrying the advertised defaults",
 			why: "the other half of the same -1: a chunked body that IS there. " +
 				"A length-gated handler throws it away and applies whatever its " +
@@ -239,8 +245,11 @@ func TestApplyingAPresetWithNoBodyUsesTheDefaultsTheListingAdvertises(t *testing
 
 // TestAReadTokenCompilesARealRoutingGraph pins the unusual half of the scope
 // rules: POST /routing/compile is on readScopeWritePatterns, so a read-scoped
-// token really can drive it. Every other POST in the API is 403 to that
-// principal.
+// token really can drive it. It is one of TWO -- POST /version/check is the
+// other (api.go's readScopeWritePatterns) -- and this comment said "every other
+// POST is 403" until a reviewer checked. Nearly-true is the shape that gets
+// quoted; the list is two entries long and is worth naming rather than
+// summarising.
 //
 // The route is already SWEPT by the ledger, but a sweep asserts a 2xx and the
 // absence of planted credentials. Neither notices a handler that answers 200
@@ -290,5 +299,62 @@ func TestAReadTokenCompilesARealRoutingGraph(t *testing.T) {
 	if out.Routing.Summary == "" {
 		t.Error("the compiled graph carries no summary; the destination card has " +
 			"nothing to say about what it is sending")
+	}
+}
+
+// TestAChunkedPresetBodyIsNotDiscarded is the half of the chunked case that can
+// fail.
+//
+// The sub-case above it sends a chunked body carrying the ADVERTISED DEFAULTS,
+// and a reviewer showed that cannot discriminate: revert the ContentLength fix
+// while keeping the defaults fix, and the old gate throws that body away and
+// applies exactly the defaults it was carrying. Same graph, green test. An
+// assertion whose expected value equals what the bug produces is not an
+// assertion.
+//
+// So this one sends a body the defaults CANNOT produce -- micTrack one below
+// the advertised value -- and requires the compiled graph to be the one that
+// body asks for. Under the length gate the body is discarded, the defaults
+// apply, and the graph names the advertised track instead.
+func TestAChunkedPresetBodyIsNotDiscarded(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	advertised := apitailPresetDefaults(t, h, sign)
+	if advertised.MicTrack == 0 {
+		t.Fatalf("the catalogue advertises micTrack 0, so there is no lower "+
+			"non-default value to distinguish a carried body from a discarded "+
+			"one: %+v", advertised)
+	}
+	off := advertised
+	off.MicTrack = advertised.MicTrack - 1
+
+	route := "/api/v1/routing/presets/mic-only"
+	body := fmt.Sprintf(`{"musicTrack":%d,"micTrack":%d,"surroundTrack":%d,"cleanTrack":%d}`,
+		off.MusicTrack, off.MicTrack, off.SurroundTrack, off.CleanTrack)
+
+	r := httptest.NewRequest(http.MethodPost, route, strings.NewReader(body))
+	r.ContentLength = -1 // every chunked request reports this, whatever it holds
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = "203.0.113.5:44444"
+	sign(r)
+
+	w := do(t, h, r)
+	apitailReached(t, w, "the session principal", "POST "+route)
+	if w.Code != http.StatusOK {
+		t.Fatalf("chunked apply answered %d: %s", w.Code, w.Body.String())
+	}
+	var got apitailCompiled
+	decodeInto(t, w.Body.Bytes(), &got)
+
+	wantLabel := fmt.Sprintf("[0:a:%d]", off.MicTrack)
+	if !strings.Contains(got.Routing.FilterComplex, wantLabel) {
+		t.Errorf("a CHUNKED body asking for micTrack %d compiled %q, which does not "+
+			"map %s. The body was discarded and the advertised defaults (micTrack "+
+			"%d) applied instead -- which is the ContentLength > 0 gate, still in "+
+			"place. A chunked request reports length -1 whatever it carries.",
+			off.MicTrack, got.Routing.FilterComplex, wantLabel, advertised.MicTrack)
+	}
+	if len(got.Routing.Tracks) != 1 || got.Routing.Tracks[0] != off.MicTrack {
+		t.Errorf("a chunked body asking for micTrack %d contributed tracks %v, want [%d]",
+			off.MicTrack, got.Routing.Tracks, off.MicTrack)
 	}
 }
