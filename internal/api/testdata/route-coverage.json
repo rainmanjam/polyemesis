@@ -14,7 +14,7 @@
     "swept": 55,
     "excused": 57,
     "denied": 99,
-    "nonTrieProbes": 11,
+    "nonTrieProbes": 12,
     "shapesEmitted": 11,
     "shapesNotInspected": 6
   },
@@ -1888,14 +1888,14 @@
       "shape": "json-body",
       "emitted": true,
       "inspected": true,
-      "by": "TestReadTokenReceivesNoCredentialOnAnyRoute",
+      "inspectedBy": "api.inspectJSONBody",
       "note": "the value sweep: real read-bearer bytes scanned for every planted sentinel"
     },
     {
       "shape": "response-header/Location",
       "emitted": true,
       "inspected": false,
-      "by": "",
+      "inspectedBy": "",
       "issue": "#168",
       "note": "the HTTPS redirect's Location carries the request URI verbatim, watch token included. The assertion lives in cmd/polyemesis (package main), out of this ledger's jurisdiction. rawResponse now renders EVERY response header, so the invariance sweep does read headers -- but only for the routes it sweeps, and the redirect is not one of them."
     },
@@ -1903,14 +1903,14 @@
       "shape": "response-header/Set-Cookie",
       "emitted": true,
       "inspected": true,
-      "by": "TestPlayoutCookieHandoffSurvives",
+      "inspectedBy": "api.inspectPlayoutCookie",
       "note": "the playout watch cookie"
     },
     {
       "shape": "response-header/Cache-Control",
       "emitted": true,
       "inspected": false,
-      "by": "",
+      "inspectedBy": "",
       "issue": "#168",
       "note": "whether a credential-bearing response may be stored. Same jurisdiction problem as response-header/Location above: asserted in package main, unasserted here for the routes outside the invariance sweep."
     },
@@ -1918,7 +1918,7 @@
       "shape": "response-header/Content-Disposition",
       "emitted": true,
       "inspected": false,
-      "by": "",
+      "inspectedBy": "",
       "issue": "#168",
       "note": "download filenames; media names only, no stored credential. RE-POINTED from #154, which commit ae8df24 announces closing: what remains is that the download routes are excused from the sweep entirely, so no principal-pair comparison reads their headers."
     },
@@ -1926,14 +1926,14 @@
       "shape": "streaming-media",
       "emitted": true,
       "inspected": true,
-      "by": "playoutManifestBytes",
-      "note": "the HLS manifest and its segments -- the shape a body sweep reads none of, and the one that escaped the previous audit"
+      "inspectedBy": "api.inspectStreamingManifest",
+      "note": "the HLS manifest and its segments -- the shape a body sweep reads none of, and the one that escaped the previous audit. The old `by` string named the playoutManifestBytes counterpart, which never reads a manifest: on the planted fixture that route answers a read token 50 bytes of {\"error\":\"this stream requires a playback token\"}. Correct behaviour, asserted by that excuse's Want -- and not this shape."
     },
     {
       "shape": "file-download",
       "emitted": true,
       "inspected": false,
-      "by": "",
+      "inspectedBy": "",
       "issue": "#168",
       "note": "recordings, stems, clips and exports. #154 decided this and is CLOSED by ae8df24: every download route now answers a read token 403, which the excuse registry drives. What is still uninspected is the shape itself for the principals entitled to it."
     },
@@ -1941,21 +1941,21 @@
       "shape": "websocket-frame",
       "emitted": true,
       "inspected": true,
-      "by": "websocketFrames + TestEveryEventTypeHasAWebSocketPolicy",
+      "inspectedBy": "api.inspectWebsocketFrame",
       "note": "one policy row per events.Type over a CLOSED table; an unclassified type fails the build and is dropped for a read scope"
     },
     {
       "shape": "sse",
       "emitted": false,
       "inspected": false,
-      "by": "",
+      "inspectedBy": "",
       "note": "ABSENT: this API emits no server-sent events"
     },
     {
       "shape": "mqtt-retained-topic",
       "emitted": true,
       "inspected": false,
-      "by": "",
+      "inspectedBy": "",
       "issue": "#160",
       "note": "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal and never any. Scrubbed at source by supervisor.scrub; the broker-side consumer audit is the deferral."
     },
@@ -1963,14 +1963,14 @@
       "shape": "on-disk-process-log",
       "emitted": true,
       "inspected": true,
-      "by": "TestRunningDestinationLeaksNoSentinelOnAnyEgress",
-      "note": "the file that goes into support tarballs; asserted from disk"
+      "inspectedBy": "api.inspectProcessLog",
+      "note": "the file that goes into support tarballs; asserted from disk. Its inspector needs a spawned child, so it runs under POLYEMESIS_LEDGER=strict with the counterpart proofs -- see the counterpart-proofs-outside-the-preflight deferral, which now covers it too."
     },
     {
       "shape": "slog-output",
       "emitted": true,
       "inspected": false,
-      "by": "",
+      "inspectedBy": "",
       "issue": "#160",
       "note": "the server's own structured log."
     }
@@ -1984,10 +1984,10 @@
       "issue": "#156"
     },
     {
-      "id": "not-found-probes-do-not-enter-the-asset-branch",
-      "what": "TestTheNonTrieSurfacesAreDriven/notFound reports coverage of the embedded-UI asset branch and, in every configuration this suite is actually run in, never enters it. internal/web/dist contains only .gitkeep unless the UI has been built, and CI does not build it before the Go job.",
-      "whySafe": "the branch that IS driven -- \"UI not built\" -- is the one a deployment without a built UI serves, and it is genuinely principal-invariant across the probes. The asset branch serves bytes from an embed.FS with no server state behind it.",
-      "whatWouldMakeItUnsafe": "any principal-dependent behaviour in the asset branch of web.Handler, which is exactly what this probe claims to cover and does not. Closing it needs the UI built before the Go job runs, which is a second CI build and a change outside this package; it is not half-wired here on purpose, because a probe that sometimes enters the branch is worse evidence than one that says it never does.",
+      "id": "built-ui-branches-are-driven-outside-the-mux",
+      "what": "the SPA and asset branches of internal/web are driven against a SYNTHETIC dist -- an index.html and one fingerprinted bundle -- through web.HandlerFor directly. Through the real chi mux, this checkout and CI both serve the bare filesystem, so the built column is not exercised end-to-end with requireAuth and the group middleware in front of it.",
+      "whySafe": "r.NotFound is mounted BELOW no middleware that varies by principal -- it is the mux's terminal handler and the same closure in both columns -- and the principal-invariance assertion the surface actually needs runs through the real mux over the real filesystem. What the synthetic column adds is branch reachability, which is a property of the closure and not of what is mounted above it.",
+      "whatWouldMakeItUnsafe": "middleware that rewrites a response on the way out, or an asset branch that ever consults the request's principal. Both would make the synthetic column's agreement with the mux an assumption rather than an observation, and the honest fix then is a CI job that builds the UI before the Go job.",
       "issue": "#167"
     },
     {
@@ -2048,7 +2048,7 @@
     },
     {
       "id": "counterpart-proofs-outside-the-preflight",
-      "what": "the two counterpart proofs that spawn a real FFmpeg stand-in -- runningDestinationLogs and websocketFrames -- run as ordinary tests and are therefore defeatable by `go test -run`, unlike everything else the ledger asserts.",
+      "what": "the two counterpart proofs that spawn a real FFmpeg stand-in -- runningDestinationLogs and websocketFrames -- run as ordinary tests and are therefore defeatable by `go test -run`, unlike everything else the ledger asserts. #176's shape inspectors join them: inspectProcessLog is marked LiveTools because the on-disk process.log only exists once a child has spawned and written, so it runs in strict mode with them rather than on every invocation. The other four inspectors run unconditionally in the preflight on the shared planted rig.",
       "whySafe": "CI sets POLYEMESIS_LEDGER=strict, which runs them from inside the preflight as well, so no single -run filter silences both paths. Once per process, not twice: the preflight returns immediately in TestMain's second pass. Measured, because the first version of this change reported +2% from `go test ./internal/api` and never ran the configuration CI uses. `POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...`, median of three: origin/main 301s, this branch before the fix 314s (+4.3%), after 299s. The preflight alone costs 22.2s in that configuration and 1.4s without it, which is the whole of the difference.",
       "whatWouldMakeItUnsafe": "CI dropping that variable. The reason they are not in the default preflight is ~15s of wall clock on every invocation, and a preflight nobody can afford to run is a preflight somebody deletes -- which returns all five issues at once.",
       "issue": "#161"
