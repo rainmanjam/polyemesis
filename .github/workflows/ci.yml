@@ -928,10 +928,25 @@ jobs:
         # own name attached rather than eating this job's whole 20 minutes.
         timeout-minutes: 6
         run: |
-          sudo apt-get update -qq
+          # RETRIES AND A PER-ACQUISITION TIMEOUT, because THIS is the install
+          # that has been failing. Three acceptance jobs hit the 6-minute
+          # ceiling here in one day -- acceptance-postprod, acceptance-pull and
+          # acceptance-mqtt -- every one of them stalled mid-fetch against
+          # azure.archive.ubuntu.com:
+          #
+          #   Get:48 .../noble/universe amd64 libavformat...
+          #   ##[error]The action 'Install FFmpeg' has timed out after 6 minutes.
+          #
+          # apt's default is ZERO retries and no per-connection timeout, so one
+          # slow mirror connection stalls the whole acquisition until the step
+          # ceiling fires. These three options are the supported way to bound
+          # that, and they bound it well inside the ceiling: at most 3 tries of
+          # 20s connect + 60s transfer per file.
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000"
+          sudo apt-get $APT_OPTS update -qq
           # lsof as well: three suites read the engine's relay port out of it
           # to measure the right socket, and they fail obscurely without it.
-          sudo apt-get install -y --no-install-recommends ffmpeg lsof
+          sudo apt-get $APT_OPTS install -y --no-install-recommends ffmpeg lsof
           ffmpeg -hide_banner -version | head -1
           # Not fatal: none of these suites needs SRT (the container ones do,
           # and they run elsewhere). Logged because a suite behaving oddly is
