@@ -8,6 +8,35 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Security
+
+- **Your MQTT broker password was echoed back in a validation error, and
+  logged every five seconds.** A broker URL written with the credential inline
+  — `mqtt://user:password@host:1883` — reached two places that repeated the URL
+  verbatim.
+
+  `MQTTSettings.problems()` builds the messages `Settings.Validate` joins into
+  the **`400` body a settings save returns**, so the password came back over the
+  wire to whoever submitted it. `parseBroker` wrapped the parse failure into the
+  connection error, which the reconnect loop wrote to the log as an **`Error`
+  line on every retry**.
+
+  Two separate branches leaked, and the guard meant to prevent exactly this
+  reached neither. `mqtt://user:pw@` parses cleanly and has no host, so the
+  no-host message — which echoed the whole URL — fired before the credentials
+  check ever ran. And `mqtt://user:pw@ho st:1883` does not parse at all, so the
+  credentials check *could* not run: `url.Error.Error()` renders as
+  `parse "<the whole URL>": <reason>`, carrying the password inside the wrapped
+  error with no string concatenation anywhere in our code.
+
+  Both messages now state the fault without repeating the input, and the
+  credentials check runs first where a URL parses at all.
+
+  **If you have ever saved a broker URL with a password in it, rotate that
+  broker credential.** Upgrading stops new copies being written; it cannot
+  remove the copies already in your logs, or in whatever collected those `400`
+  responses.
+
 ### Changed
 
 - **BREAKING: a `read` API token gets metadata, not content.** Thirteen routes
@@ -97,8 +126,6 @@ its first tagged release.
   second. The log line is unchanged and still records both, because whoever is
   working out why an encoder will not connect needs the first one too.
 
-### Fixed
-
 - **`POST /routing/presets/{preset}` now applies the defaults it advertises.**
   A request with no body used to run on Go's zero value for every track index
   rather than on the OBS-convention defaults `GET /routing/presets` publishes
@@ -139,6 +166,18 @@ its first tagged release.
   unredacted body — arrives in a cookie, so a shared cache keyed on
   `Authorization` alone filed their response under the same key as every
   anonymous caller's.
+
+- **Masked URL segments came back percent-encoded.** A redacted path segment in
+  a `/sources` or `/settings` body rendered as `%5Bredacted%5D` rather than
+  `[redacted]`, because the mask is written into the URL and `url.String`
+  escapes its brackets. Cosmetic, but it landed in the one place a reader is
+  least equipped to tell a deliberate omission from a bug.
+
+- **The startup banner no longer prints an ingest port in pull mode.** Pull
+  dials out and has no inbound port, so `ingest      pull (port 6000)` read as
+  "point the encoder at 6000" — an instruction that can never work, and one
+  that sends you to your firewall to debug a port that was never in the path.
+  It now reads `pull (dials out; no inbound port)`.
 
 ## [0.6.0] — 2026-08-09
 
