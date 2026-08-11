@@ -1847,7 +1847,7 @@ func (e *Engine) teardownBackup(b *backupIngest) {
 	}
 	if b.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		b.proc.Stop(ctx)
+		_ = b.proc.Stop(ctx)
 		cancel()
 	}
 	if b.hub != nil {
@@ -2341,7 +2341,7 @@ func (e *Engine) teardownPlaylist(p *playlistTier) {
 	}
 	if p.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		p.proc.Stop(ctx)
+		_ = p.proc.Stop(ctx)
 		cancel()
 	}
 	if p.hub != nil {

@@ -3,7 +3,6 @@ package meters
 import (
 	"bufio"
 	"math"
-	"net"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The whole claim of this tier is that it measures what a DESTINATION sends,
@@ -111,7 +111,23 @@ func measureTrack(t *testing.T, ffmpeg string, src routing.Source, p routing.Pro
 
 	// The analyser binds the port; the source must not start pushing before it
 	// has, or the first seconds land in nothing.
-	time.Sleep(700 * time.Millisecond)
+	//
+	// #211: this was `time.Sleep(700 * time.Millisecond)` -- an interval assumed
+	// away. The observable already existed in the shell suites as
+	// poly_wait_port_ready, where it was measured to be the entire residual flake
+	// rate of acceptance-failover; it did not exist in Go. WaitUDPPortBound is
+	// that observer: it asks the kernel whether the port is taken, which is the
+	// same question the shell asks lsof.
+	//
+	// Named as a hard failure rather than a warning because everything below
+	// depends on it. A source pushing into an unbound port produces a frame count
+	// of zero and a "the analyser printed no usable frame" three seconds later,
+	// which describes the wrong component.
+	if !testenv.WaitUDPPortBound(port, 10*time.Second) {
+		t.Fatalf("the analyser never bound udp 127.0.0.1:%d in 10s, so every datagram the "+
+			"source is about to push would land in nothing and the measurement below would "+
+			"blame the meter for it", port)
+	}
 
 	source := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", "sine=f=1000:d=8",
@@ -142,13 +158,9 @@ func measureTrack(t *testing.T, ffmpeg string, src routing.Source, p routing.Pro
 	return last
 }
 
+// #211 found four copies of this helper and this is the fifth. One
+// implementation now, in internal/testenv.
 func freeUDPPort(t *testing.T) int {
 	t.Helper()
-	c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatalf("pick port: %v", err)
-	}
-	port := c.LocalAddr().(*net.UDPAddr).Port
-	_ = c.Close()
-	return port
+	return testenv.FreeUDPPort(t)
 }

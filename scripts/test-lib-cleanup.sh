@@ -103,13 +103,18 @@ if ! hold_port; then
 	exit 1
 fi
 ( sleep 1; kill "$HOLDER" 2>/dev/null ) &
+releaser=$!
 out=$(poly_free_port "$PORT" 2>&1)
 if printf '%s' "$out" | grep -q "reclaiming it"; then
 	bad "a port released inside the grace period was reported as reclaimed by force"
 else
 	ok "a port released during the wait is not reported as a leak"
 fi
-wait 2>/dev/null
+# `wait "$releaser"` and not a bare `wait`: a bare wait blocks on every job this
+# shell has, including any future one somebody adds above, and this file is the
+# one that argues unbounded waits in teardown are the defect. The releaser is a
+# `sleep 1` and a kill, so waiting on it by pid is bounded by construction.
+wait "$releaser" 2>/dev/null
 
 step "4. Waiting for a listener returns as soon as one appears"
 # The inverse of the reclaim, and the fix for the residual flake: a publisher
@@ -230,8 +235,123 @@ else
 	bad "poly_wait_jobs failed with no background jobs running"
 fi
 
+step "9. The teardown verdict reaches the suite's exit status"
+# poly_cleanup's verdict used to be a printed opinion: it returned 1 and the
+# only caller was `trap 'poly_watchdog_disarm; cleanup' EXIT`, whose status is
+# discarded. A green `acceptance:` job was therefore never evidence that
+# teardown succeeded -- and the next suite in the matrix is the one that pays,
+# because it binds the port the last one failed to release.
+#
+# Driven END TO END through a real EXIT trap in a real subshell script rather
+# than by calling poly_cleanup_exit directly, because the half that was missing
+# was never the arithmetic -- it was the wiring: where `$?` is captured, and
+# whether the trap exits with it.
+#
+# THE FIXTURE SOURCES THE REAL LIBRARY and overrides only poly_cleanup, so the
+# precedence under test is the shipped poly_cleanup_exit and the trap line is
+# the shipped one (asserted verbatim against all twelve suites in case 10).
+#
+# poly_watchdog_disarm is stubbed to `:`, which SETS $? TO 0 -- exactly what the
+# real one does, since it ends in `kill` and `wait`. Passing `$?` as an ARGUMENT
+# is what makes that harmless: the shell expands it while assembling the call,
+# before anything in the trap runs. Sub-case (c) is what notices if it stops
+# being expanded there.
+TRAP_SHAPE="trap 'poly_teardown_trap \$? cleanup' EXIT"
+
+WORK9="$(mktemp -d)"
+# shellcheck disable=SC2016  # these single quotes are script text being WRITTEN,
+# not shell to expand here.
+make_suite() { # make_suite <path> <teardown-rc> <body-exit>
+	local path="$1" teardown_rc="$2" body_exit="$3"
+	{
+		echo '#!/usr/bin/env bash'
+		echo 'set -uo pipefail'
+		echo ". \"$SCRIPTS/lib-cleanup.sh\""
+		echo 'poly_watchdog_disarm() { :; }'
+		echo "poly_cleanup() { return $teardown_rc; }"
+		echo 'cleanup() { poly_cleanup_exit "${1:-0}" 19999; }'
+		echo "$TRAP_SHAPE"
+		echo "exit $body_exit"
+	} > "$path"
+	chmod +x "$path"
+	return
+}
+
+suite_status() { # suite_status <teardown-rc> <body-exit>
+	local teardown_rc="$1" body_exit="$2"
+	make_suite "$WORK9/suite.sh" "$teardown_rc" "$body_exit"
+	bash "$WORK9/suite.sh" >/dev/null 2>&1
+	echo $?
+}
+
+# (a) THE CENTRAL CASE. Body passed, teardown did not: the run is not a pass.
+got=$(suite_status 1 0)
+if [ "$got" -ne 0 ]; then
+	ok "a suite whose teardown FAILED exits non-zero (got $got)"
+else
+	bad "a suite exited 0 with a failed teardown -- the verdict is still a printed opinion, and a green acceptance job still means nothing about teardown"
+fi
+
+# (b) The other side of it. A gate that always failed would satisfy (a).
+got=$(suite_status 0 0)
+if [ "$got" -eq 0 ]; then
+	ok "a suite that passed with a clean teardown still exits 0"
+else
+	bad "a passing suite with a clean teardown exited $got -- every run in the matrix would now be red for no reason"
+fi
+
+# (c) The expensive mistake this shape exists to avoid, twice over: a red suite
+# must keep its OWN status. Reading it as 0 (captured after the disarm) turns a
+# failure green; renumbering it to 1 loses which failure it was.
+got=$(suite_status 0 3)
+if [ "$got" -eq 3 ]; then
+	ok "a suite whose body FAILED keeps its own status (3) through a clean teardown"
+else
+	bad "a suite that exited 3 came out as $got -- either \$? was captured after poly_watchdog_disarm clobbered it, or the teardown renumbered a product failure"
+fi
+
+# (d) And still its own, when the teardown ALSO failed. A generic teardown
+# status overwriting a specific product one is the misdirection this whole
+# class costs hours to.
+got=$(suite_status 1 3)
+if [ "$got" -eq 3 ]; then
+	ok "a failed teardown does not overwrite the body's status (still 3)"
+else
+	bad "a suite that exited 3 came out as $got once teardown also failed -- a teardown problem is now indistinguishable from a product one"
+fi
+rm -rf "$WORK9"
+
+step "10. Every suite installs that exact trap, not its own variant"
+# Case 9 proves the SHAPE works. This proves the shape is what the suites
+# actually carry -- twelve files is eleven chances to drift, and a suite that
+# quietly reverted to `trap 'poly_watchdog_disarm; cleanup' EXIT` would go back
+# to discarding the verdict while every check above still passed.
+#
+# Identity, not count: the offending files are named.
+SUITES="acceptance.sh acceptance-audio.sh acceptance-encoders.sh acceptance-failover.sh
+acceptance-mqtt.sh acceptance-playlist-phase0.sh acceptance-postprod.sh acceptance-pull.sh
+acceptance-recording-stop.sh acceptance-renditions.sh acceptance-synth.sh acceptance-tls.sh"
+missing=""
+checked=0
+for s in $SUITES; do
+	if [ ! -f "$SCRIPTS/$s" ]; then
+		missing="$missing $s(absent)"
+		continue
+	fi
+	checked=$((checked + 1))
+	grep -Fqx "$TRAP_SHAPE" "$SCRIPTS/$s" || missing="$missing $s"
+	grep -q "poly_cleanup_exit" "$SCRIPTS/$s" || missing="$missing $s(no-poly_cleanup_exit)"
+done
+if [[ "$checked" -ne 12 ]]; then
+	bad "only $checked of 12 named suites exist; a renamed suite would make this check pass by examining nothing"
+elif [ -n "$missing" ]; then
+	bad "these suites do not carry the shared trap shape:$missing"
+else
+	ok "all 12 suites carry the shared trap and call poly_cleanup_exit"
+fi
+
 total=$((pass + fail))
-EXPECTED_CHECKS=12
+EXPECTED_CHECKS=17
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

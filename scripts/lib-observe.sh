@@ -229,6 +229,122 @@ poly_poll_field() {
   return 1
 }
 
+# Set by poly_hold_field: the value the field settled on, and how many times it
+# was seen to change. Both are for the caller's message -- "held at 6" and
+# "moved 31 times" are the two sentences a reader needs and neither is
+# recoverable from the return code.
+POLY_HELD_VALUE=""
+POLY_HELD_CHANGES=0
+
+# poly_hold_field <label> <field-idx> <hold-secs> <ceiling-secs> <line-sampler-fn> [args...]
+#
+# THE CEILING HALF OF AN ASSERTION WHOSE FLOOR IS ALREADY CHECKED.
+#
+# poly_poll_field waits for a field to REACH a value. This waits for a field to
+# STOP MOVING: it returns 0 once one value has held for <hold-secs> within
+# <ceiling-secs>, and 1 otherwise, printing the trajectory of everything it saw.
+#
+# Issue #226 is why it exists. `acceptance-failover.sh` asserted its switch count
+# with `-ge 2` and nothing else, and a wrong-hub mutation that made the tier
+# switch 80 times where the baseline switches 6 PASSED that check -- 80 is not
+# fewer than 2. Failover's failure mode is not "too few switches"; it is
+# flapping, and flapping sails past any floor.
+#
+# A CONSTANT CEILING IS THE WRONG FIX and was rejected before this was written.
+# The legitimate switch count in that suite is timing-dependent -- the script's
+# own measurements show switches landing at roughly 13s and 36s depending on how
+# the sweep and the grace period line up -- so any number picked for `-le` is
+# either so loose it admits flapping or so tight it fails correct code. What is
+# NOT timing-dependent is that a tier nobody is asking to switch stops switching.
+# That is a stability predicate, it needs no magic number, and it is what this
+# measures.
+#
+# The field is compared, the whole LINE is recorded, for the same reason
+# poly_poll_field does it: the report then shows the fields nobody was watching.
+poly_hold_field() {
+  local label="$1" idx="$2" hold="$3" secs="$4" fn="$5"; shift 5
+  local start now line cur prev="" held_since=0 samples=0 deadline
+  poly__traj_reset
+  POLY_HELD_VALUE=""
+  POLY_HELD_CHANGES=0
+  start=$(date +%s)
+  deadline=$((start + secs))
+  while :; do
+    line="$("$fn" "$@" 2>&1)"
+    cur="$(printf '%s' "$line" | awk -v n="$idx" '{print $n}')"
+    samples=$((samples + 1))
+    poly__traj_add "$samples" "$line"
+    now=$(date +%s)
+    # DELIBERATELY `[` AND NOT `[[` ON BOTH LINES BELOW. Neither is a style
+    # holdout; each would change what this loop decides.
+    #
+    # `[ "$cur" != "$prev" ]`: $prev is an awk-extracted field of a live status
+    # line, not a literal, so under `[[` it is a PATTERN. Let it ever hold `*`
+    # and `[[ $cur != $prev ]]` is false for every $cur, held_since never
+    # resets, and a field that is still moving is reported as settled -- the
+    # exact defect case 9 of scripts/test-lib-observe.sh exists to catch.
+    #
+    # `-ge "$hold"`: $hold is the caller's argument and is never validated here.
+    # `[` rejects a non-integer loudly (rc 2, "integer expected") and the elif
+    # stays false; `[[` evaluates it as an ARITHMETIC EXPRESSION, so a
+    # non-numeric $hold reads as 0, `elapsed -ge 0` is always true, and the
+    # first sample is reported as settled. Measured: `[` and `[[` diverge on
+    # every non-plain-decimal operand, including `08` and `1+1`.
+    if [ "$samples" -eq 1 ] || [ "$cur" != "$prev" ]; then
+      [ "$samples" -gt 1 ] && POLY_HELD_CHANGES=$((POLY_HELD_CHANGES + 1))
+      prev="$cur"
+      held_since=$now
+    elif [ $((now - held_since)) -ge "$hold" ]; then
+      POLY_HELD_VALUE="$cur"
+      POLY_WAIT_ELAPSED=$((now - start))
+      return 0
+    fi
+    [ "$now" -ge "$deadline" ] && break
+    sleep "$POLY_POLL_INTERVAL"
+  done
+  POLY_HELD_VALUE="$prev"
+  POLY_WAIT_ELAPSED=$(( $(date +%s) - start ))
+  printf '        watched %s for %ss (ceiling %ss, %d samples); field %d never held one value for %ss\n' \
+    "$label" "$POLY_WAIT_ELAPSED" "$secs" "$samples" "$idx" "$hold"
+  printf '        it changed %d time(s) and was last %s\n' "$POLY_HELD_CHANGES" "${prev:-(empty)}"
+  poly__traj_print
+  return 1
+}
+
+# poly_detectable_floor <runs> [confidence-percent]
+#
+# The smallest per-run failure rate, as a percentage, that <runs> repetitions
+# would catch at least <confidence>% of the time. Prints it to stdout; returns 1
+# without printing on an input it cannot use.
+#
+# ISSUE #206. .github/workflows/flake-rate.yml publishes "0 failed / 5 runs" and
+# that sentence is read as "the suite is not flaky". It is not what was
+# measured. Five repetitions of a suite whose true per-run failure rate is 20%
+# come back all-green about one time in three; at the default of 5 runs nothing
+# below a rate of about 45% is detected with any confidence worth the word.
+#
+# The arithmetic is the only part of this that is not obvious, and it is one
+# line: the chance of N independent runs ALL passing is (1-p)^N, so the rate
+# that gets caught with probability c is where (1-p)^N = 1-c, which is
+# p = 1 - (1-c)^(1/N).
+#
+# Printing it turns a green report from a claim into a bounded one. A zero-
+# failure result at N=5 means "no rate above ~45% is present", which is a
+# genuinely different statement from "not flaky" and is the one the instrument
+# can actually support.
+poly_detectable_floor() {
+  local runs="$1" conf="${2:-95}"
+  case "$runs" in ''|*[!0-9]*) return 1 ;; esac
+  case "$conf" in ''|*[!0-9]*) return 1 ;; esac
+  # DELIBERATELY `[`. The case above admits any all-digit $runs, and that
+  # includes leading zeros. `[ 08 -ge 1 ]` is true (decimal 8); `[[ 08 -ge 1 ]]`
+  # is an arithmetic context where `08` is an invalid octal literal, so it
+  # errors and the `|| return 1` rejects an input this function accepts today.
+  [ "$runs" -ge 1 ] || return 1
+  [ "$conf" -ge 1 ] && [ "$conf" -le 99 ] || return 1
+  awk -v n="$runs" -v c="$conf" 'BEGIN { printf "%.1f\n", 100 * (1 - exp(log(1 - c/100) / n)) }'
+}
+
 # poly_docker_postmortem <container>
 #
 # What a container check should print instead of asserting a cause. Every line

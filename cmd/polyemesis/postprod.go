@@ -105,6 +105,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	// The stored history bound, applied once at startup. Nothing else calls
 	// Purge, and a job row is tiny — but "tiny forever" is still a leak.
 	// Re-read every sweep rather than captured here: see purgeJobHistoryLoop.
+	exportDir := clipper.ExportDirIn(cfg.RecordingsDir())
 	go purgeJobHistoryLoop(ctx, log, q, func() db.PostProdSettings {
 		s, err := store.GetSettings()
 		if err != nil {
@@ -115,7 +116,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 			return db.PostProdSettings{}
 		}
 		return s.PostProd
-	}, jobPurgeEvery)
+	}, exportDir, jobPurgeEvery)
 
 	// Existing installs get their sessions built from the recordings already
 	// indexed, so upgrading does not look like losing your history. Idempotent
@@ -338,11 +339,15 @@ const jobPurgeEvery = time.Hour
 // is the same instant.
 //
 // every is a parameter so the test can drive it without waiting an hour.
+// exportDir is where clip exports live, so the sweep can delete the file a
+// purged clip.export owned. It is a parameter rather than read off the engine
+// because this loop must keep working when there is no clip export in sight,
+// and an empty string simply means "purge rows, touch nothing on disk".
 func purgeJobHistoryLoop(ctx context.Context, log *slog.Logger, q *jobs.Queue,
-	settings func() db.PostProdSettings, every time.Duration) {
+	settings func() db.PostProdSettings, exportDir string, every time.Duration) {
 	// Once immediately, so a restart reflects whatever is stored rather than
 	// waiting out the first tick.
-	purgeJobHistory(log, q, settings())
+	purgeJobHistory(log, q, settings(), exportDir)
 
 	tick := time.NewTicker(every)
 	defer tick.Stop()
@@ -351,7 +356,7 @@ func purgeJobHistoryLoop(ctx context.Context, log *slog.Logger, q *jobs.Queue,
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			purgeJobHistory(log, q, settings())
+			purgeJobHistory(log, q, settings(), exportDir)
 		}
 	}
 }
@@ -359,19 +364,38 @@ func purgeJobHistoryLoop(ctx context.Context, log *slog.Logger, q *jobs.Queue,
 // purgeJobHistory applies the stored retention bound. RetainDays 0 means "keep
 // forever", which is why it is checked rather than turned into a zero cutoff
 // that would delete the lot.
-func purgeJobHistory(log *slog.Logger, q *jobs.Queue, p db.PostProdSettings) {
+func purgeJobHistory(log *slog.Logger, q *jobs.Queue, p db.PostProdSettings, exportDir string) {
 	if p.RetainDays <= 0 {
 		return
 	}
 	cutoff := time.Now().AddDate(0, 0, -p.RetainDays)
-	n, err := q.Purge(cutoff, p.RetainJobs)
+	purged, err := q.Purge(cutoff, p.RetainJobs)
 	if err != nil {
 		log.Warn("cannot purge the job history", "error", err)
 		return
 	}
-	if n > 0 {
-		log.Info("purged finished jobs", "count", n, "olderThanDays", p.RetainDays)
+	if len(purged) == 0 {
+		return
 	}
+	// The scheduled half of #222, and the half that made it urgent: this runs
+	// on a timer nobody is watching, so a clip export purged here is stranded
+	// without anyone present to notice the disk did not go down.
+	files := 0
+	if exportDir != "" {
+		for _, j := range purged {
+			removed, err := clipper.RemoveExport(exportDir, j)
+			if err != nil {
+				log.Warn("purged a clip export job but could not delete its file",
+					"job", j.ID, "error", err)
+				continue
+			}
+			if removed {
+				files++
+			}
+		}
+	}
+	log.Info("purged finished jobs", "count", len(purged),
+		"exportFilesDeleted", files, "olderThanDays", p.RetainDays)
 }
 
 // backfillSessions groups the recordings that were indexed before sessions

@@ -64,7 +64,10 @@ func main() {
 	if err := src.Start(); err != nil {
 		die("start source: %v", err)
 	}
-	defer func() { _ = src.Process.Kill() }()
+	// Kill AND Wait. Kill only asks; until something reaps the child it is a
+	// zombie holding a slot in this process's table, and on a driver that
+	// starts several children in sequence that is a leak with a name (#197).
+	defer func() { _ = src.Process.Kill(); _ = src.Wait() }()
 
 	fmt.Println("waiting for the engine to probe the track layout")
 	deadline := time.Now().Add(40 * time.Second)

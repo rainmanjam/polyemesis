@@ -389,8 +389,10 @@ type Store interface {
 	// DeleteJob removes a job row.
 	DeleteJob(id int64) error
 	// PurgeJobs deletes terminal jobs that finished before cutoff, keeping at
-	// least keep of the newest regardless of age.
-	PurgeJobs(cutoff time.Time, keep int) (int, error)
+	// least keep of the newest regardless of age. It returns the rows it
+	// deleted so a caller can clean up whatever they owned outside the
+	// database -- a count names nothing, and the row is the last reference.
+	PurgeJobs(cutoff time.Time, keep int) ([]Job, error)
 }
 
 func clampInt(v, lo, hi int) int {

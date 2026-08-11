@@ -87,12 +87,7 @@ func urlSecrets(raw string) []string {
 		return nil
 	}
 	var out []string
-	if u.User != nil {
-		if pw, ok := u.User.Password(); ok {
-			out = append(out, pw)
-		}
-		out = append(out, u.User.Username())
-	}
+	out = append(out, userinfoSecrets(raw, u)...)
 	for k, vs := range u.Query() {
 		if alerts.SecretName(k) {
 			out = append(out, vs...)
@@ -102,6 +97,78 @@ func urlSecrets(raw string) []string {
 		out = append(out, parts[len(parts)-1])
 	}
 	return out
+}
+
+// userinfoSecrets is the username and password of a URL in BOTH the spelling
+// url.URL gives them and the spelling the argv actually carries.
+//
+// #229's residual, and the reason it is a function rather than four lines
+// inline: url.URL.User DECODES. On
+//
+//	rtsp://user:p%40ssw0rd%21@cam.example.com/stream/1
+//
+// u.User.Password() returns `p@ssw0rd!`, and SecretSet.Scrub is a SUBSTRING
+// replacement over the argv the kernel was handed -- which contains
+// `p%40ssw0rd%21`. The decoded literal matches nothing there, so the password
+// was rendered verbatim into GET /api/v1/processes, a route a READ-SCOPED
+// TOKEN CAN REACH. Every character that forces percent-encoding -- @ / ! # : %
+// -- is ordinary in a generated credential, so this was not an exotic shape.
+//
+// Both spellings are emitted rather than only the raw one. They are identical
+// whenever the password needs no encoding, and SecretSet already de-duplicates
+// and drops anything under alerts.MinSecretLen; where they differ, the decoded
+// form is what a log line built from url.URL rather than from argv would carry.
+// Over-masking is the safe direction here and is the direction the ledger's own
+// note on MinSecretLen argues for.
+//
+// The raw halves are cut out of the ORIGINAL TEXT for the same reason
+// belowAuthority is: u.User.String() re-spells its input, and a literal that
+// has been re-spelled is a literal that no longer matches the bytes on the
+// command line.
+func userinfoSecrets(raw string, u *url.URL) []string {
+	var out []string
+	if u.User != nil {
+		if pw, ok := u.User.Password(); ok {
+			out = append(out, pw)
+		}
+		out = append(out, u.User.Username())
+	}
+	if user, pass := rawUserinfo(raw); user != "" || pass != "" {
+		if pass != "" {
+			out = append(out, pass)
+		}
+		if user != "" {
+			out = append(out, user)
+		}
+	}
+	return out
+}
+
+// rawUserinfo returns the userinfo exactly as it was typed: the bytes between
+// "://" and the '@' that ends the authority, split at the first ':'.
+//
+// The authority is bounded at the first '/', '?' or '#' BEFORE the '@' is
+// sought, so a path containing an '@' -- legal, and ordinary in S3-style URLs
+// -- cannot be mistaken for a credential separator. LastIndex within that
+// bound, because an '@' may appear inside the password itself.
+func rawUserinfo(raw string) (user, pass string) {
+	i := strings.Index(raw, "://")
+	if i < 0 {
+		return "", ""
+	}
+	authority := raw[i+3:]
+	if j := strings.IndexAny(authority, "/?#"); j >= 0 {
+		authority = authority[:j]
+	}
+	at := strings.LastIndex(authority, "@")
+	if at < 0 {
+		return "", ""
+	}
+	info := authority[:at]
+	if c := strings.Index(info, ":"); c >= 0 {
+		return info[:c], info[c+1:]
+	}
+	return info, ""
 }
 
 // pullURLSecrets is urlSecrets for a PULL URL, where everything below the
@@ -172,12 +239,7 @@ func pullURLSecrets(raw string) []string {
 		return nil
 	}
 	var out []string
-	if u.User != nil {
-		if pw, ok := u.User.Password(); ok {
-			out = append(out, pw)
-		}
-		out = append(out, u.User.Username())
-	}
+	out = append(out, userinfoSecrets(raw, u)...)
 	if below := belowAuthority(raw); below != "" {
 		out = append(out, below)
 	}

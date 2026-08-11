@@ -833,6 +833,12 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			Enabled: settings.Failover.Playlist.Enabled,
 			Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
 		}
+		// The two stored pull URLs, for the same reason and taken at the same
+		// moment. Plain strings need no copy -- a string value IS a snapshot,
+		// where the playlist above is a slice whose backing array the decode
+		// can rewrite in place. See pullSourceUploadProblems.
+		storedPullURL := settings.Ingest.Pull.URL
+		storedBackupPullURL := settings.Failover.Backup.Pull.URL
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -888,6 +894,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// that is not the one about to be stored or holding the check open
 		// across the write. Recorded rather than claimed away.
 		if err := s.playlistUploadProblems(settings.Failover.Playlist, storedPlaylist); err != nil {
+			return badRequestError{err.Error()}
+		}
+		// The same rule for the OTHER way a stored upload reaches an FFmpeg: a
+		// pull source naming one. That path bypasses ffmpeg.ProbeFile's format
+		// allowlist entirely, so a file this server was never allowed to inspect
+		// must not be routed to air through it. #201.
+		if err := s.pullSourceUploadProblems(*settings, storedPullURL, storedBackupPullURL); err != nil {
 			return badRequestError{err.Error()}
 		}
 		return nil
@@ -1386,6 +1399,15 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 	// destination whose URL the platform refuses is enabled and not running,
 	// and the UI, told only "enabled", drew it as started. Reading the process
 	// state back means a success response is evidence that something happened.
+	//
+	// AND WHICH EFFECT (#209). "Reading the process state back" is only evidence
+	// that something happened -- it is not evidence of WHICH thing, because
+	// supervisor.stop() sets StateStopped on BOTH of its arms: the one where the
+	// child was reaped, and the one where the deadline expired, SIGKILL was
+	// issued and nobody waited. Those have different consequences for whoever
+	// asked: the second means a process that may still be running is still
+	// holding, and still publishing to, what this response has just declared
+	// free. So a stop reports `reaped`, and says why when it is false.
 	resp := map[string]any{"enabled": enabled}
 	for _, d := range s.eng().Status().Destinations {
 		if d.ID != id {
@@ -1396,6 +1418,12 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		}
 		if d.Error != "" {
 			resp["error"] = d.Error
+		}
+		if !enabled {
+			resp["reaped"] = d.StopWarning == ""
+			if d.StopWarning != "" {
+				resp["warning"] = d.StopWarning
+			}
 		}
 		break
 	}

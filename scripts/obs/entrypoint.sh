@@ -3,6 +3,12 @@
 # harder than "run obs".
 set -euo pipefail
 
+# The bounded stop at the foot of this file. A separate file because a container
+# entrypoint cannot be unit-tested and that function can be -- see #208, where a
+# blind edit to these last two lines was the thing being avoided.
+# shellcheck source=scripts/obs/lib-stop.sh
+. "$(dirname "$0")/lib-stop.sh"
+
 RTMP_URL="${RTMP_URL:-rtmp://host.docker.internal:1935/live}"
 RTMP_KEY="${RTMP_KEY:-}"
 TRACKS="${TRACKS:-3}"
@@ -166,9 +172,34 @@ log "configured: $TRACKS track(s) -> $RTMP_URL"
 if [ "${1:-}" = "shell" ]; then exec /bin/bash; fi
 
 # ---- go ------------------------------------------------------------------
-obs --startstreaming --minimize-to-tray --disable-updater --verbose 2>&1 | sed 's/^/  [obs] /' &
+# PROCESS SUBSTITUTION, NOT A PIPELINE, and the difference is the whole of #208.
+#
+# This used to be `obs ... 2>&1 | sed 's/^/  [obs] /' &` followed by
+# `OBS_PID=$!`. After a pipeline `$!` is the LAST element, so OBS_PID named the
+# log prefixer. The `kill -TERM` below killed sed, OBS carried on with its stdout
+# closed, and the `wait` returned the instant sed was reaped -- which is why this
+# never hung and also never stopped OBS.
+#
+# `> >(sed ...) 2>&1 &` backgrounds obs ITSELF, so `$!` is obs. The `[obs]`
+# prefix on every line is unchanged; only which process the shell is holding is.
+obs --startstreaming --minimize-to-tray --disable-updater --verbose \
+	> >(sed 's/^/  [obs] /') 2>&1 &
 OBS_PID=$!
 sleep "$SECONDS_TO_STREAM"
 log "stopping"
-kill -TERM "$OBS_PID" 2>/dev/null || true
-wait "$OBS_PID" 2>/dev/null || true
+
+# BOUNDED, and it re-observes. `kill -TERM` then an unbounded `wait` is #179's
+# body, and it is latent here only for as long as the signal goes to the wrong
+# process; the line above just fixed that. poly_bounded_stop asks, watches for
+# 20s, escalates to SIGKILL, watches again, and reports loudly rather than
+# blocking for ever. 20s because OBS finalises its RTMP session and flushes its
+# encoders on the way out and this container has no GPU, so the shutdown is
+# software-encoded; the ceiling is a blast radius, not a fitted measurement.
+if ! poly_bounded_stop "$OBS_PID" obs 20 5; then
+	log "OBS outlived SIGKILL; the container runner is now the only thing that will reclaim it"
+fi
+
+# The prefixer drains what OBS wrote on its way out. This sleep is AFTER the
+# death has been observed, so it is a flush and not a wait on a death that may
+# never come -- which is the distinction the rest of this file is about.
+sleep 1

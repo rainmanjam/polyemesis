@@ -1,0 +1,20 @@
+package fixture
+
+// GREEN: every no-argument Stop in the tree. These are tickers, timers, servers
+// and engines; none of them returns an error a caller could act on, and the
+// arity test is what keeps the several dozen `defer tick.Stop()` sites out of
+// this rule's jurisdiction.
+
+import "time"
+
+type server interface{ Stop() }
+
+func run(s server, e server) {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	timer := time.NewTimer(time.Second)
+	timer.Stop()
+	s.Stop()
+	e.Stop()
+	go func() { s.Stop() }()
+}

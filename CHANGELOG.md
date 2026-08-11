@@ -10,6 +10,32 @@ its first tagged release.
 
 ### Security
 
+- **A busy server stopped inspecting uploads, and the caller chose when.** The
+  four-slot semaphore that bounds concurrent `ffprobe` children waited for its
+  slot *inside* the probe's own 30-second deadline, so a queued upload could
+  spend the whole budget waiting and be stored with the verdict "the inspection
+  was cut short". Nobody had to disconnect to reach that state any more — eleven
+  more uploads did it. The wait now runs on the request's context and the
+  deadline starts when the probe does, so a busy machine makes an upload slow
+  rather than unchecked. ([#216](https://github.com/rainmanjam/polyemesis/issues/216))
+
+- **A rejected upload told you where the server keeps its files.** `ffprobe`
+  names its input in front of nearly everything it prints, and the `400` body
+  passed those words through verbatim — the data directory and the internal
+  `.partial-` name included. The path is now replaced with the name the file
+  would have been given, at the handler egress, and the rest of the sentence is
+  kept: `moov atom not found` is what tells an operator their download was
+  truncated. ([#181](https://github.com/rainmanjam/polyemesis/issues/181))
+
+- **Two outbound payload egresses were absent from the coverage ledger.** The
+  webhook `POST` and the alert `POST` send payloads outward with no principal,
+  which is the same shape as the retained MQTT topic the ledger already carries,
+  and neither was listed — so nothing read their bytes. Both are now inspected
+  by a proof that reads the real request off a real socket on a server whose
+  every credential column holds a sentinel. The `:80` redirect listener is
+  recorded as emitted-and-uninspected rather than left outside the ledger.
+  ([#169](https://github.com/rainmanjam/polyemesis/issues/169))
+
 - **Your MQTT broker password was echoed back in a validation error, and
   logged every five seconds.** A broker URL written with the credential inline
   — `mqtt://user:password@host:1883` — reached two places that repeated the URL
@@ -36,6 +62,23 @@ its first tagged release.
   broker credential.** Upgrading stops new copies being written; it cannot
   remove the copies already in your logs, or in whatever collected those `400`
   responses.
+
+- **A pull or destination password containing `@`, `/`, `!`, `#` or `%` was
+  rendered verbatim in `GET /processes`, which a `read` token can reach.** The
+  scrubber that removes credentials from a rendered FFmpeg command line is a
+  substring replacement over the argv the process was actually handed. It was
+  collecting the password through Go's URL parser, which **decodes** it — so for
+  `rtsp://user:p%40ssw0rd%21@cam/stream` it held `p@ssw0rd!` and looked for that
+  in a command line containing `p%40ssw0rd%21`. It matched nothing and masked
+  nothing.
+
+  Only passwords needing percent-encoding were affected; the username, the path
+  and plainly-spelled passwords were always scrubbed. Both the pull side and the
+  destination side had it, through separate code paths.
+
+  **If a pull source or destination of yours uses a password with one of those
+  characters, treat it as exposed to anyone who held a `read` token and rotate
+  it.**
 
 ### Added
 
@@ -85,6 +128,14 @@ its first tagged release.
   or reads transcripts with an API token, it needs an `admin` token now**; the
   route works, the scope does not.
 
+  **Every token you already have becomes `admin` when you upgrade.** The
+  migration is `ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT
+  'admin'`, so existing automation keeps working exactly as it did and nothing
+  breaks on restart. The consequence worth stating plainly is the other
+  direction: **nothing is restricted until you act.** The `read` scope is opt-in
+  — a monitoring script does not become read-only by upgrading, and if you want
+  it to be, issue it a new `read` token and revoke the old one.
+
 - **BREAKING: an upload that no probe could read is stored but marked, and some
   formats are refused outright.** Uploads now carry a verdict record, so a file
   that was accepted without being inspected — a client disconnect mid-probe, no
@@ -116,6 +167,90 @@ its first tagged release.
   leak — did not reach a live connection.
 
 ### Fixed
+
+- **A pull source could name an upload this server was never allowed to
+  inspect.** An upload's `pullUrl` is offered copyable in the Library, and
+  pasting it into **Settings → Ingest → Pull** handed the path to the engine's
+  own FFmpeg — which is not the inspection path, and carries neither the format
+  allowlist nor the protocol pin. So a file whose inspection a dropped
+  connection cut short could be routed to air with nothing having read a byte
+  of it.
+
+  Saving a pull source — primary or backup — that names an upload **recorded as
+  unchecked** is now refused, with the file and the reason in the message. It is
+  the same test a playlist item already gets, scoped the same way: only a URL
+  this save *changes* is checked, so an unrelated settings change is never
+  refused over a source configured before the gate existed. An upload with no
+  record at all — every file stored before inspection existed — is still
+  allowed, because refusing those would strand media an operator has had for a
+  year.
+
+- **A killed upload left bytes on your disk that nothing would ever remove.**
+  Nothing in the product swept the uploads directory. A staged file stranded by
+  a process that died mid-transfer, or by a cleanup that failed, stayed
+  forever — invisible and unreferenceable, but occupying up to 8 GiB of the
+  volume the database, the recorder and the HLS preview share, with the
+  free-space floor unaware of it and nothing anywhere reporting the total. The
+  same for an inspection record whose upload was removed out of band.
+
+  Startup now clears both, once, before anything can accept an upload, and
+  **logs what it removed and how much space came back** — the boot after the
+  crash is the one where that line matters. Only leftovers older than an hour
+  are touched, so a sweep can never race a transfer that is still arriving.
+
+- **An upload was briefly listable as an empty file while it was being
+  published.** Finalising an upload reserved its final name with an exclusive
+  create, which is what makes two uploads drawing one name a loud failure
+  instead of one operator's bytes silently replacing another's. But the
+  reservation was a zero-byte file *under that final name*, so until the bytes
+  were renamed into place `GET /api/v1/media` showed an empty row with a working
+  `pullUrl`, and a settings save would accept it as a playlist item. The window
+  was a file write wide on every platform and tens of milliseconds on Windows.
+  The reservation now uses a name the listing refuses, so nothing is ever
+  visible under the final name except the finished file — and a name that is
+  genuinely already taken is still refused.
+
+- **A media record could be written for a name no upload has.** The call that
+  records what was found in a file checked only that the name had no path
+  separator, so any other string wrote a sidecar that nothing in the product
+  ever reads or removes. No caller could produce one, which is exactly why the
+  contract was narrowed now: it refuses a name that is not a listable upload,
+  and a name with no file beside it.
+
+- **A destination whose FFmpeg had already died could be reported as running
+  indefinitely.** The supervisor waited for a child's output pipes to reach
+  end-of-file before reaping the child itself — and a pipe reaches end-of-file
+  when the *last* writer closes it, not when the process you started exits.
+  FFmpeg spawning a helper that outlives it, or anything the child forks and
+  does not wait for, inherits those pipes and holds them open. The supervisor
+  was then waiting on a process it never started: the destination stayed green
+  on the dashboard, the restart policy never fired, and a stop of that
+  destination was bounded by the lifetime of a grandchild rather than by any
+  timeout.
+
+  The child is now reaped on its own, and the drain that captures its stderr is
+  bounded afterwards. The tail of stderr that becomes a destination's error
+  message is unchanged on the ordinary path.
+
+- **Stopping a destination cost a sleeping goroutine per stop, for eight
+  seconds each.** The escalation that kills a child which has not heeded the
+  shutdown signal waited out the full grace period on every stop, including the
+  overwhelming majority that finish in milliseconds. Stopping forty
+  destinations left forty goroutines parked, each holding a reference to a
+  process it still intended to kill. The escalation now returns as soon as the
+  child is reaped.
+
+- **`POST /destinations/{id}/stop` said `"stopped"` whether or not the process
+  actually stopped.** The supervisor reports the same state on both outcomes:
+  the one where the child was reaped, and the one where the shutdown deadline
+  expired, `SIGKILL` was sent, and nothing waited to see whether it worked. The
+  second means a process that may still be running is still holding — and still
+  publishing to — the relay port and the stream the response has just declared
+  free.
+
+  A stop now also answers `reaped`, plus a `warning` saying what is uncertain
+  when it is `false`. Nothing about the `state` field has changed, so existing
+  callers are unaffected.
 
 - **A `read` token could read a pull URL's credential from `GET /sources`.** The
   masking ran, and masked the wrong part: it blanked only the last path segment

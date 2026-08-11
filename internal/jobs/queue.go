@@ -577,8 +577,11 @@ func (q *Queue) List(f Filter) ([]Job, error) { return q.store.ListJobs(f) }
 func (q *Queue) Delete(id int64) error { return q.store.DeleteJob(id) }
 
 // Purge drops terminal jobs older than cutoff, keeping the newest keep of them
-// whatever their age.
-func (q *Queue) Purge(cutoff time.Time, keep int) (int, error) {
+// whatever their age, and hands back the rows it removed.
+//
+// The rows rather than a count: a purged job may have been the only reference
+// to a file on disk, and the caller is the only one left who can act on that.
+func (q *Queue) Purge(cutoff time.Time, keep int) ([]Job, error) {
 	return q.store.PurgeJobs(cutoff, keep)
 }
 

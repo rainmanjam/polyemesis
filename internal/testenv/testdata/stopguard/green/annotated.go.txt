@@ -1,0 +1,16 @@
+package fixture
+
+// GREEN: the annotated form. `_ =` makes it an assignment rather than an
+// expression statement, which is the whole of what the rule reads.
+
+import "context"
+
+type proc interface{ Stop(context.Context) error }
+
+type dest struct{ proc proc }
+
+func teardown(p proc, d *dest, ctx context.Context) {
+	// Deliberately discarded: there is nothing else this path can do.
+	_ = p.Stop(ctx)
+	_ = d.proc.Stop(ctx)
+}

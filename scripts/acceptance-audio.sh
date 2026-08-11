@@ -41,9 +41,9 @@ note() { printf "  %s\n" "$1"; }
 
 cleanup() {
   pkill -f "acceptance-source"       2>/dev/null
-  poly_cleanup "$PORT" "${WORK:-}"
+  poly_cleanup_exit "${1:-0}" "$PORT" "${WORK:-}"
 }
-trap 'poly_watchdog_disarm; cleanup' EXIT
+trap 'poly_teardown_trap $? cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -19,6 +18,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // freeUDPPort asks the kernel for a UDP port nobody is using.
@@ -33,14 +33,11 @@ import (
 // If the window is lost, the manager fails to bind and the test that cares says
 // so while naming the port. That is the right failure: loud, specific, and about
 // the thing that actually happened.
+// #211: one implementation, in internal/testenv, instead of four copies of it.
+// The reasoning above is unchanged and is repeated there, once.
 func freeUDPPort(t *testing.T) int {
 	t.Helper()
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("cannot find a free UDP port: %v", err)
-	}
-	defer pc.Close()
-	return pc.LocalAddr().(*net.UDPAddr).Port
+	return testenv.FreeUDPPort(t)
 }
 
 // srtPortOf reports the port the fixture settled on, for failure messages that

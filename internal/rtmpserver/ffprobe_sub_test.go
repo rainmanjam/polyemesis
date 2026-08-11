@@ -51,8 +51,11 @@ func TestRealFFmpegPublishesAndRealFFprobeSubscribes(t *testing.T) {
 	if err := pub.Start(); err != nil {
 		t.Fatalf("publisher: %v", err)
 	}
-	defer func() { _ = pub.Process.Kill() }()
-	time.Sleep(2 * time.Second)
+	// Kill AND Wait. Kill only asks; until something reaps the child it is a
+	// zombie holding a slot in this process's table, and on a driver that
+	// starts several children in sequence that is a leak with a name (#197).
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
+	waitPublishing(t, s, tg.SourceID, 20*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -132,8 +135,11 @@ func TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder(t *testing.T) {
 	if err := pub.Start(); err != nil {
 		t.Fatalf("publisher: %v", err)
 	}
-	defer func() { _ = pub.Process.Kill() }()
-	time.Sleep(3 * time.Second)
+	// Kill AND Wait. Kill only asks; until something reaps the child it is a
+	// zombie holding a slot in this process's table, and on a driver that
+	// starts several children in sequence that is a leak with a name (#197).
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
+	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
@@ -170,5 +176,33 @@ func TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder(t *testing.T) {
 	}
 	if !strings.Contains(got, "video") {
 		t.Error("the video track did not survive alongside the audio tracks")
+	}
+}
+
+// waitPublishing waits for the server to REGISTER a live publisher, which is
+// the event the two tests below used to guess at with a fixed sleep.
+//
+// #211, the same class as the four :0 port helpers: an interval assumed empty.
+// Two and three seconds are enough for FFmpeg to complete an RTMP handshake on
+// an idle laptop and are a guess anywhere else. When the guess is short, ffprobe
+// subscribes to a stream nobody is publishing and the test fails with "ffprobe
+// did not see a video and an audio stream through the relay" -- which reads as a
+// relay defect and is a publisher that had not arrived yet.
+//
+// Publishing() is the server's own answer to the question, taken under its own
+// lock, and it is already exported and already tested (rtmpserver_test.go:140).
+func waitPublishing(t *testing.T, s *Server, sourceID int64, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		if s.Publishing(sourceID) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("no publisher registered on source %d after %s: FFmpeg never completed "+
+				"the RTMP handshake, so anything ffprobe reports below is about a stream "+
+				"that was never being published", sourceID, within)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

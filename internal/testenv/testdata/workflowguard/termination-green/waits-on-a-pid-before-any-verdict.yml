@@ -1,0 +1,16 @@
+# GREEN. A named wait that precedes the step's verdict is not this rule's
+# business: the step has not yet claimed anything, so there is no answer for the
+# wait to lose. The backgrounded-step rule's timeout-minutes is what bounds it.
+name: build
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Background a build and collect it
+        timeout-minutes: 10
+        run: |
+          make artefacts &
+          pid=$!
+          wait "$pid"
+          ls -l artefacts/

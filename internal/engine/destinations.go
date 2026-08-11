@@ -10,6 +10,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -724,6 +725,9 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	if e.afterPublish != nil {
 		e.afterPublish()
 	}
+	// A new child supersedes whatever the previous one's stop failed to observe:
+	// the warning is about THIS destination's current situation, not a log.
+	e.noteStopOutcome(row.ID, nil)
 	proc.Start()
 	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
@@ -739,7 +743,15 @@ func (e *Engine) teardownDest(d *destination) {
 		"its command line changed, or it was disabled or removed")
 	if d.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		d.proc.Stop(ctx)
+		// NOT DISCARDED. This is the one Stop in the tree whose error a caller is
+		// waiting on: POST /destinations/{id}/stop reads the process state back
+		// so that "a success response is evidence that something happened", and
+		// the state is StateStopped on both of stop()'s arms. The error is the
+		// only thing that distinguishes "the child was reaped" from "SIGKILL was
+		// issued and nobody waited", and those have different consequences --
+		// the port and the hub subscription released below are about to be handed
+		// to somebody else (#209).
+		e.noteStopOutcome(d.row.ID, d.proc.Stop(ctx))
 		cancel()
 	}
 	if d.subName != "" {
@@ -754,6 +766,43 @@ func (e *Engine) teardownDest(d *destination) {
 		e.alloc.Release(d.port)
 	}
 	e.stopBackup(d)
+}
+
+// stopUnreapedWarning is what a caller is told when a stop ended on the deadline
+// arm. It says what is uncertain and what that costs, because "stopped" already
+// said the thing that is certain.
+const stopUnreapedWarning = "the child was sent SIGKILL and was not waited for; " +
+	"it may still be running and still publishing"
+
+// noteStopOutcome records what a destination's stop actually achieved.
+//
+// err is the value (*supervisor.Process).Stop returned. Only ErrStopDeadline is
+// recorded: every other error means the stop did not happen for a reason the
+// caller can already see, while ErrStopDeadline means it happened and the result
+// was not observed, which is the distinction nothing downstream could make.
+//
+// A nil err clears the record, so this is also how a fresh start retracts an old
+// warning.
+func (e *Engine) noteStopOutcome(id int64, err error) {
+	e.stopMu.Lock()
+	defer e.stopMu.Unlock()
+	if !errors.Is(err, supervisor.ErrStopDeadline) {
+		delete(e.unreaped, id)
+		return
+	}
+	if e.unreaped == nil {
+		e.unreaped = make(map[int64]string, 1)
+	}
+	e.unreaped[id] = stopUnreapedWarning
+}
+
+// StopUnreaped reports whether the last stop of this destination left a child
+// that was killed but never observed dead, and the warning that says so.
+func (e *Engine) StopUnreaped(id int64) (warning string, unreaped bool) {
+	e.stopMu.Lock()
+	defer e.stopMu.Unlock()
+	w, ok := e.unreaped[id]
+	return w, ok
 }
 
 // backupPending is what an operator is told between switching redundancy on and
@@ -917,7 +966,7 @@ func (e *Engine) stopBackup(d *destination) {
 	}
 	if d.backup != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		d.backup.Stop(ctx)
+		_ = d.backup.Stop(ctx)
 		cancel()
 	}
 	if d.backupSub != "" {

@@ -1,0 +1,19 @@
+# RED, and the `wait` is the ONLY thing wrong with it: nothing follows, so no
+# other arm of the rule can reach it. A shell `wait` has no ceiling. On Windows
+# the kill above it cannot deliver a real SIGTERM to a native .exe, so this waits
+# for a death that never comes -- #179's mechanism with everything else stripped
+# away. Bound it with a poll on `kill -0` instead.
+name: smoke
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop the server and collect it
+        timeout-minutes: 5
+        run: |
+          ./server &
+          pid=$!
+          echo "started"
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true

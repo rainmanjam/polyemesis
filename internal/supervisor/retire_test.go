@@ -28,7 +28,7 @@ func TestStopBeforeStartRetiresTheProcessForEver(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
-	p.Stop(ctx)
+	_ = p.Stop(ctx)
 
 	p.Start()
 
@@ -112,7 +112,7 @@ func TestAStopDuringARestartWins(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
-	p.Stop(ctx)
+	_ = p.Stop(ctx)
 	p.Restart(ctx)
 
 	p.runMu.Lock()

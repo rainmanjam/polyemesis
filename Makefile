@@ -120,6 +120,16 @@ coverage-instrument-guard: ## Prove -cover on internal/api measures the selectio
 	@# suite all reported 22.0%. Runs the probes rather than reading the source.
 	@./scripts/coverage-instrument-guard.sh
 
+.PHONY: termination-guard
+termination-guard: ## Prove no script kills a process and then acts as though it had
+	@# The shell half of the #179/#180 class. The workflow guard
+	@# (internal/testenv/workflowtimeout_test.go) obliges a step timeout and
+	@# nothing else; this obliges the observation itself -- a kill followed by a
+	@# sleep, a verdict or a read with nothing looking again in between, a bare
+	@# `wait`, or a `$$!` captured from a pipeline where it names the wrong
+	@# process. Its own red/green fixtures live in scripts/test-termination-guard.sh.
+	@./scripts/termination-guard.sh
+
 .PHONY: test-v
 test-v: ## Run the Go test suite verbosely
 	go test -v ./...

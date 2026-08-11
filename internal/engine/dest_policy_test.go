@@ -60,7 +60,7 @@ func TestABackupThatGaveUpIsRevivedWhenTheLimitIsRaised(t *testing.T) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		backup.Stop(ctx)
+		_ = backup.Stop(ctx)
 	})
 	waitUntil(t, func() bool {
 		return backup.Status().State == supervisor.StateFailed

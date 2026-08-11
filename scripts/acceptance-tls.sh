@@ -39,8 +39,8 @@ ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
 step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 
-cleanup() { poly_cleanup "$PORT_OFF $PORT_MANUAL $PORT_SELF $PORT_PROXY" "${WORK:-}"; }
-trap 'poly_watchdog_disarm; cleanup' EXIT
+cleanup() { poly_cleanup_exit "${1:-0}" "$PORT_OFF $PORT_MANUAL $PORT_SELF $PORT_PROXY" "${WORK:-}"; }
+trap 'poly_teardown_trap $? cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 command -v openssl >/dev/null || { echo "openssl is required"; exit 1; }
