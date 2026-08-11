@@ -1144,9 +1144,11 @@
       "class": "differential",
       "pointers": [
         "/0/destination/backupStreamKey",
+        "/0/destination/backupUrl",
         "/0/destination/extraInputArgs",
         "/0/destination/extraOutputArgs",
         "/0/destination/streamKey",
+        "/0/destination/url",
         "/1/destination/url"
       ],
       "sentinels": [
@@ -1162,9 +1164,11 @@
       "class": "differential",
       "pointers": [
         "/destination/backupStreamKey",
+        "/destination/backupUrl",
         "/destination/extraInputArgs",
         "/destination/extraOutputArgs",
-        "/destination/streamKey"
+        "/destination/streamKey",
+        "/destination/url"
       ],
       "sentinels": [
         "SENTINEL-destination-streamkey-9f3a",

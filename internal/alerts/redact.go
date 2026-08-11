@@ -118,6 +118,61 @@ func RedactWebhookURL(raw string) string {
 // is unchanged by definition. The double-mask this looked like it should fix
 // came from splitTrailer eating the mask's closing bracket before this function
 // ever saw it, and it is fixed there.
+// RedactURLForPrincipal is RedactURL for a reader who must see NO credential,
+// as opposed to an operator reading a diagnostic.
+//
+// The difference is every path segment, and it exists because the two callers
+// want opposite things. A diagnostic wants to stay readable: blanking the path
+// of every URL in every log line destroys the message, which is what
+// TestWebhookPathIsNotDisclosed's own comment warns about, and it is why
+// RedactURL masks only the LAST segment and only for the schemes that put a key
+// there. A response body handed to a read-scoped token wants the opposite: it
+// must not carry a credential, and NOTHING IN A URL SAYS WHICH SEGMENT IS ONE.
+//
+// Measured, and this is the bug it closes. An HLS pull URL puts the credential
+// in the MIDDLE and the filename last:
+//
+//	https://cdn.example/live/SUPERSECRETPATHSEG/stream1/index.m3u8
+//	RedactURL -> unchanged. https is not in keyCarrying, so no path masking runs
+//	             at all; and where it does run it masks index.m3u8, the one
+//	             segment that is not a secret.
+//
+// GET /api/v1/sources handed that verbatim to a read-scoped bearer, through
+// readSafeIngest -> maskURL -> RedactURL, while the identical credential was
+// correctly masked on GET /api/v1/processes. Same class as #229 one layer up:
+// a mask built from where credentials usually live rather than from what the
+// URL carries.
+//
+// Every segment, every scheme. Over-masking a path a low-privilege reader was
+// never entitled to costs nothing; under-masking it is the disclosure.
+func RedactURLForPrincipal(raw string) string {
+	trimmed, trailer := splitTrailer(raw)
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return maskUnparseable(trimmed) + trailer
+	}
+	if u.User != nil {
+		u.User = url.User(Mask)
+	}
+	if q := u.Query(); len(q) > 0 {
+		// EVERY parameter, not the ones in secretParam. Same argument as the
+		// path: CDN pull URLs use authcode, hdnts and policy, none of which are
+		// in that table, and the table is a list of names somebody remembered.
+		for k := range q {
+			q.Set(k, Mask)
+		}
+		u.RawQuery = q.Encode()
+	}
+	parts := strings.Split(u.Path, "/")
+	for i, seg := range parts {
+		if seg != "" {
+			parts[i] = Mask
+		}
+	}
+	u.Path = strings.Join(parts, "/")
+	return u.String() + trailer
+}
+
 func maskLastSegment(path string) string {
 	parts := strings.Split(path, "/")
 	last := -1
