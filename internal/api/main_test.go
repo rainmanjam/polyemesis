@@ -16,10 +16,41 @@ import (
 // is not malice; it is what everybody types while debugging one handler, and it
 // silently turned every ledger obligation off.
 //
-// So the package's tests run TWICE. The first m.Run is forced to
-// ^TestLedgerPreflight$ regardless of what the caller asked for; if it fails,
-// the package fails and the caller's selection never runs. The second m.Run
-// restores the caller's own selection and does what they asked.
+// So the package's tests run TWICE. The FIRST m.Run is the caller's own
+// selection, exactly as they typed it. The SECOND is forced to
+// ^TestLedgerPreflight$ with -skip emptied and -count pinned to 1, regardless of
+// what the caller asked for, and the process exits non-zero if EITHER pass did.
+// The ledger therefore runs on every invocation of this package and no filter
+// can switch it off -- which is the whole of #161 -- but it no longer runs
+// FIRST, and that ordering is load-bearing for a reason that has nothing to do
+// with the ledger. See THE ORDER, below.
+//
+// THE ORDER, and why it is this way round. #217/#223. Coverage counters are
+// process-global, but the coverage PROFILE is written by testing.M.after, which
+// is guarded by m.afterOnce (go1.26.5, src/testing/testing.go:2284, :2683,
+// coverReport at :2751). after runs on a `defer` inside the first m.Run to
+// return, so the profile is written when PASS ONE ends and the second pass's
+// counters are never in it. With the preflight first, `go test -cover
+// ./internal/api` reported the preflight's own execution and nothing else:
+//
+//	-run XXXNoSuchTestAtAll  -covermode=set  ->  22.0% of statements
+//	-run TestUpload...Origin -covermode=set  ->  22.0% of statements
+//	(unfiltered)             -covermode=set  ->  22.0% of statements
+//
+// Zero tests, one test and the whole suite, the same number -- which is not a
+// coverage figure at all, it is a constant wearing one. Running the caller's
+// selection first puts the caller's selection in the profile, which is what
+// -cover is asked for; the forced preflight's own coverage is then the part that
+// falls outside it. `make coverage-instrument-guard` (scripts/coverage-instrument-guard.sh)
+// fails if those two numbers ever collapse back into each other.
+//
+// WHAT THE REORDER COSTS, stated rather than glossed. Under the old order a
+// failing preflight meant the caller's tests never ran. It cannot mean that any
+// more: by the time the preflight runs, they have. The package still goes red --
+// the exit code is the first non-zero of the two passes -- but a developer whose
+// ledger is broken now pays for their own test run before being told. That is
+// the price of a measurable -cover on this package, and it is the only thing the
+// old order bought that this one does not.
 //
 // WHAT IS NEUTRALISED, EXACTLY. The previous version of this comment said
 // "there is deliberately NO bypass: no flag, no environment variable, no -short
@@ -62,19 +93,26 @@ import (
 // plain configuration and never measured the strict one, where the preflight ran
 // TWICE per unfiltered invocation and cost 22.2s each time.
 //
-// So it runs ONCE per process now: TestLedgerPreflight returns immediately in
-// the second pass, because the first pass already computed every verdict in this
-// same process and a second computation cannot reach a different one. Measured
-// end to end, `POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...`,
-// median of three:
+// So it runs ONCE per process: whichever pass drives TestLedgerPreflight's body
+// records that in ledgerPreflightDone, and the other pass returns immediately,
+// because the verdict was computed in this same process and a second computation
+// cannot reach a different one. Under an unfiltered invocation that is now the
+// FIRST pass doing the work and the forced second pass returning; under `-run
+// TestSomethingElse` the first pass never selects it and the forced pass does the
+// work. Either way, once. That once-per-process property is what the measurement
+// below bought when it was introduced, and the #217 reorder moves which pass pays
+// rather than how many do; the figures are kept as the record of that earlier
+// change, `POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...`, median of
+// three, and are NOT a measurement of the reorder:
 //
-//	origin/main (ae8df24)   301s   (300 / 303 / 301)
-//	before this commit      314s   (315 / 314 / 313)   +4.3%
-//	after                   299s   (296 / 299 / 299)   -0.7%, inside the spread
+//	origin/main (ae8df24)                301s   (300 / 303 / 301)
+//	the run-it-twice version             314s   (315 / 314 / 313)   +4.3%
+//	with ledgerPreflightDone             299s   (296 / 299 / 299)   -0.7%, inside the spread
 //
 // It is deliberately NOT a t.Skip: a skip is a test that did not run, and this
-// one ran. If TestMain is ever removed, ledgerPreflightDone stays false and the
-// second pass runs it in full, which is the fail-closed direction.
+// one ran. If TestMain is ever removed there is only one pass, ledgerPreflightDone
+// stays false through it, and the body runs in full there -- the fail-closed
+// direction, at the cost of the -cover reorder going with it.
 func TestMain(m *testing.M) {
 	flag.Parse()
 
@@ -89,7 +127,7 @@ func TestMain(m *testing.M) {
 	}
 	if listFlag != nil && listFlag.Value.String() != "" {
 		// A listing, not a run. It executes no test and therefore claims
-		// nothing; forcing a preflight in front of it would print the names
+		// nothing; forcing a preflight alongside it would print the names
 		// twice and prove nothing about the ledger.
 		os.Exit(m.Run())
 	}
@@ -100,31 +138,43 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	callerRun, callerSkip := runFlag.Value.String(), skipFlag.Value.String()
-	callerCount := countFlag.Value.String()
+	// PASS ONE: the caller's own selection, with their flags untouched. It goes
+	// first so that testing.M.after -- which writes the coverage profile once,
+	// under m.afterOnce, on the way out of whichever m.Run returns first --
+	// writes a profile of the tests the caller asked for. See THE ORDER above.
+	code := m.Run()
 
+	// PASS TWO: the preflight, forced, whatever the caller typed and whatever
+	// pass one reported. An unfiltered pass one has already driven it and set
+	// ledgerPreflightDone, so this pass costs nothing there; a filtered pass one
+	// has not, and this is where the ledger actually runs.
 	set(runFlag, "^TestLedgerPreflight$")
 	set(skipFlag, "")
 	set(countFlag, "1")
-	if code := m.Run(); code != 0 {
+	if pre := m.Run(); pre != 0 {
 		fmt.Fprintln(os.Stderr,
-			"THE ROUTE COVERAGE PREFLIGHT FAILED, so the tests you asked for did not run.\n"+
-				"It runs before every invocation of this package precisely so that a -run, "+
-				"-skip or -count filter cannot switch the ledger off. Fix the failure above "+
-				"-- each message names the route, the observed status, the byte count and "+
-				"the edit.")
-		os.Exit(code)
+			"THE ROUTE COVERAGE PREFLIGHT FAILED. It is forced after every invocation of\n"+
+				"this package, with -run, -skip and -count set aside, precisely so that a "+
+				"filter cannot switch the ledger off -- so the tests you asked for DID run, "+
+				"above, and this verdict is in addition to whatever they reported. Fix the "+
+				"failure above -- each message names the route, the observed status, the "+
+				"byte count and the edit.")
+		if code == 0 {
+			code = pre
+		}
 	}
-	ledgerPreflightDone = true
-
-	set(runFlag, callerRun)
-	set(skipFlag, callerSkip)
-	set(countFlag, callerCount)
-	os.Exit(m.Run())
+	os.Exit(code)
 }
 
-// ledgerPreflightDone records that the first pass above completed successfully,
-// in THIS process. It is the only thing that makes the second pass cheap, and it
-// defaults to false so that losing TestMain costs a duplicate run rather than a
-// silent hole.
+// ledgerPreflightDone records that TestLedgerPreflight's body has already been
+// DRIVEN in this process -- by either pass, and whatever verdict it reached. It
+// is the only thing that keeps the other pass cheap.
+//
+// It is set by the test itself rather than by TestMain, because after the #217
+// reorder TestMain cannot know whether pass one selected the preflight: that
+// depends on the caller's own -run and -skip. It is set on the way out including
+// the failing way out, so a red ledger is reported once rather than twice.
+//
+// It defaults to false, so losing TestMain costs a run of the full body in the
+// caller's own pass rather than a silent hole.
 var ledgerPreflightDone bool

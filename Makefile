@@ -111,6 +111,15 @@ preflight-guard: ## Prove the route-coverage preflight survives -run, -skip and 
 	done
 	@echo 'preflight-guard: the route-coverage preflight still runs under -run, -skip and -count=0'
 
+.PHONY: coverage-instrument-guard
+coverage-instrument-guard: ## Prove -cover on internal/api measures the selection, not the preflight
+	@# The other half of the same mechanism. preflight-guard above proves the
+	@# forced preflight still RUNS; this proves it is not the only thing the
+	@# coverage profile ever sees. #217: with the forced pass placed first, the
+	@# profile was written on its way out and zero tests, one test and the whole
+	@# suite all reported 22.0%. Runs the probes rather than reading the source.
+	@./scripts/coverage-instrument-guard.sh
+
 .PHONY: test-v
 test-v: ## Run the Go test suite verbosely
 	go test -v ./...

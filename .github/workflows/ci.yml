@@ -129,7 +129,7 @@ jobs:
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
       #
-      # internal/api forces its route coverage ledger through a first m.Run with
+      # internal/api forces its route coverage ledger through a SECOND m.Run with
       # the caller's -run, -skip and -count set aside, so that no test filter can
       # switch the ledger off. `make preflight-guard` proves that mechanism is
       # still wired by running the package under each of those three switches and
@@ -143,6 +143,23 @@ jobs:
       # almost nothing.
       - name: The route-coverage preflight is still wired
         run: make preflight-guard
+
+      # THE OTHER HALF OF THE SAME MECHANISM. #217/#223.
+      #
+      # The preflight runs in a SECOND m.Run rather than a first, because the
+      # coverage profile is written by testing.M.after under m.afterOnce, on the
+      # way out of whichever pass returns first. While the forced pass went
+      # first, `go test -cover ./internal/api` reported 22.0% for zero tests, for
+      # one test and for the whole suite alike -- a constant wearing a
+      # percentage, which #219 already lost a round to.
+      #
+      # Reordering is a one-line change and reverting it is a one-line change,
+      # so it needs a running gate rather than a comment. This one runs the
+      # package under three different selections and requires the numbers to
+      # differ. ~60s, dominated by the unfiltered probe, which is the number
+      # anybody would actually quote.
+      - name: internal/api coverage measures the tests, not the preflight
+        run: make coverage-instrument-guard
 
       # -race because the engine reconciles from several goroutines and a data
       # race here shows up in production as a stream that stops for one viewer.
