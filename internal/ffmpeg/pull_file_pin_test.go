@@ -1,9 +1,9 @@
 package ffmpeg
 
 import (
+	"bytes"
 	"context"
 	"net"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -61,35 +61,6 @@ func TestFilePullReachesTheRelayWithTheProtocolPinOn(t *testing.T) {
 	dir := t.TempDir()
 	buildSample(t, filepath.Join(dir, "sample.ts"), "-t", "1")
 
-	// AND A RETRYING REMOVAL ON TOP OF THAT, because reaping the child is not
-	// sufficient on Windows. This test failed on windows-latest with
-	//
-	//	TempDir RemoveAll cleanup: unlinkat ...\ffmpeg.stderr:
-	//	The process cannot access the file because it is being used by another
-	//	process.
-	//
-	// after stop() had already waited for cmd.Wait to return -- so FFmpeg was
-	// reaped and the handle was not FFmpeg's. It is the window
-	// uploads.renameStaged documents and retries for: a file whose last byte
-	// was written milliseconds ago is exactly what an on-access scanner opens,
-	// and CI runners run one.
-	//
-	// t.TempDir's own cleanup is a single RemoveAll with no retry, so it cannot
-	// wait that window out. This runs BEFORE it -- Cleanup is LIFO and TempDir
-	// registered first -- and leaves it nothing to do. Registered after the
-	// defers below for the same reason: every defer, including stop(), has
-	// already run by the time any Cleanup does.
-	t.Cleanup(func() {
-		for i := 0; i < 100; i++ {
-			if err := os.RemoveAll(dir); err == nil {
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		// Not a failure. The managed cleanup runs next and reports its own
-		// error; saying so twice would just be noise.
-	})
-
 	// The relay socket is bound HERE, and the port comes out of the bind rather
 	// than out of a guess: a hard-coded port is a test that fails on whichever
 	// machine is already using it.
@@ -108,20 +79,34 @@ func TestFilePullReachesTheRelayWithTheProtocolPinOn(t *testing.T) {
 		RelayURL:    "udp://" + conn.LocalAddr().String(),
 	})
 
-	// Stderr goes to a FILE rather than to a buffer this goroutine also reads.
-	// os/exec copies into cmd.Stderr from its own goroutine, so reading a
-	// strings.Builder before Wait returns is a data race, and the failure
-	// message is worth nothing if -race turns it into a different failure.
-	stderrPath := filepath.Join(dir, "ffmpeg.stderr")
-	ef, err := os.Create(stderrPath)
-	if err != nil {
-		t.Fatalf("cannot open a stderr file: %v", err)
-	}
-	defer ef.Close()
+	// Stderr goes to a BUFFER, and this is the second attempt at it.
+	//
+	// It was a file under dir, for a reason that reads well and is wrong: that
+	// os/exec copies into cmd.Stderr from its own goroutine, so reading the
+	// buffer "before Wait returns" would be a data race. True -- but every read
+	// site below calls stop() first, and stop() is `cancel(); <-done` where done
+	// closes after cmd.Wait returns. Wait returning is precisely the
+	// happens-before that makes the buffer safe to read; it is the guarantee
+	// os/exec documents. So the race the file avoided was never reachable.
+	//
+	// The file, meanwhile, broke windows-latest twice:
+	//
+	//	TempDir RemoveAll cleanup: unlinkat ...\ffmpeg.stderr:
+	//	The process cannot access the file because it is being used by another
+	//	process.
+	//
+	// FFmpeg was already reaped both times. A retrying RemoveAll registered
+	// ahead of t.TempDir's own cleanup did not help either, which rules out the
+	// brief on-access-scanner window uploads.renameStaged retries for and says
+	// the handle outlives the process by longer than a test should wait.
+	//
+	// A buffer has no handle for anything to hold. That is the whole fix: not a
+	// longer wait for the file to be released, but no file.
+	var stderr bytes.Buffer
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, ffmpegBin, args...)
-	cmd.Stderr = ef
+	cmd.Stderr = &stderr
 	// -stream_loop -1 means this never ends on its own. WaitDelay bounds the
 	// gap between the kill and the pipes closing, the same reason ProbeFile
 	// sets one.
@@ -146,8 +131,7 @@ func TestFilePullReachesTheRelayWithTheProtocolPinOn(t *testing.T) {
 	n, _, readErr := conn.ReadFrom(buf)
 	if readErr != nil {
 		stop()
-		_ = ef.Close()
-		said, _ := os.ReadFile(stderrPath)
+		said := stderr.String()
 		t.Fatalf("no bytes reached the relay from a file:// pull: %v\n"+
 			"the -protocol_whitelist pin on the input must not refuse the source or the relay output\n"+
 			"args: %s\nffmpeg said: %s", readErr, join(args), said)
@@ -156,8 +140,7 @@ func TestFilePullReachesTheRelayWithTheProtocolPinOn(t *testing.T) {
 	// pass on any noise that happened to land on the port.
 	if n == 0 || buf[0] != 0x47 {
 		stop()
-		_ = ef.Close()
-		said, _ := os.ReadFile(stderrPath)
+		said := stderr.String()
 		t.Fatalf("the relay received %d bytes whose first byte is %#x, not an MPEG-TS packet\n"+
 			"args: %s\nffmpeg said: %s", n, buf[0], join(args), said)
 	}
