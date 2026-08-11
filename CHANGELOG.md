@@ -10,6 +10,32 @@ its first tagged release.
 
 ### Security
 
+- **A busy server stopped inspecting uploads, and the caller chose when.** The
+  four-slot semaphore that bounds concurrent `ffprobe` children waited for its
+  slot *inside* the probe's own 30-second deadline, so a queued upload could
+  spend the whole budget waiting and be stored with the verdict "the inspection
+  was cut short". Nobody had to disconnect to reach that state any more — eleven
+  more uploads did it. The wait now runs on the request's context and the
+  deadline starts when the probe does, so a busy machine makes an upload slow
+  rather than unchecked. ([#216](https://github.com/rainmanjam/polyemesis/issues/216))
+
+- **A rejected upload told you where the server keeps its files.** `ffprobe`
+  names its input in front of nearly everything it prints, and the `400` body
+  passed those words through verbatim — the data directory and the internal
+  `.partial-` name included. The path is now replaced with the name the file
+  would have been given, at the handler egress, and the rest of the sentence is
+  kept: `moov atom not found` is what tells an operator their download was
+  truncated. ([#181](https://github.com/rainmanjam/polyemesis/issues/181))
+
+- **Two outbound payload egresses were absent from the coverage ledger.** The
+  webhook `POST` and the alert `POST` send payloads outward with no principal,
+  which is the same shape as the retained MQTT topic the ledger already carries,
+  and neither was listed — so nothing read their bytes. Both are now inspected
+  by a proof that reads the real request off a real socket on a server whose
+  every credential column holds a sentinel. The `:80` redirect listener is
+  recorded as emitted-and-uninspected rather than left outside the ledger.
+  ([#169](https://github.com/rainmanjam/polyemesis/issues/169))
+
 - **Your MQTT broker password was echoed back in a validation error, and
   logged every five seconds.** A broker URL written with the credential inline
   — `mqtt://user:password@host:1883` — reached two places that repeated the URL
