@@ -145,6 +145,116 @@ func TestAStartThatFailedIsNotRetriedOnTheNextSweep(t *testing.T) {
 	}
 }
 
+// The PRODUCER side of the same property, and the one the two tests above
+// cannot see.
+//
+// TestAStartThatFailedIsNotRetriedOnTheNextSweep proves the backoff is honoured.
+// It does not prove the timestamp the window is measured FROM is written when
+// the start failed, because in that test the value already in feedAt is a
+// wall-clock instant a few milliseconds old -- so a mutant that stamps feedAt
+// only `if feed != nil` leaves behind a stamp that is stale by microseconds and
+// backs off anyway. The assertion passes for a reason that has nothing to do
+// with the failed start.
+//
+// This test removes the alibi. detachFeedForSilence zeroes feedAt, so at the
+// moment of the failed start there is NO previous stamp to inherit: if the
+// failed start does not write one itself, `!lastAt.IsZero()` is false on the
+// next sweep and the unstartable feed is retried immediately.
+//
+// The instants are real time.Now() for the reason at the top of this file:
+// startFeed stamps feedAt from the wall clock.
+//
+// Mutation: selector.go:1180, move `e.sel.feedAt = startedAt` inside the
+// `if feed != nil` block below it, so a start that produced no process leaves
+// the timestamp alone.
+// Observed to fail with "a start that failed to produce a process was retried
+// 300ms later" and to be the only failing test in the package.
+func TestAFailedStartArmsTheBackoffFromItsOwnAttempt(t *testing.T) {
+	e := failoverEngine(t)
+	// Two ports: the first feed has to SUCCEED, so that the stamp this test
+	// then clears is a real one and the clearing is doing visible work.
+	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 2)
+	s := failoverOnSettings()
+	setSettings(e, s)
+	e.reconcileSelector(s, wantSelector(s), "")
+	if e.selectorHub() == nil {
+		t.Fatal("the source selector did not start")
+	}
+
+	deliverTS(t, e.hub, 8)
+	e.sweepSelector(time.Now())
+	if act := e.Failover().Active; act != sourcePrimary {
+		t.Fatalf("the primary is delivering and %q is on air; no feed was started, so there "+
+			"is no successful start whose timestamp could be cleared", act)
+	}
+	if !feedSubscribed(e.sourceHub()) {
+		t.Fatalf("the primary is on air but nothing is subscribed to its hub (%v)",
+			e.sourceHub().Subscribers())
+	}
+
+	// A deliberate teardown, which zeroes feedAt. From here the ONLY thing that
+	// can arm the backoff is the failed start itself.
+	e.detachFeedForSilence("silence-signature-moved")
+	if feedSubscribed(e.sourceHub()) {
+		t.Fatalf("detachFeedForSilence left the feed subscribed: %v", e.sourceHub().Subscribers())
+	}
+
+	held := drainPorts(t, e.alloc)
+
+	deliverTS(t, e.hub, 8)
+	first := time.Now()
+	e.sweepSelector(first)
+
+	// Positive first, exactly as in the consumer-side test: the start was
+	// ATTEMPTED and failed. Without this the assertions below would pass on an
+	// engine that never reached startFeed at all.
+	if problem := e.Failover().Error; problem == "" {
+		t.Fatalf("the primary is delivering, there is no port for its copy hop and the tier " +
+			"reports no problem at all: the start was never attempted, so there is no " +
+			"failed start to arm a backoff from")
+	}
+	if feedSubscribed(e.sourceHub()) {
+		t.Fatalf("a feed subscribed despite the allocator being empty: %v", e.sourceHub().Subscribers())
+	}
+
+	// The ports come back, so the backoff is again the only thing that can hold
+	// the retry off.
+	for _, p := range held {
+		e.alloc.Release(p)
+	}
+
+	e.sweepSelector(first.Add(300 * time.Millisecond))
+
+	if feedSubscribed(e.sourceHub()) {
+		t.Errorf("a start that failed to produce a process was retried %s later: the attempt "+
+			"did not stamp sel.feedAt, so the %s respawn window is measured from whatever "+
+			"start last SUCCEEDED -- and after a deliberate teardown that is the zero time, "+
+			"which arms nothing. An unstartable feed now respawns on every sweep",
+			300*time.Millisecond, feedRespawn)
+	}
+}
+
+// drainPorts takes every port the allocator has left and returns them, so a
+// caller can hand them back later. Fails the test rather than returning an empty
+// list: "the allocator was already empty" and "the allocator is empty because
+// this drained it" are different premises, and only the second one is a test.
+func drainPorts(t *testing.T, a *relay.PortAllocator) []int {
+	t.Helper()
+	var held []int
+	for {
+		p, err := a.Allocate()
+		if err != nil {
+			break
+		}
+		held = append(held, p)
+	}
+	if len(held) == 0 {
+		t.Fatal("the allocator had no ports to drain, so a start failing for want of one " +
+			"proves nothing about this engine")
+	}
+	return held
+}
+
 // reconcileBackupIngest tears the backup's hub down and its feed with it, for
 // the same reason detachFeedForSilence does, and it has to disarm the same
 // backoff. An operator editing the standby's SRT latency would otherwise leave

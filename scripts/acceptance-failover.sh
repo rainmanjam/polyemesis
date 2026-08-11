@@ -458,6 +458,32 @@ else
   bad "expected at least 2 switches, saw ${switches:-0}"
 fi
 
+# THE CEILING. Issue #226: the floor above is half an assertion, and it is the
+# wrong half. Applying the wrong-hub mutation to sampleSources -- `primaryRx :=
+# e.downstreamHub().RxBytes()`, the exact error that function's own comment warns
+# against -- made this tier switch 80 times against a baseline of 6, and the
+# check above printed "the tier recorded both switches (80)". It was caught, but
+# only by four downstream consequence checks; the assertion whose whole job is to
+# describe the switch count reported success.
+#
+# A CONSTANT `-le` IS NOT THE FIX. The legitimate count here is timing-dependent
+# -- the switches land at roughly 13s and 36s depending on how the sweep and the
+# 5s grace line up -- so any number is either loose enough to admit flapping or
+# tight enough to redden correct code. What is not timing-dependent is that a
+# tier nobody is asking to switch STOPS switching. That is the property.
+#
+# The hold is deliberately weaker than the `settle primary 25 120` that precedes
+# it: the active feed holding one value for 25s already implies the switch count
+# held for 25s, so on a run where that settle succeeded this cannot fail. It
+# earns its keep on the runs where it did not -- which is precisely the mutant's
+# signature, and where the suite currently only prints a note.
+if poly_hold_field "the switch count" 2 10 40 readstatus; then
+  ok "the switch count has stopped moving (held at $POLY_HELD_VALUE for 10s)"
+else
+  bad "the tier is still switching with nothing asking it to: the switch count changed $POLY_HELD_CHANGES time(s) in 40s and never held one value for 10s"
+  note "that is FLAPPING, which a floor of 2 cannot see -- see issue #226"
+fi
+
 step "7. Filler starts playing, with the encoder still on air"
 # THE CASE THIS WHOLE SUB-PROJECT EXISTS FOR, and it was impossible to write
 # before it. A playing file used to feed the PRIMARY's hub, so the primary
@@ -1017,7 +1043,9 @@ printf "  %d passed, %d failed\n\n" "$pass" "$fail"
 # to stop. It is a FLOOR, not an equality: a failure that fires an extra `bad`
 # on a path a clean run never takes only raises the total. If you add or remove
 # a check, change this line in the same commit.
-EXPECTED_CHECKS=24
+# 25 rather than 24 since #226 added the switch-count CEILING alongside its
+# floor. The floor alone passed a tier switching 80 times.
+EXPECTED_CHECKS=25
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

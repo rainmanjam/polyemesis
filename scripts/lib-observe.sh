@@ -229,6 +229,73 @@ poly_poll_field() {
   return 1
 }
 
+# Set by poly_hold_field: the value the field settled on, and how many times it
+# was seen to change. Both are for the caller's message -- "held at 6" and
+# "moved 31 times" are the two sentences a reader needs and neither is
+# recoverable from the return code.
+POLY_HELD_VALUE=""
+POLY_HELD_CHANGES=0
+
+# poly_hold_field <label> <field-idx> <hold-secs> <ceiling-secs> <line-sampler-fn> [args...]
+#
+# THE CEILING HALF OF AN ASSERTION WHOSE FLOOR IS ALREADY CHECKED.
+#
+# poly_poll_field waits for a field to REACH a value. This waits for a field to
+# STOP MOVING: it returns 0 once one value has held for <hold-secs> within
+# <ceiling-secs>, and 1 otherwise, printing the trajectory of everything it saw.
+#
+# Issue #226 is why it exists. `acceptance-failover.sh` asserted its switch count
+# with `-ge 2` and nothing else, and a wrong-hub mutation that made the tier
+# switch 80 times where the baseline switches 6 PASSED that check -- 80 is not
+# fewer than 2. Failover's failure mode is not "too few switches"; it is
+# flapping, and flapping sails past any floor.
+#
+# A CONSTANT CEILING IS THE WRONG FIX and was rejected before this was written.
+# The legitimate switch count in that suite is timing-dependent -- the script's
+# own measurements show switches landing at roughly 13s and 36s depending on how
+# the sweep and the grace period line up -- so any number picked for `-le` is
+# either so loose it admits flapping or so tight it fails correct code. What is
+# NOT timing-dependent is that a tier nobody is asking to switch stops switching.
+# That is a stability predicate, it needs no magic number, and it is what this
+# measures.
+#
+# The field is compared, the whole LINE is recorded, for the same reason
+# poly_poll_field does it: the report then shows the fields nobody was watching.
+poly_hold_field() {
+  local label="$1" idx="$2" hold="$3" secs="$4" fn="$5"; shift 5
+  local start now line cur prev="" held_since=0 samples=0 deadline
+  poly__traj_reset
+  POLY_HELD_VALUE=""
+  POLY_HELD_CHANGES=0
+  start=$(date +%s)
+  deadline=$((start + secs))
+  while :; do
+    line="$("$fn" "$@" 2>&1)"
+    cur="$(printf '%s' "$line" | awk -v n="$idx" '{print $n}')"
+    samples=$((samples + 1))
+    poly__traj_add "$samples" "$line"
+    now=$(date +%s)
+    if [ "$samples" -eq 1 ] || [ "$cur" != "$prev" ]; then
+      [ "$samples" -gt 1 ] && POLY_HELD_CHANGES=$((POLY_HELD_CHANGES + 1))
+      prev="$cur"
+      held_since=$now
+    elif [ $((now - held_since)) -ge "$hold" ]; then
+      POLY_HELD_VALUE="$cur"
+      POLY_WAIT_ELAPSED=$((now - start))
+      return 0
+    fi
+    [ "$now" -ge "$deadline" ] && break
+    sleep "$POLY_POLL_INTERVAL"
+  done
+  POLY_HELD_VALUE="$prev"
+  POLY_WAIT_ELAPSED=$(( $(date +%s) - start ))
+  printf '        watched %s for %ss (ceiling %ss, %d samples); field %d never held one value for %ss\n' \
+    "$label" "$POLY_WAIT_ELAPSED" "$secs" "$samples" "$idx" "$hold"
+  printf '        it changed %d time(s) and was last %s\n' "$POLY_HELD_CHANGES" "${prev:-(empty)}"
+  poly__traj_print
+  return 1
+}
+
 # poly_docker_postmortem <container>
 #
 # What a container check should print instead of asserting a cause. Every line

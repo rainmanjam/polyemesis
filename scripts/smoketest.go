@@ -20,7 +20,9 @@ import (
 	srt "github.com/datarhei/gosrt"
 )
 
-const base = "http://127.0.0.1:8099/api/v1"
+// A var rather than a const so smoketest_stop_test.go can point the stop poll
+// at an httptest server. Nothing in main() reassigns it.
+var base = "http://127.0.0.1:8099/api/v1"
 
 var client *http.Client
 var csrf string
@@ -144,7 +146,7 @@ func main() {
 	step("shutting the server down cleanly")
 	do("POST", "/destinations/1/stop", nil)
 	do("POST", "/destinations/2/stop", nil)
-	time.Sleep(3 * time.Second)
+	waitStopped([]string{"1", "2"}, 10*time.Second)
 	_ = src.Process.Kill()
 	_ = src.Wait()
 
@@ -304,13 +306,15 @@ func ertmpPhase() bool {
 	}
 	step("E-RTMP: streaming 12s so each destination accumulates audio")
 	time.Sleep(12 * time.Second)
+	var stopped []string
 	for _, d := range doGet("/status")["destinations"].([]any) {
 		dm := d.(map[string]any)
 		if n, _ := dm["name"].(string); n == "C-rtmp-1-2" || n == "D-rtmp-1-3" {
 			do("POST", fmt.Sprintf("/destinations/%v/stop", dm["id"]), nil)
+			stopped = append(stopped, fmt.Sprintf("%v", dm["id"]))
 		}
 	}
-	time.Sleep(3 * time.Second)
+	waitStopped(stopped, 10*time.Second)
 
 	fmt.Println("\n=== E-RTMP VERIFICATION ===")
 	okc := verify("c.mkv", "C over E-RTMP (tracks 1+2)", map[int]bool{300: true, 900: true, 2000: false})
@@ -455,18 +459,90 @@ func srtPhase() bool {
 	}
 	step("SRT: streaming 12s so each destination accumulates audio")
 	time.Sleep(12 * time.Second)
+	var stopped []string
 	for _, d := range doGet("/status")["destinations"].([]any) {
 		dm := d.(map[string]any)
 		if n, _ := dm["name"].(string); n == "E-srt-1-2" || n == "F-srt-1-3" {
 			do("POST", fmt.Sprintf("/destinations/%v/stop", dm["id"]), nil)
+			stopped = append(stopped, fmt.Sprintf("%v", dm["id"]))
 		}
 	}
-	time.Sleep(3 * time.Second)
+	waitStopped(stopped, 10*time.Second)
 
 	fmt.Println("\n=== SRT VERIFICATION ===")
 	oke := verify("e.mkv", "E over SRT (tracks 1+2)", map[int]bool{300: true, 900: true, 2000: false})
 	okf := verify("f.mkv", "F over SRT (tracks 1+3)", map[int]bool{300: true, 900: false, 2000: true})
 	return oke && okf
+}
+
+// stopPollInterval is how often waitStopped asks. Named so the wait and the
+// tests agree on one number.
+var stopPollInterval = 250 * time.Millisecond
+
+// waitStopped polls the destination states until none of the given ids reports a
+// running process, and returns the ids still running when it gives up.
+//
+// ISSUE #195. This was `time.Sleep(3 * time.Second)` in three places, and a
+// fixed sleep is the wrong instrument here for three separate reasons. It runs
+// on WINDOWS -- ci.yml drives this program on all three matrix OSes -- where a
+// guessed interval is the least reliable thing available. It costs three
+// seconds of every run of the step whether or not the processes are gone. And
+// when it is not enough, it says nothing at all: the verification that follows
+// reads a file that is still being written and fails somewhere else entirely.
+//
+// A BOUNDED POLL IS FASTER IN THE NORMAL CASE AND DIAGNOSTIC IN THE ABNORMAL
+// ONE. "destination 1 was still running 10s after POST /stop" is a sentence; a
+// three-second sleep is not.
+//
+// It does NOT decide the verdict, deliberately -- the same discipline
+// lib-observe.sh states for the shell suites. verify() is what passes or fails
+// this program; a wait that overrode it would be a timeout nobody could trust.
+func waitStopped(ids []string, within time.Duration) []string {
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	deadline := time.Now().Add(within)
+	started := time.Now()
+	for {
+		still := runningAmong(want)
+		if len(still) == 0 {
+			fmt.Printf("     destination(s) %v stopped %s after /stop\n",
+				ids, time.Since(started).Round(time.Millisecond))
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			fmt.Printf("     WARNING: destination(s) %v were STILL RUNNING %s after POST /stop.\n",
+				still, within)
+			fmt.Println("     Whatever the verification below reports, it read files that were " +
+				"still being written.")
+			return still
+		}
+		time.Sleep(stopPollInterval)
+	}
+}
+
+// runningAmong reports which of the wanted destination ids currently carry a
+// running process. Ids nobody asked about are ignored: in the E-RTMP and SRT
+// phases the earlier phases' destinations are still in /status, and a wait that
+// counted those would never finish.
+func runningAmong(want map[string]bool) []string {
+	var still []string
+	dests, _ := doGet("/status")["destinations"].([]any)
+	for _, d := range dests {
+		dm, ok := d.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := fmt.Sprintf("%v", dm["id"])
+		if !want[id] {
+			continue
+		}
+		if p, ok := dm["process"].(map[string]any); ok && p["state"] == "running" {
+			still = append(still, id)
+		}
+	}
+	return still
 }
 
 func destBody(name, file string, tracks []int) map[string]any {

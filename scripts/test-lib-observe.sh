@@ -130,8 +130,56 @@ grep -q "observed 1 distinct run(s)" "$WORK/g" \
   && ok "a signal that never changed reports one run, not one line per sample" \
   || bad "the trajectory did not collapse a stable signal"
 
+step "8. poly_hold_field: a field that has stopped moving is reported as settled"
+# The three cases below are issue #226's, and the order matters. The one that
+# earns the check its keep is case 9: a floor of `-ge 2` on a switch count
+# reported success on a tier that switched 80 times, so the assertion that
+# matters is the one that FAILS on a value which will not sit still.
+line_steady()      { printf 'primary 6 true 0'; }
+line_field_moves() { printf 'primary %d true 0' "$(tick)"; }
+line_other_moves() { printf 'primary 6 true %d' "$(tick)"; }
+
+reset; poly_hold_field "the switch count" 2 1 4 line_steady > "$WORK/h" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] && ok "a field that holds one value returns 0" || bad "expected rc=0, got $rc"
+[ "$POLY_HELD_VALUE" = "6" ] \
+  && ok "the settled value is reported for the caller's message ($POLY_HELD_VALUE)" \
+  || bad "POLY_HELD_VALUE was '$POLY_HELD_VALUE', wanted 6"
+[ -s "$WORK/h" ] \
+  && bad "a settled field printed $(wc -l < "$WORK/h") line(s); it must be silent" \
+  || ok "a settled field is silent"
+
+step "9. poly_hold_field: a field that will not sit still is a failure, not a floor"
+reset; start9=$(date +%s)
+poly_hold_field "the switch count" 2 1 3 line_field_moves > "$WORK/i" 2>&1
+rc=$?
+elapsed9=$(( $(date +%s) - start9 ))
+[ "$rc" -eq 1 ] \
+  && ok "a field that changes on every sample returns 1" \
+  || bad "flapping was reported as settled (rc=$rc) -- this is exactly issue #226"
+[ "$POLY_HELD_CHANGES" -gt 1 ] \
+  && ok "the report counts the changes it saw ($POLY_HELD_CHANGES)" \
+  || bad "POLY_HELD_CHANGES was $POLY_HELD_CHANGES; a flapping field changed more than once"
+grep -q "never held one value" "$WORK/i" \
+  && ok "the failure says what was wrong rather than printing a bare count" \
+  || bad "the failure did not name the property it was measuring"
+[ "$elapsed9" -le 6 ] \
+  && ok "the wait is bounded by its ceiling (${elapsed9}s against a ceiling of 3s)" \
+  || bad "the wait ran ${elapsed9}s past a 3s ceiling"
+
+step "10. poly_hold_field: only the named field decides"
+# The whole LINE is recorded and a SINGLE FIELD is compared. Without the
+# distinction this check would fail whenever any unrelated column moved -- and
+# in the failover suite the destination restart count in field 4 moves for
+# reasons that have nothing to do with switching.
+reset; poly_hold_field "the switch count" 2 1 4 line_other_moves > "$WORK/j" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] \
+  && ok "movement in an unwatched field does not count as instability" \
+  || bad "a field that never moved was reported unstable because its neighbours did (rc=$rc)"
+
 total=$((pass + fail))
-EXPECTED_CHECKS=12
+EXPECTED_CHECKS=20
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
