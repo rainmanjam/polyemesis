@@ -146,7 +146,12 @@ export function AppLayout({
         <div className="ml-2 hidden items-center gap-2 sm:flex">
           <StatusDot tone={ingestTone} />
           <span className="text-[11px] text-muted-foreground">{t("chrome.ingest")}</span>
-          <span className="tnum font-mono text-[11px]">
+          {/* By test id: ui/e2e/live-status-rendering.spec.ts asserts what this
+              says for an SRT source, which has no ingest child and read
+              "Offline" on every healthy install until it was driven from
+              useIngestLive. Nothing else in the chrome distinguishes it from
+              the uptime beside it, which carries the same classes. */}
+          <span data-testid="chrome-ingest-status" className="tnum font-mono text-[11px]">
             {/* The bitrate when there is a process to read it from, and the
                 state otherwise. An SRT source is live without a child, so it
                 has no bitrate to show here — saying "Running" is the honest

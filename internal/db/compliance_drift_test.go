@@ -1,136 +1,150 @@
 package db
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
 
-// The head of the Facebook audience block, and of the sentence shown instead of
-// it when the connected account publishes to a Page. Both are whole conditions
-// rather than identifiers, for the reason facebook_ui_drift_test.go's header
-// sets out: an identifier is still written in a block that no longer renders.
-const (
-	facebookAudienceHead = `{platform === "facebook" && !facebookTargetsAPage && (`
-	facebookPageCaseHead = `{platform === "facebook" && facebookTargetsAPage && (`
-)
+/* ===========================================================================
+   What is left in Go, and why, after issue #107.
 
-// Every Facebook privacy value must be offered by the destination editor.
-//
-// This exists because the feature shipped unreachable once already: the whole
-// create-time and push path was built while facebookPrivacy appeared only in
-// types.ts, and TestUITypesCanNameEveryDestinationField was green throughout
-// because naming a field is all it asks for. Declaring a type is what the code
-// compiles against; a SelectItem is what a human can click.
-//
-// It matches `<SelectItem value="...">` rather than searching the file, because
-// these values appear in types.ts and in comments for unrelated reasons, and a
-// whole-file search would pass on an editor that still offered nothing.
-//
-// It also bounds itself to the audience block rather than to the file. A
-// whole-file search passed on a dialog whose audience block was disabled --
-// every SelectItem is still written inside a block that no longer renders, and
-// it would also have passed on options that had drifted into some other
-// platform's select entirely.
-//
-// MUTATION, run against a committed tree: `{platform === "facebook" &&
-// !facebookTargetsAPage && false && (` -- the head stops matching and this
-// fails. The previous whole-file version stayed green.
-func TestEveryFacebookPrivacyIsOfferedByTheDestinationEditor(t *testing.T) {
-	src := readUI(t, "components", "DestinationDialog.tsx")
-	block := jsxBlockUnder(t, src, facebookAudienceHead, "DestinationDialog.tsx")
+   This file used to hold three guards that read ui/src/**.tsx and asserted on
+   the text: that a <SelectItem> was written inside the Facebook audience block,
+   that the block was gated on the account not being a Page, and that save()
+   looped the server's warnings into toast.warning. All three were claims about
+   what React RENDERS, and source text cannot answer that -- as those guards'
+   own comments admitted, one of them in so many words ("this reads source text,
+   so it proves the gate is written, not that React renders it").
 
+   They now live in ui/e2e/facebook-destination.spec.ts, where a browser opens
+   the real dialog and drives the real controls.
+
+   ONE claim stayed, because it is the one no browser and no compiler can make:
+   the set of audiences the UI offers must be the set of audiences the SERVER
+   accepts. Go owns db.FacebookPrivacies; TypeScript cannot see it, and a
+   browser can only observe what the UI happens to render. So the mirror is
+   pinned here -- against a data declaration, ui/src/lib/facebookPrivacy.ts,
+   rather than against JSX. The dialog maps over that array, so the pin is
+   load-bearing rather than decorative: an entry deleted there is an option
+   deleted from the select.
+   =========================================================================== */
+
+// The audiences the UI offers must be exactly the audiences the server accepts.
+//
+// Both directions, because they fail differently and both have shipped here:
+//
+//   - A Go value the UI does not offer is an audience no operator can choose,
+//     with every line of Facebook privacy handling behind it unreachable. That
+//     is the third-time-lucky defect this repository keeps rediscovering:
+//     complete in every layer except the one a person touches.
+//   - A UI value Go does not accept is worse in a quieter way. ValidCompliance
+//     rejects it, so the operator picks an audience, presses Save, and gets a
+//     400 with no field to attach it to.
+//
+// It reads ui/src/lib/facebookPrivacy.ts, which is DATA -- an exported array of
+// {value, labelKey} -- and not a component. That distinction is the whole point
+// of issue #107. Whether the select renders, whether an operator can click an
+// option, and whether the chosen value survives a save are questions about a
+// running browser, and ui/e2e/facebook-destination.spec.ts asks them there.
+// What is asked here is a question about two enums in two languages, which is
+// exactly what a cross-language pin is for.
+//
+// MUTATION: delete the FRIENDS_OF_FRIENDS entry from facebookPrivacy.ts -- this
+// fails naming it, and the option disappears from the dialog, because the
+// dialog maps over the same array.
+func TestTheUIOffersExactlyTheAudiencesTheServerAccepts(t *testing.T) {
+	path := filepath.Join("..", "..", "ui", "src", "lib", "facebookPrivacy.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		// Not skipped: this file existing is the point. Losing it takes the
+		// select's options with it, since the dialog renders from it.
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+
+	// The array literal only. A `value:` in the doc comment above it, or in some
+	// unrelated export added later, is not an option the select renders.
+	body, ok := tsExportedArray(string(raw), "FACEBOOK_PRIVACIES")
+	if !ok {
+		t.Fatalf("no `export const FACEBOOK_PRIVACIES = [` in %s. Either it was "+
+			"renamed -- in which case this guard is watching nothing and the rename "+
+			"has to reach here too -- or the dialog is back to listing its options by "+
+			"hand, where nothing can pin them to the Go enum.", path)
+	}
+
+	offered := map[string]bool{}
+	for _, m := range regexp.MustCompile(`value:\s*"([^"]*)"`).FindAllStringSubmatch(body, -1) {
+		offered[m[1]] = true
+	}
+	if len(offered) == 0 {
+		t.Fatalf("FACEBOOK_PRIVACIES in %s has no `value:` entries at all; the "+
+			"audience select renders from it and would be empty", path)
+	}
+
+	accepted := map[string]bool{}
 	for _, p := range FacebookPrivacies {
-		option := `<SelectItem value="` + string(p) + `">`
-		if !strings.Contains(block, option) {
-			t.Errorf("no %s inside the Facebook audience block in DestinationDialog.tsx. "+
-				"A privacy an operator cannot choose is a setting that can only ever be "+
-				"empty, and every line of Facebook privacy handling behind it is "+
-				"unreachable.", option)
+		// FBPrivacyUnchanged is the absence of an audience rather than one of
+		// them; the select renders it as its own "leave it as it is" row and it
+		// is deliberately not in the mirrored array.
+		if p == FBPrivacyUnchanged {
+			continue
+		}
+		accepted[string(p)] = true
+	}
+
+	for _, v := range sortedKeys(accepted) {
+		if !offered[v] {
+			t.Errorf("db.FacebookPrivacies accepts %q and ui/src/lib/facebookPrivacy.ts "+
+				"does not offer it. An audience an operator cannot choose is a setting "+
+				"that can only ever be empty, and every line of Facebook privacy "+
+				"handling behind it is unreachable.", v)
 		}
 	}
-	// The select has to write what it reads. An audience picker wired to some
-	// other field is reachable, clickable and inert.
-	if !strings.Contains(block, "facebookPrivacy:") {
-		t.Error("the audience select inside the Facebook block does not set " +
-			"facebookPrivacy, so choosing an audience changes nothing that is saved.")
+	for _, v := range sortedKeys(offered) {
+		if !accepted[v] {
+			t.Errorf("ui/src/lib/facebookPrivacy.ts offers %q and db.FacebookPrivacies "+
+				"does not accept it. ValidFacebookPrivacy refuses the save, so an "+
+				"operator picks that audience and meets a 400 with no field to blame.", v)
+		}
 	}
 }
 
-// The Facebook audience control must be hidden when the connected account
-// publishes to a Page.
+// tsExportedArray returns the text between the brackets of
+// `export const <name> = [ ... ]`.
 //
-// A Page broadcast is public: Facebook has no personal audience to restrict it
-// to, and IngestFor suppresses privacy for a Page target regardless of what is
-// stored. Offering the control anyway is a setting that silently does nothing,
-// which is the defect roadmap item 0 exists for -- and this repo has now shipped
-// three features nobody could reach, so a control that CAN be reached and does
-// nothing is the same mistake wearing the opposite coat.
-//
-// It matches the negated guard rather than the identifier alone, because
-// `facebookTargetsAPage` also appears at its definition and in the branch that
-// explains the Page case to the operator. Searching for the bare name would
-// pass on a dialog that computed the answer and then ignored it.
-//
-// LIMITATION, and it is the same one action_drift_test.go documents: this reads
-// source text, so it proves the gate is written, not that React renders it. A
-// dialog that gated on `facebookTargetsAPage && false` would satisfy it -- the
-// head would still match, because that mutation is inside the block rather than
-// in front of the condition. The honest guard for that is a browser test
-// against a Page-connected account, which needs an OAuth fixture this suite has
-// no way to build; ui/e2e/ is where it would go.
-//
-// What it can now say, and could not before, is that BOTH halves of the
-// decision are written: the control gated on a profile, and the sentence that
-// replaces it for a Page. Matching the bare identifier `!facebookTargetsAPage`
-// was satisfied by the gate alone, so deleting the explanation left an operator
-// with a setting that had silently vanished and nothing saying why.
-//
-// MUTATION, run against a committed tree: delete the Page-case block from
-// DestinationDialog.tsx, leaving the gate on the audience control -- fails on
-// the second assertion. The previous version, which searched the file for
-// `!facebookTargetsAPage`, stayed green.
-func TestTheFacebookAudienceControlIsHiddenForAPageAccount(t *testing.T) {
-	src := readUI(t, "components", "DestinationDialog.tsx")
-
-	// jsxBlockUnder fatals if either head is missing or duplicated, which is the
-	// whole assertion for the gate: a control that is no longer gated on the
-	// account being a profile has no block under this head at all.
-	jsxBlockUnder(t, src, facebookAudienceHead, "DestinationDialog.tsx")
-
-	page := jsxBlockUnder(t, src, facebookPageCaseHead, "DestinationDialog.tsx")
-	if !strings.Contains(page, "Page") {
-		t.Error("the Page case renders nothing that mentions a Page. An operator " +
-			"whose account publishes to a Page sees the audience control disappear " +
-			"with no statement of why, which reads as the form losing a setting.")
+// It bounds itself to the literal rather than searching the file because the
+// doc comment above this particular array quotes the very strings it declares,
+// and a whole-file search would be satisfied by prose.
+func tsExportedArray(src, name string) (string, bool) {
+	head := "export const " + name + " = ["
+	start := strings.Index(src, head)
+	if start < 0 {
+		return "", false
 	}
+	open := start + len(head) - 1
+	depth := 0
+	for i := open; i < len(src); i++ {
+		switch src[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return src[open+1 : i], true
+			}
+		}
+	}
+	return "", false
 }
 
-// The server drops compliance a destination's platform cannot send and returns
-// a warning saying which. A drop nobody is shown is a setting that vanishes
-// between one save and the next open, so the dialog has to render it.
-//
-// This guard watches the CONSUMPTION, not the field. api.ts declaring
-// `warnings?: string[]` proves only that the type exists -- the same shape of
-// mistake that let unsendable tags ship, where every end of the wire was named
-// and nothing carried a value across it.
-//
-// This one has no enclosing JSX block to bound it to -- it is a statement in
-// save(), not a render -- so it matches the WHOLE statement instead of the call
-// alone. That is the same principle: `for (const w of warnings) false &&
-// toast.warning(w, ...)` leaves "toast.warning(w" in the file untouched, and so
-// does moving the call behind any other condition.
-//
-// MUTATION, run against a committed tree: `for (const w of warnings) false &&
-// toast.warning(w, { duration: 10000 });` -- fails. It compiles, which matters:
-// `warnings` is still read, so noUnusedLocals stays quiet and the mutation is
-// one CI would otherwise accept. The previous version, matching "toast.warning(w",
-// stayed green.
-func TestTheDialogShowsWhatTheServerDropped(t *testing.T) {
-	src := stripJSComments(readUI(t, "components", "DestinationDialog.tsx"))
-
-	if !strings.Contains(src, "for (const w of warnings) toast.warning(w") {
-		t.Error("the destination dialog does not render the server's warnings. " +
-			"Settings dropped because the platform cannot send them would then " +
-			"disappear with no explanation, which reads as the form losing them.")
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
+	sort.Strings(out)
+	return out
 }
