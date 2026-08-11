@@ -37,6 +37,23 @@ its first tagged release.
   remove the copies already in your logs, or in whatever collected those `400`
   responses.
 
+- **A pull or destination password containing `@`, `/`, `!`, `#` or `%` was
+  rendered verbatim in `GET /processes`, which a `read` token can reach.** The
+  scrubber that removes credentials from a rendered FFmpeg command line is a
+  substring replacement over the argv the process was actually handed. It was
+  collecting the password through Go's URL parser, which **decodes** it — so for
+  `rtsp://user:p%40ssw0rd%21@cam/stream` it held `p@ssw0rd!` and looked for that
+  in a command line containing `p%40ssw0rd%21`. It matched nothing and masked
+  nothing.
+
+  Only passwords needing percent-encoding were affected; the username, the path
+  and plainly-spelled passwords were always scrubbed. Both the pull side and the
+  destination side had it, through separate code paths.
+
+  **If a pull source or destination of yours uses a password with one of those
+  characters, treat it as exposed to anyone who held a `read` token and rotate
+  it.**
+
 ### Added
 
 - **A destination can now forward its audio bit-for-bit.** Set `copy` on a
@@ -84,6 +101,14 @@ its first tagged release.
   rather than what was said. **If you have automation that downloads recordings
   or reads transcripts with an API token, it needs an `admin` token now**; the
   route works, the scope does not.
+
+  **Every token you already have becomes `admin` when you upgrade.** The
+  migration is `ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT
+  'admin'`, so existing automation keeps working exactly as it did and nothing
+  breaks on restart. The consequence worth stating plainly is the other
+  direction: **nothing is restricted until you act.** The `read` scope is opt-in
+  — a monitoring script does not become read-only by upgrading, and if you want
+  it to be, issue it a new `read` token and revoke the old one.
 
 - **BREAKING: an upload that no probe could read is stored but marked, and some
   formats are refused outright.** Uploads now carry a verdict record, so a file
