@@ -244,20 +244,40 @@ func parseBroker(raw string) (*url.URL, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("mqtt broker URL is unparseable: %w", err)
+		// NEVER `%w` the url.Error, and never echo `raw`. url.Error.Error()
+		// renders as `parse "<the whole URL>": <reason>` -- so wrapping it puts
+		// the operator's password into an Error log line by way of the one
+		// branch that runs BEFORE the credentials guard below can refuse it.
+		// `mqtt://user:pw@ho st:1883` is the measured shape: a typo'd host in a
+		// URL that also carries a credential. The reason is the diagnostic; the
+		// URL is something the operator just typed and does not need read back.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return nil, fmt.Errorf("mqtt broker URL is unparseable: %v", urlErr.Err)
+		}
+		return nil, errors.New("mqtt broker URL is unparseable")
 	}
 	switch u.Scheme {
 	case "mqtt", "tcp", "mqtts", "ssl", "ws", "wss":
 	default:
 		return nil, fmt.Errorf("mqtt broker scheme %q is not one of mqtt, mqtts, tcp, ssl, ws or wss", u.Scheme)
 	}
-	if u.Host == "" {
-		return nil, fmt.Errorf("mqtt broker URL %q has no host", raw)
-	}
+	// BEFORE the host check, not after. `mqtt://user:pw@` parses cleanly, has a
+	// credential and has NO host -- so with the checks the other way round the
+	// no-host branch echoed the whole URL, password included, and the guard
+	// immediately below it (whose own message promises the password is "never
+	// logged") was never reached. The promise was true only for URLs that were
+	// otherwise well formed.
 	if u.User != nil {
 		// Refused rather than accepted-and-moved, because an operator who put
 		// a password in the URL needs to know it would have been logged.
 		return nil, errors.New("mqtt broker URL carries credentials; put the username and password in their own fields so the password is sealed and never logged")
+	}
+	if u.Host == "" {
+		// No `%q raw`: a URL with no host is one an operator can see on their
+		// own screen, and the only thing this string could add is the userinfo
+		// the branch above now catches -- plus whatever a future shape carries.
+		return nil, errors.New("mqtt broker URL has no host")
 	}
 	return u, nil
 }

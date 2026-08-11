@@ -619,6 +619,23 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	// is the one impression this must not give.
 	if settings.Ingest.Mode == db.IngestUnset {
 		fmt.Printf("  ingest      not chosen yet — pick SRT, RTMP or pull in the web UI\n")
+	} else if settings.Ingest.Mode == db.IngestPull {
+		// Pull DIALS OUT. It is the one mode with no inbound port, and printing
+		// one is worse than printing nothing: `ingest pull (port 6000)` is read
+		// as "point the encoder at 6000", which in pull mode is an instruction
+		// that can never work and sends the operator to their firewall to debug
+		// a port that was never in the path.
+		//
+		// 6000 genuinely IS bound in pull mode -- both listeners bind
+		// unconditionally now (engine/manager.go, "BOTH LISTENERS BIND,
+		// ALWAYS"), so ingestPort's return value is not wrong and is left
+		// alone. What is wrong is attributing that port to THIS ingest.
+		// engine.Manager.ListenerBound(db.IngestPull) already returns false and
+		// says why in its own comment -- "pull dials out ... saying yes would
+		// tell an operator a token gates an ingest that no publisher ever
+		// reaches" -- and manager_test.go pins it. This banner was the last
+		// place still telling the operator the opposite.
+		fmt.Printf("  ingest      pull (dials out; no inbound port)\n")
 	} else {
 		fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
 	}
