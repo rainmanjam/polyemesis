@@ -1305,6 +1305,12 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, db.ErrNoUser):
 		writeError(w, http.StatusConflict, "setup has not been completed")
+	case errors.Is(err, db.ErrStateConflict):
+		// The sentence is passed through rather than replaced, because unlike
+		// the two cases above this one is per-request: WHICH state blocked the
+		// operation is the whole of what the operator needs to know, and it is
+		// the store that knows it.
+		writeError(w, http.StatusConflict, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}

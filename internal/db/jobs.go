@@ -604,8 +604,26 @@ type rowQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
+// ErrStateConflict marks "the row is there, but its state does not allow what
+// was asked" -- a retry of a job that never finished, a cancel of one already
+// cancelled, a delete of one with a worker on it.
+//
+// It exists so callers can tell that case apart from a genuine store failure
+// WITHOUT matching on the sentence. Until it existed, every one of these
+// reached internal/api's writeStoreError as an unrecognised error and was
+// answered 500, which tells an operator "the server is broken" about a request
+// that was merely inapplicable (#221).
+//
+// The sentence still carries the detail; this only classifies it.
+var ErrStateConflict = errors.New("job state conflict")
+
 // jobStateConflict turns "the UPDATE matched nothing" into an error that says
 // why: the job is gone, or it is in a state this operation does not apply to.
+//
+// The two answers are deliberately different KINDS of error, not two spellings
+// of one: a missing row is ErrNotFound (404), a wrong state is ErrStateConflict
+// (409). Collapsing them would make "there is no such job" and "that job is
+// already running" indistinguishable to the caller.
 func jobStateConflict(q rowQuerier, id int64, verb string) error {
 	var state string
 	err := q.QueryRow(`SELECT state FROM jobs WHERE id = ?`, id).Scan(&state)
@@ -615,7 +633,7 @@ func jobStateConflict(q rowQuerier, id int64, verb string) error {
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("cannot %s job %d: it is %s", verb, id, state)
+	return fmt.Errorf("%w: cannot %s job %d: it is %s", ErrStateConflict, verb, id, state)
 }
 
 func timeOrZero(unix int64) time.Time {

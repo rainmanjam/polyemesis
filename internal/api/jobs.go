@@ -688,8 +688,36 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"released": true, "governed": true})
 }
 
+// handleDeleteJob removes a job row, EXCEPT while a worker is on it.
+//
+// Queue.Delete is unconditional and stays that way: its documentation says
+// cancelling a running job first is the caller's choice, not something done
+// silently underneath it, and a delete that quietly cancelled would be a worse
+// surprise than one that refuses. So the refusal lives here, in the policy
+// layer, and it refuses rather than escalates.
+//
+// What it prevents: deleting a running row does not stop the worker. The
+// execution keeps its context and keeps burning CPU on work whose record is
+// gone, and when it returns, finish() writes progress and a terminal state
+// against an id that no longer exists (#220). The operator saw a 200 and has no
+// route left to the thing still running.
+//
+// What it does NOT claim: this is a read followed by a write, not one atomic
+// statement. A job that is claimed in the window between them is still deleted.
+// That window is the two statements wide; the one this replaces was the whole
+// life of the job.
 func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
-	s.jobAction(w, r, func(id int64) error { return s.jobq.Delete(id) })
+	s.jobAction(w, r, func(id int64) error {
+		j, err := s.jobq.Get(id)
+		if err != nil {
+			return err
+		}
+		if j.State == jobs.StateRunning {
+			return fmt.Errorf("%w: cannot delete job %d: it is running, cancel it first",
+				db.ErrStateConflict, id)
+		}
+		return s.jobq.Delete(id)
+	})
 }
 
 // jobAction is the shared shape of every single-job control: parse, act, hand
