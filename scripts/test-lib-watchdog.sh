@@ -143,8 +143,11 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 if kill -0 "$pipe_pid" 2>/dev/null; then
-  kill -9 "$pipe_pid" 2>/dev/null
+  # THE VERDICT BEFORE THE CLEANUP, which is the ordering #179 cost 28 minutes
+  # and an unrecoverable log to establish: an answer that has been computed must
+  # be emitted before anything that can hang or be misread runs.
   bad "stdout stayed open after the suite exited -- a live watchdog would hang the CI step"
+  kill -9 "$pipe_pid" 2>/dev/null
 else
   ok "stdout closes when the suite exits; no watchdog is left behind"
 fi

@@ -44,9 +44,9 @@ step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 # agent's or another operator's server on a different port.
 cleanup() {
   pkill -f "acceptance-source"       2>/dev/null
-  poly_cleanup "$PORT" "${WORK:-}"
+  poly_cleanup_exit "${1:-0}" "$PORT" "${WORK:-}"
 }
-trap 'poly_watchdog_disarm; cleanup' EXIT
+trap 'poly_teardown_trap $? cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
