@@ -566,7 +566,7 @@ note "with the filler on air: $FILLER_STATUS"
 # Reported as unmeasured rather than passed: the destination may genuinely have
 # restarted and we would not know. The one thing it must not do is claim a
 # restart it did not observe.
-if [ "$restarts_filler" = "-1" ] || [ "$restarts_before" = "-1" ]; then
+if [[ "$restarts_filler" = "-1" ]] || [[ "$restarts_before" = "-1" ]]; then
   bad "no destination process was reported across the filler switch; nothing was measured"
 elif [ "$restarts_filler" -eq "$restarts_before" ]; then
   ok "the destination rode the switch to filler without restarting ($restarts_filler restarts)"

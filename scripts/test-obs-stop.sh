@@ -29,12 +29,15 @@ fail=0
 ok() {
 	printf "  \033[32mPASS\033[0m  %s\n" "$1"
 	pass=$((pass + 1))
+	return
 }
 bad() {
-	printf "  \033[31mFAIL\033[0m  %s\n" "$1"
+	local msg="$1"
+	printf "  \033[31mFAIL\033[0m  %s\n" "$msg"
 	fail=$((fail + 1))
+	return
 }
-step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
+step() { printf "\n\033[1m%s\033[0m\n" "$1"; return; }
 
 # ready <file> -- poll for a stand-in's readiness marker, bounded.
 ready() {
@@ -140,7 +143,7 @@ step "3. The wait is BOUNDED -- this is the whole of #208's first finding"
 # The line replaced was `kill -TERM "$pid"; wait "$pid"`, with no ceiling. Had
 # the pid been right, this stand-in would have held the container entrypoint for
 # 300 seconds. The assertion is not "fast", it is "nowhere near 300".
-if [ "$elapsed" -le 8 ]; then
+if [[ "$elapsed" -le 8 ]]; then
 	ok "gave up on SIGTERM and finished in ${elapsed}s against the stand-in's 300s"
 else
 	bad "took ${elapsed}s against a 2s+2s bound; the wait is not bounded"
@@ -166,7 +169,7 @@ t0=$(date +%s)
 out=$(poly_bounded_stop "$ZOMBIE" zombie 5 2 2>&1)
 rc=$?
 took=$(($(date +%s) - t0))
-if [ "$rc" -eq 0 ] && [ "$took" -le 1 ]; then
+if [[ "$rc" -eq 0 ]] && [[ "$took" -le 1 ]]; then
 	ok "an already-exited child returns success immediately (${took}s)"
 else
 	bad "an already-exited child took ${took}s and returned $rc; the poll is not noticing a process that is already gone"

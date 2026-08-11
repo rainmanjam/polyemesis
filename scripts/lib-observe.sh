@@ -275,6 +275,21 @@ poly_hold_field() {
     samples=$((samples + 1))
     poly__traj_add "$samples" "$line"
     now=$(date +%s)
+    # DELIBERATELY `[` AND NOT `[[` ON BOTH LINES BELOW. Neither is a style
+    # holdout; each would change what this loop decides.
+    #
+    # `[ "$cur" != "$prev" ]`: $prev is an awk-extracted field of a live status
+    # line, not a literal, so under `[[` it is a PATTERN. Let it ever hold `*`
+    # and `[[ $cur != $prev ]]` is false for every $cur, held_since never
+    # resets, and a field that is still moving is reported as settled -- the
+    # exact defect case 9 of scripts/test-lib-observe.sh exists to catch.
+    #
+    # `-ge "$hold"`: $hold is the caller's argument and is never validated here.
+    # `[` rejects a non-integer loudly (rc 2, "integer expected") and the elif
+    # stays false; `[[` evaluates it as an ARITHMETIC EXPRESSION, so a
+    # non-numeric $hold reads as 0, `elapsed -ge 0` is always true, and the
+    # first sample is reported as settled. Measured: `[` and `[[` diverge on
+    # every non-plain-decimal operand, including `08` and `1+1`.
     if [ "$samples" -eq 1 ] || [ "$cur" != "$prev" ]; then
       [ "$samples" -gt 1 ] && POLY_HELD_CHANGES=$((POLY_HELD_CHANGES + 1))
       prev="$cur"
@@ -321,6 +336,10 @@ poly_detectable_floor() {
   local runs="$1" conf="${2:-95}"
   case "$runs" in ''|*[!0-9]*) return 1 ;; esac
   case "$conf" in ''|*[!0-9]*) return 1 ;; esac
+  # DELIBERATELY `[`. The case above admits any all-digit $runs, and that
+  # includes leading zeros. `[ 08 -ge 1 ]` is true (decimal 8); `[[ 08 -ge 1 ]]`
+  # is an arithmetic context where `08` is an invalid octal literal, so it
+  # errors and the `|| return 1` rejects an input this function accepts today.
   [ "$runs" -ge 1 ] || return 1
   [ "$conf" -ge 1 ] && [ "$conf" -le 99 ] || return 1
   awk -v n="$runs" -v c="$conf" 'BEGIN { printf "%.1f\n", 100 * (1 - exp(log(1 - c/100) / n)) }'

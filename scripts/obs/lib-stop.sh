@@ -52,6 +52,7 @@ poly__alive() {
 	kill -0 "$1" 2>/dev/null || return 1
 	case "$(ps -o state= -p "$1" 2>/dev/null | tr -d ' ')" in
 	Z* | "") return 1 ;;
+	*) ;;
 	esac
 	return 0
 }

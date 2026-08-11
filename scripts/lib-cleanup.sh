@@ -293,6 +293,11 @@ poly_cleanup_exit() {
     # above forbids. A tidy-up of this function reached for exactly that once;
     # case 9 of scripts/test-lib-cleanup.sh caught it, and this comment is here so
     # the next one does not have to be caught.
+    # DELIBERATELY `[`. $rc is the caller's first argument and is not validated
+    # here. `[` rejects a non-integer loudly; `[[` would evaluate it as an
+    # arithmetic expression, where a non-numeric value reads as 0 and would be
+    # PROMOTED to 1 -- renumbering a run on exactly the axis the table above
+    # forbids renumbering.
     if [ "$rc" -eq 0 ]; then
       rc=1
     fi

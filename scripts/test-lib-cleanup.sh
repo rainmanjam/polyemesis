@@ -262,21 +262,24 @@ WORK9="$(mktemp -d)"
 # shellcheck disable=SC2016  # these single quotes are script text being WRITTEN,
 # not shell to expand here.
 make_suite() { # make_suite <path> <teardown-rc> <body-exit>
+	local path="$1" teardown_rc="$2" body_exit="$3"
 	{
 		echo '#!/usr/bin/env bash'
 		echo 'set -uo pipefail'
 		echo ". \"$SCRIPTS/lib-cleanup.sh\""
 		echo 'poly_watchdog_disarm() { :; }'
-		echo "poly_cleanup() { return $2; }"
+		echo "poly_cleanup() { return $teardown_rc; }"
 		echo 'cleanup() { poly_cleanup_exit "${1:-0}" 19999; }'
 		echo "$TRAP_SHAPE"
-		echo "exit $3"
-	} > "$1"
-	chmod +x "$1"
+		echo "exit $body_exit"
+	} > "$path"
+	chmod +x "$path"
+	return
 }
 
 suite_status() { # suite_status <teardown-rc> <body-exit>
-	make_suite "$WORK9/suite.sh" "$1" "$2"
+	local teardown_rc="$1" body_exit="$2"
+	make_suite "$WORK9/suite.sh" "$teardown_rc" "$body_exit"
 	bash "$WORK9/suite.sh" >/dev/null 2>&1
 	echo $?
 }
@@ -339,7 +342,7 @@ for s in $SUITES; do
 	grep -Fqx "$TRAP_SHAPE" "$SCRIPTS/$s" || missing="$missing $s"
 	grep -q "poly_cleanup_exit" "$SCRIPTS/$s" || missing="$missing $s(no-poly_cleanup_exit)"
 done
-if [ "$checked" -ne 12 ]; then
+if [[ "$checked" -ne 12 ]]; then
 	bad "only $checked of 12 named suites exist; a renamed suite would make this check pass by examining nothing"
 elif [ -n "$missing" ]; then
 	bad "these suites do not carry the shared trap shape:$missing"

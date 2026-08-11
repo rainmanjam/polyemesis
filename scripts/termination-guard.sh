@@ -56,10 +56,12 @@ ROOT="$(dirname "$HERE")"
 # falls back to <dir>/<file>, which is what makes the identity assertions in
 # scripts/test-termination-guard.sh readable.
 rel() {
-	case "$1" in
-	"$ROOT"/*) printf '%s' "${1#"$ROOT"/}" ;;
-	*) printf '%s/%s' "$(basename "$(dirname "$1")")" "$(basename "$1")" ;;
+	local path="$1"
+	case "$path" in
+	"$ROOT"/*) printf '%s' "${path#"$ROOT"/}" ;;
+	*) printf '%s/%s' "$(basename "$(dirname "$path")")" "$(basename "$path")" ;;
 	esac
+	return
 }
 
 # WINDOW. How far after a kill an assumption still counts as belonging to it.
@@ -127,7 +129,8 @@ findings_file="$(mktemp)"
 trap 'rm -f "$findings_file"' EXIT
 
 note() { # note <path> <line> <rule> <message>
-	printf '%s:%s: %s: %s\n' "$(rel "$1")" "$2" "$3" "$4" >>"$findings_file"
+	local path="$1" lineno="$2" rule="$3" message="$4"
+	printf '%s:%s: %s: %s\n' "$(rel "$path")" "$lineno" "$rule" "$message" >>"$findings_file"
 }
 
 # MATCHING IS DONE WITH BASH'S OWN `=~`, not by piping each line to grep. That
@@ -136,6 +139,7 @@ note() { # note <path> <line> <rule> <message>
 # every PR is a guard somebody moves to a nightly job and then stops reading.
 re_match() { # re_match <text> <ere>
 	[[ $1 =~ $2 ]]
+	return
 }
 
 scan_file() {
@@ -209,7 +213,7 @@ scan_file() {
 				hittext="${lines[j]%%#*}"
 				win="$win
 $hittext"
-				if [ -z "$hitline" ] && re_match "$hittext" "$ASSUME"; then
+				if [[ -z "$hitline" ]] && re_match "$hittext" "$ASSUME"; then
 					hitline="$j"
 				fi
 			done
@@ -232,7 +236,7 @@ fi
 files=0
 for d in "${dirs[@]}"; do
 	for f in "$d"/*.sh; do
-		[ -f "$f" ] || continue
+		[[ -f "$f" ]] || continue
 		files=$((files + 1))
 		scan_file "$f"
 	done
@@ -259,13 +263,22 @@ kept="$(mktemp)"
 # allow_covers <finding-line> <path> <rule> -- does this entry cover this finding?
 # Findings are `<path>:<line>: <rule>: <message>`.
 allow_covers() {
-	case "$1" in
-	"$2":*) ;;
+	local fline="$1" apath="$2" arule="$3"
+	case "$fline" in
+	"$apath":*) ;;
 	*) return 1 ;;
 	esac
-	[ "$3" = "*" ] && return 0
-	case "$1" in
-	*": $3: "*) return 0 ;;
+	# DELIBERATELY `[` AND NOT `[[`. The `*` here is a literal wildcard SENTINEL
+	# meaning "this entry covers any rule", so the quotes around it are what makes
+	# the comparison a comparison. `[` has no pattern-matching mode and cannot be
+	# broken by dropping them. `[[` does: `[[ $arule = * ]]` matches EVERY value
+	# (measured -- it diverged from `[` on 23 of 23 corpus values), so every
+	# allowlist entry would cover every finding and this guard would report clean
+	# for ever while still printing its file count. Left as `[` so that a later
+	# tidy-up cannot silently disable the allowlist.
+	[ "$arule" = "*" ] && return 0
+	case "$fline" in
+	*": $arule: "*) return 0 ;;
 	esac
 	return 1
 }
@@ -282,7 +295,7 @@ while IFS="$(printf '\t')" read -r apath arule areason; do
 		[ -n "$fline" ] || continue
 		allow_covers "$fline" "$apath" "$arule" && hits=$((hits + 1))
 	done <"$findings_file"
-	if [ "$hits" -eq 0 ]; then
+	if [[ "$hits" -eq 0 ]]; then
 		stale="$stale $apath($arule)"
 	else
 		suppressed=$((suppressed + hits))
@@ -290,10 +303,10 @@ while IFS="$(printf '\t')" read -r apath arule areason; do
 done <"$allow_tmp"
 
 while IFS= read -r fline; do
-	[ -n "$fline" ] || continue
+	[[ -n "$fline" ]] || continue
 	keep=1
 	while IFS="$(printf '\t')" read -r apath arule areason; do
-		case "$apath" in "" | \#*) continue ;; esac
+		case "$apath" in "" | \#*) continue ;; *) ;; esac
 		[ -n "$areason" ] || continue
 		allow_covers "$fline" "$apath" "$arule" && keep=0
 	done <"$allow_tmp"
@@ -311,12 +324,12 @@ if [ -n "$stale" ]; then
 	fail=1
 fi
 
-if [ -s "$kept" ]; then
+if [[ -s "$kept" ]]; then
 	sort "$kept" >&2
 	fail=1
 fi
 
-if [ "$fail" -ne 0 ]; then
+if [[ "$fail" -ne 0 ]]; then
 	echo "TERMINATION GUARD: FAILED. A signal is a request. Between asking a process to die and observing it dead there is an interval, and everything a script does in that interval is measured against a machine in a state nobody looked at." >&2
 	rm -f "$kept"
 	exit 1
