@@ -1,0 +1,25 @@
+# GREEN. The shape #179 was fixed into, and the shape the real ci.yml carries.
+# The cleanup is a TRAP, so it runs when the step ends -- necessarily after the
+# verdict -- and the verdict is emitted inline before anything is torn down. A
+# rule that flagged this would be flagging the fix.
+name: smoke
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start a server and check it serves
+        timeout-minutes: 10
+        run: |
+          ./server -addr 127.0.0.1:8123 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ok=no
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8123/health; then ok=yes; break; fi
+            sleep 1
+          done
+          if [ "$ok" != yes ]; then
+            echo "server never served /health"
+            exit 1
+          fi

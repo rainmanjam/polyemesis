@@ -35,7 +35,11 @@
 # USAGE
 #
 #   source "$(dirname "$0")/lib-cleanup.sh"
-#   trap 'poly_cleanup "$PORT" "$WORK" "$INGEST"' EXIT
+#   cleanup() { poly_cleanup_exit "${1:-0}" "$PORT" "$WORK" "$INGEST"; }
+#   trap 'poly_teardown_trap $? cleanup' EXIT
+#
+# The trap is that exact shape in all twelve suites; see poly_cleanup_exit at the
+# foot of this file for why each piece of it is where it is.
 #
 # WORK is optional; pass it when the suite has a working directory, so the
 # backstop sweep can identify this run's processes by their command line.
@@ -240,13 +244,11 @@ poly_cleanup() {
   # `exit`.
   #
   # Every suite installs this as `trap '... cleanup' EXIT`, and an EXIT trap that
-  # exits REPLACES the script's own exit status. Making teardown failures fail
-  # the suite from here would therefore also let a teardown hiccup overwrite a
-  # green run's status and, worse, overwrite a RED one -- turning a specific
-  # product failure into a generic teardown failure. Wiring the verdict through
-  # to the exit status needs each suite's own trap to combine it with $?, which
-  # is twelve edits and its own review. Tracked; see the issue linked from the
-  # PR that added this. Until then this is honest about being a report.
+  # exits REPLACES the script's own exit status. Exiting from here would let a
+  # teardown hiccup overwrite a RED run's specific product failure with a generic
+  # teardown one, which is the mistake this repository keeps paying for. The
+  # combining is done by poly_cleanup_exit below, which is given the suite's own
+  # status and can only ever turn a 0 into a 1.
   if [ "$stopfail" -gt 0 ] || [ "$portfail" -gt 0 ]; then
     printf "  \033[31mFAIL\033[0m  teardown did not complete: %s server(s) survived kill -9, %s port(s) still held.\n" "$stopfail" "$portfail"
     printf "        Everything this run reported after the point of failure was\n"
@@ -255,4 +257,71 @@ poly_cleanup() {
     return 1
   fi
   return 0
+}
+
+# poly_cleanup_exit <suite-status> <ports> [work] [bindports] -- the teardown
+# verdict, COMBINED with the suite's own, in the one place all twelve suites can
+# share.
+#
+# THE PRECEDENCE IS THE WHOLE POINT, and it is asymmetric on purpose:
+#
+#   suite 0, teardown ok    -> 0    a clean run stays clean
+#   suite 0, teardown FAILS -> 1    a green run whose teardown did not complete
+#                                   measured the tail of itself against a machine
+#                                   in an unknown state; that is not a pass
+#   suite 3, teardown ok    -> 3    the suite's own status, unchanged
+#   suite 3, teardown FAILS -> 3    STILL the suite's own status. A teardown
+#                                   failure must never overwrite a specific
+#                                   product failure with a generic one; a
+#                                   teardown problem misread as a product problem
+#                                   is what this class costs hours to.
+#
+# So teardown can only ever turn a 0 into a 1. It can never renumber a red run.
+#
+# THE CALLER'S HALF is uniform across every suite and has to stay that way:
+#
+#   cleanup() { ...suite sweeps...; poly_cleanup_exit "${1:-0}" "$PORT" "${WORK:-}"; }
+#   trap 'poly_teardown_trap $? cleanup' EXIT
+#
+# See poly_teardown_trap for why the trap is one call and not a `;`-list.
+poly_cleanup_exit() {
+  local rc="$1"
+  shift
+  if ! poly_cleanup "$@"; then
+    # ONLY a 0 is promoted. An unconditional `rc=1`, or an `else rc=0` on the
+    # success side, both RENUMBER a red run -- which is the one outcome the table
+    # above forbids. A tidy-up of this function reached for exactly that once;
+    # case 9 of scripts/test-lib-cleanup.sh caught it, and this comment is here so
+    # the next one does not have to be caught.
+    if [ "$rc" -eq 0 ]; then
+      rc=1
+    fi
+  fi
+  return "$rc"
+}
+
+# poly_teardown_trap <suite-status> [cleanup-fn] -- the EXIT trap, entire.
+#
+# WHY THE TRAP IS ONE CALL AND NOT A LIST. The obvious spelling is
+# `trap 'poly_rc=$?; poly_watchdog_disarm; cleanup "$poly_rc"; exit $?' EXIT`,
+# and it is correct -- but only because `poly_rc=$?` comes FIRST. poly_watchdog_disarm
+# ends in a `kill` and a `wait`, so it clobbers `$?`; a reader who tidies the
+# disarm to the front turns every red suite green and nothing says so.
+#
+# Passing `$?` as an ARGUMENT makes that ordering structural instead of a
+# convention: the shell expands it while assembling the call, before anything in
+# this function runs, so there is no window in which it can be lost. It also
+# stops shellcheck reporting the intermediate variable as referenced-but-unassigned
+# in all twelve suites, which is a warning nobody would have kept reading.
+poly_teardown_trap() {
+  local rc="$1" fn="${2:-cleanup}"
+
+  # The watchdog library is sourced by the suites, not by this one, so its
+  # absence is a valid configuration rather than an error.
+  if declare -f poly_watchdog_disarm >/dev/null 2>&1; then
+    poly_watchdog_disarm
+  fi
+
+  "$fn" "$rc"
+  exit $?
 }

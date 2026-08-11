@@ -38,6 +38,16 @@ type DestStatus struct {
 	Warnings      []string           `json:"warnings"`
 	Error         string             `json:"error,omitempty"`
 	Process       *supervisor.Status `json:"process,omitempty"`
+	// StopWarning is set when the LAST stop of this destination ended on Stop's
+	// deadline arm: SIGKILL issued, not waited for, the child possibly still
+	// running and still publishing.
+	//
+	// It is a separate field from Error because it is not a failure of this
+	// destination -- the row is fine, the stop was issued, the port and the
+	// subscription have been released. It is a statement about what was NOT
+	// observed, and the reason it has to be said out loud is that Process.State
+	// reads "stopped" on both of Stop's arms and so cannot say it (#209).
+	StopWarning string `json:"stopWarning,omitempty"`
 	// RenditionID is the shared encode this destination reads, nil for
 	// passthrough. RenditionName is its label, empty for passthrough, so the
 	// dashboard can group destinations under the encode they share.
@@ -223,6 +233,11 @@ func (e *Engine) Status() Status {
 				ds.RenditionName = names[*row.RenditionID]
 			}
 			ds.FacebookBroadcastID = row.Facebook.BroadcastID
+			// Read for EVERY row, running or not. The rows this matters for are
+			// precisely the ones with no live entry left: a destination that was
+			// stopped is gone from e.dests, so anything hung off `live` below
+			// would be silently absent exactly when the warning is true.
+			ds.StopWarning, _ = e.StopUnreaped(row.ID)
 			// Looked up ONCE. This was two identical linear scans of the same
 			// list with the same argument, per row, on a function that runs per
 			// WebSocket push and per telemetry tick.

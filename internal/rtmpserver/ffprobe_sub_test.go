@@ -51,7 +51,10 @@ func TestRealFFmpegPublishesAndRealFFprobeSubscribes(t *testing.T) {
 	if err := pub.Start(); err != nil {
 		t.Fatalf("publisher: %v", err)
 	}
-	defer func() { _ = pub.Process.Kill() }()
+	// Kill AND Wait. Kill only asks; until something reaps the child it is a
+	// zombie holding a slot in this process's table, and on a driver that
+	// starts several children in sequence that is a leak with a name (#197).
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 20*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -132,7 +135,10 @@ func TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder(t *testing.T) {
 	if err := pub.Start(); err != nil {
 		t.Fatalf("publisher: %v", err)
 	}
-	defer func() { _ = pub.Process.Kill() }()
+	// Kill AND Wait. Kill only asks; until something reaps the child it is a
+	// zombie holding a slot in this process's table, and on a driver that
+	// starts several children in sequence that is a leak with a name (#197).
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)

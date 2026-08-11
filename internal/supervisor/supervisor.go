@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -45,8 +46,31 @@ const (
 	// shutdownGrace is how long a child gets to exit after SIGTERM before it
 	// is killed. FFmpeg uses this window to flush and finalise its output,
 	// which is what keeps a recording playable.
+	//
+	// It is contracted from OUTSIDE this package: acceptance-recording-stop.sh
+	// measures elapsed wall-clock across a stop and asserts it is under 8s. The
+	// number may not be changed without changing that assertion.
 	shutdownGrace = 8 * time.Second
-	logRingSize   = 400
+	// drainGrace is how long the stdout/stderr drain gets to finish AFTER the
+	// child has been reaped, before the supervisor closes the read ends out from
+	// under it.
+	//
+	// It exists because a pipe reaches EOF when the LAST write end closes, and a
+	// child's descendants inherit those write ends. FFmpeg spawning a helper that
+	// outlives it -- or any grandchild that escapes the process group -- keeps
+	// stdout and stderr open after the child is gone, and a drain that waits for
+	// EOF therefore waits on a process the supervisor never started and cannot
+	// name. Before this bound existed, that made runOnce, and so `done`, and so
+	// Stop, unbounded.
+	//
+	// 2s and not less because the drain's remaining job at that point is to scan
+	// what is already sitting in the pipe buffer, which the kernel caps at tens
+	// of kilobytes -- three orders of magnitude below what 2s of bufio scanning
+	// costs, so the tail of stderr that becomes LastError survives. 2s and not
+	// more because it is additive to a stop that has already spent its own grace,
+	// and only ever paid at all when a descendant is holding the pipe.
+	drainGrace  = 2 * time.Second
+	logRingSize = 400
 )
 
 // LogLine is one captured stderr line.
@@ -214,6 +238,31 @@ type Process struct {
 
 	cmdMu sync.Mutex
 	cmd   *exec.Cmd
+	// exited is closed by runOnce the instant cmd.Wait() returns for THIS cmd --
+	// that is, the instant the child is reaped, not when its pipes close. It is
+	// allocated with cmd and cleared with it, so it is a per-run token: a stale
+	// reference cannot be satisfied by a successor's exit, and a successor's
+	// escalator cannot be cancelled by a predecessor's.
+	//
+	// It replaces the pointer-identity guard terminate() used to carry. That
+	// guard was correct -- runOnce nils p.cmd before a respawn allocates a new
+	// exec.Cmd, so a stale closure could not match -- but it was a subtle
+	// invariant defended by nothing, and it could only be consulted after the
+	// escalator had already slept the whole grace period.
+	exited chan struct{}
+
+	// escalators tracks terminate()'s grace goroutines. Each one is a live
+	// commitment to kill a process group, so something must be able to observe
+	// that they have finished; without this the only proof was wall-clock.
+	escalators sync.WaitGroup
+
+	// grace and drain are shutdownGrace and drainGrace as this Process will
+	// actually use them. Fields rather than the constants directly so a test can
+	// separate "the escalation fired" from "the escalation fired at 8 seconds"
+	// without the suite paying 8 seconds per case, and without mutating package
+	// state that a concurrent test would see.
+	grace time.Duration
+	drain time.Duration
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
@@ -266,6 +315,8 @@ func New(log *slog.Logger, spec Spec) *Process {
 		state:   StateStopped,
 		logs:    newRing(logRingSize),
 		secrets: alerts.NewSecretSet(log, spec.Secrets...),
+		grace:   shutdownGrace,
+		drain:   drainGrace,
 	}
 }
 
@@ -674,21 +725,51 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// children out from under the supervisor.
 	setProcessGroup(cmd)
 
-	stdout, err := cmd.StdoutPipe()
+	// os.Pipe rather than cmd.StdoutPipe/StderrPipe, and the reason is the whole
+	// of this function's shape.
+	//
+	// exec's own pipes are owned by exec: Wait closes them after the process
+	// exits, and its documentation therefore forbids calling Wait before every
+	// read has completed. That forces "drain to EOF, then Wait" -- and EOF on a
+	// pipe means the last WRITE end closed, which is a fact about the child's
+	// descendants rather than about the child. A grandchild that outlives its
+	// parent, or escapes the process group the escalation signals, holds that
+	// write end open, and the drain waits for a process the supervisor never
+	// started. runOnce then never returns, supervise never closes `done`, and
+	// Stop takes its deadline arm at best and blocks for ever at worst.
+	//
+	// Pipes this package creates are owned by this package. Nothing in exec
+	// touches them, so cmd.Wait() may be called the moment the child is reaped --
+	// bounding the reap on the child alone -- and the read ends can be closed
+	// from here, which unblocks a drain that is waiting on an inherited writer.
+	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrW, err := os.Pipe()
 	if err != nil {
+		_ = stdout.Close()
+		_ = stdoutW.Close()
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
+	cmd.Stdout, cmd.Stderr = stdoutW, stderrW
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start %s: %w", p.spec.Bin, err)
+	startErr := cmd.Start()
+	// The parent's copies of the write ends, closed unconditionally: the child
+	// has inherited its own, and while the parent holds one the pipe cannot reach
+	// EOF even when every descendant has gone.
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+	if startErr != nil {
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return fmt.Errorf("start %s: %w", p.spec.Bin, startErr)
 	}
 
+	exited := make(chan struct{})
 	p.cmdMu.Lock()
 	p.cmd = cmd
+	p.exited = exited
 	p.cmdMu.Unlock()
 
 	p.mu.Lock()
@@ -706,6 +787,8 @@ func (p *Process) runOnce(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+	drained := make(chan struct{})
+	go func() { wg.Wait(); close(drained) }()
 
 	go func() {
 		defer wg.Done()
@@ -741,11 +824,41 @@ func (p *Process) runOnce(ctx context.Context) error {
 		}
 	}()
 
-	wg.Wait()
+	// THE REAP FIRST, and on its own. cmd.Wait() here waits for the child and for
+	// nothing else: the pipes above belong to this package, so exec has no
+	// copying goroutine to join and no descriptor of ours to close. Whatever is
+	// still holding stdout open cannot delay this.
 	waitErr := cmd.Wait()
+	// Announce the reap before the drain, because that is what terminate()'s
+	// escalation is asking about: a child that has been reaped needs no SIGKILL,
+	// whether or not its grandchild is still writing.
+	close(exited)
+
+	// THEN THE DRAIN, BOUNDED. In the ordinary case -- no surviving descendant --
+	// the write ends closed when the child died, the drain has already seen EOF,
+	// and this select takes its first arm immediately: stderr is fully captured
+	// and LastError is exactly what it was before.
+	//
+	// When a descendant IS holding the pipe, closing the read ends unblocks the
+	// drain goroutines with "file already closed" instead of leaving them parked
+	// on a writer nobody can account for. The wait after the close is not
+	// optional: lastLines is read below, and abandoning the goroutines that write
+	// it would be a data race and would truncate LastError non-deterministically.
+	select {
+	case <-drained:
+	case <-time.After(p.drain):
+		p.log.Warn("stdout/stderr still open after the child was reaped; "+
+			"closing them (a descendant inherited the pipe)", "after", p.drain)
+		_ = stdout.Close()
+		_ = stderr.Close()
+		<-drained
+	}
+	_ = stdout.Close()
+	_ = stderr.Close()
 
 	p.cmdMu.Lock()
 	p.cmd = nil
+	p.exited = nil
 	p.cmdMu.Unlock()
 	p.mu.Lock()
 	p.pid = 0
@@ -771,7 +884,7 @@ func (p *Process) defaultStdout(r io.Reader) error {
 // terminate asks the child's whole process group to exit, then escalates.
 func (p *Process) terminate() {
 	p.cmdMu.Lock()
-	cmd := p.cmd
+	cmd, exited := p.cmd, p.exited
 	p.cmdMu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return
@@ -780,12 +893,26 @@ func (p *Process) terminate() {
 
 	// Escalate if it has not gone after the grace period. FFmpeg normally
 	// exits in well under a second; anything longer is wedged.
+	//
+	// A SELECT, NOT A SLEEP. The sleep this replaces ran to completion on every
+	// stop, including the overwhelming majority that are over in milliseconds: a
+	// supervisor stopping forty destinations paid forty goroutines each parked
+	// for the full 8 seconds, and the only thing standing between a stale one and
+	// an innocent successor was pointer identity on p.cmd. `exited` is closed by
+	// runOnce when THIS cmd is reaped, so the ordinary case costs one timer and
+	// returns at once, and the escalating case cannot be about anybody else's
+	// child -- the channel was allocated with this cmd and is never reused.
+	p.escalators.Add(1)
 	go func() {
-		time.Sleep(shutdownGrace)
-		p.cmdMu.Lock()
-		still := p.cmd
-		p.cmdMu.Unlock()
-		if still == cmd {
+		defer p.escalators.Done()
+		t := time.NewTimer(p.grace)
+		defer t.Stop()
+		select {
+		case <-exited:
+			// Reaped inside the grace period. There is nothing to escalate to,
+			// and killGroup on a reaped pid is a signal to whoever holds that
+			// number now.
+		case <-t.C:
 			p.log.Warn("process did not exit after grace period; killing group")
 			killGroup(cmd)
 		}

@@ -1,0 +1,26 @@
+# RED. #179's body, VERBATIM, carrying the timeout-minutes that satisfies the
+# backgrounded-step rule. #210 measured this exact file passing both subtests of
+# TestTheBackgroundedStepRuleFlagsItsRedFixtures unflagged: the defect the gate
+# was built for, reintroduced word for word, merging green.
+name: smoke
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start a server and check it serves
+        timeout-minutes: 10
+        run: |
+          ./server -addr 127.0.0.1:8123 &
+          pid=$!
+          ok=no
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8123/health; then ok=yes; break; fi
+            sleep 1
+          done
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          if [ "$ok" != yes ]; then
+            echo "server never served /health"
+            exit 1
+          fi

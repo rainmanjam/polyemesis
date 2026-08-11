@@ -257,7 +257,7 @@ func (e *Engine) teardownSilence(t *silenceTier) {
 	}
 	if t.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		t.proc.Stop(ctx)
+		_ = t.proc.Stop(ctx)
 		cancel()
 	}
 	if t.subName != "" {

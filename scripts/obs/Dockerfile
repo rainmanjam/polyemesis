@@ -43,6 +43,11 @@ ENV LIBGL_ALWAYS_SOFTWARE=1 \
     QT_QPA_PLATFORM=xcb \
     DISPLAY=:99
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# lib-stop.sh alongside it, not merged into it: the entrypoint sources it from
+# its own directory, and it is the one part of the entrypoint that has tests
+# (scripts/test-obs-stop.sh), which is why it is a file and not four inline
+# lines. A build that copies only entrypoint.sh dies at `. lib-stop.sh` on the
+# first line rather than 25 seconds later in a stop path nobody watches.
+COPY entrypoint.sh lib-stop.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

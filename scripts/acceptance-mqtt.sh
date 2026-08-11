@@ -59,9 +59,9 @@ step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1
-  poly_cleanup "$PORT" "${WORK:-}"
+  poly_cleanup_exit "${1:-0}" "$PORT" "${WORK:-}"
 }
-trap 'poly_watchdog_disarm; cleanup' EXIT
+trap 'poly_teardown_trap $? cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 command -v go >/dev/null || { echo "go is required to run the driver"; exit 1; }

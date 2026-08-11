@@ -248,6 +248,32 @@ jobs:
       - run: ./scripts/test-sbom-guard.sh
         timeout-minutes: 5
 
+      # The termination guard, and its tests, alongside the SBOM pair above for
+      # the same reason and one of its own. #210: after #179/#180 the class had
+      # ONE gate and its jurisdiction was .github/workflows -- a fixture carrying
+      # #179's body verbatim was dropped into that test's green directory and
+      # passed. For scripts/ there was no gate at all, which is how
+      # acceptance-mqtt.sh kept the exact shape that had just been rewritten in
+      # three other suites. Found by a sweep, not by CI.
+      #
+      # Both halves run: the guard against the real tree, and its own red/green
+      # fixtures. The guard without its fixtures is a check nobody has watched
+      # fail; the fixtures without the guard oblige nothing. Pure shell, under a
+      # second each.
+      - run: ./scripts/termination-guard.sh
+        timeout-minutes: 5
+      - run: ./scripts/test-termination-guard.sh
+        timeout-minutes: 5
+
+      # The OBS container entrypoint's stop path. #208 was FILED rather than
+      # fixed on the grounds that it could not be run -- "a blind edit to a
+      # container entrypoint has two ways to go wrong that a review cannot see".
+      # Both ways are about a process, not about OBS, so the stop logic moved
+      # into scripts/obs/lib-stop.sh and this drives it with `sleep` and a
+      # SIGTERM-deaf stand-in. No OBS, no Xvfb, no container, about six seconds.
+      - run: ./scripts/test-obs-stop.sh
+        timeout-minutes: 6
+
       # The acceptance suites' shared teardown. Same argument as the guard
       # above, and a sharper one: this teardown was silently leaking the ingest
       # port on every run, which made acceptance-failover fail 10 times out of

@@ -210,3 +210,237 @@ func TestTheBackgroundedStepRuleFlagsItsRedFixtures(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------- rule two
+
+// THE TERMINATION-ORDER RULE, and it exists because the rule above is not
+// enough. #210 measured that: a fixture whose `run:` was #179's body VERBATIM --
+// `kill "$pid" ... ; wait "$pid" ... ; if [ "$ok" != yes ]` -- was dropped into
+// testdata/workflowguard/green/ carrying `timeout-minutes: 10`, and
+// TestTheBackgroundedStepRuleFlagsItsRedFixtures passed, both subtests,
+// unflagged. The gate obliges bounding the blast radius. It does not oblige
+// emitting the verdict before the cleanup, and the defect it was built for could
+// be reintroduced verbatim and merge green.
+//
+// So: in a step that backgrounds a process, the VERDICT MUST NOT COME AFTER THE
+// TEARDOWN. That is the property #179 actually violated. Its step decided in two
+// seconds that the server was healthy, then blocked in `wait` on a kill Git-Bash
+// could not deliver, and the answer it had already computed died with the step.
+// A step that reports first can hang afterwards and still have told you what it
+// learned.
+//
+// A `trap` is NOT a teardown for this purpose, and the distinction is the whole
+// reason the real workflows are green: `trap 'kill $pid' EXIT` REGISTERS cleanup
+// to run when the step ends, which is necessarily after the verdict. That is the
+// shape #179 was fixed into, and a rule that could not tell it from an inline
+// kill would flag the fix.
+//
+// WHAT IT DELIBERATELY DOES NOT CATCH: a verdict computed in a script the step
+// invokes; a teardown hidden behind a variable or a function defined elsewhere;
+// an `exit 0` that is really a verdict. It is syntactic and line-local, a net
+// under the class rather than a proof about it. scripts/termination-guard.sh is
+// the same net over scripts/*.sh, with rules of its own.
+
+// inlineKill reports a kill in command position that is EXECUTED here.
+//
+// A `trap 'kill ...' EXIT` is excluded, and the distinction is the whole reason
+// the real workflows are green: a trap REGISTERS cleanup to run when the step
+// ends, necessarily after the verdict. That is the shape #179 was fixed into,
+// and a rule that could not tell it from an inline kill would flag the fix.
+func inlineKill(s string) bool {
+	t := strings.TrimSpace(s)
+	if t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "trap ") {
+		return false
+	}
+	if strings.HasPrefix(t, "kill -0") || strings.Contains(t, "! kill -0") {
+		return false // an observation, not a kill
+	}
+	return strings.HasPrefix(t, "kill ") || strings.HasPrefix(t, "pkill ")
+}
+
+// observation reports a line that RE-OBSERVES whether the process is actually
+// gone. `kill -0` and pgrep are the portable spellings; a poll loop around
+// either is what turns a request into an answer.
+func observation(s string) bool {
+	t := strings.TrimSpace(s)
+	return strings.Contains(t, "kill -0") || strings.Contains(t, "pgrep") ||
+		strings.Contains(t, "poly_free_port") || strings.Contains(t, "tasklist")
+}
+
+// assumption reports a line that ACTS on the belief that the process is gone --
+// including `wait`, which in a shell has no ceiling at all and is #179's
+// mechanism exactly: it blocks on a death that a kill Git-Bash cannot deliver to
+// a native .exe may never produce.
+func assumption(s string) bool {
+	t := strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "#", 2)[0])
+	if t == "" {
+		return false
+	}
+	for _, w := range []string{"wait", "sleep ", "cat ", "grep ", "ls ", "if ", "["} {
+		if t == w || strings.HasPrefix(t, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// bareWait reports a `wait` with no pid: it blocks on every background job at
+// once, with no pid and no bound.
+func bareWait(s string) bool {
+	t := strings.TrimSpace(s)
+	if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "trap ") {
+		return false
+	}
+	t = strings.TrimSuffix(strings.TrimSpace(strings.SplitN(t, "#", 2)[0]), ";")
+	for _, form := range []string{"wait", "wait || true", "wait 2>/dev/null",
+		"wait 2>/dev/null || true"} {
+		if t == form {
+			return true
+		}
+	}
+	return false
+}
+
+// auditTerminationOrder returns every backgrounding step whose verdict is
+// computed after its teardown, or which contains a bare wait.
+func auditTerminationOrder(t *testing.T, dir string) []finding {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+
+	var out []finding
+	var files int
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if ext := filepath.Ext(e.Name()); ext != ".yml" && ext != ".yaml" {
+			continue
+		}
+		files++
+
+		path := filepath.Join(dir, e.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var wf workflow
+		if err := yaml.Unmarshal(raw, &wf); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+
+		for job, j := range wf.Jobs {
+			for i, s := range j.Steps {
+				if !strings.Contains(s.Run, backgrounding) {
+					continue
+				}
+				name := s.Name
+				if name == "" {
+					name = s.ID
+				}
+				if name == "" {
+					name = "#" + itoa(i+1) + " (unnamed)"
+				}
+
+				// WHICHEVER COMES FIRST DECIDES. After an inline kill, scan
+				// forward: a re-observation means the step earned whatever it
+				// does next, and an assumption reached first means it did not.
+				// Same adjudication as scripts/termination-guard.sh, so the two
+				// jurisdictions cannot drift into disagreeing about a shape.
+				lines := strings.Split(s.Run, "\n")
+				flagged := false
+				for n, ln := range lines {
+					if bareWait(ln) {
+						flagged = true
+						break
+					}
+					if !inlineKill(ln) {
+						continue
+					}
+					for _, after := range lines[n+1:] {
+						if observation(after) {
+							break
+						}
+						if assumption(after) {
+							flagged = true
+							break
+						}
+					}
+					if flagged {
+						break
+					}
+				}
+				if flagged {
+					out = append(out, finding{file: e.Name(), job: job, step: name})
+				}
+			}
+		}
+	}
+
+	if files == 0 {
+		t.Fatalf("no workflow files found under %s; this check would pass by "+
+			"examining nothing", dir)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].String() < out[b].String() })
+	return out
+}
+
+// TestBackgroundedWorkflowStepsReportBeforeTheyTearDown is the rule, applied to
+// the real workflows.
+func TestBackgroundedWorkflowStepsReportBeforeTheyTearDown(t *testing.T) {
+	dir := filepath.Join(repoRoot(t), ".github", "workflows")
+	for _, f := range auditTerminationOrder(t, dir) {
+		t.Errorf("%s kills a process and then ACTS on the belief that it is gone, with "+
+			"nothing in between that observed it.\n"+
+			"        A signal is a request. Between asking a process to die and observing\n"+
+			"        it dead there is an interval, and everything the step does in that\n"+
+			"        interval is measured against a machine in a state nobody looked at.\n"+
+			"        A shell `wait` is not an observation with a ceiling: on Windows the\n"+
+			"        kill above it cannot deliver a real SIGTERM to a native .exe, so it\n"+
+			"        waits for a death that never comes. That is #179 -- 28 minutes, and a\n"+
+			"        log that came back BlobNotFound carrying a verdict already computed.\n"+
+			"        Poll `kill -0` with a bound, or register cleanup with `trap ... EXIT`,\n"+
+			"        which runs after the step has already said what it learned.", f)
+	}
+}
+
+// TestTheTerminationOrderRuleFlagsItsRedFixtures is the guard on rule two --
+// including, by name, the fixture #210 proved the first rule admits.
+func TestTheTerminationOrderRuleFlagsItsRedFixtures(t *testing.T) {
+	base := filepath.Join("testdata", "workflowguard")
+
+	t.Run("red fixtures are all flagged", func(t *testing.T) {
+		want := []string{
+			"issue-179-body-verbatim.yml :: job smoke :: step Start a server and check it serves",
+			"kill-then-unbounded-wait.yml :: job smoke :: step Stop the server and collect it",
+			"kill-then-verdict.yml :: job smoke :: step Verdict after the kill",
+		}
+		var got []string
+		for _, f := range auditTerminationOrder(t, filepath.Join(base, "termination-red")) {
+			got = append(got, f.String())
+		}
+		if len(got) != len(want) {
+			t.Fatalf("flagged %d red steps, want %d\n got: %v\nwant: %v",
+				len(got), len(want), got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("finding %d = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("green fixtures are not flagged", func(t *testing.T) {
+		for _, dir := range []string{"termination-green", "green", "red"} {
+			if got := auditTerminationOrder(t, filepath.Join(base, dir)); len(got) != 0 {
+				t.Errorf("%s: flagged %v. These report before they tear down, or use a "+
+					"trap -- which runs after the verdict by construction and is the "+
+					"shape #179 was fixed into. Flagging the fix is how a rule grows "+
+					"an allowlist.", dir, got)
+			}
+		}
+	})
+}

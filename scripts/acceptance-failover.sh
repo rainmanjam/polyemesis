@@ -67,9 +67,9 @@ cleanup() {
   pkill -f "failover-publisher" 2>/dev/null
   # INGEST is passed because the ingest ffmpeg's argv carries no work-dir path,
   # so the sweep above cannot see it. It is the port that leaked.
-  poly_cleanup "$PORT" "$WORK" "$INGEST"
+  poly_cleanup_exit "${1:-0}" "$PORT" "$WORK" "$INGEST"
 }
-trap 'poly_watchdog_disarm; cleanup' EXIT
+trap 'poly_teardown_trap $? cleanup' EXIT
 
 [ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required"; exit 1; }

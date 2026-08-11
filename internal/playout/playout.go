@@ -426,7 +426,7 @@ func (m *Manager) teardown(v *variant) {
 	}
 	if v.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		v.proc.Stop(ctx)
+		_ = v.proc.Stop(ctx)
 		cancel()
 	}
 	// After the process, so the muxer is never writing into a closed socket.

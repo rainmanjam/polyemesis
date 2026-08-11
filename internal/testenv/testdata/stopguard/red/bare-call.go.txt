@@ -1,0 +1,15 @@
+package fixture
+
+// RED: two bare Stop statements. Both throw away ErrStopDeadline without
+// saying so, and both must be flagged, in this order.
+
+import "context"
+
+type proc interface{ Stop(context.Context) error }
+
+type dest struct{ proc proc }
+
+func teardown(p proc, d *dest, ctx context.Context) {
+	p.Stop(ctx)
+	d.proc.Stop(ctx)
+}

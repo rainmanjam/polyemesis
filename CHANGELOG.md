@@ -191,6 +191,41 @@ its first tagged release.
   contract was narrowed now: it refuses a name that is not a listable upload,
   and a name with no file beside it.
 
+- **A destination whose FFmpeg had already died could be reported as running
+  indefinitely.** The supervisor waited for a child's output pipes to reach
+  end-of-file before reaping the child itself — and a pipe reaches end-of-file
+  when the *last* writer closes it, not when the process you started exits.
+  FFmpeg spawning a helper that outlives it, or anything the child forks and
+  does not wait for, inherits those pipes and holds them open. The supervisor
+  was then waiting on a process it never started: the destination stayed green
+  on the dashboard, the restart policy never fired, and a stop of that
+  destination was bounded by the lifetime of a grandchild rather than by any
+  timeout.
+
+  The child is now reaped on its own, and the drain that captures its stderr is
+  bounded afterwards. The tail of stderr that becomes a destination's error
+  message is unchanged on the ordinary path.
+
+- **Stopping a destination cost a sleeping goroutine per stop, for eight
+  seconds each.** The escalation that kills a child which has not heeded the
+  shutdown signal waited out the full grace period on every stop, including the
+  overwhelming majority that finish in milliseconds. Stopping forty
+  destinations left forty goroutines parked, each holding a reference to a
+  process it still intended to kill. The escalation now returns as soon as the
+  child is reaped.
+
+- **`POST /destinations/{id}/stop` said `"stopped"` whether or not the process
+  actually stopped.** The supervisor reports the same state on both outcomes:
+  the one where the child was reaped, and the one where the shutdown deadline
+  expired, `SIGKILL` was sent, and nothing waited to see whether it worked. The
+  second means a process that may still be running is still holding — and still
+  publishing to — the relay port and the stream the response has just declared
+  free.
+
+  A stop now also answers `reaped`, plus a `warning` saying what is uncertain
+  when it is `false`. Nothing about the `state` field has changed, so existing
+  callers are unaffected.
+
 - **A `read` token could read a pull URL's credential from `GET /sources`.** The
   masking ran, and masked the wrong part: it blanked only the last path segment
   and only for `rtmp`/`rtsp`/`srt`-like schemes, so an HLS pull URL over `https`

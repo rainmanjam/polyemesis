@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -96,6 +97,44 @@ func runFakeChild(mode string, args []string) int {
 		time.Sleep(d)
 		return 0
 
+	case "orphan":
+		// A GRANDCHILD THAT OUTLIVES ITS PARENT AND INHERITS ITS PIPES. This is
+		// the shape #194 was filed for, reduced to its mechanism: FFmpeg spawning
+		// a helper that survives it does exactly this, and so does anything the
+		// child forks and does not wait for.
+		//
+		// The grandchild inherits THESE fds -- os.Stdout and os.Stderr here are
+		// the write ends of the supervisor's pipes -- so when this process exits,
+		// the pipes do NOT reach EOF. A supervisor that drains to EOF before
+		// reaping is then waiting on a process it never started, for as long as
+		// the grandchild lives.
+		d, err := time.ParseDuration(args[0])
+		if err != nil {
+			return 2
+		}
+		code, err := strconv.Atoi(args[1])
+		if err != nil {
+			return 2
+		}
+		self, err := os.Executable()
+		if err != nil {
+			return 2
+		}
+		gc := exec.Command(self, fakeChildFlag, "sleep", d.String())
+		gc.Stdout, gc.Stderr = os.Stdout, os.Stderr
+		if err := gc.Start(); err != nil {
+			return 2
+		}
+		// Announced on stderr so the test can reach the grandchild to kill it:
+		// it is re-parented to init the moment this returns, and a test that
+		// leaves a 20-second sleeper behind on every run is its own problem.
+		fmt.Fprintf(os.Stderr, "%s%d\n", orphanPIDPrefix, gc.Process.Pid)
+		// A line the supervisor will classify as an error, so a test can assert
+		// that the tail of stderr still becomes LastError -- the diagnostic the
+		// bounded drain must not have traded away.
+		fmt.Fprintln(os.Stderr, orphanLastWords)
+		return code
+
 	case "stderr":
 		n, err := strconv.Atoi(args[0])
 		if err != nil {
@@ -168,6 +207,52 @@ func waitForDeaf(t *testing.T, p *Process) {
 // fakeStderr spawns a child that writes n lines to stderr and exits cleanly.
 func fakeStderr(n int) fake { return newFake("stderr", strconv.Itoa(n)) }
 
+const (
+	// orphanPIDPrefix introduces the pid of the grandchild an "orphan" child
+	// leaves behind. Pair fakeOrphan with reapOrphan.
+	orphanPIDPrefix = "fake child: orphan grandchild pid="
+	// orphanLastWords is the last thing an "orphan" child writes before exiting.
+	// It contains "error" so classify() files it as one and runOnce folds it into
+	// LastError.
+	orphanLastWords = "orphan child: error: the last words before exiting"
+)
+
+// fakeOrphan spawns a child that leaves a grandchild holding its stdout and
+// stderr for grandchildLife, then exits with code.
+func fakeOrphan(grandchildLife time.Duration, code int) fake {
+	return newFake("orphan", grandchildLife.String(), strconv.Itoa(code))
+}
+
+// reapOrphan kills the grandchild a fakeOrphan child left behind, reading its
+// pid out of the supervisor's own log ring.
+//
+// Registered by the test AFTER testProcess, so it runs BEFORE testProcess's Stop
+// (t.Cleanup is LIFO) and the pid line is still in the ring either way.
+func reapOrphan(t *testing.T, p *Process) {
+	t.Helper()
+	for _, l := range p.Logs() {
+		_, rest, found := strings.Cut(l.Text, orphanPIDPrefix)
+		if !found {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(rest))
+		if err != nil {
+			continue
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		// Kill AND Wait would be the hygienic pair, but this process is not our
+		// child -- it was re-parented to init -- so there is nothing here to
+		// reap. Kill is the whole of what this side can do.
+		_ = proc.Kill()
+		return
+	}
+	t.Errorf("no %q line in the log ring: the grandchild's pid was never announced, so this "+
+		"test cannot prove it did not leave a %s sleeper behind", orphanPIDPrefix, "20s")
+}
+
 func testProcess(t *testing.T, f fake, spec Spec) *Process {
 	t.Helper()
 	spec.Bin, spec.Args = f.bin, f.args
@@ -178,7 +263,7 @@ func testProcess(t *testing.T, f fake, spec Spec) *Process {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		p.Stop(ctx)
+		_ = p.Stop(ctx)
 	})
 	return p
 }

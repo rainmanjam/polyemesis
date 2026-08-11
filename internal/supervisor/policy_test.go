@@ -115,7 +115,7 @@ func TestStoppingAReconnectingProcessReturnsPromptly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	p.Stop(ctx)
+	_ = p.Stop(ctx)
 
 	if took := time.Since(start); took > 2*time.Second {
 		t.Fatalf("Stop took %s on a process with no child; teardown of a reconnecting "+

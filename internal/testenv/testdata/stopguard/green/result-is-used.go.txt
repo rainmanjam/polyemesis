@@ -1,0 +1,25 @@
+package fixture
+
+// GREEN: the result is used. Returned, assigned, sent on a channel, or tested
+// -- none of these is an expression statement and none is a discard.
+
+import "context"
+
+type proc interface{ Stop(context.Context) error }
+
+func stopAndReturn(p proc, ctx context.Context) error { return p.Stop(ctx) }
+
+func stopAndTest(p proc, ctx context.Context) bool {
+	if err := p.Stop(ctx); err != nil {
+		return false
+	}
+	return true
+}
+
+func stopAndSend(p proc, ctx context.Context, errc chan error) {
+	go func() { errc <- p.Stop(ctx) }()
+}
+
+func stopAndNote(p proc, ctx context.Context, note func(error)) {
+	note(p.Stop(ctx))
+}
