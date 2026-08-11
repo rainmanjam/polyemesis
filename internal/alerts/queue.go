@@ -60,6 +60,29 @@ type groupKey struct {
 // It owns no goroutine and reads no clock: every method takes the current time.
 // That is what makes "a destination that flaps twelve times in ten seconds
 // sends one message" a table test rather than a stopwatch.
+//
+// SINGLE-GOROUTINE BY DESIGN, AND DELIBERATELY UNLOCKED.
+//
+// There is no mutex on this type and there must not be one. Every call site --
+// Add, Due, Requeue, Forget, Pending -- is reached from the one for/select in
+// Notifier.Run, and events arrive over Notifier.events, which serialises them.
+// The maps below are therefore only ever touched by that goroutine, which is
+// what makes them safe with no lock and what keeps the delivery path free of
+// one. Production holds that contract; nothing in production needs fixing.
+//
+// The consequence is a rule about TESTS, and the tests are where it has
+// actually been broken. A test may call these methods directly ONLY when Run
+// is not running. Doing both is a data race on these maps regardless of how
+// the timing happens to fall -- see #249, where a `go n.Run(ctx)` followed by
+// a direct co.Add raced Run's tick-driven flush and reddened an unrelated PR
+// under -race, having never reproduced locally in twelve attempts.
+//
+// So: a test that wants the run loop feeds it through Notifier.Publish and
+// lets Run own these maps. A test that wants the state machine calls these
+// methods and Notifier.Flush without starting Run, the way
+// TestFlushDeliversThroughTheWholePathOnce does. Choosing neither -- reaching
+// past the channel beside a live Run -- is always wrong, and the fix for it is
+// never a mutex here: that would slow the real path to legalise a test.
 type coalescer struct {
 	groups map[groupKey]*group
 	// lastSent is the rate-limit clock, per rule.
