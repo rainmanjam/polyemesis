@@ -135,17 +135,17 @@ step "8. poly_hold_field: a field that has stopped moving is reported as settled
 # earns the check its keep is case 9: a floor of `-ge 2` on a switch count
 # reported success on a tier that switched 80 times, so the assertion that
 # matters is the one that FAILS on a value which will not sit still.
-line_steady()      { printf 'primary 6 true 0'; }
-line_field_moves() { printf 'primary %d true 0' "$(tick)"; }
+line_steady()      { printf 'primary 6 true 0'; return; }
+line_field_moves() { printf 'primary %d true 0' "$(tick)"; return; }
 line_other_moves() { printf 'primary 6 true %d' "$(tick)"; }
 
 reset; poly_hold_field "the switch count" 2 1 4 line_steady > "$WORK/h" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] && ok "a field that holds one value returns 0" || bad "expected rc=0, got $rc"
-[ "$POLY_HELD_VALUE" = "6" ] \
+[[ "$POLY_HELD_VALUE" = "6" ]] \
   && ok "the settled value is reported for the caller's message ($POLY_HELD_VALUE)" \
   || bad "POLY_HELD_VALUE was '$POLY_HELD_VALUE', wanted 6"
-[ -s "$WORK/h" ] \
+[[ -s "$WORK/h" ]] \
   && bad "a settled field printed $(wc -l < "$WORK/h") line(s); it must be silent" \
   || ok "a settled field is silent"
 
@@ -174,7 +174,7 @@ step "10. poly_hold_field: only the named field decides"
 # reasons that have nothing to do with switching.
 reset; poly_hold_field "the switch count" 2 1 4 line_other_moves > "$WORK/j" 2>&1
 rc=$?
-[ "$rc" -eq 0 ] \
+[[ "$rc" -eq 0 ]] \
   && ok "movement in an unwatched field does not count as instability" \
   || bad "a field that never moved was reported unstable because its neighbours did (rc=$rc)"
 
@@ -185,10 +185,10 @@ step "11. poly_detectable_floor: what a green flake report did NOT measure"
 #   N=1,  c=95  ->  95.0   one run catches only a certainty
 #   N=5,  c=95  ->  45.1   the workflow's default; this is the headline
 #   N=40, c=95  ->   7.2   its cap, still above the ~7% rate #180 implies
-[ "$(poly_detectable_floor 1)" = "95.0" ] \
+[[ "$(poly_detectable_floor 1)" = "95.0" ]] \
   && ok "one run detects nothing below 95%" \
   || bad "floor(1) = $(poly_detectable_floor 1), want 95.0"
-[ "$(poly_detectable_floor 5)" = "45.1" ] \
+[[ "$(poly_detectable_floor 5)" = "45.1" ]] \
   && ok "the workflow default of 5 runs detects nothing below 45.1%" \
   || bad "floor(5) = $(poly_detectable_floor 5), want 45.1"
 [ "$(poly_detectable_floor 40)" = "7.2" ] \

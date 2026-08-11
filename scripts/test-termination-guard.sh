@@ -33,10 +33,12 @@ ok() {
 	pass=$((pass + 1))
 }
 bad() {
-	printf "  \033[31mFAIL\033[0m  %s\n" "$1"
+	local msg="$1"
+	printf "  \033[31mFAIL\033[0m  %s\n" "$msg"
 	fail=$((fail + 1))
+	return
 }
-step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
+step() { printf "\n\033[1m%s\033[0m\n" "$1"; return; }
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -159,9 +161,10 @@ GREEN
 run_guard() { # run_guard <dir> [allowlist-file]
 	TERMINATION_GUARD_ALLOWLIST="${2:-$work/empty-allow}" \
 		"$GUARD" "$1" >"$work/out" 2>&1
+	return
 }
 
-findings() { grep -E '^(red|green|empty)/' "$work/out" | sed 's/^\([^:]*:[0-9]*: [a-z-]*\):.*/\1/' | sort; }
+findings() { grep -E '^(red|green|empty)/' "$work/out" | sed 's/^\([^:]*:[0-9]*: [a-z-]*\):.*/\1/' | sort; return; }
 
 step "1. Every red fixture is flagged, by count and by identity"
 # THE CENTRAL CASE. `want` names file, line and rule; a guard that flagged the
@@ -274,11 +277,11 @@ fi
 total=$((pass + fail))
 EXPECTED_CHECKS=10
 printf "\n"
-if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
+if [[ "$total" -lt "$EXPECTED_CHECKS" ]]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
 	exit 1
 fi
-if [ "$fail" -gt 0 ]; then
+if [[ "$fail" -gt 0 ]]; then
 	printf "  \033[31mtermination-guard: %d of %d checks FAILED\033[0m\n\n" "$fail" "$total"
 	exit 1
 fi
