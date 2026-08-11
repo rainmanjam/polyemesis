@@ -1,14 +1,7 @@
 {
   "note": "Tests that have something to say and are not saying it. Every entry is printed BY NAME on every run, counted, and ceiling-clamped: the ceiling may fall freely and raising it is a hand edit of this file. The target is zero. This register is NOT for environmental skips -- no FFmpeg, no GPU, -short -- which are honest and are frozen in place by testdata/skips.json instead.",
-  "ceiling": 4,
+  "ceiling": 3,
   "entries": [
-    {
-      "id": "web-spa-fallback-needs-a-built-ui",
-      "site": "internal/web/web_test.go:20 and :62",
-      "why": "TestUnmatchedAPIPathIsJSON404NotTheSPA and TestUnknownUIPathStillFallsBackToTheSPA are the guards for a live-verified bug: every unmatched path, /api included, returned 200 text/html, so res.ok was true and JSON.parse failed on '<'. With no built UI the embed.FS is empty, Built() is false and both decline to run -- which is every CI job in this repository.",
-      "whatItWouldTake": "either a UI build step before the Go suite, or a test-only fs.FS seam so the fallback can be driven against a two-file stand-in. The second is cheap and is what #167 is about. NOT fixed here: #167 is out of scope for this round and quarantining it is the honest interim, because the previous state was a skip nobody counted.",
-      "issue": "#167"
-    },
     {
       "id": "engine-placeholder-layout-track-hazard",
       "site": "internal/engine/rendition_test.go:544",

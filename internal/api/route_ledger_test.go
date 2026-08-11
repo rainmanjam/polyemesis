@@ -4,22 +4,27 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
 // THE ROUTE COVERAGE LEDGER.
@@ -219,11 +224,29 @@ type coverageExcus struct {
 	Issue string `json:"issue,omitempty"`
 }
 
+// coverageShape is the ARTIFACT PROJECTION of a shapeRow, and every field of it
+// is now derived rather than written.
+//
+// Inspected was a hand-set bool sitting next to a hand-written By string, and
+// #176's whole complaint is that the two could disagree with reality and with
+// each other: `Inspected: true, By: ""` passed every check in this ledger, and
+// three rows named proofs this package cannot run. Both fields are now computed
+// from shapeRow.Inspector -- a func value the preflight CALLS -- so there is no
+// longer any way to spell "inspected" that does not come with something that
+// runs. See shapeRegistry and TestEveryInspectedShapeWitnessesItself.
 type coverageShape struct {
-	Shape     string `json:"shape"`
-	Emitted   bool   `json:"emitted"`
-	Inspected bool   `json:"inspected"`
-	By        string `json:"by"`
+	Shape   string `json:"shape"`
+	Emitted bool   `json:"emitted"`
+	// Inspected is Inspector != nil. It is not settable.
+	Inspected bool `json:"inspected"`
+	// InspectedBy is the runtime name of the inspector func, read out of the
+	// program rather than typed into the row. It replaces `by`, which was free
+	// text: a name that resolved to nothing ("TestPlayoutCookieHandoff"), to
+	// another package's test, or to a helper that asserts nothing, and which the
+	// ledger had to run an AST walk over the whole repository to second-guess.
+	// A derived name cannot be wrong about which function will run, because it
+	// is that function's name.
+	InspectedBy string `json:"inspectedBy"`
 	// Issue is the STRUCTURED deferral for an emitted-but-uninspected shape,
 	// and it replaces a substring search over Note.
 	//
@@ -1013,22 +1036,238 @@ type nonTrieProbe struct {
 	// why records what this probe is FOR, since a path that matches no route is
 	// otherwise indistinguishable from a typo.
 	why string
+	// bare and built are the branch of internal/web.HandlerFor this probe
+	// ENTERS, in a checkout with no UI compiled and in one with a real bundle
+	// embedded. Both are DRIVEN -- see assertNotFoundProbesEnterTheirBranches --
+	// which is the whole of #167: the columns used to be one column, and it was
+	// the one nobody was running.
+	bare, built string
 }
+
+// The OBSERVABLE branches of internal/web.HandlerFor. Every one of them is
+// distinguishable from outside by status, Content-Type and Cache-Control, which
+// is what lets a test say which one a request took without reading the source
+// of the thing it is testing.
+const (
+	webBranchAsset      = "asset-immutable" // a real file under assets/, cached forever
+	webBranchAPIJSON404 = "api-json-404"    // an /api path that matched no route
+	webBranchUINotBuilt = "ui-not-built"    // no index.html to fall back to
+	webBranchSPAIndex   = "spa-index"       // the SPA fallback, or index.html itself
+)
 
 // notFoundProbes is the NotFound surface, hand-declared because chi.Walk cannot
 // emit it, and EXECUTED rather than merely listed.
+//
+// #167 measured what "executed" was worth here: `.github/workflows/ci.yml` does
+// not build the UI before the Go job, so internal/web/dist holds only .gitkeep,
+// and eight of these nine took the "UI not built" branch in every run that has
+// ever claimed to cover this surface. `/assets/app.js` did not reach the asset
+// branch -- and, found by driving it, does not reach the asset branch even with
+// a real bundle embedded, because Vite fingerprints its output and no file of
+// that name is ever produced. The name was aspirational in both configurations.
 func notFoundProbes() []nonTrieProbe {
 	return []nonTrieProbe{
-		{http.MethodGet, "/", "the SPA root"},
-		{http.MethodGet, "/assets/app.js", "a bundled asset path"},
-		{http.MethodGet, "/.env", "the credential file every scanner asks for first"},
-		{http.MethodGet, "/debug/pprof/", "the profiler surface, if anything ever mounted it"},
-		{http.MethodGet, "/metrics", "the Prometheus convention, unrouted here"},
-		{http.MethodGet, "/API/V1/SETTINGS", "a case-varied spelling of a real route"},
-		{http.MethodPost, "/.env", "an unmatched METHOD as well as an unmatched path"},
-		{http.MethodDelete, "/anything", "a destructive method on the catch-all"},
-		{http.MethodGet, "/api/v1/no-such-route", "an unrouted path INSIDE the API prefix"},
+		{http.MethodGet, "/", "the SPA root", webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodGet, "/assets/app.js", "a bundled asset PATH -- and not a bundled asset: " +
+			"Vite fingerprints its output, so nothing is ever named this. It reaches the " +
+			"asset branch in neither configuration, which is why assetProbe below exists",
+			webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodGet, "/.env", "the credential file every scanner asks for first",
+			webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodGet, "/debug/pprof/", "the profiler surface, if anything ever mounted it",
+			webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodGet, "/metrics", "the Prometheus convention, unrouted here",
+			webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodGet, "/API/V1/SETTINGS", "a case-varied spelling of a real route",
+			webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodPost, "/.env", "an unmatched METHOD as well as an unmatched path",
+			webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodDelete, "/anything", "a destructive method on the catch-all",
+			webBranchUINotBuilt, webBranchSPAIndex},
+		{http.MethodGet, "/api/v1/no-such-route", "an unrouted path INSIDE the API prefix",
+			webBranchAPIJSON404, webBranchAPIJSON404},
+		// THE TENTH PROBE, added because the branch table made its absence
+		// legible. Opening a DIRECTORY under the sub-FS succeeds, so this used to
+		// reach http.FileServer and be answered 200 with an index of the bundle
+		// inventory -- the disclosure #156's review named and nothing drove.
+		// internal/web now falls a directory through to the SPA branch, and this
+		// row is what pins it from the ledger's side.
+		{http.MethodGet, "/assets/", "the asset ROOT: a directory, not a file",
+			webBranchUINotBuilt, webBranchSPAIndex},
 	}
+}
+
+// assetProbe is the tenth probe, and it exists because the ninth was named for a
+// branch it never entered.
+//
+// It is not in notFoundProbes because it is only meaningful against a populated
+// filesystem: through the real mux, in this repository's build, it is just
+// another 404. The branch assertion drives it in the built column, where it is
+// the ONLY probe that reaches the immutable-cache branch.
+func assetProbe() nonTrieProbe {
+	return nonTrieProbe{http.MethodGet, "/assets/index-abc123.js",
+		"a fingerprinted bundle, the only path shape that reaches the asset branch",
+		webBranchUINotBuilt, webBranchAsset}
+}
+
+// builtUIFS is a synthetic `dist` -- an index.html and one fingerprinted bundle
+// -- standing in for what `npm run build` produces.
+//
+// The alternative was to make CI build the UI before the Go job, which is a
+// four-minute npm install on every Go run to make nine probes honest. This
+// drives the same branches at no cost, and it is the filesystem the handler
+// actually reads rather than a description of one.
+func builtUIFS() fs.FS {
+	return fstest.MapFS{
+		"index.html":              {Data: []byte("<!doctype html><title>polyemesis</title>")},
+		"assets/index-abc123.js":  {Data: []byte("export default 1;\n")},
+		"assets/index-abc123.css": {Data: []byte(":root{}\n")},
+	}
+}
+
+// observedWebBranch classifies a response into one of the four branches, from
+// the bytes a client receives.
+//
+// From OUTSIDE, deliberately. A classifier that read internal/web's source
+// would pass just as happily on the day the handler stops calling the thing it
+// claims to call, which is #107's finding one package to the left.
+func observedWebBranch(w *httptest.ResponseRecorder) string {
+	cc := w.Header().Get("Cache-Control")
+	ct := w.Header().Get("Content-Type")
+	body := w.Body.String()
+	switch {
+	case cc == "public, max-age=31536000, immutable":
+		return webBranchAsset
+	case w.Code == http.StatusNotFound && strings.HasPrefix(ct, "application/json") &&
+		strings.Contains(body, `"no such endpoint"`):
+		return webBranchAPIJSON404
+	case w.Code == http.StatusNotFound && strings.Contains(body, "UI not built."):
+		return webBranchUINotBuilt
+	case w.Code == http.StatusOK && strings.HasPrefix(ct, "text/html"):
+		return webBranchSPAIndex
+	}
+	return fmt.Sprintf("unclassified(%d, %q, %q)", w.Code, ct, cc)
+}
+
+// assertNotFoundProbesEnterTheirBranches is #167.
+//
+// The finding was not that this surface is dangerous -- it is verified benign,
+// and the invariance assertion in TestTheNonTrieSurfacesAreDriven is what says
+// so. The finding was that the CI run claiming to cover it was covering a
+// DIFFERENT HANDLER from the one production ships: dist holds only .gitkeep in
+// the Go job, so the SPA and asset branches never executed and nobody could
+// tell, because nothing recorded which branch a probe took.
+//
+// Both columns are driven here, against internal/web.HandlerFor -- the same
+// closure the mux mounts, over a filesystem this test chooses. That is the
+// difference between this and the tripwire retired in #240: a claim about the
+// other configuration is worthless unless the fixture reaches it, so this
+// fixture reaches it.
+//
+// It also asserts the PRECONDITION rather than assuming it: whether this
+// checkout embedded a real UI is read from web.Built(), and the branch every
+// probe takes through the REAL mux must agree with it. Build the UI and re-run,
+// and the bare column stops being the one asserted through the mux.
+func assertNotFoundProbesEnterTheirBranches(t *testing.T) {
+	t.Helper()
+
+	bare, err := web.FS()
+	if err != nil {
+		t.Fatalf("embedded UI filesystem: %v", err)
+	}
+	columns := []struct {
+		name   string
+		fsys   fs.FS
+		branch func(nonTrieProbe) string
+	}{
+		{"bare", bare, func(p nonTrieProbe) string { return p.bare }},
+		{"built", builtUIFS(), func(p nonTrieProbe) string { return p.built }},
+	}
+
+	probes := append(notFoundProbes(), assetProbe())
+	entered := map[string]map[string]bool{}
+	for _, col := range columns {
+		h := web.HandlerFor(col.fsys)
+		entered[col.name] = map[string]bool{}
+		for _, p := range probes {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(p.method, p.path, nil))
+			got := observedWebBranch(w)
+			entered[col.name][got] = true
+			if want := col.branch(p); got != want {
+				t.Errorf("%s %s (%s), %s filesystem: entered the %q branch of "+
+					"internal/web.HandlerFor, and the probe declares %q.\n"+
+					"This column is DRIVEN, which it was not before #167: the probe set "+
+					"used to record only that the responses were principal-independent, "+
+					"and could not distinguish \"the SPA served index.html\" from \"there "+
+					"was no index.html to serve\". status %d, Content-Type %q, "+
+					"Cache-Control %q.",
+					p.method, p.path, p.why, col.name, got, want,
+					w.Code, w.Header().Get("Content-Type"), w.Header().Get("Cache-Control"))
+			}
+		}
+	}
+
+	// THE COVERAGE FACT, stated as an assertion rather than left implicit. Each
+	// column must enter every branch the other does not, or the split is
+	// decoration: if the built column stopped reaching the asset branch, every
+	// per-probe check above would still pass and this surface would be back to
+	// one configuration under test.
+	for _, want := range []struct{ column, branch string }{
+		{"bare", webBranchUINotBuilt},
+		{"bare", webBranchAPIJSON404},
+		{"built", webBranchSPAIndex},
+		{"built", webBranchAsset},
+		{"built", webBranchAPIJSON404},
+	} {
+		if !entered[want.column][want.branch] {
+			t.Errorf("no probe entered the %q branch of internal/web.HandlerFor against the "+
+				"%s filesystem. Every assertion above is per-probe and a probe set that "+
+				"stopped reaching a branch would satisfy all of them; this is the check "+
+				"that says the branch was executed at all.\nbranches entered: %v",
+				want.branch, want.column, sortedSet(entered[want.column]))
+		}
+	}
+
+}
+
+// assertNotFoundProbesMatchThisBuild is the precondition half of #167, and it is
+// the half that has to run through the REAL mux.
+//
+// Which column above describes this invocation is a fact about the checkout, not
+// a choice, and it was exactly the fact CI was getting silently wrong: the run
+// asserted a surface and never recorded that the surface it drove had no UI
+// behind it. UIBuilt() is the server's own answer, and the branch each probe
+// takes through r.NotFound must agree with it.
+func assertNotFoundProbesMatchThisBuild(t *testing.T, h http.Handler) {
+	t.Helper()
+	built := UIBuilt()
+	for _, p := range notFoundProbes() {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(p.method, p.path, nil))
+		got := observedWebBranch(w)
+		want := p.bare
+		if built {
+			want = p.built
+		}
+		if got != want {
+			t.Errorf("%s %s through the real mux entered the %q branch; this checkout "+
+				"reports UIBuilt()=%v, for which the probe declares %q.\n"+
+				"Before #167 nothing compared these, so a CI job that never runs "+
+				"`npm run build` reported coverage of a handler serving an empty "+
+				"embed.FS while the shipped binary serves a populated one.",
+				p.method, p.path, got, built, want)
+		}
+	}
+}
+
+func sortedSet(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // methodNotAllowedProbes is G4: chi's methodNotAllowed short-circuits BEFORE
@@ -1040,21 +1279,142 @@ func notFoundProbes() []nonTrieProbe {
 // before is that no test drove this response class at all.
 func methodNotAllowedProbes() []nonTrieProbe {
 	return []nonTrieProbe{
-		{http.MethodHead, "/api/v1/settings", "a GET-only route answered 405 with Allow: GET"},
-		{http.MethodPut, "/api/v1/upgrade/stage", "a POST-only route answered 405 with Allow: POST"},
+		// No bare/built branch: these never reach internal/web at all. chi's
+		// methodNotAllowed answers them before r.NotFound is consulted, which is
+		// the whole of G4.
+		{method: http.MethodHead, path: "/api/v1/settings",
+			why: "a GET-only route answered 405 with Allow: GET"},
+		{method: http.MethodPut, path: "/api/v1/upgrade/stage",
+			why: "a POST-only route answered 405 with Allow: POST"},
 	}
 }
 
 // ------------------------------------------------------------------ the shapes
 
+// shapeRig is the fixture the shape inspectors run against: ONE planted server,
+// built once per inspection pass and shared by every inspector that can use it.
+//
+// #176's fourth acceptance criterion, and the reason this is a struct rather
+// than each inspector standing up its own server: "the preflight's wall clock
+// does not materially grow -- piggyback on the existing planted server rather
+// than standing up new fixtures. A preflight that doubles in cost is a preflight
+// somebody deletes." Two inspectors genuinely cannot share it and each says so
+// on its own line.
+type shapeRig struct {
+	h    http.Handler
+	sign func(*http.Request)
+	// read is a read-scoped bearer on h, minted once.
+	read string
+	// s is the *Server behind h, CAPTURED HERE rather than fetched later.
+	//
+	// serverUnderTest returns package-global lastTestServer -- "the Server most
+	// recently built by renditionServer" -- and two of the inspectors below
+	// build a playout origin of their own. Reading the global after they have
+	// run hands back THEIR server, so the websocket inspector dialled a
+	// different process from the one it holds a token for and got 401. Found by
+	// running it; the first version of this rig did exactly that.
+	s *Server
+}
+
+func newShapeRig(t *testing.T) shapeRig {
+	t.Helper()
+	h, _, sign := plantedServer(t)
+	return shapeRig{
+		h:    h,
+		sign: sign,
+		read: createScopedToken(t, h, sign, "ledger-shapes", db.ScopeRead),
+		s:    serverUnderTest(t, h),
+	}
+}
+
+// shapeObservation is what an inspector must produce, and it is the shape
+// registry's answer to the same question the counterpart registry answers with
+// proofResult: BYTES, not a claim.
+//
+// Shape is not decoration. It must equal the row's Shape, which is what makes an
+// inspector wired to the wrong row a failure by name rather than a silent
+// re-attribution -- the mistake `By: "TestPlayoutCookieHandoff"` was one typo
+// away from, on a field nothing resolved.
+type shapeObservation struct {
+	Shape  string
+	Sample string
+}
+
+type shapeInspector func(*testing.T, shapeRig) shapeObservation
+
+// shapeRow is the registry entry. It replaces the six-field positional literal
+// whose third element was a hand-set `Inspected` bool.
+//
+// THERE IS NO `Inspected` FIELD, and that is the point of #176's first
+// acceptance criterion ("`Inspected: true` with a nil inspector does not
+// compile"). The stronger form landed instead: the claim is not checkable-but-
+// unwritable, it is UNSPELLABLE. Inspection is `Inspector != nil`, computed in
+// emittedShapes, and the only way to move a shape into the inspected column is
+// to hand the ledger a function it will call.
+type shapeRow struct {
+	Shape   string
+	Emitted bool
+	// Inspector is the proof. Nil means not inspected; non-nil means the
+	// preflight CALLS it and requires it to witness this row's shape in real
+	// emitted bytes.
+	Inspector shapeInspector
+	// LiveTools marks the one inspector that cannot run on the shared rig
+	// because its shape only exists once a real child process has spawned and
+	// written. It costs an FFmpeg stand-in and a spawn wait, so it runs in
+	// strict mode with the counterpart proofs rather than on every `go test`.
+	// That residual is a deferral row, not an implicit gap.
+	LiveTools bool
+	Issue     string
+	Note      string
+}
+
 // emittedShapes is I5: coverage is (method, pattern, SHAPE), because the two
 // things that escaped were both shapes rather than routes. The playout manifest
 // is a streaming response and the argv leak travelled through a WebSocket frame;
 // a ledger that only counted routes would have called both covered.
+//
+// It is now a PROJECTION of shapeRegistry rather than the registry itself, so
+// the artifact's `inspected` and `inspectedBy` columns are read out of the
+// program instead of typed next to it.
 func emittedShapes() []coverageShape {
-	return []coverageShape{
-		{"json-body", true, true, "TestReadTokenReceivesNoCredentialOnAnyRoute", "",
-			"the value sweep: real read-bearer bytes scanned for every planted sentinel"},
+	rows := shapeRegistry()
+	out := make([]coverageShape, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, coverageShape{
+			Shape:       r.Shape,
+			Emitted:     r.Emitted,
+			Inspected:   r.Inspector != nil,
+			InspectedBy: inspectorName(r.Inspector),
+			Issue:       r.Issue,
+			Note:        r.Note,
+		})
+	}
+	return out
+}
+
+// inspectorName is the DERIVED `inspectedBy`: the runtime name of the function
+// the ledger is going to call, trimmed to package.Func.
+//
+// The whole of shape_reference_test.go's symbol index existed to second-guess a
+// hand-written string with an AST walk over the repository. A name taken from
+// the func value cannot name something that does not exist, cannot name another
+// package's test, and cannot name a helper the ledger will not run -- the three
+// defects that walk was built to find.
+func inspectorName(fn shapeInspector) string {
+	if fn == nil {
+		return ""
+	}
+	full := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+	if i := strings.LastIndex(full, "/"); i >= 0 {
+		full = full[i+1:]
+	}
+	return full
+}
+
+func shapeRegistry() []shapeRow {
+	return []shapeRow{
+		{Shape: "json-body", Emitted: true, Inspector: inspectJSONBody,
+			Note: "the value sweep: real read-bearer bytes scanned for every planted sentinel"},
 		// NOT inspected, corrected from Inspected:true. This row named
 		// TestAConfiguredRedirectNeverCachesAWatchToken, which is declared in
 		// cmd/polyemesis/redirect_test.go -- package main. It is a real test and
@@ -1064,50 +1424,160 @@ func emittedShapes() []coverageShape {
 		// jurisdiction does not cover it. Recording it as this package's
 		// inspection was a claim about another package's test suite.
 		//
-		// Downgraded rather than deleted, because the SHAPE is still emitted here
-		// and still uninspected here, which is the fact the ledger exists to
-		// carry. See TestEveryInspectedShapeNamesAProofThisPackageCanRun.
-		{"response-header/Location", true, false, "", "#168",
-			"the HTTPS redirect's Location carries the request URI verbatim, watch token " +
+		// #176 names this row and its Cache-Control twin as the two that "need
+		// real work rather than a rename", and they still do: an inspector here
+		// would have to stand up the redirect wrapper, which lives in package
+		// main. Left deferred with the jurisdiction stated, which is what #176
+		// asks for, rather than given a token inspector that witnesses a header
+		// on some other route and calls the shape covered.
+		{Shape: "response-header/Location", Emitted: true, Issue: "#168",
+			Note: "the HTTPS redirect's Location carries the request URI verbatim, watch token " +
 				"included. The assertion lives in cmd/polyemesis (package main), out of " +
 				"this ledger's jurisdiction. rawResponse now renders EVERY response header, " +
 				"so the invariance sweep does read headers -- but only for the routes it " +
 				"sweeps, and the redirect is not one of them."},
-		// Re-pointed, not downgraded: TestPlayoutCookieHandoff does not exist and
-		// never did. The real test is TestPlayoutCookieHandoffSurvives, in this
-		// package. A bare string naming a proof was free to be wrong because
-		// nothing resolved it.
-		{"response-header/Set-Cookie", true, true, "TestPlayoutCookieHandoffSurvives", "",
-			"the playout watch cookie"},
-		{"response-header/Cache-Control", true, false, "", "#168",
-			"whether a credential-bearing response may be stored. Same jurisdiction " +
+		{Shape: "response-header/Set-Cookie", Emitted: true, Inspector: inspectPlayoutCookie,
+			Note: "the playout watch cookie"},
+		{Shape: "response-header/Cache-Control", Emitted: true, Issue: "#168",
+			Note: "whether a credential-bearing response may be stored. Same jurisdiction " +
 				"problem as response-header/Location above: asserted in package main, " +
 				"unasserted here for the routes outside the invariance sweep."},
-		{"response-header/Content-Disposition", true, false, "", "#168",
-			"download filenames; media names only, no stored credential. RE-POINTED from " +
+		{Shape: "response-header/Content-Disposition", Emitted: true, Issue: "#168",
+			Note: "download filenames; media names only, no stored credential. RE-POINTED from " +
 				"#154, which commit ae8df24 announces closing: what remains is that the " +
 				"download routes are excused from the sweep entirely, so no principal-pair " +
 				"comparison reads their headers."},
-		{"streaming-media", true, true, "playoutManifestBytes", "",
-			"the HLS manifest and its segments -- the shape a body sweep reads none of, " +
-				"and the one that escaped the previous audit"},
-		{"file-download", true, false, "", "#168",
-			"recordings, stems, clips and exports. #154 decided this and is CLOSED by " +
+		{Shape: "streaming-media", Emitted: true, Inspector: inspectStreamingManifest,
+			Note: "the HLS manifest and its segments -- the shape a body sweep reads none of, " +
+				"and the one that escaped the previous audit. The old `by` string named the " +
+				"playoutManifestBytes counterpart, which never reads a manifest: on the " +
+				"planted fixture that route answers a read token 50 bytes of " +
+				"{\"error\":\"this stream requires a playback token\"}. Correct behaviour, " +
+				"asserted by that excuse's Want -- and not this shape."},
+		{Shape: "file-download", Emitted: true, Issue: "#168",
+			Note: "recordings, stems, clips and exports. #154 decided this and is CLOSED by " +
 				"ae8df24: every download route now answers a read token 403, which the " +
 				"excuse registry drives. What is still uninspected is the shape itself " +
 				"for the principals entitled to it."},
-		{"websocket-frame", true, true, "websocketFrames + TestEveryEventTypeHasAWebSocketPolicy", "",
-			"one policy row per events.Type over a CLOSED table; an unclassified type " +
+		{Shape: "websocket-frame", Emitted: true, Inspector: inspectWebsocketFrame,
+			Note: "one policy row per events.Type over a CLOSED table; an unclassified type " +
 				"fails the build and is dropped for a read scope"},
-		{"sse", false, false, "", "", "ABSENT: this API emits no server-sent events"},
-		{"mqtt-retained-topic", true, false, "", "#160",
-			"cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal " +
+		{Shape: "sse", Note: "ABSENT: this API emits no server-sent events"},
+		{Shape: "mqtt-retained-topic", Emitted: true, Issue: "#160",
+			Note: "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal " +
 				"and never any. Scrubbed at source by supervisor.scrub; the broker-side " +
 				"consumer audit is the deferral."},
-		{"on-disk-process-log", true, true, "TestRunningDestinationLeaksNoSentinelOnAnyEgress", "",
-			"the file that goes into support tarballs; asserted from disk"},
-		{"slog-output", true, false, "", "#160",
-			"the server's own structured log."},
+		{Shape: "on-disk-process-log", Emitted: true, Inspector: inspectProcessLog, LiveTools: true,
+			Note: "the file that goes into support tarballs; asserted from disk. Its inspector " +
+				"needs a spawned child, so it runs under POLYEMESIS_LEDGER=strict with the " +
+				"counterpart proofs -- see the counterpart-proofs-outside-the-preflight " +
+				"deferral, which now covers it too."},
+		{Shape: "slog-output", Emitted: true, Issue: "#160",
+			Note: "the server's own structured log."},
+	}
+}
+
+// ------------------------------------------------------------ the inspectors
+//
+// Every one of these RETURNS THE BYTES IT READ and asserts the property that
+// distinguishes its shape from any other -- valid JSON, an #EXTM3U line, a
+// cookie by name. A sample that is merely non-empty would let a 50-byte error
+// body stand in for a manifest, which is exactly what the string this registry
+// used to carry was doing.
+
+func inspectJSONBody(t *testing.T, rig shapeRig) shapeObservation {
+	t.Helper()
+	body := rawBody(t, rig.h, bearer(rig.read), "/api/v1/settings")
+	if !json.Valid([]byte(body)) {
+		t.Errorf("the json-body inspector read %d bytes from GET /api/v1/settings and they "+
+			"are not valid JSON, so what it witnessed is not the shape this row claims.\n%s",
+			len(body), truncateForFailure(body))
+	}
+	return shapeObservation{Shape: "json-body", Sample: body}
+}
+
+// inspectPlayoutCookie cannot use the shared rig: the planted fixture's playout
+// is unprotected, so no handoff cookie is ever issued on it. It builds the same
+// token-protected origin TestPlayoutCookieHandoffSurvives uses, which costs a
+// server and no child process.
+func inspectPlayoutCookie(t *testing.T, _ shapeRig) shapeObservation {
+	t.Helper()
+	_, h, _ := playoutOriginServer(t, enabledPlayout(true),
+		playoutPublish{Protection: PlayoutProtectToken, Token: testToken})
+	r := httptest.NewRequest(http.MethodGet,
+		"/playout/master.m3u8?"+playoutTokenParam+"="+testToken, nil)
+	r.RemoteAddr = "203.0.113.9:5555"
+	w := do(t, h, r)
+	got := w.Header().Get("Set-Cookie")
+	if !strings.HasPrefix(got, playoutTokenCookie+"=") {
+		t.Errorf("the Set-Cookie inspector drove the token handoff and got status %d with "+
+			"Set-Cookie %q, which does not begin with %q. This shape is recorded as "+
+			"emitted; if the handoff has stopped issuing a cookie, the row is what has "+
+			"to change.", w.Code, got, playoutTokenCookie+"=")
+	}
+	return shapeObservation{Shape: "response-header/Set-Cookie", Sample: got}
+}
+
+// inspectStreamingManifest is the row #176 turned up as more than a rename.
+//
+// The old `by` string was "playoutManifestBytes", a counterpart proof that reads
+// PlayoutPrefix+"master.m3u8" off the PLANTED server -- where the stream is
+// token-protected and a read bearer is answered 50 bytes of
+// {"error":"this stream requires a playback token"}. That proof is correct and
+// its excuse's Want asserts exactly that 401; what it is not is an inspection of
+// the streaming-media shape, because no manifest byte was ever in it. Naming a
+// green proof was enough while nothing ran the name.
+func inspectStreamingManifest(t *testing.T, _ shapeRig) shapeObservation {
+	t.Helper()
+	_, h, _ := playoutOriginServer(t, enabledPlayout(true),
+		playoutPublish{Protection: PlayoutProtectToken, Token: testToken})
+	r := httptest.NewRequest(http.MethodGet,
+		"/playout/master.m3u8?"+playoutTokenParam+"="+testToken, nil)
+	r.RemoteAddr = "203.0.113.9:5555"
+	w := do(t, h, r)
+	body := w.Body.String()
+	if !strings.HasPrefix(body, "#EXTM3U") {
+		t.Errorf("the streaming-media inspector drove the playout origin with a valid "+
+			"playback token and got status %d with a body that does not start with "+
+			"#EXTM3U, so it read no manifest. A sample that is merely non-empty would "+
+			"have accepted the error page here -- which is precisely what the string "+
+			"this row used to carry was accepting.\nbody: %s",
+			w.Code, truncateForFailure(body))
+	}
+	return shapeObservation{Shape: "streaming-media", Sample: body}
+}
+
+// inspectWebsocketFrame reads real frames off a real upgrade on the SHARED rig.
+//
+// 750ms rather than the 2-3s the counterpart proofs use: the status, source and
+// stats frames are written at subscribe time, so the window only has to cover
+// the handshake. wsFrames burns whatever window it is given, so this number is
+// the whole of this inspector's cost.
+func inspectWebsocketFrame(t *testing.T, rig shapeRig) shapeObservation {
+	t.Helper()
+	frames := wsFrames(t, rig.s, "Bearer "+rig.read, 750*time.Millisecond)
+	for _, f := range frames {
+		var env struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(f), &env); err != nil || env.Type == "" {
+			t.Errorf("the websocket-frame inspector read a frame that is not a typed event "+
+				"envelope (%v): %s", err, truncateForFailure(f))
+			break
+		}
+	}
+	return shapeObservation{Shape: "websocket-frame", Sample: strings.Join(frames, "\n")}
+}
+
+// inspectProcessLog is the LiveTools one. The file only exists once a child has
+// spawned and written to it, so there is no version of this that shares a rig
+// with a fixture that starts no process.
+func inspectProcessLog(t *testing.T, _ shapeRig) shapeObservation {
+	t.Helper()
+	h, _, _ := runningDestServer(t)
+	return shapeObservation{
+		Shape:  "on-disk-process-log",
+		Sample: processLogFile(t, serverUnderTest(t, h)),
 	}
 }
 
@@ -1542,8 +2012,14 @@ func TestLedgerPreflight(t *testing.T) {
 	// Calling the Test functions directly rather than extracting helpers: the
 	// call IS the compile-time reference, and it is the smallest change that
 	// buys both properties.
-	TestEveryInspectedShapeNamesAProofThisPackageCanRun(t)
+	TestEveryInspectedShapeWitnessesItself(t)
 	TestBlankingEveryShapeNoteChangesNoVerdict(t)
+
+	// #167's branch table, from here as well, and for the same two reasons: it
+	// needs no server, so it costs the preflight nothing, and a guard that only
+	// lives in TestTheNonTrieSurfacesAreDriven is one `-run` away from silence.
+	// The precondition half stays there, because it needs the mux.
+	assertNotFoundProbesEnterTheirBranches(t)
 
 	// 6. STRICT MODE. CI sets POLYEMESIS_LEDGER=strict and the counterpart
 	// proofs run from HERE as well, so no single -run filter silences both.
@@ -1668,6 +2144,13 @@ func runCounterpartProofs(t *testing.T) {
 func TestTheNonTrieSurfacesAreDriven(t *testing.T) {
 	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "nontrie", db.ScopeRead)
+
+	// #167: WHICH BRANCH did the probes above actually drive. Both halves --
+	// the two-column branch table and the precondition through this mux.
+	t.Run("branches", func(t *testing.T) {
+		assertNotFoundProbesEnterTheirBranches(t)
+		assertNotFoundProbesMatchThisBuild(t, h)
+	})
 
 	t.Run("notFound", func(t *testing.T) {
 		for _, p := range notFoundProbes() {
@@ -2390,30 +2873,45 @@ func deferredWithReasons() []coverageDefer {
 			Issue: "#156",
 		},
 		{
-			// RECORDED, NOT FIXED, and recorded because the honest artifact is
-			// worth more than a half-wired guard. Two independent runs measured
-			// it: with internal/web/dist populated, a Cache-Control that varies
-			// by principal FAILS the notFound probe by name; with dist carrying
-			// only .gitkeep -- which is the state of a CI checkout and of this
-			// repository -- the same mutation passes in 0.71s. fs.WalkDir over
-			// web.FS() returns "." and ".gitkeep", so eight of the nine probes
-			// take the "UI not built" branch.
-			ID: "not-found-probes-do-not-enter-the-asset-branch",
-			What: "TestTheNonTrieSurfacesAreDriven/notFound reports coverage of the " +
-				"embedded-UI asset branch and, in every configuration this suite is " +
-				"actually run in, never enters it. internal/web/dist contains only " +
-				".gitkeep unless the UI has been built, and CI does not build it before " +
-				"the Go job.",
-			WhySafe: "the branch that IS driven -- \"UI not built\" -- is the one a " +
-				"deployment without a built UI serves, and it is genuinely principal-" +
-				"invariant across the probes. The asset branch serves bytes from an " +
-				"embed.FS with no server state behind it.",
-			WhatWouldMakeItUnsafe: "any principal-dependent behaviour in the asset branch " +
-				"of web.Handler, which is exactly what this probe claims to cover and " +
-				"does not. Closing it needs the UI built before the Go job runs, which " +
-				"is a second CI build and a change outside this package; it is not " +
-				"half-wired here on purpose, because a probe that sometimes enters the " +
-				"branch is worse evidence than one that says it never does.",
+			// THE MEASUREMENT THAT JUSTIFIED THE OLD ROW, kept because it is what
+			// makes this one's scope legible: with internal/web/dist populated, a
+			// Cache-Control that varies by principal FAILS the notFound probe by
+			// name; with dist carrying only .gitkeep -- the state of a CI checkout
+			// and of this repository -- the same mutation passed in 0.71s.
+			// fs.WalkDir over web.FS() returns "." and ".gitkeep", so eight of the
+			// nine probes took the "UI not built" branch and nothing said so.
+			//
+			// RETIRED, and replaced by a narrower residual rather than deleted
+			// outright. The old row said the asset branch is entered by nothing
+			// and that closing it "needs the UI built before the Go job runs,
+			// which is a second CI build". It does not: web.HandlerFor takes the
+			// filesystem, so both columns are driven by
+			// assertNotFoundProbesEnterTheirBranches at no CI cost, and
+			// assertNotFoundProbesMatchThisBuild pins which column the real mux
+			// serves. What is left is smaller and worth stating on its own.
+			ID: "built-ui-branches-are-driven-outside-the-mux",
+			What: "the SPA and asset branches of internal/web are driven against a " +
+				"SYNTHETIC dist -- an index.html and one fingerprinted bundle -- through " +
+				"web.HandlerFor directly. Through the real chi mux, this checkout and CI " +
+				"both serve the bare filesystem, so the built column is not exercised " +
+				"end-to-end with requireAuth and the group middleware in front of it.",
+			WhySafe: "r.NotFound is mounted BELOW no middleware that varies by principal " +
+				"-- it is the mux's terminal handler and the same closure in both columns " +
+				"-- and the principal-invariance assertion the surface actually needs runs " +
+				"through the real mux over the real filesystem. What the synthetic column " +
+				"adds is branch reachability, which is a property of the closure and not " +
+				"of what is mounted above it.",
+			WhatWouldMakeItUnsafe: "middleware that rewrites a response on the way out, or " +
+				"an asset branch that ever consults the request's principal. Both would " +
+				"make the synthetic column's agreement with the mux an assumption rather " +
+				"than an observation, and the honest fix then is a CI job that builds the " +
+				"UI before the Go job.",
+			// Still #167. Its two stated fix directions -- "run the probes against a
+			// build with assets embedded, or assert the emptiness precondition so
+			// the divergence is visible" -- are both done, and the citation stays
+			// because the first one is done beside the mux rather than through it.
+			// Retiring the number is the maintainer's call on a residual this
+			// small, not something to bank in the same change that shrank it.
 			Issue: "#167",
 		},
 		{
@@ -2537,7 +3035,11 @@ func deferredWithReasons() []coverageDefer {
 			What: "the two counterpart proofs that spawn a real FFmpeg stand-in -- " +
 				"runningDestinationLogs and websocketFrames -- run as ordinary tests and " +
 				"are therefore defeatable by `go test -run`, unlike everything else the " +
-				"ledger asserts.",
+				"ledger asserts. #176's shape inspectors join them: inspectProcessLog is " +
+				"marked LiveTools because the on-disk process.log only exists once a child " +
+				"has spawned and written, so it runs in strict mode with them rather than " +
+				"on every invocation. The other four inspectors run unconditionally in the " +
+				"preflight on the shared planted rig.",
 			WhySafe: "CI sets POLYEMESIS_LEDGER=strict, which runs them from inside the " +
 				"preflight as well, so no single -run filter silences both paths. Once " +
 				"per process, not twice: the preflight returns immediately in TestMain's " +

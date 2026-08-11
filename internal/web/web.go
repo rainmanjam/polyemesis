@@ -42,6 +42,39 @@ func Handler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	return HandlerFor(sub), nil
+}
+
+// HandlerFor is Handler over an ARBITRARY asset filesystem, and it exists so
+// that the branches below can be driven in both of the configurations this
+// binary ships in.
+//
+// #167: CI's Go job does not run `npm run build`, so `dist` holds only
+// .gitkeep and every request that reaches this handler takes the
+// "UI not built" branch. The route ledger's NotFound probes were reported as
+// covering this surface while, in every configuration they are actually run in,
+// eight of nine took one dead branch and the asset branch was entered by
+// nothing. Splitting the filesystem out of the closure costs nothing at run
+// time -- Handler passes the embedded one, exactly as before -- and lets a test
+// hand in a populated one.
+//
+// The split itself changed no behaviour -- the body is the one that was inside
+// Handler. What the seam then made visible, and what IS a behaviour change, is
+// the directory case below: it could not be driven at all while the only
+// filesystem this handler would accept was an empty one.
+// isRegularFile reports whether p names something in sub that is a file rather
+// than a directory. A path that does not exist is neither.
+func isRegularFile(sub fs.FS, p string) bool {
+	f, err := sub.Open(p)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	return err == nil && !st.IsDir()
+}
+
+func HandlerFor(sub fs.FS) http.Handler {
 	files := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,8 +83,16 @@ func Handler() (http.Handler, error) {
 			p = "index.html"
 		}
 
-		if f, err := sub.Open(p); err == nil {
-			f.Close()
+		// A DIRECTORY IS NOT AN ASSET, and this is the reason isRegularFile
+		// exists rather than a bare Open. Opening a directory SUCCEEDS, and
+		// handing it to http.FileServer answers 200 with an index of its
+		// contents: GET /assets/ returned the whole bundle inventory as a page
+		// of links to any anonymous caller. Nobody is entitled to that listing
+		// and no client asks for it -- the SPA references bundles by their
+		// fingerprinted names -- so it is a gratuitous disclosure of build
+		// layout. A directory now falls through to the SPA branch, which is how
+		// every other unknown path is answered.
+		if isRegularFile(sub, p) {
 			// Vite fingerprints everything under /assets, so those are safe to
 			// cache forever. index.html must never be, or a deploy leaves users
 			// on the old bundle.
@@ -95,5 +136,5 @@ func Handler() (http.Handler, error) {
 			Read([]byte) (int, error)
 			Seek(int64, int) (int64, error)
 		}))
-	}), nil
+	})
 }
