@@ -1,0 +1,19 @@
+# RED. The same shape without the wait: the kill is inline rather than trapped,
+# and the step's outcome is decided after it. A kill that has not been observed
+# means the exit status below describes a machine nobody looked at.
+name: smoke
+on: [push]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verdict after the kill
+        timeout-minutes: 5
+        run: |
+          ./server &
+          pid=$!
+          sleep 2
+          kill "$pid"
+          if ! grep -q ready server.log; then
+            exit 1
+          fi
