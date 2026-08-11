@@ -1,0 +1,16 @@
+package fixture
+
+// RED: a bare Stop inside a goroutine literal. It is still an expression
+// statement, and burying it one function literal deep must not hide it -- the
+// shutdown path in internal/engine has exactly this shape.
+
+import (
+	"context"
+	"sync"
+)
+
+type proc interface{ Stop(context.Context) error }
+
+func shutdown(p proc, ctx context.Context, wg *sync.WaitGroup) {
+	go func() { defer wg.Done(); p.Stop(ctx) }()
+}
