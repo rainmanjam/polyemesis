@@ -706,6 +706,12 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 // statement. A job that is claimed in the window between them is still deleted.
 // That window is the two statements wide; the one this replaces was the whole
 // life of the job.
+// What it also does, since #222: takes the exported file with the row. A
+// clip.export's row is the ONLY reference to its file -- the download route is
+// keyed on the job, and the exports directory is deliberately outside the
+// rolling buffer's pruning -- so a row-only delete stranded the file forever,
+// unservable and unsweepable. The file goes AFTER the row, so a failed delete
+// leaves both.
 func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 	s.jobAction(w, r, func(id int64) error {
 		j, err := s.jobq.Get(id)
@@ -716,8 +722,49 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("%w: cannot delete job %d: it is running, cancel it first",
 				db.ErrStateConflict, id)
 		}
-		return s.jobq.Delete(id)
+		if err := s.jobq.Delete(id); err != nil {
+			return err
+		}
+		s.removeClipExport(*j)
+		return nil
 	})
+}
+
+// removeClipExport deletes the file a finished clip export produced, and logs
+// rather than fails when it cannot.
+//
+// The row is already gone by the time this runs. Returning an error here would
+// report a delete that did happen as a failure, and the operator's retry would
+// then 404 -- so the honest outcome for a stranded file is a log line naming
+// it, which is strictly better than the silence this replaces.
+func (s *Server) removeClipExport(j jobs.Job) {
+	// The engine is what knows where recordings live, and it can legitimately
+	// be absent: publishAudit documents the same two cases, and the second is
+	// not hypothetical -- Manager.reconcile logs and continues when engine.New
+	// fails, so an install whose video pipeline will not build has no default
+	// engine. Deleting a job must not panic on such a box, and DELETE /jobs and
+	// the purge button are both far busier routes than the download this guard
+	// was previously only implied on.
+	//
+	// Skipping is the right failure: without a recordings directory there is no
+	// exports directory to confine a path to, and a delete that removed a file
+	// it could not first confine is the one outcome worse than a leaked file.
+	if s.mgr == nil {
+		return
+	}
+	eng := s.eng()
+	if eng == nil {
+		return
+	}
+	removed, err := clipper.RemoveExport(clipper.ExportDirIn(eng.Recordings().Dir()), j)
+	if err != nil {
+		s.log.Warn("deleted a clip export job but could not delete its file",
+			"job", j.ID, "err", err)
+		return
+	}
+	if removed {
+		s.log.Info("deleted a clip export file with its job", "job", j.ID)
+	}
 }
 
 // jobAction is the shared shape of every single-job control: parse, act, hand
@@ -783,10 +830,16 @@ func (s *Server) handlePurgeJobs(w http.ResponseWriter, r *http.Request) {
 	if days > 0 {
 		cutoff = time.Now().AddDate(0, 0, -days)
 	}
-	n, err := s.jobq.Purge(cutoff, keep)
+	purged, err := s.jobq.Purge(cutoff, keep)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"purged": n})
+	// Same reasoning as handleDeleteJob, in bulk: this button is the one that
+	// strands exports by the dozen, and it is the reason a delete-only fix for
+	// #222 would have read as a fix without being one.
+	for _, j := range purged {
+		s.removeClipExport(j)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"purged": len(purged)})
 }

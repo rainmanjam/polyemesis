@@ -396,22 +396,32 @@ jobs:
       # bash on all three: windows-latest ships Git Bash, so one script serves
       # every runner rather than a PowerShell fork nobody maintains.
       #
+      # Built in a step of its own so each half carries a ceiling that means
+      # something (#198). These two things are unrelated: the build is the long
+      # pole on a cold Windows cache, and the serve check is 2-4s measured
+      # (n=21). Sharing one step forced its timeout to be sized for the build,
+      # which put a 10-minute ceiling on a 3-second assertion and hid "the
+      # Windows build cache was cold today" inside a step called "check it
+      # serves". Split, the timing column says which one it was.
+      #
+      # -cover, so the smoke run MEASURES itself. See the covdata step at the
+      # end of this job for what that is for and what it costs.
+      - name: Build the smoke binary
+        timeout-minutes: 8
+        shell: bash
+        run: go build -cover -o polyemesis-smoke ./cmd/polyemesis
+
       # timeout-minutes because this step BACKGROUNDS A PROCESS, and a step that
-      # holds a pid can wait on something that never comes. 10 against a
-      # measured 2-4s (n=21) is enormous headroom, and it is sized for the
-      # unbounded `go build` inside rather than the server: a cold Windows build
-      # cache is the long pole here. Deliberately below the job's
-      # timeout-minutes: 30, per the discipline at :154-158 and :305-311 --
-      # whichever timeout fires first decides how much you learn, so the
-      # narrowest one has to.
+      # holds a pid can wait on something that never comes. 2 against a measured
+      # 2-4s (n=21) is still 30x headroom now that the build is not inside it.
+      # Deliberately below the job's timeout-minutes: 30, per the discipline at
+      # :154-158 and :305-311 -- whichever timeout fires first decides how much
+      # you learn, so the narrowest one has to.
       - name: Start the server and check it serves
-        timeout-minutes: 10
+        timeout-minutes: 2
         shell: bash
         run: |
           set -uo pipefail
-          # -cover, so this run MEASURES itself. See the covdata step at the end
-          # of this job for what that is for and what it costs.
-          go build -cover -o polyemesis-smoke ./cmd/polyemesis
           mkdir -p covdata/serve
           GOCOVERDIR=covdata/serve ./polyemesis-smoke -addr 127.0.0.1:8123 -data ./smoke-data -log warn &
           pid=$!

@@ -297,6 +297,9 @@ func (s *Server) handleUpgradeStage(w http.ResponseWriter, r *http.Request) {
 		"version", tag, "binary", plan.BinaryPath,
 		"forced", body.Force, "onAir", plan.OnAirSummary,
 		"by", actorFor(r), "ip", s.clientIP(r))
+	// And an audit event, not only a log line (#148). A log line stays on the
+	// box that was just replaced; this reaches the operator wherever they are.
+	s.publishAudit(auditUpgradeStaged(tag, body.Force, s.clientIP(r)))
 
 	writeJSON(w, http.StatusOK, upgradeResult{
 		Staged:          true,
@@ -342,6 +345,7 @@ func (s *Server) handleUpgradeRollback(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("upgrade rolled back",
 		"binary", plan.BinaryPath, "forced", body.Force, "onAir", plan.OnAirSummary,
 		"by", actorFor(r), "ip", s.clientIP(r))
+	s.publishAudit(auditUpgradeRolledBack(body.Force, s.clientIP(r)))
 
 	writeJSON(w, http.StatusOK, upgradeResult{
 		RolledBack:      true,

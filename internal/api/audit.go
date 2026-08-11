@@ -73,6 +73,8 @@ const (
 	fieldTokenScope   = "Scope"
 	fieldSections     = "Sections"
 	fieldClipName     = "Clip"
+	fieldVersion      = "Version"
+	fieldForced       = "Forced past a live broadcast"
 )
 
 // clientIP is the address the request came from, resolved the same way the
@@ -268,6 +270,60 @@ func auditAPITokenCreated(name, scope, address string) alerts.Event {
 		WithField(fieldTokenName, name).
 		WithField(fieldTokenScope, scope).
 		WithField(fieldAddress, address)
+}
+
+// auditUpgradeStaged reports a replaced server binary (#148).
+//
+// The version and the forced flag travel, and nothing else does. Both are the
+// same judgement auditAPITokenCreated makes about what is safe to hand a
+// third-party chat host: the version is a release tag this server chose from
+// its own update feed, never operator text, and the forced flag is a boolean.
+//
+// The BINARY PATH is deliberately absent, though the log line beside this call
+// carries it. A log line stays on the box; this event is delivered to whatever
+// webhook or chat channel the install has configured, and the filesystem
+// layout of somebody's server is not something to broadcast to answer a
+// question -- "which version, and did it interrupt a broadcast" -- that the
+// path does not help with.
+//
+// The forced case is the one an operator will want to find later, so it is a
+// named field rather than a sentence: a field can be searched for.
+func auditUpgradeStaged(version string, forced bool, address string) alerts.Event {
+	ev := alerts.Event{
+		Type:     alerts.TypeUpgradeStaged,
+		Severity: alerts.SeverityCritical,
+		Title:    "Server binary replaced",
+		Text: "A new release was staged over this server's own binary. It takes " +
+			"effect at the next restart, and it survives a password change and a " +
+			"token revocation.",
+	}.
+		WithField(fieldVersion, version).
+		WithField(fieldAddress, address)
+	if forced {
+		// Only when true, on auditLoginSucceeded's reasoning: "Forced: no" on
+		// every routine upgrade trains the reader to skip the line that matters.
+		ev = ev.WithField(fieldForced, "yes")
+	}
+	return ev
+}
+
+// auditUpgradeRolledBack reports the previous binary being put back.
+//
+// No version: a rollback names no release. It restores whatever this box was
+// running before the last stage, and inventing a tag for it would be a guess
+// printed as a fact.
+func auditUpgradeRolledBack(forced bool, address string) alerts.Event {
+	ev := alerts.Event{
+		Type:     alerts.TypeUpgradeRolledBack,
+		Severity: alerts.SeverityCritical,
+		Title:    "Server binary rolled back",
+		Text: "The previous server binary was restored. It takes effect at the " +
+			"next restart.",
+	}.WithField(fieldAddress, address)
+	if forced {
+		ev = ev.WithField(fieldForced, "yes")
+	}
+	return ev
 }
 
 // auditSettingsChanged reports a settings save that altered something, naming

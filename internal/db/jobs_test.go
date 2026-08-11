@@ -606,11 +606,11 @@ func TestPurgeJobsKeepsTheNewestAndSparesLiveWork(t *testing.T) {
 		t.Fatalf("ClaimJob: %v", err)
 	}
 
-	n, err := d.PurgeJobs(now.Add(-30*time.Minute), 1)
+	purged, err := d.PurgeJobs(now.Add(-30*time.Minute), 1)
 	if err != nil {
 		t.Fatalf("PurgeJobs: %v", err)
 	}
-	if n != 2 {
+	if n := len(purged); n != 2 {
 		t.Fatalf("purged %d, want the two oldest finished jobs", n)
 	}
 	for _, id := range []int64{oldest, middle} {
@@ -733,11 +733,11 @@ func TestPurgeSparesJobsFinishedSinceTheCutoff(t *testing.T) {
 		t.Fatalf("seed terminal row without a finished_at: %v", err)
 	}
 
-	n, err := d.PurgeJobs(cutoff, 0)
+	purged, err := d.PurgeJobs(cutoff, 0)
 	if err != nil {
 		t.Fatalf("PurgeJobs: %v", err)
 	}
-	if n != 2 {
+	if n := len(purged); n != 2 {
 		t.Errorf("purged %d rows, want exactly the 2 that finished before the cutoff", n)
 	}
 	for _, id := range []int64{oldA, oldB} {

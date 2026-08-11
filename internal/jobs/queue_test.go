@@ -363,7 +363,7 @@ func (m *memStore) DeleteJob(id int64) error {
 	return nil
 }
 
-func (m *memStore) PurgeJobs(cutoff time.Time, keep int) (int, error) {
+func (m *memStore) PurgeJobs(cutoff time.Time, keep int) ([]Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var done []*Job
@@ -373,15 +373,15 @@ func (m *memStore) PurgeJobs(cutoff time.Time, keep int) (int, error) {
 		}
 	}
 	sort.Slice(done, func(a, b int) bool { return done[a].FinishedAt.After(done[b].FinishedAt) })
-	n := 0
+	var purged []Job
 	for i, j := range done {
 		if i < keep || !j.FinishedAt.Before(cutoff) {
 			continue
 		}
+		purged = append(purged, *j)
 		delete(m.rows, j.ID)
-		n++
 	}
-	return n, nil
+	return purged, nil
 }
 
 // fakeClock makes backoff and deferral assertions exact instead of timed.

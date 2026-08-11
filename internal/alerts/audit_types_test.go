@@ -9,6 +9,7 @@ var auditTypes = []Type{
 	TypeLoginFailed, TypeLoginSucceeded,
 	TypePasswordChanged, TypeAPITokenCreated, TypeAPITokenRevoked,
 	TypeSettingsChanged, TypeClipCaptured,
+	TypeUpgradeStaged, TypeUpgradeRolledBack,
 }
 
 // The reason the five types had to go into AllTypes rather than into a

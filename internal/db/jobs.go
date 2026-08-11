@@ -524,21 +524,61 @@ func (d *DB) DeleteJob(id int64) error {
 // PurgeJobs drops finished jobs older than cutoff, keeping the newest keep of
 // them whatever their age so the history page is never empty after a quiet
 // month.
-func (d *DB) PurgeJobs(cutoff time.Time, keep int) (int, error) {
+//
+// It returns the rows it deleted, not a count, and that is the whole point of
+// the signature. Some jobs own a file that outlives their row -- a clip.export
+// writes into the exports directory, which nothing else ever sweeps -- and a
+// caller cannot clean up after a row it can no longer read. A count told the
+// caller how much it had just made unreachable and nothing about what (#222).
+//
+// The select and the delete run in one transaction so the rows returned are
+// exactly the rows removed: this database takes a single writer, but a caller
+// that deleted a file for a row a failed commit had put back would be worse
+// than one that leaked it.
+func (d *DB) PurgeJobs(cutoff time.Time, keep int) ([]jobs.Job, error) {
 	if keep < 0 {
 		keep = 0
 	}
-	res, err := d.sql.Exec(`DELETE FROM jobs
-		WHERE state IN ('done','failed','cancelled') AND finished_at > 0 AND finished_at < ?
+	// The same predicate twice, deliberately spelled once here.
+	const where = `state IN ('done','failed','cancelled') AND finished_at > 0 AND finished_at < ?
 		AND id NOT IN (
 			SELECT id FROM jobs WHERE state IN ('done','failed','cancelled')
 			ORDER BY finished_at DESC, id DESC LIMIT ?
-		)`, unixOrZero(cutoff), keep)
+		)`
+	tx, err := d.sql.Begin()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT `+jobColumns+` FROM jobs WHERE `+where,
+		unixOrZero(cutoff), keep)
+	if err != nil {
+		return nil, err
+	}
+	var purged []jobs.Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		purged = append(purged, *j)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	if _, err := tx.Exec(`DELETE FROM jobs WHERE `+where,
+		unixOrZero(cutoff), keep); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return purged, nil
 }
 
 // JobCounts is the jobs-by-state summary a status page wants without pulling

@@ -128,12 +128,12 @@ func TestPurgeJobHistoryTreatsZeroDaysAsKeepForever(t *testing.T) {
 	id := seed()
 
 	q := jobs.New(slog.Default(), store)
-	purgeJobHistory(slog.Default(), q, db.PostProdSettings{RetainDays: 0, RetainJobs: 0})
+	purgeJobHistory(slog.Default(), q, db.PostProdSettings{RetainDays: 0, RetainJobs: 0}, "")
 	if _, err := store.GetJob(id); err != nil {
 		t.Fatalf("a job was purged with retention set to keep forever: %v", err)
 	}
 
-	purgeJobHistory(slog.Default(), q, db.PostProdSettings{RetainDays: 30, RetainJobs: 0})
+	purgeJobHistory(slog.Default(), q, db.PostProdSettings{RetainDays: 30, RetainJobs: 0}, "")
 	if _, err := store.GetJob(id); err == nil {
 		t.Error("a 400-day-old job survived a 30-day retention bound")
 	}
@@ -194,7 +194,7 @@ func TestJobRetentionIsRereadEverySweepRatherThanCapturedAtStartup(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
-	go func() { defer close(done); purgeJobHistoryLoop(ctx, slog.Default(), q, read, 5*time.Millisecond) }()
+	go func() { defer close(done); purgeJobHistoryLoop(ctx, slog.Default(), q, read, "", 5*time.Millisecond) }()
 
 	// The first sweep must not have purged it.
 	time.Sleep(20 * time.Millisecond)
@@ -237,7 +237,7 @@ func TestJobRetentionLoopStopsWithItsContext(t *testing.T) {
 	go func() {
 		defer close(done)
 		purgeJobHistoryLoop(ctx, slog.Default(), jobs.New(slog.Default(), store),
-			func() db.PostProdSettings { return db.PostProdSettings{} }, time.Hour)
+			func() db.PostProdSettings { return db.PostProdSettings{} }, "", time.Hour)
 	}()
 	cancel()
 	select {
