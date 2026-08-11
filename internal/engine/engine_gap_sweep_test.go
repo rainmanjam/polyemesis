@@ -76,12 +76,30 @@ func deliverTS(t *testing.T, h *relay.Hub, n int) {
 // Observed to fail on the first assertion -- the phase-1 slate -- and to be the
 // only failing test in the package.
 //
-// HONEST DIRECTION NOTE: in-process the mutant makes the primary read
-// permanently DEAD (the selector hub is empty here, because the feed's FFmpeg
-// binary does not exist), where in production it would make the primary read
-// permanently ALIVE. The property pinned is the same one either way -- the
-// liveness the decision uses comes from the primary's hub and no other -- but
-// the failure this test shows is not the failure an operator would see.
+// BOTH DIRECTIONS ARE COVERED, and the note that used to sit here said
+// otherwise. It conceded that the mutant above makes the primary read
+// permanently DEAD in-process where production would make it read permanently
+// ALIVE, and worried that the failure shown is therefore not the failure an
+// operator would see. A reviewer measured the other direction and the concession
+// was wrong.
+//
+// Mutation, the production direction: sampleSources
+// `primaryRx := e.hub.RxBytes() + uint64(now.UnixNano())`, so the primary reads
+// alive whatever it is doing -- the exact shape of "failover never fires again".
+//
+//	pre-existing suite, these files removed:  ok 36.4s, FULLY GREEN
+//	with these files:                         both tests fail, at phase 2
+//	  "the primary stopped delivering a full grace window ago and \"primary\" is
+//	   still on air: failover never fired, because the sweep is reading a hub that
+//	   carries bytes whichever source is up"
+//
+// Phase 1 catches the dead direction and phase 2 catches the alive one, which is
+// why the test has two phases. And the first line of that measurement is the
+// reason these two tests exist at all: NOTHING ELSE IN THE REPOSITORY NOTICES
+// THAT FAILOVER HAS STOPPED FIRING. The acceptance suite catches the wrong-hub
+// mutant by consequence, but its own named check -- switches >= 2 -- passed at
+// 80 switches, and it flakes at 25% locally, so a real regression there is not
+// distinguishable from noise.
 func TestTheFailoverDecisionReadsThePrimarysOwnHub(t *testing.T) {
 	e := failoverEngine(t)
 	s := failoverOnSettings()
