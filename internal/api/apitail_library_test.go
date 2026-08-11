@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -80,6 +81,29 @@ func apitailLibraryFixture(t *testing.T) (http.Handler, func(*http.Request), int
 		}},
 	}); err != nil {
 		t.Fatalf("SaveTranscript: %v", err)
+	}
+
+	// THE POSITIVE CONTROL LIVES HERE, not in one of the tests, so every test
+	// built on this fixture inherits it.
+	//
+	// Both leak assertions below are assertions of ABSENCE, and an absence
+	// assertion over a fixture that planted nothing passes having examined
+	// nothing. That control existed, but it lived inside the transcript-route
+	// test -- so a reviewer's mutation that made SaveTranscript report success
+	// while storing nothing fired there and left the SESSION-route test passing
+	// in the same run. One test was carrying the control for two, across a file
+	// boundary, which is one refactor away from the ninth vacuous guard in this
+	// repository.
+	//
+	// /library/search is used because it is the route #171 denied to read tokens
+	// precisely BECAUSE it returns the words: if the words are anywhere, they are
+	// here.
+	probe := jsonRequest(t, http.MethodGet, "/api/v1/library/search?q="+url.QueryEscape(apitailSpokenFirst), nil)
+	sign(probe)
+	if body := do(t, h, probe).Body.String(); !strings.Contains(body, apitailSpokenFirst) {
+		t.Fatalf("the fixture planted no findable transcript text, so every "+
+			"assertion of absence below would pass having examined nothing: "+
+			"searching for %q returned %s", apitailSpokenFirst, body)
 	}
 	return h, sign, id
 }
