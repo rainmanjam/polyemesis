@@ -178,8 +178,48 @@ rc=$?
   && ok "movement in an unwatched field does not count as instability" \
   || bad "a field that never moved was reported unstable because its neighbours did (rc=$rc)"
 
+step "11. poly_detectable_floor: what a green flake report did NOT measure"
+# The numbers are checked against the closed form rather than against whatever
+# the function currently prints, which is the difference between a test and a
+# transcript. p = 1 - (1-c)^(1/N):
+#   N=1,  c=95  ->  95.0   one run catches only a certainty
+#   N=5,  c=95  ->  45.1   the workflow's default; this is the headline
+#   N=40, c=95  ->   7.2   its cap, still above the ~7% rate #180 implies
+[ "$(poly_detectable_floor 1)" = "95.0" ] \
+  && ok "one run detects nothing below 95%" \
+  || bad "floor(1) = $(poly_detectable_floor 1), want 95.0"
+[ "$(poly_detectable_floor 5)" = "45.1" ] \
+  && ok "the workflow default of 5 runs detects nothing below 45.1%" \
+  || bad "floor(5) = $(poly_detectable_floor 5), want 45.1"
+[ "$(poly_detectable_floor 40)" = "7.2" ] \
+  && ok "even the cap of 40 runs cannot see the ~7% rate issue #180 implies" \
+  || bad "floor(40) = $(poly_detectable_floor 40), want 7.2"
+
+# Monotonicity, because a floor that did not fall with more runs would be
+# describing something other than repetition.
+f5=$(poly_detectable_floor 5); f20=$(poly_detectable_floor 20)
+awk -v a="$f5" -v b="$f20" 'BEGIN{exit !(a > b)}' \
+  && ok "more runs lower the floor ($f5% -> $f20%)" \
+  || bad "the floor did not fall from 5 runs ($f5) to 20 ($f20)"
+
+# A confidence that is not 95 has to move it, or the second argument is decoration.
+awk -v a="$(poly_detectable_floor 5 99)" -v b="$f5" 'BEGIN{exit !(a > b)}' \
+  && ok "demanding more confidence raises the floor" \
+  || bad "the confidence argument changed nothing"
+
+# Garbage in, nothing out. A floor printed from an unparseable run count would
+# be a number in a report with no measurement behind it, which is the exact
+# disease this whole function is for.
+for junk in "" "abc" "-1" "0"; do
+  if out=$(poly_detectable_floor "$junk" 2>&1) && [ -n "$out" ]; then
+    bad "poly_detectable_floor '$junk' printed '$out' instead of refusing"
+  else
+    ok "poly_detectable_floor refuses '$junk'"
+  fi
+done
+
 total=$((pass + fail))
-EXPECTED_CHECKS=20
+EXPECTED_CHECKS=29
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

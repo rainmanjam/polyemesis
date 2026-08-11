@@ -296,6 +296,36 @@ poly_hold_field() {
   return 1
 }
 
+# poly_detectable_floor <runs> [confidence-percent]
+#
+# The smallest per-run failure rate, as a percentage, that <runs> repetitions
+# would catch at least <confidence>% of the time. Prints it to stdout; returns 1
+# without printing on an input it cannot use.
+#
+# ISSUE #206. .github/workflows/flake-rate.yml publishes "0 failed / 5 runs" and
+# that sentence is read as "the suite is not flaky". It is not what was
+# measured. Five repetitions of a suite whose true per-run failure rate is 20%
+# come back all-green about one time in three; at the default of 5 runs nothing
+# below a rate of about 45% is detected with any confidence worth the word.
+#
+# The arithmetic is the only part of this that is not obvious, and it is one
+# line: the chance of N independent runs ALL passing is (1-p)^N, so the rate
+# that gets caught with probability c is where (1-p)^N = 1-c, which is
+# p = 1 - (1-c)^(1/N).
+#
+# Printing it turns a green report from a claim into a bounded one. A zero-
+# failure result at N=5 means "no rate above ~45% is present", which is a
+# genuinely different statement from "not flaky" and is the one the instrument
+# can actually support.
+poly_detectable_floor() {
+  local runs="$1" conf="${2:-95}"
+  case "$runs" in ''|*[!0-9]*) return 1 ;; esac
+  case "$conf" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$runs" -ge 1 ] || return 1
+  [ "$conf" -ge 1 ] && [ "$conf" -le 99 ] || return 1
+  awk -v n="$runs" -v c="$conf" 'BEGIN { printf "%.1f\n", 100 * (1 - exp(log(1 - c/100) / n)) }'
+}
+
 # poly_docker_postmortem <container>
 #
 # What a container check should print instead of asserting a cause. Every line
