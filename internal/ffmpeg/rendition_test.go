@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // baseRendition is a spec with only the plumbing filled in, so each test can
@@ -854,15 +856,19 @@ func aspectFilterFor(t *testing.T, mode AspectMode, w, h int) string {
 	return vf
 }
 
+// needFFmpeg resolves the real binaries these tests run their generated chains
+// through.
+//
+// #187: it skips on a machine that has none, and FAILS when
+// POLYEMESIS_REQUIRE_FFMPEG is set -- which .github/workflows/ci.yml does. The
+// decision lives in internal/testenv because internal/api's ffprobeOrSkip had
+// the identical hole, and one hole in two shapes gets fixed once.
 func needFFmpeg(t *testing.T, names ...string) []string {
 	t.Helper()
 	var bins []string
 	for _, n := range names {
-		bin, err := exec.LookPath(n)
-		if err != nil {
-			t.Skipf("%s is not installed; the aspect arithmetic is covered by the string tests", n)
-		}
-		bins = append(bins, bin)
+		bins = append(bins, testenv.FFmpegBinary(t, n,
+			n+" is not installed; the aspect arithmetic is covered by the string tests"))
 	}
 	return bins
 }
