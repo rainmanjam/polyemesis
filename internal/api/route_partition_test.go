@@ -423,26 +423,45 @@ func countPartition(vs []sweepVerdict) partitionTotals {
 // asserts absence.
 func assertEverySentinelIsWitnessed(t *testing.T, h http.Handler, sign func(*http.Request)) {
 	t.Helper()
-	admin := createScopedToken(t, h, sign, "witness-admin", db.ScopeAdmin)
+	gone := sentinelsNotWitnessed(t, h, sign, "witness-admin")
+	for _, secret := range gone {
+		t.Errorf("the sentinel %s is declared in allSentinels() and appears in NO "+
+			"high-privilege body on any swept route. Either it is planted in a column "+
+			"nothing serves -- in which case every absence assertion about it is "+
+			"vacuous -- or the route that served it stopped. This is #150's generating "+
+			"cause with the polarity reversed: a credential column nobody plants is "+
+			"invisible to a sweep that only asserts absence.", secret)
+	}
+	if len(gone) == 0 {
+		t.Logf("sentinel witness: %d/%d planted credentials observed in a high-privilege body",
+			len(allSentinels()), len(allSentinels()))
+	}
+}
+
+// sentinelsNotWitnessed is the measurement half, split out so that a caller who
+// EXPECTS a credential to have gone can compare against a declared list rather
+// than fail. The census in nonget_differential_test.go is that caller: a write
+// route with a documented side effect on stored configuration -- PUT
+// /api/v1/settings writes its ingest block through to the default source row --
+// destroys a planted credential on purpose, and the useful assertion there is
+// "exactly the declared ones", not "none".
+//
+// tokenName is a parameter because two callers minting "witness-admin" against
+// the same handler would be two tokens with one name in the audit trail.
+func sentinelsNotWitnessed(t *testing.T, h http.Handler,
+	sign func(*http.Request), tokenName string) []string {
+	t.Helper()
+	admin := createScopedToken(t, h, sign, tokenName, db.ScopeAdmin)
 	var all strings.Builder
 	for _, path := range leakRoutes() {
 		all.WriteString(bodyOf(t, h, bearer(admin), path))
 		all.WriteString(bodyOf(t, h, sign, path))
 	}
-	missing := 0
+	var gone []string
 	for _, secret := range allSentinels() {
 		if !strings.Contains(all.String(), secret) {
-			missing++
-			t.Errorf("the sentinel %s is declared in allSentinels() and appears in NO "+
-				"high-privilege body on any swept route. Either it is planted in a column "+
-				"nothing serves -- in which case every absence assertion about it is "+
-				"vacuous -- or the route that served it stopped. This is #150's generating "+
-				"cause with the polarity reversed: a credential column nobody plants is "+
-				"invisible to a sweep that only asserts absence.", secret)
+			gone = append(gone, secret)
 		}
 	}
-	if missing == 0 {
-		t.Logf("sentinel witness: %d/%d planted credentials observed in a high-privilege body",
-			len(allSentinels()), len(allSentinels()))
-	}
+	return gone
 }

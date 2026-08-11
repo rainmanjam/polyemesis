@@ -100,10 +100,22 @@ type coverageLedger struct {
 	// max()-clamped on regeneration, exactly like DifferentialFloor, which is
 	// what stops `-update-coverage` from shrinking the committed evidence to fit
 	// a regression.
-	SentinelWitnessFloor  int `json:"sentinelWitnessFloor"`
-	UnstableCeiling       int `json:"unstableCeiling"`
-	InertCeiling          int `json:"inertCeiling"`
-	VarianceExemptCeiling int `json:"varianceExemptCeiling"`
+	SentinelWitnessFloor int `json:"sentinelWitnessFloor"`
+	// NonGetDifferentialFloor is the same idea on the WRITE surface, where
+	// there was no positive control at all. 83 non-GET pairs are classified on
+	// an executed 403, which is an invariant: it says a read principal was
+	// refused and says nothing about whether anything was being withheld. Blank
+	// every credential in the fixture and all 83 stay green.
+	//
+	// This counts (pair, sentinel) witnesses over the pairs that were MEASURED
+	// to hand an admin a planted credential from the same request the read
+	// principal is refused. max()-clamped like the two floors above: it may
+	// rise freely and falls only by a hand edit whose sentence is "this write
+	// route stopped disclosing this credential to anybody".
+	NonGetDifferentialFloor int `json:"nonGetDifferentialFloor"`
+	UnstableCeiling         int `json:"unstableCeiling"`
+	InertCeiling            int `json:"inertCeiling"`
+	VarianceExemptCeiling   int `json:"varianceExemptCeiling"`
 	// THE SHAPE REGISTRY HAD NO RATCHET AT ALL, and it is the surface #169 is
 	// about. Seven numbers here were clamped and all seven were about routes.
 	// Deleting a shape row -- the documented response to a shape check that
@@ -1946,7 +1958,23 @@ func classifyRoutes(t *testing.T, h http.Handler, s *Server) ([]coverageRoute, c
 			// middleware says so" is exactly the kind of claim that was true of
 			// three other things in this PR and wrong about the fourth. The
 			// classification is a 403 that actually happened.
-			enumerated[i].Coverage = "denied-by-method"
+			//
+			// DENIED-BY-METHOD IS AN INVARIANT, and the word splits here for
+			// that reason. The 403 above depends on nothing being in the
+			// database: blank every planted credential and all 83 of these
+			// pairs stay green, which is #168's problem on the write surface.
+			// The pairs in nonGetDifferentialCensus are the ones where the same
+			// request, driven as admin, was MEASURED to return a planted
+			// credential -- so for those the 403 is withholding something
+			// demonstrable rather than something assumed. The word is carried
+			// into the artifact and compared by assertRouteSetsEqual on every
+			// plain run, which is what makes deleting a census row visible here
+			// as well as at nonGetDifferentialFloor.
+			if nonGetDifferentialPairs()[key] {
+				enumerated[i].Coverage = "denied-differential"
+			} else {
+				enumerated[i].Coverage = "denied-by-method"
+			}
 			totals.Denied++
 		default:
 			enumerated[i].Coverage = "UNCLASSIFIED"
@@ -2053,12 +2081,33 @@ func TestLedgerPreflight(t *testing.T) {
 	// 2. ENUMERATE AND CLASSIFY.
 	enumerated, totals := classifyRoutes(t, h, s)
 	assertSweptCounterpartsNameSweptRoutes(t, enumerated)
+	assertCensusPairsAreClassified(t, enumerated)
 
 	// 3. THE PARTITION. #165: every swept path gets a computed verdict, and
 	// "swept" stops being one word covering two different claims.
 	verdicts := sweepCensus(t, h, sign)
 	part := countPartition(verdicts)
 	assertEverySentinelIsWitnessed(t, h, sign)
+
+	// 3b. THE NON-GET DIFFERENTIAL CENSUS. #157's residual: 83 non-GET pairs
+	// are classified on an executed 403, which proves a read principal was
+	// refused and proves nothing about whether anything was being withheld.
+	// This drives the pairs measured to hand an ADMIN a planted credential from
+	// the same request, so the denial next to it has a positive control.
+	//
+	// LAST among the drives that touch a fixture, and on a fixture of its own.
+	// Two of its rows mutate -- a publish secret is rotated, the settings
+	// document is re-saved -- and the record from the round that specified this
+	// is explicit that such a census must not run against the shared fixture,
+	// must run in sorted order, and must re-run assertEverySentinelIsWitnessed
+	// at the end, or a destructive route poisoning the fixture is silent rather
+	// than caught. All three are properties of assertNonGetDifferential, and
+	// the third one is checked rather than promised: see its doc comment for
+	// the row that was measured to break it.
+	//
+	// It is called HERE, before writeLedger, because the floor it feeds is
+	// written by that call. Nothing above it re-reads the shared fixture.
+	nonGetWitnesses := assertNonGetDifferential(t)
 
 	// 4. EQUALITY against the artifact.
 	want := readLedger(t)
@@ -2075,7 +2124,7 @@ func TestLedgerPreflight(t *testing.T) {
 	assertCitationsAreWellFormed(t, want)
 
 	if *updateCoverage {
-		writeLedger(t, want, enumerated, totals, verdicts, part)
+		writeLedger(t, want, enumerated, totals, verdicts, part, nonGetWitnesses)
 	} else {
 		assertRouteSetsEqual(t, want.Routes, enumerated)
 		assertSweepVerdictsEqual(t, want.SweepVerdicts, verdicts)
@@ -2147,6 +2196,22 @@ func TestLedgerPreflight(t *testing.T) {
 			"assertSweepVerdictsEqual names which path lost which sentinel.\n"+
 			"per-path witnesses: %v",
 			n, want.SentinelWitnessFloor, sentinelWitnessesByPath(verdicts))
+	}
+	// THE WRITE SURFACE'S POSITIVE CONTROL, and the number that did not exist
+	// before this round. Everything above it is about routes a read token can
+	// GET. The 83 non-GET pairs classified on an executed 403 had no floor at
+	// all, because "was refused" costs nothing to keep true: an empty database
+	// answers 403 exactly as readily as a full one.
+	if nonGetWitnesses < want.NonGetDifferentialFloor {
+		t.Errorf("THE NON-GET POSITIVE CONTROL FELL. %d (pair, sentinel) witnesses were "+
+			"observed across the write-surface census and the committed floor is %d. A "+
+			"pair in that census is recorded as denied-differential rather than "+
+			"denied-by-method, which is a claim that its 403 withholds a credential an "+
+			"admin demonstrably receives from the same request. Below the floor, some "+
+			"pair's 403 is now withholding nothing that this package can show. The "+
+			"message naming the pair and the sentinel is above; lowering this is a hand "+
+			"edit of nonGetDifferentialFloor in %s.",
+			nonGetWitnesses, want.NonGetDifferentialFloor, coveragePath)
 	}
 	if part.Unstable > want.UnstableCeiling {
 		t.Errorf("%d swept paths return different bytes to the same principal on two "+
@@ -2552,7 +2617,8 @@ func readLedger(t *testing.T) coverageLedger {
 // iteration order. An artifact that churns is regenerated blindly and reviewed
 // by nobody, which defeats the whole point of committing it.
 func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute,
-	totals coverageTotals, verdicts []sweepVerdict, part partitionTotals) {
+	totals coverageTotals, verdicts []sweepVerdict, part partitionTotals,
+	nonGetWitnesses int) {
 	t.Helper()
 	totals = fillDerivedTotals(totals, routes)
 	shapes := emittedShapes()
@@ -2606,6 +2672,11 @@ func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute,
 	// of its four witnessed credentials is a `-update-coverage` away from being
 	// committed as the new truth.
 	out.SentinelWitnessFloor = max(countSentinelWitnesses(verdicts), prev.SentinelWitnessFloor)
+	// The same mirror again, on the write surface. Deleting a row from
+	// nonGetDifferentialCensus is the cheap way to make a failing positive
+	// control go away, and max() is what stops the documented regeneration
+	// command from banking it.
+	out.NonGetDifferentialFloor = max(nonGetWitnesses, prev.NonGetDifferentialFloor)
 	// The shape registry's two ratchets. Deleting a row lowers ShapeFloor and
 	// max() refuses to bank it; downgrading a row to not-inspected raises
 	// shapesNotInspected and min() refuses to bank that.
@@ -3136,15 +3207,38 @@ func deferredWithReasons() []coverageDefer {
 			Issue: "#168",
 		},
 		{
+			// REWRITTEN from measurement. The old text said the non-GET pairs
+			// were enumerated and classified but their response bodies were not
+			// scanned, cited a test that no longer exists, and carried the
+			// original count of 123. All three had gone stale: every non-GET
+			// pair is driven with a read bearer today (83 by readScopeIsRefused,
+			// 38 by driveExcuse, 2 by readScopeWriteSweep, which reads bytes),
+			// and six of them are now driven as ADMIN as well with the planted
+			// credential REQUIRED present. What is left is stated below, in the
+			// terms the residual actually has.
 			ID: "G3",
-			What: "the VALUE sweep is GET-only. The non-GET method+pattern pairs are " +
-				"enumerated and classified in this ledger, but their response BODIES are " +
-				"not scanned for sentinels.",
-			WhySafe: "swept by hand this round: only admin principals receive sentinels " +
-				"from a non-GET handler, and a read token is refused every non-GET route " +
-				"by the scope rule before a body is built at all.",
-			WhatWouldMakeItUnsafe: "a non-GET handler that a read scope may call and that " +
-				"returns a body built from stored configuration.",
+			What: "76 of the 83 non-GET pairs a read scope is refused are classified on " +
+				"the 403 alone. That is an INVARIANT: it records the refusal and records " +
+				"nothing about whether the pair would disclose anything to a principal " +
+				"entitled to it, so it stays green over an empty database.",
+			WhySafe: "all 83 were driven as ADMIN with {} against a per-pair fixture. The " +
+				"7 that answered 2xx carrying a planted credential are now the census in " +
+				"nonGetDifferentialCensus, driven at both privilege levels with the " +
+				"credential REQUIRED present and the 403 required beside it, and the " +
+				"census is complete over that measurement. Of the other 76, 18 answered " +
+				"2xx carrying no planted credential -- a status envelope, a job id, a " +
+				"list -- and requiring a sentinel from those would mean planting fixture " +
+				"data for the purpose, which reviews identically to a real proof.",
+			WhatWouldMakeItUnsafe: "the residual 58 are the honest hole: they answered " +
+				"4xx or 5xx (17 404, 17 400, 15 503, 8 403, 1 500) because this fixture " +
+				"has no such row, the subsystem is not running, or {} is not a payload " +
+				"they accept -- so the drive never reached a handler that builds a body " +
+				"and the measurement cannot say what they would disclose. Also unsafe: " +
+				"any non-GET handler that begins echoing stored configuration back in a " +
+				"2xx body, which is the normal REST idiom and the shape PUT " +
+				"/api/v1/settings already has. Both are re-found by the same admin drive " +
+				"that built the census, which is a measurement rather than a judgement " +
+				"call.",
 			Issue: "#157",
 		},
 		{
