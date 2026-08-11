@@ -108,7 +108,29 @@ jobs:
           # -c rather than a heredoc: inside a YAML block the heredoc body and
           # its terminator are indented, which Python reads as a bad indent and
           # bash does not accept as a delimiter.
-          python3 -c 'import urllib.request; urllib.request.urlretrieve("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz", "/tmp/ff.tar.xz")'
+          # RETRIED, because this is one un-mirrored third-party download and
+          # every Linux job in this file makes it. It has hard-failed two jobs
+          # in one day -- acceptance-postprod and acceptance-pull -- both by
+          # sitting on a stalled connection until the 6-minute ceiling fired.
+          # A stuck mirror is exactly what that ceiling is for, but a single
+          # attempt turns a transient stall into a red job and a manual rerun.
+          #
+          # curl rather than urllib: --retry understands the difference between
+          # a connection that failed and one that is merely slow, and
+          # --retry-all-errors covers the 5xx a release CDN returns under load.
+          # The per-attempt --max-time is well inside the step ceiling, so three
+          # attempts still cannot outlast it -- the ceiling keeps its meaning.
+          for attempt in 1 2 3; do
+            if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+                 --connect-timeout 20 --max-time 90 \
+                 -o /tmp/ff.tar.xz \
+                 "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
+              break
+            fi
+            echo "ffmpeg download attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep 5
+          done
           mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
           sudo install -m 0755 ffbuild/bin/ffmpeg  /usr/local/bin/ffmpeg
           sudo install -m 0755 ffbuild/bin/ffprobe /usr/local/bin/ffprobe
@@ -339,7 +361,29 @@ jobs:
           # -c rather than a heredoc: inside a YAML block the heredoc body and
           # its terminator are indented, which Python reads as a bad indent and
           # bash does not accept as a delimiter.
-          python3 -c 'import urllib.request; urllib.request.urlretrieve("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz", "/tmp/ff.tar.xz")'
+          # RETRIED, because this is one un-mirrored third-party download and
+          # every Linux job in this file makes it. It has hard-failed two jobs
+          # in one day -- acceptance-postprod and acceptance-pull -- both by
+          # sitting on a stalled connection until the 6-minute ceiling fired.
+          # A stuck mirror is exactly what that ceiling is for, but a single
+          # attempt turns a transient stall into a red job and a manual rerun.
+          #
+          # curl rather than urllib: --retry understands the difference between
+          # a connection that failed and one that is merely slow, and
+          # --retry-all-errors covers the 5xx a release CDN returns under load.
+          # The per-attempt --max-time is well inside the step ceiling, so three
+          # attempts still cannot outlast it -- the ceiling keeps its meaning.
+          for attempt in 1 2 3; do
+            if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+                 --connect-timeout 20 --max-time 90 \
+                 -o /tmp/ff.tar.xz \
+                 "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
+              break
+            fi
+            echo "ffmpeg download attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep 5
+          done
           mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
           sudo install -m 0755 ffbuild/bin/ffmpeg  /usr/local/bin/ffmpeg
           sudo install -m 0755 ffbuild/bin/ffprobe /usr/local/bin/ffprobe
