@@ -37,6 +37,33 @@ its first tagged release.
   remove the copies already in your logs, or in whatever collected those `400`
   responses.
 
+### Added
+
+- **A destination can now forward its audio bit-for-bit.** Set `copy` on a
+  destination's audio block — `-c:a copy`, no decode, no mix, no encoder — so an
+  archive or contribution feed carries the same bits your encoder sent us.
+  Available in the destination dialog.
+
+  It is called **copy** and not "passthrough" on purpose: passthrough already
+  means a video rendition at the ingest's own resolution, and reusing the word
+  would make "a passthrough destination" ambiguous in exactly the conversations
+  where it matters.
+
+  Copy still **selects**. The compiled routing profile decides which tracks go
+  out and the role policy still removes excluded ones, so the DMCA switch keeps
+  working; what you give up is everything the mix stage does to the samples.
+  Because of that, a destination that sets `copy` alongside mix settings the
+  copy path cannot honour is **refused, naming each setting individually**,
+  rather than accepted with the settings silently ignored. A form that says one
+  thing while the stream does another is the worse outcome.
+
+- **Staging and rolling back the server binary now have endpoints.**
+  `GET /api/v1/upgrade/plan` reports what an upgrade would do and is a read.
+  `POST /api/v1/upgrade/stage` and `POST /api/v1/upgrade/rollback` perform it
+  and are **session-only** — deliberately out of reach of an API token of either
+  scope, because a leaked token that can replace the server's own binary is a
+  different category of problem from one that can read a stream key.
+
 ### Changed
 
 - **BREAKING: a `read` API token gets metadata, not content.** Thirteen routes
