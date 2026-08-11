@@ -348,17 +348,48 @@ jobs:
 
           gitleaks detect --no-banner --redact --config .gitleaks.toml --log-opts "$range"
 
-      # push / schedule / workflow_dispatch: the FULL unscoped walk, deliberately.
+      # push / schedule / workflow_dispatch: THIS REF'S OWN FULL HISTORY.
       #
-      # Do not "unify" these two by handing this one a range as well. On a push
-      # to main the natural range is origin/main..origin/main, which is empty,
-      # which scans 0 commits and exits 0 — measured. A blanket range would
-      # make the post-merge and scheduled scans structurally vacuous, and those
-      # are the two runs whose entire job is to look at all of main's history.
-      # Here the full history genuinely IS this ref's own problem.
-      - name: scan (push, schedule, dispatch — full history)
+      # The old comment here rejected scoping this branch, and its argument was
+      # true of exactly one candidate: `origin/main..origin/main` is empty, so
+      # a RANGE would make the post-merge and scheduled scans vacuous. That is
+      # correct and it is why no range appears below. It does not follow that
+      # the alternative is an unscoped walk, and reading it that way is what
+      # left this step cross-blaming every other branch in the repository
+      # (#191).
+      #
+      # `HEAD` is not a range. It is this ref's whole ancestry — all of main's
+      # history on a push to main or a schedule, which is the thing those two
+      # runs exist to read — and it excludes commits that are not on it.
+      #
+      # MEASURED locally at cffd20c with the pinned gitleaks 8.30.1, on a clone
+      # carrying this repository's branches:
+      #
+      #   gitleaks detect (no --log-opts)      869 commits, LEAKS FOUND: 2, exit 1
+      #   gitleaks detect --log-opts HEAD      626 commits, no leaks,      exit 0
+      #
+      # Both findings are one commit on `fix/redaction-and-auth`, and
+      # `git merge-base --is-ancestor` says it is NOT an ancestor of main. So
+      # today a push to main or the nightly schedule fails on a secret that is
+      # not on main, in a file no commit on main contains — the alarm names the
+      # wrong ref, and an alarm that names the wrong ref is one people learn to
+      # clear rather than read.
+      #
+      # AND THE SCOPING IS NOT A SILENCER, which is the half that has to be
+      # shown or this is just a way of going green. Measured in a throwaway
+      # clone: a secret-shaped fixture committed onto HEAD's own history is
+      # still reported by the scoped form — `leaks found: 1`, exit 1 — and the
+      # same clone with that commit removed exits 0.
+      #
+      # --full-history is deliberately absent. It was the other candidate, and
+      # it makes no difference here: `--log-opts HEAD` and
+      # `--log-opts "--full-history HEAD"` scanned the same 626 commits and the
+      # same 16,847,688 bytes. User --log-opts REPLACES gitleaks' own defaults
+      # rather than appending to them — that is what the 869→626 drop is — so
+      # the flag would only re-state a default this scan does not use.
+      - name: scan (push, schedule, dispatch — this ref's own full history)
         if: github.event_name != 'pull_request'
-        run: gitleaks detect --no-banner --redact --config .gitleaks.toml
+        run: gitleaks detect --no-banner --redact --config .gitleaks.toml --log-opts HEAD
 
   # Static analysis.
   semgrep:

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -549,12 +550,23 @@ func (p *Pending) Commit(v Verdict) (File, error) {
 	// loudly instead of overwriting.
 	//
 	// The claim is a zero-byte file under the final name, so it is briefly
-	// listable. That is one os.Rename wide, and it is strictly the better of the
-	// two states to be caught in: an operator who refreshes at exactly the wrong
-	// moment sees an obviously-empty row, rather than a full-looking one that is
-	// somebody else's file. Closing it properly needs either a second rename
-	// through a non-Listable name or renameat2(RENAME_NOREPLACE) with this as
-	// the portable fallback; issue #203.
+	// listable.
+	//
+	// THAT WINDOW IS NOT "ONE os.Rename WIDE", which is what this comment used
+	// to say and what #203 item 1 repeats. Read the three statements below it:
+	// the claim is followed by PutVerdict -- a create, a marshal and a write of
+	// a sidecar file -- and only THEN by renameOverClaim, which is itself a
+	// retry loop with 10ms sleeps on Windows. The window is a file write wide on
+	// every platform and can be tens of milliseconds on one of them. The
+	// original wording made it sound like a scheduling accident; it is an I/O
+	// operation, and a reader deciding whether #203 is worth doing was being
+	// given the wrong order of magnitude.
+	//
+	// It is still strictly the better of the two states to be caught in: an
+	// operator who refreshes at exactly the wrong moment sees an obviously-empty
+	// row, rather than a full-looking one that is somebody else's file. Closing
+	// it properly needs either a second rename through a non-Listable name or
+	// renameat2(RENAME_NOREPLACE) with this as the portable fallback; #203.
 	claim, err := os.OpenFile(final, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
@@ -648,35 +660,14 @@ func (s *Store) Save(r io.Reader, hint string, maxBytes int64, minFreeBytes uint
 // broadcast they scheduled goes to air.
 func (s *Store) Stage(r io.Reader, hint string, maxBytes int64, minFreeBytes uint64) (*Pending, error) {
 	if minFreeBytes > 0 && s.freeBytes != nil {
-		free, err := s.freeBytes(s.dir)
+		held, err := s.admit(minFreeBytes, maxBytes)
 		if err != nil {
-			// FAIL CLOSED. An earlier version skipped the guard when the check
-			// itself errored, which is the wrong direction for a disk check:
-			// the one case where you cannot tell how much room is left is not
-			// the case to start writing gigabytes.
-			return nil, fmt.Errorf("%w: could not read free space: %v", ErrNoSpace, err)
+			return nil, err
 		}
-		// The floor has to survive the upload, not merely precede it. Checking
-		// `free < minFreeBytes` alone accepts an 8 GiB upload onto a volume
-		// with exactly the 2 GiB reserve free, writes until ENOSPC, and eats
-		// the reserve the database and the recorder depend on -- which is the
-		// entire thing the floor exists to protect.
-		//
-		// STILL TOCTOU ACROSS CONCURRENT UPLOADS, and that is issue #200 rather
-		// than an oversight here. Every request reads the same number and
-		// nothing subtracts what the others have already promised to write:
-		// eight concurrent Stages were measured admitted against a volume
-		// reported as having room for one. Closing it needs a process-wide
-		// reservation, because api.Server.uploadStore builds a NEW Store per
-		// request by design, so a lock on this struct would bound nothing. The
-		// issue records why it was safe to leave and what would change that.
-		needed := minFreeBytes
-		if maxBytes > 0 {
-			needed += uint64(maxBytes)
-		}
-		if free < needed {
-			return nil, ErrNoSpace
-		}
+		// Released when the bytes are on disk (or gone), which is the whole
+		// window the reservation has to cover: past this function freeBytes
+		// counts them itself.
+		defer releaseSpace(s.dir, held)
 	}
 
 	name := SafeName(hint)
@@ -746,6 +737,101 @@ func (s *Store) Stage(r io.Reader, hint string, maxBytes int64, minFreeBytes uin
 	}
 
 	return &Pending{store: s, tmp: tmpName, name: name, bytes: written}, nil
+}
+
+// inFlight is what concurrent uploads have already promised to write, in bytes,
+// keyed by UPLOADS DIRECTORY.
+//
+// #200. The free-space guard was read-check-write with nothing subtracting the
+// promises other requests had already made: every concurrent Stage read the
+// same number and eight of them were measured admitted against a volume
+// reporting room for one. The floor exists to keep the database and the
+// recorder alive on a full disk, and eight requests agreeing to eat it is the
+// same failure as no floor at all.
+//
+// PROCESS-WIDE AND KEYED BY PATH, not a field on Store, and that is the load-
+// bearing part of the fix rather than an implementation detail.
+// api.Server.uploadStore builds a NEW *Store on every request BY DESIGN
+// (media.go:616 -- "it owns no state beyond a path"), so a mutex and a counter
+// living on the struct would be a fresh mutex and a zero counter per request:
+// the guard would read correctly, test green against a single injected Store,
+// and bound absolutely nothing in production. That is this repository's
+// documented failure mode -- a test that passes while the thing it names is
+// broken -- and it is why the accounting is keyed on the directory the two
+// Stores share instead of on the object they do not.
+//
+// One global mutex rather than a sync.Map of per-directory locks: the read of
+// free space, the comparison and the reservation must be ONE atomic step or the
+// TOCTOU simply moves, and a map lookup outside the lock buys nothing when the
+// section it guards is a statfs.
+var (
+	inFlightMu sync.Mutex
+	inFlight   = map[string]uint64{}
+)
+
+// admit reserves room for one upload, or refuses it, atomically against every
+// other upload into the same directory.
+//
+// The reservation is maxBytes -- the most this upload is PERMITTED to write --
+// and not the body's actual length, which nobody knows until it has been
+// written. That over-reserves for a small upload arriving under a large limit,
+// which is the correct direction: the failure being prevented is the reserve
+// being eaten, and refusing an upload that would have fitted costs a retry
+// while admitting one that does not costs the database.
+//
+// An upload with no limit at all (maxBytes <= 0) reserves NOTHING and is
+// therefore still unaccounted. It is not reachable from the HTTP handler, which
+// always passes a limit; a future caller that passes none gets the old
+// behaviour and this comment is where that is written down.
+func (s *Store) admit(minFreeBytes uint64, maxBytes int64) (uint64, error) {
+	var want uint64
+	if maxBytes > 0 {
+		want = uint64(maxBytes)
+	}
+
+	inFlightMu.Lock()
+	defer inFlightMu.Unlock()
+
+	// Inside the lock deliberately. Reading free space outside it and comparing
+	// inside re-opens the window this exists to close, just narrower -- and a
+	// narrower race is the kind that ships.
+	free, err := s.freeBytes(s.dir)
+	if err != nil {
+		// FAIL CLOSED. An earlier version skipped the guard when the check
+		// itself errored, which is the wrong direction for a disk check: the
+		// one case where you cannot tell how much room is left is not the case
+		// to start writing gigabytes.
+		return 0, fmt.Errorf("%w: could not read free space: %v", ErrNoSpace, err)
+	}
+	// The floor has to survive the upload, not merely precede it. Checking
+	// `free < minFreeBytes` alone accepts an 8 GiB upload onto a volume with
+	// exactly the 2 GiB reserve free, writes until ENOSPC, and eats the reserve
+	// the database and the recorder depend on -- which is the entire thing the
+	// floor exists to protect.
+	needed := minFreeBytes + want + inFlight[s.dir]
+	if free < needed {
+		return 0, ErrNoSpace
+	}
+	if want > 0 {
+		inFlight[s.dir] += want
+	}
+	return want, nil
+}
+
+// releaseSpace gives back a reservation. The map entry is deleted at zero so a
+// long-lived process does not accumulate one row per directory it has ever
+// written to -- which, in the test binary, is one per t.TempDir().
+func releaseSpace(dir string, n uint64) {
+	if n == 0 {
+		return
+	}
+	inFlightMu.Lock()
+	defer inFlightMu.Unlock()
+	if inFlight[dir] <= n {
+		delete(inFlight, dir)
+		return
+	}
+	inFlight[dir] -= n
 }
 
 // PullURL renders the file:// URL for a stored upload, relative to the data
