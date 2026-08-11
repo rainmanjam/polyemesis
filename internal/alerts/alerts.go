@@ -112,6 +112,21 @@ const (
 	// one operation that takes content OFF the server -- the alert is not
 	// "something broke", it is a record that material left.
 	TypeClipCaptured Type = "clip.captured"
+	// TypeUpgradeStaged fires when the server's own binary is replaced, before
+	// the restart that makes it take effect.
+	//
+	// Critical, and for the same reason TypeAPITokenCreated is: what it records
+	// survives the response to a compromise. A minted token outlives a password
+	// change; a replaced binary outlives a password change, a token revocation
+	// AND a restart -- and the restart is what arms it. Nothing else in this
+	// list can still be running after the operator believes they have cleaned
+	// up.
+	TypeUpgradeStaged Type = "upgrade.staged"
+	// TypeUpgradeRolledBack fires when the previous binary is put back. Also
+	// critical: a rollback is a binary replacement in the other direction, and
+	// "somebody quietly returned this box to the version before the security
+	// fix" is exactly the sentence this trail exists to make findable.
+	TypeUpgradeRolledBack Type = "upgrade.rolled_back"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -151,6 +166,9 @@ func AllTypes() []Type {
 		// learned where it is, and grouping these correctly would move eight of
 		// them. Meaning loses to stability here.
 		TypeDestinationFallingBehind, TypeDestinationCaughtUp,
+		// Appended for the same stability reason, not because a binary
+		// replacement is less important than a clip.
+		TypeUpgradeStaged, TypeUpgradeRolledBack,
 	}
 }
 

@@ -48,6 +48,15 @@ func everyAuditEvent() []alerts.Event {
 		// ever makes this name caller-supplied must sanitise it at the source;
 		// the redactor will not.
 		auditClipCaptured("clip-20260806-143000.ts", dirty),
+		// A realistic release tag rather than a planted one, for exactly the
+		// reason auditClipCaptured spells out above: the version is read from
+		// this server's own update feed and never from operator text, which is
+		// a STRUCTURAL guarantee. alerts.Redact matches syntax, so a bare
+		// scalar goes through it untouched -- planting one here fails this
+		// test, which is how that was re-established. Anything that ever lets
+		// a caller name the version to install must sanitise at the source.
+		auditUpgradeStaged("v1.2.3", true, dirty),
+		auditUpgradeRolledBack(true, dirty),
 	}
 }
 
@@ -225,6 +234,13 @@ func TestAuditSeveritiesMatchWhatTheFloorsPromise(t *testing.T) {
 		// repeatedly and is somebody doing their job. A rule that wants only
 		// incidents drops it with MinSeverity rather than unsubscribing.
 		alerts.TypeClipCaptured: alerts.SeverityInfo,
+		// Critical, on exactly auditAPITokenCreated's reasoning: what these
+		// record survives the response to a compromise. A replaced binary
+		// outlives a password change, a token revocation AND a restart, and
+		// the restart is what arms it. A rollback is the same act in the
+		// other direction.
+		alerts.TypeUpgradeStaged:     alerts.SeverityCritical,
+		alerts.TypeUpgradeRolledBack: alerts.SeverityCritical,
 	}
 	seen := map[alerts.Type]bool{}
 	for _, ev := range everyAuditEvent() {
