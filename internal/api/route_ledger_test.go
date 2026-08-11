@@ -453,23 +453,35 @@ func publicOrigin() coverageExcus {
 	return coverageExcus{
 		Why: "the public media origin under every method chi registered on the mount. " +
 			"Gated per request by authorizePlayout; the GET row carries the streaming " +
-			"counterpart and the rest reach the same gate.",
+			"counterpart. OPTIONS reaches a gate of its own: playoutPreflightAllowed " +
+			"applies the CONFIGURATION half -- enabled, and public unless the caller is " +
+			"the operator -- and denies with the same 404 GET gives, so the two agree. " +
+			"It omits the CREDENTIAL half deliberately: a preflight carries no " +
+			"credentials by specification, and answering one 401 would break " +
+			"cross-origin playback of a token-protected public stream.",
 		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
 		Counterpart: "playoutManifestBytes",
-		// FOUND BY DRIVING ALL TEN METHODS, which is the whole of the change
-		// that expanded ANY entries into pairs. Nine of them reach
-		// authorizePlayout and answer 401. OPTIONS does not: it is answered 204
-		// with no body ABOVE the gate, so the sentence "the rest reach the same
-		// gate" was false for one pair in ten and no request had ever been
-		// issued that could say so.
+		// The OPTIONS override survives #170's fix, and the reason it survives is
+		// worth more than the override.
 		//
-		// Recorded as what it is rather than argued away. It is the subject of
-		// #170, which is out of scope this round and is being fixed on another
-		// branch; the honest thing here is a Want that states the status this
-		// pair really returns, driven exactly like the other nine. When #170's
-		// fix lands, this override FAILS with the new status and whoever rebases
-		// has to look at it -- which is the behaviour a correct-but-stale
-		// premise should have.
+		// This entry used to carry a tripwire: "when #170's fix lands, this Want
+		// FAILS with the new status and whoever rebases has to look at it." The
+		// fix landed. The Want did not fail, and nobody was sent to look.
+		//
+		// It did not fail because this fixture's playout is enabled and public,
+		// which is the branch playoutPreflightAllowed ALLOWS -- so the status is
+		// still 204, now for a different reason. The old 204 was "no gate ran";
+		// today's is "the gate ran and said yes". A single status cannot tell
+		// those apart, so a Want pinned to one status could never have detected
+		// the change it promised to detect.
+		//
+		// The lesson generalises past this row: a claim that a future edit will
+		// break an assertion is only as good as the fixture's coverage of the
+		// branch that edit adds. Here the fixture exercises one branch of two.
+		// The denial half is asserted where it can actually be driven --
+		// TestPlayoutPreflightGateMatrix drives the full config x principal
+		// matrix and pins the 404s, including the private-stream denials this
+		// row's fixture never reaches.
 		PerMethod: map[string]*routeWant{
 			http.MethodOptions: {As: "read", Status: http.StatusNoContent, AnonMatchesRead: true},
 		},
@@ -2540,24 +2552,6 @@ func deferredWithReasons() []coverageDefer {
 				"preflight nobody can afford to run is a preflight somebody deletes -- " +
 				"which returns all five issues at once.",
 			Issue: "#161",
-		},
-		{
-			ID: "options-above-the-playout-gate",
-			What: "OPTIONS /playout/* is answered 204 with no body ABOVE authorizePlayout, " +
-				"so it is the one method+pattern pair of that mount that does not reach " +
-				"the gate the other nine reach.",
-			WhySafe: "found by DRIVING it, which is the point: the excuse registry used to " +
-				"collapse an ANY entry to a single GET, so this pair's premise had never " +
-				"been issued as a request. It is now driven with a perMethod Want stating " +
-				"the 204 it really returns, byte-identical to an anonymous stranger's, with " +
-				"no body -- an existence oracle at worst, of the same class as the 405 " +
-				"surface in G4.",
-			WhatWouldMakeItUnsafe: "the preflight response carrying anything derived from " +
-				"the playout configuration -- a CORS allowlist echoing a configured origin " +
-				"would do it. The behavioural fix is #170's and lands on another branch; " +
-				"when it does, this Want fails with the new status and whoever rebases has " +
-				"to look at it.",
-			Issue: "#170",
 		},
 		{
 			ID: "ratchet-raises-rest-on-ordinary-review",
