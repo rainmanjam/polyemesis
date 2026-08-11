@@ -833,6 +833,12 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			Enabled: settings.Failover.Playlist.Enabled,
 			Items:   append([]db.PlaylistItem(nil), settings.Failover.Playlist.Items...),
 		}
+		// The two stored pull URLs, for the same reason and taken at the same
+		// moment. Plain strings need no copy -- a string value IS a snapshot,
+		// where the playlist above is a slice whose backing array the decode
+		// can rewrite in place. See pullSourceUploadProblems.
+		storedPullURL := settings.Ingest.Pull.URL
+		storedBackupPullURL := settings.Failover.Backup.Pull.URL
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -888,6 +894,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// that is not the one about to be stored or holding the check open
 		// across the write. Recorded rather than claimed away.
 		if err := s.playlistUploadProblems(settings.Failover.Playlist, storedPlaylist); err != nil {
+			return badRequestError{err.Error()}
+		}
+		// The same rule for the OTHER way a stored upload reaches an FFmpeg: a
+		// pull source naming one. That path bypasses ffmpeg.ProbeFile's format
+		// allowlist entirely, so a file this server was never allowed to inspect
+		// must not be routed to air through it. #201.
+		if err := s.pullSourceUploadProblems(*settings, storedPullURL, storedBackupPullURL); err != nil {
 			return badRequestError{err.Error()}
 		}
 		return nil

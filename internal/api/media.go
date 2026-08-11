@@ -189,6 +189,22 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 // gigabytes and on a machine that is also encoding a live broadcast. The cost
 // of being too tight is rejecting a perfectly good upload, which is worse than
 // the cost of waiting.
+//
+// YES, THIS RUNS A SUBPROCESS INSIDE AN HTTP HANDLER, AND playlist_normalise.go
+// ARGUES AGAINST DOING THAT. Both are right and the reasoning is written out in
+// full at the top of that file; the short version is that the two are different
+// work. A probe is a bounded HEADER read whose answer IS the response -- the
+// handler has to decide before it can reply, and deferring the decision means
+// publishing the file first, which is the publish-before-probe window #118
+// removed. A normalise is an unbounded TRANSCODE of every frame whose answer is
+// a file on disk, which no request is waiting for. #188 filed the fact that
+// neither comment said so; a reader who found one first concluded the other
+// code was wrong.
+//
+// What keeps this side of the line defensible is that both bounds are real:
+// this constant caps one probe, and MaxConcurrentUploadProbes caps how many run
+// at once. Raising either without the other is what would make the comparison
+// stop holding.
 const probeUploadTimeout = 30 * time.Second
 
 // MaxConcurrentUploadProbes bounds how many ffprobe children the upload

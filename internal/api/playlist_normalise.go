@@ -21,6 +21,42 @@ import (
 // The API layer, by contrast, already builds a store per request
 // (Server.uploadStore) and is where the operator is standing.
 
+// A PROBE IS NOT A NORMALISE, AND THIS FILE IS NOT AN ARGUMENT AGAINST THE ONE
+// media.go RUNS INLINE.
+//
+// enqueuePlaylistNormalisation's comment below says a synchronous subprocess in
+// the request path is "a price this endpoint should not pay", and
+// handleUploadMedia now runs ffprobe synchronously inside an HTTP handler for
+// up to probeUploadTimeout. Read alone, either one condemns the other. #188 is
+// that contradiction, and it is a documentation defect rather than a behaviour
+// one: both are right, and the line between them is worth stating once so that
+// nobody reconciles them by moving the wrong piece.
+//
+// The distinction is what the work IS, not where it runs:
+//
+//   - A PROBE IS A BOUNDED HEADER READ WHOSE ANSWER IS THE RESPONSE. It reads
+//     metadata, not frames, and finishes in milliseconds on a file of any size.
+//     The handler cannot defer it, because the answer to "is this media" IS the
+//     201 or the 400 -- deferring it means answering 201 first and discovering
+//     the file is an ffconcat script afterwards, which is the publish-before-
+//     probe window #118 removed. It is bounded twice regardless:
+//     probeUploadTimeout on each probe, MaxConcurrentUploadProbes on how many
+//     may run at once.
+//
+//   - A NORMALISE IS AN UNBOUNDED TRANSCODE WHOSE ANSWER IS A FILE. It reads
+//     and re-encodes every frame of a file that may be several gigabytes, on a
+//     machine that may be carrying a live broadcast, and takes minutes to
+//     hours. Nothing about the settings save depends on its result: the save
+//     succeeds, and the playlist becomes ready later when the derivative
+//     exists. Tying an HTTP request to it would hold a connection open for an
+//     hour to report something the readiness gate already reports.
+//
+// SO THE FIX FOR EITHER IS NOT TO MOVE THE OTHER. Moving the upload probe into
+// the queue would mean publishing the file before it could be scheduled, which
+// re-creates the exact window that PR removed and in a worse form. Making
+// normalisation synchronous would tie a request to a full transcode. The
+// mirror of this paragraph is in media.go, above probeUploadTimeout.
+
 // playlistUploadProblems reports why an item the operator is INTRODUCING
 // cannot be used, or nil. want is the incoming playlist; stored is the one
 // already saved.
