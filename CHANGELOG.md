@@ -10,6 +10,65 @@ its first tagged release.
 
 ### Changed
 
+- **BREAKING: a `read` API token gets metadata, not content.** Thirteen routes
+  now answer `403` to a `read`-scoped token that previously served them: the
+  five media and export downloads, both transcript endpoints, and
+  `GET /library/search`.
+
+  Search is on that list and it is the one worth reading twice, because it looks
+  like a metadata query and is not. `db.TranscriptHit` carries the segment
+  `text`, its neighbouring `context` and the `speaker`, so a token that iterated
+  common words would rebuild whole transcripts without ever requesting a route
+  with `transcript` in its path. The line is drawn at what the bytes are, not at
+  what the URL says.
+
+  Listing is unaffected: a `read` token still sees recordings, clips, stems and
+  sessions, their durations, sizes and status, and whether a transcript exists.
+  `GET /library` still returns the bare list of speaker labels — who appears,
+  rather than what was said. **If you have automation that downloads recordings
+  or reads transcripts with an API token, it needs an `admin` token now**; the
+  route works, the scope does not.
+
+- **BREAKING: an upload that no probe could read is stored but marked, and some
+  formats are refused outright.** Uploads now carry a verdict record, so a file
+  that was accepted without being inspected — a client disconnect mid-probe, no
+  `ffprobe` on the box — is distinguishable from one that passed, and playlists
+  refuse to reference it. Files uploaded before this exist as "no record", which
+  is deliberately not the same as "unverified": your existing library is not
+  stranded.
+
+  Raw elementary streams (`.h264`, `.hevc`, `.mpegvideo` dumps) are now refused
+  at upload with a message telling you to remux. They report no duration, so the
+  old behaviour was to accept them and then fail the normalise job permanently —
+  a playlist item that could never go on air. Refusing at the door is the same
+  answer given earlier and with a remedy. See #218 if you need them supported.
+
+- **BREAKING: a job-state conflict answers `409`, and a running job cannot be
+  deleted.** `POST /jobs/{id}/cancel` and `/retry` against a job in a state that
+  does not permit it returned `500`; they now return `409` with a sentence.
+  `DELETE /jobs/{id}` on a RUNNING job is refused rather than removing the row
+  and orphaning its worker.
+
+- **`/hls/*` is session-only.** The dashboard preview playlist no longer accepts
+  a bearer token of either scope, and the routes answer `GET` and `HEAD` only.
+  If you point a player, a probe or a script at an HLS URL from outside a
+  browser session, it stops working.
+
+- **Revoking an API token now closes its open WebSocket, and changing the
+  account password closes the operator's.** A socket used to keep the principal
+  it was opened with for ever, so revocation — the only lever you have after a
+  leak — did not reach a live connection.
+
+### Fixed
+
+- **A `read` token could read a pull URL's credential from `GET /sources`.** The
+  masking ran, and masked the wrong part: it blanked only the last path segment
+  and only for `rtmp`/`rtsp`/`srt`-like schemes, so an HLS pull URL over `https`
+  came back untouched and one with the credential mid-path had its *filename*
+  masked instead. Redaction for a read-scoped reader now masks every path
+  segment and every query parameter, on every scheme. A `read` token sees the
+  host and nothing else; a session and an `admin` token are unaffected.
+
 - **A `read` API token no longer reaches the live media of a stream you have not
   published.** `read` means metadata, not content, and live playout is content.
 
