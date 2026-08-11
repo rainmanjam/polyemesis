@@ -140,8 +140,26 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 
 		verdict, probeErr := s.probeUpload(r.Context(), pending.Path(), pending.Name())
 		if probeErr != nil {
+			// THE FULL SENTENCE IS LOGGED; THE SCRUBBED ONE IS RETURNED.
+			//
+			// ffprobe names its input in almost every diagnostic it prints, and
+			// probeUpload passes those words through on purpose -- "moov atom not
+			// found" is what tells an operator their download was truncated. What
+			// came with them was the absolute path of the staged file, which is
+			// the server's data directory plus an internal ".partial-" name, in
+			// the 400 body. That was the last unscrubbed subprocess-stderr-to-
+			// client path in a repo that had just been through argv scrubbing and
+			// path-disclosure removal (#181).
+			//
+			// Scrubbed HERE, at the egress, rather than inside probeUpload: this
+			// is the one place a probe error becomes a response body, so a refusal
+			// shape added to probeUpload later is covered without anybody
+			// remembering to scrub it. The same reasoning as writeUploadError's
+			// default arm and internal/api/redact.go -- redact where the bytes
+			// leave, not where they are made.
 			s.log.Info("media rejected", "name", pending.Name(), "err", probeErr)
-			writeError(w, http.StatusBadRequest, probeErr.Error())
+			writeError(w, http.StatusBadRequest,
+				scrubProbePaths(probeErr.Error(), pending.Path(), pending.Name(), s.cfg.DataDir))
 			return
 		}
 
@@ -181,6 +199,64 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 
 	writeError(w, http.StatusBadRequest,
 		fmt.Sprintf("no %q part in the multipart body", uploadFieldName))
+}
+
+// probePathPlaceholder stands in for the staged file when a probe message names
+// it and there is no operator-facing name to put there instead.
+const probePathPlaceholder = "the uploaded file"
+
+// scrubProbePaths removes this server's paths from a probe diagnostic, keeping
+// the rest of ffprobe's sentence.
+//
+// THE PATH IS THE DISCLOSURE, NOT THE MESSAGE. ffprobe prints its input's name
+// in front of nearly everything it says -- `/srv/data/uploads/.partial-1216776868.ts:
+// Invalid data found when processing input` -- and that string went into the 400
+// body verbatim. A blanket "this file could not be read" would cost the operator
+// the only actionable half of it, so the path is replaced and the words are
+// kept.
+//
+// staged is replaced with the name the file WOULD have been given, which is the
+// name the operator typed and the only one they can match against anything they
+// can see; the ".partial-" temp name appears nowhere else in the product. The
+// directory and the data directory are then removed on their own, because a
+// message can name the directory without the file (a permission error on the
+// uploads directory, say) and because the replacements must be complete rather
+// than cover the one shape that was measured.
+//
+// Longest first, and that ordering is load-bearing: dataDir is a prefix of the
+// staged file's directory, which is a prefix of the staged path, so removing the
+// short one first would leave the tails of the long ones behind.
+func scrubProbePaths(msg, staged, name, dataDir string) string {
+	display := strings.TrimSpace(name)
+	if display == "" {
+		display = probePathPlaceholder
+	}
+	replace := func(old, new string) {
+		if strings.TrimSpace(old) == "" {
+			return
+		}
+		msg = strings.ReplaceAll(msg, old, new)
+		// The absolute spelling as well as the one we were handed. uploadStore
+		// resolves the data directory with filepath.Abs before building the
+		// store, so these are normally the same string -- but a relative
+		// s.cfg.DataDir makes them differ, and the one ffprobe was handed is the
+		// absolute one.
+		if abs, err := filepath.Abs(old); err == nil && abs != old {
+			msg = strings.ReplaceAll(msg, abs, new)
+		}
+	}
+	replace(staged, display)
+	if staged != "" {
+		if dir := filepath.Dir(staged); dir != "" && dir != "." {
+			replace(dir+string(filepath.Separator), "")
+			replace(dir, "")
+		}
+	}
+	if dir := strings.TrimSpace(dataDir); dir != "" {
+		replace(strings.TrimSuffix(dir, string(filepath.Separator))+string(filepath.Separator), "")
+		replace(strings.TrimSuffix(dir, string(filepath.Separator)), "")
+	}
+	return msg
 }
 
 // probeUploadTimeout bounds the inspection of one stored file.
@@ -327,22 +403,40 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 	if timeout <= 0 {
 		timeout = probeUploadTimeout
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
-	// ONE SLOT PER CONCURRENT PROBE, and the wait is inside the timeout on
-	// purpose. Nothing bounded this: 25 concurrent uploads spawned 25 ffprobe
-	// children and held 25 request goroutines for the full 30 seconds each,
-	// measured. The same branch argues in playlist_normalise.go that a
-	// synchronous subprocess in the request path is "a price this endpoint
-	// should not pay" -- this endpoint pays it, so the least it can do is pay it
-	// a bounded number of times at once.
+	// ONE SLOT PER CONCURRENT PROBE, AND THE WAIT IS OUTSIDE THE TIMEOUT.
 	//
-	// Waiting counts against the probe's own deadline rather than extending it,
-	// so a queue of uploads cannot turn into a queue of request goroutines that
-	// outlives any of them: a request that waits out its deadline lands on the
-	// interrupted path, which stores the file unchecked and SAYS SO, which is
-	// exactly what the third state is for.
+	// Nothing bounded this: 25 concurrent uploads spawned 25 ffprobe children and
+	// held 25 request goroutines for the full 30 seconds each, measured. The same
+	// branch argues in playlist_normalise.go that a synchronous subprocess in the
+	// request path is "a price this endpoint should not pay" -- this endpoint pays
+	// it, so the least it can do is pay it a bounded number of times at once.
+	//
+	// The wait USED TO COUNT against the probe's own deadline, and that made the
+	// semaphore the third instance in one change of the shape this whole design
+	// exists to remove: A BRANCH WHOSE TAKEN-NESS A REMOTE CALLER CHOOSES (#216).
+	// ctx.Err() let a remote disconnect decide whether the gate ran; a remote
+	// DELETE let a caller decide which of four states a file was in; and a
+	// four-deep semaphore inside a 30-second budget let REMOTE CONCURRENCY decide.
+	// Sixteen concurrent uploads meant twelve waiting, and a caller who wanted
+	// their file to go uninspected no longer needed to disconnect -- they needed
+	// eleven tabs. Measured: with a 2s budget and the four slots held, a single
+	// upload came back verified:false, reason "interrupted", having never been
+	// looked at.
+	//
+	// So the queue is now a QUEUE. The wait runs on the REQUEST's context, which
+	// bounds it by the only thing that legitimately ends it -- the client going
+	// away, which is F1's already-recorded state -- and the deadline starts when
+	// the probe does. That separates "the machine is busy", which is a delay, from
+	// "this file could not be inspected", which is a verdict; they used to be the
+	// same outcome. A busy server now makes an upload SLOW rather than UNCHECKED.
+	//
+	// What this does NOT do is bound the request goroutines themselves: sixteen
+	// uploads still hold sixteen goroutines, now for longer each. That is the same
+	// residual the bound had before -- the bound was always on CHILDREN -- and it
+	// belongs to the middleware filed as #203. Trading a goroutine for a verdict
+	// is the right way round: a goroutine costs a stack, and the alternative costs
+	// the inspection that every consumer downstream assumes happened.
 	select {
 	case probeSlots <- struct{}{}:
 		defer func() { <-probeSlots }()
@@ -351,6 +445,13 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 			"name", name, "cause", ctx.Err(), "err", "waiting for a probe slot")
 		return uploads.UnverifiedVerdict(uploads.ReasonInterrupted), nil
 	}
+
+	// The deadline starts HERE, with the slot in hand, so it bounds the probe and
+	// nothing else. Shadowing ctx deliberately: everything below this line asks
+	// the probe's own context whether the probe was cut short, and asking the
+	// request's would answer a different question.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	res, err := ffmpeg.ProbeFile(ctx, bin, path)
 	if err != nil {

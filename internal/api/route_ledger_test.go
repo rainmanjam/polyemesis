@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +25,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/web"
@@ -1467,6 +1471,49 @@ func shapeRegistry() []shapeRow {
 			Note: "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal " +
 				"and never any. Scrubbed at source by supervisor.scrub; the broker-side " +
 				"consumer audit is the deferral."},
+		// THE OTHER TWO PRINCIPAL-LESS EGRESSES (#169). Structurally identical to
+		// the retained MQTT topic above -- a payload this process sends outward,
+		// to a party it chose, with nobody to redact for -- and absent from this
+		// list until now. The read-token value sweep that covers the rest of this
+		// ledger cannot reach them: it asks whether one principal receives what
+		// another does not, and there is no principal here at all. So the
+		// question asked instead is the one the argv leak answered wrongly,
+		// whether a stored credential reaches the wire for anybody.
+		//
+		// Both are INSPECTED rather than deferred, and that is a claim #176's
+		// model can hold this time: an outbound egress is reachable from the
+		// shared rig without a child process. The endpoint is an httptest server
+		// in this process, so what these cost is one HTTP round trip each --
+		// nearer inspectJSONBody than the LiveTools row below.
+		{Shape: "outbound-hook-body", Emitted: true, Inspector: inspectOutboundHookBody,
+			Note: "internal/hooks.Dispatcher's webhook POST: the Envelope and the signature " +
+				"header, read off a real socket, over the deliver path rather than " +
+				"Dispatcher.Test. Redacted at Publish; the inspector reads the far end."},
+		{Shape: "outbound-alert-body", Emitted: true, Inspector: inspectOutboundAlertBody,
+			Note: "internal/alerts.Notifier's alert POST, witnessed on the COALESCED path -- " +
+				"the one every real alert takes and the only one that can carry process " +
+				"state. Notifier.Test's synthetic body travels the same encoder and is " +
+				"read by TestOutboundAlertPayloadCarriesNoStoredCredential rather than " +
+				"here, because a synthetic item cannot discriminate this shape from a " +
+				"fixed sentence."},
+		// THE PORT-80 LISTENER, which #169 records as outside the ledger entirely
+		// rather than merely uninspected. Not downgraded from anything: it has
+		// never been here.
+		//
+		// Uninspected under #176's rule for the same reason response-header/
+		// Location is: an inspector would have to stand up something that lives
+		// in package main. Giving it a token inspector that witnessed a redirect
+		// from some other handler is precisely the substitution #176 caught
+		// streaming-media making.
+		{Shape: "plain-http-listener", Emitted: true, Issue: "#169",
+			Note: "cmd/polyemesis.startHTTPHelper binds :80 and serves the ACME http-01 " +
+				"responder plus a permanent redirect, on a listener no ledger row has ever " +
+				"named. Its Location header IS covered as a shape -- response-header/" +
+				"Location, deferred under #168 for the same jurisdiction reason -- but the " +
+				"LISTENER is a second surface: it answers before any router in this " +
+				"package exists, in package main, with no principal and no auth. The " +
+				"assertion that exists lives in cmd/polyemesis/redirect_test.go and does " +
+				"not run when this ledger runs."},
 		{Shape: "on-disk-process-log", Emitted: true, Inspector: inspectProcessLog, LiveTools: true,
 			Note: "the file that goes into support tarballs; asserted from disk. Its inspector " +
 				"needs a spawned child, so it runs under POLYEMESIS_LEDGER=strict with the " +
@@ -1567,6 +1614,159 @@ func inspectWebsocketFrame(t *testing.T, rig shapeRig) shapeObservation {
 		}
 	}
 	return shapeObservation{Shape: "websocket-frame", Sample: strings.Join(frames, "\n")}
+}
+
+// inspectOutboundHookBody and inspectOutboundAlertBody are the two
+// principal-less egresses (#169), and they are the first inspectors here that
+// read bytes this process SENT rather than bytes it served.
+//
+// That inverts the rig's usual direction and costs nothing extra to do: the
+// far end is an httptest server in this process, so a delivery is one in-process
+// round trip. Neither needs LiveTools -- no child is spawned and no FFmpeg
+// stand-in is involved -- which is what makes them inspectable at all under
+// #176's budget rather than deferred with the jurisdiction excuse the port-80
+// listener has to use.
+//
+// Each asserts the property that DISCRIMINATES its shape, per the rule this
+// section opens with. "Some bytes arrived at an endpoint I stood up" is exactly
+// the substitution that let a 50-byte error page stand in for a manifest: an
+// endpoint that 404s, a dispatcher that never loaded the hook, or an encoder
+// that shipped an empty object would all deliver bytes. So the hook body must
+// parse as a hook Envelope and carry the signature header, and the alert body
+// must parse as an alert payload with at least one alert in it.
+//
+// SHARED-RIG ETIQUETTE. Both create a row -- a hook, an alert rule -- on the
+// rig's planted server, which is the only mutation any inspector here makes.
+// Nothing else in the registry reads hooks or alert rules, and the two rows the
+// value sweep does read (settings, sources) are untouched. Stated because a
+// shared fixture that inspectors mutate is a fixture whose inspectors have an
+// order, and this one must not acquire a hidden one.
+func inspectOutboundHookBody(t *testing.T, rig shapeRig) shapeObservation {
+	t.Helper()
+	endpoint, rec := egressEndpoint(t)
+	const path = "/receiver/ledger-shape"
+	created := createHook(t, rig.h, rig.sign, map[string]any{
+		"name": "ledger-shape-egress", "url": endpoint.URL + path,
+	})
+	id := int64(created["id"].(float64))
+	secret, _ := created["secret"].(string)
+
+	d := hooks.NewDispatcher(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		hooks.SourceFunc(func() ([]hooks.Hook, error) {
+			return []hooks.Hook{hooks.Hook{
+				ID: id, Name: "ledger-shape-egress", Enabled: true,
+				URL: endpoint.URL + path, Secret: secret,
+				MaxAttempts: 1, TimeoutSeconds: 5,
+			}.Normalized()}, nil
+		}),
+		hooks.WithReloadInterval(5*time.Millisecond),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go d.Run(ctx)
+	d.Publish(hooks.Event{
+		Trigger: hooks.TriggerIngestPublished,
+		Source:  hooks.SourceRef{ID: 1, Name: "Main"},
+	})
+	waitForEgress(t, rec, 1, "the hook endpoint (shape inspector)")
+
+	body := rec.lastBody()
+	var env struct {
+		SpecVersion string `json:"specVersion"`
+		ID          string `json:"id"`
+		Trigger     string `json:"trigger"`
+	}
+	if err := json.Unmarshal([]byte(body), &env); err != nil ||
+		env.SpecVersion == "" || env.ID == "" || env.Trigger == "" {
+		t.Errorf("the outbound-hook-body inspector read %d bytes off the receiver and they "+
+			"are not a hook Envelope (%v): specVersion=%q id=%q trigger=%q.\n"+
+			"An endpoint that answered 404, or a dispatcher that never loaded the hook, "+
+			"would also have delivered bytes here. This row claims the ENVELOPE shape is "+
+			"inspected, so the envelope is what has to be witnessed.\n%s",
+			len(body), err, env.SpecVersion, env.ID, env.Trigger, truncateForFailure(body))
+	}
+	// The signature header is the other half of this egress and the reason the
+	// hook's own secret can stay home. A delivery without it is a different
+	// shape from the one this row describes.
+	headers := rec.lastHeaders()
+	if !strings.Contains(headers, hooks.SignatureHeader) {
+		t.Errorf("the outbound hook delivery carried no %s header, so this inspector is "+
+			"witnessing an unsigned egress and the row's note is wrong about what it "+
+			"reads.\nheaders: %s", hooks.SignatureHeader, truncateForFailure(headers))
+	}
+	return shapeObservation{Shape: "outbound-hook-body", Sample: headers + body}
+}
+
+// inspectOutboundAlertBody witnesses the COALESCED delivery, which is the one
+// every real alert takes.
+//
+// Not Notifier.Test: that builds one synthetic Item from a fixed sentence, and a
+// fixed sentence cannot discriminate this shape from any other endpoint that
+// echoes a rule name. The coalesced body is also the only one that can carry
+// process state, which is #169's entire worry. Test's body is read by
+// TestOutboundAlertPayloadCarriesNoStoredCredential instead.
+//
+// Flushed FORWARD rather than waited out. Rule.Debounce defaults a zero to ten
+// seconds and the shortest the form allows is one; passing a future `now` to
+// Flush -- the shipped test-and-shutdown entry point into one coalescing pass --
+// makes the pending delivery due immediately. Polled rather than called once,
+// because Publish hands the event to the Run goroutine and a single Flush can
+// land before it has been coalesced. That is the whole of this inspector's
+// wall clock: no sleep, and no budget that a slower platform can fail.
+//
+// A Notifier of its own, over the rig server's OWN store: the engine's alerter
+// is built inside engine.New with no seam and its Run loop is not driven by this
+// fixture -- measured, a published event never left. The rule under test is
+// still a stored one, created through the real route above.
+func inspectOutboundAlertBody(t *testing.T, rig shapeRig) shapeObservation {
+	t.Helper()
+	endpoint, rec := egressEndpoint(t)
+	createRule(t, rig.h, rig.sign, map[string]any{
+		"name": "ledger-shape-egress", "url": endpoint.URL + "/receiver/ledger-shape",
+	})
+
+	n := alerts.New(
+		slog.New(slog.NewTextHandler(io.Discard, nil)), rig.s.store,
+		alerts.WithFlushInterval(5*time.Millisecond),
+		alerts.WithRetry(1, time.Millisecond, time.Millisecond),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go n.Run(ctx)
+	n.Publish(alerts.Event{
+		Type: alerts.TypeDestinationDown, Severity: alerts.SeverityCritical,
+		Key: "ledger-shape", Title: "twitch is down",
+		Text: "the child exited: Broken pipe (Connection reset by peer)",
+	})
+	deadline := time.Now().Add(20 * time.Second)
+	for rec.count() == 0 && time.Now().Before(deadline) {
+		n.Flush(time.Now().Add(time.Hour))
+		time.Sleep(2 * time.Millisecond)
+	}
+	waitForEgress(t, rec, 1, "the alert endpoint (shape inspector)")
+
+	body := rec.lastBody()
+	var payload struct {
+		Source string `json:"source"`
+		Rule   string `json:"rule"`
+		Alerts []struct {
+			Type  string `json:"type"`
+			Title string `json:"title"`
+			Count int    `json:"count"`
+		} `json:"alerts"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil ||
+		payload.Source == "" || len(payload.Alerts) == 0 || payload.Alerts[0].Type == "" {
+		t.Errorf("the outbound-alert-body inspector read %d bytes off the receiver and they "+
+			"are not an alert payload (%v): source=%q rule=%q alerts=%d.\n"+
+			"A delivery that coalesced to nothing, or an endpoint answering something "+
+			"else, would still have put bytes here. The payload with its alerts in it is "+
+			"what this row claims is inspected.\n%s",
+			len(body), err, payload.Source, payload.Rule, len(payload.Alerts),
+			truncateForFailure(body))
+	}
+	return shapeObservation{Shape: "outbound-alert-body", Sample: rec.lastHeaders() + body}
 }
 
 // inspectProcessLog is the LiveTools one. The file only exists once a child has

@@ -7,16 +7,16 @@
   "unstableCeiling": 3,
   "inertCeiling": 11,
   "varianceExemptCeiling": 2,
-  "shapeFloor": 11,
-  "shapesNotInspectedCeiling": 6,
+  "shapeFloor": 14,
+  "shapesNotInspectedCeiling": 7,
   "totals": {
     "methodPatternPairs": 211,
     "swept": 55,
     "excused": 57,
     "denied": 99,
     "nonTrieProbes": 12,
-    "shapesEmitted": 11,
-    "shapesNotInspected": 6
+    "shapesEmitted": 14,
+    "shapesNotInspected": 7
   },
   "partition": {
     "differential": 8,
@@ -1960,6 +1960,28 @@
       "note": "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal and never any. Scrubbed at source by supervisor.scrub; the broker-side consumer audit is the deferral."
     },
     {
+      "shape": "outbound-hook-body",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectOutboundHookBody",
+      "note": "internal/hooks.Dispatcher's webhook POST: the Envelope and the signature header, read off a real socket, over the deliver path rather than Dispatcher.Test. Redacted at Publish; the inspector reads the far end."
+    },
+    {
+      "shape": "outbound-alert-body",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectOutboundAlertBody",
+      "note": "internal/alerts.Notifier's alert POST, witnessed on the COALESCED path -- the one every real alert takes and the only one that can carry process state. Notifier.Test's synthetic body travels the same encoder and is read by TestOutboundAlertPayloadCarriesNoStoredCredential rather than here, because a synthetic item cannot discriminate this shape from a fixed sentence."
+    },
+    {
+      "shape": "plain-http-listener",
+      "emitted": true,
+      "inspected": false,
+      "inspectedBy": "",
+      "issue": "#169",
+      "note": "cmd/polyemesis.startHTTPHelper binds :80 and serves the ACME http-01 responder plus a permanent redirect, on a listener no ledger row has ever named. Its Location header IS covered as a shape -- response-header/Location, deferred under #168 for the same jurisdiction reason -- but the LISTENER is a second surface: it answers before any router in this package exists, in package main, with no principal and no auth. The assertion that exists lives in cmd/polyemesis/redirect_test.go and does not run when this ledger runs."
+    },
+    {
       "shape": "on-disk-process-log",
       "emitted": true,
       "inspected": true,
@@ -2078,6 +2100,7 @@
     "#162",
     "#163",
     "#167",
-    "#168"
+    "#168",
+    "#169"
   ]
 }
