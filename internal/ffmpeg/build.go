@@ -248,7 +248,39 @@ func (s IngestSpec) pullInputArgs() []string {
 		// -stream_loop -1 makes the file look like a feed that never ends, and
 		// -re paces it at wall-clock speed. Without -re FFmpeg reads at disk
 		// speed and buries the relay in an hour of stream in seconds.
-		return []string{"-stream_loop", "-1", "-re"}
+		//
+		// -protocol_whitelist file IS THE PIN #201 NAMES AS MISSING HERE, and it
+		// is the same pin ProbeFile carries for the same reason. A file pull
+		// dials nothing, so bounding what a demuxer may OPEN to the file
+		// protocol costs a correct source exactly nothing -- and it stops the
+		// absence of egress from being a property of whatever protocols this
+		// build happens to enable.
+		//
+		// IT IS A PIN AND NOT A FIX, and the measurement says so plainly. With
+		// FFmpeg 8.1.2: an ffconcat script naming "http://…" is refused
+		// IDENTICALLY with and without the flag ("Unsafe file name", concat's
+		// safe=1 default), so the flag changes no observed behaviour today; and
+		// an ffconcat script naming a SIBLING file is still resolved WITH the
+		// flag on -- format_name=concat, the sibling's streams reported as this
+		// file's -- because "file" is exactly the protocol it uses. #201's own
+		// blast-radius paragraph says the same thing: this is content
+		// substitution, and protocol whitelisting does not touch it.
+		//
+		// SO THE FORMAT ALLOWLIST DOES NOT MOVE HERE, and cannot. It is not a
+		// flag: it is a decision made by reading ffprobe's format.format_name,
+		// which means a subprocess. This function is pure and is called from the
+		// engine's reconcile path (engine.ingestArgs, selector.ingestChild) on
+		// every source switch and every supervisor respawn, so putting a probe
+		// behind it would put a synchronous ffprobe on the live-video path whose
+		// fail-closed outcome is "the ingest does not start". playlist_normalise
+		// refuses that price for an HTTP request; the live stream cannot pay a
+		// higher one. The allowlist stays where it can be run and where a
+		// refusal has somewhere to be reported -- see api.pullSourceUploadProblems.
+		//
+		// The flag is scoped to the file family on purpose. -protocol_whitelist
+		// applies to the INPUT AVFormatContext, so putting it on an http, rtsp,
+		// srt or rtmp pull would refuse the very protocol that source needs.
+		return []string{"-protocol_whitelist", "file", "-stream_loop", "-1", "-re"}
 	}
 	return nil
 }

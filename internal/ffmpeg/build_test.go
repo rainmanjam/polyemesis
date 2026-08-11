@@ -324,7 +324,9 @@ func TestIngestArgsPullReconnectFlagsPerScheme(t *testing.T) {
 				"-reconnect_streamed":  "1",
 				"-reconnect_delay_max": "30",
 			},
-			absent: []string{"-rtsp_transport", "-stream_loop", "-re"},
+			// -protocol_whitelist is scoped to the file family. On an HTTP pull
+			// it would refuse the protocol the source needs.
+			absent: []string{"-rtsp_transport", "-stream_loop", "-re", "-protocol_whitelist"},
 		},
 		{
 			name:    "https honours a custom backoff ceiling",
@@ -338,7 +340,7 @@ func TestIngestArgsPullReconnectFlagsPerScheme(t *testing.T) {
 			want: []string{"-rtsp_transport"},
 			// UDP RTSP through NAT connects and then delivers nothing.
 			wantVal: map[string]string{"-rtsp_transport": "tcp"},
-			absent:  []string{"-reconnect", "-stream_loop"},
+			absent:  []string{"-reconnect", "-stream_loop", "-protocol_whitelist"},
 		},
 		{
 			name:    "rtsp transport is overridable",
@@ -350,19 +352,19 @@ func TestIngestArgsPullReconnectFlagsPerScheme(t *testing.T) {
 			name: "file loops at wall-clock speed",
 			spec: IngestSpec{Kind: IngestPull, PullURL: "file://loops/bars.ts", PullDataDir: "/srv/data"},
 			// Without -re the file is read at disk speed and floods the relay.
-			want:    []string{"-stream_loop", "-re"},
-			wantVal: map[string]string{"-stream_loop": "-1"},
+			want:    []string{"-stream_loop", "-re", "-protocol_whitelist"},
+			wantVal: map[string]string{"-stream_loop": "-1", "-protocol_whitelist": "file"},
 			absent:  []string{"-reconnect", "-rtsp_transport"},
 		},
 		{
 			name:   "srt needs no extra input flags",
 			spec:   IngestSpec{Kind: IngestPull, PullURL: "srt://peer.example:9000"},
-			absent: []string{"-reconnect", "-rtsp_transport", "-stream_loop", "-re"},
+			absent: []string{"-reconnect", "-rtsp_transport", "-stream_loop", "-re", "-protocol_whitelist"},
 		},
 		{
 			name:   "rtmp needs no extra input flags",
 			spec:   IngestSpec{Kind: IngestPull, PullURL: "rtmp://peer.example/live/k"},
-			absent: []string{"-reconnect", "-rtsp_transport", "-stream_loop", "-listen"},
+			absent: []string{"-reconnect", "-rtsp_transport", "-stream_loop", "-listen", "-protocol_whitelist"},
 		},
 	}
 
