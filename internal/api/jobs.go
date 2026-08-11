@@ -738,7 +738,25 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 // then 404 -- so the honest outcome for a stranded file is a log line naming
 // it, which is strictly better than the silence this replaces.
 func (s *Server) removeClipExport(j jobs.Job) {
-	removed, err := clipper.RemoveExport(s.clipExportDir(), j)
+	// The engine is what knows where recordings live, and it can legitimately
+	// be absent: publishAudit documents the same two cases, and the second is
+	// not hypothetical -- Manager.reconcile logs and continues when engine.New
+	// fails, so an install whose video pipeline will not build has no default
+	// engine. Deleting a job must not panic on such a box, and DELETE /jobs and
+	// the purge button are both far busier routes than the download this guard
+	// was previously only implied on.
+	//
+	// Skipping is the right failure: without a recordings directory there is no
+	// exports directory to confine a path to, and a delete that removed a file
+	// it could not first confine is the one outcome worse than a leaked file.
+	if s.mgr == nil {
+		return
+	}
+	eng := s.eng()
+	if eng == nil {
+		return
+	}
+	removed, err := clipper.RemoveExport(clipper.ExportDirIn(eng.Recordings().Dir()), j)
 	if err != nil {
 		s.log.Warn("deleted a clip export job but could not delete its file",
 			"job", j.ID, "err", err)

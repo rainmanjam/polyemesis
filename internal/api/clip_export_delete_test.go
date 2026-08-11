@@ -1,12 +1,15 @@
 package api
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 )
 
@@ -87,6 +90,34 @@ func TestDeletingANonExportJobDeletesNoFiles(t *testing.T) {
 
 	if _, err := os.Stat(kept); err != nil {
 		t.Fatalf("deleting a job of another kind removed an export: %v", err)
+	}
+}
+
+// TestDeletingAJobOnAnEngineLessServerDoesNotPanic is the guard on the path
+// this change put the engine dereference on.
+//
+// s.eng() is s.mgr.Default(), and publishAudit documents both ways it comes
+// back empty: s.mgr is nil throughout this package's tests, and on a real box
+// Manager.reconcile logs and continues when engine.New fails, so an install
+// whose video pipeline will not build has no default engine. Before the guard
+// this panicked, and DELETE /jobs is a much busier route than the download
+// handler where the same dereference was already implied.
+func TestDeletingAJobOnAnEngineLessServerDoesNotPanic(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	s.jobq = jobs.New(slog.New(slog.NewTextHandler(io.Discard, nil)), store)
+	if s.mgr != nil {
+		t.Fatal("this test needs a server with no engine manager")
+	}
+
+	job := seedDoneClipExport(t, store, "/nowhere/highlight.mp4")
+
+	// A panic here fails the test through the handler's recovery or the test
+	// binary itself; either way this does not reach the assertion.
+	send(t, h, sign, http.MethodDelete, jobPath(job.ID), nil, http.StatusOK)
+
+	if _, err := store.GetJob(job.ID); err == nil {
+		t.Error("the job row survived a delete that answered 200")
 	}
 }
 
