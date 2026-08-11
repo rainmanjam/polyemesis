@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -505,7 +506,12 @@ func TestPuttingTheJobPolicyLeavesTheRestOfTheSettingsAlone(t *testing.T) {
 	if after.PostProd.RetainDays != policy.RetainDays {
 		t.Errorf("stored retainDays %d, want %d", after.PostProd.RetainDays, policy.RetainDays)
 	}
-	if after.Recording != before.Recording {
+	// reflect.DeepEqual rather than `!=`, which needs db.RecordingSettings to
+	// stay comparable. It is all scalars today, so `!=` compiled -- and the day
+	// someone adds a slice or a map to it, a JOBS POLICY test stops compiling
+	// for a reason nobody will connect to the change they made. A tripwire in an
+	// unrelated file is worse than a slower comparison.
+	if !reflect.DeepEqual(after.Recording, before.Recording) {
 		t.Errorf("the recording settings changed when only the jobs policy was written:\n"+
 			" before %+v\n  after %+v", before.Recording, after.Recording)
 	}

@@ -61,10 +61,17 @@ func TestClipExportDownloadServesOnlyFilesInsideTheExportsDir(t *testing.T) {
 	setClipResultPath(t, store, job.ID, canary)
 	mustNotLeak(t, h, sign, http.MethodGet, path)
 
-	// And one aimed at the directory from outside via traversal, which is the
-	// form a hand-edited row is most likely to take.
+	// And one aimed at the canary from inside the exports directory via
+	// traversal, which is the form a hand-edited row is most likely to take.
+	//
+	// ONE `..`, not two. dir is <recordings>/exports and the canary is at
+	// <recordings>/secret.mp4, so two overshot to <DataDir>/secret.mp4 -- a file
+	// that does not exist, which 404s whether confinement runs or not. A
+	// reviewer measured it: with the clipExportPath guard removed AND the
+	// preceding absolute-path case deleted, this still reported ok. The
+	// assertion named traversal and tested the absence of a file.
 	setClipResultPath(t, store, job.ID,
-		filepath.Join(dir, "..", "..", filepath.Base(canary)))
+		filepath.Join(dir, "..", filepath.Base(canary)))
 	mustNotLeak(t, h, sign, http.MethodGet, path)
 }
 
