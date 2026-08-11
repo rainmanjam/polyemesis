@@ -59,7 +59,7 @@ func TestProbeFileRefusesAStillImage(t *testing.T) {
 			// And it is a refusal the handler turns into a rejection rather
 			// than into "stored unchecked": Refused owns that distinction.
 			if !Refused(err) {
-				t.Errorf("ffmpeg.Refused says a PNG is not a verdict about the file, "+
+				t.Errorf("ffmpeg.Refused says a PNG is not a verdict about the file, " +
 					"so api.probeUpload would store it unchecked instead of refusing it")
 			}
 			if res != nil {
