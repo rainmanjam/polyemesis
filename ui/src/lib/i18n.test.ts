@@ -210,3 +210,59 @@ describe("translation catalogues", () => {
     ).toEqual([]);
   });
 });
+
+/* The Facebook block's copy has to keep SAYING what it has to say.
+ *
+ * Moved here from internal/db/facebook_ui_drift_test.go for issue #107. That
+ * guard was not one of the broken ones -- it parsed en.json as data rather than
+ * reading a component as text, so it could actually fail for its own reason --
+ * but it was a claim about a UI catalogue with no Go counterpart anywhere in
+ * it, asserted from internal/db by reading across the repository. It belongs
+ * beside the other catalogue guards, which is here.
+ *
+ * The type system already covers the half these do not: lib/i18n.ts defines
+ * TranslationKey as `keyof typeof en`, so a component asking for a key that
+ * does not exist is a compile error and `npm run build` catches it. Types
+ * cannot see the VALUE, and the value is the half carrying the warning.
+ *
+ * Whether the sentences RENDER is a separate question with a separate home:
+ * ui/e2e/facebook-destination.spec.ts opens the dialog and reads them off the
+ * screen. Whether the other fourteen locales carry them non-empty is the
+ * ratchet above.
+ */
+describe("the Facebook block's copy still carries its warnings", () => {
+  const REQUIRED: { key: string; phrase: RegExp; why: string }[] = [
+    {
+      key: "dest.fbCrosspostLabel",
+      phrase: /Crosspost to Pages/,
+      why:
+        "the crosspost list has no heading, so an operator meets a bare row of " +
+        "inputs with no statement of what they do",
+    },
+    {
+      key: "dest.fbBackupCost",
+      // The NUMBER, not the fact. An operator told a backup "uses more
+      // bandwidth" will not plan for twice the upload, and finds out during a
+      // broadcast.
+      phrase: /Doubles/,
+      why:
+        "the backup toggle no longer states that it doubles the destination's " +
+        "upload, which is a cost paid before anyone notices it went unmentioned",
+    },
+    {
+      key: "dest.fbBackupReconnect",
+      phrase: /reconnects the stream/,
+      why:
+        "the backup toggle no longer states that enabling it reconnects the " +
+        "stream once, so an operator learns it by watching a live broadcast drop",
+    },
+  ];
+
+  it.each(REQUIRED)("$key says what it has to say", ({ key, phrase, why }) => {
+    const got = english[key];
+    expect(got, `en.json has no ${key}. ${why}.`).toBeDefined();
+    expect(got, `en.json ${key} is "${got}", which no longer matches ${phrase}. ${why}.`).toMatch(
+      phrase,
+    );
+  });
+});

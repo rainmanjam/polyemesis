@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
 import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
 import { Switch } from "@/components/ui/switch";
@@ -1073,7 +1074,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               <Label>{t("dest.connectedAccount")}</Label>
               {platformAccounts.length > 0 ? (
                 <Select value={accountId} onValueChange={setAccountId}>
-                  <SelectTrigger>
+                  <SelectTrigger data-testid="connected-account-picker">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1708,15 +1709,35 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       })
                     }
                   >
-                    <SelectTrigger>
+                    {/* By test id, the way the rendition picker is, and for the
+                        same reason video-treatment.spec.ts records: the dialog
+                        carries a dozen comboboxes and the Label above this one
+                        is not associated with it, so a role-based locator picks
+                        whichever one happens to come first and the test dies on
+                        a timeout instead of an assertion. */}
+                    <SelectTrigger data-testid="fb-audience-picker">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unset">{t("dest.leaveOnFacebook")}</SelectItem>
-                      <SelectItem value="SELF">{t("dest.onlyMe")}</SelectItem>
-                      <SelectItem value="ALL_FRIENDS">{t("dest.friends")}</SelectItem>
-                      <SelectItem value="FRIENDS_OF_FRIENDS">{t("dest.friendsOfFriends")}</SelectItem>
-                      <SelectItem value="EVERYONE">{t("dest.public")}</SelectItem>
+                      {/* Rendered FROM lib/facebookPrivacy, not typed out here.
+                          That array is pinned to db.FacebookPrivacies by
+                          internal/db/compliance_drift_test.go, and the pin only
+                          means something while this select is the array's one
+                          consumer: an option added to the enum and missed here
+                          would otherwise be a Facebook audience no operator can
+                          choose, with every line of handling behind it dead. */}
+                      {FACEBOOK_PRIVACIES.map((p) => (
+                        // data-value because Radix puts the option's VALUE
+                        // nowhere in the DOM -- only its label. ui/e2e reads
+                        // the audiences this select is offering off the page
+                        // and round-trips each one through the server, and
+                        // reading labels instead would make that a test of the
+                        // English catalogue rather than of the enum.
+                        <SelectItem key={p.value} value={p.value} data-value={p.value}>
+                          {t(p.labelKey)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <span className="text-[10px] text-muted-foreground">
