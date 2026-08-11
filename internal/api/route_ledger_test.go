@@ -1308,18 +1308,27 @@ func classifyRoutes(t *testing.T, h http.Handler, s *Server) ([]coverageRoute, c
 	return enumerated, totals
 }
 
-// TestLedgerPreflight is the whole ledger, and TestMain runs it BEFORE whatever
-// the caller asked for -- see main_test.go. That is #161's jurisdiction problem
-// solved for this package: `go test ./internal/api -run TestSomethingElse` no
-// longer leaves every one of these obligations unchecked.
+// TestLedgerPreflight is the whole ledger, and TestMain forces it through a
+// second m.Run with the caller's -run, -skip and -count set aside, whatever the
+// caller asked for and whatever their own pass reported -- see main_test.go.
+// That is #161's jurisdiction problem solved for this package: `go test
+// ./internal/api -run TestSomethingElse` no longer leaves every one of these
+// obligations unchecked.
+//
+// It is the SECOND pass and not the first, since #217: the coverage profile is
+// written on the way out of whichever m.Run returns first, so a preflight that
+// ran first was the only thing `go test -cover ./internal/api` ever measured.
+// The consequence to be honest about is that a failing ledger no longer stops
+// the caller's tests from running -- by the time this runs, they have.
 //
 // Every failure message below names the route, the observed status, the byte
 // count and the exact edit that fixes it. A preflight with bad messages is a
 // preflight that gets deleted, and then all five issues return at once.
 func TestLedgerPreflight(t *testing.T) {
-	// ALREADY RUN, IN THIS PROCESS. TestMain forces this test through a first
-	// m.Run with the caller's -run, -skip and -count set aside; the second pass
-	// restores them and would otherwise re-drive 55 paths x 3 principals x 3
+	// ALREADY RUN, IN THIS PROCESS. TestMain drives this package twice: the
+	// caller's own selection, then a forced ^TestLedgerPreflight$. An unfiltered
+	// invocation therefore reaches this body in the caller's pass and again in
+	// the forced one, and would otherwise re-drive 55 paths x 3 principals x 3
 	// samples for a verdict already computed. Measured at ~14s of a ~42s
 	// package, which is the entire reason the unfiltered CI invocation used to
 	// cost +9.8% rather than +2%.
@@ -1330,11 +1339,18 @@ func TestLedgerPreflight(t *testing.T) {
 	// full body runs here, so the failure direction is duplicated work rather
 	// than a hole.
 	if ledgerPreflightDone {
-		t.Logf("the route coverage preflight already ran in this process, in TestMain's " +
-			"first pass, with -run/-skip/-count forced aside. Recomputing it here cannot " +
-			"reach a different verdict; see main_test.go.")
+		t.Logf("the route coverage preflight already ran in this process, in the other " +
+			"one of TestMain's two passes, with every assertion live. Recomputing it here " +
+			"cannot reach a different verdict; see main_test.go.")
 		return
 	}
+
+	// Whichever pass got here owns the computation, and it owns it even if the
+	// computation fails: the flag is set on the way out including the Goexit a
+	// t.Fatalf takes, so a red ledger is reported once rather than in both
+	// passes. TestMain cannot set this itself -- after #217 it does not know
+	// whether the caller's own -run and -skip selected this test.
+	defer func() { ledgerPreflightDone = true }()
 
 	// The liveness marker. `make preflight-guard` asserts that this line still
 	// appears under `-run XXXNoSuchTest`, under `-skip TestLedgerPreflight` and

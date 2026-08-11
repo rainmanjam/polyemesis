@@ -23,16 +23,30 @@
       "alreadyPaidDown": "The same round added a Finding-B test to internal/ffmpeg with two more environmental reasons -- a build that cannot mux AIFF/y4m/GIF, and a build that puts one of them on the allowlist -- and neither is a skip. They log and return, and the parent asserts that at least one of the three formats reached the branch under test, which is a stronger statement than three skips could make. internal/api's new tests added none: they reuse the existing fakeProbe and ffprobeOrSkip sites. Issues #187 and #190 still cover turning the remaining FFmpeg and Windows ones into failures."
     }
   ],
-  "total": 90,
+  "loweredBy": [
+    {
+      "pr": 187,
+      "from": 90,
+      "to": 88,
+      "packages": {
+        "internal/api": "8 -> 7",
+        "internal/ffmpeg": "20 -> 19"
+      },
+      "why": "#187, which the raisedBy entry above named as the real fix and deferred. ffprobeOrSkip (internal/api) and needFFmpeg (internal/ffmpeg) now call internal/testenv.FFmpegBinary, which SKIPS on a machine without the binary and FAILS, naming it, when POLYEMESIS_REQUIRE_FFMPEG is set -- which .github/workflows/ci.yml's go job now does. The two skip calls moved into internal/testenv, which this census excludes by design, so the count falls by two. Capability skips are deliberately untouched: an ffmpeg that cannot mux h264/aac is still an environment fact in CI, and only a binary's outright absence is a defect.",
+      "notPaidDown": "The two Windows sites are still #190 and still skips, and sampleMedia's capability skips are still skips. This entry lowers the ratchet rather than closing the class.",
+      "handEditedRatherThanRegenerated": "`go test ./internal/testenv -run TestNoNewBareSkipCanLand -update-skips` produces exactly these numbers and DELETES the raisedBy array above on the way past: skipCensus has no field for it, so writeSkipCensus round-trips the file through a struct that cannot see it. The written reasons are the entire reviewable half of this ratchet, so the three numbers were lowered by hand instead. Filed as a finding on the same round that filed #205, which is the same shape one artifact over."
+    }
+  ],
+  "total": 88,
   "byPackage": {
     "cmd/polyemesis": 1,
-    "internal/api": 8,
+    "internal/api": 7,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
     "internal/db": 1,
     "internal/engine": 6,
-    "internal/ffmpeg": 20,
+    "internal/ffmpeg": 19,
     "internal/media": 5,
     "internal/meters": 3,
     "internal/playlistmedia": 4,

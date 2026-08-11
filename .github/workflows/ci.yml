@@ -58,6 +58,21 @@ jobs:
     # Above the 15m per-package go test timeout below, so Go's diagnostic
     # panic wins the race against this.
     timeout-minutes: 25
+    env:
+      # #187. The comment below the checkout has said since the beginning that a
+      # missing FFmpeg makes those tests SKIP, "which is worse, because the run
+      # goes green having checked nothing" -- and then nothing in this file made
+      # that impossible. This does. With it set, internal/testenv.FFmpegBinary
+      # fails and names the binary instead of skipping, so deleting the install
+      # step above turns the upload gate's tests red rather than silent.
+      #
+      # It is set on THIS job only. The crossplatform job installs FFmpeg from
+      # three different package managers and its post-install checks now assert
+      # ffprobe as well, but arming a hard failure on runner images I have not
+      # measured is how a gate becomes a revert; the full suite runs here, and
+      # here is where the guarantee is worth having. Widening it is a small
+      # change once someone has watched the three images pass with it.
+      POLYEMESIS_REQUIRE_FFMPEG: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -100,6 +115,13 @@ jobs:
           # Fail loudly rather than silently testing a build without SRT.
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
+          # ffprobe TOO, and not because the install could half-succeed. #187:
+          # every test that proves the upload probe gate works starts by looking
+          # ffprobe up and skipping if it is absent, so an ffprobe that stopped
+          # arriving would have taken the whole gate's verification with it while
+          # this step still printed an ffmpeg version and passed. The one binary
+          # that was verified was the one the skips did not turn on.
+          ffprobe -hide_banner -version | head -1
 
       # The gate is "gofmt named no files", and it has to rest on gofmt having
       # RUN. It used to be `gofmt -l ./cmd ./internal | tee /tmp/fmt && test !
@@ -129,7 +151,7 @@ jobs:
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
       #
-      # internal/api forces its route coverage ledger through a first m.Run with
+      # internal/api forces its route coverage ledger through a SECOND m.Run with
       # the caller's -run, -skip and -count set aside, so that no test filter can
       # switch the ledger off. `make preflight-guard` proves that mechanism is
       # still wired by running the package under each of those three switches and
@@ -143,6 +165,23 @@ jobs:
       # almost nothing.
       - name: The route-coverage preflight is still wired
         run: make preflight-guard
+
+      # THE OTHER HALF OF THE SAME MECHANISM. #217/#223.
+      #
+      # The preflight runs in a SECOND m.Run rather than a first, because the
+      # coverage profile is written by testing.M.after under m.afterOnce, on the
+      # way out of whichever pass returns first. While the forced pass went
+      # first, `go test -cover ./internal/api` reported 22.0% for zero tests, for
+      # one test and for the whole suite alike -- a constant wearing a
+      # percentage, which #219 already lost a round to.
+      #
+      # Reordering is a one-line change and reverting it is a one-line change,
+      # so it needs a running gate rather than a comment. This one runs the
+      # package under three different selections and requires the numbers to
+      # differ. ~60s, dominated by the unfiltered probe, which is the number
+      # anybody would actually quote.
+      - name: internal/api coverage measures the tests, not the preflight
+        run: make coverage-instrument-guard
 
       # -race because the engine reconciles from several goroutines and a data
       # race here shows up in production as a stream that stops for one viewer.
@@ -287,8 +326,22 @@ jobs:
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
+      # BOTH binaries, on all three. #187: the skip helpers key off ffprobe and
+      # this step only ever ran ffmpeg, so the binary that decides whether the
+      # upload gate's tests run at all was the one nothing here looked at. The
+      # go job additionally sets POLYEMESIS_REQUIRE_FFMPEG so a missing one is a
+      # test failure rather than a skip; this job does not, deliberately -- see
+      # the note on that env block.
+      #
+      # TWO STEPS rather than a two-line one. The default shell on the Windows
+      # runner is pwsh, whose wrapper exits with the LAST command's status, so a
+      # two-line block would have reported ffprobe's result and discarded
+      # ffmpeg's -- the same discarded-exit-status shape as the gofmt pipeline in
+      # the go job. A step boundary checks each one.
       - name: FFmpeg version
         run: ffmpeg -hide_banner -version
+      - name: ffprobe version
+        run: ffprobe -hide_banner -version
 
       - run: go build ./...
       - run: go vet ./...

@@ -22,6 +22,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
@@ -34,13 +35,18 @@ import (
 // somewhere to be asserted, and it supplies the binary rather than replacing
 // the logic, so what runs here is the real handler path.
 
+// ffprobeOrSkip resolves the real ffprobe these tests gate with.
+//
+// #187: it skips on a machine that has none, and FAILS when
+// POLYEMESIS_REQUIRE_FFMPEG is set -- which .github/workflows/ci.yml does. CI
+// installs ffprobe on every job and nothing asserted that these tests then ran,
+// so deleting the install step would have left the upload gate unverified with
+// green CI. The decision lives in internal/testenv because internal/ffmpeg's
+// needFFmpeg had the identical hole.
 func ffprobeOrSkip(t *testing.T) string {
 	t.Helper()
-	bin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
-	return bin
+	return testenv.FFmpegBinary(t, "ffprobe",
+		"ffprobe is not installed, so there is no prober for the upload gate to gate with")
 }
 
 // probeServer is mediaServer with the prober wired up, and returns the Server
