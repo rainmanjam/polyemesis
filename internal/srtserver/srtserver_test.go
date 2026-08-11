@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"sync"
 	"testing"
 	"time"
 
 	srt "github.com/datarhei/gosrt"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // These are real SRT connections over a real socket, not fakes. That is worth
@@ -42,27 +42,23 @@ func (r *recorder) bytes() []byte {
 	return append([]byte(nil), r.data...)
 }
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	c, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
-	}
-	defer c.Close()
-	return c.LocalAddr().(*net.UDPAddr).Port
-}
-
 // serve starts a server over a fixed target set.
+//
+// #211: the port is HELD until the statement before Start, rather than being
+// handed back by a helper and re-bound several statements later. The window in
+// which something else can take it is now one line long. It is not zero, and
+// internal/testenv/ports.go says why that cannot honestly be arranged.
 func serve(t *testing.T, targets ...Target) (*Server, string) {
 	t.Helper()
-	port := freePort(t)
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	res := testenv.ReserveUDP(t)
+	addr := fmt.Sprintf("127.0.0.1:%d", res.Port())
 
 	lookup := ConstantTimeLookup(
 		func() []Target { return targets },
 		func(tg Target) []string { return []string{tokenFor(tg)} },
 	)
 	s := New(quietLog(), addr, lookup)
+	res.Release()
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

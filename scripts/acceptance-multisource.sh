@@ -187,6 +187,9 @@ else
 fi
 
 step "5. Survives a container replacement"
+# Taken BEFORE the container is destroyed, so the check below compares the
+# install against itself rather than against a number typed into this file.
+BEFORE_SOURCES=$(drive tokens "$BASE" | grep -c . || true)
 docker rm -f "$CTR" >/dev/null 2>&1
 docker run -d --name "$CTR" --network "$NET" \
   -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" -p "6100:6100/udp" \
@@ -198,10 +201,19 @@ sleep 14
 # reason that had nothing to do with persistence. A check that cannot fail is
 # worse than one that is missing, because it reads as coverage.
 AFTER=$(drive tokens "$BASE" | grep -c . || true)
-if [ "${AFTER:-0}" -ge 2 ] 2>/dev/null; then
+# A FLOOR AND A CEILING, from this run's own baseline. Issue #226 is the sibling
+# of this check in acceptance-failover.sh: `-ge 2` on a count reads as coverage
+# and admits every value above 2, so a replacement that DUPLICATED both sources
+# -- four rows where two are wanted -- would have printed "both sources came
+# back (4)". BEFORE_SOURCES is measured rather than written down, because the
+# number this scenario creates is a fact about the script above, not a constant
+# worth restating here.
+if [ "${AFTER:-0}" -eq "${BEFORE_SOURCES:-0}" ] && [ "${AFTER:-0}" -ge 2 ] 2>/dev/null; then
   ok "both sources came back after the container was destroyed ($AFTER sources)"
+elif [ "${AFTER:-0}" -lt "${BEFORE_SOURCES:-0}" ] 2>/dev/null; then
+  bad "only $AFTER of $BEFORE_SOURCES source(s) after restart; a source did not persist"
 else
-  bad "only $AFTER source(s) after restart; a source did not persist"
+  bad "$AFTER source(s) after restart against $BEFORE_SOURCES before it: the replacement did not restore the install, it multiplied it"
 fi
 
 step "6. The listener can be moved, and both programmes follow it"

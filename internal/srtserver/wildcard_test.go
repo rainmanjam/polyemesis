@@ -7,6 +7,8 @@ import (
 	"net"
 	"strconv"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // Issue #28 was filed as "the SRT listener may bind IPv6-only", on the evidence
@@ -79,14 +81,12 @@ func TestBothFamiliesCanHoldTheSamePort(t *testing.T) {
 	defer p6.Close()
 }
 
+// #211: one implementation, in internal/testenv, instead of four copies of it.
+// The window between the release and the real bind is unchanged and is
+// documented there rather than here.
 func freeUDPPort(t *testing.T) int {
 	t.Helper()
-	c, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("pick a port: %v", err)
-	}
-	defer c.Close()
-	return c.LocalAddr().(*net.UDPAddr).Port
+	return testenv.FreeUDPPort(t)
 }
 
 // The end-to-end proof, and the case issue #28 is actually about: an IPv4

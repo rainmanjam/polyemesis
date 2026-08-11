@@ -15,6 +15,35 @@
 # Deliberately REPORT-ONLY. It does not fail on a bad rate, because nobody
 # knows yet what a bad rate is -- that is the thing being measured. Baking in a
 # threshold now would be asserting the answer before taking the measurement.
+#
+# ----------------------------------------------------------------- SCOPE
+#
+# ISSUE #206. WHAT THIS INSTRUMENT CANNOT SEE, AT ANY NUMBER OF RUNS. Three
+# facts about the file below, each individually reasonable, combine into a blind
+# spot that is structural rather than statistical:
+#
+#   - the suite input is refused unless it matches ^acceptance[a-z0-9-]*$
+#   - it executes ./scripts/$SUITE.sh
+#   - the measure job is runs-on: ubuntu-latest
+#
+# So it cannot run `go test ./internal/...`, and it cannot run on macOS or
+# Windows. For a Go-test flake (#172) and for a Windows-only flake (#180) the
+# detection probability here is ZERO at `runs` anywhere in 1..40 -- and both of
+# those are classes this repository has actually been bitten by. The flake
+# discipline could not observe the class it was used to prosecute.
+#
+# That is NOT fixed here. Fixing it means a second matrix dimension over runner
+# OS and a second execution mode for Go packages, which is a different workflow
+# rather than a bigger one. What is fixed is the report no longer implying it:
+# the summary now names its own scope and prints the DETECTABLE FLOOR, so a
+# green result reads as "no rate above X% is present in this suite on ubuntu"
+# rather than as "not flaky".
+#
+# The floor is poly_detectable_floor in scripts/lib-observe.sh, which
+# scripts/test-lib-observe.sh checks against the closed form. At the default of
+# 5 runs it is about 45%; at the cap of 40 it is about 7.2%, which is still
+# above the roughly 7% per-run rate #180's incident survey implies. The
+# instrument cannot reach that rate even at its own maximum, and now says so.
 name: flake rate
 
 on:
@@ -179,10 +208,32 @@ jobs:
             exit 1
           fi
 
+          # #206: what this run could NOT have detected. A green report is read
+          # as "the suite is not flaky", and at the default of 5 runs it does
+          # not support that: nothing below a per-run rate of about 45% is
+          # caught with 95% confidence. Sourced rather than reimplemented so the
+          # arithmetic has a test -- scripts/test-lib-observe.sh checks it
+          # against the closed form p = 1 - (1-c)^(1/N).
+          . ./scripts/lib-observe.sh
+          floor=$(poly_detectable_floor "$measured" 95) || floor=""
+
           {
             echo "### $SUITE"
             echo
             echo "**$fail failed / $measured runs**, unchanged tree, same runner image."
+            echo
+            if [ -n "$floor" ]; then
+              echo "Detectable floor at $measured runs: **${floor}%**. A per-run failure"
+              echo "rate below that is caught less than 95% of the time, so a result of"
+              echo "0 failures bounds the rate rather than clearing it."
+            else
+              echo "_The detectable floor could not be computed for $measured runs._"
+            fi
+            echo
+            echo "Scope: \`./scripts/$SUITE.sh\` on ubuntu-latest only. This workflow cannot"
+            echo "run Go package tests and cannot run on macOS or Windows, so for a Go-test"
+            echo "flake or a Windows-only flake its detection probability is zero at any"
+            echo "number of runs -- see issue #206."
             echo
             echo '| run | result | duration |'
             echo '|---|---|---|'

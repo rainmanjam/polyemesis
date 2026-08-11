@@ -15,6 +15,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The manager owns the multi-source lifecycle: which engines exist, and the one
@@ -276,25 +277,16 @@ func TestBothListenersBindWithoutBeingAskedTo(t *testing.T) {
 
 // freeUDPPort asks the kernel for a port and gives it straight back. Racy in
 // principle, fine in practice, and far less racy than a hard-coded 6000.
+// #211: one implementation, in internal/testenv, instead of four copies of it.
 func freeUDPPort(t *testing.T) int {
 	t.Helper()
-	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatalf("no free udp port: %v", err)
-	}
-	defer c.Close()
-	return c.LocalAddr().(*net.UDPAddr).Port
+	return testenv.FreeUDPPort(t)
 }
 
 // freeTCPPort is the same trick for the RTMP listener, which is TCP.
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("no free tcp port: %v", err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	return testenv.FreeTCPPort(t)
 }
 
 func TestPortZeroLeavesTheListenerDownRatherThanBoundAtRandom(t *testing.T) {

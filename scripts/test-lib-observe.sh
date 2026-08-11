@@ -130,8 +130,96 @@ grep -q "observed 1 distinct run(s)" "$WORK/g" \
   && ok "a signal that never changed reports one run, not one line per sample" \
   || bad "the trajectory did not collapse a stable signal"
 
+step "8. poly_hold_field: a field that has stopped moving is reported as settled"
+# The three cases below are issue #226's, and the order matters. The one that
+# earns the check its keep is case 9: a floor of `-ge 2` on a switch count
+# reported success on a tier that switched 80 times, so the assertion that
+# matters is the one that FAILS on a value which will not sit still.
+line_steady()      { printf 'primary 6 true 0'; }
+line_field_moves() { printf 'primary %d true 0' "$(tick)"; }
+line_other_moves() { printf 'primary 6 true %d' "$(tick)"; }
+
+reset; poly_hold_field "the switch count" 2 1 4 line_steady > "$WORK/h" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] && ok "a field that holds one value returns 0" || bad "expected rc=0, got $rc"
+[ "$POLY_HELD_VALUE" = "6" ] \
+  && ok "the settled value is reported for the caller's message ($POLY_HELD_VALUE)" \
+  || bad "POLY_HELD_VALUE was '$POLY_HELD_VALUE', wanted 6"
+[ -s "$WORK/h" ] \
+  && bad "a settled field printed $(wc -l < "$WORK/h") line(s); it must be silent" \
+  || ok "a settled field is silent"
+
+step "9. poly_hold_field: a field that will not sit still is a failure, not a floor"
+reset; start9=$(date +%s)
+poly_hold_field "the switch count" 2 1 3 line_field_moves > "$WORK/i" 2>&1
+rc=$?
+elapsed9=$(( $(date +%s) - start9 ))
+[ "$rc" -eq 1 ] \
+  && ok "a field that changes on every sample returns 1" \
+  || bad "flapping was reported as settled (rc=$rc) -- this is exactly issue #226"
+[ "$POLY_HELD_CHANGES" -gt 1 ] \
+  && ok "the report counts the changes it saw ($POLY_HELD_CHANGES)" \
+  || bad "POLY_HELD_CHANGES was $POLY_HELD_CHANGES; a flapping field changed more than once"
+grep -q "never held one value" "$WORK/i" \
+  && ok "the failure says what was wrong rather than printing a bare count" \
+  || bad "the failure did not name the property it was measuring"
+[ "$elapsed9" -le 6 ] \
+  && ok "the wait is bounded by its ceiling (${elapsed9}s against a ceiling of 3s)" \
+  || bad "the wait ran ${elapsed9}s past a 3s ceiling"
+
+step "10. poly_hold_field: only the named field decides"
+# The whole LINE is recorded and a SINGLE FIELD is compared. Without the
+# distinction this check would fail whenever any unrelated column moved -- and
+# in the failover suite the destination restart count in field 4 moves for
+# reasons that have nothing to do with switching.
+reset; poly_hold_field "the switch count" 2 1 4 line_other_moves > "$WORK/j" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] \
+  && ok "movement in an unwatched field does not count as instability" \
+  || bad "a field that never moved was reported unstable because its neighbours did (rc=$rc)"
+
+step "11. poly_detectable_floor: what a green flake report did NOT measure"
+# The numbers are checked against the closed form rather than against whatever
+# the function currently prints, which is the difference between a test and a
+# transcript. p = 1 - (1-c)^(1/N):
+#   N=1,  c=95  ->  95.0   one run catches only a certainty
+#   N=5,  c=95  ->  45.1   the workflow's default; this is the headline
+#   N=40, c=95  ->   7.2   its cap, still above the ~7% rate #180 implies
+[ "$(poly_detectable_floor 1)" = "95.0" ] \
+  && ok "one run detects nothing below 95%" \
+  || bad "floor(1) = $(poly_detectable_floor 1), want 95.0"
+[ "$(poly_detectable_floor 5)" = "45.1" ] \
+  && ok "the workflow default of 5 runs detects nothing below 45.1%" \
+  || bad "floor(5) = $(poly_detectable_floor 5), want 45.1"
+[ "$(poly_detectable_floor 40)" = "7.2" ] \
+  && ok "even the cap of 40 runs cannot see the ~7% rate issue #180 implies" \
+  || bad "floor(40) = $(poly_detectable_floor 40), want 7.2"
+
+# Monotonicity, because a floor that did not fall with more runs would be
+# describing something other than repetition.
+f5=$(poly_detectable_floor 5); f20=$(poly_detectable_floor 20)
+awk -v a="$f5" -v b="$f20" 'BEGIN{exit !(a > b)}' \
+  && ok "more runs lower the floor ($f5% -> $f20%)" \
+  || bad "the floor did not fall from 5 runs ($f5) to 20 ($f20)"
+
+# A confidence that is not 95 has to move it, or the second argument is decoration.
+awk -v a="$(poly_detectable_floor 5 99)" -v b="$f5" 'BEGIN{exit !(a > b)}' \
+  && ok "demanding more confidence raises the floor" \
+  || bad "the confidence argument changed nothing"
+
+# Garbage in, nothing out. A floor printed from an unparseable run count would
+# be a number in a report with no measurement behind it, which is the exact
+# disease this whole function is for.
+for junk in "" "abc" "-1" "0"; do
+  if out=$(poly_detectable_floor "$junk" 2>&1) && [ -n "$out" ]; then
+    bad "poly_detectable_floor '$junk' printed '$out' instead of refusing"
+  else
+    ok "poly_detectable_floor refuses '$junk'"
+  fi
+done
+
 total=$((pass + fail))
-EXPECTED_CHECKS=12
+EXPECTED_CHECKS=29
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
