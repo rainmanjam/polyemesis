@@ -61,6 +61,35 @@ func TestFilePullReachesTheRelayWithTheProtocolPinOn(t *testing.T) {
 	dir := t.TempDir()
 	buildSample(t, filepath.Join(dir, "sample.ts"), "-t", "1")
 
+	// AND A RETRYING REMOVAL ON TOP OF THAT, because reaping the child is not
+	// sufficient on Windows. This test failed on windows-latest with
+	//
+	//	TempDir RemoveAll cleanup: unlinkat ...\ffmpeg.stderr:
+	//	The process cannot access the file because it is being used by another
+	//	process.
+	//
+	// after stop() had already waited for cmd.Wait to return -- so FFmpeg was
+	// reaped and the handle was not FFmpeg's. It is the window
+	// uploads.renameStaged documents and retries for: a file whose last byte
+	// was written milliseconds ago is exactly what an on-access scanner opens,
+	// and CI runners run one.
+	//
+	// t.TempDir's own cleanup is a single RemoveAll with no retry, so it cannot
+	// wait that window out. This runs BEFORE it -- Cleanup is LIFO and TempDir
+	// registered first -- and leaves it nothing to do. Registered after the
+	// defers below for the same reason: every defer, including stop(), has
+	// already run by the time any Cleanup does.
+	t.Cleanup(func() {
+		for i := 0; i < 100; i++ {
+			if err := os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		// Not a failure. The managed cleanup runs next and reports its own
+		// error; saying so twice would just be noise.
+	})
+
 	// The relay socket is bound HERE, and the port comes out of the bind rather
 	// than out of a guess: a hard-coded port is a test that fails on whichever
 	// machine is already using it.
