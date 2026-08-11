@@ -169,7 +169,10 @@ func recordEncoders() {
 // about one encoder rather than a blanket failure.
 func refuseCase(relay string) {
 	src := startSource(relay)
-	defer func() { _ = src.Process.Kill() }()
+	// Kill AND Wait. Kill only asks; until something reaps the child it is a
+	// zombie holding a slot in this process's table, and on a driver that
+	// starts several children in sequence that is a leak with a name (#197).
+	defer func() { _ = src.Process.Kill(); _ = src.Wait() }()
 	waitForProbe()
 
 	hwID := newRendition("nvenc-720p", "h264_nvenc", 1280, 720)
@@ -202,7 +205,10 @@ func refuseCase(relay string) {
 // as though it had never asked.
 func fallbackCase(relay string) {
 	src := startSource(relay)
-	defer func() { _ = src.Process.Kill() }()
+	// Kill AND Wait. Kill only asks; until something reaps the child it is a
+	// zombie holding a slot in this process's table, and on a driver that
+	// starts several children in sequence that is a leak with a name (#197).
+	defer func() { _ = src.Process.Kill(); _ = src.Wait() }()
 	waitForProbe()
 
 	id := newRendition("fallback-720p", "libx264", 1280, 720)
