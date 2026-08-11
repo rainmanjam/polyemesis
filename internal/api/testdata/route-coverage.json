@@ -4,6 +4,7 @@
   "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
+  "nonGetDifferentialFloor": 20,
   "unstableCeiling": 3,
   "inertCeiling": 11,
   "varianceExemptCeiling": 2,
@@ -289,12 +290,12 @@
     {
       "method": "PUT",
       "pattern": "/api/v1/destinations/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-differential"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/destinations/{id}/expert",
-      "coverage": "denied-by-method"
+      "coverage": "denied-differential"
     },
     {
       "method": "GET",
@@ -314,7 +315,7 @@
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/expert/preview",
-      "coverage": "denied-by-method"
+      "coverage": "denied-differential"
     },
     {
       "method": "POST",
@@ -669,7 +670,7 @@
     {
       "method": "PUT",
       "pattern": "/api/v1/playout/publish",
-      "coverage": "denied-by-method"
+      "coverage": "denied-differential"
     },
     {
       "method": "POST",
@@ -804,7 +805,7 @@
     {
       "method": "PUT",
       "pattern": "/api/v1/settings",
-      "coverage": "denied-by-method"
+      "coverage": "denied-differential"
     },
     {
       "method": "PUT",
@@ -859,12 +860,12 @@
     {
       "method": "PUT",
       "pattern": "/api/v1/sources/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-differential"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/sources/{id}/token",
-      "coverage": "denied-by-method"
+      "coverage": "denied-differential"
     },
     {
       "method": "GET",
@@ -2021,9 +2022,9 @@
     },
     {
       "id": "G3",
-      "what": "the VALUE sweep is GET-only. The non-GET method+pattern pairs are enumerated and classified in this ledger, but their response BODIES are not scanned for sentinels.",
-      "whySafe": "swept by hand this round: only admin principals receive sentinels from a non-GET handler, and a read token is refused every non-GET route by the scope rule before a body is built at all.",
-      "whatWouldMakeItUnsafe": "a non-GET handler that a read scope may call and that returns a body built from stored configuration.",
+      "what": "76 of the 83 non-GET pairs a read scope is refused are classified on the 403 alone. That is an INVARIANT: it records the refusal and records nothing about whether the pair would disclose anything to a principal entitled to it, so it stays green over an empty database.",
+      "whySafe": "all 83 were driven as ADMIN with {} against a per-pair fixture. The 7 that answered 2xx carrying a planted credential are now the census in nonGetDifferentialCensus, driven at both privilege levels with the credential REQUIRED present and the 403 required beside it, and the census is complete over that measurement. Of the other 76, 18 answered 2xx carrying no planted credential -- a status envelope, a job id, a list -- and requiring a sentinel from those would mean planting fixture data for the purpose, which reviews identically to a real proof.",
+      "whatWouldMakeItUnsafe": "the residual 58 are the honest hole: they answered 4xx or 5xx (17 404, 17 400, 15 503, 8 403, 1 500) because this fixture has no such row, the subsystem is not running, or {} is not a payload they accept -- so the drive never reached a handler that builds a body and the measurement cannot say what they would disclose. Also unsafe: any non-GET handler that begins echoing stored configuration back in a 2xx body, which is the normal REST idiom and the shape PUT /api/v1/settings already has. Both are re-found by the same admin drive that built the census, which is a measurement rather than a judgement call.",
       "issue": "#157"
     },
     {
