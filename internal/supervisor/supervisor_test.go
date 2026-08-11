@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -663,7 +662,7 @@ func TestStartDelayAppliesToTheFirstSpawnOnly(t *testing.T) {
 		defer func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			p.Stop(ctx)
+			_ = p.Stop(ctx)
 		}()
 
 		waitFor(t, "the first spawn", func() bool { return p.Status().Restarts >= 1 })
@@ -703,7 +702,7 @@ func TestStartDelayIsInterruptedByAStop(t *testing.T) {
 	p.Start()
 
 	begin := time.Now()
-	p.Stop(context.Background())
+	_ = p.Stop(context.Background())
 	if waited := time.Since(begin); waited > 2*time.Second {
 		t.Errorf("Stop took %s; it waited out the start delay instead of cancelling it", waited)
 	}
@@ -718,31 +717,45 @@ func TestStartDelayIsInterruptedByAStop(t *testing.T) {
 // alive and still writing means two publishers on one input -- a corrupted
 // timeline rather than a missing one. Before this, the only record was a log
 // line, which nothing can branch on. See issue #138.
+// NO LONGER SKIPPED ON WINDOWS, and the skip was not deleted -- it was made
+// unnecessary. Recorded because the reasoning is the whole of issue #192.
+//
+// The skip's objection was real. signalGroup's Windows path is
+// GenerateConsoleCtrlEvent (proc_windows.go:66-74); with no attached console it
+// fails and falls straight through to killGroup. TerminateProcess is
+// asynchronous by contract, but the child could still be reaped fast enough for
+// `done` to be ready alongside the already-expired ctx, and Go then picks an arm
+// AT RANDOM. The failure would read "Stop reported a clean stop on an expired
+// deadline", indistinguishable from a real regression.
+//
+// The issue proposed closing that by MEASURING the runner: does
+// GenerateConsoleCtrlEvent fail there, how long does the fall-through killGroup
+// take to close `done`. That answer would have been a statistic about one
+// runner on one day, and the next change to the reap path would invalidate it
+// silently.
+//
+// The construction below removes the race instead of measuring it. `done` is
+// closed by supervise()'s defer, which runs only after runOnce() returns, which
+// cannot happen while a drain goroutine is still running -- and this test's
+// stdout handler blocks until t.Cleanup releases it. So from p.Start() until the
+// end of this test, the reap arm is PROVABLY not ready: not unlikely, not
+// unlikely-on-a-measured-runner, but unreachable. Whether the child dies in a
+// microsecond or not at all no longer bears on which arm the select takes, so
+// the platform question the skip was waiting on stops being a question.
+//
+// The rest of the test is unchanged, and the deaf fake and its readiness
+// handshake stay: they are what makes the SIGTERM genuinely unheeded, which is
+// the condition the deadline arm exists for. What the blocked drain adds is only
+// that the arm is chosen for a reason this test controls.
 func TestStopReportsWhenItHadToKillTheChild(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// NOT "no SIGTERM semantics on Windows" -- that was false, and being
-		// false it made the deadline arm look like a Unix curiosity when it is
-		// the arm Windows takes in PRODUCTION: under the SCM (service_windows.go
-		// :50-82) a stop request arrives with a deadline already ticking.
-		//
-		// The real reason to skip is that arm selection here is not yet proven
-		// deterministic on a console-less runner. signalGroup's Windows path is
-		// GenerateConsoleCtrlEvent (proc_windows.go:66-74), and when that fails
-		// -- which it does with no attached console -- it falls straight
-		// through to killGroup. TerminateProcess is asynchronous by contract,
-		// but the child may still be reaped fast enough for `done` to race the
-		// already-expired ctx at the select, and this test would then fail
-		// claiming Stop reported a clean stop on an expired deadline.
-		//
-		// Preconditions for un-skipping, recorded so the next person does not
-		// have to rediscover them: prove deterministic arm selection on a
-		// console-less runner, and land the fakeDeaf readiness handshake first
-		// (done: see testfake_test.go) so "deaf" is verified rather than
-		// assumed. Tracked as its own issue; deliberately not gambled on the
-		// day this repository is prosecuting flakes.
-		t.Skip("deadline-arm selection is not yet proven deterministic on a console-less Windows runner")
-	}
-	p := testProcess(t, fakeDeaf(30*time.Second), Spec{})
+	// Closed by the cleanup registered below, which runs BEFORE testProcess's
+	// (t.Cleanup is LIFO and this is registered later), so the drain is released
+	// and runOnce unwinds while the Process is still the one being torn down.
+	release := make(chan struct{})
+	p := testProcess(t, fakeDeaf(30*time.Second), Spec{
+		StdoutHandler: func(io.Reader) error { <-release; return nil },
+	})
+	t.Cleanup(func() { close(release) })
 	p.Start()
 	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
 	// StateRunning only means cmd.Start() returned. Wait for the child to say
