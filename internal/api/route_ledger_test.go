@@ -1058,6 +1058,22 @@ type nonTrieProbe struct {
 	// which is the whole of #167: the columns used to be one column, and it was
 	// the one nobody was running.
 	bare, built string
+	// terminal is which of the mux's non-trie terminals this probe is a WITNESS
+	// for, and it is stamped by the slice the probe lives in rather than typed
+	// on the row. It is the join between these probes and the population
+	// recordRegistrations derives: a terminal with no probe, and a probe naming
+	// a terminal this build did not register, both fail by name in
+	// TestEveryNonTrieTerminalIsDerivedAndWitnessed. Before #156 these slices
+	// WERE the population, so neither failure existed.
+	terminal string
+}
+
+// allNonTrieProbes is every witness this package drives against the mux's
+// non-trie terminals, in one place, because the derived population has to be
+// reconciled against all of them and not against whichever slice a caller
+// remembered.
+func allNonTrieProbes() []nonTrieProbe {
+	return append(append(notFoundProbes(), assetProbe()), methodNotAllowedProbes()...)
 }
 
 // The OBSERVABLE branches of internal/web.HandlerFor. Every one of them is
@@ -1082,26 +1098,26 @@ const (
 // a real bundle embedded, because Vite fingerprints its output and no file of
 // that name is ever produced. The name was aspirational in both configurations.
 func notFoundProbes() []nonTrieProbe {
-	return []nonTrieProbe{
-		{http.MethodGet, "/", "the SPA root", webBranchUINotBuilt, webBranchSPAIndex},
+	return stampTerminal(terminalNotFound, []nonTrieProbe{
+		{http.MethodGet, "/", "the SPA root", webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodGet, "/assets/app.js", "a bundled asset PATH -- and not a bundled asset: " +
 			"Vite fingerprints its output, so nothing is ever named this. It reaches the " +
 			"asset branch in neither configuration, which is why assetProbe below exists",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodGet, "/.env", "the credential file every scanner asks for first",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodGet, "/debug/pprof/", "the profiler surface, if anything ever mounted it",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodGet, "/metrics", "the Prometheus convention, unrouted here",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodGet, "/API/V1/SETTINGS", "a case-varied spelling of a real route",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodPost, "/.env", "an unmatched METHOD as well as an unmatched path",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodDelete, "/anything", "a destructive method on the catch-all",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
 		{http.MethodGet, "/api/v1/no-such-route", "an unrouted path INSIDE the API prefix",
-			webBranchAPIJSON404, webBranchAPIJSON404},
+			webBranchAPIJSON404, webBranchAPIJSON404, ""},
 		// THE TENTH PROBE, added because the branch table made its absence
 		// legible. Opening a DIRECTORY under the sub-FS succeeds, so this used to
 		// reach http.FileServer and be answered 200 with an index of the bundle
@@ -1109,8 +1125,19 @@ func notFoundProbes() []nonTrieProbe {
 		// internal/web now falls a directory through to the SPA branch, and this
 		// row is what pins it from the ledger's side.
 		{http.MethodGet, "/assets/", "the asset ROOT: a directory, not a file",
-			webBranchUINotBuilt, webBranchSPAIndex},
+			webBranchUINotBuilt, webBranchSPAIndex, ""},
+	})
+}
+
+// stampTerminal sets the terminal on a whole slice, because it is a property of
+// which surface the slice is about rather than of the individual row. A field
+// typed once per row is a field that can be typed wrong, and this ledger has
+// already deleted two of those.
+func stampTerminal(name string, probes []nonTrieProbe) []nonTrieProbe {
+	for i := range probes {
+		probes[i].terminal = name
 	}
+	return probes
 }
 
 // assetProbe is the tenth probe, and it exists because the ninth was named for a
@@ -1121,9 +1148,10 @@ func notFoundProbes() []nonTrieProbe {
 // another 404. The branch assertion drives it in the built column, where it is
 // the ONLY probe that reaches the immutable-cache branch.
 func assetProbe() nonTrieProbe {
-	return nonTrieProbe{http.MethodGet, "/assets/index-abc123.js",
+	return stampTerminal(terminalNotFound, []nonTrieProbe{{http.MethodGet,
+		"/assets/index-abc123.js",
 		"a fingerprinted bundle, the only path shape that reaches the asset branch",
-		webBranchUINotBuilt, webBranchAsset}
+		webBranchUINotBuilt, webBranchAsset, ""}})[0]
 }
 
 // builtUIFS is a synthetic `dist` -- an index.html and one fingerprinted bundle
@@ -1294,7 +1322,7 @@ func sortedSet(m map[string]bool) []string {
 // publishes the table -- and the behavioural change is filed. What was true
 // before is that no test drove this response class at all.
 func methodNotAllowedProbes() []nonTrieProbe {
-	return []nonTrieProbe{
+	return stampTerminal(terminalMethodNotAllowed, []nonTrieProbe{
 		// No bare/built branch: these never reach internal/web at all. chi's
 		// methodNotAllowed answers them before r.NotFound is consulted, which is
 		// the whole of G4.
@@ -1302,7 +1330,7 @@ func methodNotAllowedProbes() []nonTrieProbe {
 			why: "a GET-only route answered 405 with Allow: GET"},
 		{method: http.MethodPut, path: "/api/v1/upgrade/stage",
 			why: "a POST-only route answered 405 with Allow: POST"},
-	}
+	})
 }
 
 // ------------------------------------------------------------------ the shapes
@@ -2077,6 +2105,16 @@ func TestLedgerPreflight(t *testing.T) {
 	// 1. THE DISCHARGE RULE. #164, #166, and the excuse half of #163. Driven for
 	// EVERY method+pattern pair the excuse covers, not one pair per entry.
 	assertExcusesDischargeByRunning(t, h, s, read)
+
+	// 1b. THE POPULATION IS DERIVED, NOT REMEMBERED. #156. Both halves run from
+	// here as well as standing alone, for the two reasons measured on
+	// ledger_ratchet_test.go: a file nothing references is deletable in silence,
+	// and TestMain forces only ^TestLedgerPreflight$. The AST half needs no
+	// server and the two drives share this one, so the preflight's wall clock
+	// does not move.
+	assertRegisteredPopulationEqualsWalk(t, s)
+	assertNonTrieTerminalsAreWitnessed(t, s)
+	TestHandlerRegistersOnlyThroughTheRecordedSeam(t)
 
 	// 2. ENUMERATE AND CLASSIFY.
 	enumerated, totals := classifyRoutes(t, h, s)
