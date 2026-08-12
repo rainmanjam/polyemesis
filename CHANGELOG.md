@@ -21,6 +21,18 @@ its first tagged release.
   the same scoping the settings gate uses: what the save introduces, never state
   you inherited. ([#255](https://github.com/rainmanjam/polyemesis/issues/255))
 
+- **And the check in front of all three routes was reading the URL, not the
+  file.** It matched the exact spelling the Library hands you and split it at the
+  first `/`, while the engine resolves the same URL through `filepath.Join` — so
+  `file://uploads/./show.ts`, `file://uploads//show.ts` and
+  `file://./uploads/show.ts` all opened the identical file and none of them was
+  checked. One typed dot was the whole bypass, on the gate #201 shipped as well
+  as on the two above, and the source card stayed silent about it too. The check
+  now asks the engine what path a URL resolves to instead of re-reading the
+  format, so every way of writing one file gets one answer.
+  ([#201](https://github.com/rainmanjam/polyemesis/issues/201),
+  [#255](https://github.com/rainmanjam/polyemesis/issues/255))
+
 - **A source that was already pulling from an unchecked file now says so.** The
   gate above cannot see a URL saved before it existed, or one whose upload was
   downgraded underneath it, and there is no second gate downstream the way a
