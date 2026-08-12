@@ -58,8 +58,14 @@ import (
 )
 
 const (
-	user = "admin"
-	pass = "MultistreamAcceptance!7q"
+	// Named because Sonar counts a literal repeated three times as a
+	// maintenance hazard, and it is right here: a typo in one of three
+	// copies of a path is a driver that talks to the wrong endpoint on one
+	// code path only.
+	settingsPath = "/settings"
+	noSuchDest   = "no destination named "
+	user         = "admin"
+	pass         = "MultistreamAcceptance!7q"
 	// profileTracks is how many track rows a profile declares. The ingest this
 	// suite publishes carries two; six is what OBS sends and what
 	// routing.PlaceholderTracks guesses, so a profile of that width is the
@@ -205,7 +211,7 @@ func ingest(rtmpPort string) {
 	if err != nil {
 		die("rtmp port is not a number: " + rtmpPort)
 	}
-	_, out := do(http.MethodGet, "/settings", nil)
+	_, out := do(http.MethodGet, settingsPath, nil)
 	var s map[string]any
 	if err := json.Unmarshal(out, &s); err != nil {
 		die("settings unreadable: " + err.Error())
@@ -226,7 +232,7 @@ func ingest(rtmpPort string) {
 	// a keyless publish reaches nothing.
 	rtmp["streamKey"] = ""
 	s["listeners"] = map[string]any{"srtPort": 6000, "rtmpPort": port}
-	code, body := do(http.MethodPut, "/settings", s)
+	code, body := do(http.MethodPut, settingsPath, s)
 	if code != http.StatusOK {
 		die(fmt.Sprintf("ingest settings failed: %d %s", code, body))
 	}
@@ -341,6 +347,17 @@ func addDest(name, platform, url, keyEnv, tracksCSV string) {
 	fmt.Println("DEST_OK")
 }
 
+// destProcess is the supervised child as /status reports it. Named rather than
+// nested inline: three fields deep in an anonymous struct is where a reader
+// stops being able to say what shape the endpoint actually returns.
+type destProcess struct {
+	State    string `json:"state"`
+	Restarts int    `json:"restarts"`
+	Progress struct {
+		OutTimeMS int64 `json:"outTimeMs"`
+	} `json:"progress"`
+}
+
 type statusDoc struct {
 	Source struct {
 		Tracks []struct {
@@ -350,18 +367,12 @@ type statusDoc struct {
 		} `json:"tracks"`
 	} `json:"source"`
 	Destinations []struct {
-		ID            int64  `json:"id"`
-		Name          string `json:"name"`
-		Tracks        []int  `json:"tracks"`
-		FilterComplex string `json:"filterComplex"`
-		Error         string `json:"error,omitempty"`
-		Process       *struct {
-			State    string `json:"state"`
-			Restarts int    `json:"restarts"`
-			Progress struct {
-				OutTimeMS int64 `json:"outTimeMs"`
-			} `json:"progress"`
-		} `json:"process"`
+		ID            int64        `json:"id"`
+		Name          string       `json:"name"`
+		Tracks        []int        `json:"tracks"`
+		FilterComplex string       `json:"filterComplex"`
+		Error         string       `json:"error,omitempty"`
+		Process       *destProcess `json:"process"`
 	} `json:"destinations"`
 }
 
@@ -405,7 +416,7 @@ func printTracks(name string) {
 		fmt.Println(strings.Join(parts, ","))
 		return
 	}
-	die("no destination named " + name)
+	die(noSuchDest + name)
 }
 
 // printGraph prints the compiled filter_complex on ONE line.
@@ -424,7 +435,7 @@ func printGraph(name string) {
 			return
 		}
 	}
-	die("no destination named " + name)
+	die(noSuchDest + name)
 }
 
 // destStat prints "<state> <restarts> <outTimeMs>".
@@ -445,7 +456,7 @@ func destStat(name string) {
 		fmt.Printf("%s %d %d\n", d.Process.State, d.Process.Restarts, d.Process.Progress.OutTimeMS)
 		return
 	}
-	die("no destination named " + name)
+	die(noSuchDest + name)
 }
 
 func stopAll() {
@@ -500,7 +511,7 @@ func leakScan(envs []string) {
 	targets := []target{
 		{"GET /status", "/status"},
 		{"GET /processes", "/processes"},
-		{"GET /settings", "/settings"},
+		{"GET /settings", settingsPath},
 	}
 	for _, d := range readStatus().Destinations {
 		if d.Process == nil {

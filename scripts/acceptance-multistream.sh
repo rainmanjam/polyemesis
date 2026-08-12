@@ -532,8 +532,29 @@ for _ in $(seq 1 40); do
   pgrep -f "multistream-sink" >/dev/null 2>&1 || break
   sleep 0.5
 done
+# THE SIGNAL IS A REQUEST, NOT AN OUTCOME. `pkill` then `sleep 1` asks the sinks
+# to die and then proceeds as though they had -- and a sink still holding its
+# output open is a file the measurements below read half-written. That shape is
+# what scripts/termination-guard.sh exists to refuse, and it caught this here.
+#
+# Bounded, because an unbounded wait on a process that will not die takes the
+# whole suite's deadline and reports nothing -- issue #179 exactly.
 pkill -f "multistream-sink" 2>/dev/null
-sleep 1
+dead=no
+for _ in $(seq 1 40); do
+  pgrep -f "multistream-sink" >/dev/null 2>&1 || { dead=yes; break; }
+  sleep 0.25
+done
+if [ "$dead" != yes ]; then
+  # SIGKILL, then observe that too. A sink that ignored SIGTERM is still holding
+  # the file the checks below are about.
+  pkill -9 -f "multistream-sink" 2>/dev/null
+  for _ in $(seq 1 20); do
+    pgrep -f "multistream-sink" >/dev/null 2>&1 || { dead=yes; break; }
+    sleep 0.25
+  done
+fi
+[ "$dead" = yes ] || bad "a multistream sink outlived SIGKILL; the recordings below may be half-written"
 
 # Measured once, into named variables, so the cross-destination comparisons in
 # step 6 read the same numbers these checks did.
