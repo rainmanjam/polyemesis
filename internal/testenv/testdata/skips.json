@@ -21,6 +21,15 @@
       },
       "why": "The normalise worker now re-runs internal/ffmpeg.ProbeFile's format allowlist on its source before it transcodes anything, which is the SECOND gate an upload the client kept the server from inspecting has to get past. The test that proves an ffconcat script cannot get past it needs a real ffprobe to gate with and a real ffmpeg to build the media the script names, and neither is a property of the code. ONE site, realMediaOrSkip, naming all three environmental reasons at once (no ffmpeg, no ffprobe, an ffmpeg that cannot mux h264/aac); three separate ones would be three free passes for the same condition.",
       "alreadyPaidDown": "The same round added a Finding-B test to internal/ffmpeg with two more environmental reasons -- a build that cannot mux AIFF/y4m/GIF, and a build that puts one of them on the allowlist -- and neither is a skip. They log and return, and the parent asserts that at least one of the three formats reached the branch under test, which is a stronger statement than three skips could make. internal/api's new tests added none: they reuse the existing fakeProbe and ffprobeOrSkip sites. Issues #187 and #190 still cover turning the remaining FFmpeg and Windows ones into failures."
+    },
+    {
+      "pr": 299,
+      "from": 92,
+      "to": 93,
+      "packages": {
+        "internal/db": "1 -> 2"
+      },
+      "why": "ONE site, and it is a platform fact rather than an environment one. TestTheStateDatabaseIsNotReadableByOtherAccounts asserts that polyemesis.db and its -wal/-shm sidecars carry no group or other access -- issue #297, where every destination stream key sat in a 0644 file inside a 0755 directory. A Unix mode bit is the whole subject of that assertion and Windows has none: internal/fsperm implements the same INTENT there with an ACL, and fsperm_windows_test.go is where that is asserted. Skipping is therefore not a gap in coverage, it is the assertion being made in the one place it means something. The alternative -- asserting mode bits on Windows -- would pass vacuously, which is the failure this census exists to stop."
     }
   ],
   "loweredBy": [
@@ -52,14 +61,14 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 92,
+  "total": 93,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
-    "internal/db": 1,
+    "internal/db": 2,
     "internal/engine": 6,
     "internal/ffmpeg": 22,
     "internal/media": 5,

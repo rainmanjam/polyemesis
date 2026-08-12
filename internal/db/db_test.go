@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1703,5 +1704,73 @@ func TestTheMigrationSucceedsOnTheAttemptAfterAFailedOne(t *testing.T) {
 	}
 	if len(list) != 1 || !list[0].BackupIngestWanted {
 		t.Errorf("the retry did not carry the intent across: %+v", list)
+	}
+}
+
+// The state database holds every destination stream key in plaintext, so it
+// must not be readable by other accounts on the machine.
+//
+// ISSUE #297. SQLite creates the file under the process umask, which is 0644 on
+// a default install -- measured, not assumed -- and both shipped deployments put
+// it in a world-traversable directory: the unit file's install notes make
+// /var/lib/polyemesis with a plain `mkdir -p` under umask 022, and the
+// Dockerfile did the same for /data. Neither set UMask=, so nothing narrowed it
+// at runtime either. Any local user could read every key.
+//
+// THE SIDECARS ARE ASSERTED TOO, and they are not a formality. SQLite creates
+// -wal and -shm with the permissions of the main database rather than from the
+// umask, so this test is what pins that behaviour: a reader who cannot open the
+// database can still read committed pages out of the write-ahead log, and a
+// future SQLite or driver change that stopped copying the mode would reopen the
+// hole silently.
+//
+// Unix only. Windows has no mode bits and internal/fsperm implements the same
+// intent with an ACL there; fsperm_windows_test.go is where that is asserted.
+//
+// Mutation: delete the fsperm.SecureFile call in Open.
+// Observed to fail with "polyemesis.db is mode 0644, want no access for group
+// or other".
+func TestTheStateDatabaseIsNotReadableByOtherAccounts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits are a Unix concept; see fsperm_windows_test.go")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "polyemesis.db")
+
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer store.Close()
+
+	// A write, so the WAL exists to be checked. Any write does; this one needs
+	// no fixture beyond what Open already created.
+	if _, err := store.sql.Exec(`CREATE TABLE IF NOT EXISTS perm_probe (x INTEGER)`); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	checked := 0
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		p := path + suffix
+		fi, err := os.Stat(p)
+		if err != nil {
+			// -shm can be absent depending on journal mode and platform. An
+			// absent file is not a leak, but it is also not evidence, so it is
+			// skipped rather than counted.
+			continue
+		}
+		checked++
+		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("%s is mode %#o, want no access for group or other. It carries "+
+				"destination stream keys in plaintext, and a stream key is a credential: "+
+				"whoever reads one can broadcast to the owner's channel", filepath.Base(p), perm)
+		}
+	}
+	// Without this a future change that stopped creating the database at all --
+	// or renamed it -- would leave every assertion above unexecuted and this
+	// test green.
+	if checked < 2 {
+		t.Fatalf("only %d of the database files existed to check; expected at least "+
+			"the database and its write-ahead log", checked)
 	}
 }

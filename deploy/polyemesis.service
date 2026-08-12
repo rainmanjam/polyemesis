@@ -3,6 +3,7 @@
 #   sudo cp polyemesis /usr/local/bin/
 #   sudo useradd --system --home /var/lib/polyemesis --shell /usr/sbin/nologin polyemesis
 #   sudo mkdir -p /var/lib/polyemesis /etc/polyemesis
+#   sudo chmod 0750 /var/lib/polyemesis    # holds stream keys -- see #297
 #   sudo chown polyemesis:polyemesis /var/lib/polyemesis
 #   sudo cp config.example.yaml /etc/polyemesis/config.yaml
 #   sudo cp deploy/polyemesis.service /etc/systemd/system/
@@ -19,6 +20,15 @@ Wants=network-online.target
 Type=simple
 User=polyemesis
 Group=polyemesis
+# 0077, so anything this service creates is private to it. Issue #297: the
+# state database holds every destination stream key in plaintext, and it was
+# created 0644 under the default 022 -- readable by any local user, since the
+# install notes above make /var/lib/polyemesis with a plain mkdir (0755).
+#
+# internal/db chmods the database itself on open, which covers an existing
+# install. This covers everything else the service ever writes there, including
+# files added later by someone who does not know to secure them.
+UMask=0077
 
 ExecStart=/usr/local/bin/polyemesis \
     --config /etc/polyemesis/config.yaml \
