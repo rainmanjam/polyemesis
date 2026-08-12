@@ -605,7 +605,28 @@ step "9. The output timeline, and what actually played"
 OUT=$(drive stopall)
 case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations: $OUT" ;; esac
 sleep 8
-OUTFILE=data/recordings/onair.mkv
+# MPEG-TS, NOT MATROSKA, AND THE DETECTOR BELOW IS WHY. Issue #126.
+#
+# Matroska stores no DTS. ffprobe's dts_time for an .mkv is RECONSTRUCTED from
+# the PTS reorder buffer, so the "backwards decode timestamp" this suite has
+# been prosecuting since #126 was filed is a property of that reconstruction as
+# much as of the timeline. Measured on one encoder writing 90 identical packets
+# to both containers:
+#
+#   onair.mkv   90 packets, 2 with dts_time=N/A
+#   onair.ts    90 packets, 0 with dts_time=N/A
+#
+# A container that STORED dts could not answer N/A. It is reconstructing, and a
+# reconstruction has been shown to fail in both directions from the same
+# packets: a real clamped backward step at the destination read CLEAN from the
+# .mkv, and a wrong-extradata case read ELEVEN backward steps, worst 66ms, from
+# the .mkv against ZERO from the .ts.
+#
+# mpegts writes DTS into the stream as the muxer received it, so the number this
+# suite asserts on becomes a measurement rather than an inference. Nothing else
+# here depends on the container: the silence, duration and sequence checks below
+# all demux either one.
+OUTFILE=data/recordings/onair.ts
 if [ ! -s "$OUTFILE" ]; then
   bad "no output was produced, so the timeline could not be measured"
 else
