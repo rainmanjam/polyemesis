@@ -51,11 +51,17 @@ import (
 //
 // WHAT THIS DELIBERATELY DOES NOT DO. It perturbs one occurrence per field PATH
 // SHAPE (`routes[].coverage`, not `routes[37].coverage`), because the artifact
-// holds 211 routes and 55 verdicts and a per-element sweep buys nothing: the
+// holds 211 routes and 58 verdicts and a per-element sweep buys nothing: the
 // comparisons are written over whole collections, so a field that is compared
 // for element 0 is compared for element 200 by the same loop. A field the walk
 // never reaches at all is what this is for, and that is a property of the path,
 // not of the index.
+//
+// The path ENUMERATION does read every element, which is a different thing and
+// was a surviving mutant: `json:",omitempty"` drops a false bool from the
+// encoded row, so `sweepVerdicts[0]` carries no `inert` key, the path never
+// existed, and deleting the comparison for it left this test green. Enumerate
+// over all elements, perturb the first one that has the path.
 
 // ledgerReporter is the subset of *testing.T the artifact comparisons use.
 //
