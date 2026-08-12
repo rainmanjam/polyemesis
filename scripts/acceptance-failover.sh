@@ -1057,6 +1057,28 @@ fi
 # 76 seconds. It reproduced about one run in two, and the only thing that showed
 # it was the geometry line below coming back BLANK -- a note nobody would fail a
 # build over.
+# STOPPED BEFORE ITS FILE IS READ, and without this the byte count below is not
+# a measurement at all.
+#
+# `drive stopall` runs once at step 9, hundreds of lines above, and the mismatch
+# destination is added AFTER it -- deliberately, so a case that expects restarts
+# cannot truncate the recording step 9 just measured. Nothing stopped it again,
+# so its Matroska was still open when the size was read, and an open MKV holds
+# whatever the muxer has flushed rather than what was delivered.
+#
+# That is not a small effect. The same healthy run reads 12845056 bytes locally
+# and 0 in CI, because a flush is a function of buffer pressure and timing. The
+# assertion was reading the muxer's schedule and reporting it as delivery, and
+# once out_time was added the mismatch became loud: 8124ms produced against a
+# 0-byte file, diagnosed as "something truncated it" when nothing had.
+#
+# The destinations are stopped here so the file is finalised, exactly as step 9
+# does before measuring onair.mkv, and for the same reason its comment gives:
+# this file was "always an unfinalised Matroska, and the duration check below was
+# written around that damage instead of against it".
+OUT=$(drive stopall)
+case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations before measuring the mismatch file: $OUT" ;; esac
+sleep 8
 MIS_BYTES=$(wc -c < "$WORK/data/recordings/mismatch.mkv" 2>/dev/null | tr -d ' ')
 note "mismatch produced media: settled=${mis_t_settled:--1}ms back=${mis_t_back:--1}ms; file=${MIS_BYTES:-0} bytes"
 if [ "${MIS_BYTES:-0}" -gt 10000 ] 2>/dev/null; then
