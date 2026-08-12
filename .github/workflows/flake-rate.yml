@@ -101,9 +101,21 @@ on:
   workflow_dispatch:
     inputs:
       suites:
+        # ONE suite by default, not two. Each acceptance repetition is minutes
+        # and the matrix multiplies: two suites at the default five runs is ten
+        # suite executions, roughly forty minutes of runner, for a dispatch
+        # somebody may have fired to ask about one of them.
+        #
+        # The cap on `runs` is deliberately NOT lowered to save the same money.
+        # At 40 the detectable floor is 7.2%, which is below the worst measured
+        # job here (test: windows-latest, 9.72% over 90 ci runs). At 25 the floor
+        # is 11.3% and at 20 it is 13.9% -- both ABOVE that job, so a smaller cap
+        # would leave this instrument unable to resolve the only rate it can
+        # currently see, while still spending runner time to say so. Cheaper and
+        # useless is worse than expensive and honest.
         description: "Comma-separated suites to measure"
         type: string
-        default: "acceptance-mqtt,acceptance-failover"
+        default: "acceptance-mqtt"
       # #206 POINT 2: THE FLOOR IS STATED HERE, AT THE POINT OF CHOOSING.
       # It was already printed in the step summary, which is the wrong end --
       # by then the value has been spent. The numbers are poly_detectable_floor
