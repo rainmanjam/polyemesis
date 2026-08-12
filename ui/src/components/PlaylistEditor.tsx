@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { toneBadge } from "@/lib/signal";
 import { useT, type TranslationKey } from "@/lib/i18n";
+import { isSelectableUpload } from "@/lib/upload-verdict";
 import type { MediaFile, PlaylistItem, PlaylistItemStatus, PlaylistStatus } from "@/lib/types";
 
 /* ===========================================================================
@@ -167,19 +168,25 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
   // by watching it repeat on air.
   // An upload the server never inspected is not offered either.
   //
-  // The server is the gate — playlistUploadProblems refuses an item naming one,
-  // with a sentence saying to upload the file again — and this only avoids
-  // offering a choice that will be refused on save. The test is "recorded as
-  // uninspected", exactly as the server's is: `unverifiedReason` is empty for an
-  // upload with no verdict at all, which is every file stored before verdicts
-  // existed, and those are still allowed (the normalise worker re-checks them
-  // at the moment of use). No new string is needed for this and none is added:
-  // the Library row for such a file carries the explanation, on the page where
-  // the operator can act on it.
+  // The server is the gate — playlistUploadProblems refuses an item naming one —
+  // and this only avoids offering a choice that will be refused on save. The
+  // test is "recorded as anything other than verified", which is the server's
+  // test: only `unrecorded` is allowed through alongside `verified`, because an
+  // upload with no verdict at all is every file stored before verdicts existed,
+  // and those are still allowed (the normalise worker re-checks them at the
+  // moment of use).
+  //
+  // IT ASKS `outcome`, NOT AN ABSENT REASON. This used to read
+  // `u.verified || !u.unverifiedReason`, inferring "no record" from an empty
+  // reason — and a REFUSED upload carries `verified:false` with a reason, so it
+  // would have been filtered out correctly by accident. The accident does not
+  // survive the state it is guessing at: nothing guarantees a recorded state
+  // carries a sentence, and the moment one does not, that expression offers an
+  // operator a file the server has already read and rejected. No new string is
+  // needed for this and none is added: the Library row carries the explanation,
+  // on the page where the operator can act on it.
   const available = uploads.filter(
-    (u) =>
-      !items.some((it) => it.upload === u.name) &&
-      (u.verified || !u.unverifiedReason),
+    (u) => !items.some((it) => it.upload === u.name) && isSelectableUpload(u),
   );
 
   return (

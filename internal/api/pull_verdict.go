@@ -99,7 +99,18 @@ func (s *Server) pullSourceUploadProblems(want db.Settings, storedPrimary, store
 		// all, and refusing those would strand media an operator has had for a
 		// year over a file that was never written. See uploads.Store.Verdict's
 		// second return.
-		if v, recorded := store.Verdict(name); recorded && !v.Verified {
+		//
+		// A REFUSAL IS SPLIT OUT for the reason playlistUploadProblems gives at
+		// length: it refuses the same save, but "upload it again" is advice that
+		// cannot work for a file that was read and is not media.
+		v, recorded := store.Verdict(name)
+		switch {
+		case !recorded:
+			// Stored before verdicts existed. Allowed; see above.
+		case v.Outcome == uploads.OutcomeRefused:
+			return fmt.Errorf("%s names %q, which was inspected and refused (%s); "+
+				"point it at a different file", c.where, name, v.Reason)
+		case !v.Verified():
 			return fmt.Errorf("%s names %q, which was stored without being checked (%s); "+
 				"upload it again before pulling from it", c.where, name, v.Reason)
 		}

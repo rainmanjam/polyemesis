@@ -180,7 +180,13 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "this upload could not be stored")
 			return
 		}
-		if !verdict.Verified {
+		// UNINSPECTED, not merely not-verified, and on this path they are the
+		// same set: a refusal returns an error above and the staged bytes are
+		// discarded, so uploads.OutcomeRefused is unreachable here and there is
+		// nothing published for it to describe. Spelled as the outcome anyway,
+		// because "!verified" would silently start covering a refusal the day
+		// something upstream of Commit learns to record one.
+		if verdict.Outcome == uploads.OutcomeUnverified {
 			// STATED AT WARN AND STATED IN THE RESPONSE. The log line alone was
 			// the whole of the previous design and it is not enough: nothing in
 			// the product reads logs, so a file accepted unchecked was
