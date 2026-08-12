@@ -449,6 +449,70 @@ func TestAFileThatDeclaresItsLengthIsNeverCounted(t *testing.T) {
 	}
 }
 
+// A TRUNCATED FINAL PROGRESS BLOCK CANNOT PULL THE COUNTED LENGTH BACKWARDS.
+//
+// FFmpeg's -progress counters are cumulative, so "the last block" is the
+// obvious reading and it is wrong in one direction that matters. ParseProgress
+// emits on every terminator, and a run killed mid-write -- or a stdout stream
+// the cap has dropped bytes from the end of -- leaves a final block carrying
+// the PREVIOUS block's counters with only the terminator fresh. Read as the
+// last block, that is a duration shorter than the file.
+//
+// Short is the dangerous direction: this number becomes estimateBytes' -fs cap
+// on the normalise encode, so an under-reading truncates an operator's
+// legitimate media rather than merely mis-labelling it.
+//
+// SYNTHETIC INPUT ON PURPOSE. FFmpeg emits a progress block about twice a
+// second of WALL time, so no fixture small enough for a unit test produces more
+// than one, and against a single block "furthest" and "last" are the same
+// function -- the reason this behaviour is a function of its own rather than a
+// closure. Measured: with a real 2-second fixture, replacing the furthest-block
+// rule with a first-block one changed no test in this package.
+func TestATruncatedFinalProgressBlockCannotShortenTheCount(t *testing.T) {
+	// Three complete blocks. The third is the shape a killed or capped stream
+	// leaves: `progress=end` arrives while out_time_us still holds the value
+	// from the block before, because the fresh one never made it.
+	stream := strings.Join([]string{
+		"frame=25", "out_time_us=1000000", "progress=continue",
+		"frame=50", "out_time_us=2000000", "progress=continue",
+		"frame=50", "progress=end",
+		"",
+	}, "\n")
+
+	got, err := furthestOutTimeMS(strings.NewReader(stream))
+	if err != nil {
+		t.Fatalf("furthestOutTimeMS: %v", err)
+	}
+	if got != 2000 {
+		t.Errorf("furthestOutTimeMS = %d ms, want 2000. Reading the LAST block "+
+			"instead of the furthest one takes the answer from a terminator whose "+
+			"counters never arrived", got)
+	}
+
+	// The control: an ordinary stream that ends cleanly must give the same
+	// answer by the same route, or the rule above is satisfied by a function
+	// that ignores the end of every stream.
+	clean := "frame=25\nout_time_us=1000000\nprogress=continue\n" +
+		"frame=50\nout_time_us=2000000\nprogress=end\n"
+	got, err = furthestOutTimeMS(strings.NewReader(clean))
+	if err != nil {
+		t.Fatalf("furthestOutTimeMS: %v", err)
+	}
+	if got != 2000 {
+		t.Errorf("furthestOutTimeMS on a clean stream = %d ms, want 2000", got)
+	}
+
+	// And a stream that never reported a time at all reports zero rather than
+	// something, which is what CountDurationSeconds turns into a refusal.
+	got, err = furthestOutTimeMS(strings.NewReader("frame=0\nprogress=end\n"))
+	if err != nil {
+		t.Fatalf("furthestOutTimeMS: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("furthestOutTimeMS on a stream with no time = %d ms, want 0", got)
+	}
+}
+
 // THE ZERO VALUE OF DurationSource IS "UNKNOWN", NOT "DECLARED".
 //
 // Small, and it is the property the whole design rests on. Every ProbeResult

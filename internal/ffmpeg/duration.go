@@ -3,6 +3,7 @@ package ffmpeg
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -116,21 +117,47 @@ func CountDurationSeconds(ctx context.Context, ffmpegBin, format, path string) (
 		}
 		return 0, err
 	}
-	var lastMS int64
-	if err := ParseProgress(&stdout.buf, func(p Progress) {
-		// Counters are cumulative, so the last block carries the total. Taking
-		// the maximum rather than the last block defends against a truncated
-		// final block, which the cap above can produce.
-		if p.OutTimeMS > lastMS {
-			lastMS = p.OutTimeMS
-		}
-	}); err != nil {
+	ms, err := furthestOutTimeMS(&stdout.buf)
+	if err != nil {
 		return 0, fmt.Errorf("read ffmpeg progress: %w", err)
 	}
-	if lastMS <= 0 {
+	if ms <= 0 {
 		return 0, fmt.Errorf("ffmpeg decoded %s without reaching a positive output time", path)
 	}
-	return float64(lastMS) / 1000, nil
+	return float64(ms) / 1000, nil
+}
+
+// furthestOutTimeMS reads a -progress stream and reports the highest output
+// time any complete block reported.
+//
+// THE HIGHEST, NOT THE LAST, and the difference is only visible on a stream
+// with more than one block in it -- which no fixture short enough to be a unit
+// test produces, since FFmpeg emits a block about twice a second of WALL time
+// and a two-second raw stream decodes in a tenth of one. That is why this is a
+// function with its own test rather than a closure inside the call above: the
+// distinction was unfalsifiable where it was, and a defence nothing can break
+// is a comment.
+//
+// Two things make last-block wrong. ParseProgress emits on each terminator, so
+// a run killed mid-write leaves a final block whose counters are a mix of the
+// one before it and whatever arrived; and the stdout cap drops bytes from the
+// end, which produces exactly the same shape. The counters are cumulative and
+// monotonic, so the furthest one any block reached is the safe reading and a
+// short final block cannot pull the answer backwards.
+//
+// Pulling it BACKWARDS is the direction that matters: this number becomes
+// estimateBytes' -fs cap on a later encode, and a duration that is too small
+// truncates an operator's legitimate media.
+func furthestOutTimeMS(r io.Reader) (int64, error) {
+	var furthest int64
+	if err := ParseProgress(r, func(p Progress) {
+		if p.OutTimeMS > furthest {
+			furthest = p.OutTimeMS
+		}
+	}); err != nil {
+		return 0, err
+	}
+	return furthest, nil
 }
 
 // CountDurationArgs is the argv CountDurationSeconds runs, split out because

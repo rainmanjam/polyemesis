@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +104,33 @@ func TestUploadAcceptsARawElementaryStreamAndSaysTheLengthWasCounted(t *testing.
 		t.Errorf("durationSource = %q, want %q: nothing in this file declared a "+
 			"length, so reporting it as though something had is the laundering the "+
 			"field exists to prevent", got.Media.DurationSource, "counted")
+	}
+
+	// AND IT SURVIVES THE SIDECAR. The response above is built in this process;
+	// the Library reads a .probe- JSON file back off disk, and a wrong or absent
+	// struct tag would leave the provenance correct in the reply that nobody
+	// keeps and empty in every listing thereafter -- the field silently
+	// degrading to "unknown" for exactly the files it was added for.
+	lr := httptest.NewRequest(http.MethodGet, "/api/v1/media", nil)
+	auth(lr)
+	lw := do(t, h, lr)
+	if lw.Code != http.StatusOK {
+		t.Fatalf("list status = %d: %s", lw.Code, lw.Body.String())
+	}
+	var listed []uploads.File
+	if err := json.Unmarshal(lw.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("listing has %d entries, want 1", len(listed))
+	}
+	if listed[0].Media == nil || listed[0].Media.DurationSource != "counted" {
+		t.Errorf("the stored sidecar reports durationSource=%v, want %q",
+			listed[0].Media, "counted")
+	}
+	if listed[0].Media != nil && math.Abs(listed[0].Media.DurationSeconds-2) > 0.25 {
+		t.Errorf("the stored sidecar reports durationSeconds=%v, want about 2",
+			listed[0].Media.DurationSeconds)
 	}
 }
 
