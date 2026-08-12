@@ -254,6 +254,16 @@ test.describe("the destination card reports the backup feed and the broadcast", 
   // A public event page is created on the operator's behalf; giving them no way
   // to reach it is half a feature. The HREF is the assertion, not the link: a
   // link that renders and points nowhere useful is the same missing feature.
+  //
+  // MUTATION: DestinationCard.tsx, drop the interpolation from the href --
+  // `https://facebook.com/${dest.facebookBroadcastId}` becomes
+  // `https://facebook.com/`. The <a> still renders, still carries the exact
+  // text "Scheduled Facebook broadcast", so both a presence assertion and any
+  // source-text grep for the link keep passing; only the destination is wrong,
+  // which is the failure an operator actually meets. Measured: FAIL on the
+  // toHaveAttribute below, Expected "https://facebook.com/10203040506070" /
+  // Received "https://facebook.com/". The other 6 tests in this file passed.
+  // Restored from a file copy; `git diff --stat` empty.
   test("the card links to the scheduled Facebook broadcast", async ({ page }) => {
     const console_ = watchConsole(page);
     await page.goto("/");
