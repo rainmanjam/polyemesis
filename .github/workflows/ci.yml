@@ -869,14 +869,63 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
-      # Only the browser suite needs a browser, and it needs the system
-      # libraries too -- a bare `npm i` leaves chromium unable to start.
+      # THE BROWSER IS CACHED; THE SYSTEM LIBRARIES ARE NOT, and the split is
+      # the whole point of this block.
+      #
+      # `playwright install --with-deps chromium` did two unrelated things in
+      # one line: downloaded a browser build from Google's Chrome-for-Testing
+      # CDN, and apt-installed the shared libraries it links against. Only the
+      # first is cacheable -- the second writes to /usr, which no cache
+      # restores -- so they are now separate steps.
+      #
+      # THE CDN IS WHAT ACTUALLY FAILED. On 2026-08-12 it answered 403:
+      #
+      #   Downloading Chrome for Testing 151.0.7922.34
+      #   Error: Download failed: server returned code 403
+      #
+      # A cache hit removes that host from the path entirely, which is strictly
+      # better than retrying it: the retries elsewhere in this file exist for
+      # dependencies that must be fetched every time, and this one need not be.
+      #
+      # KEYED ON THE RESOLVED PLAYWRIGHT VERSION, not on a lockfile hash. The
+      # browser build is a function of that version alone, so an unrelated
+      # dependency bump must not evict a browser that is still correct. Read
+      # from playwright-core, which is the package that actually pins the
+      # revision; @playwright/test can float above it.
+      - name: Playwright version
+        if: matrix.suite == 'acceptance-browser'
+        id: playwright-version
+        working-directory: ui
+        run: |
+          v=$(node -p "require('./package-lock.json').packages['node_modules/playwright-core'].version")
+          [ -n "$v" ] || { echo "could not resolve playwright-core version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "playwright-core $v"
+
+      # No restore-keys. A near-miss would restore a browser for a DIFFERENT
+      # Playwright, which the install below would then have to download over
+      # anyway -- a partial hit here buys nothing and makes the cache's
+      # contents harder to reason about.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: matrix.suite == 'acceptance-browser'
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
       - name: Install Playwright
         if: matrix.suite == 'acceptance-browser'
         working-directory: ui
         run: |
           npm ci --ignore-scripts
-          npx --no-install playwright install --with-deps chromium
+          # install-deps runs UNCONDITIONALLY: it is apt writing to /usr, which
+          # the cache above does not cover, so a cache hit still needs it.
+          npx --no-install playwright install-deps chromium
+          # install runs unconditionally TOO, and is not gated on cache-hit on
+          # purpose. It checks the local browser registry first and skips the
+          # download when the revision is already there, so a cache hit costs
+          # no CDN request -- while a cache that restored incompletely still
+          # self-heals instead of failing later as "chromium not found".
+          npx --no-install playwright install chromium
 
       # The same step timeout the `acceptance` job's suite step carries at
       # :724, and missing here until now. This job's ceiling is 45 minutes,
