@@ -274,10 +274,39 @@ type File struct {
 	//
 	// An absent boolean would have re-created that exactly, so it is always
 	// present and always answered, and `false` is a statement rather than a gap.
+	//
+	// IT IS NO LONGER THE WHOLE ANSWER. See Outcome: `false` now covers three
+	// different things, and a consumer that has to tell an operator what to DO
+	// about a file has to ask Outcome instead. This field stays, always present
+	// and meaning exactly what it always meant -- "these bytes were inspected
+	// and accepted" -- because it is the field every released version of this
+	// product and its sidecar format has carried.
 	Verified bool `json:"verified"`
-	// UnverifiedReason says WHY, in the operator's words, when Verified is
-	// false. Empty for a file with no recorded verdict at all -- one stored
-	// before verdicts existed, or placed in the directory by hand.
+	// Outcome is which of FOUR states this upload is in, and it is the field a
+	// consumer should branch on.
+	//
+	// ALWAYS PRESENT, deliberately not omitempty, for the same reason Verified
+	// is: an absent value is a gap, and a gap is what the three-states-as-two
+	// bug was made of. The fourth value is OutcomeUnrecorded, which no sidecar
+	// ever carries -- it is how the LISTING says "there is no record here at
+	// all", a state Store.Verdict reports through its second return and which
+	// this transport had no way to express. It was inferred from an empty
+	// UnverifiedReason, which is not the same question and stopped being a
+	// usable proxy the moment a recorded state could also carry no reason.
+	Outcome Outcome `json:"outcome"`
+	// UnverifiedReason says WHY, in the operator's words, whenever Verified is
+	// false and something was recorded. Empty for a file with no recorded
+	// verdict at all -- one stored before verdicts existed, or placed in the
+	// directory by hand.
+	//
+	// IT IS THE REASON FOR BOTH NON-VERIFIED RECORDED STATES, and the name is
+	// still accurate for both: a refused file is certainly not verified. What
+	// the reason MEANS differs -- "nobody could read these bytes" versus "these
+	// bytes were read and are not media" -- and Outcome is what says which, so
+	// a consumer never has to guess from the sentence. Keeping one field rather
+	// than adding a second is also what makes a client that predates Outcome
+	// fail CLOSED: it sees a refusal as an unverified file with a reason, which
+	// is the reading that refuses it as a playlist item.
 	UnverifiedReason string `json:"unverifiedReason,omitempty"`
 }
 
@@ -339,7 +368,56 @@ const (
 	// looking. It has no production caller; the sentence exists so that a file
 	// it wrote is still ANSWERED rather than silent.
 	ReasonNotInspected = "this file was stored without being inspected"
+	// ReasonUnreadableRecord is a sidecar this build will not act on: not JSON,
+	// or claiming a pass in one field while denying it in another. It is a fact
+	// about the RECORD, not about the file or about the prober, which is why it
+	// is not ReasonProbeUnusable -- that sentence blames a binary that may have
+	// run perfectly well.
+	ReasonUnreadableRecord = "this server could not read its own record of the inspection"
 )
+
+// Outcome is which of the states a stored upload is in.
+//
+// A STRING, NOT A SECOND BOOLEAN, and that is the whole shape of the fix. The
+// record used to carry one bool, so it had two states, and the product needed
+// three: the missing one -- INSPECTED AND REFUSED -- had nowhere to live, so a
+// refusal was never stored at all and the bytes were thrown away instead. That
+// works exactly once, at upload time, when nothing yet references the file. It
+// does not work for anything that inspects an upload LATER (see #202): by then
+// the file is published, a playlist item may name it, and DELETE answers 409 --
+// so the refusal has to be RECORDED, and there was no state to record it in
+// that was not a lie about a file this server had in fact read.
+//
+// Three values are storable and a fourth is not: OutcomeUnrecorded exists so a
+// listing can say "no record", which is a distinct answer from every recorded
+// one and must stay that way -- refusing every upload an install made before
+// verdicts existed would strand media an operator has had for a year.
+type Outcome string
+
+const (
+	// OutcomeVerified means these bytes were inspected and accepted as media.
+	OutcomeVerified Outcome = "verified"
+	// OutcomeUnverified means no inspection produced a verdict about these
+	// bytes: it was cut short, it could not be run, or it never happened. It is
+	// a statement about this SERVER, and the remedy is to try again.
+	OutcomeUnverified Outcome = "unverified"
+	// OutcomeRefused means these bytes WERE inspected and are not media this
+	// server will accept. It is a statement about the FILE, it is permanent,
+	// and trying again is not a remedy -- which is exactly why it cannot be
+	// recorded as OutcomeUnverified: every consumer of that state tells the
+	// operator to upload the file again.
+	OutcomeRefused Outcome = "refused"
+	// OutcomeUnrecorded means nothing was ever written about these bytes. NEVER
+	// STORED -- PutVerdict refuses it -- because a record saying "there is no
+	// record" is a contradiction, and writing one would destroy the very
+	// distinction this value exists to carry.
+	OutcomeUnrecorded Outcome = "unrecorded"
+)
+
+// storable reports whether an Outcome may be written to a sidecar.
+func (o Outcome) storable() bool {
+	return o == OutcomeVerified || o == OutcomeUnverified || o == OutcomeRefused
+}
 
 // Verdict is the record that sits beside every upload this server publishes.
 //
@@ -358,18 +436,111 @@ const (
 // as unverified with an empty Reason. That is fail-closed in the only direction
 // that is safe, and it is distinguishable from a recorded refusal to inspect:
 // see Store.Verdict's second return.
+//
+// THE OUTCOME IS THE ONE SOURCE OF TRUTH IN MEMORY, and `verified` is a field
+// of the FORMAT rather than of the type -- MarshalJSON derives it and
+// UnmarshalJSON falls back to it. Carrying both as struct fields would make
+// Verdict{Verified: true, Outcome: OutcomeRefused} constructible, and a record
+// that disagrees with itself is the thing this type exists to stop being
+// possible.
 type Verdict struct {
+	Outcome Outcome
+	Reason  string
+	Info    *MediaInfo
+}
+
+// Verified reports the narrow question: were these bytes inspected and
+// accepted. False for BOTH of the other recorded states, which is why nothing
+// that has to tell an operator what to do about a file should ask this instead
+// of Outcome.
+func (v Verdict) Verified() bool { return v.Outcome == OutcomeVerified }
+
+// verdictJSON is the sidecar format. It is not the in-memory type, and the gap
+// between them is the compatibility story: see Verdict.UnmarshalJSON.
+type verdictJSON struct {
 	Verified bool       `json:"verified"`
+	Outcome  Outcome    `json:"outcome,omitempty"`
 	Reason   string     `json:"reason,omitempty"`
 	Info     *MediaInfo `json:"info,omitempty"`
 }
 
+// MarshalJSON writes the sidecar, INCLUDING the legacy `verified` bool.
+//
+// THE BOOL IS STILL WRITTEN AND IT IS NOT VESTIGIAL. Every install already has
+// these files on disk, and a format change here is not only about what OLDER
+// records look like to this build -- it is also about what THIS build's records
+// look like to an older one, which is a downgrade, a rollback, or a second
+// process on the same data directory during an upgrade. An older binary knows
+// only `verified`, so a refusal must present to it as `verified:false` with a
+// reason, and it will call that file "not checked": the wrong label, but the
+// fail-closed answer, since every gate keyed on `verified` still refuses it.
+//
+// It is also the field the fallback in UnmarshalJSON reads, which is what makes
+// an outcome this build has never heard of degrade rather than explode.
+func (v Verdict) MarshalJSON() ([]byte, error) {
+	return json.Marshal(verdictJSON{
+		Verified: v.Outcome == OutcomeVerified,
+		Outcome:  v.Outcome,
+		Reason:   v.Reason,
+		Info:     v.Info,
+	})
+}
+
+// UnmarshalJSON reads a sidecar written by ANY version of this product.
+//
+// ONE RULE, AND IT COVERS BOTH DIRECTIONS IN TIME: an outcome this build knows
+// wins; anything else -- absent, because the record predates the third state,
+// or a name a LATER version invented -- falls back to `verified`, the field
+// every version of this format has carried. So an old record reads exactly as
+// it always did, and a future "quarantined" reads as whatever that future
+// version asserted about the only field this build can interpret.
+//
+// A record that says `outcome:"verified"` while saying `verified:false`
+// contradicts itself and is refused rather than half-believed. That is
+// reachable: the sidecar is a plain file in the data directory, and an operator
+// or a restore-from-backup can hand-edit one. Fail-closed is the only safe
+// direction for a field whose `true` opens a gate.
+func (v *Verdict) UnmarshalJSON(b []byte) error {
+	var raw verdictJSON
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	out := raw.Outcome
+	switch {
+	case out == OutcomeVerified && !raw.Verified:
+		out, raw.Reason, raw.Info = OutcomeUnverified, ReasonUnreadableRecord, nil
+	case out.storable():
+		// Stated by the writer, and this build knows the word.
+	case raw.Verified:
+		out = OutcomeVerified
+	default:
+		out = OutcomeUnverified
+	}
+	*v = Verdict{Outcome: out, Reason: raw.Reason, Info: raw.Info}
+	return nil
+}
+
 // VerifiedVerdict is the record for bytes that were inspected and accepted.
-func VerifiedVerdict(info MediaInfo) Verdict { return Verdict{Verified: true, Info: &info} }
+func VerifiedVerdict(info MediaInfo) Verdict {
+	return Verdict{Outcome: OutcomeVerified, Info: &info}
+}
 
 // UnverifiedVerdict is the record for bytes that were stored without a verdict
 // being reachable, and why.
-func UnverifiedVerdict(reason string) Verdict { return Verdict{Reason: reason} }
+func UnverifiedVerdict(reason string) Verdict {
+	return Verdict{Outcome: OutcomeUnverified, Reason: reason}
+}
+
+// RefusedVerdict is the record for bytes that WERE inspected and were refused,
+// carrying the sentence the operator is shown.
+//
+// The reason is not optional and PutVerdict enforces that. A refusal is
+// permanent -- no retry changes it -- so the sentence is the operator's only
+// route to acting on it, and a refusal with nothing to say would leave a file
+// unusable with no way to find out why.
+func RefusedVerdict(reason string) Verdict {
+	return Verdict{Outcome: OutcomeRefused, Reason: reason}
+}
 
 // PutVerdict records what this server concluded about a stored upload.
 //
@@ -391,7 +562,22 @@ func UnverifiedVerdict(reason string) Verdict { return Verdict{Reason: reason} }
 // existing behaviour. What it stops is the SECOND caller -- a re-probe
 // endpoint, a metadata backfill, a migration -- passing a name that did not
 // just come out of Commit.
+// IT ALSO REFUSES A VERDICT NO INSPECTION PRODUCED. OutcomeUnrecorded is the
+// listing's way of saying "there is no record", so writing one would be a
+// record asserting its own absence -- and it would erase the distinction the
+// settings validators depend on to avoid stranding a year of legitimate media.
+// An unset Outcome is refused for the same reason: a zero Verdict is what a
+// caller produces by forgetting, and the old zero value silently meant
+// "unverified, no reason", which is a statement this function should not make
+// on a caller's behalf. A refusal with no sentence is refused because the
+// sentence is the whole of what an operator can act on; see RefusedVerdict.
 func (s *Store) PutVerdict(stored string, v Verdict) error {
+	if !v.Outcome.storable() {
+		return fmt.Errorf("uploads: refusing to record outcome %q for %q", v.Outcome, stored)
+	}
+	if v.Outcome == OutcomeRefused && v.Reason == "" {
+		return fmt.Errorf("uploads: refusing to record a refusal of %q with no reason", stored)
+	}
 	if err := s.verdictTarget(stored); err != nil {
 		return err
 	}
@@ -460,10 +646,12 @@ func (s *Store) Verdict(stored string) (Verdict, bool) {
 	var v Verdict
 	if err := json.Unmarshal(b, &v); err != nil {
 		// Unreadable is not "fine". A record this process cannot parse is a
-		// record, and the safe reading of one is the unverified one.
-		return Verdict{Reason: ReasonProbeUnusable}, true
+		// record, and the safe reading of one is the unverified one -- NOT the
+		// refused one, which would be this server blaming an operator's file for
+		// damage to its own bookkeeping.
+		return Verdict{Outcome: OutcomeUnverified, Reason: ReasonUnreadableRecord}, true
 	}
-	if !v.Verified {
+	if !v.Verified() {
 		v.Info = nil
 	}
 	return v, true
@@ -671,7 +859,8 @@ func (p *Pending) Commit(v Verdict) (File, error) {
 		Modified:         time.Now().UTC(),
 		PullURL:          PullURL(p.name),
 		Media:            v.Info,
-		Verified:         v.Verified,
+		Verified:         v.Verified(),
+		Outcome:          v.Outcome,
 		UnverifiedReason: v.Reason,
 	}, nil
 }
@@ -998,10 +1187,22 @@ func (s *Store) List() ([]File, error) {
 		if err != nil {
 			continue
 		}
-		// The recorded verdict, not a metadata lookup. A file with no record
-		// reads as unverified with no reason, which is the honest description
-		// of an upload stored before verdicts existed or placed here by hand.
-		v, _ := s.Verdict(e.Name())
+		// The recorded verdict, not a metadata lookup.
+		//
+		// THE SECOND RETURN IS CARRIED THROUGH NOW, and dropping it was the
+		// transport half of the same bug the third state fixes on disk. "No
+		// record" and "recorded as uninspected" are different answers with
+		// different remedies -- the first is an upload from before verdicts
+		// existed and is still usable, the second is a file this build published
+		// unchecked -- and both used to arrive at the client as `verified:false`
+		// with the client left to infer which from whether a reason happened to
+		// be present. That inference is exactly what a third recorded state
+		// breaks, so the listing states it instead.
+		v, recorded := s.Verdict(e.Name())
+		outcome := v.Outcome
+		if !recorded {
+			outcome = OutcomeUnrecorded
+		}
 		out = append(out, File{
 			Name:     e.Name(),
 			Origin:   OriginUploaded,
@@ -1012,7 +1213,8 @@ func (s *Store) List() ([]File, error) {
 			// field is a pointer and the UI has to cope with nil rather than
 			// being handed zeroes it would render as "0x0".
 			Media:            v.Info,
-			Verified:         v.Verified,
+			Verified:         v.Verified(),
+			Outcome:          outcome,
 			UnverifiedReason: v.Reason,
 		})
 	}

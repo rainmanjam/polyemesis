@@ -173,7 +173,7 @@ func TestATTACK_RealSocketDisconnectPublishesUnprobed(t *testing.T) {
 	if f.UnverifiedReason == "" {
 		t.Error("the listing does not say why the file is unverified")
 	}
-	if v, recorded := mustStore(t, dataDir).Verdict(f.Name); !recorded || v.Verified {
+	if v, recorded := mustStore(t, dataDir).Verdict(f.Name); !recorded || v.Verified() {
 		t.Errorf("the verdict on disk is (%+v, recorded=%v); want a recorded refusal to inspect",
 			v, recorded)
 	}

@@ -186,7 +186,26 @@ func (s *Server) playlistUploadProblems(want, stored db.PlaylistSettings) error 
 		// That is the gate that holds for files this validator never sees:
 		// inherited items, which are skipped above by design, and anything
 		// placed in the directory by hand.
-		if v, recorded := store.Verdict(name); recorded && !v.Verified {
+		//
+		// AND A REFUSAL GETS A DIFFERENT SENTENCE, because it needs a different
+		// ACTION. Both states refuse the item, so the gate is unchanged; what
+		// changes is what the operator is told to do next. "Upload it again" is
+		// the correct remedy for an inspection that never finished and is
+		// actively wrong for a file that was inspected and is not media -- the
+		// same bytes fail the same way, and an operator who follows the advice
+		// re-sends a large file to be refused again. It is also the sentence the
+		// refusal state exists to make possible: before it, a recorded refusal
+		// could only have been stored as "not checked", which would have made
+		// this line state something the server knows is false.
+		v, recorded := store.Verdict(name)
+		switch {
+		case !recorded:
+			// Every upload stored before verdicts existed. Allowed; see above.
+		case v.Outcome == uploads.OutcomeRefused:
+			return fmt.Errorf("playlist item %d: %q was inspected and refused (%s), "+
+				"so it cannot be added to a playlist; sending the same file again "+
+				"will not change that", i, name, v.Reason)
+		case !v.Verified():
 			return fmt.Errorf("playlist item %d: %q was stored without being checked "+
 				"(%s), so it cannot be added to a playlist; upload it again", i, name, v.Reason)
 		}

@@ -20,7 +20,7 @@ func TestAVerdictCannotBeRecordedForANameNoUploadHas(t *testing.T) {
 	if err := s.PutMedia("real-abcd1234.ts", MediaInfo{AudioTracks: 2}); err != nil {
 		t.Fatalf("the control failed, so every refusal below proves nothing: %v", err)
 	}
-	if v, recorded := s.Verdict("real-abcd1234.ts"); !recorded || !v.Verified {
+	if v, recorded := s.Verdict("real-abcd1234.ts"); !recorded || !v.Verified() {
 		t.Fatalf("the control wrote no usable record: %+v recorded=%v", v, recorded)
 	}
 
