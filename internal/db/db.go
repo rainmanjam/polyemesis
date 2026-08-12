@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -109,6 +110,33 @@ func Open(path string, opts ...Option) (*DB, error) {
 	if err := sqldb.Ping(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("ping sqlite %s: %w", path, err)
+	}
+	// THE FILE HOLDS EVERY DESTINATION STREAM KEY IN PLAINTEXT, and SQLite
+	// creates it under the process umask -- 0644 on a default install, measured.
+	// Issue #297.
+	//
+	// A stream key is a credential: whoever reads one can broadcast to the
+	// owner's channel. Both shipped deployments put this file in a
+	// world-traversable directory -- the unit file's install notes create
+	// /var/lib/polyemesis with a plain `mkdir -p` under umask 022, and the
+	// Dockerfile does the same for /data -- and neither sets UMask=, so nothing
+	// narrowed the mode at runtime either.
+	//
+	// AFTER Ping, which is what forces SQLite to create the file. Chmod before
+	// that would race a file that does not exist yet.
+	//
+	// THE SIDECARS FOLLOW FROM THIS ONE. SQLite creates -wal and -shm with the
+	// permissions of the main database rather than from the umask, so securing
+	// this file secures the pages that have not been checkpointed yet -- which
+	// matter just as much, since a reader who cannot open the database can
+	// still read recent writes out of the log.
+	//
+	// fsperm rather than os.Chmod(0600): a FileMode is a Unix concept that
+	// Windows discards, so a literal mode here would compile, succeed, and
+	// restrict nothing on that platform. See internal/fsperm.
+	if err := fsperm.SecureFile(path); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("restrict %s: %w", path, err)
 	}
 	if _, err := sqldb.Exec(schemaSQL); err != nil {
 		sqldb.Close()

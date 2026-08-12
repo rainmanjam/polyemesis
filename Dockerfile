@@ -137,7 +137,9 @@ COPY --from=build /out/polyemesis /usr/local/bin/polyemesis
 
 # The data directory holds the database, the secret key and recordings.
 # Mount a volume here or everything is lost when the container is replaced.
-RUN mkdir -p /data && chown polyemesis:polyemesis /data
+# 0750, not the default 0755: /data holds polyemesis.db, which carries every
+# destination stream key in plaintext. See issue #297.
+RUN mkdir -p /data && chown polyemesis:polyemesis /data && chmod 0750 /data
 VOLUME ["/data"]
 USER polyemesis
 WORKDIR /data
