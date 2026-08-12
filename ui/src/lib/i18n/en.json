@@ -1073,6 +1073,7 @@
   "set.tokenHashNote": "polyemesis stores only a hash. If you lose it, revoke this token and create another.",
   "set.tokenNamePlaceholder": "prometheus",
   "sources.listenerDegraded": "Partly bound",
+  "sources.pullUnchecked": "Unchecked file",
   "set.tokenScope": "Scope",
   "set.tokenScopeRead": "Read only",
   "set.tokenScopeAdmin": "Full access",

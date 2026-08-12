@@ -93,16 +93,149 @@ func (s *Server) pullSourceUploadProblems(want db.Settings, storedPrimary, store
 			// ask is not the same as the answer being yes.
 			return fmt.Errorf("%s cannot be checked: %w", c.where, err)
 		}
-		// RECORDED AS UNVERIFIED, NOT "NOT RECORDED AS VERIFIED", which is the
-		// same distinction playlistUploadProblems draws and for the same
-		// reason: every upload stored before verdicts existed has no record at
-		// all, and refusing those would strand media an operator has had for a
-		// year over a file that was never written. See uploads.Store.Verdict's
-		// second return.
-		if v, recorded := store.Verdict(name); recorded && !v.Verified {
+		if reason, unchecked := uncheckedUpload(store, name); unchecked {
 			return fmt.Errorf("%s names %q, which was stored without being checked (%s); "+
-				"upload it again before pulling from it", c.where, name, v.Reason)
+				"upload it again before pulling from it", c.where, name, reason)
 		}
 	}
 	return nil
+}
+
+// uncheckedUpload answers the one question every consumer of "stored does not
+// imply checked" asks: does this server hold a RECORDED refusal to inspect the
+// named upload, and what did it say.
+//
+// RECORDED AS UNVERIFIED, NOT "NOT RECORDED AS VERIFIED", which is the same
+// distinction playlistUploadProblems draws and for the same reason: every
+// upload stored before verdicts existed has no record at all, and refusing
+// those would strand media an operator has had for a year over a file that was
+// never written. See uploads.Store.Verdict's second return.
+//
+// Spelled once because there are now three callers that must agree --
+// pullSourceUploadProblems above, sourceIngestUploadProblem below, and
+// Server.pullUploadUnchecked, which reports rather than refuses. Two of them
+// refuse a save and the third puts a sentence on a card; a copy of this
+// condition that drifted would let one of the three disagree about which files
+// are safe, and the disagreement would be invisible.
+func uncheckedUpload(store *uploads.Store, name string) (reason string, unchecked bool) {
+	v, recorded := store.Verdict(name)
+	if !recorded || v.Verified {
+		return "", false
+	}
+	return v.Reason, true
+}
+
+// sourceIngestUploadProblem is pullSourceUploadProblems for the route that
+// actually decides what the engine pulls, and #255 is that this route had no
+// gate at all.
+//
+// MEASURED BEFORE IT WAS WRITTEN. `PUT /api/v1/sources/1` carrying
+// `ingest.pull.url = file://uploads/<an upload recorded unchecked>` answered
+// 200 and stored it; `POST /api/v1/sources` answered 201. Neither went through
+// pullSourceUploadProblems, which is reached only from the settings handler.
+//
+// AND THE SETTINGS GATE IS NOT A SUBSTITUTE, because engine.effectiveSettings
+// does `settings.Ingest = src.Ingest` -- the source row's ingest REPLACES the
+// settings one for every engine. PUT /settings mirrors its ingest block into
+// the DEFAULT source (see handlers.go), which is what kept that gate meaningful
+// at all; it has never covered a second programme, and the Sources page edits
+// every programme through this route. So the gated path was the legacy one and
+// the ungated path was the one the UI uses.
+//
+// SCOPED TO WHAT THE SAVE INTRODUCES, exactly as the settings gate is. stored
+// is the URL already on the row, empty for a create -- where everything is
+// introduced by definition. The Sources card PUTs the whole ingest block on
+// every unrelated change (a port, a passphrase, the mode), so an unconditional
+// check would refuse an edit to an SRT latency because of a pull URL configured
+// before this existed, with nothing on the form to say which field was wrong.
+// The inherited case is REPORTED instead, not refused -- see pullUploadUnchecked.
+func (s *Server) sourceIngestUploadProblem(want db.IngestSettings, stored string) error {
+	if want.Pull.URL == stored {
+		return nil
+	}
+	name, ok := uploads.UploadFromPullURL(want.Pull.URL)
+	if !ok {
+		return nil
+	}
+	store, err := s.uploadStore()
+	if err != nil {
+		// Fail closed, as both other save-time gates do. Not being able to ask
+		// is not the same as the answer being yes.
+		return fmt.Errorf("the pull source cannot be checked: %w", err)
+	}
+	if reason, unchecked := uncheckedUpload(store, name); unchecked {
+		return fmt.Errorf("the pull source names %q, which was stored without being checked (%s); "+
+			"upload it again before pulling from it", name, reason)
+	}
+	return nil
+}
+
+// pullUploadUnchecked is the INHERITED case, and it reports rather than
+// refuses. Empty when there is nothing to say.
+//
+// #255 offers two directions for a pull source that already names an unchecked
+// upload -- re-check at engine reconcile, which fails closed, or surface it on
+// the card, which fails open -- and says the choice turns on whether an
+// operator would rather lose an ingest or air an uninspected file. This is the
+// second, and the reason is that the first question is not the one a reconcile
+// gate would actually be answering.
+//
+// AN UNVERIFIED VERDICT IS A FACT ABOUT THIS SERVER, NEVER ABOUT THE FILE.
+// All four reasons say so in their own words: uploads.ReasonNoProber ("this
+// server had no ffprobe available"), ReasonProbeUnusable ("this server could
+// not run its media inspection"), ReasonInterrupted ("the inspection was cut
+// short"), ReasonNotInspected. A file ffprobe DID read and reject never becomes
+// an unverified verdict at all -- probeUpload returns an error and the upload
+// is refused with 400 and not stored. So "unchecked" means "nobody looked", and
+// on an install with no ffprobe it means that of EVERY upload, by construction.
+// A fail-closed reconcile gate on that condition is not a check keyed to a bad
+// file; it is a kill switch keyed to this server's toolchain, and its blast
+// radius on an ffprobe-less install is every file:// pull ingest, all at once.
+//
+// AND IT WOULD LAND WHERE NOBODY IS STANDING. reconcileIngest runs on every
+// source switch and every supervisor respawn, so the refusal arrives at 3am as
+// a stopped stream and a log line. internal/ffmpeg/build.go already refuses to
+// pay this price for a subprocess -- "playlist_normalise refuses that price for
+// a mere HTTP request; the live stream cannot pay a higher one" -- and making
+// the check cheap does not make the OUTAGE cheap. The cost that was being
+// weighed there was never the probe; it was the fail-closed outcome.
+//
+// THE WORST CASE THIS DECLINES TO PREVENT IS BOUNDED, and build.go measured it
+// on FFmpeg 8.1.2: with -protocol_whitelist file pinned on the engine's file
+// pull and concat's safe=1 default, an ffconcat naming "http://..." is refused,
+// and what still resolves is a SIBLING FILE -- another upload in the operator's
+// own directory. Airing the wrong one of your own files is not worth taking the
+// programme off air for.
+//
+// WHAT MAKES THIS MORE THAN A BADGE is that the server computes it and puts it
+// in the /sources response. pull_verdict.go's own objection to the Library
+// marker was "a warning in the UI is not a check in the server", and the case
+// it named was automation configuring a pull source from a listing, which never
+// sees a row. That automation reads this field. It is still fail-open and this
+// is not claimed as a closure of #255's hole -- an operator who ignores it airs
+// an uninspected file.
+func (s *Server) pullUploadUnchecked(src *db.Source) string {
+	if src == nil || src.Ingest.Mode != db.IngestPull {
+		return ""
+	}
+	name, ok := uploads.UploadFromPullURL(src.Ingest.Pull.URL)
+	if !ok {
+		return ""
+	}
+	// Built only for a pull source that names an upload, which is what keeps a
+	// listing of RTMP and SRT programmes from paying an os.MkdirAll per row.
+	store, err := s.uploadStore()
+	if err != nil {
+		// Nothing to SAY, rather than a claim that all is well. The save-time
+		// gates fail closed here because they can refuse; a card has no honest
+		// refusal to make, and inventing a warning out of "the data directory
+		// is missing" would put the wrong sentence in front of the operator.
+		return ""
+	}
+	reason, unchecked := uncheckedUpload(store, name)
+	if !unchecked {
+		return ""
+	}
+	return fmt.Sprintf("this source pulls from %q, which was stored without being checked (%s); "+
+		"nothing has read a byte of it, so upload it again before relying on it", name, reason)
 }
