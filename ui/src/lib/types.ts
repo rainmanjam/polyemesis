@@ -938,6 +938,13 @@ export interface PlaylistItemStatus {
   upload: string;
   state: "ready" | "transcoding" | "attention";
   detail?: string;
+  /** A fact about the item that does NOT stop it going to air, so it is
+   *  separate from `detail` and never accompanied by a non-"ready" state.
+   *  Today it means one thing: the re-verify job refused this upload after a
+   *  derivative had already been made from it. The copy on air keeps playing
+   *  -- it was transcoded from those bytes and is intact -- and the operator
+   *  is told so they can replace the file when it suits them. */
+  warning?: string;
 }
 
 export interface PlaylistStatus {
