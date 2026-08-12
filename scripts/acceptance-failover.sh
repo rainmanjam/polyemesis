@@ -746,7 +746,8 @@ else
         n++
         at[n]=kv["inOffset"]+0; wall[n]=kv["time"]
         from[n]=kv["outKind"]; to[n]=kv["inKind"]
-        tear[n]=kv["teardownMs"]+0; pred[n]=kv["predictedStepMs"]+0
+        tear[n]=kv["teardownMs"]+0
+        out_t[n]=kv["outTimeMs"]+0; out_o[n]=kv["outOffset"]+0
         dead[n]=kv["stopDeadline"]
         next
       }
@@ -762,8 +763,14 @@ else
         if (n==0) { print "SEAMS none in server.log -- either no switch happened or the build predates the ledger"; exit }
         printf "SEAMS %d handover(s); %d backward DTS step(s) of any magnitude in the file\n", n, s+0
         for (j=1;j<=n;j++) {
-          printf "  seam %d %s->%s at tier %.3fs (%s): teardown %.3fms, predicted %+.3fms",
-                 j, from[j], to[j], at[j], wall[j], tear[j], pred[j]
+          # The outgoing terms are printed RAW. A derived figure used to sit
+          # here called "predicted", and it was minus the start lag of the
+          # outgoing feed rather than a timestamp step -- see logSeam and #126.
+          # Two proposed fixes were reasoned from it and both were refuted, so
+          # this table now reports what was measured and leaves the arithmetic
+          # to a reader who has established what the terms mean.
+          printf "  seam %d %s->%s at tier %.3fs (%s): teardown %.3fms, outOffset %.3fs, outTime %.0fms",
+                 j, from[j], to[j], at[j], wall[j], tear[j], out_o[j], out_t[j]
           if (dead[j]=="true") printf ", STOP DEADLINE -- the old feed may still have been writing"
           printf "\n"
         }

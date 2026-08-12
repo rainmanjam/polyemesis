@@ -160,14 +160,23 @@ func TestASwitchWritesOneSeamLineNamingBothFeeds(t *testing.T) {
 		t.Errorf("inOffset = %v, want the incoming feed's own offset %v", inOffset, inFeed.offset)
 	}
 
-	// predictedStepMs is the falsifiable number the instrumentation was added
-	// for, so it is checked against its own three inputs rather than trusted.
+	// outTimeMs is recorded as a TERM, so it is checked for presence and sanity
+	// rather than against a derived figure.
+	//
+	// The ledger used to publish predictedStepMs alongside it. That field was
+	// minus the outgoing feed's start lag, not a timestamp step, and two
+	// proposed fixes for #126 were reasoned from it before it was measured. The
+	// assertion here used to check that it followed from its own inputs -- which
+	// it did, faithfully, while describing the wrong quantity. Arithmetic
+	// consistency was never the property in doubt.
 	outTimeMs := seamFloat(t, f, "outTimeMs")
-	want := (outOffset + outTimeMs/1000 - inOffset) * 1000
-	if got := seamFloat(t, f, "predictedStepMs"); math.Abs(got-want) > 1e-3 {
-		t.Errorf("predictedStepMs = %v, want %v computed from the same line's own "+
-			"outOffset/outTimeMs/inOffset -- a prediction that does not follow from its "+
-			"inputs cannot falsify anything", got, want)
+	if outTimeMs < 0 {
+		t.Errorf("outTimeMs = %v, want the media the outgoing feed had produced", outTimeMs)
+	}
+	if _, ok := f["predictedStepMs"]; ok {
+		t.Error("the seam ledger published predictedStepMs again; it is minus the " +
+			"outgoing feed's start lag rather than a step, and naming it a step is " +
+			"what sent two refuted fixes for #126 down the wrong path")
 	}
 
 	if teardown := seamFloat(t, f, "teardownMs"); teardown < 0 {
