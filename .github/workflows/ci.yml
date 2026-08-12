@@ -447,15 +447,36 @@ jobs:
         # carrying a comment explaining why that is wrong.
         #
         # BtbN publishes ffmpeg-n8.1-latest-win64-gpl-8.1.zip from the SAME
-        # release the Linux arm downloads: one source, one version, one retry.
+        # release the Linux arm downloads: one source, one version. Use the same
+        # authenticated-API-first path as Linux as well: the failing run took
+        # repeated ResponseEnded errors from the anonymous asset URL.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip'
+          $asset = 'ffmpeg-n8.1-latest-win64-gpl-8.1.zip'
+          $zip = Join-Path $env:RUNNER_TEMP 'ff.zip'
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$asset"
           for ($i = 1; $i -le 3; $i++) {
-            try { Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ff.zip" -TimeoutSec 90; break }
-            catch { if ($i -eq 3) { throw }; Write-Host "ffmpeg download attempt $i failed"; Start-Sleep -Seconds 5 }
+            Remove-Item $zip -Force -ErrorAction SilentlyContinue
+            if (Get-Command gh -ErrorAction SilentlyContinue) {
+              try {
+                gh release download latest --repo BtbN/FFmpeg-Builds --pattern $asset --output $zip
+                if (Test-Path $zip) { break }
+              } catch {}
+            }
+            try {
+              & curl.exe --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL `
+                --retry 3 --retry-all-errors --retry-delay 5 `
+                --connect-timeout 20 --max-time 90 `
+                -o $zip $url
+              if ($LASTEXITCODE -eq 0) { break }
+            } catch {}
+            if ($i -eq 3) { throw "failed to download $asset after $i attempts" }
+            Write-Host "ffmpeg download attempt $i failed"
+            Start-Sleep -Seconds 5
           }
-          Expand-Archive -Path "$env:RUNNER_TEMP\ff.zip" -DestinationPath "$env:RUNNER_TEMP\ff" -Force
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\ff" -Force
           $bin = (Get-ChildItem "$env:RUNNER_TEMP\ff" -Filter bin -Recurse -Directory | Select-Object -First 1).FullName
           if (-not $bin) { throw 'no bin/ directory in the FFmpeg archive' }
           # GITHUB_PATH, not $env:PATH: the latter dies with this step, which is

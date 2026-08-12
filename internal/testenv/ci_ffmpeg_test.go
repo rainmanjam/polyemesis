@@ -48,3 +48,43 @@ func TestCIFFmpegDownloadUsesAuthenticatedFallback(t *testing.T) {
 		t.Fatalf("checked %d FFmpeg download step(s), want %d so the assertion cannot pass by examining too little", checked, wantFFmpegSteps)
 	}
 }
+
+func TestCIWindowsFFmpegDownloadUsesAuthenticatedFallback(t *testing.T) {
+	const wantFFmpegSteps = 1
+
+	var wf struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string            `yaml:"name"`
+				Run  string            `yaml:"run"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(readRepoFile(t, ".github", "workflows", "ci.yml")), &wf); err != nil {
+		t.Fatalf("parse .github/workflows/ci.yml: %v", err)
+	}
+
+	const asset = "ffmpeg-n8.1-latest-win64-gpl-8.1.zip"
+	var checked int
+	for job, j := range wf.Jobs {
+		for _, s := range j.Steps {
+			if !strings.Contains(s.Run, asset) {
+				continue
+			}
+			checked++
+			if got := s.Env["GH_TOKEN"]; got != "${{ github.token }}" {
+				t.Fatalf("job %s step %q sets GH_TOKEN=%q, want ${{ github.token }}", job, s.Name, got)
+			}
+			if !strings.Contains(s.Run, "gh release download latest --repo BtbN/FFmpeg-Builds") {
+				t.Fatalf("job %s step %q downloads %s without the authenticated gh fallback", job, s.Name, asset)
+			}
+			if !strings.Contains(s.Run, "curl.exe --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL") {
+				t.Fatalf("job %s step %q downloads %s without the hardened curl fallback", job, s.Name, asset)
+			}
+		}
+	}
+	if checked != wantFFmpegSteps {
+		t.Fatalf("checked %d FFmpeg download step(s), want %d so the assertion cannot pass by examining too little", checked, wantFFmpegSteps)
+	}
+}
