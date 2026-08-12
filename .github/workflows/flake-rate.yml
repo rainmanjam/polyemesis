@@ -18,26 +18,41 @@
 #
 # ----------------------------------------------------------------- SCOPE
 #
-# ISSUE #206. WHAT THIS INSTRUMENT CANNOT SEE, AT ANY NUMBER OF RUNS. Three
-# facts about the file below, each individually reasonable, combine into a blind
-# spot that is structural rather than statistical:
+# ISSUE #206. WHAT THIS INSTRUMENT COULD NOT SEE, AT ANY NUMBER OF RUNS. Three
+# facts about this file, each individually reasonable, combined into a blind
+# spot that was structural rather than statistical:
 #
-#   - the suite input is refused unless it matches ^acceptance[a-z0-9-]*$
-#   - it executes ./scripts/$SUITE.sh
-#   - the measure job is runs-on: ubuntu-latest
+#   - the suite input was refused unless it matched ^acceptance[a-z0-9-]*$
+#   - it executed ./scripts/$SUITE.sh
+#   - the measure job was runs-on: ubuntu-latest
 #
-# So it cannot run `go test ./internal/...`, and it cannot run on macOS or
+# So it could not run `go test ./internal/...`, and it could not run on macOS or
 # Windows. For a Go-test flake (#172) and for a Windows-only flake (#180) the
-# detection probability here is ZERO at `runs` anywhere in 1..40 -- and both of
+# detection probability was ZERO at `runs` anywhere in 1..40 -- and both of
 # those are classes this repository has actually been bitten by. The flake
 # discipline could not observe the class it was used to prosecute.
 #
-# That is NOT fixed here. Fixing it means a second matrix dimension over runner
-# OS and a second execution mode for Go packages, which is a different workflow
-# rather than a bigger one. What is fixed is the report no longer implying it:
-# the summary now names its own scope and prints the DETECTABLE FLOOR, so a
-# green result reads as "no rate above X% is present in this suite on ubuntu"
-# rather than as "not flaky".
+# THE SECOND EXECUTION MODE AND THE RUNNER DIMENSION NOW EXIST. The paragraph
+# above described what was missing and predicted the shape of the fix -- "a
+# second matrix dimension over runner OS and a second execution mode for Go
+# packages" -- and that is what `gotest` and `runners` below are. A Go-test
+# flake can now be repeated, on ubuntu, macOS or Windows, which makes #172 and
+# #180 measurable rather than structurally invisible.
+#
+# WHAT IS STILL TRUE, because the numbers did not change: the cap of 40 runs
+# puts the detectable floor at about 7.2%, and #180's incident survey implies
+# roughly 7%. The instrument can now REACH that class of flake and still cannot
+# resolve that rate at its maximum. Raising the cap is a separate decision with
+# a real cost -- each Windows repetition is minutes -- and it should be made
+# against a measured need rather than pre-emptively.
+#
+# The acceptance mode is unchanged and still ubuntu-only: those suites shell out
+# to ./scripts/*.sh, which assume a POSIX shell and the Linux tool set. Making
+# them portable is a different job from measuring how often they fail.
+#
+# The report also names its own scope and prints the DETECTABLE FLOOR, so a
+# green result reads as "no rate above X% is present in this suite on this
+# runner" rather than as "not flaky".
 #
 # The floor is poly_detectable_floor in scripts/lib-observe.sh, which
 # scripts/test-lib-observe.sh checks against the closed form. At the default of
@@ -57,6 +72,14 @@ on:
         description: "Repetitions per suite"
         type: string
         default: "5"
+      gotest:
+        description: "Go package and optional -run, e.g. ./internal/supervisor -run TestStop (empty = skip)"
+        type: string
+        default: ""
+      runners:
+        description: "Runner labels for the Go mode only, comma separated"
+        type: string
+        default: "ubuntu-latest"
 
 # Declared per job rather than once at the top. The two jobs genuinely differ:
 # plan never checks anything out, so it needs nothing at all, and saying so is
@@ -78,6 +101,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       suites: ${{ steps.split.outputs.suites }}
+      runners: ${{ steps.runners.outputs.runners }}
     steps:
       # Read from the environment, never interpolated into the script: the
       # input is a string a human types and must not reach the shell as code.
@@ -94,6 +118,30 @@ jobs:
           fi
           echo "suites=$json" >> "$GITHUB_OUTPUT"
           echo "measuring: $json"
+
+      # ALLOW-LISTED, not sanitised. The three GitHub-hosted labels this
+      # repository uses are the only accepted values, so an input that is not
+      # one of them is refused rather than passed through to runs-on. A
+      # self-hosted label arriving here would send a matrix leg somewhere
+      # nobody intended, and `runs-on` is not a place to find out that
+      # validation was approximate.
+      #
+      # Read from the environment for the same reason the suite list is: the
+      # input is a string a human types and must never reach the shell as code.
+      - name: Split the runner list
+        id: runners
+        env:
+          RUNNERS: ${{ inputs.runners }}
+        run: |
+          json=$(printf '%s' "$RUNNERS" | tr ',' '\n' | sed 's/[[:space:]]//g' \
+            | grep -E '^(ubuntu-latest|macos-latest|windows-latest)$' | jq -R . | jq -sc 'unique')
+          if [ "$json" = "[]" ] || [ -z "$json" ]; then
+            echo "no valid runner labels in: $RUNNERS" >&2
+            echo "accepted: ubuntu-latest, macos-latest, windows-latest" >&2
+            exit 1
+          fi
+          echo "runners=$json" >> "$GITHUB_OUTPUT"
+          echo "go mode runners: $json"
 
   measure:
     name: "${{ matrix.suite }} x${{ inputs.runs }}"
@@ -230,10 +278,10 @@ jobs:
               echo "_The detectable floor could not be computed for $measured runs._"
             fi
             echo
-            echo "Scope: \`./scripts/$SUITE.sh\` on ubuntu-latest only. This workflow cannot"
-            echo "run Go package tests and cannot run on macOS or Windows, so for a Go-test"
-            echo "flake or a Windows-only flake its detection probability is zero at any"
-            echo "number of runs -- see issue #206."
+            echo "Scope: \`./scripts/$SUITE.sh\` on ubuntu-latest only. THIS job says nothing"
+            echo "about any other suite, any other runner, or any Go test. A Go test can now"
+            echo "be measured through the \`gotest\` input, on ubuntu, macOS or Windows -- but"
+            echo "that is a different job and its result is not this one. See issue #206."
             echo
             echo '| run | result | duration |'
             echo '|---|---|---|'
@@ -248,4 +296,171 @@ jobs:
         with:
           name: flake-logs-${{ matrix.suite }}
           path: /tmp/*.log
+          if-no-files-found: ignore
+
+  # THE GO MODE. Issue #206: the acceptance mode above cannot execute a Go
+  # package test and cannot leave ubuntu, so for #172 (a -race flake in a Go
+  # test) and #180 (a Windows-only process-lifetime flake) its detection
+  # probability was zero at every value of `runs`. Those are classes this
+  # repository has been bitten by and then could not measure.
+  #
+  # A SEPARATE JOB RATHER THAN A MODE FLAG ON THE ONE ABOVE. The two share only
+  # the loop shape: this one needs a Go toolchain and no FFmpeg, runs on three
+  # operating systems, and reports per-runner. Folding them together would put
+  # two `if:` ladders through every step to keep one name.
+  measure-go:
+    name: "go ${{ matrix.os }} x${{ inputs.runs }}"
+    needs: plan
+    # Skipped entirely when the input is empty, so the ordinary acceptance
+    # dispatch does not pay for a matrix it did not ask for.
+    if: inputs.gotest != ''
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    # Lower than the acceptance job's 120: a Go package test is seconds to a
+    # couple of minutes, not minutes to tens. Still far above 40 repetitions of
+    # anything reasonable, and it exists so a HUNG test reports rather than
+    # sitting to GitHub's six-hour default -- which is #179 exactly.
+    timeout-minutes: 60
+    strategy:
+      # One runner's flake must not cancel the measurement on the others. That
+      # is the entire point of the dimension: the interesting result is that
+      # windows differs from ubuntu, and fail-fast would delete it.
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.plan.outputs.runners) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # bash on all three, so the loop is written once. GitHub's Windows images
+      # ship it; the alternative is a PowerShell copy of this script that would
+      # drift from the bash one the moment either is edited.
+      - name: Repeat the test
+        shell: bash
+        env:
+          GOTEST: ${{ inputs.gotest }}
+          RUNS: ${{ inputs.runs }}
+        run: |
+          set -uo pipefail
+
+          # VALIDATED, NOT QUOTED. The input is a string a human types into a
+          # dispatch form, and it reaches `go test` as ARGUMENTS. Read from the
+          # environment so it is never interpolated into the script as code,
+          # then split into exactly two fields and each checked against what it
+          # is allowed to be. Anything else is refused rather than escaped:
+          # there is no shell metacharacter in a package path or a -run pattern
+          # that this workflow has any reason to accept.
+          PKG=$(printf '%s' "$GOTEST" | awk '{print $1}')
+          FLAG=$(printf '%s' "$GOTEST" | awk '{print $2}')
+          PATTERN=$(printf '%s' "$GOTEST" | awk '{print $3}')
+          if printf '%s' "$GOTEST" | awk 'NF>3{exit 0} {exit 1}'; then
+            echo "gotest takes at most '<package> -run <pattern>', got: $GOTEST" >&2
+            exit 1
+          fi
+          case "$PKG" in
+            ./*) ;;
+            *) echo "package must start with ./, got: '$PKG'" >&2; exit 1 ;;
+          esac
+          printf '%s' "$PKG" | grep -qE '^\./[A-Za-z0-9._/-]+$' || {
+            echo "package has characters this workflow will not pass to go test: '$PKG'" >&2; exit 1; }
+          ARGS=("$PKG" -count=1)
+          if [ -n "$FLAG" ]; then
+            [ "$FLAG" = "-run" ] || { echo "the only accepted flag is -run, got: '$FLAG'" >&2; exit 1; }
+            printf '%s' "$PATTERN" | grep -qE '^[A-Za-z0-9_|/^$.()-]+$' || {
+              echo "-run pattern has characters this workflow will not pass on: '$PATTERN'" >&2; exit 1; }
+            # `$` and `(` are both legitimate in a -run regex -- `TestFoo$` and
+            # an alternation group -- so the class above admits them, which also
+            # admits the literal text `$(`. It is NOT evaluated: the value comes
+            # from the environment, is never re-expanded, and reaches go test
+            # inside an argument array. This refuses it anyway. The reasoning
+            # that makes it safe is four steps long, and a reader should not
+            # have to reconstruct it to review a workflow.
+            case "$PATTERN" in
+              *'$('*|*'`'*) echo "-run pattern may not contain \$( or a backtick: '$PATTERN'" >&2; exit 1 ;;
+            esac
+            ARGS+=(-run "$PATTERN")
+          elif [ -n "$PATTERN" ]; then
+            echo "a pattern was given with no -run before it: '$PATTERN'" >&2; exit 1
+          fi
+
+          # The same bounds the acceptance job applies, for the same reasons.
+          case "$RUNS" in ''|*[!0-9]*) echo "runs must be a whole number, got: '$RUNS'"; exit 1 ;; esac
+          [ "$RUNS" -ge 1 ] || { echo "runs must be at least 1, got: '$RUNS'"; exit 1; }
+          [ "$RUNS" -le 40 ] || { echo "runs must be 40 or fewer, got: '$RUNS'"; exit 1; }
+
+          # NO FFMPEG IS INSTALLED, AND THAT IS A LIMIT ON WHAT MAY BE MEASURED
+          # HERE, not an oversight. POLYEMESIS_REQUIRE_FFMPEG is deliberately
+          # not set either, so a package that needs it SKIPS -- and a skipped
+          # test passes, which would publish "0 failed" for a test that never
+          # executed. The guard below catches that: a run whose output contains
+          # no ran-test evidence is refused rather than counted.
+          pass=0; fail=0
+          : > outcomes.txt
+          for i in $(seq 1 "$RUNS"); do
+            start=$(date +%s)
+            if go test "${ARGS[@]}" > "gotest-$i.log" 2>&1; then
+              rc=PASS; pass=$((pass + 1))
+            else
+              rc=FAIL; fail=$((fail + 1))
+            fi
+            printf '%s\t%s\t%ss\n' "$i" "$rc" "$(( $(date +%s) - start ))" >> outcomes.txt
+            echo "  run $i: $rc ($(( $(date +%s) - start ))s)"
+            [ "$rc" = FAIL ] && tail -5 "gotest-$i.log" | sed 's/^/      /'
+          done
+
+          # "no test files" and a package that only SKIPS both exit 0. Either
+          # would publish a clean rate for a measurement that never happened,
+          # which is the one output this instrument must never produce.
+          if grep -qE '^(ok|FAIL|---)' gotest-1.log; then :; else
+            echo "::error::the first run produced no test result for $PKG"
+            echo "::error::refusing to publish a rate: '0 failed' for a package that did not run reads as clean"
+            sed 's/^/  /' gotest-1.log | head -20
+            exit 1
+          fi
+          if grep -qE '^\s*ok.*\[no test files\]' gotest-1.log; then
+            echo "::error::$PKG has no test files; there is nothing to measure"
+            exit 1
+          fi
+
+          # The second lock, counted from what the loop WROTE rather than from
+          # the input, exactly as the acceptance job does and for the reason
+          # written there.
+          measured=$(grep -c . outcomes.txt || true)
+          if [ "${measured:-0}" -lt 1 ]; then
+            echo "::error::no run was executed, so there is no rate to report"
+            exit 1
+          fi
+          if [ "$measured" -ne "$RUNS" ] || [ "$((pass + fail))" -ne "$measured" ]; then
+            echo "::error::recorded $measured outcome(s) and $((pass + fail)) tallied for $RUNS requested run(s)"
+            exit 1
+          fi
+
+          floor=$(awk -v n="$measured" 'BEGIN{printf "%.1f", 100*(1-(0.05)^(1/n))}')
+          {
+            echo "### go test on ${{ matrix.os }}: $fail of $measured failed"
+            echo
+            echo "Command: \`go test ${ARGS[*]}\`"
+            echo
+            echo "Detectable floor at $measured runs: about ${floor}% per-run failure rate."
+            echo "A clean result here means \"no rate above ${floor}% is present on ${{ matrix.os }}\","
+            echo "not \"not flaky\", and it says nothing about the other runners or about"
+            echo "the acceptance suites -- see issue #206."
+            echo
+            echo '| run | result | duration |'
+            echo '|---|---|---|'
+            awk -F'\t' '{printf "| %s | %s | %s |\n", $1, $2, $3}' outcomes.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "RESULT $PKG on ${{ matrix.os }}: $fail/$measured failed"
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: flake-logs-go-${{ matrix.os }}
+          path: gotest-*.log
           if-no-files-found: ignore
