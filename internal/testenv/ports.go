@@ -35,9 +35,12 @@ package testenv
 // of a comment.
 
 import (
-	"fmt"
+	"bytes"
 	"io"
 	"net"
+	"os/exec"
+	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -122,20 +125,62 @@ func FreeTCPPort(t *testing.T) int {
 //
 // It returns false rather than failing the test: what to do about a child that
 // never bound belongs to the caller, who knows what it was and can say so.
+//
+// IT OBSERVES THE SOCKET TABLE AND DOES NOT BIND. Issue #279: this used to
+// decide whether the child had taken the port by taking the port itself --
+//
+//	c, err := net.ListenPacket("udp", addr)
+//	if err != nil { return true }   // somebody else has it
+//	_ = c.Close()
+//
+// -- and while it held that socket the child could not bind. FFmpeg does not
+// retry a failed UDP bind; it exits. The probe then found the port free for the
+// rest of its budget and reported a timeout naming the child, which had died
+// because of the probe. Measured at 14 in 400 with the child binding
+// immediately, and every timeout in that run was a bind the probe had stolen.
+//
+// The docstring above already claimed this was "the same question the shell
+// asks" through poly_wait_port_ready. It was not: lsof READS the table, and
+// ListenPacket COMPETES for it. That sentence is why nobody looked again, so
+// the code now does what it always said it did.
 func WaitUDPPortBound(port int, within time.Duration) bool {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(within)
 	for {
-		c, err := net.ListenPacket("udp", addr)
-		if err != nil {
-			// The bind was refused, so somebody else has it. That somebody is
-			// the process the caller just started.
+		if udpPortHeld(port) {
 			return true
 		}
-		_ = c.Close()
 		if !time.Now().Before(deadline) {
 			return false
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// udpPortHeld reports whether any process holds a UDP socket on the port,
+// without opening one.
+//
+// A NON-ZERO EXIT IS THE NEGATIVE ANSWER, not an error to propagate: both lsof
+// and findstr exit 1 when they match nothing, which is exactly "no process
+// holds it". Only the presence of output is read as yes, so a tool that is
+// missing entirely -- which exits non-zero with no output as well -- degrades
+// to "not yet" and the caller's deadline still terminates the wait. That is the
+// safe direction: the old failure was a wait that ended a child, and the worst
+// this can do is time out without touching it.
+func udpPortHeld(port int) bool {
+	p := strconv.Itoa(port)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		// -ano lists numeric addresses with owning PIDs and never resolves
+		// names, which is what keeps this bounded on a machine with no DNS.
+		cmd = exec.Command("cmd", "/c", "netstat -ano -p UDP | findstr :"+p+" ")
+	} else {
+		// -nP: no host and no port name resolution, for the same reason.
+		// -iUDP:<port> is the whole query; the socket table is read, not joined.
+		cmd = exec.Command("lsof", "-nP", "-iUDP:"+p)
+	}
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return false
+	}
+	return len(bytes.TrimSpace(out)) > 0
 }

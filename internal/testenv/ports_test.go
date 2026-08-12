@@ -121,10 +121,24 @@ func TestFreePortIsNotHeld(t *testing.T) {
 // sleep before pushing datagrams at a child's socket; the negative is what stops
 // it becoming a hang when the child never binds.
 //
-// Mutation: invert the sense of the bind check in WaitUDPPortBound
-// (`if err != nil` -> `if err == nil`).
+// Mutation: invert the sense of udpPortHeld's answer (`return len(...) > 0` ->
+// `== 0`).
 // Observed to fail on both sub-cases: the held port reported unbound, and the
 // free port reported bound.
+//
+// WHAT THIS TEST CANNOT SEE, recorded because it is the reason #279 survived
+// it. Both sub-cases either hold the port for the whole call or leave it free
+// for the whole call, so the probe never competes with a bind in progress. The
+// old implementation -- which answered by binding the port itself -- passed
+// this test on every platform while being able to kill the child it was
+// waiting for.
+//
+// A guard for that was attempted and is deliberately absent. The window is a
+// few microseconds inside a 20ms poll, and any test that hammers the port hard
+// enough to hit it also makes the probe return on its first poll, which ends
+// the competition it was trying to observe. Nothing here should be read as
+// covering it: what prevents the defect now is that WaitUDPPortBound contains
+// no bind at all, which is a property of the code and not of this file.
 func TestWaitUDPPortBoundSeesABindAndGivesUpBounded(t *testing.T) {
 	held := testenv.ReserveUDP(t)
 	if !testenv.WaitUDPPortBound(held.Port(), 2*time.Second) {
