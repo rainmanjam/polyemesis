@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -31,6 +32,88 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
+// THE DONE-CRITERION FOR THIS LEDGER, decided by a council and written here so
+// that the next person inherits the CONDITION rather than the argument.
+//
+// The ledger is DONE at a commit iff `POLYEMESIS_LEDGER=strict go test
+// ./internal/api` passes while establishing all five conjuncts below. Each is
+// independently falsifiable; none of them asserts a count.
+//
+//  1. TOTALITY OVER A DERIVED POPULATION. Every method+pattern pair the mux
+//     serves reaches exactly one word of the closed vocabulary, and the
+//     POPULATION is derived from REGISTRATION -- a recorder on
+//     Server.Handler() -- rather than from chi.Walk plus a hand-list. Each word
+//     is produced by a request actually issued against the handler this build
+//     ships, through the real mux.
+//     See route_population_test.go and, for the mux half of #167, muxServingUI.
+//
+//  2. EVIDENCE, NOT REFUSAL. Every excused and denied word carries either an
+//     executed differential -- a planted sentinel one principal demonstrably
+//     receives and another does not -- or an entry on an explicit
+//     declared-invariance list recording the counter-experiment that WAS
+//     EXECUTED and produced no differential. A bare 403, 404 or 405 discharges
+//     nothing.
+//     See nonget_differential_test.go.
+//
+//  3. VERDICT PURITY. No verdict function reads prose, a count, or the
+//     open/closed state of any issue. Blanking every free-text field changes no
+//     verdict; deleting every Issue field changes no verdict except the
+//     citation-LIVENESS checks, which are about citations and not about
+//     coverage. Every emitted shape is either inspected by a func the preflight
+//     CALLS or carries a jurisdiction record (package, test name) that resolves
+//     via `go test -list` in the owning package. No shape may be emitted,
+//     uninspected and citation-only.
+//     See shape_jurisdiction_test.go, TestDeletingEveryProseReasonChangesNoVerdict,
+//     TestBlankingEveryShapeNoteChangesNoVerdict.
+//
+//  4. READBACK. Perturbing any committed field of route-coverage.json fails at
+//     least one named test, and exactly one declared canary field is reported
+//     unasserted on every run.
+//     See ledger_readback_test.go.
+//
+//  5. DEPTH TERMINATION. Exactly one meta-guard exists over the ledger's
+//     artifact, and it contains its own live canary, which is what terminates
+//     the guard ladder at depth 2. The rule is mechanical rather than a matter
+//     of taste: recursion stops at the first level whose vacuity is
+//     SELF-DETECTING. L1 cannot see its own vacuity -- the Inert, Sentinels and
+//     Pointers history in this file is three proofs of that -- and L2 can,
+//     because a perturbation loop that stops perturbing reports its canary as
+//     covered and fails itself. So the canary is load-bearing: a meta-guard
+//     ships with its canary or does not ship, since a canary-less L2 genuinely
+//     justifies an L3 and then the ladder never ends.
+//     See shape_caller_guard_test.go's noteCanary and ledger_readback_test.go's
+//     declared canary field.
+//
+// COUNTS VERSUS PROPERTIES, because this ledger has been talked out of the
+// distinction before. A count is legitimate as a RATCHET -- a bound with a
+// hand-edit cost, which survives population drift -- and illegitimate as a
+// CRITERION, because an equality is falsified by regeneration and carries no
+// information when it holds. #163 drifted 22 -> 39 -> 32 while #176 changed the
+// predicate underneath it; the G3 residual has been 123, then 83, then 76, twice
+// inside one review round. So every conjunct above is universally quantified
+// over a derived population, and the twelve ratchets in this file stay exactly
+// where they are, as evidence rather than as criteria.
+//
+// THE WEAKEST PART, inherited and owned rather than argued away. Conjunct 2's
+// declared-invariance list is a NEW DECLARATION CHANNEL, and every declaration
+// channel this ledger has had -- Reason, DeferredIssue, By, Issue -- became a
+// free pass within one round. Worse, its safeguard is a NEGATIVE measurement
+// ("the counter-experiment ran and found no differential"), which is
+// byte-identical to what a vacuous harness produces. The mitigation is that the
+// list's own detector carries a positive control: the same code path is run
+// against a pair MEASURED to disclose, and must find the sentinel there. That
+// answers "the harness went blind"; it does not answer "the declaration is
+// wrong about what it declares".
+//
+// SECOND WEAKNESS. Conjunct 1's derived population can only derive from
+// registrations this process makes through Server.Handler(). A listener created
+// elsewhere -- exactly #169's port 80, which binds in package main before any
+// router here exists -- is invisible to any derivation rooted at this router.
+// Jurisdiction totality at the outermost boundary remains a human review, and no
+// mechanical repair for it is known.
+//
+// ------------------------------------------------------------------------------
+//
 // THE ROUTE COVERAGE LEDGER.
 //
 // The recurring failure in #150 was never any single leak. It was that a guard
@@ -283,23 +366,61 @@ type coverageShape struct {
 	// registry and re-runs the real decision rather than a helper written to
 	// ignore prose.
 	Issue string `json:"issue,omitempty"`
-	Note  string `json:"note"`
+	// Jurisdiction is THE DISCHARGE for an emitted shape this package cannot
+	// inspect, and it replaces the issue number that used to be one.
+	//
+	// #164 spent a round deleting "an issue number is a discharge" from the
+	// route channel and the shape channel re-admitted it: shapeVerdict returned
+	// "deferred" on issueRef.MatchString(sh.Issue), so four shapes rode on a
+	// citation alone and closing #169 -- whose row was discharged by the literal
+	// string "#169" -- broke the build. An issue's state is not evidence about
+	// this API, and a verdict that reads it makes an external tracker part of
+	// the test suite.
+	//
+	// What replaces it is a record of WHERE the assertion lives: a package and a
+	// top-level test name, RESOLVED by `go test -list` in that package. That is
+	// strictly weaker than an inspector -- it says an assertion exists and runs
+	// somewhere, not that it read these bytes -- and strictly stronger than a
+	// number, because it cannot name a test that does not exist, and because the
+	// resolution is mechanical rather than a reader's trust.
+	//
+	// See TestEveryJurisdictionRecordResolvesToALiveTest.
+	Jurisdiction *shapeJurisdiction `json:"jurisdiction,omitempty"`
+	Note         string             `json:"note"`
+}
+
+// shapeJurisdiction names the package and test that assert a shape this package
+// cannot reach.
+type shapeJurisdiction struct {
+	// Package is an import path relative to the module root, e.g.
+	// "cmd/polyemesis". It is what `go test -list` is pointed at.
+	Package string `json:"package"`
+	// Test is a top-level Test function in that package. Resolved, never
+	// trusted.
+	Test string `json:"test"`
+	// Why is PROSE and NOTHING READS IT, on the same rule as coverageExcus.Why.
+	Why string `json:"why"`
 }
 
 // shapeVerdict is THE decision step 7 acts on, extracted so that the guard
 // against prose-derived coverage can re-run the real thing.
 //
-// It reads Emitted, Inspected and Issue. It does not read Note, and the test
-// that proves so blanks Note across the live registry and re-runs THIS
-// function -- which is what makes that test capable of failing.
+// IT READS NO ISSUE, and that is this round's change. It reads Emitted,
+// Inspected and Jurisdiction. It does not read Note and it does not read Issue,
+// and there are two tests that blank each of those across the LIVE registry and
+// re-run this function -- which is what makes them capable of failing.
+//
+// The consequence worth stating plainly: the open/closed state of every issue
+// this ledger cites is now verdict-neutral. Closing #169 requires editing a
+// reference, not repairing a build.
 func shapeVerdict(sh coverageShape) string {
 	switch {
 	case !sh.Emitted:
 		return "absent"
 	case sh.Inspected:
 		return "inspected"
-	case issueRef.MatchString(sh.Issue):
-		return "deferred"
+	case sh.Jurisdiction != nil && sh.Jurisdiction.Package != "" && sh.Jurisdiction.Test != "":
+		return "out-of-jurisdiction"
 	default:
 		return "FAILS-THE-LEDGER"
 	}
@@ -1177,6 +1298,24 @@ func builtUIFS() fs.FS {
 	}
 }
 
+// muxServingUI builds a REAL router from the server under test whose NotFound
+// terminal serves the given filesystem.
+//
+// It is the whole mechanism behind driving the built column end to end: every
+// middleware registerRoutes installs is in front of the terminal, exactly as in
+// the shipped binary, and the only thing that differs from production is which
+// `dist` the embedded-UI closure reads. The field is restored immediately --
+// Handler() captures the closure at build time, so the returned mux keeps
+// serving the chosen filesystem and every other caller of s.Handler() goes on
+// getting the embedded one.
+func muxServingUI(t *testing.T, s *Server, fsys fs.FS) http.Handler {
+	t.Helper()
+	prev := s.uiFS
+	defer func() { s.uiFS = prev }()
+	s.uiFS = fsys
+	return s.Handler()
+}
+
 // observedWebBranch classifies a response into one of the four branches, from
 // the bytes a client receives.
 //
@@ -1210,17 +1349,26 @@ func observedWebBranch(w *httptest.ResponseRecorder) string {
 // the Go job, so the SPA and asset branches never executed and nobody could
 // tell, because nothing recorded which branch a probe took.
 //
-// Both columns are driven here, against internal/web.HandlerFor -- the same
-// closure the mux mounts, over a filesystem this test chooses. That is the
-// difference between this and the tripwire retired in #240: a claim about the
-// other configuration is worthless unless the fixture reaches it, so this
-// fixture reaches it.
+// Both columns are driven here THROUGH THE REAL CHI MUX, over a filesystem this
+// test chooses. That is the difference between this and the tripwire retired in
+// #240: a claim about the other configuration is worthless unless the fixture
+// reaches it, so this fixture reaches it.
+//
+// THROUGH THE MUX IS THIS ROUND'S CHANGE, and it is the rest of #167. The
+// columns used to be driven against web.HandlerFor DIRECTLY -- no requestLogger,
+// no securityHeaders, no chi routing in front of them -- so the built column
+// described a handler in isolation while the configuration production ships was
+// the one nothing had entered end to end. Server.uiHandler is a seam for exactly
+// this: registerRoutes mounts whatever it returns, and a test can choose the
+// filesystem without any of the middleware above it changing. If a middleware
+// ever rewrites a response on the way out -- the "what would make it unsafe" of
+// the deferral this replaces -- the branch a probe enters moves and this fails.
 //
 // It also asserts the PRECONDITION rather than assuming it: whether this
 // checkout embedded a real UI is read from web.Built(), and the branch every
 // probe takes through the REAL mux must agree with it. Build the UI and re-run,
 // and the bare column stops being the one asserted through the mux.
-func assertNotFoundProbesEnterTheirBranches(t *testing.T) {
+func assertNotFoundProbesEnterTheirBranches(t *testing.T, s *Server) {
 	t.Helper()
 
 	bare, err := web.FS()
@@ -1239,7 +1387,7 @@ func assertNotFoundProbesEnterTheirBranches(t *testing.T) {
 	probes := append(notFoundProbes(), assetProbe())
 	entered := map[string]map[string]bool{}
 	for _, col := range columns {
-		h := web.HandlerFor(col.fsys)
+		h := muxServingUI(t, s, col.fsys)
 		entered[col.name] = map[string]bool{}
 		for _, p := range probes {
 			w := httptest.NewRecorder()
@@ -1248,7 +1396,8 @@ func assertNotFoundProbesEnterTheirBranches(t *testing.T) {
 			entered[col.name][got] = true
 			if want := col.branch(p); got != want {
 				t.Errorf("%s %s (%s), %s filesystem: entered the %q branch of "+
-					"internal/web.HandlerFor, and the probe declares %q.\n"+
+					"internal/web.HandlerFor THROUGH THE REAL MUX, and the probe "+
+					"declares %q.\n"+
 					"This column is DRIVEN, which it was not before #167: the probe set "+
 					"used to record only that the responses were principal-independent, "+
 					"and could not distinguish \"the SPA served index.html\" from \"there "+
@@ -1416,8 +1565,12 @@ type shapeRow struct {
 	// strict mode with the counterpart proofs rather than on every `go test`.
 	// That residual is a deferral row, not an implicit gap.
 	LiveTools bool
-	Issue     string
-	Note      string
+	// Jurisdiction is the discharge for a shape whose assertion lives in another
+	// package. Issue is a citation for a reader and discharges nothing; see
+	// coverageShape.Jurisdiction for the round that made that true.
+	Jurisdiction *shapeJurisdiction
+	Issue        string
+	Note         string
 }
 
 // emittedShapes is I5: coverage is (method, pattern, SHAPE), because the two
@@ -1433,12 +1586,13 @@ func emittedShapes() []coverageShape {
 	out := make([]coverageShape, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, coverageShape{
-			Shape:       r.Shape,
-			Emitted:     r.Emitted,
-			Inspected:   r.Inspector != nil,
-			InspectedBy: inspectorName(r.Inspector),
-			Issue:       r.Issue,
-			Note:        r.Note,
+			Shape:        r.Shape,
+			Emitted:      r.Emitted,
+			Inspected:    r.Inspector != nil,
+			InspectedBy:  inspectorName(r.Inspector),
+			Issue:        r.Issue,
+			Jurisdiction: r.Jurisdiction,
+			Note:         r.Note,
 		})
 	}
 	return out
@@ -1483,6 +1637,11 @@ func shapeRegistry() []shapeRow {
 		// asks for, rather than given a token inspector that witnesses a header
 		// on some other route and calls the shape covered.
 		{Shape: "response-header/Location", Emitted: true, Issue: "#168",
+			Jurisdiction: &shapeJurisdiction{
+				Package: "cmd/polyemesis", Test: "TestAConfiguredRedirectNeverCachesAWatchToken",
+				Why: "the redirect wrapper lives in package main; that test drives it and " +
+					"asserts the Location it emits is never cacheable. Resolved by " +
+					"`go test -list`, not trusted."},
 			Note: "the HTTPS redirect's Location carries the request URI verbatim, watch token " +
 				"included. The assertion lives in cmd/polyemesis (package main), out of " +
 				"this ledger's jurisdiction. rawResponse now renders EVERY response header, " +
@@ -1491,10 +1650,23 @@ func shapeRegistry() []shapeRow {
 		{Shape: "response-header/Set-Cookie", Emitted: true, Inspector: inspectPlayoutCookie,
 			Note: "the playout watch cookie"},
 		{Shape: "response-header/Cache-Control", Emitted: true, Issue: "#168",
+			Jurisdiction: &shapeJurisdiction{
+				Package: "cmd/polyemesis", Test: "TestATokenlessWatchPathIsStillUncacheable",
+				Why: "same package-main jurisdiction as Location above, and the same " +
+					"redirect surface: the assertion that a watch path is never stored is " +
+					"there because the wrapper is there."},
 			Note: "whether a credential-bearing response may be stored. Same jurisdiction " +
 				"problem as response-header/Location above: asserted in package main, " +
 				"unasserted here for the routes outside the invariance sweep."},
 		{Shape: "response-header/Content-Disposition", Emitted: true, Issue: "#168",
+			Jurisdiction: &shapeJurisdiction{
+				Package: "internal/api", Test: "TestDownloadCAServesOnlyTheSelfSignedCACertificate",
+				Why: "IN THIS PACKAGE and still not an inspection, which is the honest " +
+					"reading of a jurisdiction record: that test drives a download route " +
+					"and asserts the attachment disposition on it, but the preflight does " +
+					"not call it and it covers one route rather than the shape. Weaker " +
+					"than an inspector, said out loud, and mechanically resolvable, which " +
+					"the issue number it replaces was not."},
 			Note: "download filenames; media names only, no stored credential. RE-POINTED from " +
 				"#154, which commit ae8df24 announces closing: what remains is that the " +
 				"download routes are excused from the sweep entirely, so no principal-pair " +
@@ -1507,6 +1679,12 @@ func shapeRegistry() []shapeRow {
 				"{\"error\":\"this stream requires a playback token\"}. Correct behaviour, " +
 				"asserted by that excuse's Want -- and not this shape."},
 		{Shape: "file-download", Emitted: true, Issue: "#168",
+			Jurisdiction: &shapeJurisdiction{
+				Package: "internal/api", Test: "TestStemDownloadServesAStemInsideTheStemsDirectory",
+				Why: "the positive case of the stem download: a principal entitled to the " +
+					"file receives its bytes and they are compared. Same caveat as " +
+					"Content-Disposition -- one route, not the shape, and not called by " +
+					"the preflight."},
 			Note: "recordings, stems, clips and exports. #154 decided this and is CLOSED by " +
 				"ae8df24: every download route now answers a read token 403, which the " +
 				"excuse registry drives. What is still uninspected is the shape itself " +
@@ -1516,6 +1694,10 @@ func shapeRegistry() []shapeRow {
 				"fails the build and is dropped for a read scope"},
 		{Shape: "sse", Note: "ABSENT: this API emits no server-sent events"},
 		{Shape: "mqtt-retained-topic", Emitted: true, Issue: "#160",
+			Jurisdiction: &shapeJurisdiction{
+				Package: "cmd/polyemesis", Test: "TestTheRetainedDestTopicIsScrubbedAtTheSink",
+				Why: "cmd/polyemesis/mqtt.go is what publishes it, and that test asserts " +
+					"the retained payload is scrubbed before it reaches the broker."},
 			Note: "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal " +
 				"and never any. Scrubbed at source by supervisor.scrub; the broker-side " +
 				"consumer audit is the deferral."},
@@ -1554,6 +1736,16 @@ func shapeRegistry() []shapeRow {
 		// from some other handler is precisely the substitution #176 caught
 		// streaming-media making.
 		{Shape: "plain-http-listener", Emitted: true, Issue: "#169",
+			Jurisdiction: &shapeJurisdiction{
+				Package: "cmd/polyemesis", Test: "TestOrdinaryHostsStillRedirect",
+				Why: "THIS ROW IS WHY THE JURISDICTION FIELD EXISTS. It used to discharge " +
+					"on the literal string \"#169\" -- an issue number as a discharge, the " +
+					"thing #164 spent a round deleting, re-admitted through the shape " +
+					"channel -- which made closing #169 break the build. #169 is " +
+					"permanently open BY CONSTRUCTION: the port-80 listener binds in " +
+					"package main before any router in this package exists, and that is " +
+					"an architectural record rather than unfinished work. Its state is " +
+					"now verdict-neutral, and this record is what answers the ledger."},
 			Note: "cmd/polyemesis.startHTTPHelper binds :80 and serves the ACME http-01 " +
 				"responder plus a permanent redirect, on a listener no ledger row has ever " +
 				"named. Its Location header IS covered as a shape -- response-header/" +
@@ -1567,8 +1759,14 @@ func shapeRegistry() []shapeRow {
 				"needs a spawned child, so it runs under POLYEMESIS_LEDGER=strict with the " +
 				"counterpart proofs -- see the counterpart-proofs-outside-the-preflight " +
 				"deferral, which now covers it too."},
-		{Shape: "slog-output", Emitted: true, Issue: "#160",
-			Note: "the server's own structured log."},
+		{Shape: "slog-output", Emitted: true, Inspector: inspectSlogOutput,
+			Note: "the server's own structured log. PROMOTED from a citation to an " +
+				"inspector in the round that deleted issue-numbers-as-discharge from the " +
+				"shape channel: the row cited #160 and nothing read the bytes, and the " +
+				"bytes turned out to be one field swap away -- s.log is a plain field, so " +
+				"an inspector points it at a buffer, drives one request through the real " +
+				"mux and reads what the request logger emitted. A citation was never the " +
+				"cheapest option here; it was the one nobody had priced."},
 	}
 }
 
@@ -1815,6 +2013,44 @@ func inspectOutboundAlertBody(t *testing.T, rig shapeRig) shapeObservation {
 			truncateForFailure(body))
 	}
 	return shapeObservation{Shape: "outbound-alert-body", Sample: rec.lastHeaders() + body}
+}
+
+// inspectSlogOutput reads the server's OWN structured log, by pointing it at a
+// buffer and driving one request through the real mux.
+//
+// It costs one extra request on the shared rig and no fixture at all, which is
+// the finding worth recording next to it: this row sat on a citation for two
+// rounds while the bytes were reachable by swapping a plain field, exactly as
+// TestTheUncheckedBypassSaysSoInTheLog in this package has been doing for other
+// reasons all along.
+//
+// The DISCRIMINATING property, per the rule this section opens with: the sample
+// must be a slog text record -- level=, msg= and the method and path of the
+// request that produced it. "Some bytes appeared in the buffer" would accept a
+// panic trace, an empty write, or a log line from something else entirely.
+func inspectSlogOutput(t *testing.T, rig shapeRig) shapeObservation {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := rig.s.log
+	defer func() { rig.s.log = prev }()
+	rig.s.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// NOT /health and NOT /stats: requestLogger drops those by design, and an
+	// inspector that drove one of them would read an empty buffer and report
+	// the shape absent.
+	rawBody(t, rig.h, bearer(rig.read), "/api/v1/settings")
+
+	got := buf.String()
+	for _, want := range []string{"level=", "msg=", "/api/v1/settings"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the slog-output inspector drove GET /api/v1/settings with the server's "+
+				"logger pointed at a buffer and the %d bytes it captured do not contain %q, "+
+				"so what it witnessed is not this API's structured log.\n%s",
+				len(got), want, truncateForFailure(got))
+			break
+		}
+	}
+	return shapeObservation{Shape: "slog-output", Sample: got}
 }
 
 // inspectProcessLog is the LiveTools one. The file only exists once a child has
@@ -2155,6 +2391,16 @@ func TestLedgerPreflight(t *testing.T) {
 	// written by that call. Nothing above it re-reads the shared fixture.
 	nonGetWitnesses := assertNonGetDifferential(t)
 
+	// 3c. THE DECLARED-INVARIANCE COUNTER-EXPERIMENT. #157's other half, and
+	// conjunct 2's second clause. The census above covers the pairs MEASURED to
+	// disclose; this drives every remaining denied-by-method pair as ADMIN and
+	// requires that no planted credential comes back -- so "invariant" is a
+	// measurement taken on this build rather than a sentence in the artifact.
+	// Its own fixtures, like the census, and for the same reason: the first run
+	// of it destroyed the control's row with a DELETE. See
+	// declared_invariance_test.go.
+	assertDeclaredInvariance(t, enumerated)
+
 	// 4. EQUALITY against the artifact.
 	want := readLedger(t)
 
@@ -2325,12 +2571,19 @@ func TestLedgerPreflight(t *testing.T) {
 	// buys both properties.
 	TestEveryInspectedShapeWitnessesItself(t)
 	TestBlankingEveryShapeNoteChangesNoVerdict(t)
+	// The same two reasons again, for the file that deletes issue-numbers-as-
+	// discharge from the shape channel. The resolver shells out to `go test
+	// -list` in three packages; measured, and the number is in the PR body,
+	// because a preflight nobody can afford to run is a preflight somebody
+	// deletes.
+	TestDeletingEveryShapeIssueChangesNoVerdict(t)
+	assertJurisdictionRecordsResolve(t)
 
 	// #167's branch table, from here as well, and for the same two reasons: it
 	// needs no server, so it costs the preflight nothing, and a guard that only
 	// lives in TestTheNonTrieSurfacesAreDriven is one `-run` away from silence.
 	// The precondition half stays there, because it needs the mux.
-	assertNotFoundProbesEnterTheirBranches(t)
+	assertNotFoundProbesEnterTheirBranches(t, s)
 
 	// 6. STRICT MODE. CI sets POLYEMESIS_LEDGER=strict and the counterpart
 	// proofs run from HERE as well, so no single -run filter silences both.
@@ -2355,15 +2608,20 @@ func TestLedgerPreflight(t *testing.T) {
 		if shapeVerdict(sh) != "FAILS-THE-LEDGER" {
 			continue
 		}
-		t.Errorf("the shape %q is emitted, is not inspected, and its Issue field is not an "+
-			"issue reference (got %q). Set `Issue: \"#NNN\"` on the row -- a bare number, "+
-			"one to five digits, hash included -- and add that number to citedIssues in %s "+
-			"by hand.\n"+
+		t.Errorf("the shape %q is emitted, is not inspected, and carries no jurisdiction "+
+			"record. Give the row an Inspector -- a func this preflight CALLS, which is the "+
+			"strong discharge -- or a `Jurisdiction: &shapeJurisdiction{Package: ..., "+
+			"Test: ...}` naming where the assertion lives, which %s resolves with "+
+			"`go test -list`.\n"+
+			"AN ISSUE NUMBER IS NOT AN OPTION AND HAS NOT BEEN SINCE THE ROUND THAT WROTE "+
+			"THIS MESSAGE. It was, for four shapes: shapeVerdict returned \"deferred\" on a "+
+			"regex match against this field (%q), which put an external tracker inside a "+
+			"verdict and made #169 uncloseable. Issue is a citation for a reader and is "+
+			"read by nothing that decides anything.\n"+
 			"The playout manifest was a streaming response and the argv leak travelled "+
 			"through a WebSocket frame; both are SHAPES, not routes, and a ledger that "+
-			"counted only routes called both covered. A deferral written in the note "+
-			"instead of the field discharges nothing, and deliberately: prose is not "+
-			"reachable by the citation checks.", sh.Shape, sh.Issue, coveragePath)
+			"counted only routes called both covered.",
+			sh.Shape, "shape_jurisdiction_test.go", sh.Issue)
 	}
 
 	// 8. CITATIONS ran at step 4, before the write. The liveness half is the git
@@ -2454,12 +2712,13 @@ func runCounterpartProofs(t *testing.T) {
 // the mux -- the same species as the /playout/* mount, one level further out.
 func TestTheNonTrieSurfacesAreDriven(t *testing.T) {
 	h, _, sign := plantedServer(t)
+	s := serverUnderTest(t, h)
 	read := createScopedToken(t, h, sign, "nontrie", db.ScopeRead)
 
 	// #167: WHICH BRANCH did the probes above actually drive. Both halves --
 	// the two-column branch table and the precondition through this mux.
 	t.Run("branches", func(t *testing.T) {
-		assertNotFoundProbesEnterTheirBranches(t)
+		assertNotFoundProbesEnterTheirBranches(t, s)
 		assertNotFoundProbesMatchThisBuild(t, h)
 	})
 
@@ -3175,19 +3434,31 @@ func ledgerNote(t *testing.T) string {
 func deferredWithReasons() []coverageDefer {
 	return []coverageDefer{
 		{
-			ID:   "G2",
-			What: "chi.Walk is complete over the routing TRIE, and the trie is not the MUX.",
-			WhySafe: "r.NotFound is the build-time embedded UI: an embed.FS with no server " +
-				"state behind it, and anonymous and read-scoped responses are " +
-				"byte-identical across nine executed probes. rawResponse now renders " +
-				"EVERY response header rather than a hand-listed five, so a header that " +
-				"varies by principal on any swept or probed route is a failure by name; " +
-				"the hand-listed set was measured to miss an Authorization echo into " +
-				"X-Principal-Echo on an immutable, publicly-cacheable asset response. " +
-				"The GUARD is fixed; the architectural residual is not.",
-			WhatWouldMakeItUnsafe: "the UI handler reading server state, or varying by " +
-				"principal. Either turns an unenumerated surface into an unguarded one.",
-			Issue: "#156",
+			ID: "G2",
+			What: "chi.Walk is complete over the routing TRIE, and the trie is not the " +
+				"MUX. The population is no longer the walk plus a hand-list: " +
+				"Server.Handler() registers nothing itself and delegates to " +
+				"registerRoutes(chi.Router), so recordRegistrations derives both terminals " +
+				"-- r.NotFound from the call, method-not-allowed from the ABSENCE of one " +
+				"-- and the probe slices are witnesses over that derivation rather than " +
+				"the enumeration authority. What is left is the ROOT of the derivation: " +
+				"it can only see registrations this process makes through " +
+				"Server.Handler().",
+			WhySafe: "the two derivations of the trie are required to AGREE (the walk over " +
+				"the served mux, the recorder over the calls), a terminal with no witness " +
+				"fails, a witness naming a terminal this build did not register fails, and " +
+				"an AST guard refuses a registration made in Handler() where the recorder " +
+				"cannot see it. rawResponse renders EVERY response header rather than a " +
+				"hand-listed five, so a header that varies by principal on any swept or " +
+				"probed route is a failure by name; the hand-listed set was measured to " +
+				"miss an Authorization echo into X-Principal-Echo on an immutable, " +
+				"publicly-cacheable asset response.",
+			WhatWouldMakeItUnsafe: "a listener created OUTSIDE this router -- " +
+				"cmd/polyemesis's port-80 ACME and redirect helper is the live example, " +
+				"and it is #169 -- which no derivation rooted at Server.Handler() can " +
+				"reach. Jurisdiction totality at the outermost boundary is a human review " +
+				"and no mechanical repair for it is known. Also unsafe: the UI handler " +
+				"reading server state, or varying by principal.",
 		},
 		{
 			// THE MEASUREMENT THAT JUSTIFIED THE OLD ROW, kept because it is what
@@ -3206,30 +3477,30 @@ func deferredWithReasons() []coverageDefer {
 			// assertNotFoundProbesEnterTheirBranches at no CI cost, and
 			// assertNotFoundProbesMatchThisBuild pins which column the real mux
 			// serves. What is left is smaller and worth stating on its own.
-			ID: "built-ui-branches-are-driven-outside-the-mux",
-			What: "the SPA and asset branches of internal/web are driven against a " +
-				"SYNTHETIC dist -- an index.html and one fingerprinted bundle -- through " +
-				"web.HandlerFor directly. Through the real chi mux, this checkout and CI " +
-				"both serve the bare filesystem, so the built column is not exercised " +
-				"end-to-end with requireAuth and the group middleware in front of it.",
-			WhySafe: "r.NotFound is mounted BELOW no middleware that varies by principal " +
-				"-- it is the mux's terminal handler and the same closure in both columns " +
-				"-- and the principal-invariance assertion the surface actually needs runs " +
-				"through the real mux over the real filesystem. What the synthetic column " +
-				"adds is branch reachability, which is a property of the closure and not " +
-				"of what is mounted above it.",
-			WhatWouldMakeItUnsafe: "middleware that rewrites a response on the way out, or " +
-				"an asset branch that ever consults the request's principal. Both would " +
-				"make the synthetic column's agreement with the mux an assumption rather " +
-				"than an observation, and the honest fix then is a CI job that builds the " +
-				"UI before the Go job.",
-			// Still #167. Its two stated fix directions -- "run the probes against a
-			// build with assets embedded, or assert the emptiness precondition so
-			// the divergence is visible" -- are both done, and the citation stays
-			// because the first one is done beside the mux rather than through it.
-			// Retiring the number is the maintainer's call on a residual this
-			// small, not something to bank in the same change that shrank it.
-			Issue: "#167",
+			ID: "built-ui-column-uses-a-synthetic-dist",
+			What: "the SPA and asset branches are now driven THROUGH THE REAL MUX -- " +
+				"Server.uiHandler is a seam, so registerRoutes mounts the chosen " +
+				"filesystem under the same requestLogger and securityHeaders the binary " +
+				"ships -- but the filesystem itself is SYNTHETIC: one index.html and one " +
+				"fingerprinted bundle, not the output of `npm run build`.",
+			WhySafe: "what the built column buys is BRANCH REACHABILITY, and every branch " +
+				"internal/web can take is distinguishable from outside by status, " +
+				"Content-Type and Cache-Control regardless of which bytes the file holds. " +
+				"The two properties that could have been assumptions rather than " +
+				"observations -- that no middleware rewrites the response on the way out, " +
+				"and that the asset branch never consults the principal -- are now " +
+				"observed, because the requests go through everything that is mounted " +
+				"above the terminal.",
+			WhatWouldMakeItUnsafe: "a real bundle whose LAYOUT differs from the synthetic " +
+				"one in a way the handler branches on -- a nested assets directory, a " +
+				"service worker at the root, a file the sub-FS refuses to open. Nothing " +
+				"here can see that, and the honest fix for it is a CI job that builds the " +
+				"UI before the Go job, which costs a four-minute npm install on every Go " +
+				"run. NO ISSUE IS CITED: #167's two stated fix directions -- drive a build " +
+				"with assets embedded, and assert the emptiness precondition so the " +
+				"divergence is visible -- are both done and both done through the mux, so " +
+				"carrying the number forward would be citing, as a reason, work that has " +
+				"been carried out.",
 		},
 		{
 			// The residual of THIS round's own run-filter scanner, stated at the
@@ -3263,28 +3534,37 @@ func deferredWithReasons() []coverageDefer {
 			// credential REQUIRED present. What is left is stated below, in the
 			// terms the residual actually has.
 			ID: "G3",
-			What: "76 of the 83 non-GET pairs a read scope is refused are classified on " +
-				"the 403 alone. That is an INVARIANT: it records the refusal and records " +
-				"nothing about whether the pair would disclose anything to a principal " +
-				"entitled to it, so it stays green over an empty database.",
-			WhySafe: "all 83 were driven as ADMIN with {} against a per-pair fixture. The " +
-				"7 that answered 2xx carrying a planted credential are now the census in " +
-				"nonGetDifferentialCensus, driven at both privilege levels with the " +
-				"credential REQUIRED present and the 403 required beside it, and the " +
-				"census is complete over that measurement. Of the other 76, 18 answered " +
-				"2xx carrying no planted credential -- a status envelope, a job id, a " +
-				"list -- and requiring a sentinel from those would mean planting fixture " +
-				"data for the purpose, which reviews identically to a real proof.",
-			WhatWouldMakeItUnsafe: "the residual 58 are the honest hole: they answered " +
-				"4xx or 5xx (17 404, 17 400, 15 503, 8 403, 1 500) because this fixture " +
-				"has no such row, the subsystem is not running, or {} is not a payload " +
-				"they accept -- so the drive never reached a handler that builds a body " +
-				"and the measurement cannot say what they would disclose. Also unsafe: " +
-				"any non-GET handler that begins echoing stored configuration back in a " +
-				"2xx body, which is the normal REST idiom and the shape PUT " +
-				"/api/v1/settings already has. Both are re-found by the same admin drive " +
-				"that built the census, which is a measurement rather than a judgement " +
-				"call.",
+			What: "the non-GET pairs a read scope is refused split into two words, and " +
+				"neither of them is now discharged by the 403 alone. denied-differential " +
+				"is nonGetDifferentialCensus: driven at both privilege levels with the " +
+				"planted credential REQUIRED present for the admin and the 403 required " +
+				"beside it. denied-by-method is the DECLARED-INVARIANCE population, and " +
+				"the counter-experiment for it is EXECUTED on every run rather than " +
+				"summarised: every such pair is driven as admin with {}, and no planted " +
+				"credential may come back. The population is derived from the live " +
+				"classification, so a pair that changes word changes sweep on the same " +
+				"run with no list to edit.",
+			WhySafe: "a negative measurement is byte-identical to what a vacuous harness " +
+				"produces, so the detector carries a POSITIVE CONTROL through the same " +
+				"code path, run after EVERY drive: a pair the differential census has " +
+				"independently measured to disclose must still be disclosing at that " +
+				"moment, or the silence just recorded is not evidence. The bracket " +
+				"version of that control -- once before, once after -- was written first " +
+				"and went red immediately, because DELETE /api/v1/destinations/{id} is in " +
+				"this population and removes the control's own row. The per-drive form " +
+				"re-plants the fixture when that happens and requires the re-planted " +
+				"control to hold, which separates \"the fixture was destroyed\" from " +
+				"\"the detector is broken\".",
+			WhatWouldMakeItUnsafe: "the pairs that never reach a handler are the honest " +
+				"hole and they are REPORTED on every run rather than counted here: they " +
+				"answer 4xx or 5xx because this fixture has no such row, the subsystem is " +
+				"not running, or {} is not a payload they accept, so the counter-" +
+				"experiment ran and could not read a body. A pair that discloses only " +
+				"through a payload {} does not reach is invisible to this, and no " +
+				"positive control can see it. Also unsafe: any non-GET handler that " +
+				"begins echoing stored configuration back in a 2xx body, which is the " +
+				"normal REST idiom and the shape PUT /api/v1/settings already has -- that " +
+				"one IS caught, by this sweep, naming the pair and the credential.",
 			Issue: "#157",
 		},
 		{
