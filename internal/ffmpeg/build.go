@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -196,15 +197,9 @@ func pullSource(raw, baseDir string) (string, pullFamily, error) {
 		return raw, fam, nil
 	}
 
-	// Backslashes are separators on Windows, so normalise before the traversal
-	// check or "..\..\secret.key" walks straight past it.
-	rel := strings.ReplaceAll(rest, `\`, "/")
-	switch {
-	case rel == "":
-		return "", fam, errors.New("file pull source needs a path")
-	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
-		filepath.IsAbs(rest), len(rel) > 1 && rel[1] == ':':
-		return "", fam, errors.New("file pull source must be a relative path inside the data directory")
+	rel, err := pullFileRel(rest)
+	if err != nil {
+		return "", fam, err
 	}
 
 	p := filepath.FromSlash(rel)
@@ -215,6 +210,78 @@ func pullSource(raw, baseDir string) (string, pullFamily, error) {
 	// ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the
 	// prefix pins it to the file protocol whatever the name looks like.
 	return "file:" + p, fam, nil
+}
+
+// pullFileRel is the ONE normalisation of a file:// pull source's path half:
+// the exact slash-separated relative path the -i argument is built from, or an
+// error when it is not a path this engine will dial.
+//
+// SPLIT OUT BECAUSE A GATE HAS TO ASK IT. #266's refutation: the upload gate
+// keyed on a hand-written re-parse of the same format, and the two disagreed
+// about four spellings that this function collapses to one. Measured on the
+// branch before this commit, with PullDataDir=/data:
+//
+//	"file://uploads/unchecked.ts"     -> -i "file:/data/uploads/unchecked.ts"  gate: refused
+//	"file://uploads/./unchecked.ts"   -> -i "file:/data/uploads/unchecked.ts"  gate: STORED
+//	"file://uploads//unchecked.ts"    -> -i "file:/data/uploads/unchecked.ts"  gate: STORED
+//	"file://./uploads/unchecked.ts"   -> -i "file:/data/uploads/unchecked.ts"  gate: STORED
+//	"file://uploads/././unchecked.ts" -> -i "file:/data/uploads/unchecked.ts"  gate: STORED
+//
+// A byte-identical -i with four different verdicts is not a narrow hole, it is
+// an unkeyed gate. So the gate now calls PullFilePath, which is this function,
+// and a spelling can no longer mean one thing to the engine and another to the
+// check in front of it.
+//
+// THE CLEAN IS WHY THE HOLE EXISTED. filepath.Join collapses ".", "" and
+// duplicate separators, but it was only reached when baseDir was non-empty --
+// so the normalisation that produced the -i lived in a branch, and nothing that
+// was not building an -i could see it. Cleaning HERE makes it unconditional and
+// gives every caller, engine or gate, the same spelling of the same path.
+func pullFileRel(rest string) (string, error) {
+	// Backslashes are separators on Windows, so normalise before the traversal
+	// check or "..\..\secret.key" walks straight past it.
+	rel := strings.ReplaceAll(rest, `\`, "/")
+	switch {
+	case rel == "":
+		return "", errors.New("file pull source needs a path")
+	case strings.HasPrefix(rel, "/"), strings.Contains(rel, ".."),
+		filepath.IsAbs(rest), len(rel) > 1 && rel[1] == ':':
+		return "", errors.New("file pull source must be a relative path inside the data directory")
+	}
+	// path.Clean, not filepath.Clean: rel is slash-separated by construction
+	// above, and on Windows filepath.Clean would hand back backslashes that the
+	// FromSlash in the caller has already been given the job of adding.
+	//
+	// ".." is refused outright above rather than resolved here, so Clean is only
+	// ever collapsing "." and "//" -- it cannot walk the path upwards, and a
+	// ".." that would have resolved back INSIDE the directory is still refused.
+	// That is the older rule (#201) and this does not loosen it: a check that
+	// says yes to "uploads/x/../y" is a check that has to be right about
+	// symlinks, and this one declines to be asked.
+	return path.Clean(rel), nil
+}
+
+// PullFilePath is the path a file:// pull source resolves to, relative to the
+// data directory and spelled with forward slashes, or ok=false when raw is not
+// a file:// source this engine would dial at all.
+//
+// EXPORTED FOR THE GATES IN FRONT OF THE ENGINE, which have to key on what the
+// -i argument will actually be rather than on what the operator typed. It is
+// deliberately the same call pullSource makes -- baseDir is empty here only
+// because a gate wants the relative half -- so there is no second parse to
+// drift from the first. See uploads.UploadFromPullURL, its only caller today.
+//
+// NOT A DECODER. FFmpeg's file protocol takes the bytes as they are, so
+// "uploads%2Fshow.ts" is a filename containing a percent sign and not a path
+// with a separator in it; this returns it unchanged, and a caller that
+// percent-decodes would be describing a different file from the one that is
+// opened.
+func PullFilePath(raw string) (string, bool) {
+	src, fam, err := pullSource(raw, "")
+	if err != nil || fam != pullFile {
+		return "", false
+	}
+	return filepath.ToSlash(strings.TrimPrefix(src, "file:")), true
 }
 
 // pullInputArgs are the input-side flags a pull source needs to survive its
