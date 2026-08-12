@@ -35,9 +35,15 @@ package testenv
 // of a comment.
 
 import (
-	"fmt"
+	"bytes"
 	"io"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,20 +128,100 @@ func FreeTCPPort(t *testing.T) int {
 //
 // It returns false rather than failing the test: what to do about a child that
 // never bound belongs to the caller, who knows what it was and can say so.
+//
+// IT OBSERVES THE SOCKET TABLE AND DOES NOT BIND. Issue #279: this used to
+// decide whether the child had taken the port by taking the port itself --
+//
+//	c, err := net.ListenPacket("udp", addr)
+//	if err != nil { return true }   // somebody else has it
+//	_ = c.Close()
+//
+// -- and while it held that socket the child could not bind. FFmpeg does not
+// retry a failed UDP bind; it exits. The probe then found the port free for the
+// rest of its budget and reported a timeout naming the child, which had died
+// because of the probe. Measured at 14 in 400 with the child binding
+// immediately, and every timeout in that run was a bind the probe had stolen.
+//
+// The docstring above already claimed this was "the same question the shell
+// asks" through poly_wait_port_ready. It was not: lsof READS the table, and
+// ListenPacket COMPETES for it. That sentence is why nobody looked again, so
+// the code now does what it always said it did.
 func WaitUDPPortBound(port int, within time.Duration) bool {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(within)
 	for {
-		c, err := net.ListenPacket("udp", addr)
-		if err != nil {
-			// The bind was refused, so somebody else has it. That somebody is
-			// the process the caller just started.
+		if udpPortHeld(port) {
 			return true
 		}
-		_ = c.Close()
 		if !time.Now().Before(deadline) {
 			return false
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// udpPortHeld reports whether any process holds a UDP socket on the port,
+// without opening one.
+//
+// A NON-ZERO EXIT IS THE NEGATIVE ANSWER, not an error to propagate: lsof exits
+// 1 when it matches nothing, which is exactly "no process holds it". Only the
+// presence of a match is read as yes, so a tool that is missing entirely
+// degrades to "not yet" and the caller's deadline still terminates the wait.
+// That is the safe direction: the old failure was a wait that ENDED a child,
+// and the worst this one can do is time out without touching it.
+//
+// ABSOLUTE PATHS AND NO SHELL. Both were flagged by go:S4036 -- a command
+// resolved through PATH is a command whoever controls PATH chose. That is a
+// fair objection even in a test helper: `go test` inherits the environment of
+// whatever started it, so a helper that runs `lsof` from PATH inside CI runs
+// whatever an earlier step left in front of it.
+//
+// The Windows arm also stops going through `cmd /c`, which removes a shell, a
+// second PATH lookup for findstr, and the quoting that came with them. netstat
+// prints every UDP row and the matching happens in Go, where it can be exact
+// about the field it matches rather than substring-matching a whole line.
+func udpPortHeld(port int) bool {
+	suffix := ":" + strconv.Itoa(port)
+
+	if runtime.GOOS == "windows" {
+		// SystemRoot rather than a literal C:\Windows: the drive is not
+		// guaranteed, and this is the variable Windows itself uses.
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = `C:\Windows`
+		}
+		// -ano: numeric addresses, all sockets, owning PID. Numeric matters --
+		// name resolution on a runner with no DNS is where a bounded check
+		// becomes a hang.
+		out, err := exec.Command(filepath.Join(root, "System32", "netstat.exe"), "-ano", "-p", "UDP").Output()
+		if err != nil && len(out) == 0 {
+			return false
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			// Fields: Proto, LocalAddress, ForeignAddress, PID. The local
+			// address is the only one that says what is BOUND here, and it is
+			// matched as a whole field: a substring match on the line would
+			// also hit a foreign address or a PID containing those digits.
+			if f := strings.Fields(line); len(f) >= 2 && strings.HasSuffix(f[1], suffix) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// lsof moves between /usr/sbin and /usr/bin across distributions, so the
+	// candidates are tried in order rather than assumed. An absent lsof yields
+	// "not held", the same safe direction as an empty result.
+	for _, bin := range []string{"/usr/sbin/lsof", "/usr/bin/lsof", "/bin/lsof"} {
+		if _, err := os.Stat(bin); err != nil {
+			continue
+		}
+		// -nP: no host and no port-name resolution, for the reason above.
+		// -iUDP:<port> is the whole query; the socket table is read, not joined.
+		out, err := exec.Command(bin, "-nP", "-iUDP:"+strconv.Itoa(port)).Output()
+		if err != nil && len(out) == 0 {
+			return false
+		}
+		return len(bytes.TrimSpace(out)) > 0
+	}
+	return false
 }
