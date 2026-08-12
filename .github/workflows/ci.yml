@@ -392,10 +392,50 @@ jobs:
           ffmpeg -hide_banner -version | head -1
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
+        # BREW CANNOT SUPPLY 8.1, AND THAT IS RECORDED RATHER THAN HIDDEN.
+        # `ffmpeg` is 9.0 and there is no `ffmpeg@8` formula -- the versioned ones
+        # jump from 7.1 straight to 9.0 -- and BtbN publishes no macOS build. So
+        # this arm cannot have the parity Linux and Windows now share, and macOS
+        # tests a MAJOR VERSION AHEAD of what the image ships.
+        #
+        # Left as brew deliberately: 7.1 would be behind rather than ahead, and
+        # building 8.1 from source costs more than this job is worth. The version
+        # is printed by the step below, so the divergence shows up in every run
+        # instead of being discovered by a test failing oddly.
         run: brew install ffmpeg
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        # THE SAME BUILD THE LINUX ARM INSTALLS, not choco, for two reasons and
+        # the second is the important one.
+        #
+        # Reliability: `choco install ffmpeg` took a 504 from
+        # community.chocolatey.org and left the next step reporting "'ffmpeg' is
+        # not recognized" -- a red job on an install that silently did not happen,
+        # and the third distinct FFmpeg-install failure this file saw in one day.
+        #
+        # VERSION PARITY, which is what actually matters. The Linux arm pins n8.1
+        # and says why: the image ships 8.1.2, and 6.1.1 "accepts an 80-channel
+        # amerge where 8.1 stops at 64, and cannot demux multitrack FLV at all".
+        # That argument is about FFmpeg, not about Linux. choco resolved to
+        # whatever it held, so this job tested a version nobody ships while
+        # carrying a comment explaining why that is wrong.
+        #
+        # BtbN publishes ffmpeg-n8.1-latest-win64-gpl-8.1.zip from the SAME
+        # release the Linux arm downloads: one source, one version, one retry.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip'
+          for ($i = 1; $i -le 3; $i++) {
+            try { Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\ff.zip" -TimeoutSec 90; break }
+            catch { if ($i -eq 3) { throw }; Write-Host "ffmpeg download attempt $i failed"; Start-Sleep -Seconds 5 }
+          }
+          Expand-Archive -Path "$env:RUNNER_TEMP\ff.zip" -DestinationPath "$env:RUNNER_TEMP\ff" -Force
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP\ff" -Filter bin -Recurse -Directory | Select-Object -First 1).FullName
+          if (-not $bin) { throw 'no bin/ directory in the FFmpeg archive' }
+          # GITHUB_PATH, not $env:PATH: the latter dies with this step, which is
+          # exactly how the choco failure stayed invisible until the NEXT step
+          # could not find the binary.
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
       # BOTH binaries, on all three. #187: the skip helpers key off ffprobe and
       # this step only ever ran ffmpeg, so the binary that decides whether the
       # upload gate's tests run at all was the one nothing here looked at. The

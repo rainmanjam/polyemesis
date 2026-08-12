@@ -52,10 +52,10 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 93,
+  "total": 92,
   "byPackage": {
     "cmd/polyemesis": 1,
-    "internal/api": 8,
+    "internal/api": 7,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
@@ -86,6 +86,20 @@
       "why": "ONE site, and it is the Windows arm of the test written to close this PR's own refutation. An adversarial verifier found that the ErrNoDuration return formatted a SHADOWED err -- `err := cmd.Run()` shadowed by `if secs, err := countDuration(...)`, whose scope dies before the return -- so the operator was told `it could not be counted: <nil>`. Seventeen mutations and twelve tests missed it, because every one of them asserted the file was REFUSED and the refusal was correct; only the diagnostic was wrong. TestARefusalNamesWhyTheCountFailedRatherThanNil tables all three reachable causes and asserts each names ITS OWN cause. One of the three is 'there is no ffmpeg to count frames with', produced by a stand-in binary that is a POSIX shell script, which Windows will not execute -- the same shape internal/api's fakeProbe already carries in the entry above, and the subject of #265. Environment, not a property of the code.",
       "alreadyPaidDown": "The api-side half of the same fix -- TestTheRefusedRawStreamsBodySaysWhyTheCountFailed -- added NO site: it reads the refusal out of the HTTP 400 JSON through the existing fixture, so it needs no stand-in of its own. The ffmpeg-side table skips once for the whole Windows case rather than once per cause; three separate calls would be three free passes for one condition, which is the rule the entry above sets.",
       "handEditedRatherThanRegenerated": "Same reason as every entry above: -update-skips round-trips this file through a struct with no field for these reasons and deletes all of them. The two numbers were raised by hand."
+    }
+  ],
+  "loweredBy2": [
+    {
+      "pr": 270,
+      "from": 93,
+      "to": 92,
+      "packages": {
+        "internal/api": "8 -> 7"
+      },
+      "why": "#265. internal/api's fakeProbe was a #!/bin/sh script, and it skipped the whole test rather than the fixture: any test that needed a probe with a controllable lifetime skipped on Windows. It is now the test binary re-executed with a JSON plan in the environment, which is what internal/supervisor/testfake_test.go does and for the same reason, so the ONE site is gone and nothing replaced it. What became testable on windows-latest, executing rather than skipping: TestUploadSurvivesAClientDisconnectDuringTheProbe, TestUploadIsAcceptedUncheckedWhenTheProbeTimesOut, TestUploadStillRejectsWhenTheProbeRunsAndFails, TestARejectedUploadIsNeverVisibleOrReferenceableWhileItIsProbed, TestTheUncheckedBypassSaysSoInTheLog, TestConcurrentUploadsDoNotSpawnUnboundedProbes, and the four in upload_verdict_test.go that used the same fixture -- TestATTACK_RealSocketDisconnectPublishesUnprobed, TestATTACK_SlowProbeTimeoutPublishesUnprobed, TestAProbeThatPrintsRubbishKeepsTheFileAndSaysSo, TestAProbeThatRunsAndDisagreesStillRejectsAndLeavesNothing. Removing a skip is the direction this ratchet exists to encourage, and this one is removed rather than relabelled: there is no runtime.GOOS anywhere in the replacement.",
+      "notPaidDown": "#190's OTHER half is untouched and is not claimed here. internal/ffmpeg's TestProbeFileReturnsWhenItsContextIsCancelled stands a shell script in precisely BECAUSE the script leaves a grandchild holding the stdout pipe, which is what bounds cmd.WaitDelay; a single-process Go helper cannot produce that shape, and producing it on Windows is a statement about Windows process trees rather than about portable Go. internal/ffmpeg's TestACountThatWasCutShortIsNotAVerdictAboutTheFile and the Windows arm of TestARefusalNamesWhyTheCountFailedRatherThanNil are the same class. internal/ffmpeg stays at 22.",
+      "handEditedRatherThanRegenerated": "For the reason every entry above records: `go test ./internal/testenv -run TestNoNewBareSkipCanLand -update-skips` produces exactly these two numbers and DELETES every reason in this file on the way past, because skipCensus has no field for them. Both were lowered by hand. Regeneration also still drops internal/supervisor, whose count remains 0 against a committed 1 -- left alone here for the reason PR 218's entry gives, that it is an unrelated change and sweeping it in would hide this one. The committed total is therefore 92 against a measured 91, and the difference is that one stale supervisor entry, not this change.",
+      "notRewritten": "The raisedBy entry for PR 118 still says internal/api's fakeProbe is a shell script and still points at #190. It is left as written: it records what was true when it was written, and #265 was split out of #190 afterwards. This entry is the update."
     }
   ]
 }

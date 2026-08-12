@@ -35,6 +35,35 @@ export function isSelectableUpload(u: Pick<MediaFile, "outcome">): boolean {
   return u.outcome === "verified" || u.outcome === "unrecorded";
 }
 
+/** Whether to offer "check again" on this upload's row.
+ *
+ *  #202. The marker used to be a dead end: the Library could say "Not checked"
+ *  and the only remedy on offer was to upload the bytes a second time, which is
+ *  not a remedy at all for a file the operator no longer has a local copy of.
+ *  The server can now re-read a file already on disk.
+ *
+ *  OFFERED FOR THE TWO STATES WHERE NOBODY HAS READ THE FILE, and deliberately
+ *  NOT for `refused`. That is the same line uploadNotice draws below and it is
+ *  drawn for the same reason: a refusal is a statement about the FILE and
+ *  reading it again reaches the same conclusion, so a "check again" button
+ *  beside it is the "upload it again" advice all over again in a new spelling —
+ *  an action that looks like a fix, does nothing, and teaches the operator that
+ *  the state is noise.
+ *
+ *  The SERVER accepts a re-check for any stored upload, refused included, and
+ *  that asymmetry is on purpose rather than an oversight: the one case where
+ *  re-reading a refused file can legitimately change the answer is a server
+ *  whose FFmpeg has been upgraded or whose format allowlist has grown, and that
+ *  is an operator action with a restart in it, not something to invite from a
+ *  row. See #202 for what a UI affordance for it would have to say.
+ *
+ *  `verified` gets nothing either. Re-reading a file that passed can only
+ *  produce the same answer or a worse one, and offering it invites an operator
+ *  to go looking for reassurance the row already gives them. */
+export function canReverify(u: Pick<MediaFile, "outcome">): boolean {
+  return u.outcome === "unverified" || u.outcome === "unrecorded";
+}
+
 /** The warning line for one upload's row, or null when there is nothing to say.
  *
  *  `tone` picks the colour and `label` the word. They differ between the two
