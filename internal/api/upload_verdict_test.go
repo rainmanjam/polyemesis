@@ -90,8 +90,10 @@ func TestATTACK_RealSocketDisconnectPublishesUnprobed(t *testing.T) {
 	dataDir := t.TempDir()
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
 	// Outlives the disconnect, so the probe is guaranteed to still be running
-	// when the client vanishes.
-	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), fakeProbePlan{Sleep: 8 * time.Second})
+	// when the client vanishes. The start marker is read below, to make that
+	// "guaranteed" true rather than hoped for.
+	started := filepath.Join(t.TempDir(), "started")
+	s.probeBin = fakeProbe(t, started, fakeProbePlan{Sleep: 8 * time.Second})
 
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -130,7 +132,30 @@ func TestATTACK_RealSocketDisconnectPublishesUnprobed(t *testing.T) {
 		host, mw.FormDataContentType(), buf.Len(), strings.Join(cookieHdr, "; "), csrf)
 	conn.Write([]byte(req))
 	conn.Write(buf.Bytes())
-	// The client vanishes the instant the body is out.
+
+	// THE CLIENT VANISHES WHILE THE PROBE IS RUNNING, and this waits for the
+	// probe to say so rather than assuming it.
+	//
+	// It used to RST "the instant the body is out", which is a race the fixture
+	// won on Linux and macOS and LOSES ON WINDOWS -- found the moment #265 let
+	// this test execute there rather than skip. An RST discards whatever is
+	// still sitting in the receiver's buffer, so a reset that lands before the
+	// server has read the body destroys the REQUEST: no file is ever staged,
+	// nothing is kept, and the test fails claiming must-fix 2 was undone when
+	// nothing had reached the code under test at all. That is a false report
+	// about the product, which is worse than the skip it replaced.
+	//
+	// The probe's own start marker is the precise signal: it exists only after
+	// the handler has read the whole body, staged the file, and spawned the
+	// probe -- so the reset below lands on a RUNNING probe, which is exactly
+	// the state this test's own comment claims and the exact shape of the
+	// reviewer's F1 attack. Nothing is weakened: the disconnect is still a real
+	// RST on a real socket, and it still arrives mid-probe.
+	waitFor(t, "the probe to start, so the reset lands on a running probe", func() bool {
+		_, err := os.Stat(started)
+		return err == nil
+	})
+
 	if tc, ok := conn.(*net.TCPConn); ok {
 		tc.SetLinger(0) // RST, not a graceful FIN
 	}
@@ -170,6 +195,15 @@ func TestATTACK_RealSocketDisconnectPublishesUnprobed(t *testing.T) {
 	}
 	if f.Media != nil {
 		t.Errorf("an uninspected file carries metadata: %+v", f.Media)
+	}
+	// AND CUT SHORT BY THE RESET, not by a prober that could not run. Without
+	// this the test is satisfied by a probe that had already exited before the
+	// RST landed, which would mean the disconnect reached nothing -- the same
+	// gap the two timeout tests carried, found by deleting the fake probe's
+	// sleep and watching this stay green (#265).
+	if f.UnverifiedReason != uploads.ReasonInterrupted {
+		t.Errorf("the verdict reads %q, want %q: the reset did not land on a running probe",
+			f.UnverifiedReason, uploads.ReasonInterrupted)
 	}
 	if f.UnverifiedReason == "" {
 		t.Error("the listing does not say why the file is unverified")
