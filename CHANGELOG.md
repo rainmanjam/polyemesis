@@ -10,6 +10,48 @@ its first tagged release.
 
 ### Security
 
+- **The route that decides what your ingest pulls had no upload check at all.**
+  Saving a pull source that names an upload this server was never able to
+  inspect has been refused since #201 — but only on `PUT /settings`, and the
+  engine does not read its ingest from there. `engine.effectiveSettings` does
+  `settings.Ingest = src.Ingest`, so the source ROW is what the engine's FFmpeg
+  opens, and `POST /sources` and `PUT /sources/{id}` accepted such a URL with a
+  `201` and a `200`. That is the route the Sources page writes through, and it
+  is the only route a second programme has ever had. Both now refuse it, with
+  the same scoping the settings gate uses: what the save introduces, never state
+  you inherited. ([#255](https://github.com/rainmanjam/polyemesis/issues/255))
+
+- **And the check in front of all three routes was reading the URL, not the
+  file.** It matched the exact spelling the Library hands you and split it at the
+  first `/`, while the engine resolves the same URL through `filepath.Join` — so
+  `file://uploads/./show.ts`, `file://uploads//show.ts` and
+  `file://./uploads/show.ts` all opened the identical file and none of them was
+  checked. One typed dot was the whole bypass, on the gate #201 shipped as well
+  as on the two above, and the source card stayed silent about it too. The check
+  now asks the engine what path a URL resolves to instead of re-reading the
+  format, so every way of writing one file gets one answer.
+  ([#201](https://github.com/rainmanjam/polyemesis/issues/201),
+  [#255](https://github.com/rainmanjam/polyemesis/issues/255))
+
+- **A source that was already pulling from an unchecked file now says so.** The
+  gate above cannot see a URL saved before it existed, or one whose upload was
+  downgraded underneath it, and there is no second gate downstream the way a
+  playlist item has one. The source card now carries the server's own sentence,
+  naming the file and what is wrong with it — and which of the two things is
+  wrong, because they have different remedies: a file nothing could inspect is
+  worth uploading again, and a file that *was* inspected and refused is not, so
+  that one says to point the source somewhere else instead. It reports rather
+  than refuses, deliberately: a missing inspection is a fact about this server —
+  no `ffprobe`, an inspection cut short — and never about your file, so on an
+  install without `ffprobe` a fail-closed re-check would take every `file://`
+  ingest off air at once, at whatever hour the supervisor next respawned. That
+  reasoning does not extend to a refusal, which *is* a fact about the file; the
+  choice between warning and refusing at reconcile is left open deliberately and
+  is still #255's to make. The field is on `GET /sources`, so a monitoring
+  script sees it too.
+  ([#255](https://github.com/rainmanjam/polyemesis/issues/255),
+  [#264](https://github.com/rainmanjam/polyemesis/issues/264))
+
 - **A busy server stopped inspecting uploads, and the caller chose when.** The
   four-slot semaphore that bounds concurrent `ffprobe` children waited for its
   slot *inside* the probe's own 30-second deadline, so a queued upload could
@@ -399,6 +441,22 @@ its first tagged release.
   "point the encoder at 6000" — an instruction that can never work, and one
   that sends you to your firewall to debug a port that was never in the path.
   It now reads `pull (dials out; no inbound port)`.
+
+### Testing
+
+- **Two guards that read `Dashboard.tsx` as text are now browser tests that
+  drive it.** `internal/oauth/composer_tags_drift_test.go` proved that the
+  substring `tags` appeared within 400 characters of the push `fetch`, and that
+  `withCompliance.length > 0` was written somewhere in the file. Neither can
+  tell whether the component compiles, mounts, or does the thing it names — the
+  #107 defect, one package over. They are replaced by `ui/e2e/go-live-composer.spec.ts`,
+  which types into the tags input, clicks Push and reads the body off the wire,
+  and which drives the compliance notice and the Push button through both the
+  stored and not-stored cases. The stated blocker was re-tested rather than
+  assumed: the composer decides everything from `GET /metadata`, so a stubbed
+  response reaches every branch with the real component and no OAuth fixture.
+  The Go file is deleted. Browser suite 92 → 97.
+  ([#259](https://github.com/rainmanjam/polyemesis/issues/259))
 
 ## [0.6.0] — 2026-08-09
 

@@ -309,6 +309,11 @@ function SourceCard({
             {source.listenerHealth?.state === "degraded" && (
               <Badge variant="warn">{t("sources.listenerDegraded")}</Badge>
             )}
+            {/* Beside the running badge for the same reason: this source IS
+                running, and it is pulling from a file nothing ever read. */}
+            {source.pullUploadUnchecked && (
+              <Badge variant="warn">{t("sources.pullUnchecked")}</Badge>
+            )}
           </CardTitle>
           <CardDescription>
             {source.isDefault
@@ -354,6 +359,22 @@ function SourceCard({
             <span>
               <strong className="font-semibold">{t("sources.listenerDegraded")}</strong>{" "}
               {source.listenerHealth.detail}
+            </span>
+          </p>
+        )}
+
+        {/* The server's sentence, not a badge on its own. It names the FILE and
+            says why nothing read it, and those two facts are the whole
+            difference between "something is wrong here" and knowing which
+            upload to send again. Rendered verbatim for the same reason
+            listenerHealth.detail is: the server is the only thing that knows,
+            and a second copy of the sentence in the UI would drift from it. */}
+        {source.pullUploadUnchecked && (
+          <p className="flex items-start gap-1.5 text-[11px] text-warn" data-testid="pull-unchecked">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              <strong className="font-semibold">{t("sources.pullUnchecked")}</strong>{" "}
+              {source.pullUploadUnchecked}
             </span>
           </p>
         )}

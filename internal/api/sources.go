@@ -89,6 +89,17 @@ type sourceView struct {
 	// bound and a flat lie to the operator whose encoder is on the other one.
 	// Omitted from the JSON when there is nothing to say. See #105.
 	ListenerHealth *engine.ListenerHealth `json:"listenerHealth,omitempty"`
+	// PullUploadUnchecked names a stored upload this source pulls from that
+	// the server holds a recorded refusal to inspect for, and why. Empty when
+	// there is nothing to say, which is every source that does not pull from a
+	// file:// upload.
+	//
+	// A source that is already saved this way keeps running -- this reports,
+	// it does not gate. The gate is on the save (see sourceIngestUploadProblem)
+	// and applies to what the save introduces. #255 spells out why the
+	// inherited case is reported rather than refused; the argument is on
+	// Server.pullUploadUnchecked, not repeated here.
+	PullUploadUnchecked string `json:"pullUploadUnchecked,omitempty"`
 }
 
 // readScopeCannotSeePublishTokens reports whether this request's principal must
@@ -164,6 +175,8 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 		LegacyRTMPKey:  legacyKey,
 		Running:        s.mgr != nil && s.mgr.Engine(src.ID) != nil,
 		ListenerHealth: health,
+
+		PullUploadUnchecked: s.pullUploadUnchecked(src),
 	}
 	if readScopeCannotSeePublishTokens(r) {
 		view = readSafeSourceView(view)
@@ -402,6 +415,13 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 	if row.Ingest.Mode == "" {
 		row.Ingest = db.DefaultSettings().Ingest
 	}
+	// The gate #255 found missing. A create introduces everything, so the
+	// stored-URL argument is empty: there is no inherited state on a row that
+	// does not exist yet.
+	if err := s.sourceIngestUploadProblem(row.Ingest, ""); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.store.CreateSource(&row); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -433,6 +453,14 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row.ID = id
+	// Against the URL that was ALREADY on the row, captured from the stored
+	// copy above before decodeJSON wrote over `row`. `existing` is the store's
+	// own value and `row` started as a copy of it, so the two are separate
+	// strings and the comparison is meaningful.
+	if err := s.sourceIngestUploadProblem(row.Ingest, existing.Ingest.Pull.URL); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.store.UpdateSource(&row); err != nil {
 		writeError(w, sourceStatus(err), err.Error())
 		return

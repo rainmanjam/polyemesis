@@ -1128,6 +1128,7 @@
   "sources.lastSourceTitle": "Останнє джерело видалити не можна — інсталяції потрібен один вхід",
   "sources.latencyMs": "Затримка (мс)",
   "sources.listenerDegraded": "Прив'язано частково",
+  "sources.pullUnchecked": "Неперевірений файл",
   "sources.loadFailed": "Не вдалося завантажити джерела",
   "sources.loading": "Завантаження джерел…",
   "sources.loss": "втрати",

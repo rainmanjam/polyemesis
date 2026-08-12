@@ -1128,6 +1128,7 @@
   "sources.lastSourceTitle": "最後のソースは削除できません。インストールには入力が 1 つ必要です",
   "sources.latencyMs": "レイテンシ (ms)",
   "sources.listenerDegraded": "一部のみバインド",
+  "sources.pullUnchecked": "未検査のファイル",
   "sources.loadFailed": "ソースを読み込めませんでした",
   "sources.loading": "ソースを読み込み中…",
   "sources.loss": "損失",

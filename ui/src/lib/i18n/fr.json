@@ -1128,6 +1128,7 @@
   "sources.lastSourceTitle": "La dernière source ne peut pas être supprimée — une installation a besoin d'une entrée",
   "sources.latencyMs": "Latence (ms)",
   "sources.listenerDegraded": "Partiellement lié",
+  "sources.pullUnchecked": "Fichier non vérifié",
   "sources.loadFailed": "Impossible de charger les sources",
   "sources.loading": "Chargement des sources…",
   "sources.loss": "perte",

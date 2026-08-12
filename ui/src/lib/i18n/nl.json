@@ -1128,6 +1128,7 @@
   "sources.lastSourceTitle": "De laatste bron kan niet worden verwijderd — een installatie heeft één ingang nodig",
   "sources.latencyMs": "Latentie (ms)",
   "sources.listenerDegraded": "Deels gebonden",
+  "sources.pullUnchecked": "Ongecontroleerd bestand",
   "sources.loadFailed": "Kon de bronnen niet laden",
   "sources.loading": "Bronnen laden…",
   "sources.loss": "verlies",

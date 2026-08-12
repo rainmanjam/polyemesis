@@ -1128,6 +1128,7 @@
   "sources.lastSourceTitle": "마지막 소스는 삭제할 수 없습니다 — 설치에는 입력이 하나 필요합니다",
   "sources.latencyMs": "지연 시간 (ms)",
   "sources.listenerDegraded": "일부만 바인딩됨",
+  "sources.pullUnchecked": "검사되지 않은 파일",
   "sources.loadFailed": "소스를 불러올 수 없습니다",
   "sources.loading": "소스를 불러오는 중…",
   "sources.loss": "손실",

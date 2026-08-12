@@ -1128,6 +1128,7 @@
   "sources.lastSourceTitle": "最后一个源无法删除——安装至少需要一路输入",
   "sources.latencyMs": "延迟 (ms)",
   "sources.listenerDegraded": "仅部分绑定",
+  "sources.pullUnchecked": "未检查的文件",
   "sources.loadFailed": "无法加载源",
   "sources.loading": "正在加载源…",
   "sources.loss": "丢包",
