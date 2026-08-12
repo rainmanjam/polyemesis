@@ -39,26 +39,62 @@
 # flake can now be repeated, on ubuntu, macOS or Windows, which makes #172 and
 # #180 measurable rather than structurally invisible.
 #
-# WHAT IS STILL TRUE, because the numbers did not change: the cap of 40 runs
-# puts the detectable floor at about 7.2%, and #180's incident survey implies
-# roughly 7%. The instrument can now REACH that class of flake and still cannot
-# resolve that rate at its maximum. Raising the cap is a separate decision with
-# a real cost -- each Windows repetition is minutes -- and it should be made
-# against a measured need rather than pre-emptively.
-#
 # The acceptance mode is unchanged and still ubuntu-only: those suites shell out
 # to ./scripts/*.sh, which assume a POSIX shell and the Linux tool set. Making
 # them portable is a different job from measuring how often they fail.
 #
+# ------------------------------------------- WHAT THE CAP OF 40 CAN RESOLVE
+#
+# ISSUE #206, RESOLUTION POINT 2. This paragraph used to say that the floor at
+# the cap, 7.2%, "is still above the roughly 7% per-run rate #180's incident
+# survey implies", and that "the instrument cannot reach that rate even at its
+# own maximum". Both sentences rested on a rate INFERRED from an incident
+# survey. The rates have since been MEASURED -- #94, 1824 job records over 90
+# `ci` runs, cancellations excluded by conclusion -- and the measurement moves
+# the answer in both directions at once. It is written out here rather than
+# summarised, because "what this instrument can see" is the only question the
+# reader of a green report has:
+#
+#   job                              failures    rate    runs needed (95%)
+#   ------------------------------------------------------------------------
+#   test: windows-latest                 7/72   9.72%    30   <- inside the cap
+#   test: macos-latest                   3/78   3.85%    77
+#   container: acceptance-browser        1/32   3.13%    95
+#   go build, vet, test                  2/70   2.86%   104
+#   acceptance: acceptance-failover      2/76   2.63%   113
+#   test: ubuntu-latest                  2/77   2.60%   114
+#   16 other jobs                       0/80+   0.00%    --
+#
+# ONE job in this repository sits above the 7.2% floor, and the cap already
+# reaches it: `test: windows-latest` at 9.72% needs 30 repetitions and is caught
+# 98.3% of the time at 40. That is the job #206 was filed about, and the cap is
+# not what stands between the instrument and it.
+#
+# EVERY OTHER MEASURED JOB IS BELOW THE FLOOR, where a green result means "not
+# measurable here" and not "not flaky". Resolving the next one down, macOS at
+# 3.85%, needs 77 repetitions; the ubuntu tier at 2.60% needs 114.
+#
+# THE CAP IS NOT RAISED, and the reason is that raising it would not buy those
+# rows. Above roughly 19 repetitions on Windows the binding constraint is not
+# the cap, it is the clock -- see the arithmetic on `timeout-minutes` in
+# measure-go below. A cap of 114 would be a number that looks rigorous and
+# cancels at minute 60 with no report at all, which is worse than a cap of 40
+# that says what it cannot see. The sub-3% tier needs N nobody here will pay
+# for: 114 repetitions of a whole-tree Windows `go test` is 5.7 hours, past even
+# GitHub's six-hour default, for ONE job at ONE rate. That is the honest answer
+# to point 2 and it is not a bigger number.
+#
+# What is done instead, because it is the half that helps: the floor is printed
+# NEXT TO the `runs` input below, so the operator sees it when choosing the
+# value rather than in the report afterwards.
+#
+# The floor is poly_detectable_floor in scripts/lib-observe.sh and its inverse
+# is poly_runs_for_rate, both checked by scripts/test-lib-observe.sh against the
+# closed form. Every number in the table above is reproducible from them.
+#
 # The report also names its own scope and prints the DETECTABLE FLOOR, so a
 # green result reads as "no rate above X% is present in this suite on this
 # runner" rather than as "not flaky".
-#
-# The floor is poly_detectable_floor in scripts/lib-observe.sh, which
-# scripts/test-lib-observe.sh checks against the closed form. At the default of
-# 5 runs it is about 45%; at the cap of 40 it is about 7.2%, which is still
-# above the roughly 7% per-run rate #180's incident survey implies. The
-# instrument cannot reach that rate even at its own maximum, and now says so.
 name: flake rate
 
 on:
@@ -68,8 +104,14 @@ on:
         description: "Comma-separated suites to measure"
         type: string
         default: "acceptance-mqtt,acceptance-failover"
+      # #206 POINT 2: THE FLOOR IS STATED HERE, AT THE POINT OF CHOOSING.
+      # It was already printed in the step summary, which is the wrong end --
+      # by then the value has been spent. The numbers are poly_detectable_floor
+      # at 95% confidence, and they are what a result of zero failures actually
+      # bounds the rate below. Only `test: windows-latest` (9.72%) is above the
+      # floor at the cap; every other job in this repository is below it.
       runs:
-        description: "Repetitions per suite"
+        description: "Repetitions per suite (max 40). Zero failures only bounds the rate BELOW the 95% detectable floor: 5 runs=45%, 10=26%, 20=14%, 30=9.5%, 40=7.2%. Under that floor a green result means 'not measurable here', not 'not flaky'."
         type: string
         default: "5"
       gotest:
@@ -318,9 +360,27 @@ jobs:
     permissions:
       contents: read
     # Lower than the acceptance job's 120: a Go package test is seconds to a
-    # couple of minutes, not minutes to tens. Still far above 40 repetitions of
-    # anything reasonable, and it exists so a HUNG test reports rather than
-    # sitting to GitHub's six-hour default -- which is #179 exactly.
+    # couple of minutes, not minutes to tens. It exists so a HUNG test reports
+    # rather than sitting to GitHub's six-hour default -- which is #179 exactly.
+    #
+    # AND IT, NOT THE CAP OF 40, IS WHAT BOUNDS N ON WINDOWS. #206 point 2 asked
+    # whether to raise the cap; this is the arithmetic that answers no. Measured
+    # over the last 25 `ci` runs on main, per-step, windows-latest:
+    #
+    #   checkout 6s + setup-go 28s + set up job 1s  =  ~35s paid ONCE
+    #   `go test -timeout 15m ./...`                =  179s median, 239s p90
+    #
+    # So the loop's budget is at most 3600 - 35 = 3565s, and at the whole-tree
+    # median only floor(3565/179) = 19 repetitions fit. The step projects
+    # against a deliberately conservative 3300s and so reports 18; the point of
+    # both numbers is the same, and it is that the nominal cap of 40 is ALREADY
+    # unreachable on Windows for a broad package selection. 40 is achievable
+    # only if one repetition costs 89s or less (3565/40). A narrow
+    # `-run` pattern is far cheaper than the whole tree and is the usual case,
+    # which is why the cap is not lowered either -- the ceiling depends on what
+    # is being repeated, so the job measures it at run 1 and warns, rather than
+    # guessing here. Raising the cap to the 114 the sub-3% jobs need would be
+    # 5.7 hours at 179s a repetition: past this ceiling, past GitHub's own.
     timeout-minutes: 60
     strategy:
       # One runner's flake must not cancel the measurement on the others. That
@@ -398,6 +458,12 @@ jobs:
           # test passes, which would publish "0 failed" for a test that never
           # executed. The guard below catches that: a run whose output contains
           # no ran-test evidence is refused rather than counted.
+          # Sourced, not reimplemented -- the same reason the acceptance job
+          # gives. This step used to compute the floor with its own inline awk
+          # one-liner, which meant the number in the report had no test behind
+          # it while the identical number in the other job did.
+          . ./scripts/lib-observe.sh
+
           pass=0; fail=0
           : > outcomes.txt
           for i in $(seq 1 "$RUNS"); do
@@ -407,9 +473,37 @@ jobs:
             else
               rc=FAIL; fail=$((fail + 1))
             fi
-            printf '%s\t%s\t%ss\n' "$i" "$rc" "$(( $(date +%s) - start ))" >> outcomes.txt
-            echo "  run $i: $rc ($(( $(date +%s) - start ))s)"
+            # Once, into a variable. It was two separate `date` calls reading
+            # the same interval, which can straddle a second and print a
+            # duration in the log that the table does not agree with.
+            dur=$(( $(date +%s) - start ))
+            printf '%s\t%s\t%ss\n' "$i" "$rc" "$dur" >> outcomes.txt
+            echo "  run $i: $rc (${dur}s)"
             [ "$rc" = FAIL ] && tail -5 "gotest-$i.log" | sed 's/^/      /'
+
+            # #206 POINT 2: THE CLOCK, NOT THE CAP, IS USUALLY WHAT STOPS THIS.
+            # Projected from the first repetition and reported immediately,
+            # because a job cancelled at the 60-minute ceiling publishes NO step
+            # summary at all -- the operator would otherwise discover the budget
+            # by losing the entire measurement. 3300s rather than 3600 leaves
+            # the checkout, the toolchain and the artefact upload their measured
+            # ~35s with a wide margin on top.
+            if [ "$i" -eq 1 ]; then
+              [ "$dur" -ge 1 ] || dur=1
+              fits=$(( 3300 / dur ))
+              echo "  one repetition cost ${dur}s, so about $fits fit inside this job's ceiling"
+              if [ "$RUNS" -gt "$fits" ]; then
+                echo "::warning::$RUNS repetitions at ${dur}s each is $(( RUNS * dur ))s, over the ~3300s this job has"
+                echo "::warning::it will be cancelled at 60 minutes and publish no rate at all; $fits or fewer would report"
+                # An `if` rather than `&&` so the block cannot end on a failing
+                # status: at fits=0 the floor is undefined and refuses, and for
+                # RUNS=1 this is the last statement the loop executes.
+                ffits=$(poly_detectable_floor "$fits" 95) || ffits=""
+                if [ -n "$ffits" ]; then
+                  echo "::warning::at $fits runs the detectable floor is ${ffits}% -- see issue #206"
+                fi
+              fi
+            fi
           done
 
           # "no test files" and a package that only SKIPS both exit 0. Either
@@ -439,16 +533,31 @@ jobs:
             exit 1
           fi
 
-          floor=$(awk -v n="$measured" 'BEGIN{printf "%.1f", 100*(1-(0.05)^(1/n))}')
+          floor=$(poly_detectable_floor "$measured" 95) || floor=""
           {
             echo "### go test on ${{ matrix.os }}: $fail of $measured failed"
             echo
             echo "Command: \`go test ${ARGS[*]}\`"
             echo
-            echo "Detectable floor at $measured runs: about ${floor}% per-run failure rate."
-            echo "A clean result here means \"no rate above ${floor}% is present on ${{ matrix.os }}\","
-            echo "not \"not flaky\", and it says nothing about the other runners or about"
-            echo "the acceptance suites -- see issue #206."
+            if [ -n "$floor" ]; then
+              echo "Detectable floor at $measured runs: about ${floor}% per-run failure rate."
+              echo "A clean result here means \"no rate above ${floor}% is present on ${{ matrix.os }}\","
+              echo "not \"not flaky\", and it says nothing about the other runners or about"
+              echo "the acceptance suites -- see issue #206."
+              echo
+              # #206: the floor alone is abstract. Against the rates this
+              # repository has actually MEASURED (#94, 1824 job records over 90
+              # ci runs) it becomes a specific statement about which jobs a
+              # green result here could and could not have cleared.
+              echo "For scale, the rates measured on this repository: \`test: windows-latest\`"
+              echo "9.72%, \`test: macos-latest\` 3.85%, \`go build, vet, test\` 2.86%,"
+              echo "\`test: ubuntu-latest\` 2.60%. Only the first is above the floor at the cap"
+              echo "of 40 runs (7.2%); the rest need 77 to 114 repetitions to resolve, which"
+              echo "does not fit this job's ceiling. A clean result below the floor is"
+              echo "\"not measurable here\", not \"not flaky\"."
+            else
+              echo "_The detectable floor could not be computed for $measured runs._"
+            fi
             echo
             echo '| run | result | duration |'
             echo '|---|---|---|'

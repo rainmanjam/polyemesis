@@ -184,7 +184,8 @@ step "11. poly_detectable_floor: what a green flake report did NOT measure"
 # transcript. p = 1 - (1-c)^(1/N):
 #   N=1,  c=95  ->  95.0   one run catches only a certainty
 #   N=5,  c=95  ->  45.1   the workflow's default; this is the headline
-#   N=40, c=95  ->   7.2   its cap, still above the ~7% rate #180 implies
+#   N=40, c=95  ->   7.2   its cap -- below the worst MEASURED job (9.72%) and
+#                          above every other job in the repository
 [[ "$(poly_detectable_floor 1)" = "95.0" ]] \
   && ok "one run detects nothing below 95%" \
   || bad "floor(1) = $(poly_detectable_floor 1), want 95.0"
@@ -192,7 +193,7 @@ step "11. poly_detectable_floor: what a green flake report did NOT measure"
   && ok "the workflow default of 5 runs detects nothing below 45.1%" \
   || bad "floor(5) = $(poly_detectable_floor 5), want 45.1"
 [ "$(poly_detectable_floor 40)" = "7.2" ] \
-  && ok "even the cap of 40 runs cannot see the ~7% rate issue #180 implies" \
+  && ok "the cap of 40 runs sees nothing below 7.2%" \
   || bad "floor(40) = $(poly_detectable_floor 40), want 7.2"
 
 # Monotonicity, because a floor that did not fall with more runs would be
@@ -218,8 +219,55 @@ for junk in "" "abc" "-1" "0"; do
   fi
 done
 
+step "12. poly_runs_for_rate: how many repetitions the MEASURED rates need"
+# The other direction of the same identity, and the one issue #206's second
+# resolution point actually asks about. Checked against N = ln(1-c)/ln(1-p)
+# rounded up, using the rates re-measured on #94 over 1824 job records:
+#
+#   9.72%  (test: windows-latest, 7/72)  ->  30, INSIDE the workflow's cap of 40
+#   2.60%  (test: ubuntu-latest,  2/77)  -> 114, nearly three times the cap
+#   0.50%  (flake-report.sh's own gate)  -> 598, which no CI history here holds
+[[ "$(poly_runs_for_rate 9.72)" = "30" ]] \
+  && ok "the worst measured job (9.72%) needs 30 runs -- the cap of 40 reaches it" \
+  || bad "runs_for_rate(9.72) = $(poly_runs_for_rate 9.72), want 30"
+[[ "$(poly_runs_for_rate 2.60)" = "114" ]] \
+  && ok "2.60% needs 114 runs, so the cap of 40 cannot resolve it" \
+  || bad "runs_for_rate(2.60) = $(poly_runs_for_rate 2.60), want 114"
+[[ "$(poly_runs_for_rate 0.5)" = "598" ]] \
+  && ok "the 0.5% threshold needs 598 clean observations to certify" \
+  || bad "runs_for_rate(0.5) = $(poly_runs_for_rate 0.5), want 598"
+
+# THE ROUND TRIP, which is what makes these two functions one claim rather than
+# two. If N repetitions are enough to catch rate p, then the floor at N runs
+# must be at or below p. Anything else means one of them is lying about the
+# same identity, and the report would quote whichever it happened to call.
+for p in 9.72 3.85 2.60 0.5; do
+  n=$(poly_runs_for_rate "$p")
+  f=$(poly_detectable_floor "$n")
+  awk -v f="$f" -v p="$p" 'BEGIN{exit !(f <= p)}' \
+    && ok "floor($n runs) = $f% is at or under the $p% it was derived from" \
+    || bad "round trip broke: rate $p% -> $n runs -> floor $f%, which is above $p%"
+done
+
+# The confidence argument has to cost repetitions, or it is decoration here too.
+awk -v a="$(poly_runs_for_rate 5 99)" -v b="$(poly_runs_for_rate 5 95)" 'BEGIN{exit !(a > b)}' \
+  && ok "99% confidence in the same rate costs more runs than 95%" \
+  || bad "the confidence argument changed nothing"
+
+# Garbage in, nothing out -- and the decimal cases matter more here than they do
+# for the run count. "1.2.3" is the one that would otherwise be read as 1.2 and
+# answered confidently; 0 and 100 are questions with no answer rather than
+# numbers to compute.
+for junk in "" "abc" "-1" "0" "100" "1.2.3" "."; do
+  if out=$(poly_runs_for_rate "$junk" 2>&1) && [ -n "$out" ]; then
+    bad "poly_runs_for_rate '$junk' printed '$out' instead of refusing"
+  else
+    ok "poly_runs_for_rate refuses '$junk'"
+  fi
+done
+
 total=$((pass + fail))
-EXPECTED_CHECKS=29
+EXPECTED_CHECKS=44
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

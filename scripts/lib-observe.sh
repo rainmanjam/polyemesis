@@ -345,6 +345,54 @@ poly_detectable_floor() {
   awk -v n="$runs" -v c="$conf" 'BEGIN { printf "%.1f\n", 100 * (1 - exp(log(1 - c/100) / n)) }'
 }
 
+# poly_runs_for_rate <rate-percent> [confidence-percent]
+#
+# The inverse of poly_detectable_floor: the fewest repetitions that would catch
+# a per-run failure rate of <rate-percent> at least <confidence>% of the time.
+# Prints a whole number to stdout; returns 1 without printing on an input it
+# cannot use.
+#
+# ISSUE #206, RESOLUTION POINT 2, which asked whether the cap of 40 should be
+# raised "past N ~= 41 for the rates being claimed". The claim it was filed
+# against was an IMPLIED rate -- roughly 7%, inferred from #180's incident
+# survey -- and 7% does need 41. The rates have since been MEASURED (#94, 1824
+# job records over 90 ci runs), and measuring them moved the answer, in both
+# directions at once:
+#
+#   test: windows-latest    7/72 = 9.72%  ->  this needs 30, inside the cap
+#   test: macos-latest      3/78 = 3.85%  ->  this needs 77
+#   go build, vet, test     2/70 = 2.86%  ->  this needs 104
+#   test: ubuntu-latest     2/77 = 2.60%  ->  this needs 114
+#
+# So the worst job in the repository is comfortably reachable at 40 and the
+# next tier is not reachable at any cap this repository can afford to run. That
+# is a fact about the arithmetic rather than about the cap, and having it as a
+# tested function is the point: the numbers above are reproducible from this
+# file rather than asserted in a comment.
+#
+# Rearranged from the same identity poly_detectable_floor uses. (1-p)^N = 1-c
+# solved for N is N = ln(1-c) / ln(1-p), rounded UP because a fractional
+# repetition does not exist and rounding down would overstate the confidence.
+poly_runs_for_rate() {
+  local rate="$1" conf="${2:-95}"
+  # A DECIMAL here, unlike the integer <runs> above: the rates this answers for
+  # are measured ratios like 9.72, not counts. Rejected: empty, anything with a
+  # character outside [0-9.], a bare ".", and any string with two dots -- awk
+  # would silently read "1.2.3" as 1.2 and answer a question nobody asked.
+  case "$rate" in ''|*[!0-9.]*|.|*.*.*) return 1 ;; esac
+  case "$conf" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$conf" -ge 1 ] && [ "$conf" -le 99 ] || return 1
+  # The domain check lives in awk rather than in the shell because it is a
+  # comparison on a decimal, which `[` cannot do. p=0 is not "needs infinitely
+  # many runs", it is a question with no answer; p>=100 is a suite that fails
+  # every time and needs no instrument.
+  awk -v p="$rate" -v c="$conf" 'BEGIN {
+    if (p <= 0 || p >= 100) exit 1
+    n = log(1 - c/100) / log(1 - p/100)
+    printf "%d\n", (n == int(n)) ? n : int(n) + 1
+  }'
+}
+
 # poly_docker_postmortem <container>
 #
 # What a container check should print instead of asserting a cause. Every line
