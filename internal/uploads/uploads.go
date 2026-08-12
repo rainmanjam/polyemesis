@@ -184,6 +184,22 @@ var allowedExt = map[string]bool{
 	".ts": true, ".mp4": true, ".mkv": true, ".mov": true, ".m4v": true,
 	".flv": true, ".webm": true, ".mpg": true, ".mpeg": true, ".m2ts": true,
 	".wav": true, ".flac": true, ".aac": true, ".mp3": true, ".m4a": true,
+	// Raw elementary streams, which polyemesis accepts as of #218 by COUNTING
+	// their length rather than demanding it from a header they cannot have.
+	//
+	// THE EXTENSION IS LOAD-BEARING FOR THESE IN A WAY IT IS NOT FOR A
+	// CONTAINER, which is why they are here and not left to become ".bin". An
+	// MP4 is identified by its ftyp box and an MKV by its EBML header, so
+	// FFmpeg's content probe is certain about them whatever the file is called.
+	// A raw H.264 stream is a start code and then payload -- there is no magic
+	// number and no header -- so the demuxer is chosen by a scoring heuristic
+	// that the extension feeds. Keeping ".h264" makes the choice deterministic
+	// rather than a judgement about the first few kilobytes.
+	//
+	// It is still only a NAME. Admission is decided by probing the bytes, so a
+	// PDF called .h264 is refused exactly as a PDF called .mp4 is.
+	".h264": true, ".264": true, ".hevc": true, ".h265": true, ".265": true,
+	".m2v": true, ".mpv": true,
 }
 
 // sanitise reduces a filename stem to characters that are safe in a path, a
@@ -318,10 +334,28 @@ type File struct {
 // and hands the answer down.
 type MediaInfo struct {
 	DurationSeconds float64 `json:"durationSeconds"`
-	VideoCodec      string  `json:"videoCodec"`
-	Width           int     `json:"width"`
-	Height          int     `json:"height"`
-	FrameRate       float64 `json:"frameRate"`
+	// DurationSource says whether DurationSeconds was DECLARED by the file's
+	// container or COUNTED by decoding it, because those are not the same
+	// claim and the number cannot tell them apart.
+	//
+	// A raw elementary stream -- a .h264 or .hevc dump straight out of an
+	// encoder -- has no container to declare a length, so polyemesis counts its
+	// frames instead of refusing it (#218). That count is a real read of every
+	// frame multiplied by the frame interval the ENCODER declared in the
+	// bitstream, and there is nothing else in such a file to check that
+	// interval against. So it is a good number with a weaker provenance, and
+	// the operator deciding whether to schedule this item is entitled to know
+	// which one they are looking at.
+	//
+	// A STRING, not internal/ffmpeg's DurationSource, for the reason stated on
+	// this type: this package stores bytes and does not import an encoder
+	// package to describe a file on disk. Empty means no duration was
+	// established, or that this sidecar predates the field.
+	DurationSource string  `json:"durationSource,omitempty"`
+	VideoCodec     string  `json:"videoCodec"`
+	Width          int     `json:"width"`
+	Height         int     `json:"height"`
+	FrameRate      float64 `json:"frameRate"`
 	// AudioTracks is the count, and it is the field this whole feature is for.
 	// Per-destination audio routing is the product, so "does this file have the
 	// three tracks I am about to route" is the question the Library could not

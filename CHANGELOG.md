@@ -82,6 +82,28 @@ its first tagged release.
 
 ### Added
 
+- **A raw `.h264`, `.hevc` or `.mpegvideo` dump can go straight into the
+  Library.** These files carry no container, so nothing in them says how long
+  they are, and the upload gate refused them: *"polyemesis cannot work out how
+  long this file is — re-save it as MP4 or MPEG-TS and upload it again."* A real
+  remedy, and manual work the product can do. polyemesis now **counts** the
+  length instead, by decoding the file once, and accepts it. Measured on a
+  10-minute 720p dump: 2.8 seconds. It runs inside the inspection budget an
+  upload already has, so nothing new can make an upload slower than it could be
+  before; a file too long to count inside that budget gets the old refusal, with
+  the old remedy. Your file also keeps its extension now instead of being stored
+  as `.bin` — for a raw stream that is the only hint FFmpeg has about how to read
+  it.
+
+  **The Library says which of the two it is.** A duration a container declared
+  and a duration polyemesis counted are not the same claim: the first was written
+  down by whatever made the file, the second is every frame we decoded times the
+  frame rate the encoder declared in the bitstream, and a raw stream holds
+  nothing to check that rate against. So `durationSource` sits beside
+  `durationSeconds` and says `declared` or `counted`, rather than the two being
+  indistinguishable once the number is in the field.
+  ([#218](https://github.com/rainmanjam/polyemesis/issues/218))
+
 - **An upload can now be recorded as *inspected and refused*, which is a thing
   the server previously had no way to write down.** The record beside every
   upload carried one boolean, so it had two states — accepted, and stored
