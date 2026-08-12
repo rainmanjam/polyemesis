@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
@@ -173,9 +174,36 @@ func Open(path string, opts ...Option) (*DB, error) {
 	// fsperm rather than os.Chmod(0600): a FileMode is a Unix concept that
 	// Windows discards, so a literal mode here would compile, succeed, and
 	// restrict nothing on that platform. See internal/fsperm.
-	if err := fsperm.SecureFile(path); err != nil {
-		sqldb.Close()
-		return nil, fmt.Errorf("restrict %s: %w", path, err)
+	// THE SIDECARS ARE SECURED EXPLICITLY, and the first version of this fix
+	// was wrong to assume they inherited.
+	//
+	// SQLite gives -wal and -shm the mode of the main database WHEN IT CREATES
+	// THEM. On an existing install it does not create them -- they are already
+	// there, at whatever mode the umask gave them before this code existed --
+	// so chmodding only the database left them readable. Found by deploying to
+	// a real server running an older build:
+	//
+	//     -rw-------  polyemesis.db        <- fixed
+	//     -rw-r--r--  polyemesis.db-wal    <- still world-readable
+	//     -rw-r--r--  polyemesis.db-shm
+	//
+	// and `sudo -u nobody head -c 32 polyemesis.db-wal` succeeded. The unit
+	// test missed it because it creates a fresh database, which is the one case
+	// where inheritance does happen.
+	//
+	// -wal is the one that matters: it holds committed pages that have not been
+	// checkpointed, so a reader who cannot open the database still sees recent
+	// writes -- including a stream key added moments ago.
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(p); err != nil {
+			// Absent is fine: -shm exists only under some journal modes, and
+			// -wal only once something has been written.
+			continue
+		}
+		if err := fsperm.SecureFile(p); err != nil {
+			sqldb.Close()
+			return nil, fmt.Errorf("restrict %s: %w", p, err)
+		}
 	}
 	if _, err := sqldb.Exec(schemaSQL); err != nil {
 		sqldb.Close()

@@ -1774,3 +1774,82 @@ func TestTheStateDatabaseIsNotReadableByOtherAccounts(t *testing.T) {
 			"the database and its write-ahead log", checked)
 	}
 }
+
+// An EXISTING install, where the sidecars were created before this code was.
+//
+// ISSUE #297, and the case the first version of that fix missed. SQLite gives
+// -wal and -shm the mode of the main database WHEN IT CREATES THEM, so a test
+// that opens a fresh database sees them inherit and passes. On an install that
+// already has them, it does not create them -- and chmodding only the database
+// left them at whatever the old umask gave them.
+//
+// Found by deploying to a real server running an older build:
+//
+//	-rw-------  polyemesis.db        <- fixed
+//	-rw-r--r--  polyemesis.db-wal    <- still world-readable
+//	-rw-r--r--  polyemesis.db-shm
+//
+// and `sudo -u nobody head -c 32 polyemesis.db-wal` succeeded against it.
+//
+// This test manufactures that state: open, write, close, deliberately widen
+// every file, then REOPEN. Only the reopen path can fix it, which is exactly
+// what an upgrade does.
+//
+// Mutation: narrow Open's loop back to `fsperm.SecureFile(path)` alone.
+// Observed to fail with "polyemesis.db-wal is mode 0644 after reopening".
+func TestReopeningAnOlderInstallSecuresTheSidecarsToo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits are a Unix concept; see fsperm_windows_test.go")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "polyemesis.db")
+
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer first.Close()
+	if _, err := first.sql.Exec(`CREATE TABLE IF NOT EXISTS perm_probe (x INTEGER)`); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// HELD OPEN while the modes are widened, and that is the fixture rather
+	// than an accident. A clean Close checkpoints and DELETES -wal and -shm, so
+	// a closed database has no sidecars to widen and the state this test is
+	// about cannot be built. An older install has them because a server is
+	// running.
+	widened := 0
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Chmod(path+suffix, 0o644); err == nil {
+			widened++
+		}
+	}
+	if widened < 2 {
+		t.Fatalf("only %d file(s) existed to widen; the fixture did not build the "+
+			"state this test is about", widened)
+	}
+
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close()
+
+	checked := 0
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		fi, err := os.Stat(path + suffix)
+		if err != nil {
+			continue
+		}
+		checked++
+		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("polyemesis.db%s is mode %#o after reopening. An upgrade is the "+
+				"only moment an existing install gets fixed, and -wal carries committed "+
+				"pages that have not been checkpointed -- a reader who cannot open the "+
+				"database still sees recent writes there", suffix, perm)
+		}
+	}
+	if checked < 2 {
+		t.Fatalf("only %d file(s) survived the reopen to be checked", checked)
+	}
+}
