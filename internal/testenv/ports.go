@@ -38,9 +38,12 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,28 +162,66 @@ func WaitUDPPortBound(port int, within time.Duration) bool {
 // udpPortHeld reports whether any process holds a UDP socket on the port,
 // without opening one.
 //
-// A NON-ZERO EXIT IS THE NEGATIVE ANSWER, not an error to propagate: both lsof
-// and findstr exit 1 when they match nothing, which is exactly "no process
-// holds it". Only the presence of output is read as yes, so a tool that is
-// missing entirely -- which exits non-zero with no output as well -- degrades
-// to "not yet" and the caller's deadline still terminates the wait. That is the
-// safe direction: the old failure was a wait that ended a child, and the worst
-// this can do is time out without touching it.
+// A NON-ZERO EXIT IS THE NEGATIVE ANSWER, not an error to propagate: lsof exits
+// 1 when it matches nothing, which is exactly "no process holds it". Only the
+// presence of a match is read as yes, so a tool that is missing entirely
+// degrades to "not yet" and the caller's deadline still terminates the wait.
+// That is the safe direction: the old failure was a wait that ENDED a child,
+// and the worst this one can do is time out without touching it.
+//
+// ABSOLUTE PATHS AND NO SHELL. Both were flagged by go:S4036 -- a command
+// resolved through PATH is a command whoever controls PATH chose. That is a
+// fair objection even in a test helper: `go test` inherits the environment of
+// whatever started it, so a helper that runs `lsof` from PATH inside CI runs
+// whatever an earlier step left in front of it.
+//
+// The Windows arm also stops going through `cmd /c`, which removes a shell, a
+// second PATH lookup for findstr, and the quoting that came with them. netstat
+// prints every UDP row and the matching happens in Go, where it can be exact
+// about the field it matches rather than substring-matching a whole line.
 func udpPortHeld(port int) bool {
-	p := strconv.Itoa(port)
-	var cmd *exec.Cmd
+	suffix := ":" + strconv.Itoa(port)
+
 	if runtime.GOOS == "windows" {
-		// -ano lists numeric addresses with owning PIDs and never resolves
-		// names, which is what keeps this bounded on a machine with no DNS.
-		cmd = exec.Command("cmd", "/c", "netstat -ano -p UDP | findstr :"+p+" ")
-	} else {
-		// -nP: no host and no port name resolution, for the same reason.
-		// -iUDP:<port> is the whole query; the socket table is read, not joined.
-		cmd = exec.Command("lsof", "-nP", "-iUDP:"+p)
-	}
-	out, err := cmd.Output()
-	if err != nil && len(out) == 0 {
+		// SystemRoot rather than a literal C:\Windows: the drive is not
+		// guaranteed, and this is the variable Windows itself uses.
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = `C:\Windows`
+		}
+		// -ano: numeric addresses, all sockets, owning PID. Numeric matters --
+		// name resolution on a runner with no DNS is where a bounded check
+		// becomes a hang.
+		out, err := exec.Command(filepath.Join(root, "System32", "netstat.exe"), "-ano", "-p", "UDP").Output()
+		if err != nil && len(out) == 0 {
+			return false
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			// Fields: Proto, LocalAddress, ForeignAddress, PID. The local
+			// address is the only one that says what is BOUND here, and it is
+			// matched as a whole field: a substring match on the line would
+			// also hit a foreign address or a PID containing those digits.
+			if f := strings.Fields(line); len(f) >= 2 && strings.HasSuffix(f[1], suffix) {
+				return true
+			}
+		}
 		return false
 	}
-	return len(bytes.TrimSpace(out)) > 0
+
+	// lsof moves between /usr/sbin and /usr/bin across distributions, so the
+	// candidates are tried in order rather than assumed. An absent lsof yields
+	// "not held", the same safe direction as an empty result.
+	for _, bin := range []string{"/usr/sbin/lsof", "/usr/bin/lsof", "/bin/lsof"} {
+		if _, err := os.Stat(bin); err != nil {
+			continue
+		}
+		// -nP: no host and no port-name resolution, for the reason above.
+		// -iUDP:<port> is the whole query; the socket table is read, not joined.
+		out, err := exec.Command(bin, "-nP", "-iUDP:"+strconv.Itoa(port)).Output()
+		if err != nil && len(out) == 0 {
+			return false
+		}
+		return len(bytes.TrimSpace(out)) > 0
+	}
+	return false
 }
