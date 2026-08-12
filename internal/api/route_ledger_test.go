@@ -1066,6 +1066,13 @@ type nonTrieProbe struct {
 	// TestEveryNonTrieTerminalIsDerivedAndWitnessed. Before #156 these slices
 	// WERE the population, so neither failure existed.
 	terminal string
+	// provenance is whether that terminal is a handler THIS BUILD REGISTERED or
+	// chi's own default. It is part of the probe's claim, not bookkeeping: a
+	// notFound probe declaring which branch of internal/web it enters is making
+	// a statement about a registered handler, and the same probe against chi's
+	// default 404 is driving something else entirely. See the provenance
+	// constants in route_population_test.go for the mutant that proved it.
+	provenance string
 }
 
 // allNonTrieProbes is every witness this package drives against the mux's
@@ -1098,26 +1105,26 @@ const (
 // a real bundle embedded, because Vite fingerprints its output and no file of
 // that name is ever produced. The name was aspirational in both configurations.
 func notFoundProbes() []nonTrieProbe {
-	return stampTerminal(terminalNotFound, []nonTrieProbe{
-		{http.MethodGet, "/", "the SPA root", webBranchUINotBuilt, webBranchSPAIndex, ""},
+	return stampTerminal(terminalNotFound, provenanceRegistered, []nonTrieProbe{
+		{http.MethodGet, "/", "the SPA root", webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/assets/app.js", "a bundled asset PATH -- and not a bundled asset: " +
 			"Vite fingerprints its output, so nothing is ever named this. It reaches the " +
 			"asset branch in neither configuration, which is why assetProbe below exists",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/.env", "the credential file every scanner asks for first",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/debug/pprof/", "the profiler surface, if anything ever mounted it",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/metrics", "the Prometheus convention, unrouted here",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/API/V1/SETTINGS", "a case-varied spelling of a real route",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodPost, "/.env", "an unmatched METHOD as well as an unmatched path",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodDelete, "/anything", "a destructive method on the catch-all",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/api/v1/no-such-route", "an unrouted path INSIDE the API prefix",
-			webBranchAPIJSON404, webBranchAPIJSON404, ""},
+			webBranchAPIJSON404, webBranchAPIJSON404, "", ""},
 		// THE TENTH PROBE, added because the branch table made its absence
 		// legible. Opening a DIRECTORY under the sub-FS succeeds, so this used to
 		// reach http.FileServer and be answered 200 with an index of the bundle
@@ -1125,7 +1132,7 @@ func notFoundProbes() []nonTrieProbe {
 		// internal/web now falls a directory through to the SPA branch, and this
 		// row is what pins it from the ledger's side.
 		{http.MethodGet, "/assets/", "the asset ROOT: a directory, not a file",
-			webBranchUINotBuilt, webBranchSPAIndex, ""},
+			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 	})
 }
 
@@ -1133,9 +1140,10 @@ func notFoundProbes() []nonTrieProbe {
 // which surface the slice is about rather than of the individual row. A field
 // typed once per row is a field that can be typed wrong, and this ledger has
 // already deleted two of those.
-func stampTerminal(name string, probes []nonTrieProbe) []nonTrieProbe {
+func stampTerminal(name, provenance string, probes []nonTrieProbe) []nonTrieProbe {
 	for i := range probes {
 		probes[i].terminal = name
+		probes[i].provenance = provenance
 	}
 	return probes
 }
@@ -1148,10 +1156,10 @@ func stampTerminal(name string, probes []nonTrieProbe) []nonTrieProbe {
 // another 404. The branch assertion drives it in the built column, where it is
 // the ONLY probe that reaches the immutable-cache branch.
 func assetProbe() nonTrieProbe {
-	return stampTerminal(terminalNotFound, []nonTrieProbe{{http.MethodGet,
+	return stampTerminal(terminalNotFound, provenanceRegistered, []nonTrieProbe{{http.MethodGet,
 		"/assets/index-abc123.js",
 		"a fingerprinted bundle, the only path shape that reaches the asset branch",
-		webBranchUINotBuilt, webBranchAsset, ""}})[0]
+		webBranchUINotBuilt, webBranchAsset, "", ""}})[0]
 }
 
 // builtUIFS is a synthetic `dist` -- an index.html and one fingerprinted bundle
@@ -1322,7 +1330,7 @@ func sortedSet(m map[string]bool) []string {
 // publishes the table -- and the behavioural change is filed. What was true
 // before is that no test drove this response class at all.
 func methodNotAllowedProbes() []nonTrieProbe {
-	return stampTerminal(terminalMethodNotAllowed, []nonTrieProbe{
+	return stampTerminal(terminalMethodNotAllowed, provenanceChiDefault, []nonTrieProbe{
 		// No bare/built branch: these never reach internal/web at all. chi's
 		// methodNotAllowed answers them before r.NotFound is consulted, which is
 		// the whole of G4.

@@ -69,6 +69,28 @@ const (
 	terminalMethodNotAllowed = "method-not-allowed"
 )
 
+// A terminal's PROVENANCE: whether this build put a handler there or whether
+// chi's own default is what answers.
+//
+// The distinction is the whole reason a derived population beats a hand-list
+// here, and it took a surviving mutant to get it right. The first version of
+// this file recorded only that a terminal EXISTS -- and both of them always
+// exist, because chi supplies a default for each -- so deleting
+// `r.NotFound(h.ServeHTTP)` from registerRoutes left every assertion green
+// while ten probes went on declaring which branch of internal/web they enter,
+// against a terminal that was now chi's four-word text/plain 404.
+//
+// A probe's declared provenance is therefore part of its claim. notFoundProbes
+// assert branches of the embedded-UI handler, which is a claim about a handler
+// THIS BUILD REGISTERS. methodNotAllowedProbes assert the opposite: G4 is
+// precisely that chi's built-in 405 answers before any group middleware runs,
+// so a custom MethodNotAllowed registration would falsify what they claim, and
+// this is where that gets noticed.
+const (
+	provenanceRegistered = "registered by registerRoutes"
+	provenanceChiDefault = "chi's built-in default; registerRoutes registers none"
+)
+
 // registrationRecorder is what registerRoutes writes into.
 type registrationRecorder struct {
 	// pairs is method+pattern, with anyMethod left unexpanded so the record
@@ -200,12 +222,12 @@ func (r recordingRouter) Trace(p string, h http.HandlerFunc) {
 }
 
 func (r recordingRouter) NotFound(h http.HandlerFunc) {
-	r.rec.terminals[terminalNotFound] = "registered by registerRoutes"
+	r.rec.terminals[terminalNotFound] = provenanceRegistered
 	r.Router.NotFound(h)
 }
 
 func (r recordingRouter) MethodNotAllowed(h http.HandlerFunc) {
-	r.rec.terminals[terminalMethodNotAllowed] = "registered by registerRoutes"
+	r.rec.terminals[terminalMethodNotAllowed] = provenanceRegistered
 	r.Router.MethodNotAllowed(h)
 }
 
@@ -226,13 +248,10 @@ func recordRegistrations(t *testing.T, s *Server) *registrationRecorder {
 	// before any group middleware runs, which is G4 -- and deriving it from the
 	// ABSENCE of a registration is the only way a hand-list-free population can
 	// contain it.
-	if _, ok := rec.terminals[terminalMethodNotAllowed]; !ok {
-		rec.terminals[terminalMethodNotAllowed] =
-			"chi's built-in default; registerRoutes registers none"
-	}
-	if _, ok := rec.terminals[terminalNotFound]; !ok {
-		rec.terminals[terminalNotFound] =
-			"chi's built-in default; registerRoutes registers none"
+	for _, name := range []string{terminalNotFound, terminalMethodNotAllowed} {
+		if _, ok := rec.terminals[name]; !ok {
+			rec.terminals[name] = provenanceChiDefault
+		}
 	}
 	return rec
 }
@@ -309,9 +328,17 @@ func assertRegisteredPopulationEqualsWalk(t *testing.T, s *Server) {
 //   - a terminal with no probe is a surface this mux answers on that nothing
 //     drives. Delete methodNotAllowedProbes() and this fires.
 //   - a probe naming a terminal the recorder did not derive is a witness for a
-//     surface that does not exist. Delete r.NotFound from registerRoutes and
-//     this fires -- and before this test, ten probes went on being driven
-//     against chi's default 404 while claiming to cover the embedded UI.
+//     surface that does not exist.
+//   - a probe whose declared PROVENANCE disagrees with the derivation is a
+//     witness pointed at a different handler from the one it describes. Delete
+//     `r.NotFound(h.ServeHTTP)` from registerRoutes and this fires: chi's
+//     default 404 is still a terminal, still answers, and is not the embedded
+//     UI the eleven notFound probes make branch claims about.
+//
+// THE THIRD CASE IS THERE BECAUSE THE FIRST VERSION OF THIS TEST DID NOT HAVE
+// IT AND A MUTANT SURVIVED. Recording only that a terminal exists records
+// nothing at all: chi supplies a default for both of them, so both are always
+// present, and "the population is derived" was true and empty.
 func TestEveryNonTrieTerminalIsDerivedAndWitnessed(t *testing.T) {
 	h, _, _ := plantedServer(t)
 	assertNonTrieTerminalsAreWitnessed(t, serverUnderTest(t, h))
@@ -333,6 +360,16 @@ func assertNonTrieTerminalsAreWitnessed(t *testing.T, s *Server) {
 			continue
 		}
 		witnessed[p.terminal] = append(witnessed[p.terminal], p.method+" "+p.path)
+		if how, ok := derived[p.terminal]; ok && how != p.provenance {
+			t.Errorf("%s %s (%s) witnesses the %q terminal and declares it %q; this build's "+
+				"registrations derive it as %q.\n"+
+				"The probe is still driving a real response, which is why nothing else "+
+				"notices -- but it is describing a different handler from the one that "+
+				"answers. A notFound probe naming a branch of internal/web against chi's "+
+				"four-word default 404, or a 405 probe asserting G4's before-the-middleware "+
+				"ordering against a MethodNotAllowed this build registered, are both this "+
+				"failure.", p.method, p.path, p.why, p.terminal, p.provenance, how)
+		}
 	}
 
 	for name, how := range derived {
