@@ -130,24 +130,26 @@ func CountDurationSeconds(ctx context.Context, ffmpegBin, format, path string) (
 // furthestOutTimeMS reads a -progress stream and reports the highest output
 // time any complete block reported.
 //
-// THE HIGHEST, NOT THE LAST, and the difference is only visible on a stream
-// with more than one block in it -- which no fixture short enough to be a unit
-// test produces, since FFmpeg emits a block about twice a second of WALL time
-// and a two-second raw stream decodes in a tenth of one. That is why this is a
-// function with its own test rather than a closure inside the call above: the
-// distinction was unfalsifiable where it was, and a defence nothing can break
-// is a comment.
+// THE PROPERTY THAT MATTERS, AND IS TESTED, is that it reads the WHOLE stream.
+// FFmpeg's -progress counters are cumulative -- out_time_us is the total so far,
+// not a delta -- so the first block of a long decode reports a fraction of the
+// file and taking it would report a fraction of the length. This is a function
+// of its own with its own test because a closure inside the call above could not
+// be shown that: FFmpeg emits a block about twice a second of WALL time, so no
+// fixture short enough for a unit test produces more than one, and against a
+// single block every reading of the stream is the same reading. Measured -- with
+// a real two-second fixture, a first-block rule changed no test in this package.
 //
-// Two things make last-block wrong. ParseProgress emits on each terminator, so
-// a run killed mid-write leaves a final block whose counters are a mix of the
-// one before it and whatever arrived; and the stdout cap drops bytes from the
-// end, which produces exactly the same shape. The counters are cumulative and
-// monotonic, so the furthest one any block reached is the safe reading and a
-// short final block cannot pull the answer backwards.
-//
-// Pulling it BACKWARDS is the direction that matters: this number becomes
-// estimateBytes' -fs cap on a later encode, and a duration that is too small
-// truncates an operator's legitimate media.
+// HIGHEST RATHER THAN LAST IS NOT SEPARATELY FALSIFIABLE, and saying so is more
+// honest than a comment claiming a defence. The two differ only if a later block
+// reports a SMALLER time, and ParseProgress cannot produce that: it reuses one
+// Progress across blocks, so a block missing an out_time line inherits the
+// previous block's value rather than resetting to zero, and cappedBuffer drops
+// bytes from the END, which removes whole blocks rather than corrupting earlier
+// ones. `>` is kept because it costs one character and cannot be wrong in the
+// direction that hurts -- a length read SHORT becomes estimateBytes' -fs cap and
+// truncates an operator's media -- but it is a belt, not a mechanism, and no
+// test in this package asserts it.
 func furthestOutTimeMS(r io.Reader) (int64, error) {
 	var furthest int64
 	if err := ParseProgress(r, func(p Progress) {

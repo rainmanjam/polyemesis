@@ -449,33 +449,34 @@ func TestAFileThatDeclaresItsLengthIsNeverCounted(t *testing.T) {
 	}
 }
 
-// A TRUNCATED FINAL PROGRESS BLOCK CANNOT PULL THE COUNTED LENGTH BACKWARDS.
+// THE COUNT IS READ FROM THE WHOLE PROGRESS STREAM, NOT ITS FIRST BLOCK.
 //
-// FFmpeg's -progress counters are cumulative, so "the last block" is the
-// obvious reading and it is wrong in one direction that matters. ParseProgress
-// emits on every terminator, and a run killed mid-write -- or a stdout stream
-// the cap has dropped bytes from the end of -- leaves a final block carrying
-// the PREVIOUS block's counters with only the terminator fresh. Read as the
-// last block, that is a duration shorter than the file.
+// FFmpeg's -progress counters are CUMULATIVE: out_time_us is the total decoded
+// so far, not a delta. So the first block of a long decode reports a fraction of
+// the file, and a reader that stopped there would report a fraction of its
+// length -- and short is the direction that hurts, because this number becomes
+// estimateBytes' -fs cap on the normalise encode, where an under-reading
+// truncates an operator's legitimate media instead of merely mis-labelling it.
 //
-// Short is the dangerous direction: this number becomes estimateBytes' -fs cap
-// on the normalise encode, so an under-reading truncates an operator's
-// legitimate media rather than merely mis-labelling it.
+// SYNTHETIC INPUT, AND THAT IS THE WHOLE REASON THIS TEST EXISTS. FFmpeg emits a
+// block about twice a second of WALL time, so a two-second fixture produces
+// exactly one block and every possible reading of the stream agrees on it.
+// Measured: with the real fixtures in this file, replacing the whole-stream rule
+// with a first-block one changed nothing in this package. The guard was
+// unfalsifiable until the parsing came out into a function that could be handed
+// a stream with more than one block in it.
 //
-// SYNTHETIC INPUT ON PURPOSE. FFmpeg emits a progress block about twice a
-// second of WALL time, so no fixture small enough for a unit test produces more
-// than one, and against a single block "furthest" and "last" are the same
-// function -- the reason this behaviour is a function of its own rather than a
-// closure. Measured: with a real 2-second fixture, replacing the furthest-block
-// rule with a first-block one changed no test in this package.
-func TestATruncatedFinalProgressBlockCannotShortenTheCount(t *testing.T) {
-	// Three complete blocks. The third is the shape a killed or capped stream
-	// leaves: `progress=end` arrives while out_time_us still holds the value
-	// from the block before, because the fresh one never made it.
+// What this does NOT pin is highest-block versus last-block. Those differ only
+// if a later block reports a SMALLER time, which ParseProgress cannot produce --
+// see furthestOutTimeMS. There is no test for it here because there is no
+// mutation that would fail one.
+func TestTheCountReadsTheWholeProgressStreamAndNotItsFirstBlock(t *testing.T) {
+	// Four blocks, cumulative, as FFmpeg writes them.
 	stream := strings.Join([]string{
 		"frame=25", "out_time_us=1000000", "progress=continue",
 		"frame=50", "out_time_us=2000000", "progress=continue",
-		"frame=50", "progress=end",
+		"frame=75", "out_time_us=3000000", "progress=continue",
+		"frame=100", "out_time_us=4000000", "progress=end",
 		"",
 	}, "\n")
 
@@ -483,33 +484,22 @@ func TestATruncatedFinalProgressBlockCannotShortenTheCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("furthestOutTimeMS: %v", err)
 	}
-	if got != 2000 {
-		t.Errorf("furthestOutTimeMS = %d ms, want 2000. Reading the LAST block "+
-			"instead of the furthest one takes the answer from a terminator whose "+
-			"counters never arrived", got)
+	if got != 4000 {
+		t.Errorf("furthestOutTimeMS = %d ms, want 4000. %d ms is the FIRST block, "+
+			"which is the total decoded when FFmpeg had been running half a second "+
+			"-- these counters are cumulative, so the answer is at the end of the "+
+			"stream and not the beginning", got, 1000)
 	}
 
-	// The control: an ordinary stream that ends cleanly must give the same
-	// answer by the same route, or the rule above is satisfied by a function
-	// that ignores the end of every stream.
-	clean := "frame=25\nout_time_us=1000000\nprogress=continue\n" +
-		"frame=50\nout_time_us=2000000\nprogress=end\n"
-	got, err = furthestOutTimeMS(strings.NewReader(clean))
-	if err != nil {
-		t.Fatalf("furthestOutTimeMS: %v", err)
-	}
-	if got != 2000 {
-		t.Errorf("furthestOutTimeMS on a clean stream = %d ms, want 2000", got)
-	}
-
-	// And a stream that never reported a time at all reports zero rather than
-	// something, which is what CountDurationSeconds turns into a refusal.
+	// A stream that never reported a time at all reports zero rather than
+	// something, which is what CountDurationSeconds turns into a refusal rather
+	// than into a zero-length file the disk guard cannot bound.
 	got, err = furthestOutTimeMS(strings.NewReader("frame=0\nprogress=end\n"))
 	if err != nil {
 		t.Fatalf("furthestOutTimeMS: %v", err)
 	}
 	if got != 0 {
-		t.Errorf("furthestOutTimeMS on a stream with no time = %d ms, want 0", got)
+		t.Errorf("furthestOutTimeMS on a stream carrying no time = %d ms, want 0", got)
 	}
 }
 
