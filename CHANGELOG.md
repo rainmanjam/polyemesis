@@ -62,8 +62,9 @@ its first tagged release.
   every engine reconcile and its ingest is not started, primary and standby
   alike. The card still names the file and says why, and the reconcile records
   the same sentence, so a save made afterwards answers with it rather than
-  leaving you a stopped programme and a log line. Nothing writes that verdict
-  yet; #202's re-verify job will be the first.
+  leaving you a stopped programme and a log line. The job that writes that
+  verdict — the *Media re-check* above — ships in this same release, so the gate
+  is live rather than waiting on a producer.
   ([#255](https://github.com/rainmanjam/polyemesis/issues/255))
 
 - **A busy server stopped inspecting uploads, and the caller chose when.** The
@@ -167,6 +168,17 @@ its first tagged release.
 
 ### Added
 
+- **An upload the server never managed to inspect can be re-checked in place,
+  instead of being re-uploaded.** `POST /media/{name}/verify` queues a *Media
+  re-check*: it reads the stored bytes again and records what it actually
+  established. Both directions are reported, because both matter to somebody —
+  a file that was refused and now passes has just become usable as a playlist
+  item, and one that passes and now fails has just stopped being usable. A
+  second refusal repeats the reason rather than silently re-asserting the first.
+  The route takes the same two checks as deleting an upload, in the same order,
+  so a probe sidecar cannot be named as the thing to verify.
+  ([#202](https://github.com/rainmanjam/polyemesis/issues/202))
+
 - **A raw `.h264`, `.hevc` or `.mpegvideo` dump can go straight into the
   Library.** These files carry no container, so nothing in them says how long
   they are, and the upload gate refused them: *"polyemesis cannot work out how
@@ -221,10 +233,11 @@ its first tagged release.
   trusted, and a record that claims a pass in one field while denying it in the
   other is refused outright.
 
-  Nothing writes `refused` yet. The re-verify job is
-  [#202](https://github.com/rainmanjam/polyemesis/issues/202); this is the state
-  it needs to exist before it can be built, because a re-verify that records its
-  findings as "not checked" would be worse than no re-verify at all.
+  This state was added before anything wrote it, because a re-verify that
+  recorded its findings as "not checked" would be worse than no re-verify at
+  all. The job that writes it — the *Media re-check* under Added — ships in this
+  same release, so `refused` is a value you can now actually be shown.
+  ([#202](https://github.com/rainmanjam/polyemesis/issues/202))
 
 - **A destination can now forward its audio bit-for-bit.** Set `copy` on a
   destination's audio block — `-c:a copy`, no decode, no mix, no encoder — so an
