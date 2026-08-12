@@ -127,10 +127,14 @@ func normaliseDir(s string) string {
 //     it is a witness to where the build really landed rather than a second
 //     declaration of intent.
 //
-// Point wrangler at the wrong directory and the deploy does not fail. Cloudflare
-// Pages accepts an upload of a directory that does not exist as an empty one, so
-// the failure arrives as a live site serving nothing, on a domain the repository
-// has just started advertising.
+// Not every way of getting this wrong is silent, and it is worth being exact
+// about which ones this buys. Point wrangler at a directory that does not exist
+// and it refuses to deploy: loud, late, but unmistakable. Point it at one that
+// DOES exist and is not the build output -- a directory left by an earlier
+// layout, or one that stops being written to the day somebody sets outDir -- and
+// the deploy succeeds and promotes the wrong tree. Nothing distinguishes that
+// from a good deploy except opening the site. This is the check for that case,
+// and it runs at review time rather than at deploy time.
 func TestThePagesDeployPublishesTheDirectoryTheSiteBuildsInto(t *testing.T) {
 	wrangler := readRepoFile(t, "web", "wrangler.toml")
 	m := pagesOutputDirRE.FindStringSubmatch(wrangler)
@@ -156,9 +160,10 @@ func TestThePagesDeployPublishesTheDirectoryTheSiteBuildsInto(t *testing.T) {
 	if deployed != built {
 		t.Errorf("wrangler uploads web/%s, and the build checks that run inside "+
 			"`npm run build` assert against web/%s.\n"+
-			"        A Pages upload of a directory that is not there is not an "+
-			"error -- it is an empty deployment. The site goes live serving "+
-			"nothing, on the domain #143 was waiting to advertise.\n"+
+			"        If web/%[1]s happens to exist -- left over from an earlier "+
+			"layout, or stale because the build stopped writing there -- wrangler "+
+			"uploads it and reports success, and the site goes live serving the "+
+			"wrong tree on the domain #143 was waiting to advertise.\n"+
 			"        Change pages_build_output_dir in web/wrangler.toml, or "+
 			"change where the build writes; the two have to be one directory.",
 			deployed, built)
