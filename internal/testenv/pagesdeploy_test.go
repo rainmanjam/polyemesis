@@ -502,7 +502,14 @@ func TestTheDocumentedDNSRecordsNameTheHostsTheSiteIsBuiltFor(t *testing.T) {
 			"hostname this project has before a custom domain resolves.",
 			wantTarget)
 	}
+	// Deduplicated: the document names the target on every record row, and five
+	// copies of one disagreement is five copies of one edit to make.
+	seen := map[string]bool{}
 	for _, got := range found {
+		if seen[got] {
+			continue
+		}
+		seen[got] = true
 		if got != wantTarget {
 			t.Errorf("docs/SITE-DEPLOY.md tells the maintainer to point DNS at "+
 				"%s, and web/wrangler.toml deploys to the project %q, whose "+
