@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,154 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
+
+// #264 landed a third verdict state under this gate, and it needs its own
+// answer rather than being folded into the second.
+//
+// OutcomeUnverified is "no inspection produced a verdict" -- a fact about THIS
+// SERVER, whose remedy is to try again. OutcomeRefused is "these bytes WERE
+// inspected and are not media", which uploads.go calls "a statement about the
+// FILE, it is permanent, and trying again is not a remedy". Both must refuse a
+// save. They must not say the same thing, because "upload it again" is advice
+// that cannot work for the second, and the operator's only route to acting on a
+// refusal is the sentence.
+//
+// THE CONTROLS ARE THE POINT AGAIN. A gate that refused every recorded verdict
+// would satisfy the two refusals on its own, so a verified upload and an upload
+// with no record at all both have to still go through.
+func TestThePullGateTellsARefusalApartFromAnUninspectedFile(t *testing.T) {
+	const (
+		refused    = "refused-abcd1234.ts"
+		unchecked  = "unchecked-abcd1234.ts"
+		verified   = "verified-abcd1234.ts"
+		norecord   = "norecord-abcd1234.ts"
+		refusedWhy = "no video or audio stream this server can play"
+	)
+
+	h, store, sign := sourceServer(t)
+	srv := serverUnderTest(t, h)
+	for _, n := range []string{refused, unchecked, verified, norecord} {
+		seedUpload(t, srv, n)
+	}
+	seedVerdict(t, srv, refused, uploads.RefusedVerdict(refusedWhy))
+	seedVerdict(t, srv, unchecked, uploads.UnverifiedVerdict(uploads.ReasonInterrupted))
+	seedVerdict(t, srv, verified, uploads.VerifiedVerdict(uploads.MediaInfo{AudioTracks: 2}))
+
+	// (a) and (b): the two controls, which must still save.
+	putSourceIngest(t, h, sign, 1, pullIngest(t, store, uploads.PullURL(verified)), http.StatusOK)
+	putSourceIngest(t, h, sign, 1, pullIngest(t, store, uploads.PullURL(norecord)), http.StatusOK)
+
+	// (c) the refusal for an uninspected file: try again.
+	body := string(putSourceIngest(t, h, sign, 1,
+		pullIngest(t, store, uploads.PullURL(unchecked)), http.StatusBadRequest))
+	for _, want := range []string{unchecked, uploads.ReasonInterrupted, "upload it again"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the uninspected refusal does not mention %q: %s", want, body)
+		}
+	}
+
+	// (d) the refusal for a file that WAS read: a different remedy, and
+	// explicitly NOT the one above. This is the assertion that would catch the
+	// two states being folded together, which is what a mechanical merge of
+	// #264 into this gate would have produced.
+	body = string(putSourceIngest(t, h, sign, 1,
+		pullIngest(t, store, uploads.PullURL(refused)), http.StatusBadRequest))
+	for _, want := range []string{refused, refusedWhy, "inspected and refused", "point it at a different file"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the refusal does not mention %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "upload it again") {
+		t.Errorf("a file that was inspected and refused is met with \"upload it again\", which "+
+			"is the one thing that cannot fix it -- a refusal is permanent: %s", body)
+	}
+}
+
+// The fail-open report has to draw the same distinction, and for a sharper
+// reason: its sentence used to say "nothing has read a byte of it", which for a
+// file that was read and refused is false twice over.
+func TestTheInheritedReportTellsARefusalApartToo(t *testing.T) {
+	const name = "inherited-abcd1234.ts"
+	const refusedWhy = "no video or audio stream this server can play"
+
+	report := func(t *testing.T, downgrade uploads.Verdict) string {
+		t.Helper()
+		h, store, sign := sourceServer(t)
+		srv := serverUnderTest(t, h)
+		seedUpload(t, srv, name)
+		// Saved while it still passed, then downgraded underneath -- the only
+		// shape that reaches the report, since the save-time gate now refuses
+		// both bad states outright.
+		seedVerdict(t, srv, name, uploads.VerifiedVerdict(uploads.MediaInfo{AudioTracks: 1}))
+		putSourceIngest(t, h, sign, 1, pullIngest(t, store, uploads.PullURL(name)), http.StatusOK)
+		seedVerdict(t, srv, name, downgrade)
+
+		var rows []struct {
+			PullUploadUnchecked string `json:"pullUploadUnchecked"`
+		}
+		decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/sources", nil, http.StatusOK), &rows)
+		if len(rows) == 0 {
+			t.Fatal("the sources listing came back empty")
+		}
+		return rows[0].PullUploadUnchecked
+	}
+
+	got := report(t, uploads.UnverifiedVerdict(uploads.ReasonProbeUnusable))
+	for _, want := range []string{name, uploads.ReasonProbeUnusable, "upload it again"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the uninspected report does not mention %q: %s", want, got)
+		}
+	}
+
+	got = report(t, uploads.RefusedVerdict(refusedWhy))
+	for _, want := range []string{name, refusedWhy, "inspected and refused", "point it at a different file"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the refusal report does not mention %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "upload it again") {
+		t.Errorf("the card tells the operator to upload a refused file again: %s", got)
+	}
+}
+
+// The two changes in this PR cross here, and this is the assertion that proves
+// the merge did not undo either. #266's bypass is about SPELLING and #264's
+// third state is about OUTCOME; they are independent, so a spelling that walks
+// past the gate reaches a refused upload exactly as it reached an unchecked one.
+func TestABypassSpellingCannotReachARefusedUploadEither(t *testing.T) {
+	const name = "refused-abcd1234.ts"
+	const refusedWhy = "no video or audio stream this server can play"
+
+	for _, form := range []string{
+		"file://uploads/%s", // the canonical spelling, as a control
+		"file://uploads/./%s",
+		"file://uploads//%s",
+		"file://./uploads/%s",
+		"file://uploads/././%s",
+	} {
+		t.Run(form, func(t *testing.T) {
+			h, store, sign := sourceServer(t)
+			srv := serverUnderTest(t, h)
+			seedUpload(t, srv, name)
+			seedVerdict(t, srv, name, uploads.RefusedVerdict(refusedWhy))
+
+			raw := fmt.Sprintf(form, name)
+			body := string(putSourceIngest(t, h, sign, 1,
+				pullIngest(t, store, raw), http.StatusBadRequest))
+			if !strings.Contains(body, "inspected and refused") {
+				t.Errorf("%q was refused, but not as a refusal: %s", raw, body)
+			}
+			got, err := store.GetSource(1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(got.Ingest.Pull.URL, name) {
+				t.Errorf("a pull source naming a file this server read and rejected reached "+
+					"the row anyway, spelled %q: %q", raw, got.Ingest.Pull.URL)
+			}
+		})
+	}
+}
 
 /* #255, and the shape of the hole turned out to be sharper than "inherited".
 

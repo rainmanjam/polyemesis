@@ -1,0 +1,134 @@
+# Build web/ and publish it to Cloudflare Pages.
+#
+# WHY THIS EXISTS. #143 wants the repository's homepage field to point at
+# polyemesis.com. It has stayed unset through three re-probes because the domain
+# does not serve the site: nothing in this repository has ever published web/.
+# `release.yml` mentions web/ exactly twice and both times it is counting
+# packages for the SBOM. The site is BUILT for https://polyemesis.com —
+# astro.config.mjs sets it, and Base.astro derives every canonical URL, og:url
+# and schema.org url from it — and then the build output goes nowhere.
+#
+# THE GATE, AND WHY IT IS A STEP AND NOT A JOB-LEVEL `if`. Publishing a public
+# site is the maintainer's act, not a merge's. This workflow must therefore be
+# mergeable and green BEFORE the credential exists, and must start publishing the
+# moment it does, with no second edit. `secrets` is not available in a job-level
+# `if:` — the contexts there are github, needs, vars and inputs — so the gate is
+# a first step that reads the secrets through `env:` and publishes a boolean, and
+# the publish step is conditioned on that boolean. Until the secret is added this
+# workflow builds the site, runs its build checks, says so in a notice, and
+# exits 0. It does not fail, because a red X on main for a credential nobody has
+# added yet trains people to ignore red Xs.
+#
+# THE BUILD IS DELIBERATELY NOT GATED. web/ has had no CI of any kind: `astro
+# check`, the link/fragment resolution pass and the built-CSS assertions in
+# web/scripts/check-build.mjs have only ever run on someone's laptop. Running
+# them here on every PR that touches web/ is worth having on its own, and it is
+# what makes the ungated half of this file useful before the gate opens.
+name: pages
+
+on:
+  # Pull requests build and check but never publish — see the `if` on the
+  # publish step, which requires refs/heads/main as well as the credential.
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
+  # The escape hatch for the first deploy: after adding the secrets the
+  # maintainer needs a run without waiting for a commit that touches web/.
+  workflow_dispatch:
+
+# cancel-in-progress is FALSE, unlike ci.yml. There the superseded run is a test
+# suite nobody is waiting on. Here it is an upload to a live site, and killing
+# one mid-flight to start another trades a deterministic order for a race
+# between two deployments over which is promoted last.
+concurrency:
+  group: pages-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: build web/ and publish to Cloudflare Pages
+    runs-on: ubuntu-latest
+    # The build measures at ~5s after install; 15 minutes is almost entirely
+    # headroom for `npm ci` on a cold cache and for the upload.
+    timeout-minutes: 15
+    defaults:
+      run:
+        # Every path in this job is relative to web/, which is what makes
+        # wrangler.toml's `pages_build_output_dir = "./dist"` resolve to
+        # web/dist. internal/testenv/pagesdeploy_test.go asserts that.
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          # Same major as the ui job in ci.yml and as the Dockerfiles' node tag.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # FIRST, so the log says whether this run can publish before it spends any
+      # time building. A reader who came here asking "why is the site still not
+      # up" gets the answer in the first step rather than the last.
+      - name: Is the deploy credential present?
+        id: gate
+        env:
+          # Through env, never interpolated into the script body. GitHub masks
+          # secrets in logs either way; what env buys is that the value is never
+          # part of the command line a `set -x` or a crash dump could print.
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CF_API_TOKEN" ] && [ -n "$CF_ACCOUNT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are both set."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Site built but not published::CLOUDFLARE_API_TOKEN and/or CLOUDFLARE_ACCOUNT_ID are not set on this repository, so this run stops after the build. Adding both secrets is what turns this workflow into a deploy — see docs/SITE-DEPLOY.md."
+          fi
+
+      # --ignore-scripts, matching ci.yml's ui job. Verified that wrangler still
+      # runs under it: its platform binaries arrive as optionalDependencies, not
+      # through an install script.
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      # NOT gated. `npm run build` is `astro check && astro build &&
+      # scripts/check-build.mjs`, and the third of those is the only thing in the
+      # repository that asserts about the shipped CSS and the resolvability of
+      # every internal link.
+      - name: Build
+        run: npm run build
+
+      - name: Publish to Cloudflare Pages
+        # Both halves are load-bearing. The gate is the credential. refs/heads/
+        # main is what keeps a pull_request run — including one from a fork,
+        # where the secrets would be empty anyway — from publishing.
+        if: steps.gate.outputs.ready == 'true' && github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # --no-install: run the wrangler that npm ci just installed from the
+          # lockfile, with its integrity hash, rather than letting npx resolve a
+          # version from the network at deploy time. Same argument release.yml
+          # makes for pinning syft by SHA-256 instead of by version tag.
+          #
+          # No directory and no --project-name: both come from wrangler.toml, so
+          # there is one place to change them and a test can read it.
+          npx --no-install wrangler pages deploy --branch main
+
+      - name: What is left to do
+        if: steps.gate.outputs.ready != 'true'
+        run: |
+          echo "The site was built and checked. It was not published."
+          echo "docs/SITE-DEPLOY.md lists the two secrets, the DNS records, and how to verify."

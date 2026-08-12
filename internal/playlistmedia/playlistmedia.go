@@ -1097,7 +1097,18 @@ func estimateBytes(durationMS, sourceBytes int64) (n int64, bounded bool) {
 // burns every attempt on a file that can never succeed, or gives up permanently
 // on a file that is fine.
 func (p *Processor) verifySource(ctx context.Context, path string) (float64, error) {
-	res, err := ffmpeg.ProbeFile(ctx, p.cfg.FFprobe, path)
+	// BOTH BINARIES, and that is the half of #218 a test asserting "the upload
+	// was accepted" would not have caught. There are two gates on this path and
+	// this is the second one; handing it only an ffprobe would leave it refusing
+	// with ErrNoDuration the raw elementary streams the upload gate had just
+	// admitted, which is #118's failure with the roles reversed -- accepted at
+	// the door, permanently refused at the worker.
+	//
+	// The count is far better placed here than at the door in any case: this is
+	// a queued job on a bounded worker that is about to spend minutes
+	// transcoding the same file, so seconds spent reading it are not on
+	// anybody's request.
+	res, err := ffmpeg.ProbeFile(ctx, ffmpeg.Bins{FFprobe: p.cfg.FFprobe, FFmpeg: p.cfg.FFmpeg}, path)
 	if err != nil {
 		name := filepath.Base(path)
 		// ffmpeg.Refused, not a list of arms, and for the reason spelled out at

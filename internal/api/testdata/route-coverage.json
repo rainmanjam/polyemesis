@@ -9,7 +9,7 @@
   "inertCeiling": 11,
   "varianceExemptCeiling": 2,
   "shapeFloor": 14,
-  "shapesNotInspectedCeiling": 7,
+  "shapesNotInspectedCeiling": 6,
   "totals": {
     "methodPatternPairs": 211,
     "swept": 55,
@@ -17,7 +17,7 @@
     "denied": 99,
     "nonTrieProbes": 12,
     "shapesEmitted": 14,
-    "shapesNotInspected": 7
+    "shapesNotInspected": 6
   },
   "partition": {
     "differential": 8,
@@ -1898,6 +1898,11 @@
       "inspected": false,
       "inspectedBy": "",
       "issue": "#168",
+      "jurisdiction": {
+        "package": "cmd/polyemesis",
+        "test": "TestAConfiguredRedirectNeverCachesAWatchToken",
+        "why": "the redirect wrapper lives in package main; that test drives it and asserts the Location it emits is never cacheable. Resolved by `go test -list`, not trusted."
+      },
       "note": "the HTTPS redirect's Location carries the request URI verbatim, watch token included. The assertion lives in cmd/polyemesis (package main), out of this ledger's jurisdiction. rawResponse now renders EVERY response header, so the invariance sweep does read headers -- but only for the routes it sweeps, and the redirect is not one of them."
     },
     {
@@ -1913,6 +1918,11 @@
       "inspected": false,
       "inspectedBy": "",
       "issue": "#168",
+      "jurisdiction": {
+        "package": "cmd/polyemesis",
+        "test": "TestATokenlessWatchPathIsStillUncacheable",
+        "why": "same package-main jurisdiction as Location above, and the same redirect surface: the assertion that a watch path is never stored is there because the wrapper is there."
+      },
       "note": "whether a credential-bearing response may be stored. Same jurisdiction problem as response-header/Location above: asserted in package main, unasserted here for the routes outside the invariance sweep."
     },
     {
@@ -1921,6 +1931,11 @@
       "inspected": false,
       "inspectedBy": "",
       "issue": "#168",
+      "jurisdiction": {
+        "package": "internal/api",
+        "test": "TestDownloadCAServesOnlyTheSelfSignedCACertificate",
+        "why": "IN THIS PACKAGE and still not an inspection, which is the honest reading of a jurisdiction record: that test drives a download route and asserts the attachment disposition on it, but the preflight does not call it and it covers one route rather than the shape. Weaker than an inspector, said out loud, and mechanically resolvable, which the issue number it replaces was not."
+      },
       "note": "download filenames; media names only, no stored credential. RE-POINTED from #154, which commit ae8df24 announces closing: what remains is that the download routes are excused from the sweep entirely, so no principal-pair comparison reads their headers."
     },
     {
@@ -1936,6 +1951,11 @@
       "inspected": false,
       "inspectedBy": "",
       "issue": "#168",
+      "jurisdiction": {
+        "package": "internal/api",
+        "test": "TestStemDownloadServesAStemInsideTheStemsDirectory",
+        "why": "the positive case of the stem download: a principal entitled to the file receives its bytes and they are compared. Same caveat as Content-Disposition -- one route, not the shape, and not called by the preflight."
+      },
       "note": "recordings, stems, clips and exports. #154 decided this and is CLOSED by ae8df24: every download route now answers a read token 403, which the excuse registry drives. What is still uninspected is the shape itself for the principals entitled to it."
     },
     {
@@ -1958,6 +1978,11 @@
       "inspected": false,
       "inspectedBy": "",
       "issue": "#160",
+      "jurisdiction": {
+        "package": "cmd/polyemesis",
+        "test": "TestTheRetainedDestTopicIsScrubbedAtTheSink",
+        "why": "cmd/polyemesis/mqtt.go is what publishes it, and that test asserts the retained payload is scrubbed before it reaches the broker."
+      },
       "note": "cmd/polyemesis/mqtt.go publishes Status.LastError RETAINED, with no principal and never any. Scrubbed at source by supervisor.scrub; the broker-side consumer audit is the deferral."
     },
     {
@@ -1980,6 +2005,11 @@
       "inspected": false,
       "inspectedBy": "",
       "issue": "#169",
+      "jurisdiction": {
+        "package": "cmd/polyemesis",
+        "test": "TestOrdinaryHostsStillRedirect",
+        "why": "THIS ROW IS WHY THE JURISDICTION FIELD EXISTS. It used to discharge on the literal string \"#169\" -- an issue number as a discharge, the thing #164 spent a round deleting, re-admitted through the shape channel -- which made closing #169 break the build. #169 is permanently open BY CONSTRUCTION: the port-80 listener binds in package main before any router in this package exists, and that is an architectural record rather than unfinished work. Its state is now verdict-neutral, and this record is what answers the ledger."
+      },
       "note": "cmd/polyemesis.startHTTPHelper binds :80 and serves the ACME http-01 responder plus a permanent redirect, on a listener no ledger row has ever named. Its Location header IS covered as a shape -- response-header/Location, deferred under #168 for the same jurisdiction reason -- but the LISTENER is a second surface: it answers before any router in this package exists, in package main, with no principal and no auth. The assertion that exists lives in cmd/polyemesis/redirect_test.go and does not run when this ledger runs."
     },
     {
@@ -1992,26 +2022,25 @@
     {
       "shape": "slog-output",
       "emitted": true,
-      "inspected": false,
-      "inspectedBy": "",
-      "issue": "#160",
-      "note": "the server's own structured log."
+      "inspected": true,
+      "inspectedBy": "api.inspectSlogOutput",
+      "note": "the server's own structured log. PROMOTED from a citation to an inspector in the round that deleted issue-numbers-as-discharge from the shape channel: the row cited #160 and nothing read the bytes, and the bytes turned out to be one field swap away -- s.log is a plain field, so an inspector points it at a buffer, drives one request through the real mux and reads what the request logger emitted. A citation was never the cheapest option here; it was the one nobody had priced."
     }
   ],
   "deferred": [
     {
       "id": "G2",
-      "what": "chi.Walk is complete over the routing TRIE, and the trie is not the MUX.",
-      "whySafe": "r.NotFound is the build-time embedded UI: an embed.FS with no server state behind it, and anonymous and read-scoped responses are byte-identical across nine executed probes. rawResponse now renders EVERY response header rather than a hand-listed five, so a header that varies by principal on any swept or probed route is a failure by name; the hand-listed set was measured to miss an Authorization echo into X-Principal-Echo on an immutable, publicly-cacheable asset response. The GUARD is fixed; the architectural residual is not.",
-      "whatWouldMakeItUnsafe": "the UI handler reading server state, or varying by principal. Either turns an unenumerated surface into an unguarded one.",
-      "issue": "#156"
+      "what": "chi.Walk is complete over the routing TRIE, and the trie is not the MUX. The population is no longer the walk plus a hand-list: Server.Handler() registers nothing itself and delegates to registerRoutes(chi.Router), so recordRegistrations derives both terminals -- r.NotFound from the call, method-not-allowed from the ABSENCE of one -- and the probe slices are witnesses over that derivation rather than the enumeration authority. What is left is the ROOT of the derivation: it can only see registrations this process makes through Server.Handler().",
+      "whySafe": "the two derivations of the trie are required to AGREE (the walk over the served mux, the recorder over the calls), a terminal with no witness fails, a witness naming a terminal this build did not register fails, and an AST guard refuses a registration made in Handler() where the recorder cannot see it. rawResponse renders EVERY response header rather than a hand-listed five, so a header that varies by principal on any swept or probed route is a failure by name; the hand-listed set was measured to miss an Authorization echo into X-Principal-Echo on an immutable, publicly-cacheable asset response.",
+      "whatWouldMakeItUnsafe": "a listener created OUTSIDE this router -- cmd/polyemesis's port-80 ACME and redirect helper is the live example, and it is #169 -- which no derivation rooted at Server.Handler() can reach. Jurisdiction totality at the outermost boundary is a human review and no mechanical repair for it is known. Also unsafe: the UI handler reading server state, or varying by principal.",
+      "issue": ""
     },
     {
-      "id": "built-ui-branches-are-driven-outside-the-mux",
-      "what": "the SPA and asset branches of internal/web are driven against a SYNTHETIC dist -- an index.html and one fingerprinted bundle -- through web.HandlerFor directly. Through the real chi mux, this checkout and CI both serve the bare filesystem, so the built column is not exercised end-to-end with requireAuth and the group middleware in front of it.",
-      "whySafe": "r.NotFound is mounted BELOW no middleware that varies by principal -- it is the mux's terminal handler and the same closure in both columns -- and the principal-invariance assertion the surface actually needs runs through the real mux over the real filesystem. What the synthetic column adds is branch reachability, which is a property of the closure and not of what is mounted above it.",
-      "whatWouldMakeItUnsafe": "middleware that rewrites a response on the way out, or an asset branch that ever consults the request's principal. Both would make the synthetic column's agreement with the mux an assumption rather than an observation, and the honest fix then is a CI job that builds the UI before the Go job.",
-      "issue": "#167"
+      "id": "built-ui-column-uses-a-synthetic-dist",
+      "what": "the SPA and asset branches are now driven THROUGH THE REAL MUX -- Server.uiHandler is a seam, so registerRoutes mounts the chosen filesystem under the same requestLogger and securityHeaders the binary ships -- but the filesystem itself is SYNTHETIC: one index.html and one fingerprinted bundle, not the output of `npm run build`.",
+      "whySafe": "what the built column buys is BRANCH REACHABILITY, and every branch internal/web can take is distinguishable from outside by status, Content-Type and Cache-Control regardless of which bytes the file holds. The two properties that could have been assumptions rather than observations -- that no middleware rewrites the response on the way out, and that the asset branch never consults the principal -- are now observed, because the requests go through everything that is mounted above the terminal.",
+      "whatWouldMakeItUnsafe": "a real bundle whose LAYOUT differs from the synthetic one in a way the handler branches on -- a nested assets directory, a service worker at the root, a file the sub-FS refuses to open. Nothing here can see that, and the honest fix for it is a CI job that builds the UI before the Go job, which costs a four-minute npm install on every Go run. NO ISSUE IS CITED: #167's two stated fix directions -- drive a build with assets embedded, and assert the emptiness precondition so the divergence is visible -- are both done and both done through the mux, so carrying the number forward would be citing, as a reason, work that has been carried out.",
+      "issue": ""
     },
     {
       "id": "run-filter-scan-is-limited-to-regeneration-commands",
@@ -2022,9 +2051,9 @@
     },
     {
       "id": "G3",
-      "what": "76 of the 83 non-GET pairs a read scope is refused are classified on the 403 alone. That is an INVARIANT: it records the refusal and records nothing about whether the pair would disclose anything to a principal entitled to it, so it stays green over an empty database.",
-      "whySafe": "all 83 were driven as ADMIN with {} against a per-pair fixture. The 7 that answered 2xx carrying a planted credential are now the census in nonGetDifferentialCensus, driven at both privilege levels with the credential REQUIRED present and the 403 required beside it, and the census is complete over that measurement. Of the other 76, 18 answered 2xx carrying no planted credential -- a status envelope, a job id, a list -- and requiring a sentinel from those would mean planting fixture data for the purpose, which reviews identically to a real proof.",
-      "whatWouldMakeItUnsafe": "the residual 58 are the honest hole: they answered 4xx or 5xx (17 404, 17 400, 15 503, 8 403, 1 500) because this fixture has no such row, the subsystem is not running, or {} is not a payload they accept -- so the drive never reached a handler that builds a body and the measurement cannot say what they would disclose. Also unsafe: any non-GET handler that begins echoing stored configuration back in a 2xx body, which is the normal REST idiom and the shape PUT /api/v1/settings already has. Both are re-found by the same admin drive that built the census, which is a measurement rather than a judgement call.",
+      "what": "the non-GET pairs a read scope is refused split into two words, and neither of them is now discharged by the 403 alone. denied-differential is nonGetDifferentialCensus: driven at both privilege levels with the planted credential REQUIRED present for the admin and the 403 required beside it. denied-by-method is the DECLARED-INVARIANCE population, and the counter-experiment for it is EXECUTED on every run rather than summarised: every such pair is driven as admin with {}, and no planted credential may come back. The population is derived from the live classification, so a pair that changes word changes sweep on the same run with no list to edit.",
+      "whySafe": "a negative measurement is byte-identical to what a vacuous harness produces, so the detector carries a POSITIVE CONTROL through the same code path, run after EVERY drive: a pair the differential census has independently measured to disclose must still be disclosing at that moment, or the silence just recorded is not evidence. The bracket version of that control -- once before, once after -- was written first and went red immediately, because DELETE /api/v1/destinations/{id} is in this population and removes the control's own row. The per-drive form re-plants the fixture when that happens and requires the re-planted control to hold, which separates \"the fixture was destroyed\" from \"the detector is broken\".",
+      "whatWouldMakeItUnsafe": "the pairs that never reach a handler are the honest hole and they are REPORTED on every run rather than counted here: they answer 4xx or 5xx because this fixture has no such row, the subsystem is not running, or {} is not a payload they accept, so the counter-experiment ran and could not read a body. A pair that discloses only through a payload {} does not reach is invisible to this, and no positive control can see it. Also unsafe: any non-GET handler that begins echoing stored configuration back in a 2xx body, which is the normal REST idiom and the shape PUT /api/v1/settings already has -- that one IS caught, by this sweep, naming the pair and the credential.",
       "issue": "#157"
     },
     {
@@ -2092,7 +2121,6 @@
     }
   ],
   "citedIssues": [
-    "#156",
     "#157",
     "#158",
     "#159",
@@ -2100,7 +2128,6 @@
     "#161",
     "#162",
     "#163",
-    "#167",
     "#168",
     "#169"
   ]

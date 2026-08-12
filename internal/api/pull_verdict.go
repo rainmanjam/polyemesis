@@ -93,36 +93,53 @@ func (s *Server) pullSourceUploadProblems(want db.Settings, storedPrimary, store
 			// ask is not the same as the answer being yes.
 			return fmt.Errorf("%s cannot be checked: %w", c.where, err)
 		}
-		if reason, unchecked := uncheckedUpload(store, name); unchecked {
-			return fmt.Errorf("%s names %q, which was stored without being checked (%s); "+
-				"upload it again before pulling from it", c.where, name, reason)
+		if what, remedy, bad := uploadObjection(store, name); bad {
+			return fmt.Errorf("%s names %q, which %s; %s", c.where, name, what, remedy)
 		}
 	}
 	return nil
 }
 
-// uncheckedUpload answers the one question every consumer of "stored does not
-// imply checked" asks: does this server hold a RECORDED refusal to inspect the
-// named upload, and what did it say.
+// uploadObjection answers the one question every consumer of "stored does not
+// imply checked" asks: may a pull source name this upload, and if not, what do
+// you tell the operator. what completes "...which %s" and remedy is the
+// sentence after it, so a caller supplies only its own subject.
 //
-// RECORDED AS UNVERIFIED, NOT "NOT RECORDED AS VERIFIED", which is the same
+// RECORDED AS A PROBLEM, NOT "NOT RECORDED AS FINE", which is the same
 // distinction playlistUploadProblems draws and for the same reason: every
 // upload stored before verdicts existed has no record at all, and refusing
 // those would strand media an operator has had for a year over a file that was
 // never written. See uploads.Store.Verdict's second return.
 //
-// Spelled once because there are now three callers that must agree --
-// pullSourceUploadProblems above, sourceIngestUploadProblem below, and
-// Server.pullUploadUnchecked, which reports rather than refuses. Two of them
-// refuse a save and the third puts a sentence on a card; a copy of this
-// condition that drifted would let one of the three disagree about which files
-// are safe, and the disagreement would be invisible.
-func uncheckedUpload(store *uploads.Store, name string) (reason string, unchecked bool) {
+// SPELLED ONCE BECAUSE THREE CALLERS MUST AGREE -- pullSourceUploadProblems
+// above, sourceIngestUploadProblem below, and Server.pullUploadUnchecked, which
+// reports rather than refuses. Two refuse a save and the third puts a sentence
+// on a card; a copy of this condition that drifted would let one of the three
+// disagree about which files are safe, and the disagreement would be invisible.
+// #264 inlined this switch into pullSourceUploadProblems, which was right when
+// that was the only caller and is not right now there are three -- so the
+// three-state logic moved in here rather than being pasted into each of them.
+//
+// THE REMEDY IS PART OF THE ANSWER, not of the caller, because it is a function
+// of WHICH state the upload is in and nothing else. #264's whole point:
+// OutcomeRefused is "a statement about the FILE, it is permanent, and trying
+// again is not a remedy", so telling that operator to upload it again is advice
+// that cannot work. Returning the remedy alongside the objection is what keeps
+// a fourth caller from inventing its own.
+func uploadObjection(store *uploads.Store, name string) (what, remedy string, bad bool) {
 	v, recorded := store.Verdict(name)
-	if !recorded || v.Verified {
-		return "", false
+	switch {
+	case !recorded:
+		// Stored before verdicts existed. Allowed; see above.
+		return "", "", false
+	case v.Outcome == uploads.OutcomeRefused:
+		return fmt.Sprintf("was inspected and refused (%s)", v.Reason),
+			"point it at a different file", true
+	case !v.Verified():
+		return fmt.Sprintf("was stored without being checked (%s)", v.Reason),
+			"upload it again before pulling from it", true
 	}
-	return v.Reason, true
+	return "", "", false
 }
 
 // sourceIngestUploadProblem is pullSourceUploadProblems for the route that
@@ -163,9 +180,8 @@ func (s *Server) sourceIngestUploadProblem(want db.IngestSettings, stored string
 		// is not the same as the answer being yes.
 		return fmt.Errorf("the pull source cannot be checked: %w", err)
 	}
-	if reason, unchecked := uncheckedUpload(store, name); unchecked {
-		return fmt.Errorf("the pull source names %q, which was stored without being checked (%s); "+
-			"upload it again before pulling from it", name, reason)
+	if what, remedy, bad := uploadObjection(store, name); bad {
+		return fmt.Errorf("the pull source names %q, which %s; %s", name, what, remedy)
 	}
 	return nil
 }
@@ -214,6 +230,36 @@ func (s *Server) sourceIngestUploadProblem(want db.IngestSettings, stored string
 // sees a row. That automation reads this field. It is still fail-open and this
 // is not claimed as a closure of #255's hole -- an operator who ignores it airs
 // an uninspected file.
+//
+// #264 ADDED A STATE THIS ARGUMENT DOES NOT COVER, and it is named here rather
+// than folded in silently. Everything above turns on one claim: "an unverified
+// verdict is a fact about this server, never about the file", which is what
+// makes a fail-closed reconcile gate a kill switch keyed to a missing ffprobe
+// rather than a check keyed to bad media. OutcomeRefused breaks that claim in
+// its own documentation -- "a statement about the FILE, it is permanent, and
+// trying again is not a remedy". So for a refusal:
+//
+//   - the blast-radius objection does not apply. A refusal can only exist where
+//     an inspection RAN and rejected the bytes, so it cannot be true of every
+//     upload on an ffprobe-less install, which was the whole shape of the
+//     outage being avoided.
+//   - the bounded-worst-case argument is weaker too. What airs is not "the
+//     wrong one of your own files" but bytes this server has already read and
+//     concluded are not media.
+//
+// I STILL DID NOT WRITE THE RECONCILE GATE, deliberately, for two reasons that
+// are about where a decision belongs and not about its merits. #255 asks the
+// maintainer to choose between failing closed and warning, and this PR's census
+// records "no engine-reconcile check at all" as a deliberate omission; deciding
+// that open question inside a merge resolution is the worst available place to
+// decide it. And nothing in the tree writes RefusedVerdict yet -- #202's
+// later-inspection path is what will -- so a gate on it today would be a gate
+// on a state no production code can currently produce, argued from a hypothetical.
+//
+// What DOES change here is the sentence. The old one said "nothing has read a
+// byte of it, so upload it again", which for a refused file is false twice over,
+// and uploads.go says exactly why every consumer of the unverified state must
+// stop saying it. See uploadObjection, which owns both halves.
 func (s *Server) pullUploadUnchecked(src *db.Source) string {
 	if src == nil || src.Ingest.Mode != db.IngestPull {
 		return ""
@@ -232,10 +278,9 @@ func (s *Server) pullUploadUnchecked(src *db.Source) string {
 		// is missing" would put the wrong sentence in front of the operator.
 		return ""
 	}
-	reason, unchecked := uncheckedUpload(store, name)
-	if !unchecked {
+	what, remedy, bad := uploadObjection(store, name)
+	if !bad {
 		return ""
 	}
-	return fmt.Sprintf("this source pulls from %q, which was stored without being checked (%s); "+
-		"nothing has read a byte of it, so upload it again before relying on it", name, reason)
+	return fmt.Sprintf("this source pulls from %q, which %s; %s", name, what, remedy)
 }

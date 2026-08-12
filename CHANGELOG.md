@@ -37,13 +37,20 @@ its first tagged release.
   gate above cannot see a URL saved before it existed, or one whose upload was
   downgraded underneath it, and there is no second gate downstream the way a
   playlist item has one. The source card now carries the server's own sentence,
-  naming the file and why nothing read it. It reports rather than refuses,
-  deliberately: an unverified verdict is a fact about this server — no `ffprobe`,
-  an inspection cut short — and never about your file, so on an install without
-  `ffprobe` a fail-closed re-check would take every `file://` ingest off air at
-  once, at whatever hour the supervisor next respawned. The field is on
-  `GET /sources`, so a monitoring script sees it too.
-  ([#255](https://github.com/rainmanjam/polyemesis/issues/255))
+  naming the file and what is wrong with it — and which of the two things is
+  wrong, because they have different remedies: a file nothing could inspect is
+  worth uploading again, and a file that *was* inspected and refused is not, so
+  that one says to point the source somewhere else instead. It reports rather
+  than refuses, deliberately: a missing inspection is a fact about this server —
+  no `ffprobe`, an inspection cut short — and never about your file, so on an
+  install without `ffprobe` a fail-closed re-check would take every `file://`
+  ingest off air at once, at whatever hour the supervisor next respawned. That
+  reasoning does not extend to a refusal, which *is* a fact about the file; the
+  choice between warning and refusing at reconcile is left open deliberately and
+  is still #255's to make. The field is on `GET /sources`, so a monitoring
+  script sees it too.
+  ([#255](https://github.com/rainmanjam/polyemesis/issues/255),
+  [#264](https://github.com/rainmanjam/polyemesis/issues/264))
 
 - **A busy server stopped inspecting uploads, and the caller chose when.** The
   four-slot semaphore that bounds concurrent `ffprobe` children waited for its
@@ -116,6 +123,65 @@ its first tagged release.
   it.**
 
 ### Added
+
+- **A raw `.h264`, `.hevc` or `.mpegvideo` dump can go straight into the
+  Library.** These files carry no container, so nothing in them says how long
+  they are, and the upload gate refused them: *"polyemesis cannot work out how
+  long this file is — re-save it as MP4 or MPEG-TS and upload it again."* A real
+  remedy, and manual work the product can do. polyemesis now **counts** the
+  length instead, by decoding the file once, and accepts it. Measured on a
+  10-minute 720p dump: 2.8 seconds. It runs inside the inspection budget an
+  upload already has, so nothing new can make an upload slower than it could be
+  before; a file too long to count inside that budget gets the old refusal, with
+  the old remedy. Your file also keeps its extension now instead of being stored
+  as `.bin` — for a raw stream that is the only hint FFmpeg has about how to read
+  it.
+
+  **The Library says which of the two it is.** A duration a container declared
+  and a duration polyemesis counted are not the same claim: the first was written
+  down by whatever made the file, the second is every frame we decoded times the
+  frame rate the encoder declared in the bitstream, and a raw stream holds
+  nothing to check that rate against. So `durationSource` sits beside
+  `durationSeconds` and says `declared` or `counted`, rather than the two being
+  indistinguishable once the number is in the field.
+  ([#218](https://github.com/rainmanjam/polyemesis/issues/218))
+
+- **An upload can now be recorded as *inspected and refused*, which is a thing
+  the server previously had no way to write down.** The record beside every
+  upload carried one boolean, so it had two states — accepted, and stored
+  without being inspected — and the product needed three. A refusal was
+  therefore never stored at all: the upload handler answers `400` and throws
+  the staged bytes away, which works exactly once, at upload time, while
+  nothing references the file. It does not work for anything that inspects an
+  upload *later*: by then the file is published, `DELETE /api/v1/media/{name}`
+  answers `409` while a playlist item names it, and the only state available to
+  record the refusal in was the one that says "nobody read this" — which every
+  consumer answers by telling the operator to upload the same bytes again, for
+  a file that will be refused identically.
+
+  `GET /api/v1/media` now carries `outcome` on every row, always present, with
+  four values: `verified`, `unverified`, `refused`, and `unrecorded`. The fourth
+  is not stored anywhere — it is what the listing says when there is no record
+  beside the file, which is every upload an install made before verdicts
+  existed, and it stays distinct from every recorded state because refusing
+  those would strand media an operator has had for a year. The Library shows
+  **Refused** rather than **Not checked** for the new state, the playlist editor
+  does not offer it, and both settings validators refuse it with a sentence that
+  does *not* say "upload it again".
+
+  `verified` keeps its exact meaning and is still written to disk, because the
+  sidecar format exists in every install and a format change has two directions
+  in time: an older binary reading one of today's records — a rollback, or a
+  second process during an upgrade — sees `verified: false` with a reason and
+  refuses the file, which is the wrong label but the safe answer. An `outcome`
+  this build does not recognise falls back to the same field rather than being
+  trusted, and a record that claims a pass in one field while denying it in the
+  other is refused outright.
+
+  Nothing writes `refused` yet. The re-verify job is
+  [#202](https://github.com/rainmanjam/polyemesis/issues/202); this is the state
+  it needs to exist before it can be built, because a re-verify that records its
+  findings as "not checked" would be worse than no re-verify at all.
 
 - **A destination can now forward its audio bit-for-bit.** Set `copy` on a
   destination's audio block — `-c:a copy`, no decode, no mix, no encoder — so an

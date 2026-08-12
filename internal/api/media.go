@@ -180,7 +180,13 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "this upload could not be stored")
 			return
 		}
-		if !verdict.Verified {
+		// UNINSPECTED, not merely not-verified, and on this path they are the
+		// same set: a refusal returns an error above and the staged bytes are
+		// discarded, so uploads.OutcomeRefused is unreachable here and there is
+		// nothing published for it to describe. Spelled as the outcome anyway,
+		// because "!verified" would silently start covering a refusal the day
+		// something upstream of Commit learns to record one.
+		if verdict.Outcome == uploads.OutcomeUnverified {
 			// STATED AT WARN AND STATED IN THE RESPONSE. The log line alone was
 			// the whole of the previous design and it is not enough: nothing in
 			// the product reads logs, so a file accepted unchecked was
@@ -358,8 +364,18 @@ var probeSlots = make(chan struct{}, MaxConcurrentUploadProbes)
 // operator who greps for the warning below could not match it to anything they
 // can see in the Library.
 func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Verdict, error) {
-	bin := s.probeBin
-	if bin == "" {
+	// FFmpeg as well as ffprobe now, because a file whose container declares no
+	// duration -- a raw .h264/.hevc/.mpegvideo dump from an encoder -- has its
+	// length COUNTED rather than being refused (#218). It is optional: an
+	// install that cannot supply one refuses those files exactly as it did
+	// before, and no other file reaches the count.
+	//
+	// s.encodeBin mirrors s.probeBin and is set only by tests, for the same
+	// reason that one is: this package has no engine manager, so without a seam
+	// the counting branch is unreachable under `go test ./internal/api` and
+	// deleting it would leave the package green.
+	bins := ffmpeg.Bins{FFprobe: s.probeBin, FFmpeg: s.encodeBin}
+	if bins.FFprobe == "" {
 		// EVERY ONE OF THESE LOGS BEFORE IT RETURNS, and that is the whole
 		// reason unchecked is a survivable outcome.
 		//
@@ -397,7 +413,12 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 		if tools == nil || tools.FFprobe == "" {
 			return unchecked("the engine reports no ffprobe binary")
 		}
-		bin = tools.FFprobe
+		bins.FFprobe = tools.FFprobe
+		// Taken from the same snapshot rather than resolved separately, so the
+		// probe and the count are always the same install's pair. An engine
+		// that reports no ffmpeg leaves this empty, which is the documented
+		// optional case rather than an error.
+		bins.FFmpeg = tools.FFmpeg
 	}
 	timeout := s.probeTimeout
 	if timeout <= 0 {
@@ -453,7 +474,7 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	res, err := ffmpeg.ProbeFile(ctx, bin, path)
+	res, err := ffmpeg.ProbeFile(ctx, bins, path)
 	if err != nil {
 		// Interruption first, because it is not a verdict about the file.
 		//
@@ -556,8 +577,14 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 
 	info := uploads.MediaInfo{
 		DurationSeconds: res.DurationSeconds,
-		AudioTracks:     len(res.Audio),
-		ProbedAt:        time.Now().UTC(),
+		// Carried through rather than dropped, because this is the field an
+		// OPERATOR sees. A counted duration and a declared one look identical
+		// as numbers and are not the same claim -- see ffmpeg.DurationSource --
+		// and the Library is where somebody deciding whether to schedule this
+		// item is looking at it.
+		DurationSource: string(res.DurationSource),
+		AudioTracks:    len(res.Audio),
+		ProbedAt:       time.Now().UTC(),
 	}
 	if res.Video != nil {
 		info.VideoCodec = res.Video.Codec

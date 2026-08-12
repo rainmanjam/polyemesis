@@ -240,6 +240,40 @@ if (!recordingRowChecked) {
   fail.push("no Recording row found on the built comparison page; that check no longer guards anything");
 }
 
+/* 8. `_headers` has to reach the root of the UPLOADED directory.
+ *
+ * Cloudflare Pages reads exactly one path for response headers: `_headers` at
+ * the top of the deployed output. Nothing else — not a subdirectory, not
+ * public/_headers, which is a source path Pages never sees. Put it anywhere but
+ * there and Pages ignores it in silence: no warning at deploy time, no error at
+ * request time, a site that serves normally with no Content-Security-Policy on
+ * anything.
+ *
+ * internal/testenv/pagesdeploy_test.go compares the header VALUES in
+ * web/public/_headers against web/nginx-security-headers.conf. That comparison
+ * is worth nothing if the file never arrives, and only the build knows whether
+ * it did — Astro copying public/ into dist/ is a build behaviour, not a
+ * declaration anyone can read off the source. This is the half that has to run
+ * after a build. */
+const headersPath = join(DIST, "_headers");
+let headersText = "";
+try {
+  headersText = readFileSync(headersPath, "utf8");
+} catch {
+  fail.push(
+    "no _headers at the root of dist/. Cloudflare Pages looks there and nowhere else, " +
+    "so every security header the site claims to send would be silently absent. " +
+    "It belongs in public/_headers, which Astro copies verbatim into dist/.",
+  );
+}
+if (headersText && !/^\s+Content-Security-Policy:\s*\S/m.test(headersText)) {
+  fail.push(
+    "dist/_headers exists but sets no Content-Security-Policy. On nginx the CSP came " +
+    "from nginx-security-headers.conf; Cloudflare Pages does not read that file, so " +
+    "this is the only place it can come from.",
+  );
+}
+
 if (fail.length) {
   console.error("build checks FAILED:\n" + fail.map((f) => "  - " + f).join("\n"));
   process.exit(1);

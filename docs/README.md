@@ -56,6 +56,7 @@ deliberately does not do, and how to get it running. These are the details.
 | Document | For |
 |---|---|
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Setup, conventions, and the constraints that are not negotiable |
+| [SITE-DEPLOY.md](SITE-DEPLOY.md) | Publishing `web/` to polyemesis.com: the two secrets, the DNS records, and how to verify — all maintainer actions |
 | [SECURITY.md](../SECURITY.md) | Reporting a vulnerability, and the threat model stated plainly |
 | [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | |
 | [CHANGELOG.md](../CHANGELOG.md) | |

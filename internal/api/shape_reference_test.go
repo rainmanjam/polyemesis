@@ -174,15 +174,17 @@ func TestBlankingEveryShapeNoteChangesNoVerdict(t *testing.T) {
 	// field this test claims is load-bearing.
 	deferred := 0
 	for _, sh := range live {
-		if shapeVerdict(sh) == "deferred" {
+		if shapeVerdict(sh) == "out-of-jurisdiction" {
 			deferred++
 		}
 	}
 	if deferred == 0 {
-		t.Fatal("no shape in the registry is currently discharged by its Issue field, so " +
-			"blanking the notes cannot demonstrate anything. This test asserts that the " +
+		t.Fatal("no shape in the registry is currently discharged by a jurisdiction record, " +
+			"so blanking the notes cannot demonstrate anything. This test asserts that the " +
 			"deferral is structural rather than prose; with nothing deferred it is an " +
-			"assertion about an empty set.")
+			"assertion about an empty set. (The field was Issue until the round that " +
+			"deleted issue-numbers-as-discharge from shapeVerdict; see " +
+			"shape_jurisdiction_test.go.)")
 	}
 
 	before := shapeVerdicts(live)
