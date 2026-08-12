@@ -8,6 +8,37 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Security
+
+- **Destination stream keys are encrypted at rest.** `internal/secrets` has
+  sealed every OAuth client secret and access token since it existed, and its
+  own docstring says what that buys: "a leaked database file — a backup, a
+  snapshot, an errant scp — is not a leaked set of live streaming credentials."
+  Destination stream keys were the one credential class outside that sentence,
+  sitting in `stream_key TEXT NOT NULL DEFAULT ''`, and they are the worst one
+  to leave out — long-lived, rarely rotated, and worth exactly what an attacker
+  wants, which is the ability to broadcast to your channel. They are now sealed
+  with the same NaCl secretbox key as everything else.
+  ([#297](https://github.com/rainmanjam/polyemesis/issues/297))
+
+- **Upgrading takes no action and no downtime.** The plaintext columns are kept
+  and still read, so a database written by 0.7.0 works on the first read after
+  the upgrade — before the migration, in fact. The first open with a key file
+  seals every key it finds still in plaintext and blanks the column it came out
+  of, and it is guarded by "is there still plaintext here" rather than by a
+  one-shot marker, so an interrupted upgrade finishes itself on the next start.
+
+- **A key that cannot be decrypted disables its destination instead of
+  publishing with an empty one.** If the key file is lost, replaced, or the
+  database is restored onto a different machine, the affected destinations stay
+  in the list with their names, platforms and routing intact and are shown as
+  needing attention: *the stream key could not be read on this machine —
+  re-enter it to enable this destination.* Nothing is written to the row, so
+  putting the right key file back restores every one of them by itself, with no
+  repair step. Re-typing the key is the other way out, and an unrelated edit —
+  a rename, a routing change — deliberately leaves the sealed bytes alone
+  rather than destroying a key the right key file would have recovered.
+
 ## [0.7.0] — 2026-08-12
 
 ### Security

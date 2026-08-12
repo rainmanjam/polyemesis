@@ -121,7 +121,19 @@ CREATE TABLE IF NOT EXISTS destinations (
     platform      TEXT    NOT NULL DEFAULT '',   -- '' | custom | youtube | twitch | kick
     account_id    INTEGER,                       -- platform_accounts.id
     url           TEXT    NOT NULL DEFAULT '',
+    -- The stream key, in two columns rather than one, for the length of one
+    -- upgrade. stream_key_enc is the secretbox ciphertext and is what a install
+    -- with a key file writes; stream_key is the plaintext column every row used
+    -- to live in, kept so that a database written by the previous release is
+    -- still readable by this one. A row carries ONE of them: the write path
+    -- blanks whichever it did not use, and the read path prefers _enc and falls
+    -- back to the plaintext. See sealStreamKey/openStreamKey in destinations.go.
+    --
+    -- BLOB and nullable, because the sealed form is bytes and because "this row
+    -- has no ciphertext" has to be distinguishable from "this row's ciphertext
+    -- is the empty string" -- Seal("") returns no bytes at all.
     stream_key    TEXT    NOT NULL DEFAULT '',
+    stream_key_enc BLOB,
     enabled       INTEGER NOT NULL DEFAULT 0,    -- user intent: should it be running
     audio_bitrate INTEGER NOT NULL DEFAULT 160,  -- kbps
     profile       TEXT    NOT NULL,              -- routing.Profile as JSON

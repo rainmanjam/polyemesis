@@ -277,6 +277,25 @@ func (e *Engine) Status() Status {
 			if row.Audio.Copy && ds.Error == "" {
 				ds.Summary = routing.CopySummary(ds.Tracks)
 			}
+			// A destination whose stored stream key would not decrypt on this
+			// machine. It is disabled by the store, so nothing above this line
+			// has anything to say about it -- there is no process, no error and
+			// no compile failure, and without this the card would be a healthy
+			// looking destination that is simply switched off, which is the one
+			// reading that would send somebody hunting in the wrong place.
+			//
+			// A warning rather than Error: the row is not broken and the
+			// routing still compiles, the credential is unreadable. Warnings is
+			// also the field the card already renders as "needs attention".
+			//
+			// slices.Clip first, because ds.Warnings above is the COMPILED
+			// slice, shared with routing's cache and with every other
+			// destination on the same profile: appending in place would write
+			// this destination's warning into theirs the moment there is spare
+			// capacity. Clip forces the append to allocate.
+			if row.KeyUnreadable != "" {
+				ds.Warnings = append(slices.Clip(ds.Warnings), row.KeyUnreadable)
+			}
 			st.Destinations = append(st.Destinations, ds)
 		}
 	}
