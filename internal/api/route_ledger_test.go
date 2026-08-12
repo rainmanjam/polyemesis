@@ -2435,118 +2435,28 @@ func TestLedgerPreflight(t *testing.T) {
 		assertProseSectionsEcho(t, want)
 	}
 
-	// 5. THE RATCHETS. Ceilings clamp DOWN with min() and the floor clamps UP
-	// with max(); neither is ever an assignment. The ratchet bug this PR's
-	// predecessor shipped was exactly an assignment where a clamp belonged.
-	if totals.Excused > want.ExcusedCeiling {
-		t.Errorf("%d routes are excused and the committed ceiling is %d. Going UP requires "+
-			"editing excusedCeiling in %s by hand. Going down is free -- regenerate and "+
-			"the ceiling comes with it.", totals.Excused, want.ExcusedCeiling, coveragePath)
-	}
-	if n := counterpartlessExcused(); n > want.CounterpartlessExcusedCeiling {
-		t.Errorf("%d excuses discharge on a driven Want alone, with no counterpart proof "+
-			"reading any bytes, and the committed ceiling is %d. A Want is a real "+
-			"assertion and a weaker one than a proof; raising this is a hand edit.",
-			n, want.CounterpartlessExcusedCeiling)
-	}
-	if part.Differential < want.DifferentialFloor {
-		t.Errorf("THE POSITIVE CONTROL FELL. %d swept paths carry a planted credential in "+
-			"the high-privilege body, and the committed floor is %d. This is #165's "+
-			"decisive assertion: blank a fixture credential and the route it covered "+
-			"stops being a differential, so the sweep over it becomes a statement about "+
-			"an empty body -- which is exactly what "+
-			"TestReadScopedTokenCannotReadAPublishToken was. A floor going DOWN is never "+
-			"free; it is a hand edit of differentialFloor in %s.",
-			part.Differential, want.DifferentialFloor, coveragePath)
-	}
-	// THE PER-(ROUTE, SENTINEL) FLOOR, and it is the one number in this file
-	// that a regeneration cannot walk backwards.
+	// 5. THE RATCHETS. Extracted so the readback meta-guard can re-run THE
+	// ratchet comparison rather than a copy of it -- a guard watching a
+	// restatement is blocker 2 of #150, and projection_guard_test.go refuses the
+	// shape outright. See ledger_readback_test.go.
+	assertLedgerRatchets(t, want, ledgerFacts{
+		Excused:         totals.Excused,
+		Part:            part,
+		Verdicts:        verdicts,
+		NonGetWitnesses: nonGetWitnesses,
+		RegenCommand:    ledgerRegenCommand(t),
+	})
+
+	// THE READBACK, conjunct 4, called from here for the two reasons every other
+	// guard in this file is: `rm` on a file nothing references leaves the suite
+	// green, and TestMain forces only ^TestLedgerPreflight$. It costs no server
+	// and no request -- it perturbs the committed artifact against itself -- so
+	// it is 80ms on a five-second preflight.
 	//
-	// differentialFloor counts ROUTES that carry at least one planted credential
-	// in the high-privilege body, and that granularity was exploitable: making
-	// handleListDestinations stop emitting extraInputArgs/extraOutputArgs to
-	// every principal removed sentinelExpertArgs from GET /api/v1/destinations,
-	// left three other sentinels on the route, kept the class at "differential",
-	// kept the floor at 8, and passed the entire package. The committed verdict
-	// still claimed the argv redaction on that route was under test. It was not.
-	//
-	// assertSweepVerdictsEqual now compares the per-path sentinel LIST, which
-	// fails that mutation by name -- but equality alone is launderable: run
-	// -update-coverage and the committed list shrinks to match. This floor is
-	// what makes the evidence load-bearing rather than decorative, because
-	// writeLedger clamps it with max() exactly like differentialFloor. Lowering
-	// it is a hand edit of sentinelWitnessFloor, and the sentence somebody has
-	// to write on purpose is "this route stopped being checked for this
-	// credential".
-	if n := countSentinelWitnesses(verdicts); n < want.SentinelWitnessFloor {
-		t.Errorf("A PER-ROUTE CREDENTIAL WITNESS DISAPPEARED. %d (path, sentinel) pairs are "+
-			"witnessed in a high-privilege body across the sweep, and the committed floor "+
-			"is %d. The route still being a differential is NOT enough: a route that "+
-			"carries four planted credentials and starts carrying three has stopped "+
-			"proving anything about the fourth, while its class, its floor and its "+
-			"absence assertion all stay green. The message above from "+
-			"assertSweepVerdictsEqual names which path lost which sentinel.\n"+
-			"per-path witnesses: %v",
-			n, want.SentinelWitnessFloor, sentinelWitnessesByPath(verdicts))
-	}
-	// THE WRITE SURFACE'S POSITIVE CONTROL, and the number that did not exist
-	// before this round. Everything above it is about routes a read token can
-	// GET. The 83 non-GET pairs classified on an executed 403 had no floor at
-	// all, because "was refused" costs nothing to keep true: an empty database
-	// answers 403 exactly as readily as a full one.
-	if nonGetWitnesses < want.NonGetDifferentialFloor {
-		t.Errorf("THE NON-GET POSITIVE CONTROL FELL. %d (pair, sentinel) witnesses were "+
-			"observed across the write-surface census and the committed floor is %d. A "+
-			"pair in that census is recorded as denied-differential rather than "+
-			"denied-by-method, which is a claim that its 403 withholds a credential an "+
-			"admin demonstrably receives from the same request. Below the floor, some "+
-			"pair's 403 is now withholding nothing that this package can show. The "+
-			"message naming the pair and the sentinel is above; lowering this is a hand "+
-			"edit of nonGetDifferentialFloor in %s.",
-			nonGetWitnesses, want.NonGetDifferentialFloor, coveragePath)
-	}
-	if part.Unstable > want.UnstableCeiling {
-		t.Errorf("%d swept paths return different bytes to the same principal on two "+
-			"consecutive samples, and the committed ceiling is %d.",
-			part.Unstable, want.UnstableCeiling)
-	}
-	// INERT is a ceiling for the same reason unstable is. An inert row is a
-	// sweep reading "[]" or "{}": it costs three requests and asserts absence
-	// over nothing. Eleven of the 43 invariants are in that state today. The
-	// number was computed and committed and nothing compared it, so a route
-	// whose list quietly emptied moved into the inert count in silence -- which
-	// is a sweep going vacuous by exactly the mechanism this file is named for.
-	if part.Inert > want.InertCeiling {
-		t.Errorf("%d swept paths return a body that is entirely \"[]\" or \"{}\", so the "+
-			"sweep over them scans nothing, and the committed ceiling is %d. A route that "+
-			"has just become inert is a route whose fixture stopped producing rows: find "+
-			"it in the sweepVerdicts diff (inert: true) and either give it a row or raise "+
-			"inertCeiling in %s by hand.", part.Inert, want.InertCeiling, coveragePath)
-	}
-	if len(nonCredentialVariance) > want.VarianceExemptCeiling {
-		t.Errorf("%d (pattern, pointer) pairs are exempted from the variance rule and the "+
-			"committed ceiling is %d.", len(nonCredentialVariance), want.VarianceExemptCeiling)
-	}
-	// THE SHAPE RATCHETS. Everything above this line is about routes, which is
-	// exactly why deleting a shape row and regenerating was green.
-	liveShapes := fillDerivedTotals(coverageTotals{}, nil)
-	if liveShapes.ShapesEmitted < want.ShapeFloor {
-		t.Errorf("A SHAPE ROW DISAPPEARED. This API is recorded as emitting %d shapes and "+
-			"the committed floor is %d. Deleting the row is the documented response to a "+
-			"shape check firing, and until this floor existed `%s` banked the deletion: "+
-			"shapesEmitted moved inside 2000 lines of JSON and the strict suite stayed "+
-			"green. A shape that genuinely stopped being emitted is a hand edit of "+
-			"shapeFloor in %s, and the sentence somebody has to write is \"this API no "+
-			"longer produces this kind of output\".",
-			liveShapes.ShapesEmitted, want.ShapeFloor, ledgerRegenCommand(t), coveragePath)
-	}
-	if liveShapes.ShapesNotInspected > want.ShapesNotInspectedCeiling {
-		t.Errorf("%d emitted shapes are inspected by nothing and the committed ceiling is "+
-			"%d. Downgrading a shape to Inspected:false is sometimes the honest move -- "+
-			"two rows in this registry were downgraded because their proof lives in "+
-			"package main -- but it is a LOOSENING, and regeneration may not bank it. "+
-			"Raise shapesNotInspectedCeiling in %s by hand.",
-			liveShapes.ShapesNotInspected, want.ShapesNotInspectedCeiling, coveragePath)
+	// NOT under -update-coverage: on a regenerating run the artifact is being
+	// rewritten and the file on disk is the one from before the write.
+	if !*updateCoverage {
+		assertLedgerReadback(t)
 	}
 
 	// THE RATCHETS' OWN GUARD, called from here rather than left as a free-
@@ -2817,7 +2727,7 @@ var issueRef = regexp.MustCompile(`^#[0-9]{1,5}$`)
 // cannot tell you the issue exists, is open, or says what the excuse claims it
 // says. The liveness half is the git scan below, and even that is incomplete by
 // construction -- see its comment.
-func assertCitationsAreWellFormed(t *testing.T, want coverageLedger) {
+func assertCitationsAreWellFormed(t ledgerReporter, want coverageLedger) {
 	t.Helper()
 	committed := map[string]bool{}
 	for _, id := range want.CitedIssues {
@@ -3025,7 +2935,7 @@ func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute,
 // The rule this file runs on is that evidence which is measured, committed and
 // never compared is decoration. Every field the artifact carries is compared
 // here, and each mismatch names the path and the exact thing that moved.
-func assertSweepVerdictsEqual(t *testing.T, want, got []sweepVerdict) {
+func assertSweepVerdictsEqual(t ledgerReporter, want, got []sweepVerdict) {
 	t.Helper()
 	index := func(rows []sweepVerdict) map[string]sweepVerdict {
 		m := map[string]sweepVerdict{}
@@ -3080,6 +2990,21 @@ func assertSweepVerdictsEqual(t *testing.T, want, got []sweepVerdict) {
 				"claims it as the evidence for this route. Regenerate if it is intended.",
 				path, gv.Class, lost, gained, wv.Pointers, gv.Pointers)
 		}
+		// THE NINTH INSTANCE, and it was found by the readback meta-guard on its
+		// FIRST RUN rather than by a ninth human noticing. `pattern` is the chi
+		// pattern the swept path resolved to; it is computed, committed, and was
+		// read by nothing, so editing it in the artifact -- or a path silently
+		// re-resolving to a different route after a registration change -- left
+		// the whole suite green with the evidence pointing at the wrong route.
+		// Exactly sentinels, pointers and inert, one field to the right.
+		if wv.Pattern != gv.Pattern {
+			t.Errorf("THE PATTERN A SWEPT PATH RESOLVES TO CHANGED. %s is recorded against "+
+				"the chi pattern %q in %s and resolves to %q live. Every per-path verdict "+
+				"below it is attributed to a route, and this is the field that says which "+
+				"one; a path that starts matching a different pattern is a sweep whose "+
+				"evidence is now filed under the wrong route.",
+				path, wv.Pattern, coveragePath, gv.Pattern)
+		}
 		if wv.Inert != gv.Inert {
 			t.Errorf("%s is committed with inert=%v and computes as inert=%v. An inert row "+
 				"is a sweep reading \"[]\" or \"{}\" -- it asserts absence over nothing -- "+
@@ -3132,7 +3057,7 @@ func liveExcuses() []coverageExcus {
 // exists to be believed. Nothing here discharges anything -- the assertions that
 // do are above -- but a committed copy that is allowed to disagree with the code
 // is worse than no copy, because it is quoted.
-func assertProseSectionsEcho(t *testing.T, want coverageLedger) {
+func assertProseSectionsEcho(t ledgerReporter, want coverageLedger) {
 	t.Helper()
 	assertKeyedRowsEqual(t, "excuses", want.Excuses, liveExcuses(),
 		func(e coverageExcus) string { return e.Route })
@@ -3142,7 +3067,7 @@ func assertProseSectionsEcho(t *testing.T, want coverageLedger) {
 		func(d coverageDefer) string { return d.ID })
 }
 
-func assertKeyedRowsEqual[T any](t *testing.T, section string, want, got []T, key func(T) string) {
+func assertKeyedRowsEqual[T any](t ledgerReporter, section string, want, got []T, key func(T) string) {
 	t.Helper()
 	index := func(rows []T) map[string]string {
 		m := map[string]string{}
@@ -3222,7 +3147,7 @@ func fillDerivedTotals(totals coverageTotals, routes []coverageRoute) coverageTo
 // a reviewer reads first, which is the same argument assertProseSectionsEcho
 // was written on: a committed copy allowed to disagree with the code is worse
 // than no copy, because it gets quoted.
-func assertCoverageTotalsEqual(t *testing.T, want, got coverageTotals) {
+func assertCoverageTotalsEqual(t ledgerReporter, want, got coverageTotals) {
 	t.Helper()
 	for _, f := range []struct {
 		name      string
@@ -3246,7 +3171,7 @@ func assertCoverageTotalsEqual(t *testing.T, want, got coverageTotals) {
 	}
 }
 
-func assertPartitionTotalsEqual(t *testing.T, want, got partitionTotals) {
+func assertPartitionTotalsEqual(t ledgerReporter, want, got partitionTotals) {
 	t.Helper()
 	for _, f := range []struct {
 		name      string
@@ -3370,7 +3295,7 @@ func assertSweptCounterpartsNameSweptRoutes(t *testing.T, enumerated []coverageR
 	}
 }
 
-func assertRouteSetsEqual(t *testing.T, want, got []coverageRoute) {
+func assertRouteSetsEqual(t ledgerReporter, want, got []coverageRoute) {
 	t.Helper()
 	index := func(rows []coverageRoute) map[string]string {
 		m := map[string]string{}
@@ -3410,8 +3335,19 @@ func assertRouteSetsEqual(t *testing.T, want, got []coverageRoute) {
 // "[no tests to run]". Committed prose does not follow a rename. A t.Name() does.
 func ledgerNote(t *testing.T) string {
 	t.Helper()
+	return ledgerNoteWith(ledgerRegenCommand(t))
+}
+
+// ledgerNoteWith is ledgerNote with the regeneration command supplied.
+//
+// The split exists because ledgerRegenCommand derives the command from the
+// RUNNING test's name -- so a failure message never tells a reader to run a
+// command that would regenerate nothing -- and the readback meta-guard has to
+// reproduce the note the PREFLIGHT writes rather than the one its own name would
+// produce.
+func ledgerNoteWith(regen string) string {
 	return "The route coverage ledger for internal/api. Regenerated ONLY by " +
-		"`" + ledgerRegenCommand(t) + "`, which " +
+		"`" + regen + "`, which " +
 		"refreshes the route list and the derived totals and NOTHING else -- it cannot " +
 		"suppress a missing counterpart, a failing positive control, or a raised ceiling. " +
 		"Read `excuses` to answer \"what is NOT covered, and why is that safe\". " +
@@ -3776,4 +3712,140 @@ func rawResponse(t *testing.T, h http.Handler, sign func(*http.Request), method,
 	}
 	b.WriteString("|" + w.Body.String())
 	return b.String()
+}
+
+// ledgerFacts is everything the ratchet comparison needs that is MEASURED
+// rather than read out of the artifact.
+//
+// It exists so that assertLedgerRatchets has exactly two inputs -- the committed
+// ledger and the live measurement -- and can therefore be re-run by the readback
+// meta-guard with the committed values standing in for the live ones. That is
+// what makes the readback a re-run of the real rule instead of a copy of it.
+type ledgerFacts struct {
+	Excused         int
+	Part            partitionTotals
+	Verdicts        []sweepVerdict
+	NonGetWitnesses int
+	// RegenCommand is passed in rather than derived, because deriving it needs a
+	// *testing.T and this function takes a reporter.
+	RegenCommand string
+}
+
+// assertLedgerRatchets is step 5, with the preflight and the readback as its two
+// callers.
+func assertLedgerRatchets(t ledgerReporter, want coverageLedger, f ledgerFacts) {
+	t.Helper()
+	// 5. THE RATCHETS. Ceilings clamp DOWN with min() and the floor clamps UP
+	// with max(); neither is ever an assignment. The ratchet bug this PR's
+	// predecessor shipped was exactly an assignment where a clamp belonged.
+	if f.Excused > want.ExcusedCeiling {
+		t.Errorf("%d routes are excused and the committed ceiling is %d. Going UP requires "+
+			"editing excusedCeiling in %s by hand. Going down is free -- regenerate and "+
+			"the ceiling comes with it.", f.Excused, want.ExcusedCeiling, coveragePath)
+	}
+	if n := counterpartlessExcused(); n > want.CounterpartlessExcusedCeiling {
+		t.Errorf("%d excuses discharge on a driven Want alone, with no counterpart proof "+
+			"reading any bytes, and the committed ceiling is %d. A Want is a real "+
+			"assertion and a weaker one than a proof; raising this is a hand edit.",
+			n, want.CounterpartlessExcusedCeiling)
+	}
+	if f.Part.Differential < want.DifferentialFloor {
+		t.Errorf("THE POSITIVE CONTROL FELL. %d swept paths carry a planted credential in "+
+			"the high-privilege body, and the committed floor is %d. This is #165's "+
+			"decisive assertion: blank a fixture credential and the route it covered "+
+			"stops being a differential, so the sweep over it becomes a statement about "+
+			"an empty body -- which is exactly what "+
+			"TestReadScopedTokenCannotReadAPublishToken was. A floor going DOWN is never "+
+			"free; it is a hand edit of differentialFloor in %s.",
+			f.Part.Differential, want.DifferentialFloor, coveragePath)
+	}
+	// THE PER-(ROUTE, SENTINEL) FLOOR, and it is the one number in this file
+	// that a regeneration cannot walk backwards.
+	//
+	// differentialFloor counts ROUTES that carry at least one planted credential
+	// in the high-privilege body, and that granularity was exploitable: making
+	// handleListDestinations stop emitting extraInputArgs/extraOutputArgs to
+	// every principal removed sentinelExpertArgs from GET /api/v1/destinations,
+	// left three other sentinels on the route, kept the class at "differential",
+	// kept the floor at 8, and passed the entire package. The committed verdict
+	// still claimed the argv redaction on that route was under test. It was not.
+	//
+	// assertSweepVerdictsEqual now compares the per-path sentinel LIST, which
+	// fails that mutation by name -- but equality alone is launderable: run
+	// -update-coverage and the committed list shrinks to match. This floor is
+	// what makes the evidence load-bearing rather than decorative, because
+	// writeLedger clamps it with max() exactly like differentialFloor. Lowering
+	// it is a hand edit of sentinelWitnessFloor, and the sentence somebody has
+	// to write on purpose is "this route stopped being checked for this
+	// credential".
+	if n := countSentinelWitnesses(f.Verdicts); n < want.SentinelWitnessFloor {
+		t.Errorf("A PER-ROUTE CREDENTIAL WITNESS DISAPPEARED. %d (path, sentinel) pairs are "+
+			"witnessed in a high-privilege body across the sweep, and the committed floor "+
+			"is %d. The route still being a differential is NOT enough: a route that "+
+			"carries four planted credentials and starts carrying three has stopped "+
+			"proving anything about the fourth, while its class, its floor and its "+
+			"absence assertion all stay green. The message above from "+
+			"assertSweepVerdictsEqual names which path lost which sentinel.\n"+
+			"per-path witnesses: %v",
+			n, want.SentinelWitnessFloor, sentinelWitnessesByPath(f.Verdicts))
+	}
+	// THE WRITE SURFACE'S POSITIVE CONTROL, and the number that did not exist
+	// before this round. Everything above it is about routes a read token can
+	// GET. The 83 non-GET pairs classified on an executed 403 had no floor at
+	// all, because "was refused" costs nothing to keep true: an empty database
+	// answers 403 exactly as readily as a full one.
+	if f.NonGetWitnesses < want.NonGetDifferentialFloor {
+		t.Errorf("THE NON-GET POSITIVE CONTROL FELL. %d (pair, sentinel) witnesses were "+
+			"observed across the write-surface census and the committed floor is %d. A "+
+			"pair in that census is recorded as denied-differential rather than "+
+			"denied-by-method, which is a claim that its 403 withholds a credential an "+
+			"admin demonstrably receives from the same request. Below the floor, some "+
+			"pair's 403 is now withholding nothing that this package can show. The "+
+			"message naming the pair and the sentinel is above; lowering this is a hand "+
+			"edit of nonGetDifferentialFloor in %s.",
+			f.NonGetWitnesses, want.NonGetDifferentialFloor, coveragePath)
+	}
+	if f.Part.Unstable > want.UnstableCeiling {
+		t.Errorf("%d swept paths return different bytes to the same principal on two "+
+			"consecutive samples, and the committed ceiling is %d.",
+			f.Part.Unstable, want.UnstableCeiling)
+	}
+	// INERT is a ceiling for the same reason unstable is. An inert row is a
+	// sweep reading "[]" or "{}": it costs three requests and asserts absence
+	// over nothing. Eleven of the 43 invariants are in that state today. The
+	// number was computed and committed and nothing compared it, so a route
+	// whose list quietly emptied moved into the inert count in silence -- which
+	// is a sweep going vacuous by exactly the mechanism this file is named for.
+	if f.Part.Inert > want.InertCeiling {
+		t.Errorf("%d swept paths return a body that is entirely \"[]\" or \"{}\", so the "+
+			"sweep over them scans nothing, and the committed ceiling is %d. A route that "+
+			"has just become inert is a route whose fixture stopped producing rows: find "+
+			"it in the sweepVerdicts diff (inert: true) and either give it a row or raise "+
+			"inertCeiling in %s by hand.", f.Part.Inert, want.InertCeiling, coveragePath)
+	}
+	if len(nonCredentialVariance) > want.VarianceExemptCeiling {
+		t.Errorf("%d (pattern, pointer) pairs are exempted from the variance rule and the "+
+			"committed ceiling is %d.", len(nonCredentialVariance), want.VarianceExemptCeiling)
+	}
+	// THE SHAPE RATCHETS. Everything above this line is about routes, which is
+	// exactly why deleting a shape row and regenerating was green.
+	liveShapes := fillDerivedTotals(coverageTotals{}, nil)
+	if liveShapes.ShapesEmitted < want.ShapeFloor {
+		t.Errorf("A SHAPE ROW DISAPPEARED. This API is recorded as emitting %d shapes and "+
+			"the committed floor is %d. Deleting the row is the documented response to a "+
+			"shape check firing, and until this floor existed `%s` banked the deletion: "+
+			"shapesEmitted moved inside 2000 lines of JSON and the strict suite stayed "+
+			"green. A shape that genuinely stopped being emitted is a hand edit of "+
+			"shapeFloor in %s, and the sentence somebody has to write is \"this API no "+
+			"longer produces this kind of output\".",
+			liveShapes.ShapesEmitted, want.ShapeFloor, f.RegenCommand, coveragePath)
+	}
+	if liveShapes.ShapesNotInspected > want.ShapesNotInspectedCeiling {
+		t.Errorf("%d emitted shapes are inspected by nothing and the committed ceiling is "+
+			"%d. Downgrading a shape to Inspected:false is sometimes the honest move -- "+
+			"two rows in this registry were downgraded because their proof lives in "+
+			"package main -- but it is a LOOSENING, and regeneration may not bank it. "+
+			"Raise shapesNotInspectedCeiling in %s by hand.",
+			liveShapes.ShapesNotInspected, want.ShapesNotInspectedCeiling, coveragePath)
+	}
 }
