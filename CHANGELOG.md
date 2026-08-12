@@ -8,6 +8,8 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-08-11
+
 ### Security
 
 - **A busy server stopped inspecting uploads, and the caller chose when.** The
@@ -35,6 +37,35 @@ its first tagged release.
   every credential column holds a sentinel. The `:80` redirect listener is
   recorded as emitted-and-uninspected rather than left outside the ledger.
   ([#169](https://github.com/rainmanjam/polyemesis/issues/169))
+
+- **`GET /assets/` returned a directory listing of the whole UI bundle, to
+  anyone.** The SPA handler decided whether a request named a real asset by
+  opening it -- and **opening a directory succeeds**, so the request was handed
+  to `http.FileServer`, which answers a directory with a generated index page.
+  An anonymous caller received the complete inventory of fingerprinted chunk
+  names, which name product areas and reveal which features a deployment was
+  built with.
+
+  No credentials, no user data and no configuration were exposed; what leaked is
+  build layout. A directory now falls through to the SPA fallback, which is how
+  every other unknown path is answered.
+
+  It survived this long because CI's Go job does not run `npm run build`, so the
+  tests ran against an empty `dist` -- and against an empty filesystem the fixed
+  and unfixed handlers are byte-identical. The bug was not merely untested, it
+  was unwritable as a test until the handler was made to accept an arbitrary
+  filesystem.
+
+- **A `file://` pull now pins the input demuxer to the file protocol.** The
+  engine's pull input carries `-protocol_whitelist file`, the same pin
+  `ProbeFile` already used, so what an input demuxer may open is bounded by the
+  argv rather than by whatever this FFmpeg build happens to enable.
+
+  **This closes nothing observable today and is recorded as hardening, not as a
+  fix.** Measured against FFmpeg 8.1.2: an ffconcat script naming `http://…` is
+  refused identically with and without the flag, and one naming a sibling file
+  is still resolved with it on. The substitution hole is closed by the format
+  allowlist, which is not a flag and lives elsewhere.
 
 - **Your MQTT broker password was echoed back in a validation error, and
   logged every five seconds.** A broker URL written with the credential inline
@@ -328,6 +359,17 @@ its first tagged release.
   unredacted body — arrives in a cookie, so a shared cache keyed on
   `Authorization` alone filed their response under the same key as every
   anonymous caller's.
+
+- **Deleting a completed clip export left its file on disk for ever.** All three
+  delete paths -- the single-job delete, the bulk purge and the unattended
+  scheduled sweep -- removed the job row and left the exported media behind,
+  unreferenced and invisible, occupying the volume the database and recorder
+  share. The file now goes with the row.
+
+- **Staging or rolling back the binary now raises an audit event.** Both were
+  logged and neither was audited, so the one question an operator asks after an
+  unexpected version change -- *was that me?* -- had no answer in the place they
+  would look.
 
 - **Masked URL segments came back percent-encoded.** A redacted path segment in
   a `/sources` or `/settings` body rendered as `%5Bredacted%5D` rather than
@@ -1603,7 +1645,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rainmanjam/polyemesis/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rainmanjam/polyemesis/compare/v0.3.0...v0.4.0
