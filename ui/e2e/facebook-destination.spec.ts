@@ -75,6 +75,38 @@ async function saveAudience(page: Page, id: number, value: string): Promise<numb
 }
 
 test.describe("the Facebook block writes what an operator types", () => {
+  /* MUTATION RECORD -- the three controls issue #107 named, each broken in turn
+     against the shipped container and each watched to fail BY NAME.
+     Recorded because the rest of this repository records it: a guard whose
+     failure nobody has seen is a guard nobody has any evidence about, which is
+     the exact complaint #107 filed against the source-text guards these
+     replaced. Two of the three are deliberately mutations a grep CANNOT see,
+     because "a grep would have caught it too" would leave the move unjustified.
+
+       donate    DestinationDialog.tsx: delete the <Input id="dest-fb-donate">,
+                 leaving its <Label>. Measured: FAIL on the `.fill("424242")`
+                 below, `waiting for getByRole('dialog').getByLabel('Donate
+                 button charity ID')`. The other 5 tests in this file passed.
+
+       crosspost DestinationDialog.tsx: change the Add Page onClick from
+                 `crosspost: [...(facebook.crosspost ?? []), { pageId: "" }]`
+                 to `crosspost: [...(facebook.crosspost ?? [])]` -- the button,
+                 the placeholder and the .map all still there, the click just
+                 appends nothing. INVISIBLE to source text: every string a
+                 drift guard matched on is untouched. Measured: FAIL on the
+                 pageId toBeVisible below, "clicking Add Page did not produce a
+                 row to type a Page ID into". The other 5 passed.
+
+       backup    DestinationDialog.tsx: drop `backupIngestWanted` from the PUT
+                 payload literal. The checkbox still renders, still checks, both
+                 cost sentences still show, and
+                 `setBackupIngestWanted(e.target.checked)` is still written
+                 verbatim -- so the old guard that grepped for that setter would
+                 still pass. Measured: FAIL on the after.backupIngestWanted
+                 assertion below, Expected true / Received undefined. The other
+                 5 passed.
+
+     Restored from a file copy after each; `git diff --stat` empty. */
   test("crosspost, donate, audience and the backup toggle all reach the server", async ({
     page,
   }) => {
