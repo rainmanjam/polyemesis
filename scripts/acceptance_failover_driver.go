@@ -245,7 +245,7 @@ func sel(on ...int) []map[string]any {
 	return rows
 }
 
-func dest() { addDest("onair", "onair.mkv") }
+func dest() { addDest("onair", "onair.ts") }
 
 // addDest creates one file destination.
 //
