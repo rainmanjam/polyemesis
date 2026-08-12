@@ -21,6 +21,7 @@
 //	adddest <name> <file>  add a second file destination, so a case that expects a
 //	                     restart cannot damage the first one's recording
 //	restarts <name>      print one named destination's restart count, or -1
+//	outtime <name>       print its produced media in ms, or -1 when it has no process
 package main
 
 import (
@@ -107,6 +108,12 @@ func main() {
 		}
 		login()
 		restarts(os.Args[3])
+	case "outtime":
+		if len(os.Args) < 4 {
+			die("usage: outtime <destination-name>")
+		}
+		login()
+		outtime(os.Args[3])
 	case "publishkey":
 		login()
 		publishKey()
@@ -304,6 +311,20 @@ type statusDoc struct {
 		Process *struct {
 			Restarts int    `json:"restarts"`
 			State    string `json:"state"`
+			// Progress is what the child has actually PRODUCED, and it was on
+			// the wire all along -- engine.DestStatus.Process is a whole
+			// supervisor.Status, which carries ffmpeg.Progress. This struct
+			// simply did not decode it.
+			//
+			// It matters because the file on disk is not an observable of
+			// delivery. An MKV muxer buffers, so a destination that is running
+			// perfectly shows 0 bytes for the whole run and then one 256 KiB
+			// flush at close -- measured, on a healthy local run. out_time
+			// counts media produced and moves with delivery rather than with
+			// the muxer's flush schedule. See issue #275.
+			Progress struct {
+				OutTimeMS int64 `json:"outTimeMs"`
+			} `json:"progress"`
 		} `json:"process"`
 	} `json:"destinations"`
 }
@@ -328,6 +349,23 @@ func restarts(name string) {
 	for _, d := range readStatus().Destinations {
 		if d.Name == name && d.Process != nil {
 			fmt.Println(d.Process.Restarts)
+			return
+		}
+	}
+	fmt.Println(-1)
+}
+
+// outtime prints how many milliseconds of media a destination has produced, or
+// -1 when there is no such process.
+//
+// -1 rather than 0 for "no process", and the distinction is the whole reason
+// this exists: 0 means "it is running and has produced nothing", which is a
+// finding, and -1 means "there is nothing to ask", which is a different one.
+// Collapsing them is how the byte count this replaces became unreadable.
+func outtime(name string) {
+	for _, d := range readStatus().Destinations {
+		if d.Name == name && d.Process != nil {
+			fmt.Println(d.Process.Progress.OutTimeMS)
 			return
 		}
 	}
