@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -12,17 +13,35 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
+// TestHelperExitsNonZero is not a test. It is the child process exitError runs,
+// and it returns immediately unless it is the one being spawned.
+//
+// THE TEST BINARY RE-EXECUTING ITSELF is os/exec's own idiom for this, and the
+// reason it is used here rather than a command name is portability: there is no
+// `false` on Windows, so `exec.Command("false")` fails to START -- an
+// *exec.Error, which is the OPPOSITE of the case this helper exists to produce,
+// and the guard below would have turned the whole table red on that platform
+// for a reason having nothing to do with the code under test.
+func TestHelperExitsNonZero(t *testing.T) {
+	if os.Getenv("POLYEMESIS_HELPER_EXIT") != "1" {
+		return
+	}
+	os.Exit(3)
+}
+
 // exitError produces a real *exec.ExitError, which is the shape "ffprobe ran and
-// exited non-zero" arrives in. Constructed by running a command that fails
-// rather than by faking one, because the arm under test is errors.As against a
-// concrete type and a hand-rolled stand-in would not exercise it. `false` is
-// POSIX and takes no arguments, so no shell is involved.
+// exited non-zero" arrives in. Constructed by running a process that really does
+// exit non-zero rather than by faking one, because the arm under test is
+// errors.As against a concrete type and a hand-rolled stand-in would not
+// exercise it.
 func exitError(t *testing.T) error {
 	t.Helper()
-	err := exec.Command("false").Run()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperExitsNonZero$")
+	cmd.Env = append(os.Environ(), "POLYEMESIS_HELPER_EXIT=1")
+	err := cmd.Run()
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) {
-		t.Fatalf("this platform did not produce an *exec.ExitError: %T %v", err, err)
+		t.Fatalf("the helper process did not produce an *exec.ExitError: %T %v", err, err)
 	}
 	return err
 }
