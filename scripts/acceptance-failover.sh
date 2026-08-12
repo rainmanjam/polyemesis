@@ -996,6 +996,29 @@ fi
 # those: a spurious switch during the unsettled window would be counted as a
 # restart this case caused, which is precisely the number that must not drift.
 settle primary 25 120 || note "the mismatched ingest never settled; the count below may include a switch this case did not make"
+# PRODUCED MEDIA IS SAMPLED ACROSS THE RUN. Issue #275.
+#
+# The assertion at the end of this step reads the recording's SIZE once, after
+# everything, and a zero there has causes it cannot separate:
+#
+#   never delivered   the destination sat on a hub that was closed under it,
+#                     started and idle -- the 76-second case this step exists
+#                     for, and a product defect
+#   truncated late    a file destination truncates and reopens when it restarts,
+#                     so a restart near the end zeroes a file that was fine all
+#                     run -- this step tearing down over its own measurement
+#
+# THE FILE IS NOT AN OBSERVABLE OF DELIVERY. Sampling its size does not separate
+# them, and that was measured rather than assumed: on a fully healthy local run
+# the recording read 0 bytes at every point during the run and 262144 at the
+# end, because the MKV muxer buffers and flushes once at close. A healthy run
+# and the closed-hub failure share the identical zero prefix.
+#
+# out_time does separate them. It counts the media the child has PRODUCED, moves
+# with delivery rather than with the muxer's flush schedule, and the server has
+# been publishing it on /status all along -- engine.DestStatus.Process is a whole
+# supervisor.Status. Only the driver's decode struct was missing it.
+mis_t_settled=$(drive outtime mismatch | tail -1)
 mis_before=$(drive restarts mismatch | tail -1)
 OUT=$(drive pin playlist)
 case "$OUT" in *PIN_OK*) : ;; *) bad "pin playlist (mismatch): $OUT" ;; esac
@@ -1005,6 +1028,7 @@ OUT=$(drive pin auto)
 case "$OUT" in *PIN_OK*) : ;; *) bad "pin auto (mismatch): $OUT" ;; esac
 waitfor 1 primary 40 || note "the mismatched run never came back to the encoder"
 sleep 8
+mis_t_back=$(drive outtime mismatch | tail -1)
 mis_after=$(drive restarts mismatch | tail -1)
 note "restarts across the mismatched cuts: $mis_before -> $mis_after"
 if [ "${mis_before:--1}" = "-1" ] || [ "${mis_after:--1}" = "-1" ]; then
@@ -1034,12 +1058,33 @@ fi
 # it was the geometry line below coming back BLANK -- a note nobody would fail a
 # build over.
 MIS_BYTES=$(wc -c < "$WORK/data/recordings/mismatch.mkv" 2>/dev/null | tr -d ' ')
+note "mismatch produced media: settled=${mis_t_settled:--1}ms back=${mis_t_back:--1}ms; file=${MIS_BYTES:-0} bytes"
 if [ "${MIS_BYTES:-0}" -gt 10000 ] 2>/dev/null; then
   ok "the mismatch destination actually wrote its output ($MIS_BYTES bytes)"
 else
-  bad "the mismatch destination wrote ${MIS_BYTES:-0} bytes across the whole run"
-  note "it never restarted, so the count above is 0 and every other check passed."
-  note "a destination on a hub that was closed under it looks exactly like this."
+  # WHICH failure this is, decided by what the destination PRODUCED rather than
+  # by what reached the disk. See the sampling note above and issue #275: the
+  # file reads zero for the whole run even when everything is working, so it
+  # cannot tell these apart and out_time can.
+  #
+  # -1 is not zero. It means the destination had no process to ask, which is a
+  # third finding again -- and reporting it as "produced nothing" would blame
+  # delivery for something that never started.
+  if [ "${mis_t_back:--1}" -lt 0 ] 2>/dev/null; then
+    bad "the mismatch destination had no process to report at the end of the run"
+    note "so this is not a delivery failure: there was nothing running to deliver to."
+  elif [ "${mis_t_back:-0}" -gt 0 ] 2>/dev/null; then
+    bad "the mismatch destination produced ${mis_t_back}ms of media and its file holds ${MIS_BYTES:-0} bytes"
+    note "it WAS being delivered to, so this is not the closed-hub case. A file"
+    note "destination truncates and reopens when it restarts -- read the restart"
+    note "count above; if that is still 0 the truncation came from outside this step."
+  else
+    bad "the mismatch destination produced no media at all across the whole run"
+    note "out_time never moved, so nothing was reaching it -- not a muxer that had"
+    note "yet to flush. It never restarted, so the count above is 0 and every other"
+    note "check passed; a destination on a hub that was closed under it looks"
+    note "exactly like this, and that is the 76-second case this step exists for."
+  fi
 fi
 note "the mismatch recording declares: $(ffprobe -v error -select_streams v \
   -show_entries stream=width,height,r_frame_rate -of csv=p=0 \
