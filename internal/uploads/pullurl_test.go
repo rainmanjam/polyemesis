@@ -24,6 +24,16 @@ func TestUploadFromPullURLAcceptsEverySpellingValidationDoes(t *testing.T) {
 		"FILE://uploads/" + stored,          // pullSource lowercases the scheme
 		`file://uploads\` + stored,          // pullSource normalises backslashes
 		"file://Uploads/" + stored,          // two of three platforms are case-insensitive
+
+		// #266. These four were the refutation: pullSource normalises through
+		// filepath.Join, so all of them build the SAME -i as the canonical
+		// spelling above, and the hand-written parse that used to live here
+		// returned ("", false) for every one -- three gates blind at once. The
+		// end-to-end measurement is in internal/api/pull_url_spelling_test.go.
+		"file://uploads/./" + stored,
+		"file://uploads//" + stored,
+		"file://./uploads/" + stored,
+		"file://uploads/././" + stored,
 	} {
 		name, ok := UploadFromPullURL(raw)
 		if !ok || name != stored {
@@ -43,6 +53,16 @@ func TestUploadFromPullURLClaimsNothingItIsNotSureOf(t *testing.T) {
 		"file://uploads/",
 		"file://uploads/sub/show.ts",
 		"uploads/show.ts",
+
+		// #266's other half. The collapsing spellings are claimed now, but
+		// widening the parse must not have made it claim things the engine
+		// opens elsewhere: a percent-encoded separator is a literal filename to
+		// FFmpeg's file protocol and never a path, and ".." is refused by
+		// pullSource outright rather than resolved, so neither is ever the -i
+		// that opens this upload.
+		"file://uploads%2Fshow.ts",
+		"file://uploads/sub/../show.ts",
+		"file://../uploads/show.ts",
 	} {
 		if name, ok := UploadFromPullURL(raw); ok {
 			t.Errorf("UploadFromPullURL(%q) claimed the upload %q; the verdict gate "+

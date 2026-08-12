@@ -1123,6 +1123,7 @@
   "sources.lastSourceTitle": "L'ultima sorgente non può essere eliminata: un'installazione ha bisogno di un ingresso",
   "sources.latencyMs": "Latenza (ms)",
   "sources.listenerDegraded": "Parzialmente associato",
+  "sources.pullUnchecked": "File non verificato",
   "sources.loadFailed": "Impossibile caricare le sorgenti",
   "sources.loading": "Caricamento sorgenti…",
   "sources.loss": "perdita",

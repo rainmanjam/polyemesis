@@ -752,6 +752,21 @@ export interface SourceView extends Source {
     state: "ok" | "degraded";
     detail?: string;
   };
+  /** The server's sentence about an upload this source pulls from that nothing
+   *  ever inspected, absent when there is nothing to say.
+   *
+   *  A pull source whose `file://` URL names a stored upload hands that path to
+   *  the ENGINE's FFmpeg, which carries neither the format allowlist nor the
+   *  probe the upload handler runs. Saving one is refused; a source ALREADY
+   *  saved that way keeps running and says this instead. #255 argues the
+   *  choice: an unverified verdict is a fact about the server (no ffprobe, a
+   *  cut-short inspection) and never about the file, so refusing the ingest
+   *  over it would take a programme off air for a toolchain problem.
+   *
+   *  Computed by the server rather than derived here, so a monitoring script
+   *  reading GET /sources sees it too — the case #201 named is automation that
+   *  configures a pull source from a listing and never looks at a card. */
+  pullUploadUnchecked?: string;
 }
 
 export interface Settings {

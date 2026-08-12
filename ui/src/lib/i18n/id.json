@@ -1123,6 +1123,7 @@
   "sources.lastSourceTitle": "Sumber terakhir tidak dapat dihapus — satu instalasi membutuhkan satu masukan",
   "sources.latencyMs": "Latensi (ms)",
   "sources.listenerDegraded": "Terikat sebagian",
+  "sources.pullUnchecked": "Berkas belum diperiksa",
   "sources.loadFailed": "Tidak dapat memuat sumber",
   "sources.loading": "Memuat sumber…",
   "sources.loss": "kehilangan",

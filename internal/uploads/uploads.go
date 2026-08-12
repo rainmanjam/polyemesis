@@ -28,6 +28,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	// For ffmpeg.PullFilePath ONLY -- see UploadFromPullURL. The dependency is
+	// the point: the gate has to key on the engine's own normalisation of a
+	// pull URL, and internal/ffmpeg imports no other package of this module, so
+	// there is nothing here for a cycle to form around.
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // Dir is the subdirectory of the data directory that holds uploads. Its own
@@ -1138,29 +1144,43 @@ func PullURL(name string) string { return "file://" + Dir + "/" + name }
 // a private copy of this parse in internal/api is a second spelling of the
 // format PullURL writes.
 //
-// TOLERANT IN EXACTLY THE WAYS ffmpeg.pullSource IS, and no others, because a
-// spelling that validation accepts and this rejects is a spelling that reaches
-// air ungated:
+// IT ASKS THE ENGINE RATHER THAN RE-READING THE FORMAT, and #266 is why. This
+// function used to transcribe ffmpeg.pullSource's tolerances by hand -- trim
+// the whitespace it trims, fold the scheme it folds, translate the backslashes
+// it translates -- with a comment promising the copy was "tolerant in exactly
+// the ways pullSource is". It was not. Measured on this branch before the fix,
+// with an upload recorded unchecked and PullDataDir=/data:
 //
-//   - surrounding whitespace, which pullSource trims;
-//   - a scheme in any case, which pullSource lowercases;
-//   - backslashes, which pullSource normalises to "/" before its own traversal
-//     check, so "file://uploads\show.ts" is a legal pull source on the platform
-//     where it is also a path.
+//	"file://uploads/unchecked.ts"     -i "file:/data/uploads/unchecked.ts"  PUT 400 refused
+//	"file://uploads/./unchecked.ts"   -i "file:/data/uploads/unchecked.ts"  PUT 200 STORED
+//	"file://uploads//unchecked.ts"    -i "file:/data/uploads/unchecked.ts"  PUT 200 STORED
+//	"file://./uploads/unchecked.ts"   -i "file:/data/uploads/unchecked.ts"  PUT 200 STORED
+//	"file://uploads/././unchecked.ts" -i "file:/data/uploads/unchecked.ts"  PUT 200 STORED
 //
-// The directory segment is compared case-insensitively for the same reason:
-// two of the three platforms this builds for have case-insensitive filesystems,
-// so "file://Uploads/show.ts" reaches the same bytes there.
+// Same -i, four ways past the gate, because pullSource normalises through
+// filepath.Join and the copy split on the first "/". THREE call sites inherited
+// that blindness at once -- pullSourceUploadProblems (#201), the two added by
+// #255, and pullUploadUnchecked, whose whole argument is that the server
+// computes the warning so automation can read it. A copy of a format is a gate
+// keyed on a SPELLING; ffmpeg.PullFilePath is the normalisation that builds the
+// -i argument, so keying on it means any spelling producing a given -i gets one
+// verdict by construction.
+//
+// The directory segment is still compared case-insensitively, which is the one
+// place this is deliberately WIDER than the engine: two of the three platforms
+// this builds for have case-insensitive filesystems, so "file://Uploads/show.ts"
+// reaches the same bytes there. Over-claiming costs a spurious refusal on Linux;
+// under-claiming costs an uninspected file on air.
 //
 // It is deliberately NOT a validator. A name it returns has been through none
 // of Resolve's checks; every caller asks the store about it, and the store
 // refuses what is not a bare name inside the directory.
 func UploadFromPullURL(raw string) (string, bool) {
-	scheme, rest, ok := strings.Cut(strings.TrimSpace(raw), "://")
-	if !ok || !strings.EqualFold(scheme, "file") {
+	rel, ok := ffmpeg.PullFilePath(raw)
+	if !ok {
 		return "", false
 	}
-	dir, name, ok := strings.Cut(strings.ReplaceAll(rest, `\`, "/"), "/")
+	dir, name, ok := strings.Cut(rel, "/")
 	if !ok || !strings.EqualFold(dir, Dir) || name == "" || strings.Contains(name, "/") {
 		return "", false
 	}
