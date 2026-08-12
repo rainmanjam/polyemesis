@@ -287,6 +287,13 @@ const (
 	reloadRestart = "restart"
 	// reloadLive means the change reached a process that kept running.
 	reloadLive = "live"
+	// reloadStop means a tier was left with no process at all, and the note is
+	// why. A third value rather than reporting a refusal as a "restart",
+	// because the two are opposite facts about whether anything is running and
+	// an operator reading "restart" would go looking for a child that is not
+	// there. #255's refused pull upload is the first: the reconcile is where
+	// that refusal finally has somewhere to be reported.
+	reloadStop = "stop"
 
 	// eventReload announces what a reconcile moved. Declared here rather than
 	// in internal/events because it is only meaningful to a system that has a

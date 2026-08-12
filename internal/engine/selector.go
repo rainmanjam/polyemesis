@@ -1802,6 +1802,25 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 		return
 	}
 
+	// #255, the standby half. The save-time gate checks the backup pull URL
+	// even when the tier is disabled -- "storing a source that is off today and
+	// switched on during an outage is the case this exists for" -- and a gate
+	// that covered the primary alone would leave exactly that asymmetry on the
+	// path that reaches air with nobody watching. Same split as the primary:
+	// only a refusal stops it, and Engine.pullUploadRefusal carries why.
+	//
+	// Before the hub is allocated rather than after, so a refused standby costs
+	// no relay port; and after the teardown above, so switching a running
+	// backup onto a refused upload takes the old one down rather than leaving
+	// it airing under a stale signature.
+	if b := s.Failover.Backup; b.Mode == db.IngestPull {
+		if refusal := e.pullUploadRefusal("the backup pull source", b.Pull.URL); refusal != "" {
+			e.log.Error("backup ingest not started: "+refusal, "source", e.sourceID)
+			e.noteReload("ingest", "backup-ingest", reloadStop, refusal)
+			return
+		}
+	}
+
 	hub, err := relay.New(e.log, 0)
 	if err != nil {
 		e.log.Error("backup ingest: no relay", "err", err)

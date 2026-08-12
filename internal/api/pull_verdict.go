@@ -111,35 +111,27 @@ func (s *Server) pullSourceUploadProblems(want db.Settings, storedPrimary, store
 // those would strand media an operator has had for a year over a file that was
 // never written. See uploads.Store.Verdict's second return.
 //
-// SPELLED ONCE BECAUSE THREE CALLERS MUST AGREE -- pullSourceUploadProblems
-// above, sourceIngestUploadProblem below, and Server.pullUploadUnchecked, which
-// reports rather than refuses. Two refuse a save and the third puts a sentence
-// on a card; a copy of this condition that drifted would let one of the three
-// disagree about which files are safe, and the disagreement would be invisible.
-// #264 inlined this switch into pullSourceUploadProblems, which was right when
-// that was the only caller and is not right now there are three -- so the
-// three-state logic moved in here rather than being pasted into each of them.
+// SPELLED ONCE BECAUSE FOUR CALLERS MUST AGREE -- pullSourceUploadProblems
+// above, sourceIngestUploadProblem below, Server.pullUploadUnchecked, which
+// reports rather than refuses, and now Engine.pullUploadRefusal, which stops an
+// inherited ingest. Two refuse a save, one puts a sentence on a card and one
+// takes a programme off air; a copy of this condition that drifted would let
+// them disagree about which files are safe, and the disagreement would be
+// invisible. #264 inlined this switch into pullSourceUploadProblems, which was
+// right when that was the only caller and stopped being right at the third.
 //
-// THE REMEDY IS PART OF THE ANSWER, not of the caller, because it is a function
-// of WHICH state the upload is in and nothing else. #264's whole point:
-// OutcomeRefused is "a statement about the FILE, it is permanent, and trying
-// again is not a remedy", so telling that operator to upload it again is advice
-// that cannot work. Returning the remedy alongside the objection is what keeps
-// a fourth caller from inventing its own.
+// THE SWITCH ITSELF NOW LIVES IN internal/uploads, and this is the adapter that
+// keeps the three handlers' call shape. It moved for one reason: internal/api
+// imports internal/engine (sourceView carries an engine.ListenerHealth), so the
+// engine cannot import this package to reach it, and #255's decision gives the
+// engine a fourth callsite. The alternative was a second copy of the switch in
+// the engine -- the exact drift this comment exists to prevent. See
+// uploads.Store.Objection, which also carries the Refused flag the engine needs
+// and these three callers do not: they refuse or report either way, and only
+// the engine treats the two states differently.
 func uploadObjection(store *uploads.Store, name string) (what, remedy string, bad bool) {
-	v, recorded := store.Verdict(name)
-	switch {
-	case !recorded:
-		// Stored before verdicts existed. Allowed; see above.
-		return "", "", false
-	case v.Outcome == uploads.OutcomeRefused:
-		return fmt.Sprintf("was inspected and refused (%s)", v.Reason),
-			"point it at a different file", true
-	case !v.Verified():
-		return fmt.Sprintf("was stored without being checked (%s)", v.Reason),
-			"upload it again before pulling from it", true
-	}
-	return "", "", false
+	o, bad := store.Objection(name)
+	return o.What, o.Remedy, bad
 }
 
 // sourceIngestUploadProblem is pullSourceUploadProblems for the route that
