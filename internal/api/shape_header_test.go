@@ -164,11 +164,16 @@ func rigRedirectResponse(t *testing.T, rig shapeRig) http.Header {
 // SHARED-RIG ETIQUETTE, per the rule stated over inspectOutboundHookBody:
 // nothing else in the registry reads the poster or the playout store's cache,
 // so this mutation cannot give the inspectors an order.
-func rigPosterResponse(t *testing.T, rig shapeRig) http.Header {
+//
+// IT RETURNS THE WHOLE RECORDER rather than the headers it used to, because the
+// media-type census gave this route a second reader: playout-poster is a shape
+// row of its own now (#168), and its inspector needs the body this drive was
+// already producing and discarding. One drive, two inspectors, no second prime.
+func rigPosterRecorder(t *testing.T, rig shapeRig) *httptest.ResponseRecorder {
 	t.Helper()
 	st := rig.s.playoutStore()
 	st.mu.Lock()
-	st.poster = []byte("\xff\xd8\xff\xe0planted poster bytes")
+	st.poster = []byte(plantedPosterBytes)
 	st.posterErr = nil
 	st.posterAt = time.Now()
 	st.mu.Unlock()
@@ -177,12 +182,20 @@ func rigPosterResponse(t *testing.T, rig shapeRig) http.Header {
 	rig.sign(r)
 	w := do(t, rig.h, r)
 	if w.Code != http.StatusOK {
-		t.Fatalf("the Content-Length drive got status %d from the poster route with a "+
-			"primed cache, want 200. The 404 branch sets no Content-Length, so this "+
-			"inspector would be reading a header the handler never wrote.", w.Code)
+		t.Fatalf("the poster drive got status %d from the poster route with a primed "+
+			"cache, want 200. The 404 branch writes neither Content-Length nor a JPEG "+
+			"body, so both inspectors behind this drive would be reading output the "+
+			"handler never produced.", w.Code)
 	}
-	return w.Header()
+	return w
 }
+
+// plantedPosterBytes is what the primed cache holds. It opens with the JPEG SOI
+// and APP0 markers so that what the handler serves is at least a plausible
+// JPEG -- but the marker is PLANTED, and the playout-poster inspector is
+// written not to lean on it. See that inspector for what the planting can and
+// cannot witness.
+const plantedPosterBytes = "\xff\xd8\xff\xe0planted poster bytes"
 
 // rigThrottledLoginResponse spends the login budget for one address so the
 // throttle answers 429 with Retry-After.
@@ -439,7 +452,7 @@ func inspectRetryAfterHeader(t *testing.T, rig shapeRig) shapeObservation {
 func inspectContentLengthHeader(t *testing.T, rig shapeRig) shapeObservation {
 	t.Helper()
 	obs := witnessHeader(t, "response-header/Content-Length", "Content-Length",
-		"", rigPosterResponse(t, rig))
+		"", rigPosterRecorder(t, rig).Header())
 	if n, err := strconv.Atoi(strings.TrimPrefix(obs.Sample, "Content-Length: ")); err != nil ||
 		n <= 0 {
 		t.Errorf("the Content-Length inspector read %q, which is not a positive byte count "+

@@ -1760,6 +1760,27 @@ func shapeRegistry() []shapeRow {
 				"planted fixture that route answers a read token 50 bytes of " +
 				"{\"error\":\"this stream requires a playback token\"}. Correct behaviour, " +
 				"asserted by that excuse's Want -- and not this shape."},
+		// THE ROW THE MEDIA-TYPE CENSUS PRODUCED (#168, half two), and the
+		// second time a derivation in this ledger has answered "there is a
+		// shape here nobody wrote down". The first was twelve response
+		// headers; this is one payload.
+		//
+		// image/jpeg is spelled at exactly one site in this package --
+		// playout.go's poster handler -- and it belonged to no row. Not
+		// json-body, not file-download (nothing sets Content-Disposition and it
+		// is served inline to a player), and not streaming-media, whose row is
+		// about the manifest and its segments. A still frame of a stream is its
+		// own kind of bytes, and it is a disclosure surface: authorizePlayout
+		// gates it, it is cached `public, max-age=10`, and it answers
+		// Access-Control-Allow-Origin: * when embedding is on.
+		{Shape: "playout-poster", Emitted: true, Inspector: inspectPlayoutPoster,
+			Note: "a JPEG still rendered off the live stream by FFmpeg and served from the " +
+				"poster cache. The RENDER is out of this package's fixture budget for the " +
+				"same reason response-header/Content-Length's was -- posterJPEG needs a .ts " +
+				"segment on disk and a real FFmpeg, so every fixture here takes the 404 " +
+				"branch -- so the inspector primes the cache and witnesses the SERVING: the " +
+				"200 branch rather than the 404, the bytes passed through verbatim, and a " +
+				"body that is not JSON wearing an image label."},
 		{Shape: "file-download", Emitted: true, Issue: "#168",
 			Jurisdiction: &shapeJurisdiction{
 				Package: "internal/api", Test: "TestStemDownloadServesAStemInsideTheStemsDirectory",
@@ -1774,7 +1795,18 @@ func shapeRegistry() []shapeRow {
 		{Shape: "websocket-frame", Emitted: true, Inspector: inspectWebsocketFrame,
 			Note: "one policy row per events.Type over a CLOSED table; an unclassified type " +
 				"fails the build and is dropped for a read scope"},
-		{Shape: "sse", Note: "ABSENT: this API emits no server-sent events"},
+		// THE ONLY NEGATIVE CLAIM IN THIS REGISTRY, and until the media-type
+		// census it was the only row nothing could check. `Emitted: false` gives
+		// step 7 the verdict "absent", so the row needs neither an inspector nor
+		// a jurisdiction record -- which means adding an event-stream handler to
+		// this package would have left every test in the repository green while
+		// a row went on saying the shape does not exist. It is now discharged by
+		// a scan that FINDS NOTHING, in the same run in which the same scan
+		// finds the eight media types this package does emit. That second half
+		// is not decoration: an absence proved by a broken scanner is free.
+		{Shape: "sse", Note: "ABSENT: this API emits no server-sent events, and " +
+			"assertDerivedPayloadShapesAreRegistered fails if text/event-stream ever " +
+			"appears in this package's source"},
 		{Shape: "mqtt-retained-topic", Emitted: true, Issue: "#160",
 			Jurisdiction: &shapeJurisdiction{
 				Package: "cmd/polyemesis", Test: "TestTheRetainedDestTopicIsScrubbedAtTheSink",
@@ -2569,6 +2601,14 @@ func TestLedgerPreflight(t *testing.T) {
 	// means "a shape appeared that nobody wrote down", which is the sentence the
 	// issue is made of. See shape_derivation_test.go.
 	assertDerivedHeaderShapesAreRegistered(t)
+	// #168's half two, and the same two reasons a fourth time. It censuses every
+	// media-type literal in this package's source and joins it to the registry,
+	// which is what found playout-poster; it also enforces the ACCOUNTING RULE
+	// that every shape row is derived, out-of-package, or anchorless-with-a-
+	// measured-reason, so the residual this issue is about cannot grow in
+	// silence. Parses only; measured at 0.03s. See
+	// shape_payload_derivation_test.go.
+	assertDerivedPayloadShapesAreRegistered(t)
 	// The same two reasons again, for the file that deletes issue-numbers-as-
 	// discharge from the shape channel. The resolver shells out to `go test
 	// -list` in three packages; measured, and the number is in the PR body,
@@ -3527,37 +3567,51 @@ func deferredWithReasons() []coverageDefer {
 				"been carried out.",
 		},
 		{
-			// The residual of THIS round's own run-filter scanner, stated at the
-			// width the guard actually has rather than the width its name
-			// suggests.
-			// #168'S RESIDUAL, WRITTEN DOWN THE ROUND ITS FIRST HALF LANDED.
-			// The issue asks for the emitted-shape set to be derived from the
-			// code that emits. ONE FAMILY now is, and it is the family the
-			// issue names -- sixteen response headers, joined in both
-			// directions to an AST scan of this package's source. The rest of
-			// the registry is still eleven rows somebody wrote.
-			ID: "shape-derivation-reaches-only-the-response-header-family",
-			What: "assertDerivedHeaderShapesAreRegistered derives every response header " +
-				"this package emits and requires a shape row for each. The other shape " +
-				"rows -- json-body, streaming-media, websocket-frame, slog-output, " +
-				"outbound-hook-body, outbound-alert-body, on-disk-process-log, " +
-				"file-download, mqtt-retained-topic, plain-http-listener, sse -- are " +
-				"hand-written, and a genuinely new one of those is still invisible until " +
-				"somebody adds a row. Also underived: the header names net/http writes at " +
-				"this package's four http.ServeContent sites, which are net/http's rather " +
-				"than this package's and appear in no source line here.",
-			WhySafe: "a response header NAMES ITS OWN SHAPE at the call site -- " +
-				"`Header().Set(\"Vary\", ...)` -- which is what makes it derivable at all. " +
-				"A whole-payload shape has no such literal: nothing syntactic " +
-				"distinguishes a manifest from an error page, and the round that deleted " +
-				"the `By` string caught a green proof reading 50 bytes of " +
-				"{\"error\":...} while a row called the streaming shape covered. A " +
-				"derivation invented for those families would be a name resolver again, " +
-				"one abstraction up.",
-			WhatWouldMakeItUnsafe: "a new whole-payload egress. The two outbound bodies in " +
-				"this registry were exactly that -- principal-less sends, structurally " +
-				"identical to the retained MQTT topic, absent from the list until #169 " +
-				"went looking -- and no scan in this file would have found them either.",
+			// #168'S RESIDUAL, NARROWED IN THE ROUND ITS SECOND HALF LANDED, and
+			// the narrowing is the interesting part. The row this replaces said
+			// the other eleven shapes were hand-written "because a header names
+			// its own shape at the call site and a whole-payload shape has no
+			// such literal". That reason was right about `Header().Set` and
+			// wrong about the rows it deferred: six of the eleven DO name
+			// themselves, in a media type, and a seventh named itself in a
+			// websocket upgrade. A media-type census over every string literal
+			// in this package derived those, and found an eighth shape --
+			// playout-poster -- that no row had ever mentioned.
+			//
+			// It also stops being a LIST. The old row enumerated eleven names,
+			// and nothing joined that enumeration to the registry: a twelfth
+			// hand-written row would not have changed a character of it, which
+			// is the same defect the shape list itself had. The residual is now
+			// two buckets that assertEveryShapeRowIsAccountedFor checks every
+			// row against.
+			ID: "shape-derivation-cannot-reach-shapes-this-package-does-not-emit",
+			What: "six shape rows are still hand-written. FIVE are emitted by another " +
+				"package -- outbound-hook-body (internal/hooks), outbound-alert-body " +
+				"(internal/alerts), on-disk-process-log (internal/supervisor), " +
+				"mqtt-retained-topic and plain-http-listener (cmd/polyemesis) -- and the " +
+				"derivations here read THIS package's directory. ONE, slog-output, is " +
+				"emitted here and has no anchor: s.log.Log/Info/Warn/Error/Debug at 81 " +
+				"sites in 18 files, so a scan for it returns \"emitted\" for every build " +
+				"this package will ever have. Also still underived: the header names " +
+				"net/http writes at this package's four http.ServeContent sites, which are " +
+				"net/http's and appear in no source line here.",
+			WhySafe: "a derivation whose answer cannot change is not a join, and that is " +
+				"the criterion each of these six failed rather than a shortage of effort. " +
+				"For the five out-of-package rows the alternative is an AST walk over " +
+				"another package's source from a test in this one, which is the mechanism " +
+				"#245 DELETED with the symbol index that resolved `By` strings; all five " +
+				"are meanwhile discharged the way that deletion left intact -- an " +
+				"Inspector the preflight calls, or a Jurisdiction record " +
+				"assertJurisdictionRecordsResolve checks. What is NOT deferred any more is " +
+				"the enumeration: every row must fall in one of four accounted buckets, so " +
+				"a new hand-written shape fails instead of joining a list.",
+			WhatWouldMakeItUnsafe: "a new egress from a package this one merely calls. The " +
+				"two outbound bodies were exactly that -- principal-less sends absent from " +
+				"the list until #169 went looking -- and no census of this package's " +
+				"literals would find the next one either. Also unsafe: a media type this " +
+				"package composes at runtime rather than spelling out, which the census " +
+				"cannot see and which would narrow it back towards a list without " +
+				"anything saying so.",
 			Issue: "#168",
 		},
 		{

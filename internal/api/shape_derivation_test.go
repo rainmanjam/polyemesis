@@ -34,20 +34,26 @@ import (
 //     staleness: a row describing output this build no longer produces, which
 //     the shapeFloor ratchet cannot see because the count does not move.
 //
-// WHY THIS FAMILY AND NOT ALL OF THEM, said plainly because a derivation
-// invites the belief that it is total. A response header is derivable because
-// the emission is a CALL WITH THE NAME IN IT: `w.Header().Set("Vary", ...)`
-// names its own shape. The other rows in that registry do not have that
-// property -- `websocket-frame`, `slog-output`, `outbound-hook-body`,
-// `streaming-media` and `on-disk-process-log` are shapes of a whole payload,
-// identified by what the bytes ARE rather than by a literal at the call site,
-// and there is no syntactic signature that distinguishes a manifest from an
-// error page (which is the mistake #176 caught: a green proof reading 50 bytes
-// of {"error":...} and calling it the manifest shape). Those rows stay
-// hand-written and that residual has a row in deferredWithReasons citing this
-// issue. What has changed is that the family the issue actually names --
-// "headers are a credential-bearing shape: Location on a redirect and
-// Set-Cookie both carry values" -- is no longer a list.
+// WHY THIS FAMILY, said plainly because a derivation invites the belief that it
+// is total. A response header is derivable because the emission is a CALL WITH
+// THE NAME IN IT: `w.Header().Set("Vary", ...)` names its own shape.
+//
+// THIS COMMENT USED TO GO ON TO SAY that the whole-payload rows had no such
+// literal and were therefore underivable, and that claim is retracted. It was
+// right that a payload shape does not name itself in a header-setting call and
+// wrong that it names itself nowhere: six of those rows spell a MEDIA TYPE in
+// this package's source, and a seventh spells a websocket upgrade.
+// shape_payload_derivation_test.go derives them by censusing every string
+// literal in the package, and that census found an eighth shape --
+// playout-poster -- that no row had ever mentioned. What survives of the old
+// paragraph is only the narrow part, and it is the reason the two files are
+// separate: a literal is why a ROW must exist; whether the bytes really are
+// that shape is the INSPECTOR's job, and #176's failure was an inspector
+// reading 50 bytes of {"error":...}, not a population that was too wide.
+//
+// The residual after both files is stated as a rule rather than a list --
+// see assertEveryShapeRowIsAccountedFor -- and it has a row in
+// deferredWithReasons citing this issue.
 
 // headerEmission is one response header this package writes, with every site
 // that writes it. The sites are the evidence: a failure names them, so the
@@ -331,6 +337,13 @@ func assertDerivedHeaderShapesAreRegistered(t *testing.T) {
 	// mentioned is the same decoration this ledger keeps catching, and it is
 	// written into deferredWithReasons under this issue so it lives in the
 	// artifact rather than in a log line nobody reads.
+	//
+	// STILL UNDERIVED, but no longer unaccounted for: every one of these four
+	// sites serves a file whose MEDIA TYPE is a literal in this package, so the
+	// media-type census claims all four for the file-download row. What net/http
+	// writes on top of that -- Last-Modified, Accept-Ranges, Content-Range,
+	// Etag, and a sniffed Content-Type -- is what this log is about, and it is
+	// the part no scan here can name.
 	if len(delegations) > 0 {
 		t.Logf("the response-header derivation names no header for %d delegation(s) to "+
 			"net/http, whose header set is net/http's rather than this package's:\n  %s",

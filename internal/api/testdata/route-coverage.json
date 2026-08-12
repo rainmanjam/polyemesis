@@ -8,7 +8,7 @@
   "unstableCeiling": 3,
   "inertCeiling": 6,
   "varianceExemptCeiling": 2,
-  "shapeFloor": 26,
+  "shapeFloor": 27,
   "shapesNotInspectedCeiling": 3,
   "totals": {
     "methodPatternPairs": 212,
@@ -16,7 +16,7 @@
     "excused": 50,
     "denied": 100,
     "nonTrieProbes": 12,
-    "shapesEmitted": 26,
+    "shapesEmitted": 27,
     "shapesNotInspected": 3
   },
   "partition": {
@@ -1971,6 +1971,13 @@
       "note": "the HLS manifest and its segments -- the shape a body sweep reads none of, and the one that escaped the previous audit. The old `by` string named the playoutManifestBytes counterpart, which never reads a manifest: on the planted fixture that route answers a read token 50 bytes of {\"error\":\"this stream requires a playback token\"}. Correct behaviour, asserted by that excuse's Want -- and not this shape."
     },
     {
+      "shape": "playout-poster",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectPlayoutPoster",
+      "note": "a JPEG still rendered off the live stream by FFmpeg and served from the poster cache. The RENDER is out of this package's fixture budget for the same reason response-header/Content-Length's was -- posterJPEG needs a .ts segment on disk and a real FFmpeg, so every fixture here takes the 404 branch -- so the inspector primes the cache and witnesses the SERVING: the 200 branch rather than the 404, the bytes passed through verbatim, and a body that is not JSON wearing an image label."
+    },
+    {
       "shape": "file-download",
       "emitted": true,
       "inspected": false,
@@ -1995,7 +2002,7 @@
       "emitted": false,
       "inspected": false,
       "inspectedBy": "",
-      "note": "ABSENT: this API emits no server-sent events"
+      "note": "ABSENT: this API emits no server-sent events, and assertDerivedPayloadShapesAreRegistered fails if text/event-stream ever appears in this package's source"
     },
     {
       "shape": "mqtt-retained-topic",
@@ -2068,10 +2075,10 @@
       "issue": ""
     },
     {
-      "id": "shape-derivation-reaches-only-the-response-header-family",
-      "what": "assertDerivedHeaderShapesAreRegistered derives every response header this package emits and requires a shape row for each. The other shape rows -- json-body, streaming-media, websocket-frame, slog-output, outbound-hook-body, outbound-alert-body, on-disk-process-log, file-download, mqtt-retained-topic, plain-http-listener, sse -- are hand-written, and a genuinely new one of those is still invisible until somebody adds a row. Also underived: the header names net/http writes at this package's four http.ServeContent sites, which are net/http's rather than this package's and appear in no source line here.",
-      "whySafe": "a response header NAMES ITS OWN SHAPE at the call site -- `Header().Set(\"Vary\", ...)` -- which is what makes it derivable at all. A whole-payload shape has no such literal: nothing syntactic distinguishes a manifest from an error page, and the round that deleted the `By` string caught a green proof reading 50 bytes of {\"error\":...} while a row called the streaming shape covered. A derivation invented for those families would be a name resolver again, one abstraction up.",
-      "whatWouldMakeItUnsafe": "a new whole-payload egress. The two outbound bodies in this registry were exactly that -- principal-less sends, structurally identical to the retained MQTT topic, absent from the list until #169 went looking -- and no scan in this file would have found them either.",
+      "id": "shape-derivation-cannot-reach-shapes-this-package-does-not-emit",
+      "what": "six shape rows are still hand-written. FIVE are emitted by another package -- outbound-hook-body (internal/hooks), outbound-alert-body (internal/alerts), on-disk-process-log (internal/supervisor), mqtt-retained-topic and plain-http-listener (cmd/polyemesis) -- and the derivations here read THIS package's directory. ONE, slog-output, is emitted here and has no anchor: s.log.Log/Info/Warn/Error/Debug at 81 sites in 18 files, so a scan for it returns \"emitted\" for every build this package will ever have. Also still underived: the header names net/http writes at this package's four http.ServeContent sites, which are net/http's and appear in no source line here.",
+      "whySafe": "a derivation whose answer cannot change is not a join, and that is the criterion each of these six failed rather than a shortage of effort. For the five out-of-package rows the alternative is an AST walk over another package's source from a test in this one, which is the mechanism #245 DELETED with the symbol index that resolved `By` strings; all five are meanwhile discharged the way that deletion left intact -- an Inspector the preflight calls, or a Jurisdiction record assertJurisdictionRecordsResolve checks. What is NOT deferred any more is the enumeration: every row must fall in one of four accounted buckets, so a new hand-written shape fails instead of joining a list.",
+      "whatWouldMakeItUnsafe": "a new egress from a package this one merely calls. The two outbound bodies were exactly that -- principal-less sends absent from the list until #169 went looking -- and no census of this package's literals would find the next one either. Also unsafe: a media type this package composes at runtime rather than spelling out, which the census cannot see and which would narrow it back towards a list without anything saying so.",
       "issue": "#168"
     },
     {
