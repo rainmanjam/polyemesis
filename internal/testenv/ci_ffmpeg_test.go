@@ -8,6 +8,10 @@ import (
 )
 
 func TestCIFFmpegDownloadUsesAuthenticatedFallback(t *testing.T) {
+	// ci.yml currently downloads the pinned Linux FFmpeg asset in two places: the
+	// ubuntu go job and the cross-platform test job's Linux arm.
+	const wantFFmpegSteps = 2
+
 	var wf struct {
 		Jobs map[string]struct {
 			Steps []struct {
@@ -40,7 +44,7 @@ func TestCIFFmpegDownloadUsesAuthenticatedFallback(t *testing.T) {
 			}
 		}
 	}
-	if checked != 2 {
-		t.Fatalf("checked %d FFmpeg download step(s), want 2 so the assertion cannot pass by examining too little", checked)
+	if checked != wantFFmpegSteps {
+		t.Fatalf("checked %d FFmpeg download step(s), want %d so the assertion cannot pass by examining too little", checked, wantFFmpegSteps)
 	}
 }
