@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/uploadprobe"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
@@ -475,132 +475,47 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 	defer cancel()
 
 	res, err := ffmpeg.ProbeFile(ctx, bins, path)
-	if err != nil {
-		// Interruption first, because it is not a verdict about the file.
-		//
-		// CTX.ERR() IS THE CLAUSE THAT ACTUALLY WORKS, and the errors.Is arms
-		// alone do not. Measured: with only the errors.Is arms, the
-		// client-disconnect reproduction still answers 400 "signal: killed" and
-		// still deletes the file. exec.CommandContext kills the child, and what
-		// comes back is a plain *exec.ExitError carrying no context error to
-		// match on -- so errors.Is finds nothing.
-		//
-		// Asking the context we handed the probe whether it is done answers the
-		// actual question, "was this probe cut short", without depending on how
-		// the os/exec of the day chooses to report it. The errors.Is arms stay
-		// for the cases where the chain IS present, which is why ProbeFile now
-		// wraps with %w on both of its error branches.
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-			ctx.Err() != nil {
-			s.log.Warn("upload probe was interrupted; accepting the file unchecked",
-				"name", name, "cause", ctx.Err(), "err", err)
-			return uploads.UnverifiedVerdict(uploads.ReasonInterrupted), nil
-		}
-		// ASKED AS ONE QUESTION, not as a sequence of arms. ffmpeg.Refused owns
-		// the list of "ffprobe ran and this is a verdict about the file",
-		// because the default below is FAIL-OPEN and a handler has no way to
-		// know when it has missed a case. Measured: with the
-		// ErrUnsupportedContainer arm disabled, a GIF was not refused with a
-		// worse message -- it was stored, 201, unchecked.
-		if ffmpeg.Refused(err) {
-			switch {
-			case errors.Is(err, ffmpeg.ErrIndirectContainer):
-				// Not "could not read": ffprobe read it fine and reported
-				// another file's streams. Saying "could not be read as media"
-				// here would be the false diagnosis all over again.
-				return uploads.Verdict{}, errors.New(
-					"this file is a playlist or script naming other files, not media itself")
-			case errors.Is(err, ffmpeg.ErrUnsupportedContainer):
-				// A REAL FILE IN A FORMAT WE DO NOT TAKE, which used to get the
-				// sentence above. AIFF, DV, y4m, IVF, CAF and GIF were all
-				// measured being told they were "a playlist or script naming
-				// other files" -- untrue about every one of them, and
-				// unactionable, because the operator goes looking for a script
-				// that does not exist. If an operator is refused here for
-				// something they should be able to upload, the fix is an entry
-				// in ffmpeg.selfContainedFormats, not a widening of the gate.
-				return uploads.Verdict{}, fmt.Errorf("%s; re-save it as MP4 or MPEG-TS", err)
-			}
-			// A refusal this handler has no sentence of its own for. ffprobe's
-			// words, and a REJECTION -- the point of routing through Refused is
-			// that a new refusal shape lands here rather than in the fail-open
-			// arm below.
-			return uploads.Verdict{}, fmt.Errorf("this file could not be read as media: %s", err)
-		}
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			// FFPROBE NEVER RAN, OR RAN AND SAID SOMETHING THIS PROCESS CANNOT
-			// READ. Both are facts about this server, and neither is a verdict
-			// about the operator's bytes -- which is the same rule the
-			// interruption arm above enforces, on the routes that arm does not
-			// reach.
-			//
-			// It was reachable and it destroyed data: with probeBin pointing at
-			// a path that does not exist, is not executable, or is a directory,
-			// every upload got 400 "this file could not be read as media:
-			// fork/exec ...: no such file or directory" and the uploads
-			// directory was empty afterwards. exec's start failures are
-			// *exec.Error and fs.ErrPermission, never *exec.ExitError, and
-			// ctx.Err() is nil for them, so both existing guards missed. A fork
-			// that fails with EAGAIN on a box that is also encoding live video
-			// reaches this without any misconfiguration at all.
-			//
-			// A probe that exits 0 and prints something that is not JSON lands
-			// here too, and for the same reason: "parse ffprobe output: invalid
-			// character 'o'" is a sentence about the binary this server was
-			// pointed at, and it was being reported as a verdict about a file.
-			s.log.Warn("the upload probe could not be run; accepting the file unchecked",
-				"name", name, "err", err)
-			return uploads.UnverifiedVerdict(uploads.ReasonProbeUnusable), nil
-		}
-		// ffprobe's own words, because "could not read this file" tells the
-		// operator nothing they can act on and ffprobe's message usually does.
-		//
-		// NOT A COMPLETENESS CHECK, and the comment here used to imply it was:
-		// it said "moov atom not found tells somebody their download was
-		// truncated", which is true of that one message and gets read as "a
-		// truncated file is caught". It is not. Measured: an MP4 written with
-		// -movflags +faststart and a Matroska file are both ACCEPTED when cut
-		// to a tenth of their length, and both report the WHOLE file's
-		// duration, because the header that carries it survived. Only an MP4
-		// with its index at the end -- the default layout -- fails, and it
-		// fails on the missing index rather than on being short. The boundary
-		// is pinned by internal/ffmpeg.TestProbeFileAcceptsMostTruncatedMedia
-		// and written down in docs/TROUBLESHOOTING.md.
-		return uploads.Verdict{}, fmt.Errorf("this file could not be read as media: %s", err)
-	}
-	if res.Video == nil && len(res.Audio) == 0 {
-		// ffprobe parsed it and found nothing playable. A container with no
-		// streams is the shape a renamed archive or document arrives in.
-		return uploads.Verdict{}, errors.New("this file carries no video or audio stream")
-	}
 
-	info := uploads.MediaInfo{
-		DurationSeconds: res.DurationSeconds,
-		// Carried through rather than dropped, because this is the field an
-		// OPERATOR sees. A counted duration and a declared one look identical
-		// as numbers and are not the same claim -- see ffmpeg.DurationSource --
-		// and the Library is where somebody deciding whether to schedule this
-		// item is looking at it.
-		DurationSource: string(res.DurationSource),
-		AudioTracks:    len(res.Audio),
-		ProbedAt:       time.Now().UTC(),
+	// THE CLASSIFICATION IS NOT HERE ANY MORE, and #202 is why it moved rather
+	// than being copied. Which ffprobe outcomes are a verdict about the FILE and
+	// which are a verdict about this SERVER is one rule with a FAIL-OPEN
+	// default, and the re-verify worker needed the same rule -- a third copy of
+	// a fail-open default is three chances to get it backwards, and getting it
+	// backwards is how a GIF gets stored 201 unchecked. uploadprobe.Classify
+	// owns it, with every sentence that used to be written out below preserved
+	// verbatim, and every arm's reasoning with it.
+	//
+	// What stays here is what is genuinely this handler's: the LOGGING, which
+	// names the file by the name it will be called rather than by the internal
+	// ".partial-" path, and the conversion of a refusal into an error, because
+	// this caller answers a request and a refusal is a 400.
+	//
+	// CTX.ERR() IS PASSED, and that clause is the one that actually works.
+	// Measured: with only the errors.Is arms, the client-disconnect
+	// reproduction still answers 400 "signal: killed" and still deletes the
+	// file. exec.CommandContext kills the child and what comes back is a plain
+	// *exec.ExitError carrying no context error to match on. Note it is read
+	// from the SHADOWED ctx above -- the probe's own -- because the question is
+	// "was this probe cut short", not "did the client go away".
+	verdict := uploadprobe.Classify(res, err, ctx.Err())
+	switch {
+	case verdict.Outcome == uploads.OutcomeRefused:
+		// A REFUSAL IS AN ERROR TO THIS CALLER AND ONLY TO THIS CALLER. The
+		// staged bytes are discarded by the handler above and the 400 carries
+		// this sentence, scrubbed. The re-verify worker takes the same Verdict
+		// and RECORDS it, because by then the file is published and there is
+		// something for the record to describe.
+		return uploads.Verdict{}, errors.New(verdict.Reason)
+	case verdict.Reason == uploads.ReasonInterrupted:
+		// EVERY ONE OF THESE LOGS BEFORE IT RETURNS, and that is the whole
+		// reason unchecked is a survivable outcome.
+		s.log.Warn("upload probe was interrupted; accepting the file unchecked",
+			"name", name, "cause", ctx.Err(), "err", err)
+	case verdict.Reason == uploads.ReasonProbeUnusable:
+		s.log.Warn("the upload probe could not be run; accepting the file unchecked",
+			"name", name, "err", err)
 	}
-	if res.Video != nil {
-		info.VideoCodec = res.Video.Codec
-		info.Width = res.Video.Width
-		info.Height = res.Video.Height
-		info.FrameRate = res.Video.FrameRate
-	}
-	if len(res.Audio) > 0 {
-		// The first track's shape, which is what a listing has room for. The
-		// count above is the number that matters for routing; per-track detail
-		// belongs on a detail view, not in a table row.
-		info.AudioCodec = res.Audio[0].Codec
-		info.AudioChannels = res.Audio[0].Channels
-		info.AudioLayout = res.Audio[0].Layout
-	}
-	return uploads.VerifiedVerdict(info), nil
+	return verdict, nil
 }
 
 // handleListMedia returns the stored uploads, newest first.

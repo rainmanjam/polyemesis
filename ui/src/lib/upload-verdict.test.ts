@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSelectableUpload, uploadNotice } from "./upload-verdict";
+import { canReverify, isSelectableUpload, uploadNotice } from "./upload-verdict";
 import type { MediaFile, MediaVerdict } from "./types";
 
 /** THE FOUR STATES, from the client's side.
@@ -84,5 +84,58 @@ describe("uploadNotice", () => {
 
   it("says nothing at all about a file that passed", () => {
     expect(uploadNotice(file("verified"))).toBeNull();
+  });
+});
+
+/** #202. The re-check control, and the states it is and is not offered for.
+ *
+ *  This is the sibling of uploadNotice's split and it draws the SAME line: a
+ *  refusal is a statement about the file, and every affordance suggesting that
+ *  looking again will change it is the "upload it again" advice in a new
+ *  spelling. The two functions disagreeing is the failure this test exists for
+ *  — a row that says "sending it again will not change that" above a button
+ *  offering to try is worse than either half alone.
+ */
+describe("canReverify", () => {
+  it("offers a re-check for a file the server never managed to inspect", () => {
+    // The state the whole feature exists for. Before #202 this row said "Not
+    // checked" and offered nothing but re-uploading, which is impossible for a
+    // file the operator no longer has locally.
+    expect(canReverify(file("unverified", "the inspection was cut short"))).toBe(true);
+  });
+
+  it("offers a re-check for a file stored before verdicts existed", () => {
+    // Every install has these. They are the largest population of files nobody
+    // has read, and they are usable today precisely because nothing refuses
+    // them — so a way to find out what they are is the point.
+    expect(canReverify(file("unrecorded"))).toBe(true);
+  });
+
+  it("does not offer a re-check for a file the server inspected and refused", () => {
+    expect(canReverify(file("refused", "polyemesis does not accept this container"))).toBe(
+      false,
+    );
+  });
+
+  it("does not offer a re-check for a file that passed", () => {
+    expect(canReverify(file("verified"))).toBe(false);
+  });
+
+  // THE CONTROL, and without it a function returning false for everything
+  // passes three of the four assertions above.
+  it("splits the four states rather than answering one way", () => {
+    const answers = (["verified", "unverified", "refused", "unrecorded"] as const).map(
+      (o) => canReverify(file(o)),
+    );
+    expect(new Set(answers).size).toBe(2);
+  });
+
+  // The two functions must key on the same field and agree about `refused`.
+  // uploadNotice tells the operator re-sending cannot help; a button beside it
+  // offering to look again contradicts that in the same row.
+  it("never offers a re-check where uploadNotice says looking again cannot help", () => {
+    const refused = file("refused", "this file carries no video or audio stream");
+    expect(uploadNotice(refused)?.detail).toContain("sending it again will not change that");
+    expect(canReverify(refused)).toBe(false);
   });
 });
