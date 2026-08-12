@@ -535,3 +535,155 @@ func TestAnUnpopulatedProbeResultClaimsNothingAboutItsDuration(t *testing.T) {
 		t.Errorf("an input with no duration reported DurationSource=%q", live.DurationSource)
 	}
 }
+
+// THE REFUSAL SAYS WHY THE COUNT FAILED, AND "<nil>" IS NOT A REASON.
+//
+// THIS IS THE TEST THE PR DID NOT HAVE, and the shape of what it missed is
+// worth writing down because it is the general trap and not a one-off. Every
+// existing assertion about this branch asked whether the file was REFUSED --
+// the sentinel, Refused(), the 400, the "MP4" remedy. All of those were
+// correct, and stayed correct, while the diagnostic beside them was a lie:
+//
+//	polyemesis cannot work out how long this file is (ffprobe read it as
+//	"h264" and reported no duration, and it could not be counted: <nil>;
+//	re-save it as MP4 or MPEG-TS and upload it again)
+//
+// `err := cmd.Run()` is scoped to probeFile's whole body and is nil by the time
+// the counting branch is reached. `if secs, err := countDuration(…)` declared a
+// SECOND err scoped to the if/else chain, and the ErrNoDuration return sits
+// after that chain -- so it formatted the outer, nil one. Seventeen mutations
+// could not catch it, because a mutation shows that a test CAN fail and this
+// branch had no test asserting the thing that was wrong. The refusal is what
+// was pinned; the reason for it was not read by anything.
+//
+// So this asserts the CONTENT of the operator-facing message, for each cause
+// that can actually reach it, and it asserts the general shape too: no reason
+// may be "<nil>", and none may be empty. An operator handed this sentence has
+// nothing else to work from -- the file is deleted and the count left no
+// artefact -- and this is the one feature whose entire purpose is counting.
+func TestARefusalNamesWhyTheCountFailedRatherThanNil(t *testing.T) {
+	bins := bothBins(t)
+	dir := t.TempDir()
+	path := buildRawStream(t, filepath.Join(dir, "dump.h264"), "h264", "libx264", "30", "1")
+
+	// A stand-in ffmpeg per cause. Real ffprobe throughout, so the header read
+	// genuinely succeeds and execution genuinely reaches the counting branch --
+	// a fake ffprobe would test the fake.
+	script := func(name, body string) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+			t.Fatalf("write stand-in %s: %v", name, err)
+		}
+		return p
+	}
+
+	cases := []struct {
+		name string
+		// ffmpeg is the binary handed to Bins. Empty means the install has none,
+		// which is the case an operator actually hits.
+		ffmpeg func() string
+		posix  bool
+		// wantCause is a distinctive fragment of the REAL error, so this fails
+		// for a message that is merely non-empty as well as for "<nil>".
+		wantCause string
+	}{
+		{
+			// The reachable-in-production one: ffmpeg is optional (see Bins), and
+			// an install without it refuses every raw elementary stream. This is
+			// the exact configuration TestWithoutAnFFmpegARawStreamIsRefusedRather
+			// ThanAccepted already ran -- it just never read the sentence.
+			name:      "no ffmpeg to count with",
+			ffmpeg:    func() string { return "" },
+			wantCause: "no ffmpeg binary",
+		},
+		{
+			// ffmpeg ran, disliked the bytes, and said so. Its words are the only
+			// thing that distinguishes this from the case above, and they are what
+			// a log reader needs.
+			name: "ffmpeg failed and said why",
+			ffmpeg: func() string {
+				return script("angry-ffmpeg", "echo 'Invalid data found when processing input' >&2\nexit 1")
+			},
+			posix:     true,
+			wantCause: "Invalid data found",
+		},
+		{
+			// ffmpeg exited 0 and the decode never reached a positive output time,
+			// so there is no number to report. A file that decodes to nothing is
+			// named in ErrNoDuration's own doc comment as one of the three residual
+			// cases, and it is the one with no child stderr to fall back on.
+			name:      "the decode reached no output time",
+			ffmpeg:    func() string { return script("empty-ffmpeg", "exit 0") },
+			posix:     true,
+			wantCause: "without reaching a positive output time",
+		},
+	}
+
+	var exercised int
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.posix && runtime.GOOS == "windows" {
+				t.Skip("the stand-in binary this case needs is a POSIX shell script")
+			}
+			_, err := ProbeFile(context.Background(),
+				Bins{FFprobe: bins.FFprobe, FFmpeg: tc.ffmpeg()}, path)
+			if err == nil {
+				t.Fatal("a raw stream whose count failed was ACCEPTED")
+			}
+			exercised++
+			// The refusal itself, restated here only so a failure below cannot be
+			// mistaken for this having changed. These are the assertions that
+			// already passed against the defect.
+			if !errors.Is(err, ErrNoDuration) || !Refused(err) {
+				t.Fatalf("error = %v, want a Refused ErrNoDuration", err)
+			}
+
+			msg := err.Error()
+			// THE ASSERTION THE PR WAS MISSING.
+			if strings.Contains(msg, "<nil>") {
+				t.Errorf("the refusal reports the cause as <nil>:\n  %s\n"+
+					"The count's own error was discarded -- a variable shadow, most "+
+					"likely -- and the operator is told the count failed and given "+
+					"nothing about why, by the feature whose whole job is counting", msg)
+			}
+			if got := countReason(msg); got == "" {
+				t.Errorf("the refusal names no cause at all:\n  %s", msg)
+			} else if !strings.Contains(got, tc.wantCause) {
+				t.Errorf("the refusal blames %q, want it to name %q:\n  %s\n"+
+					"A non-empty reason is not enough: it has to be THIS count's "+
+					"reason, or the message is a plausible-looking wrong answer",
+					got, tc.wantCause, msg)
+			}
+			// The remedy still travels with it. It is the only thing an operator
+			// can act on, and it must not have been displaced by the cause.
+			if !strings.Contains(msg, "MP4") {
+				t.Errorf("the refusal no longer names a remedy: %s", msg)
+			}
+		})
+	}
+	if exercised == 0 {
+		t.Fatal("no count failure reached the assertions, so this test proved nothing")
+	}
+}
+
+// countReason extracts what probeFile blamed the failed count on: the text
+// between "could not be counted: " and the "; " that introduces the remedy.
+//
+// Reading the message rather than the error chain is deliberate. The chain is
+// not what the operator gets -- internal/api renders this with %s into a 400
+// body -- and the defect this pins was invisible to errors.Is and errors.As:
+// the sentinel was right, the wrapping was right, and the interpolated %v was
+// a nil the formatter turned into four characters of nothing.
+func countReason(msg string) string {
+	const marker = "could not be counted: "
+	i := strings.Index(msg, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := msg[i+len(marker):]
+	if j := strings.Index(rest, "; "); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.TrimSpace(rest)
+}

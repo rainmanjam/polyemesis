@@ -210,3 +210,60 @@ func TestWithoutAnFFmpegTheUploadGateStillRefusesARawStream(t *testing.T) {
 		}
 	}
 }
+
+// AND THE 400 BODY NAMES THE CAUSE RATHER THAN "<nil>".
+//
+// THE SAME REFUSAL AS THE TEST ABOVE, READ INSTEAD OF COUNTED. That one asserts
+// the upload was rejected, that the bytes are gone, and that the sentence says
+// "how long" and "MP4" -- and every one of those assertions passed against a
+// body that read:
+//
+//	{"error":"this file could not be read as media: polyemesis cannot work out
+//	how long this file is (ffprobe read it as \"h264\" and reported no duration,
+//	and it could not be counted: <nil>; re-save it as MP4 or MPEG-TS and upload
+//	it again)"}
+//
+// The refusal was right. The diagnostic was not, and only the diagnostic tells
+// an operator whether the fix is on their disk or on this server -- here it is
+// "this install has no ffmpeg", which is a thing THEY CANNOT SEE from the file
+// and cannot infer from "re-save it as MP4". A test that stops at "it was
+// refused" cannot distinguish the two, which is exactly why this one is
+// separate rather than three more lines in the test above.
+//
+// At this level rather than only in internal/ffmpeg because this is where the
+// string actually reaches a person: internal/api renders the error with %s into
+// the response body, so a chain that carries the cause correctly and a message
+// that does not are indistinguishable to everything except a reader.
+func TestTheRefusedRawStreamsBodySaysWhyTheCountFailed(t *testing.T) {
+	ffprobe := ffprobeOrSkip(t)
+	body := rawStreamBytes(t)
+	// s.encodeBin deliberately left empty: an install with no ffmpeg to count
+	// with, which is the configuration Bins documents as supported and refusing.
+	_, h, _, auth := probeServer(t, ffprobe)
+
+	r := uploadBytesRequest(t, "dump.h264", body)
+	auth(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode error body: %v (%s)", err, w.Body.String())
+	}
+	// THE ASSERTION THE PR WAS MISSING, at the surface an operator sees.
+	if strings.Contains(got.Error, "<nil>") {
+		t.Errorf("the 400 body reports the cause of the failed count as <nil>:\n  %s\n"+
+			"The operator is told the count failed and given nothing about why -- "+
+			"and this is the feature whose entire purpose is counting the length of "+
+			"a raw elementary stream", got.Error)
+	}
+	if !strings.Contains(got.Error, "no ffmpeg binary") {
+		t.Errorf("the 400 body does not say the count failed for want of an ffmpeg:\n  %s\n"+
+			"That is the actual cause here, it is a fact about THIS SERVER rather "+
+			"than about the operator's file, and nothing else in the message hints "+
+			"at it -- \"re-save it as MP4\" sends them to their own disk", got.Error)
+	}
+}

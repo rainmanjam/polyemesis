@@ -418,11 +418,27 @@ func probeFile(ctx context.Context, bins Bins, path string, stdoutCap int) (*Pro
 	// WithNoStreams failed with the less useful reason. It also means the count
 	// is never spent on a file with nothing in it to count.
 	if (res.Video != nil || len(res.Audio) > 0) && res.DurationSeconds <= 0 {
-		if secs, err := countDuration(ctx, bins.FFmpeg, res.FormatName, path); err == nil {
+		// countErr, NOT err, AND NOT AN `if secs, err := …` SHORT FORM. That form
+		// was here and it shipped a lie: `err` is already declared at the top of
+		// this function (`err := cmd.Run()`, nil by the time execution reaches
+		// here), so the short form declared a SECOND err scoped to the if/else
+		// chain -- and the ErrNoDuration return below sits AFTER that chain, so it
+		// read the outer, nil one. The operator was handed "it could not be
+		// counted: <nil>" for the one feature whose entire job is counting, with
+		// the real cause -- no ffmpeg binary, ffmpeg's own stderr, a decode that
+		// reached no positive output time -- discarded on the way out.
+		//
+		// A distinct name rather than a rearrangement, because a rearrangement is
+		// re-breakable by the next edit that adds a branch: with `countErr` there
+		// is no scope in which the wrong variable is spelled the same as the right
+		// one. TestARefusalNamesWhyTheCountFailedRatherThanNil is the pin.
+		secs, countErr := countDuration(ctx, bins.FFmpeg, res.FormatName, path)
+		if countErr == nil {
 			res.DurationSeconds = secs
 			res.DurationSource = DurationCounted
 			return res, nil
-		} else if ctx.Err() != nil {
+		}
+		if ctx.Err() != nil {
 			// THE COUNT WAS CUT SHORT, WHICH IS NOT A VERDICT ABOUT THE FILE.
 			// Returning ErrNoDuration here would make it one, and ErrNoDuration
 			// is in Refused -- so a client who disconnects mid-upload, or a
@@ -441,11 +457,11 @@ func probeFile(ctx context.Context, bins Bins, path string, stdoutCap int) (*Pro
 			// FFmpeg's own words are kept beside it with %v, because they are
 			// what a log reader needs.
 			return nil, fmt.Errorf("counting the length of %q was cut short: %w (%v)",
-				res.FormatName, ctx.Err(), err)
+				res.FormatName, ctx.Err(), countErr)
 		}
 		return nil, fmt.Errorf("%w (ffprobe read it as %q and reported no duration, "+
 			"and it could not be counted: %v; re-save it as MP4 or MPEG-TS and "+
-			"upload it again)", ErrNoDuration, res.FormatName, err)
+			"upload it again)", ErrNoDuration, res.FormatName, countErr)
 	}
 	return res, nil
 }
