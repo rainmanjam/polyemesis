@@ -267,7 +267,16 @@ func ledgerFieldPaths(v any) []string {
 				set[prefix] = true
 				return
 			}
-			walk(prefix+"[]", t[0])
+			// EVERY element, not just the first, and that correction came from a
+			// surviving mutant. `json:",omitempty"` means a false bool or an
+			// empty slice is ABSENT from the encoded row -- so sweepVerdicts[0],
+			// an ordinary non-inert row, does not carry `inert` at all, the walk
+			// never produced that path, and deleting the comparison for it left
+			// this test green. A readback blind to exactly the fields that are
+			// usually zero is blind to the interesting ones.
+			for _, el := range t {
+				walk(prefix+"[]", el)
+			}
 		default:
 			set[prefix] = true
 		}
@@ -325,7 +334,17 @@ func setAtPath(node any, segs []string, full string) bool {
 			arr[0] = perturbedValue(arr[0])
 			return true
 		}
-		return setAtPath(arr[0], segs[1:], full)
+		// THE FIRST ELEMENT THAT ACTUALLY HAS THE PATH. An omitempty field is
+		// absent from most rows and present on a few, and perturbing element 0
+		// unconditionally would silently perturb nothing -- reporting the path
+		// as caught while the artifact was never changed, which is the false
+		// green this whole file exists to find.
+		for _, el := range arr {
+			if setAtPath(el, segs[1:], full) {
+				return true
+			}
+		}
+		return false
 	}
 	if len(segs) == 1 {
 		m[key] = perturbedNumberForRatchet(key, child)
