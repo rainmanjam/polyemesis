@@ -29,7 +29,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
-	"github.com/rainmanjam/polyemesis/internal/web"
 )
 
 // THE DONE-CRITERION FOR THIS LEDGER, decided by a council and written here so
@@ -1290,6 +1289,27 @@ func assetProbe() nonTrieProbe {
 // four-minute npm install on every Go run to make nine probes honest. This
 // drives the same branches at no cost, and it is the filesystem the handler
 // actually reads rather than a description of one.
+// bareUIFS is a checkout with no UI compiled: an empty filesystem, constructed
+// here rather than borrowed from the embedded one.
+//
+// ISSUE #284. This column used to be web.FS(), the real embedded filesystem,
+// which is bare only while internal/web/dist holds nothing but .gitkeep. That
+// is true in CI because the go job does not run `npm run build`, and false for
+// any developer who has -- so `npm run build && go test ./internal/api` failed
+// with every bare probe entering "spa-index", and the failure named the handler
+// rather than the environment.
+//
+// The same coupling has bitten from the other side. The /assets/ directory
+// listing shipped in v0.6.0 because "CI's Go job does not run npm run build, so
+// the tests ran against an empty dist -- and against an empty filesystem the
+// fixed and unfixed handlers are byte-identical". A probe whose verdict depends
+// on whether somebody ran a build is measuring the environment as much as the
+// code, in both directions.
+//
+// Constructed, so both columns are driven in the same run whatever is on disk,
+// exactly as builtUIFS below already was.
+func bareUIFS() fs.FS { return fstest.MapFS{} }
+
 func builtUIFS() fs.FS {
 	return fstest.MapFS{
 		"index.html":              {Data: []byte("<!doctype html><title>polyemesis</title>")},
@@ -1371,16 +1391,12 @@ func observedWebBranch(w *httptest.ResponseRecorder) string {
 func assertNotFoundProbesEnterTheirBranches(t *testing.T, s *Server) {
 	t.Helper()
 
-	bare, err := web.FS()
-	if err != nil {
-		t.Fatalf("embedded UI filesystem: %v", err)
-	}
 	columns := []struct {
 		name   string
 		fsys   fs.FS
 		branch func(nonTrieProbe) string
 	}{
-		{"bare", bare, func(p nonTrieProbe) string { return p.bare }},
+		{"bare", bareUIFS(), func(p nonTrieProbe) string { return p.bare }},
 		{"built", builtUIFS(), func(p nonTrieProbe) string { return p.built }},
 	}
 
