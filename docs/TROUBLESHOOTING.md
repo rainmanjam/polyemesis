@@ -289,10 +289,27 @@ So the state is **recorded**, not merely logged:
   `unverifiedReason` saying which row above applies. A file that passed carries
   `"verified": true` and its `media` block. **`media` being absent is not the
   signal** — that is also how an upload from before this feature looks.
-- The Library shows a **Not checked** marker on the row.
+- `GET /api/v1/media` also carries `"outcome"`, always present, and it is the
+  field to branch on. `verified` is still true only for "inspected and
+  accepted", but **false covers four situations with different remedies**:
+
+  | `outcome` | what it means | what to do |
+  | --- | --- | --- |
+  | `verified` | inspected and accepted | nothing |
+  | `unverified` | this server produced no verdict (one of the five rows above) | upload it again |
+  | `refused` | the bytes **were** inspected and are not media this server takes | replace the file; re-sending it changes nothing |
+  | `unrecorded` | nothing was ever written about this file — every upload stored before verdicts existed | nothing; the normalise worker re-checks it at the moment of use |
+
+  `unrecorded` is not stored anywhere: it is what the listing says when there is
+  no `.probe-` record beside the file, and it stays distinct from every recorded
+  state because refusing those uploads would strand media an operator has had
+  for a year.
+- The Library shows a **Not checked** marker on the row, or **Refused** for the
+  `refused` state — never both, and never the first for the second.
 - A settings save that **adds** such a file to a playlist is refused, naming the
-  file and telling the operator to upload it again. Items already in the stored
-  playlist are not refused — see below.
+  file and telling the operator to upload it again — or, for a `refused` file,
+  saying it was inspected and refused and that sending it again will not change
+  that. Items already in the stored playlist are not refused — see below.
 - The normalise worker re-runs the same format check on whatever it is handed
   before it transcodes anything, so an item that reaches it by any other route
   is caught there instead.
@@ -301,6 +318,15 @@ The remedy is to upload the file again on a connection that stays up. There is
 no way to mark a stored file as checked without re-uploading it, deliberately:
 the server would be recording a pass it did not perform. A job that re-runs the
 check against a file already on disk is issue #202.
+
+**Nothing writes `refused` yet.** The upload handler still answers `400` and
+discards the staged bytes, which is right — nothing references a file that was
+never published. The state exists because anything that inspects an upload
+*later* cannot do that: the file is published by then, `DELETE` answers `409`
+while a playlist item names it, so the refusal has to be recorded — and until
+this state existed the only way to record it was as `unverified`, which every
+consumer answers by telling you to upload the same bytes again. The re-verify
+job of #202 is the first writer.
 
 One thing this does **not** cover: an unchecked file's pull URL still works, so
 pasting it into a pull source bypasses all of the above. That is issue #201.

@@ -285,20 +285,28 @@ func probeFirstLastDTS(t *testing.T, path string) (first, last float64) {
 // came out of the production relay hop at 1.421s with -output_ts_offset 0, and
 // at 101.421s with -output_ts_offset 100. The flag ADDS.
 //
-// That constant does not break the tier, and saying exactly why is the point of
-// writing it down. Every feed is the same shape -- one `-c copy` hop with no
-// -copyts, so FFmpeg rebases whatever it reads to the muxer's own start -- so
-// the same constant sits under every feed and CANCELS in the difference between
-// two of them. What survives is the property the tier actually needs: two feeds
-// whose offsets differ by N begin N apart on the published timeline. That is the
-// first assertion below, and it is the one that would matter if it broke.
+// The property the tier actually needs survives that: two feeds whose offsets
+// differ by N begin N apart on the published timeline. That is the first
+// assertion below, and it is the one that would matter if it broke.
 //
-// It also means the seam ledger's predictedStepMs is a DIFFERENCE of two
-// absolute positions, both carrying the constant, so the prediction is unharmed
-// by it. The second assertion pins the other half of that formula: FFmpeg's own
-// -progress out_time is measured from the rebased input, WITHOUT the offset
-// added, which is what makes `out.offset + out_time` the outgoing feed's last
-// published timestamp.
+// THE CONSTANT DOES NOT CANCEL, AND THIS TEST CANNOT SEE THAT. An earlier
+// version of this comment said the constant "sits under every feed and CANCELS
+// in the difference between two of them", and therefore that the seam ledger's
+// predictedStepMs is unharmed by it. It cancels HERE, and only here, because
+// both hops below read the SAME fixture from its HEAD. Production feeds do not:
+// each joins a live hub at its own moment, and a slate joins no hub at all.
+// Measured against a running hub in
+// TestProgressOutTimeCountsMediaProducedNotPositionOnThePublishedTimeline and
+// the bench behind it, the constant was 1.421s for a hop reading from the head,
+// 2.304 / 2.464 / 2.304 / 2.485 for hops joining at +4s, +8s, +12s and +16s, and
+// 1.333 for a SlateArgs feed -- a spread of 1.15s that the ledger's prediction
+// drops, under an acceptance detector whose threshold is 1ms. See #126.
+//
+// The second assertion pins the other half of the ledger's formula: FFmpeg's own
+// -progress out_time is measured WITHOUT the offset added. What that makes
+// `out.offset + out_time` is the switch DECISION's tier stamp plus the media the
+// feed has produced -- not the feed's last published timestamp, which is that
+// sum plus the constant above.
 func TestOutputTSOffsetAddsToTheInputTimelineRatherThanSettingIt(t *testing.T) {
 	ffmpegBin, _ := offsetBenchTools(t)
 

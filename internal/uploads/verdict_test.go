@@ -54,7 +54,7 @@ func TestAnUninspectedUploadIsRecordedAsOneAndSaysWhy(t *testing.T) {
 	if !recorded {
 		t.Fatal("no verdict was written beside the file")
 	}
-	if v.Verified || v.Reason != ReasonInterrupted {
+	if v.Verified() || v.Reason != ReasonInterrupted {
 		t.Errorf("verdict on disk = %+v", v)
 	}
 }
@@ -118,7 +118,7 @@ func TestAnUnreadableRecordFailsClosed(t *testing.T) {
 	if !recorded {
 		t.Fatal("an unreadable record reads as no record at all")
 	}
-	if v.Verified {
+	if v.Verified() {
 		t.Error("an unreadable record reads as a pass")
 	}
 }

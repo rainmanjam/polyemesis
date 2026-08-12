@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, ShieldAlert, Trash2, Upload, X } from "lucide-react";
+import { Copy, ShieldAlert, ShieldX, Trash2, Upload, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { bytes, duration, timestamp } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { uploadNotice } from "@/lib/upload-verdict";
 import type { MediaFile } from "@/lib/types";
 
 /* ===========================================================================
@@ -237,19 +238,38 @@ export function MediaUploads() {
                       how every upload from before the check existed looks.
                       A row that says nothing here is a row that lets an
                       operator schedule a file nobody has read. */}
-                  {!f.verified && (
-                    <div
-                      className="mt-0.5 flex items-center gap-1 text-[11px] text-warn"
-                      title={
-                        f.unverifiedReason
-                          ? `${f.unverifiedReason}. Upload it again to have it checked; it cannot be used as a playlist item until it has been.`
-                          : "This file was stored before uploads were checked, so nothing here describes what is in it."
-                      }
-                    >
-                      <ShieldAlert className="size-3 shrink-0" aria-hidden />
-                      <span>Not checked</span>
-                    </div>
-                  )}
+                  {/* REFUSED IS NOT "NOT CHECKED", and this row is the whole
+                      reason the third state exists. A file that was inspected
+                      and rejected is the opposite of an unchecked one: the
+                      server read it and knows exactly what it is. Rendering
+                      both as "Not checked" would state something the server
+                      knows to be false, and — worse — would hand the operator
+                      the one remedy that cannot work, since re-sending the same
+                      bytes earns the same refusal. Nothing writes this state
+                      yet (see #202: the re-verify job is what will), and the
+                      row is built first so that when something does, the
+                      Library does not lie about it for a release.
+                      The wording lives in lib/upload-verdict so that this row
+                      and the playlist editor's filter cannot disagree. */}
+                  {(() => {
+                    const notice = uploadNotice(f);
+                    if (!notice) return null;
+                    const Icon =
+                      notice.tone === "refused" ? ShieldX : ShieldAlert;
+                    return (
+                      <div
+                        className={`mt-0.5 flex items-center gap-1 text-[11px] ${
+                          notice.tone === "refused"
+                            ? "text-destructive"
+                            : "text-warn"
+                        }`}
+                        title={notice.detail}
+                      >
+                        <Icon className="size-3 shrink-0" aria-hidden />
+                        <span>{notice.label}</span>
+                      </div>
+                    );
+                  })()}
                   {/* What the file actually is, which a name and a size cannot
                       say. The track count leads because routing is per track:
                       selecting track 3 of a file that carries one is silence

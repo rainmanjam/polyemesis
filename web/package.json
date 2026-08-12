@@ -16,5 +16,8 @@
     "motion": "^13.0.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^6.0.3"
+  },
+  "devDependencies": {
+    "wrangler": "4.121.0"
   }
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -109,6 +110,11 @@ type Server struct {
 	// server that never established how it was installed.
 	upgradeMethod upgrade.Method
 	execPath      string
+
+	// uiFS overrides the embedded UI filesystem the NotFound terminal serves.
+	// Nil -- which is every server this binary builds -- means web.Handler(),
+	// the embedded bundle, unchanged. See uiHandler for why the seam exists.
+	uiFS fs.FS
 
 	// The post-production tier. Every one of these is optional and every
 	// handler that reads one checks first, because a build that has not wired
@@ -361,8 +367,30 @@ func New(o Options) *Server {
 }
 
 // Handler builds the router.
+//
+// IT REGISTERS NOTHING ITSELF, and that is a load-bearing property rather than
+// a style choice. Every registration goes through registerRoutes, which takes a
+// chi.Router INTERFACE, so the route-coverage ledger can hand it a recorder and
+// derive the population it reconciles from the registrations this build makes
+// instead of from chi.Walk plus a hand-written list of everything the walk
+// cannot see. chi.Walk is complete over the routing TRIE and the trie is not the
+// mux: r.NotFound and the method-not-allowed terminal are invisible to it, and
+// until now the only record that they exist was a slice of probes somebody
+// remembered to write.
+//
+// TestHandlerRegistersOnlyThroughTheRecordedSeam reads this function's AST and
+// fails if a registration call appears here, because a route registered on the
+// mux directly is a route the recorder cannot see -- which is the same hole one
+// level in.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
+	s.registerRoutes(r)
+	return r
+}
+
+// registerRoutes is Handler's body, taking the router as an interface so that
+// the enumeration authority can be a recorder rather than a walk. See Handler.
+func (s *Server) registerRoutes(r chi.Router) {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(s.requestLogger)
@@ -877,12 +905,28 @@ func (s *Server) Handler() http.Handler {
 	r.Handle(WatchPath, watch)
 	r.Handle(WatchPath+"/*", watch)
 
-	if h, err := web.Handler(); err == nil {
+	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)
 	} else {
 		s.log.Error("embedded UI unavailable", "err", err)
 	}
-	return r
+}
+
+// uiHandler is the NotFound terminal, resolved through a field so a test can
+// mount the same closure over a populated `dist` and drive the SPA and asset
+// branches THROUGH THE REAL MUX rather than beside it.
+//
+// That distinction is the whole of #167's residual. The branch table was driven
+// against web.HandlerFor directly, with no requireAuth, no security headers and
+// no request logger in front of it, while the mux this checkout and CI actually
+// serve mounts a `dist` holding only .gitkeep -- so the configuration production
+// ships was the one configuration no probe had ever entered end to end. A nil
+// field is the shipped behaviour verbatim.
+func (s *Server) uiHandler() (http.Handler, error) {
+	if s.uiFS != nil {
+		return web.HandlerFor(s.uiFS), nil
+	}
+	return web.Handler()
 }
 
 // UIBuilt reports whether a real UI is embedded, so main can warn on startup
