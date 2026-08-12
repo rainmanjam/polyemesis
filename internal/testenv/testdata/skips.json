@@ -52,7 +52,7 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 92,
+  "total": 93,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 8,
@@ -61,7 +61,7 @@
     "internal/config": 1,
     "internal/db": 1,
     "internal/engine": 6,
-    "internal/ffmpeg": 21,
+    "internal/ffmpeg": 22,
     "internal/media": 5,
     "internal/meters": 3,
     "internal/playlistmedia": 5,
@@ -74,5 +74,18 @@
     "internal/supervisor": 1,
     "internal/transcribe": 1,
     "internal/upgrade": 8
-  }
+  },
+  "raisedBy3": [
+    {
+      "pr": 267,
+      "from": 92,
+      "to": 93,
+      "packages": {
+        "internal/ffmpeg": "21 -> 22"
+      },
+      "why": "ONE site, and it is the Windows arm of the test written to close this PR's own refutation. An adversarial verifier found that the ErrNoDuration return formatted a SHADOWED err -- `err := cmd.Run()` shadowed by `if secs, err := countDuration(...)`, whose scope dies before the return -- so the operator was told `it could not be counted: <nil>`. Seventeen mutations and twelve tests missed it, because every one of them asserted the file was REFUSED and the refusal was correct; only the diagnostic was wrong. TestARefusalNamesWhyTheCountFailedRatherThanNil tables all three reachable causes and asserts each names ITS OWN cause. One of the three is 'there is no ffmpeg to count frames with', produced by a stand-in binary that is a POSIX shell script, which Windows will not execute -- the same shape internal/api's fakeProbe already carries in the entry above, and the subject of #265. Environment, not a property of the code.",
+      "alreadyPaidDown": "The api-side half of the same fix -- TestTheRefusedRawStreamsBodySaysWhyTheCountFailed -- added NO site: it reads the refusal out of the HTTP 400 JSON through the existing fixture, so it needs no stand-in of its own. The ffmpeg-side table skips once for the whole Windows case rather than once per cause; three separate calls would be three free passes for one condition, which is the rule the entry above sets.",
+      "handEditedRatherThanRegenerated": "Same reason as every entry above: -update-skips round-trips this file through a struct with no field for these reasons and deletes all of them. The two numbers were raised by hand."
+    }
+  ]
 }
