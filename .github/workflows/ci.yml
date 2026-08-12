@@ -463,7 +463,9 @@ jobs:
               try {
                 gh release download latest --repo BtbN/FFmpeg-Builds --pattern $asset --output $zip
                 if (Test-Path $zip) { break }
-              } catch {}
+              } catch {
+                Write-Host "gh attempt $i failed: $($_.Exception.Message)"
+              }
             }
             try {
               & curl.exe --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL `
