@@ -368,7 +368,7 @@ failover is off — there is no tier to switch.
 
 | Method | Path |
 |---|---|
-| `POST` | `/media` |
+| `POST` | `/media`, `/media/{name}/verify` |
 | `GET` | `/media` |
 | `DELETE` | `/media/{name}` |
 
@@ -387,11 +387,38 @@ file an operator deliberately put there. Every file carries an `origin` of
 `uploaded`, `recorded` or `clip`, derived from which store it came out of rather
 than stored beside it.
 
-`POST /media` and `DELETE /media/{name}` are **session-only**: a browser session
-reaches them and **an API token does not**. Writing arbitrary bytes to the
-server's disk is not something a leaked automation credential should reach.
-`GET /media` is not restricted — a token can list what is stored, which is the
-half of this endpoint automation actually wants.
+`POST /media/{name}/verify` queues a **re-inspection** of a file already on
+disk. It answers `201` with the queued job, or `200` when an identical re-check
+was already queued or running, `404` when no such upload exists and `503` when
+this build has no job queue. The inspection itself happens in the queue, under
+the resource policy, because it is an FFprobe against a file that may be several
+gigabytes on a box that is also encoding a broadcast — nothing waits on the
+answer, so nothing holds a request open for it.
+
+It exists because `verified: false` used to be a dead end. An upload the server
+never managed to inspect — the probe runs while the request is open, so a
+dropped connection cuts it short — could only be re-inspected by sending the
+bytes a second time, which is no remedy at all for a file the operator no longer
+has a local copy of.
+
+**It records only what it establishes.** An inspection that concludes writes
+`verified` or `refused`, replacing whatever was recorded before, so a file that
+passes on the second look stops being refused. An inspection that *cannot run* —
+no FFprobe, a file that has since been deleted, a probe cut short — writes
+**nothing at all**, and the job fails saying so. `outcome` never moves to
+`unverified` because of this endpoint, and a file with no record keeps having no
+record: "nobody has read this" and "this server could not read it just now" are
+different claims, and every install has uploads predating verdicts entirely.
+
+`POST /media`, `POST /media/{name}/verify` and `DELETE /media/{name}` are
+**session-only**: a browser session reaches them and **an API token does not**.
+Writing arbitrary bytes to the server's disk is not something a leaked
+automation credential should reach, and neither is rewriting the server's
+conclusions about bytes already there — `PUT /settings` refuses a playlist item
+or pull source naming an upload that is anything but verified or unrecorded, so
+the verdict is a gate and not a label. `GET /media` is not restricted — a token
+can list what is stored, which is the half of this endpoint automation actually
+wants.
 
 Until this was fixed, the sentence above was the only thing enforcing it: the
 routes were in the ordinary authenticated group, and a token-only `POST`
