@@ -1222,50 +1222,42 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 // the surviving explanations, so they are written down at the moment they are
 // known and nowhere else can know them.
 //
-// predictedStepMs is the falsifiable part, and it is a PREDICTION rather than a
-// measurement: it is where the outgoing feed's last published timestamp is
-// believed to be (its offset plus how far FFmpeg said it had got) minus where
-// the incoming feed's timeline starts. The leading hypothesis for #126 is that
-// the copy hop, which has no -re where the slate has one, publishes as fast as
-// bytes arrive and so runs AHEAD of the tier clock its offset was computed from.
-// Measured offline at about 30x realtime given a burst; where a burst would come
-// from in production is NOT established, because relay.Hub is a pure fanout and
-// queues nothing, so it would have to be a socket buffer or FFmpeg's own fifo.
-// If the hypothesis is right this number is positive at a seam that produces a
-// backwards step, and a failing run with predictedStepMs near zero kills it
-// outright.
+// THE LEDGER RECORDS TERMS, NOT A VERDICT, and that is the correction this
+// line carries. It used to publish predictedStepMs -- `(out.offset + out_time)
+// - in.offset` -- described as where the outgoing feed's last published
+// timestamp sits relative to where the incoming feed's timeline starts. It was
+// never that quantity, and the name did real damage: two proposed fixes for
+// #126 were derived from reading it, and both were refuted.
 //
-// It rests on one assumption -- that FFmpeg's out_time does not already include
-// -output_ts_offset -- which is exactly what relayfeed_offset_integration_test.go
-// measures offline rather than argues about. The three inputs are logged
-// separately as well as combined, so a reader who finds the assumption wrong can
-// recompute the prediction from the same line without rerunning anything.
-//
-// WHAT predictedStepMs WAS MEASURED TO BE, AND IT IS NOT A STEP. Read the
-// hypothesis above as history. out_time counts the media a feed has produced
-// since its own first output -- measured in
-// TestProgressOutTimeCountsMediaProducedNotPositionOnThePublishedTimeline -- and
-// both offsets are tier-clock stamps taken at a switch DECISION. So
-// `(out.offset + out_time) - in.offset` is, to within two correction terms,
-// MINUS THE OUTGOING FEED'S START LAG: the wall time between its offset being
-// stamped and its first output, which for a feed that follows a teardown is the
-// teardown. That is why 91% of 113 recorded seams carry a negative prediction
-// while 112 of them produced no step at all, and why the seam whose predecessor
-// logged an 8002ms teardown carries predictedStepMs = -8586ms against a
-// delivered step of -30ms.
+// What it actually computed: out_time counts the media a feed has produced
+// since its OWN first output -- measured in
+// TestProgressOutTimeCountsMediaProducedNotPositionOnThePublishedTimeline --
+// while both offsets are tier-clock stamps taken at a switch DECISION. So the
+// expression is, to within two correction terms, MINUS THE OUTGOING FEED'S
+// START LAG: the wall time between its offset being stamped and its first
+// output, which for a feed following a teardown is the teardown. Hence 91% of
+// 113 recorded seams carried a negative "prediction" while 112 of them produced
+// no step at all, and the seam whose predecessor logged an 8002ms teardown
+// carried -8586ms against a delivered step of -30ms. The 286x was never an
+// overshoot; the two numbers were different quantities.
 //
 // The step a destination actually sees is
 //
 //	(out.offset + C_out + out_time) - (in.offset + C_in)
 //
 // where C_k is a feed's own start constant, the first value on its input
-// timeline, which -output_ts_offset ADDS to. The ledger drops both C terms. They
-// cancel only when the two feeds read the same stream from the same point, which
-// at a real seam they never do; measured spread between feeds is about 1.15s
-// against a 1ms detector threshold. Nothing FFmpeg reports through -progress
-// carries C, so this line cannot be repaired into a step predictor by arithmetic
-// alone. Do not try; two fixes derived from reading rather than measuring have
-// already been refuted here. See #126.
+// timeline, which -output_ts_offset ADDS to. The old expression dropped both C
+// terms. They cancel only when the two feeds read the same stream from the same
+// point, which at a real seam they never do; measured spread between feeds is
+// about 1.15s against a 1ms detector threshold.
+//
+// NOTHING FFmpeg REPORTS THROUGH -progress CARRIES C, so no arithmetic over
+// these fields yields a step. It is not published rather than published wrong:
+// a reader who wants the old number can still form it from outOffset, outTimeMs
+// and inOffset, which are all here, but they will be forming a start lag and
+// the ledger no longer tells them it is a step. Do not reintroduce a derived
+// field here without measuring what it is first -- that is the specific mistake
+// this paragraph exists to stop, twice over. See #126.
 //
 // Info rather than Debug on purpose: the acceptance suite runs the server at
 // -log info, and turning it up to debug to see this would also turn on the
@@ -1310,14 +1302,12 @@ func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64,
 		return
 	}
 
-	predicted := (out.offset + float64(outTimeMs)/1000 - in.offset) * 1000
-
 	e.log.Info("feed seam",
 		"outGen", out.gen, "outKind", string(out.kind), "outOffset", out.offset,
 		"outTimeMs", outTimeMs, "outProgressDone", progressDone,
 		"teardownMs", teardownMs, "stopDeadline", errors.Is(stopErr, supervisor.ErrStopDeadline),
 		"inGen", in.gen, "inKind", string(in.kind), "inOffset", in.offset,
-		"predictedStepMs", predicted, "reason", reason)
+		"reason", reason)
 }
 
 // feedRunning reports whether the feed's process is still up. A feed is not
