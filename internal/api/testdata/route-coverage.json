@@ -1,19 +1,19 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 57,
-  "counterpartlessExcusedCeiling": 32,
+  "excusedCeiling": 50,
+  "counterpartlessExcusedCeiling": 25,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
   "nonGetDifferentialFloor": 20,
   "unstableCeiling": 3,
-  "inertCeiling": 11,
+  "inertCeiling": 6,
   "varianceExemptCeiling": 2,
   "shapeFloor": 26,
   "shapesNotInspectedCeiling": 3,
   "totals": {
     "methodPatternPairs": 212,
-    "swept": 55,
-    "excused": 57,
+    "swept": 62,
+    "excused": 50,
     "denied": 100,
     "nonTrieProbes": 12,
     "shapesEmitted": 26,
@@ -21,8 +21,8 @@
   },
   "partition": {
     "differential": 8,
-    "invariant": 43,
-    "inertSubsetOfInvariant": 11,
+    "invariant": 50,
+    "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
     "unstable": 3
   },
@@ -50,7 +50,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/alerts/rules/{id}",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "PUT",
@@ -215,7 +215,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/clipper/recordings/{id}",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "POST",
@@ -385,7 +385,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/hooks/{id}",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "PUT",
@@ -475,7 +475,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "PUT",
@@ -530,7 +530,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/library/sessions/{id}",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "PUT",
@@ -745,7 +745,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/renditions/{id}",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "PUT",
@@ -795,7 +795,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/schedules/{id}",
-      "coverage": "excused"
+      "coverage": "swept"
     },
     {
       "method": "PUT",
@@ -1097,8 +1097,12 @@
     {
       "path": "/api/v1/alerts/rules",
       "pattern": "GET /api/v1/alerts/rules",
-      "class": "invariant",
-      "inert": true
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/alerts/rules/1",
+      "pattern": "GET /api/v1/alerts/rules/{id}",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/auth/me",
@@ -1137,6 +1141,11 @@
     {
       "path": "/api/v1/chat/users?platform=twitch\u0026authorId=1",
       "pattern": "GET /api/v1/chat/users",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/clipper/recordings/1",
+      "pattern": "GET /api/v1/clipper/recordings/{id}",
       "class": "invariant"
     },
     {
@@ -1221,8 +1230,12 @@
     {
       "path": "/api/v1/hooks",
       "pattern": "GET /api/v1/hooks",
-      "class": "invariant",
-      "inert": true
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/hooks/1",
+      "pattern": "GET /api/v1/hooks/{id}",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/hooks/1/deliveries",
@@ -1253,6 +1266,16 @@
     {
       "path": "/api/v1/library",
       "pattern": "GET /api/v1/library",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/library/recordings/1",
+      "pattern": "GET /api/v1/library/recordings/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/library/sessions/1",
+      "pattern": "GET /api/v1/library/sessions/{id}",
       "class": "invariant"
     },
     {
@@ -1325,8 +1348,7 @@
     {
       "path": "/api/v1/recordings",
       "pattern": "GET /api/v1/recordings",
-      "class": "invariant",
-      "inert": true
+      "class": "invariant"
     },
     {
       "path": "/api/v1/recordings/stems",
@@ -1342,8 +1364,12 @@
     {
       "path": "/api/v1/renditions",
       "pattern": "GET /api/v1/renditions",
-      "class": "invariant",
-      "inert": true
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/renditions/1",
+      "pattern": "GET /api/v1/renditions/{id}",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/renditions/presets",
@@ -1358,8 +1384,12 @@
     {
       "path": "/api/v1/schedules",
       "pattern": "GET /api/v1/schedules",
-      "class": "invariant",
-      "inert": true
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/schedules/1",
+      "pattern": "GET /api/v1/schedules/{id}",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/schedules/runs",
@@ -1526,17 +1556,6 @@
       "counterpart": "notFoundSurfaceIsPrincipalIndependent"
     },
     {
-      "route": "GET /api/v1/alerts/rules/{id}",
-      "scope": "route",
-      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
-      "want": {
-        "as": "read",
-        "status": 404
-      },
-      "counterpart": "",
-      "issue": "#163"
-    },
-    {
       "route": "GET /api/v1/auth/tokens",
       "scope": "route",
       "why": "session-only; no bearer of either scope reaches it",
@@ -1555,17 +1574,6 @@
         "status": 403
       },
       "counterpart": ""
-    },
-    {
-      "route": "GET /api/v1/clipper/recordings/{id}",
-      "scope": "route",
-      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
-      "want": {
-        "as": "read",
-        "status": 404
-      },
-      "counterpart": "",
-      "issue": "#163"
     },
     {
       "route": "GET /api/v1/clipper/recordings/{id}/keyframes",
@@ -1608,17 +1616,6 @@
       "counterpart": ""
     },
     {
-      "route": "GET /api/v1/hooks/{id}",
-      "scope": "route",
-      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
-      "want": {
-        "as": "read",
-        "status": 404
-      },
-      "counterpart": "",
-      "issue": "#163"
-    },
-    {
       "route": "GET /api/v1/jobs",
       "scope": "route",
       "why": "503 without a job queue wired; the handler never reaches storage",
@@ -1637,17 +1634,6 @@
         "status": 503
       },
       "counterpart": ""
-    },
-    {
-      "route": "GET /api/v1/library/recordings/{id}",
-      "scope": "route",
-      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
-      "want": {
-        "as": "read",
-        "status": 404
-      },
-      "counterpart": "",
-      "issue": "#163"
     },
     {
       "route": "GET /api/v1/library/recordings/{id}/media/{file}",
@@ -1680,17 +1666,6 @@
       "counterpart": ""
     },
     {
-      "route": "GET /api/v1/library/sessions/{id}",
-      "scope": "route",
-      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
-      "want": {
-        "as": "read",
-        "status": 404
-      },
-      "counterpart": "",
-      "issue": "#163"
-    },
-    {
       "route": "GET /api/v1/metadata/broadcast-window",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -1703,12 +1678,13 @@
     {
       "route": "GET /api/v1/metadata/push/{id}",
       "scope": "route",
-      "why": "reached only with a metadata push row this fixture does not create; the 404 body is the handler's own \"no such metadata push\", not the router's",
+      "why": "reached only with a LIVE metadata push, which is an entry in the in-process metadataRegistry rather than a row in any table: it is created by POST /metadata/push making a real call to a platform, and its snapshot moves while the push runs. Neither half is plantable by this fixture, and a body that changes between samples is an unstable sweep rather than a covered route. The 404 body is the handler's own \"no such metadata push\", not the router's",
       "want": {
         "as": "read",
         "status": 404
       },
-      "counterpart": ""
+      "counterpart": "",
+      "issue": "#163"
     },
     {
       "route": "GET /api/v1/oauth/{platform}/callback",
@@ -1791,28 +1767,6 @@
         "status": 403
       },
       "counterpart": ""
-    },
-    {
-      "route": "GET /api/v1/renditions/{id}",
-      "scope": "route",
-      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
-      "want": {
-        "as": "read",
-        "status": 404
-      },
-      "counterpart": "",
-      "issue": "#163"
-    },
-    {
-      "route": "GET /api/v1/schedules/{id}",
-      "scope": "route",
-      "why": "reached only with a row this fixture does not create, so it answers 404. Traced to leaf fields and carrying no stored credential (media, transcripts and text). The FIXTURE is what is deferred, not the guard: the 404 is driven, and a body appearing here fails.",
-      "want": {
-        "as": "read",
-        "status": 404
-      },
-      "counterpart": "",
-      "issue": "#163"
     },
     {
       "route": "GET /api/v1/tls/ca",
@@ -2171,9 +2125,9 @@
     },
     {
       "id": "empty-fixture-rows",
-      "what": "the routes reached only with a row this fixture does not create -- clipper recordings, library recordings and sessions, alert rules, hooks, schedules, renditions. Their excuses no longer discharge on prose or on an issue number: each DRIVES the 404 it claims. What is still deferred is the FIXTURE, not the guard.",
-      "whySafe": "the 404 is now an assertion. If any of these starts answering a read token with a body, the excuse drive fails naming the route and the observed status, and the fix is leakRoutes().",
-      "whatWouldMakeItUnsafe": "nothing silently -- that is the change. What it costs is coverage: ten routes whose response bodies no principal has ever seen in a test, so their leaf fields are still traced by reading rather than by reading bytes.",
+      "what": "SEVEN OF THE NINE ARE GONE. plantRows now creates a row of each kind, so clipper recordings, library recordings and sessions, alert rules, hooks, schedules and renditions answer 200 and are value-swept rather than excused; their bodies are read by three principals and scanned for every planted sentinel, which is the coverage this row used to record as missing. What is left is TWO routes that no row can drive. GET /metadata/push/{id} reads an in-process registry entry created by a real outbound platform call, whose snapshot moves while the push runs. GET /playout/poster.jpg renders a JPEG out of an MPEG-TS segment, and there is no segment on disk without running FFmpeg in a unit test. Both keep a driven excuse. Separately, /hooks/1/deliveries stays INERT: the row exists now, but a delivery record does not, and manufacturing one means an outbound HTTP attempt.",
+      "whySafe": "the 404 was already an assertion and still is for the two that remain: if either starts answering a read token with a body, the excuse drive fails naming the route and the observed status. For the seven that left, the claim is no longer a 404 at all -- it is the ordinary sweep, which is strictly stronger, and two of them (the alert rule and the hook) carry a planted webhook secret in the URL path so that alerts.RedactWebhookURL is under the sweep rather than merely under review.",
+      "whatWouldMakeItUnsafe": "a fixture row being deleted. That is not silent either: leakRoutes() requires a 200 from every path it names, so losing a row fails by name rather than quietly reverting these routes to unread. The residual cost is the two routes above, whose leaf fields are still traced by reading the handler rather than by reading bytes.",
       "issue": "#163"
     },
     {
