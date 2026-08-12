@@ -239,6 +239,18 @@ type Server struct {
 	// handler path rather than replacing it.
 	probeBin string
 
+	// encodeBin supplies the ffmpeg path for probeUpload's duration count, and
+	// is set only by tests.
+	//
+	// The sibling of probeBin and needed for the same reason it is. probeUpload
+	// reaches ffmpeg through s.eng().Tools(), this package's tests have no
+	// manager, and so the branch that COUNTS the length of a raw elementary
+	// stream (#218) would be unreachable under `go test ./internal/api` --
+	// deleting it, or wiring the wrong binary into it, would leave the package
+	// green. A test that sets probeBin and leaves this empty exercises the
+	// refusal; one that sets both exercises the count.
+	encodeBin string
+
 	// probeTimeout overrides probeUploadTimeout, and is set only by tests.
 	//
 	// Zero means the constant. It exists because probeUploadTimeout is 30

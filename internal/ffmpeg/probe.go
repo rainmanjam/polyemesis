@@ -21,10 +21,28 @@ type ProbeResult struct {
 	// "mov,mp4,m4a,3gp,3g2,mj2" for an MP4 and "matroska,webm" for an MKV.
 	// ProbeFile gates on it; Probe reports it and nothing reads it.
 	FormatName string `json:"formatName"`
-	// DurationSeconds is the container's own duration, and is 0 for a live
-	// input -- a relay that never ends has no duration to report, which is the
-	// case this type was written for. It is meaningful for a file.
+	// DurationSeconds is how long this input is, and is 0 for a live input --
+	// a relay that never ends has no duration to report, which is the case this
+	// type was written for. It is meaningful for a file.
+	//
+	// IT IS NO LONGER ALWAYS THE CONTAINER'S OWN FIELD. A raw elementary stream
+	// has no container to declare one, and ProbeFile now COUNTS the length of
+	// such a file rather than refusing it -- see #218 and CountDurationSeconds.
+	// DurationSource says which of the two happened, and a consumer for whom
+	// the difference matters must ask; the number alone cannot tell it.
 	DurationSeconds float64 `json:"durationSeconds"`
+	// DurationSource says where DurationSeconds came from: declared by the
+	// container, counted by decoding, or not established at all.
+	//
+	// A SEPARATE FIELD RATHER THAN A SEPARATE NUMBER, and that direction was the
+	// decision. Putting a counted duration in a field of its own would leave
+	// every existing consumer -- the Library listing, the disk estimate, the
+	// -fs cap, the progress bar -- reading zero for a file that is perfectly
+	// playable, which is precisely the "accepted at the door, unusable forever"
+	// state #118 was written to end, re-created in the opposite direction. So
+	// the number goes where the number goes and the PROVENANCE travels beside
+	// it, in a field whose zero value is "unknown" rather than "measured".
+	DurationSource DurationSource `json:"durationSource,omitempty"`
 }
 
 // There was a Raw string here holding ffprobe's whole JSON reply, and nothing
@@ -158,8 +176,18 @@ func Refused(err error) bool {
 }
 
 // ErrNoDuration is returned for a file whose format is accepted but whose length
-// ffprobe will not state. It is a refusal at the door rather than a permanent
-// failure at the worker, which is where it used to land.
+// polyemesis could not establish. It is a refusal at the door rather than a
+// permanent failure at the worker, which is where it used to land.
+//
+// ITS REACH NARROWED IN #218 AND ITS MEANING DID NOT. It used to fire for every
+// file whose CONTAINER did not declare a duration, which swept in the raw
+// elementary streams the allowlist admits -- a .h264 dump from an encoder has
+// no container to declare anything, so it was refused for a property it can
+// never have. ProbeFile now counts such a file's length instead. What is left
+// here is the honest residual: no ffmpeg binary to count with, a count that
+// failed or ran out of time, or a file that decoded to nothing. All three are
+// still "polyemesis cannot work out how long this file is", and the two gates
+// still agree, which is the guarantee #118 bought and this must not spend.
 var ErrNoDuration = errors.New("polyemesis cannot work out how long this file is")
 
 // indirectFormats are the demuxer names whose whole job is resolving a NAME to
@@ -215,6 +243,10 @@ var selfContainedFormats = map[string]bool{
 	"wav": true, "flac": true, "aac": true, "mp3": true, "ac3": true, "eac3": true,
 	// Raw elementary streams. An operator handed a .h264 dump by an encoder
 	// has a real file, and it is as self-contained as a container is.
+	//
+	// These are the entries that made the duration branch below necessary and
+	// then, in #218, made it count rather than refuse: none of them declares a
+	// duration, because there is no container to declare it in.
 	"h264": true, "hevc": true, "mpegvideo": true,
 }
 
@@ -247,8 +279,37 @@ var selfContainedFormats = map[string]bool{
 // The error is returned verbatim rather than folded into a generic "could not
 // read this". Somebody who uploaded the wrong thing is best served by ffprobe's
 // own words about it.
-func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, error) {
-	return probeFile(ctx, ffprobeBin, path, probeStdoutCap)
+func ProbeFile(ctx context.Context, bins Bins, path string) (*ProbeResult, error) {
+	return probeFile(ctx, bins, path, probeStdoutCap)
+}
+
+// Bins names the binaries ProbeFile may run.
+//
+// Not the detected Tools struct above it: that is a startup snapshot with a
+// mutex and an encoder census attached, and internal/playlistmedia has two
+// configured paths and no Tools at all. This is the pair, and only the pair.
+//
+// A STRUCT, AND ProbeFile'S SIGNATURE CHANGED RATHER THAN GAINING AN OPTIONAL
+// EXTRA, because there are TWO gates on this path and they must not be able to
+// drift apart. internal/api's upload handler and internal/playlistmedia's
+// verifySource both call ProbeFile, and #118's whole guarantee is that they
+// give the same answer about the same file. A variadic option or a second
+// ProbeFileDeriving entry point would have let one of them be updated and the
+// other quietly keep refusing -- an upload accepted at the door and refused
+// forever at the worker, which is the exact state that issue closed. Changing
+// the signature makes the compiler visit both.
+//
+// Two adjacent strings would have been swappable by accident and the swap would
+// compile; named fields cannot be.
+type Bins struct {
+	// FFprobe reads the file's shape. Required.
+	FFprobe string
+	// FFmpeg counts the length of a file whose container declares none.
+	// OPTIONAL, and an install without it is not broken -- it gets exactly the
+	// behaviour it had before #218: such a file is refused with ErrNoDuration
+	// and its remedy. Every other file is unaffected, because a container that
+	// states its own duration never reaches the count.
+	FFmpeg string
 }
 
 // probeFile is ProbeFile with the stdout cap as an argument, so a test can
@@ -256,8 +317,8 @@ func ProbeFile(ctx context.Context, ffprobeBin, path string) (*ProbeResult, erro
 // of building a file that makes ffprobe print eight megabytes -- which would
 // take longer than the rest of the suite and would be measuring the fixture.
 // Nothing else passes anything but probeStdoutCap.
-func probeFile(ctx context.Context, ffprobeBin, path string, stdoutCap int) (*ProbeResult, error) {
-	cmd := exec.CommandContext(ctx, ffprobeBin,
+func probeFile(ctx context.Context, bins Bins, path string, stdoutCap int) (*ProbeResult, error) {
+	cmd := exec.CommandContext(ctx, bins.FFprobe,
 		"-hide_banner",
 		"-loglevel", "error",
 		"-protocol_whitelist", "file",
@@ -338,23 +399,79 @@ func probeFile(ctx context.Context, ffprobeBin, path string, stdoutCap int) (*Pr
 	// playlist that can never go on air. Accepted at the door, unusable forever,
 	// which is worse than either answer given consistently.
 	//
-	// Keyed on the duration rather than on the format name deliberately: the
-	// gate's real requirement is the one the worker has, so any future format
-	// with this property is covered without a second list to keep in step. ac3
-	// and every container that carries a duration are unaffected.
+	// #118 fixed that by refusing at the door. #218 fixes it the other way for
+	// the files that deserve it: a length polyemesis can COUNT is a length
+	// polyemesis has, and the count now happens here -- at the one place both
+	// gates already come through, so neither can be updated without the other.
+	//
+	// Keyed on the duration rather than on the format name deliberately, and
+	// that key is unchanged: the gate's real requirement is the one the worker
+	// has, so any future format with this property gets counted too without a
+	// second list to keep in step. ac3 and every container that carries a
+	// duration never reach this branch and pay nothing for it.
 	//
 	// Ordered AFTER the caller's no-streams diagnosis in effect, by asking only
 	// when there is something to measure: a no-tracks MP4 reaches here read
 	// perfectly, with zero streams and no duration, and "no video or audio
 	// stream" is the sentence that tells its owner what is wrong. Measured -- the
 	// first version of this check preempted it and TestUploadRefusesAContainer
-	// WithNoStreams failed with the less useful reason.
+	// WithNoStreams failed with the less useful reason. It also means the count
+	// is never spent on a file with nothing in it to count.
 	if (res.Video != nil || len(res.Audio) > 0) && res.DurationSeconds <= 0 {
-		return nil, fmt.Errorf("%w (ffprobe read it as %q and reported no duration; "+
-			"re-save it as MP4 or MPEG-TS and upload it again)",
-			ErrNoDuration, res.FormatName)
+		if secs, err := countDuration(ctx, bins.FFmpeg, res.FormatName, path); err == nil {
+			res.DurationSeconds = secs
+			res.DurationSource = DurationCounted
+			return res, nil
+		} else if ctx.Err() != nil {
+			// THE COUNT WAS CUT SHORT, WHICH IS NOT A VERDICT ABOUT THE FILE.
+			// Returning ErrNoDuration here would make it one, and ErrNoDuration
+			// is in Refused -- so a client who disconnects mid-upload, or a
+			// deadline that expires on a busy box, would get the operator's
+			// bytes deleted with a sentence blaming their file. Both callers
+			// already have the right handling for an interrupted probe; the
+			// context error is what routes them to it.
+			//
+			// %w ON ctx.Err() AND NOT ON THE RUN ERROR, which is the opposite
+			// of what looks natural and is what actually works. Killing a child
+			// through CommandContext yields a plain *exec.ExitError saying
+			// "signal: killed" and carrying NO context error to match on --
+			// measured here, and the same thing media.go's probeUpload
+			// documents about its own arms. Wrapping the run error would put a
+			// chain in the caller's hands that answers a different question.
+			// FFmpeg's own words are kept beside it with %v, because they are
+			// what a log reader needs.
+			return nil, fmt.Errorf("counting the length of %q was cut short: %w (%v)",
+				res.FormatName, ctx.Err(), err)
+		}
+		return nil, fmt.Errorf("%w (ffprobe read it as %q and reported no duration, "+
+			"and it could not be counted: %v; re-save it as MP4 or MPEG-TS and "+
+			"upload it again)", ErrNoDuration, res.FormatName, err)
 	}
 	return res, nil
+}
+
+// countDuration is CountDurationSeconds with the one precondition ProbeFile
+// needs and the exported function cannot check for itself: that the format name
+// ffprobe reported names EXACTLY ONE demuxer, so it can be handed back as -f.
+//
+// format_name is the comma-joined list of names one demuxer registers under, so
+// "mov,mp4,m4a,3gp,3g2,mj2" is one demuxer with six names and there is no way
+// to know which of the six FFmpeg will accept. Every raw elementary stream
+// reports a single name -- "h264", "hevc", "mpegvideo" -- which is not a
+// coincidence: a format with no container has no family of related ones to
+// share a demuxer with.
+//
+// Refusing to guess is the conservative direction here. A multi-name format
+// that declares no duration is a CONTAINER that would not say how long it is,
+// which is a different and more suspicious thing than a stream that has nowhere
+// to put the answer, and it keeps its existing refusal.
+func countDuration(ctx context.Context, ffmpegBin, formatName, path string) (float64, error) {
+	name := strings.TrimSpace(formatName)
+	if name == "" || strings.Contains(name, ",") {
+		return 0, fmt.Errorf("%q names %d demuxers, so there is none to pin the count to",
+			formatName, len(strings.Split(formatName, ",")))
+	}
+	return CountDurationSeconds(ctx, ffmpegBin, name, path)
 }
 
 // probeStdoutCap and probeStderrCap bound what one ffprobe may hand back.
@@ -425,6 +542,7 @@ func ParseProbe(raw []byte) (*ProbeResult, error) {
 	// for a stream instead.
 	if d, err := strconv.ParseFloat(strings.TrimSpace(p.Format.Duration), 64); err == nil && d > 0 {
 		res.DurationSeconds = d
+		res.DurationSource = DurationDeclared
 	}
 	audioIdx := 0
 	for _, s := range p.Streams {

@@ -289,10 +289,28 @@ type File struct {
 // and hands the answer down.
 type MediaInfo struct {
 	DurationSeconds float64 `json:"durationSeconds"`
-	VideoCodec      string  `json:"videoCodec"`
-	Width           int     `json:"width"`
-	Height          int     `json:"height"`
-	FrameRate       float64 `json:"frameRate"`
+	// DurationSource says whether DurationSeconds was DECLARED by the file's
+	// container or COUNTED by decoding it, because those are not the same
+	// claim and the number cannot tell them apart.
+	//
+	// A raw elementary stream -- a .h264 or .hevc dump straight out of an
+	// encoder -- has no container to declare a length, so polyemesis counts its
+	// frames instead of refusing it (#218). That count is a real read of every
+	// frame multiplied by the frame interval the ENCODER declared in the
+	// bitstream, and there is nothing else in such a file to check that
+	// interval against. So it is a good number with a weaker provenance, and
+	// the operator deciding whether to schedule this item is entitled to know
+	// which one they are looking at.
+	//
+	// A STRING, not internal/ffmpeg's DurationSource, for the reason stated on
+	// this type: this package stores bytes and does not import an encoder
+	// package to describe a file on disk. Empty means no duration was
+	// established, or that this sidecar predates the field.
+	DurationSource string  `json:"durationSource,omitempty"`
+	VideoCodec     string  `json:"videoCodec"`
+	Width          int     `json:"width"`
+	Height         int     `json:"height"`
+	FrameRate      float64 `json:"frameRate"`
 	// AudioTracks is the count, and it is the field this whole feature is for.
 	// Per-destination audio routing is the product, so "does this file have the
 	// three tracks I am about to route" is the question the Library could not

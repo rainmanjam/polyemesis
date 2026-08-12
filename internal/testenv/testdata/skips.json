@@ -37,19 +37,34 @@
       "handEditedRatherThanRegenerated": "`go test ./internal/testenv -run TestNoNewBareSkipCanLand -update-skips` produces exactly these numbers and DELETES the raisedBy array above on the way past: skipCensus has no field for it, so writeSkipCensus round-trips the file through a struct that cannot see it. The written reasons are the entire reviewable half of this ratchet, so the three numbers were lowered by hand instead. Filed as a finding on the same round that filed #205, which is the same shape one artifact over."
     }
   ],
-  "total": 88,
+  "raisedBy2": [
+    {
+      "pr": 218,
+      "from": 88,
+      "to": 92,
+      "packages": {
+        "internal/api": "7 -> 8",
+        "internal/ffmpeg": "19 -> 21",
+        "internal/playlistmedia": "4 -> 5"
+      },
+      "why": "Raw elementary streams (.h264/.hevc/.mpegvideo) are now accepted with a COUNTED length instead of refused, and testing that needs a real raw bitstream, which only a real encoder can produce. THREE of the four are the same environmental reason once per package: an FFmpeg without libx264/libx265/mpeg2video cannot write the fixture at all. They are capability skips of exactly the shape #187 left in place -- a binary's outright absence fails under POLYEMESIS_REQUIRE_FFMPEG via testenv.FFmpegBinary, which all three fixtures route through first; only 'this build lacks that encoder' skips. The FOURTH is internal/ffmpeg's TestACountThatWasCutShortIsNotAVerdictAboutTheFile, which stands a #!/bin/sh script in for ffmpeg so a cancellation lands inside the count with no wall-clock budget anywhere in the test. That is #190's class exactly, and the same shape as TestProbeFileReturnsWhenItsContextIsCancelled three functions away.",
+      "alreadyPaidDown": "The first draft added SEVEN sites; four were removed before this was written. internal/playlistmedia's fixture hand-rolled two exec.LookPath skips, which are now one testenv.FFmpegBinary call each and so leave the census entirely; internal/api's did the same for ffmpeg. internal/ffmpeg's TestACountedLengthIsNotReportedAsADeclaredOne remuxes the raw stream to MPEG-TS with -c copy, which involves no encoder and therefore cannot fail on a build that just wrote the source -- that is a t.Fatalf, not a skip. The seven other new tests across the three packages added no sites: the three-format table in TestARawElementaryStreamIsAcceptedWithACountedDuration logs and counts instead of skipping per format, and asserts at the end that at least one format reached the branch, which the Finding-B entry above established as the stronger pattern.",
+      "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
+    }
+  ],
+  "total": 92,
   "byPackage": {
     "cmd/polyemesis": 1,
-    "internal/api": 7,
+    "internal/api": 8,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
     "internal/db": 1,
     "internal/engine": 6,
-    "internal/ffmpeg": 19,
+    "internal/ffmpeg": 21,
     "internal/media": 5,
     "internal/meters": 3,
-    "internal/playlistmedia": 4,
+    "internal/playlistmedia": 5,
     "internal/relay": 3,
     "internal/routing": 5,
     "internal/rtmpserver": 10,
