@@ -36,12 +36,13 @@ import (
 // written and turned round to assert the fixed behaviour rather than deleted.
 // The originals printed "REMOTE ATTACK SUCCEEDED" and passed.
 //
-// WHAT IS NOT COVERED ON WINDOWS. Three of them need a probe whose lifetime the
-// test controls, which is fakeProbe, which is a POSIX shell script -- so on
-// Windows they skip, exactly as the rest of the probe suite does (#190). The
-// verdict RECORD itself is plain Go over plain files and is covered on every
-// platform by the tests that use no fake probe: the socket test below, the
-// playlist refusal, and internal/uploads' own verdict tests.
+// COVERED ON WINDOWS SINCE #265. Three of them need a probe whose lifetime the
+// test controls, which is fakeProbe; that used to be a POSIX shell script and
+// they skipped on Windows with the rest of the probe suite (#190). fakeProbe is
+// now this test binary re-executed, so they run there. The verdict RECORD
+// itself is plain Go over plain files and was always covered on every platform
+// by the tests that use no fake probe: the socket test below, the playlist
+// refusal, and internal/uploads' own verdict tests.
 
 // mustStore opens the uploads store under a test's data directory.
 func mustStore(t *testing.T, dataDir string) *uploads.Store {
@@ -89,8 +90,8 @@ func TestATTACK_RealSocketDisconnectPublishesUnprobed(t *testing.T) {
 	dataDir := t.TempDir()
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
 	// Outlives the disconnect, so the probe is guaranteed to still be running
-	// when the client vanishes. A script, so this skips on Windows (#190).
-	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), "exec sleep 8")
+	// when the client vanishes.
+	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), fakeProbePlan{Sleep: 8 * time.Second})
 
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -209,7 +210,7 @@ func TestATTACK_RealSocketDisconnectPublishesUnprobed(t *testing.T) {
 func TestATTACK_SlowProbeTimeoutPublishesUnprobed(t *testing.T) {
 	dataDir := t.TempDir()
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
-	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), "exec sleep 60")
+	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), fakeProbePlan{Sleep: time.Minute})
 	s.probeTimeout = 200 * time.Millisecond
 	auth := login(t, h)
 
@@ -239,6 +240,14 @@ func TestATTACK_SlowProbeTimeoutPublishesUnprobed(t *testing.T) {
 	f := onlyFile(t, dataDir)
 	if f.Verified || f.UnverifiedReason == "" {
 		t.Errorf("the listing does not mark the file: %+v", f)
+	}
+	// AND MARKED AS CUT SHORT, not as an unusable prober. "Some unverified
+	// reason" is satisfied by a stand-in that exited before the deadline could
+	// expire, which would leave this test measuring no timeout at all -- found
+	// by deleting the fake probe's sleep and watching this stay green (#265).
+	if f.UnverifiedReason != uploads.ReasonInterrupted {
+		t.Errorf("the verdict reads %q, want %q: no probe was still running when "+
+			"the deadline expired", f.UnverifiedReason, uploads.ReasonInterrupted)
 	}
 	if err := s.playlistUploadProblems(
 		db.PlaylistSettings{Items: []db.PlaylistItem{{Upload: f.Name}}},
@@ -283,7 +292,7 @@ func TestADisconnectKeepsAValidUploadAndTheSameBytesAreStillRefusedWhenChecked(t
 		s, h, _ := testServer(t, config.Config{DataDir: dataDir})
 		auth := login(t, h)
 		started := filepath.Join(t.TempDir(), "started")
-		s.probeBin = fakeProbe(t, started, "exec sleep 60")
+		s.probeBin = fakeProbe(t, started, fakeProbePlan{Sleep: time.Minute})
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -380,7 +389,7 @@ func TestAProbeThatCannotBeRunKeepsTheFileAndSaysSo(t *testing.T) {
 func TestAProbeThatPrintsRubbishKeepsTheFileAndSaysSo(t *testing.T) {
 	dataDir := t.TempDir()
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
-	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), "echo not json at all")
+	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), fakeProbePlan{Stdout: "not json at all"})
 	auth := login(t, h)
 
 	r := uploadRequest(t, "file", "show.mkv", "pretend media bytes")
@@ -401,8 +410,10 @@ func TestAProbeThatPrintsRubbishKeepsTheFileAndSaysSo(t *testing.T) {
 func TestAProbeThatRunsAndDisagreesStillRejectsAndLeavesNothing(t *testing.T) {
 	dataDir := t.TempDir()
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
-	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"),
-		"echo 'Invalid data found when processing input' >&2; exit 1")
+	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), fakeProbePlan{
+		Stderr: "Invalid data found when processing input",
+		Exit:   1,
+	})
 	auth := login(t, h)
 
 	r := uploadRequest(t, "file", "junk.mkv", "not media at all")
@@ -533,8 +544,7 @@ func TestARefusedContainerIsNotDescribedAsAPlaylist(t *testing.T) {
 //
 // The bound is on CHILDREN, so that is what is counted: the fake probe appends
 // a line on entry and removes it on exit, and the high-water mark must never
-// exceed MaxConcurrentUploadProbes. Skips on Windows with the rest of the fake
-// probe suite (#190).
+// exceed MaxConcurrentUploadProbes.
 func TestConcurrentUploadsDoNotSpawnUnboundedProbes(t *testing.T) {
 	dataDir := t.TempDir()
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
@@ -543,18 +553,12 @@ func TestConcurrentUploadsDoNotSpawnUnboundedProbes(t *testing.T) {
 	// One line per live child; the peak file keeps the high-water mark. Done
 	// with a lock directory so two children cannot interleave a read-modify-
 	// write of it.
-	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"),
-		"until mkdir "+live+".lock 2>/dev/null; do :; done\n"+
-			"echo x >> "+live+"\n"+
-			"n=$(wc -l < "+live+")\n"+
-			"p=$(cat "+peak+" 2>/dev/null || echo 0)\n"+
-			"[ \"$n\" -gt \"$p\" ] && echo \"$n\" > "+peak+"\n"+
-			"rmdir "+live+".lock\n"+
-			"sleep 0.4\n"+
-			"until mkdir "+live+".lock 2>/dev/null; do :; done\n"+
-			"sed -e '$d' "+live+" > "+live+".t && mv "+live+".t "+live+"\n"+
-			"rmdir "+live+".lock\n"+
-			"exit 1")
+	s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), fakeProbePlan{
+		Live: live,
+		Peak: peak,
+		Hold: 400 * time.Millisecond,
+		Exit: 1,
+	})
 	auth := login(t, h)
 
 	const n = 16

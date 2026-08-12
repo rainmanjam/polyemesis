@@ -114,6 +114,19 @@ import (
 // stays false through it, and the body runs in full there -- the fail-closed
 // direction, at the cost of the -cover reorder going with it.
 func TestMain(m *testing.M) {
+	// THE FAKE PROBE'S OTHER LIFE, and it has to come first.
+	//
+	// The probe suite's stand-in for ffprobe is this binary re-executed (see
+	// fakeprobe_test.go). ffmpeg.probeFile spawns it with ffprobe's OWN argv --
+	// -hide_banner, -print_format json and the rest -- which the testing package
+	// would reject as unknown flags, so the plan arrives by environment and is
+	// read BEFORE flag.Parse. It must also exit before either m.Run below: a
+	// testing summary printed onto the pipe probeFile is parsing as ffprobe's
+	// JSON would make every probe unusable rather than under test.
+	if plan := os.Getenv(fakeProbeEnv); plan != "" {
+		os.Exit(runFakeProbe(plan))
+	}
+
 	flag.Parse()
 
 	runFlag := flag.Lookup("test.run")
