@@ -92,24 +92,50 @@ func TestOnlyANameTheLibraryListsCanBeReChecked(t *testing.T) {
 	cases := []struct {
 		name   string
 		path   string
+		seed   bool
 		status int
 		why    string
 	}{
 		{
-			name: "a verdict sidecar", path: ".probe-show-abcd1234.ts.json",
+			name: "a verdict sidecar", path: ".probe-show-abcd1234.ts.json", seed: true,
 			status: http.StatusBadRequest,
 			why: "probing a sidecar and writing a verdict beside it creates a file " +
 				"nothing else in the product can create",
 		},
 		{
-			name: "a staged upload still in flight", path: ".partial-show-abcd1234.ts",
+			name: "a staged upload still in flight", path: ".partial-show-abcd1234.ts", seed: true,
 			status: http.StatusBadRequest,
 			why:    "the bytes are incomplete and the name is about to stop existing",
 		},
 		{
-			name: "a name reservation", path: ".partial-claim-show-abcd1234.ts",
+			name: "a name reservation", path: ".partial-claim-show-abcd1234.ts", seed: true,
 			status: http.StatusBadRequest,
 			why:    "a zero-byte placeholder another Commit is holding",
+		},
+		// THE ORDERING, not just the rule, and these three rows are what
+		// distinguish the HANDLER's guard from the one uploadverify.NewJob
+		// makes. With the handler's uploads.Listable check removed the seeded
+		// rows above still answer 400 -- NewJob refuses the name too -- so on
+		// their own they pin nothing about this handler. Unseeded, the guard's
+		// absence lets os.Stat answer FIRST, and 404-vs-400 becomes an
+		// existence oracle for names the product does not admit to having:
+		// whether a given upload has a verdict sidecar, and whether a given
+		// name is mid-upload right now. The same reason handleDeleteMedia
+		// validates the name before it removes anything.
+		{
+			name: "a sidecar that is not there", path: ".probe-never-uploaded.ts.json",
+			status: http.StatusBadRequest,
+			why:    "refused as a NAME, before anything says whether bytes exist at it",
+		},
+		{
+			name: "a staged name that is not there", path: ".partial-never-uploaded.ts",
+			status: http.StatusBadRequest,
+			why:    "same, for a name that would be an upload in flight",
+		},
+		{
+			name: "a reservation that is not there", path: ".partial-claim-never-uploaded.ts",
+			status: http.StatusBadRequest,
+			why:    "same, for a name another Commit would be holding",
 		},
 		{
 			name: "a bare parent directory", path: "..",
@@ -118,7 +144,7 @@ func TestOnlyANameTheLibraryListsCanBeReChecked(t *testing.T) {
 		},
 		{
 			name: "a percent-encoded traversal", path: "..%2F..%2Fetc%2Fpasswd",
-			status: http.StatusNotFound,
+			status: http.StatusNotFound, seed: false,
 			why: "chi hands the segment over still encoded, so this is a LITERAL " +
 				"filename with no separator in it and resolves inside the uploads " +
 				"directory -- 404 because no such file, which is the right answer " +
@@ -134,12 +160,14 @@ func TestOnlyANameTheLibraryListsCanBeReChecked(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h, sign, srv, q := verifyServer(t)
-			// The sidecar and partial names are seeded so the refusal is the
-			// NAME rule rather than the file merely being absent -- otherwise
-			// three rows here would pass on a 404 and the rule would be untested.
-			seedUpload(t, srv, ".probe-show-abcd1234.ts.json")
-			seedUpload(t, srv, ".partial-show-abcd1234.ts")
-			seedUpload(t, srv, ".partial-claim-show-abcd1234.ts")
+			// Seeded where the row says so, so the refusal is demonstrably the
+			// NAME rule rather than the file merely being absent; and NOT
+			// seeded on the three ordering rows, where the absence is the
+			// point. Both halves are needed: one pins the rule, the other pins
+			// that it is applied first.
+			if c.seed {
+				seedUpload(t, srv, c.path)
+			}
 
 			// mustJSONError rather than send: api.go registers the embedded SPA
 			// as the root mux's NotFound handler, so an unrouted /api/v1 path
