@@ -325,6 +325,26 @@ its first tagged release.
 
 ### Fixed
 
+- **A playlist item whose file was refused after the fact said "not yet queued
+  for normalisation" for ever.** The *Media re-check* above is the first thing
+  in this product that can refuse a file which was already accepted, and the
+  playlist had nowhere to put that answer: `GET /failover/playlist` reported
+  the queue state it found, so an item whose source can never normalise showed
+  the amber "working on it" reading, and the operator waited on a job that
+  fails and re-queues on every save.
+
+  An item with no derivative now names the refusal and its reason, and says
+  that sending the same file again will not change it — the remedy for a
+  refusal is a different file, not patience.
+
+  **An item that is already on air keeps playing.** Its derivative was
+  transcoded from those bytes and is intact, so pulling it off air would black
+  out a running programme to report something the operator can act on whenever
+  they like. It stays `ready`, and the finding arrives as a new `warning`
+  field beside it. Readiness answers "may this go to air"; a re-inspection of
+  the source is not an answer to that question once a derivative exists.
+  ([#273](https://github.com/rainmanjam/polyemesis/issues/273))
+
 - **A pull source could name an upload this server was never allowed to
   inspect.** An upload's `pullUrl` is offered copyable in the Library, and
   pasting it into **Settings → Ingest → Pull** handed the path to the engine's

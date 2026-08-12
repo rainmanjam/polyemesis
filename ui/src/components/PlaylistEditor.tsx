@@ -230,6 +230,16 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
                       {st.detail ?? t("playlist.missingUpload")}
                     </div>
                   )}
+                  {/* Rendered independently of state rather than as another
+                      branch of the chain above: a warning accompanies a READY
+                      row, which is the whole point of it being a separate
+                      field. Folding it in would make it unreachable, since
+                      the row it belongs to is never "attention". */}
+                  {st?.warning && (
+                    <div className="mt-0.5 text-[11px] text-warn" data-testid="playlist-item-warning">
+                      {st.warning}
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
