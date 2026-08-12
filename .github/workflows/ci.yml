@@ -460,12 +460,10 @@ jobs:
           for ($i = 1; $i -le 3; $i++) {
             Remove-Item $zip -Force -ErrorAction SilentlyContinue
             if (Get-Command gh -ErrorAction SilentlyContinue) {
-              try {
-                gh release download latest --repo BtbN/FFmpeg-Builds --pattern $asset --output $zip
-                if (Test-Path $zip) { break }
-              } catch {
-                Write-Host "gh attempt $i failed: $($_.Exception.Message)"
-              }
+              & gh release download latest --repo BtbN/FFmpeg-Builds --pattern $asset --output $zip
+              if ($LASTEXITCODE -eq 0 -and (Test-Path $zip)) { break }
+              Write-Host "gh attempt $i failed with exit code $LASTEXITCODE"
+              Remove-Item $zip -Force -ErrorAction SilentlyContinue
             }
             try {
               & curl.exe --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL `
