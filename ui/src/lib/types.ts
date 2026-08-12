@@ -752,6 +752,21 @@ export interface SourceView extends Source {
     state: "ok" | "degraded";
     detail?: string;
   };
+  /** The server's sentence about an upload this source pulls from that nothing
+   *  ever inspected, absent when there is nothing to say.
+   *
+   *  A pull source whose `file://` URL names a stored upload hands that path to
+   *  the ENGINE's FFmpeg, which carries neither the format allowlist nor the
+   *  probe the upload handler runs. Saving one is refused; a source ALREADY
+   *  saved that way keeps running and says this instead. #255 argues the
+   *  choice: an unverified verdict is a fact about the server (no ffprobe, a
+   *  cut-short inspection) and never about the file, so refusing the ingest
+   *  over it would take a programme off air for a toolchain problem.
+   *
+   *  Computed by the server rather than derived here, so a monitoring script
+   *  reading GET /sources sees it too — the case #201 named is automation that
+   *  configures a pull source from a listing and never looks at a card. */
+  pullUploadUnchecked?: string;
 }
 
 export interface Settings {
@@ -2332,10 +2347,34 @@ export interface MediaFile {
    *  ABSENCE of `media`, which is also what every upload stored before probing
    *  looks like. */
   verified: boolean;
-  /** Why, when `verified` is false. Empty for a file with no recorded verdict at
-   *  all — one stored before verdicts existed. */
+  /** Which state this upload is in — the field to branch on.
+   *
+   *  `verified` is still true only for "inspected and accepted", but false now
+   *  covers three different things with three different remedies, and telling an
+   *  operator what to DO requires knowing which:
+   *
+   *  - `unverified` — this server produced no verdict about the bytes (the check
+   *    was cut short, or could not run). A fact about the SERVER. Upload it again.
+   *  - `refused` — the bytes WERE inspected and are not media this server takes.
+   *    A fact about the FILE, and permanent: re-sending it changes nothing.
+   *  - `unrecorded` — nothing was ever written about this file, which is every
+   *    upload stored before verdicts existed. Still usable; refusing these would
+   *    strand media an operator has had for a year.
+   *
+   *  ALWAYS PRESENT. `unrecorded` used to be inferred client-side from an empty
+   *  `unverifiedReason`, which was never the same question and stopped being a
+   *  usable proxy once a recorded state could carry no reason of its own. */
+  outcome: MediaVerdict;
+  /** Why this file is not verified, in the operator's words. Set for both
+   *  `unverified` and `refused` — `outcome` is what says which kind of reason it
+   *  is. Empty only for `unrecorded`. */
   unverifiedReason?: string;
 }
+
+/** The four states of {@link MediaFile.outcome}. Three of them are recorded
+ *  beside the file; `unrecorded` is the absence of a record, which is a distinct
+ *  answer from every recorded one and must stay that way. */
+export type MediaVerdict = "verified" | "unverified" | "refused" | "unrecorded";
 
 /** MediaInfo is a stored upload's probe result, as the Library shows it. */
 export interface MediaInfo {

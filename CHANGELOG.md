@@ -12,6 +12,60 @@ its first tagged release.
 
 ### Security
 
+- **The route that decides what your ingest pulls had no upload check at all.**
+  Saving a pull source that names an upload this server was never able to
+  inspect has been refused since #201 — but only on `PUT /settings`, and the
+  engine does not read its ingest from there. `engine.effectiveSettings` does
+  `settings.Ingest = src.Ingest`, so the source ROW is what the engine's FFmpeg
+  opens, and `POST /sources` and `PUT /sources/{id}` accepted such a URL with a
+  `201` and a `200`. That is the route the Sources page writes through, and it
+  is the only route a second programme has ever had. Both now refuse it, with
+  the same scoping the settings gate uses: what the save introduces, never state
+  you inherited. ([#255](https://github.com/rainmanjam/polyemesis/issues/255))
+
+- **And the check in front of all three routes was reading the URL, not the
+  file.** It matched the exact spelling the Library hands you and split it at the
+  first `/`, while the engine resolves the same URL through `filepath.Join` — so
+  `file://uploads/./show.ts`, `file://uploads//show.ts` and
+  `file://./uploads/show.ts` all opened the identical file and none of them was
+  checked. One typed dot was the whole bypass, on the gate #201 shipped as well
+  as on the two above, and the source card stayed silent about it too. The check
+  now asks the engine what path a URL resolves to instead of re-reading the
+  format, so every way of writing one file gets one answer.
+  ([#201](https://github.com/rainmanjam/polyemesis/issues/201),
+  [#255](https://github.com/rainmanjam/polyemesis/issues/255))
+
+- **A source that was already pulling from an unchecked file now says so.** The
+  gate above cannot see a URL saved before it existed, or one whose upload was
+  downgraded underneath it, and there is no second gate downstream the way a
+  playlist item has one. The source card now carries the server's own sentence,
+  naming the file and what is wrong with it — and which of the two things is
+  wrong, because they have different remedies: a file nothing could inspect is
+  worth uploading again, and a file that *was* inspected and refused is not, so
+  that one says to point the source somewhere else instead. It reports rather
+  than refuses, deliberately: a missing inspection is a fact about this server —
+  no `ffprobe`, an inspection cut short — and never about your file, so on an
+  install without `ffprobe` a fail-closed re-check would take every `file://`
+  ingest off air at once, at whatever hour the supervisor next respawned. That
+  reasoning does not extend to a refusal, which *is* a fact about the file — see
+  the entry below, which is where that half was settled. The field is on
+  `GET /sources`, so a monitoring script sees it too.
+  ([#255](https://github.com/rainmanjam/polyemesis/issues/255),
+  [#264](https://github.com/rainmanjam/polyemesis/issues/264))
+
+- **A source pulling from a file this server inspected and rejected is now
+  taken off air.** The warning above is kept for an upload nothing could
+  inspect, and only for that: a missing inspection is a fact about this server,
+  so refusing on it would stop every `file://` ingest on a box without
+  `ffprobe`. A *refusal* cannot be that — it exists only where an inspection ran
+  and read the bytes — so an inherited pull source naming one is re-checked on
+  every engine reconcile and its ingest is not started, primary and standby
+  alike. The card still names the file and says why, and the reconcile records
+  the same sentence, so a save made afterwards answers with it rather than
+  leaving you a stopped programme and a log line. Nothing writes that verdict
+  yet; #202's re-verify job will be the first.
+  ([#255](https://github.com/rainmanjam/polyemesis/issues/255))
+
 - **A busy server stopped inspecting uploads, and the caller chose when.** The
   four-slot semaphore that bounds concurrent `ffprobe` children waited for its
   slot *inside* the probe's own 30-second deadline, so a queued upload could
@@ -112,6 +166,65 @@ its first tagged release.
   it.**
 
 ### Added
+
+- **A raw `.h264`, `.hevc` or `.mpegvideo` dump can go straight into the
+  Library.** These files carry no container, so nothing in them says how long
+  they are, and the upload gate refused them: *"polyemesis cannot work out how
+  long this file is — re-save it as MP4 or MPEG-TS and upload it again."* A real
+  remedy, and manual work the product can do. polyemesis now **counts** the
+  length instead, by decoding the file once, and accepts it. Measured on a
+  10-minute 720p dump: 2.8 seconds. It runs inside the inspection budget an
+  upload already has, so nothing new can make an upload slower than it could be
+  before; a file too long to count inside that budget gets the old refusal, with
+  the old remedy. Your file also keeps its extension now instead of being stored
+  as `.bin` — for a raw stream that is the only hint FFmpeg has about how to read
+  it.
+
+  **The Library says which of the two it is.** A duration a container declared
+  and a duration polyemesis counted are not the same claim: the first was written
+  down by whatever made the file, the second is every frame we decoded times the
+  frame rate the encoder declared in the bitstream, and a raw stream holds
+  nothing to check that rate against. So `durationSource` sits beside
+  `durationSeconds` and says `declared` or `counted`, rather than the two being
+  indistinguishable once the number is in the field.
+  ([#218](https://github.com/rainmanjam/polyemesis/issues/218))
+
+- **An upload can now be recorded as *inspected and refused*, which is a thing
+  the server previously had no way to write down.** The record beside every
+  upload carried one boolean, so it had two states — accepted, and stored
+  without being inspected — and the product needed three. A refusal was
+  therefore never stored at all: the upload handler answers `400` and throws
+  the staged bytes away, which works exactly once, at upload time, while
+  nothing references the file. It does not work for anything that inspects an
+  upload *later*: by then the file is published, `DELETE /api/v1/media/{name}`
+  answers `409` while a playlist item names it, and the only state available to
+  record the refusal in was the one that says "nobody read this" — which every
+  consumer answers by telling the operator to upload the same bytes again, for
+  a file that will be refused identically.
+
+  `GET /api/v1/media` now carries `outcome` on every row, always present, with
+  four values: `verified`, `unverified`, `refused`, and `unrecorded`. The fourth
+  is not stored anywhere — it is what the listing says when there is no record
+  beside the file, which is every upload an install made before verdicts
+  existed, and it stays distinct from every recorded state because refusing
+  those would strand media an operator has had for a year. The Library shows
+  **Refused** rather than **Not checked** for the new state, the playlist editor
+  does not offer it, and both settings validators refuse it with a sentence that
+  does *not* say "upload it again".
+
+  `verified` keeps its exact meaning and is still written to disk, because the
+  sidecar format exists in every install and a format change has two directions
+  in time: an older binary reading one of today's records — a rollback, or a
+  second process during an upgrade — sees `verified: false` with a reason and
+  refuses the file, which is the wrong label but the safe answer. An `outcome`
+  this build does not recognise falls back to the same field rather than being
+  trusted, and a record that claims a pass in one field while denying it in the
+  other is refused outright.
+
+  Nothing writes `refused` yet. The re-verify job is
+  [#202](https://github.com/rainmanjam/polyemesis/issues/202); this is the state
+  it needs to exist before it can be built, because a re-verify that records its
+  findings as "not checked" would be worse than no re-verify at all.
 
 - **A destination can now forward its audio bit-for-bit.** Set `copy` on a
   destination's audio block — `-c:a copy`, no decode, no mix, no encoder — so an
@@ -382,6 +495,22 @@ its first tagged release.
   "point the encoder at 6000" — an instruction that can never work, and one
   that sends you to your firewall to debug a port that was never in the path.
   It now reads `pull (dials out; no inbound port)`.
+
+### Testing
+
+- **Two guards that read `Dashboard.tsx` as text are now browser tests that
+  drive it.** `internal/oauth/composer_tags_drift_test.go` proved that the
+  substring `tags` appeared within 400 characters of the push `fetch`, and that
+  `withCompliance.length > 0` was written somewhere in the file. Neither can
+  tell whether the component compiles, mounts, or does the thing it names — the
+  #107 defect, one package over. They are replaced by `ui/e2e/go-live-composer.spec.ts`,
+  which types into the tags input, clicks Push and reads the body off the wire,
+  and which drives the compliance notice and the Push button through both the
+  stored and not-stored cases. The stated blocker was re-tested rather than
+  assumed: the composer decides everything from `GET /metadata`, so a stubbed
+  response reaches every branch with the real component and no OAuth fixture.
+  The Go file is deleted. Browser suite 92 → 97.
+  ([#259](https://github.com/rainmanjam/polyemesis/issues/259))
 
 ## [0.6.0] — 2026-08-09
 

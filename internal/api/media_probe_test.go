@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -229,40 +228,10 @@ func TestUploadAcceptsRealMediaAndRecordsWhatItIs(t *testing.T) {
 	}
 }
 
-// fakeProbe writes an executable standing in for ffprobe and returns its path.
-//
-// A script rather than a stub function because probeUpload reaches ffprobe by
-// spawning a PROCESS, and the two behaviours being pinned below -- a probe that
-// is still running when the client goes away, and a probe that is still running
-// when somebody else calls GET /api/v1/media -- only exist because it is a
-// process that takes real time. A function seam would delete the very thing
-// under test.
-//
-// It touches `started` on entry so a test can wait for the probe to actually be
-// in flight instead of sleeping and hoping.
-//
-// POSIX ONLY, and the cost is stated rather than hidden: on Windows this is a
-// text file with a #! line that CreateProcess will not run, so every test
-// below that needs a probe with a controllable lifetime is skipped there. What
-// goes unverified on Windows is the client-disconnect survival, the probe
-// timeout, the staged-not-listable window and the two WARN lines -- all of
-// which are platform-independent Go over a platform-independent os/exec, but
-// "should be fine" is not a measurement. Issue filed; the fix is a small
-// helper binary built by the test rather than a shell script, which is real
-// work and is not being guessed at here.
-func fakeProbe(t *testing.T, started string, body string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake probe is a POSIX shell script; see the comment on fakeProbe " +
-			"for what this leaves unverified on Windows")
-	}
-	p := filepath.Join(t.TempDir(), "fake-ffprobe")
-	script := "#!/bin/sh\ntouch " + started + "\n" + body + "\n"
-	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake ffprobe: %v", err)
-	}
-	return p
-}
+// fakeProbe lives in fakeprobe_test.go. It used to be a #!/bin/sh script here,
+// and everything below that needs a probe with a controllable lifetime skipped
+// on Windows because of it (#190). It is now this test binary re-executed, so
+// those tests run on every platform (#265).
 
 // waitFor blocks until cond holds, and fails rather than hanging.
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -423,11 +392,11 @@ func TestUploadSurvivesAClientDisconnectDuringTheProbe(t *testing.T) {
 	started := filepath.Join(t.TempDir(), "started")
 	// Sleeps far longer than the disconnect below, so the probe is guaranteed
 	// to be in flight when the context is cancelled.
-	// `exec` so the sleep REPLACES the shell rather than being a child of it.
-	// Without it the sleep survives the kill holding ffprobe's stdout pipe, and
-	// the handler waits out cmd.WaitDelay -- correct behaviour, but it is
-	// internal/ffmpeg's to assert, not this test's.
-	s.probeBin = fakeProbe(t, started, "exec sleep 60")
+	// ONE PROCESS, which is what the old script's `exec` bought by hand: a
+	// shell wrapper's sleeper survived the kill still holding ffprobe's stdout
+	// pipe, and the handler waited out cmd.WaitDelay -- correct behaviour, but
+	// it is internal/ffmpeg's to assert, not this test's.
+	s.probeBin = fakeProbe(t, started, fakeProbePlan{Sleep: time.Minute})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -480,6 +449,19 @@ func TestUploadSurvivesAClientDisconnectDuringTheProbe(t *testing.T) {
 	if listed[0].Media != nil {
 		t.Errorf("an interrupted probe recorded metadata anyway: %+v", listed[0].Media)
 	}
+	// AND UNCHECKED FOR THE RIGHT REASON. Without this the test is satisfied by
+	// a probe that was never in flight at all: a stand-in that exits instantly
+	// prints nothing this process can parse, which is also accepted unchecked
+	// and also records no metadata, so every assertion above passes while the
+	// cancel below lands on a probe that finished milliseconds earlier. Found
+	// by mutation -- deleting the fake probe's sleep left this test green
+	// (#265). ReasonInterrupted is the only one of the three that means the
+	// disconnect reached a RUNNING probe, which is the whole subject here.
+	if listed[0].UnverifiedReason != uploads.ReasonInterrupted {
+		t.Errorf("the verdict reads %q, want %q: the probe this test cancelled was "+
+			"not running when the client went away, so nothing here measured a "+
+			"disconnect", listed[0].UnverifiedReason, uploads.ReasonInterrupted)
+	}
 }
 
 // The same rule for the other interruption: probeUploadTimeout expiring.
@@ -494,11 +476,10 @@ func TestUploadIsAcceptedUncheckedWhenTheProbeTimesOut(t *testing.T) {
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
 	auth := login(t, h)
 	started := filepath.Join(t.TempDir(), "started")
-	// `exec` so the sleep REPLACES the shell rather than being a child of it.
-	// Without it the sleep survives the kill holding ffprobe's stdout pipe, and
-	// the handler waits out cmd.WaitDelay -- correct behaviour, but it is
-	// internal/ffmpeg's to assert, not this test's.
-	s.probeBin = fakeProbe(t, started, "exec sleep 60")
+	// ONE PROCESS, for the reason given on the disconnect test above: nothing
+	// survives the kill holding the stdout pipe, so this measures the timeout
+	// rather than cmd.WaitDelay.
+	s.probeBin = fakeProbe(t, started, fakeProbePlan{Sleep: time.Minute})
 	s.probeTimeout = 150 * time.Millisecond
 
 	r := uploadRequest(t, "file", "slow.mkv", "pretend media bytes")
@@ -506,8 +487,18 @@ func TestUploadIsAcceptedUncheckedWhenTheProbeTimesOut(t *testing.T) {
 	if w := do(t, h, r); w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
 	}
-	if listed := listMedia(t, h, auth); len(listed) != 1 {
+	listed := listMedia(t, h, auth)
+	if len(listed) != 1 {
 		t.Fatalf("the upload did not survive a probe timeout: %+v", listed)
+	}
+	// THE TIMEOUT IS WHAT ENDED IT, not an unusable prober. Same mutation gap as
+	// the disconnect test above: a stand-in that exits instantly is also
+	// accepted unchecked, so without this the 150ms budget could expire against
+	// nothing at all and the test would not notice (#265).
+	if listed[0].UnverifiedReason != uploads.ReasonInterrupted {
+		t.Errorf("the verdict reads %q, want %q: no probe was still running when "+
+			"the deadline expired, so this measured no timeout",
+			listed[0].UnverifiedReason, uploads.ReasonInterrupted)
 	}
 }
 
@@ -518,7 +509,10 @@ func TestUploadStillRejectsWhenTheProbeRunsAndFails(t *testing.T) {
 	s, h, _ := testServer(t, config.Config{DataDir: dataDir})
 	auth := login(t, h)
 	started := filepath.Join(t.TempDir(), "started")
-	s.probeBin = fakeProbe(t, started, "echo 'Invalid data found when processing input' >&2; exit 1")
+	s.probeBin = fakeProbe(t, started, fakeProbePlan{
+		Stderr: "Invalid data found when processing input",
+		Exit:   1,
+	})
 
 	r := uploadRequest(t, "file", "junk.mkv", "not media at all")
 	auth(r)
@@ -551,8 +545,11 @@ func TestARejectedUploadIsNeverVisibleOrReferenceableWhileItIsProbed(t *testing.
 	release := filepath.Join(t.TempDir(), "release")
 	// Blocks until the test says so, then refuses the file. The handler is held
 	// inside the probe for exactly as long as the assertions need.
-	s.probeBin = fakeProbe(t, started,
-		"while [ ! -f "+release+" ]; do sleep 0.01; done; echo 'Invalid data found' >&2; exit 1")
+	s.probeBin = fakeProbe(t, started, fakeProbePlan{
+		Release: release,
+		Stderr:  "Invalid data found",
+		Exit:    1,
+	})
 
 	r := uploadRequest(t, "file", "pending.mkv", "pretend media bytes")
 	auth(r)
@@ -727,7 +724,7 @@ func TestTheUncheckedBypassSaysSoInTheLog(t *testing.T) {
 		s, h, _ := testServer(t, config.Config{DataDir: dataDir})
 		s.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		auth := login(t, h)
-		s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), "exec sleep 60")
+		s.probeBin = fakeProbe(t, filepath.Join(t.TempDir(), "started"), fakeProbePlan{Sleep: time.Minute})
 		s.probeTimeout = 150 * time.Millisecond
 
 		r := uploadRequest(t, "file", "slow.mkv", "pretend media bytes")

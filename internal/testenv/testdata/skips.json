@@ -37,7 +37,22 @@
       "handEditedRatherThanRegenerated": "`go test ./internal/testenv -run TestNoNewBareSkipCanLand -update-skips` produces exactly these numbers and DELETES the raisedBy array above on the way past: skipCensus has no field for it, so writeSkipCensus round-trips the file through a struct that cannot see it. The written reasons are the entire reviewable half of this ratchet, so the three numbers were lowered by hand instead. Filed as a finding on the same round that filed #205, which is the same shape one artifact over."
     }
   ],
-  "total": 88,
+  "raisedBy2": [
+    {
+      "pr": 218,
+      "from": 88,
+      "to": 92,
+      "packages": {
+        "internal/api": "7 -> 8",
+        "internal/ffmpeg": "19 -> 21",
+        "internal/playlistmedia": "4 -> 5"
+      },
+      "why": "Raw elementary streams (.h264/.hevc/.mpegvideo) are now accepted with a COUNTED length instead of refused, and testing that needs a real raw bitstream, which only a real encoder can produce. THREE of the four are the same environmental reason once per package: an FFmpeg without libx264/libx265/mpeg2video cannot write the fixture at all. They are capability skips of exactly the shape #187 left in place -- a binary's outright absence fails under POLYEMESIS_REQUIRE_FFMPEG via testenv.FFmpegBinary, which all three fixtures route through first; only 'this build lacks that encoder' skips. The FOURTH is internal/ffmpeg's TestACountThatWasCutShortIsNotAVerdictAboutTheFile, which stands a #!/bin/sh script in for ffmpeg so a cancellation lands inside the count with no wall-clock budget anywhere in the test. That is #190's class exactly, and the same shape as TestProbeFileReturnsWhenItsContextIsCancelled three functions away.",
+      "alreadyPaidDown": "The first draft added SEVEN sites; four were removed before this was written. internal/playlistmedia's fixture hand-rolled two exec.LookPath skips, which are now one testenv.FFmpegBinary call each and so leave the census entirely; internal/api's did the same for ffmpeg. internal/ffmpeg's TestACountedLengthIsNotReportedAsADeclaredOne remuxes the raw stream to MPEG-TS with -c copy, which involves no encoder and therefore cannot fail on a build that just wrote the source -- that is a t.Fatalf, not a skip. The seven other new tests across the three packages added no sites: the three-format table in TestARawElementaryStreamIsAcceptedWithACountedDuration logs and counts instead of skipping per format, and asserts at the end that at least one format reached the branch, which the Finding-B entry above established as the stronger pattern.",
+      "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
+    }
+  ],
+  "total": 92,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
@@ -46,10 +61,10 @@
     "internal/config": 1,
     "internal/db": 1,
     "internal/engine": 6,
-    "internal/ffmpeg": 19,
+    "internal/ffmpeg": 22,
     "internal/media": 5,
     "internal/meters": 3,
-    "internal/playlistmedia": 4,
+    "internal/playlistmedia": 5,
     "internal/relay": 3,
     "internal/routing": 5,
     "internal/rtmpserver": 10,
@@ -59,5 +74,32 @@
     "internal/supervisor": 1,
     "internal/transcribe": 1,
     "internal/upgrade": 8
-  }
+  },
+  "raisedBy3": [
+    {
+      "pr": 267,
+      "from": 92,
+      "to": 93,
+      "packages": {
+        "internal/ffmpeg": "21 -> 22"
+      },
+      "why": "ONE site, and it is the Windows arm of the test written to close this PR's own refutation. An adversarial verifier found that the ErrNoDuration return formatted a SHADOWED err -- `err := cmd.Run()` shadowed by `if secs, err := countDuration(...)`, whose scope dies before the return -- so the operator was told `it could not be counted: <nil>`. Seventeen mutations and twelve tests missed it, because every one of them asserted the file was REFUSED and the refusal was correct; only the diagnostic was wrong. TestARefusalNamesWhyTheCountFailedRatherThanNil tables all three reachable causes and asserts each names ITS OWN cause. One of the three is 'there is no ffmpeg to count frames with', produced by a stand-in binary that is a POSIX shell script, which Windows will not execute -- the same shape internal/api's fakeProbe already carries in the entry above, and the subject of #265. Environment, not a property of the code.",
+      "alreadyPaidDown": "The api-side half of the same fix -- TestTheRefusedRawStreamsBodySaysWhyTheCountFailed -- added NO site: it reads the refusal out of the HTTP 400 JSON through the existing fixture, so it needs no stand-in of its own. The ffmpeg-side table skips once for the whole Windows case rather than once per cause; three separate calls would be three free passes for one condition, which is the rule the entry above sets.",
+      "handEditedRatherThanRegenerated": "Same reason as every entry above: -update-skips round-trips this file through a struct with no field for these reasons and deletes all of them. The two numbers were raised by hand."
+    }
+  ],
+  "loweredBy2": [
+    {
+      "pr": 270,
+      "from": 93,
+      "to": 92,
+      "packages": {
+        "internal/api": "8 -> 7"
+      },
+      "why": "#265. internal/api's fakeProbe was a #!/bin/sh script, and it skipped the whole test rather than the fixture: any test that needed a probe with a controllable lifetime skipped on Windows. It is now the test binary re-executed with a JSON plan in the environment, which is what internal/supervisor/testfake_test.go does and for the same reason, so the ONE site is gone and nothing replaced it. What became testable on windows-latest, executing rather than skipping: TestUploadSurvivesAClientDisconnectDuringTheProbe, TestUploadIsAcceptedUncheckedWhenTheProbeTimesOut, TestUploadStillRejectsWhenTheProbeRunsAndFails, TestARejectedUploadIsNeverVisibleOrReferenceableWhileItIsProbed, TestTheUncheckedBypassSaysSoInTheLog, TestConcurrentUploadsDoNotSpawnUnboundedProbes, and the four in upload_verdict_test.go that used the same fixture -- TestATTACK_RealSocketDisconnectPublishesUnprobed, TestATTACK_SlowProbeTimeoutPublishesUnprobed, TestAProbeThatPrintsRubbishKeepsTheFileAndSaysSo, TestAProbeThatRunsAndDisagreesStillRejectsAndLeavesNothing. Removing a skip is the direction this ratchet exists to encourage, and this one is removed rather than relabelled: there is no runtime.GOOS anywhere in the replacement.",
+      "notPaidDown": "#190's OTHER half is untouched and is not claimed here. internal/ffmpeg's TestProbeFileReturnsWhenItsContextIsCancelled stands a shell script in precisely BECAUSE the script leaves a grandchild holding the stdout pipe, which is what bounds cmd.WaitDelay; a single-process Go helper cannot produce that shape, and producing it on Windows is a statement about Windows process trees rather than about portable Go. internal/ffmpeg's TestACountThatWasCutShortIsNotAVerdictAboutTheFile and the Windows arm of TestARefusalNamesWhyTheCountFailedRatherThanNil are the same class. internal/ffmpeg stays at 22.",
+      "handEditedRatherThanRegenerated": "For the reason every entry above records: `go test ./internal/testenv -run TestNoNewBareSkipCanLand -update-skips` produces exactly these two numbers and DELETES every reason in this file on the way past, because skipCensus has no field for them. Both were lowered by hand. Regeneration also still drops internal/supervisor, whose count remains 0 against a committed 1 -- left alone here for the reason PR 218's entry gives, that it is an unrelated change and sweeping it in would hide this one. The committed total is therefore 92 against a measured 91, and the difference is that one stale supervisor entry, not this change.",
+      "notRewritten": "The raisedBy entry for PR 118 still says internal/api's fakeProbe is a shell script and still points at #190. It is left as written: it records what was true when it was written, and #265 was split out of #190 afterwards. This entry is the update."
+    }
+  ]
 }

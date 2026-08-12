@@ -66,7 +66,7 @@ func TestARealFileInAFormatWeDoNotTakeIsNotCalledAPlaylist(t *testing.T) {
 				return
 			}
 
-			_, err := ProbeFile(context.Background(), ffprobe, out)
+			_, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, out)
 			if err == nil {
 				t.Logf("%s is on the allowlist on this build; nothing to assert", tc.name)
 				return
@@ -104,7 +104,7 @@ func TestARealFileInAFormatWeDoNotTakeIsNotCalledAPlaylist(t *testing.T) {
 	if err := os.WriteFile(script, ffconcatScript("victim.mp4"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ProbeFile(context.Background(), ffprobe, script); !errors.Is(err, ErrIndirectContainer) {
+	if _, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, script); !errors.Is(err, ErrIndirectContainer) {
 		t.Fatalf("an ffconcat script no longer gets the indirection sentence: %v", err)
 	}
 }
@@ -203,7 +203,7 @@ func TestAProbeThatPrintsTooMuchIsRefusedRatherThanBuffered(t *testing.T) {
 	// version of this test exercised cappedBuffer alone and left ProbeFile's own
 	// `if stdout.over` arm unpinned -- a mutation that deleted the check
 	// survived it.
-	if _, err := probeFile(context.Background(), ffprobe, sample, 32); err == nil {
+	if _, err := probeFile(context.Background(), Bins{FFprobe: ffprobe}, sample, 32); err == nil {
 		t.Fatal("a reply past the cap was parsed rather than refused")
 	} else if !errors.Is(err, ErrProbeTooVerbose) {
 		t.Fatalf("wrong refusal: %v", err)
@@ -214,7 +214,7 @@ func TestAProbeThatPrintsTooMuchIsRefusedRatherThanBuffered(t *testing.T) {
 	}
 	// THE CONTROL: the same file at the real cap is read normally, so the
 	// refusal above is the cap and not the file.
-	if _, err := probeFile(context.Background(), ffprobe, sample, probeStdoutCap); err != nil {
+	if _, err := probeFile(context.Background(), Bins{FFprobe: ffprobe}, sample, probeStdoutCap); err != nil {
 		t.Fatalf("the same media at the real cap was refused: %v", err)
 	}
 

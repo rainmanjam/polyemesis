@@ -15,6 +15,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
+	"github.com/rainmanjam/polyemesis/internal/uploadverify"
 )
 
 // The jobs API is the operator's view of the CPU tradeoff this whole tier is
@@ -117,6 +118,8 @@ var kindCatalogue = []struct {
 		"A keyframe-accurate cut out of a finished recording, copied losslessly wherever the cut lands on a keyframe."},
 	{playlistmedia.KindNormalise, "Playlist normalise",
 		"Transcodes one uploaded playlist item to the single fixed profile every item must share. A playlist will not go on air until every one of its items has been through this."},
+	{uploadverify.Kind, "Media re-check",
+		"Reads a stored upload again and records what it is. This is how a file the server never managed to inspect stops being \"Not checked\" without uploading it a second time. It records only what it establishes: an inspection that cannot run leaves the existing record exactly as it was."},
 }
 
 func kindLabel(k jobs.Kind) string {

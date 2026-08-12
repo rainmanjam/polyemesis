@@ -1,0 +1,24 @@
+# Cloudflare Pages project configuration for the marketing site.
+#
+# WHY THIS FILE EXISTS AT ALL. `wrangler pages deploy` can take the project name
+# and the output directory as flags, and for a while that is simpler. It is also
+# how the deploy command and the build command drift: the flags live in a
+# workflow, the output directory lives in astro.config.mjs, and nothing compares
+# them. Putting both in a file that Wrangler treats as the source of truth gives
+# internal/testenv/pagesdeploy_test.go something to compare against.
+#
+# `pages_build_output_dir` is RELATIVE TO THIS FILE, so it is ./dist because this
+# file is web/wrangler.toml and Astro builds into web/dist. The workflow runs
+# wrangler with working-directory: web for the same reason.
+#
+# This file is the source of truth once it is used: fields set here CANNOT be
+# edited in the Cloudflare dashboard. That is deliberate — the dashboard is not
+# in version control and a setting only it knows about is a setting nobody can
+# review.
+#
+# NO compatibility_date, and no bindings. Those configure Pages *Functions*, and
+# this site has none: astro.config.mjs sets output: "static", so a deploy is an
+# upload of files and nothing runs per request. Adding a date here would suggest
+# a runtime that does not exist.
+name = "polyemesis"
+pages_build_output_dir = "./dist"

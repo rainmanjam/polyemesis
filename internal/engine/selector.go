@@ -1241,6 +1241,32 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 // separately as well as combined, so a reader who finds the assumption wrong can
 // recompute the prediction from the same line without rerunning anything.
 //
+// WHAT predictedStepMs WAS MEASURED TO BE, AND IT IS NOT A STEP. Read the
+// hypothesis above as history. out_time counts the media a feed has produced
+// since its own first output -- measured in
+// TestProgressOutTimeCountsMediaProducedNotPositionOnThePublishedTimeline -- and
+// both offsets are tier-clock stamps taken at a switch DECISION. So
+// `(out.offset + out_time) - in.offset` is, to within two correction terms,
+// MINUS THE OUTGOING FEED'S START LAG: the wall time between its offset being
+// stamped and its first output, which for a feed that follows a teardown is the
+// teardown. That is why 91% of 113 recorded seams carry a negative prediction
+// while 112 of them produced no step at all, and why the seam whose predecessor
+// logged an 8002ms teardown carries predictedStepMs = -8586ms against a
+// delivered step of -30ms.
+//
+// The step a destination actually sees is
+//
+//	(out.offset + C_out + out_time) - (in.offset + C_in)
+//
+// where C_k is a feed's own start constant, the first value on its input
+// timeline, which -output_ts_offset ADDS to. The ledger drops both C terms. They
+// cancel only when the two feeds read the same stream from the same point, which
+// at a real seam they never do; measured spread between feeds is about 1.15s
+// against a 1ms detector threshold. Nothing FFmpeg reports through -progress
+// carries C, so this line cannot be repaired into a step predictor by arithmetic
+// alone. Do not try; two fixes derived from reading rather than measuring have
+// already been refuted here. See #126.
+//
 // Info rather than Debug on purpose: the acceptance suite runs the server at
 // -log info, and turning it up to debug to see this would also turn on the
 // per-packet churn logging, which changes the timing of the very thing being
@@ -1774,6 +1800,25 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 	}
 	if want == "" {
 		return
+	}
+
+	// #255, the standby half. The save-time gate checks the backup pull URL
+	// even when the tier is disabled -- "storing a source that is off today and
+	// switched on during an outage is the case this exists for" -- and a gate
+	// that covered the primary alone would leave exactly that asymmetry on the
+	// path that reaches air with nobody watching. Same split as the primary:
+	// only a refusal stops it, and Engine.pullUploadRefusal carries why.
+	//
+	// Before the hub is allocated rather than after, so a refused standby costs
+	// no relay port; and after the teardown above, so switching a running
+	// backup onto a refused upload takes the old one down rather than leaving
+	// it airing under a stale signature.
+	if b := s.Failover.Backup; b.Mode == db.IngestPull {
+		if refusal := e.pullUploadRefusal("the backup pull source", b.Pull.URL); refusal != "" {
+			e.log.Error("backup ingest not started: "+refusal, "source", e.sourceID)
+			e.noteReload("ingest", "backup-ingest", reloadStop, refusal)
+			return
+		}
 	}
 
 	hub, err := relay.New(e.log, 0)

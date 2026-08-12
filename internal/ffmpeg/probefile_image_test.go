@@ -50,7 +50,7 @@ func TestProbeFileRefusesAStillImage(t *testing.T) {
 			if err := os.WriteFile(p, png, 0o600); err != nil {
 				t.Fatalf("write %s: %v", name, err)
 			}
-			res, err := ProbeFile(context.Background(), ffprobe, p)
+			res, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, p)
 			if !errors.Is(err, ErrUnsupportedContainer) {
 				t.Fatalf("a PNG named %q was not refused as an unsupported container: "+
 					"err=%v res=%+v -- an image in the Library looks like a video to "+

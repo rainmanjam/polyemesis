@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, ShieldAlert, Trash2, Upload, X } from "lucide-react";
+import {
+  Copy,
+  RefreshCw,
+  ShieldAlert,
+  ShieldX,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { bytes, duration, timestamp } from "@/lib/format";
+import { useT } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,6 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { canReverify, uploadNotice } from "@/lib/upload-verdict";
 import type { MediaFile } from "@/lib/types";
 
 /* ===========================================================================
@@ -41,12 +51,22 @@ interface InFlight {
 }
 
 export function MediaUploads() {
+  const t = useT();
   const [files, setFiles] = useState<MediaFile[]>([]);
   const [inFlight, setInFlight] = useState<InFlight[]>([]);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [copied, setCopied] = useState("");
   const [pendingDelete, setPendingDelete] = useState<MediaFile | null>(null);
+  // The name currently being submitted, so the button cannot be pressed twice
+  // while the request is open. The SERVER folds duplicates too — the job is
+  // Unique on the upload — but a button that keeps responding to clicks while
+  // nothing visibly happens reads as broken.
+  const [verifying, setVerifying] = useState("");
+  // What the last re-check submission said. A sentence rather than a toast,
+  // because the answer is "queued", not "done": the inspection runs in the job
+  // queue and the row does not change until it finishes.
+  const [notice, setNotice] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -106,6 +126,40 @@ export function MediaUploads() {
     await navigator.clipboard.writeText(f.pullUrl);
     setCopied(f.name);
     window.setTimeout(() => setCopied(""), 2000);
+  }
+
+  /* Ask the server to read a file it already has (#202).
+   *
+   * IT DOES NOT REFRESH THE LISTING ON SUCCESS, and that is deliberate. The
+   * request returns when the job is QUEUED; the FFprobe has not run, so a
+   * refresh here would re-render exactly the same row and read as "the button
+   * did nothing". The operator is told what was queued instead, and the row
+   * changes on the next refresh after the job lands. */
+  async function reverify(f: MediaFile) {
+    setError("");
+    setNotice("");
+    setVerifying(f.name);
+    try {
+      const { created } = await api.verifyMedia(f.name);
+      setNotice(
+        created
+          ? t("media.checkQueued", { name: f.name })
+          : // Not silence. A press that folded into a job already running is a
+            // successful press, and saying nothing leaves the operator pressing
+            // it again.
+            t("media.checkAlreadyQueued", { name: f.name }),
+      );
+    } catch (e) {
+      // Named, like every other failure on this card. A re-check that fails
+      // silently leaves the operator believing the file is being looked at.
+      setError(
+        `${t("media.checkFailed", { name: f.name })} ${
+          e instanceof ApiError ? e.message : String(e)
+        }`,
+      );
+    } finally {
+      setVerifying("");
+    }
   }
 
   async function remove(f: MediaFile) {
@@ -203,6 +257,12 @@ export function MediaUploads() {
           </div>
         )}
 
+        {notice && (
+          <div className="rounded-md border bg-muted/40 p-2 text-xs text-muted-foreground">
+            {notice}
+          </div>
+        )}
+
         {files.length === 0 && inFlight.length === 0 ? (
           <div className="text-xs text-muted-foreground">
             Nothing uploaded yet.
@@ -237,19 +297,38 @@ export function MediaUploads() {
                       how every upload from before the check existed looks.
                       A row that says nothing here is a row that lets an
                       operator schedule a file nobody has read. */}
-                  {!f.verified && (
-                    <div
-                      className="mt-0.5 flex items-center gap-1 text-[11px] text-warn"
-                      title={
-                        f.unverifiedReason
-                          ? `${f.unverifiedReason}. Upload it again to have it checked; it cannot be used as a playlist item until it has been.`
-                          : "This file was stored before uploads were checked, so nothing here describes what is in it."
-                      }
-                    >
-                      <ShieldAlert className="size-3 shrink-0" aria-hidden />
-                      <span>Not checked</span>
-                    </div>
-                  )}
+                  {/* REFUSED IS NOT "NOT CHECKED", and this row is the whole
+                      reason the third state exists. A file that was inspected
+                      and rejected is the opposite of an unchecked one: the
+                      server read it and knows exactly what it is. Rendering
+                      both as "Not checked" would state something the server
+                      knows to be false, and — worse — would hand the operator
+                      the one remedy that cannot work, since re-sending the same
+                      bytes earns the same refusal. Nothing writes this state
+                      yet (see #202: the re-verify job is what will), and the
+                      row is built first so that when something does, the
+                      Library does not lie about it for a release.
+                      The wording lives in lib/upload-verdict so that this row
+                      and the playlist editor's filter cannot disagree. */}
+                  {(() => {
+                    const notice = uploadNotice(f);
+                    if (!notice) return null;
+                    const Icon =
+                      notice.tone === "refused" ? ShieldX : ShieldAlert;
+                    return (
+                      <div
+                        className={`mt-0.5 flex items-center gap-1 text-[11px] ${
+                          notice.tone === "refused"
+                            ? "text-destructive"
+                            : "text-warn"
+                        }`}
+                        title={notice.detail}
+                      >
+                        <Icon className="size-3 shrink-0" aria-hidden />
+                        <span>{notice.label}</span>
+                      </div>
+                    );
+                  })()}
                   {/* What the file actually is, which a name and a size cannot
                       say. The track count leads because routing is per track:
                       selecting track 3 of a file that carries one is silence
@@ -286,6 +365,33 @@ export function MediaUploads() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  {/* THE REMEDY FOR "Not checked", and until #202 there was
+                      none. The only way to get a verdict was to upload the
+                      bytes again, which is no remedy for a file the operator
+                      no longer has locally — and the row above is the whole
+                      reason the state is visible at all.
+
+                      NOT OFFERED BESIDE "Refused", and canReverify is where
+                      that line is drawn and argued. A refusal is a statement
+                      about the FILE; reading it a second time reaches the same
+                      conclusion, so a button here would be "upload it again"
+                      in a new spelling: an action that looks like a fix, does
+                      nothing, and teaches the operator to ignore the state. */}
+                  {canReverify(f) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={verifying === f.name}
+                      onClick={() => void reverify(f)}
+                      title={t("media.checkAgainHint")}
+                      aria-label={`${t("media.checkAgain")}: ${f.name}`}
+                    >
+                      <RefreshCw
+                        className={`size-3.5 ${verifying === f.name ? "animate-spin" : ""}`}
+                      />
+                      {t("media.checkAgain")}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"

@@ -337,7 +337,11 @@ function GoLiveComposer() {
   const busy = pushing || (job !== null && !job.done);
 
   return (
-    <Card className="mt-4">
+    // The testid scopes ui/e2e/go-live-composer.spec.ts to this card. "Title"
+    // and "Tags" are generic enough to appear elsewhere on a dashboard, and a
+    // spec that reached the wrong one would assert about a control it was not
+    // written for -- silently, and in whichever direction happened to pass.
+    <Card className="mt-4" data-testid="golive-composer">
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
           <Megaphone className="h-3.5 w-3.5 text-muted-foreground" />

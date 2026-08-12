@@ -141,7 +141,7 @@ func TestProbeFileRefusesWhatIsNotMedia(t *testing.T) {
 			path: write("script.ffconcat", ffconcatScript("victim.mp4"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := ProbeFile(context.Background(), ffprobe, tc.path)
+			res, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, tc.path)
 			if tc.wantIndirect {
 				if !errors.Is(err, ErrIndirectContainer) {
 					t.Fatalf("want ErrIndirectContainer, got err=%v res=%+v", err, res)
@@ -194,7 +194,7 @@ func TestProbeFileRefusesAScriptThatNamesOtherFiles(t *testing.T) {
 
 	// The victim really is readable media, so a refusal below cannot be
 	// explained by the referenced file being broken.
-	if res, err := ProbeFile(context.Background(), ffprobe, victim); err != nil {
+	if res, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, victim); err != nil {
 		t.Fatalf("the referenced file is not readable, so this proves nothing: %v", err)
 	} else if res.Video == nil {
 		t.Fatal("the referenced file has no video stream, so this proves nothing")
@@ -208,7 +208,7 @@ func TestProbeFileRefusesAScriptThatNamesOtherFiles(t *testing.T) {
 		t.Fatalf("the script fixture grew to %d bytes; it is meant to be tiny", n)
 	}
 
-	res, err := ProbeFile(context.Background(), ffprobe, script)
+	res, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, script)
 	if !errors.Is(err, ErrIndirectContainer) {
 		t.Fatalf("an ffconcat script was not refused as indirect: err=%v res=%+v", err, res)
 	}
@@ -288,7 +288,7 @@ func TestProbeFileAcceptsMostTruncatedMedia(t *testing.T) {
 
 	t.Run("a truncated faststart MP4 is accepted with the whole file's duration", func(t *testing.T) {
 		whole := build("fast.mp4", "-movflags", "+faststart")
-		res, err := ProbeFile(context.Background(), ffprobe, cut(whole, 0.1))
+		res, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, cut(whole, 0.1))
 		if err != nil {
 			t.Fatalf("this is documented as ACCEPTED; if it now fails, "+
 				"docs/TROUBLESHOOTING.md and probeUpload's comment need updating: %v", err)
@@ -305,7 +305,7 @@ func TestProbeFileAcceptsMostTruncatedMedia(t *testing.T) {
 	})
 
 	t.Run("a truncated Matroska file is accepted with the whole file's duration", func(t *testing.T) {
-		res, err := ProbeFile(context.Background(), ffprobe, cut(build("whole.mkv"), 0.1))
+		res, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, cut(build("whole.mkv"), 0.1))
 		if err != nil {
 			t.Fatalf("this is documented as ACCEPTED: %v", err)
 		}
@@ -318,7 +318,7 @@ func TestProbeFileAcceptsMostTruncatedMedia(t *testing.T) {
 	})
 
 	t.Run("a truncated plain MP4 is the one case that IS caught", func(t *testing.T) {
-		_, err := ProbeFile(context.Background(), ffprobe, cut(build("plain.mp4"), 0.1))
+		_, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, cut(build("plain.mp4"), 0.1))
 		if err == nil {
 			t.Fatal("a truncated non-faststart MP4 should fail: its moov box is at the end")
 		}
@@ -339,7 +339,7 @@ func TestProbeFileReadsRealMedia(t *testing.T) {
 	// buildSample produces two for every caller.
 	path := buildSample(t, filepath.Join(t.TempDir(), "sample.mkv"), "-t", "2")
 
-	res, err := ProbeFile(context.Background(), ffprobe, path)
+	res, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, path)
 	if err != nil {
 		t.Fatalf("ProbeFile on real media: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestProbeFileReturnsWhenItsContextIsCancelled(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, err := ProbeFile(ctx, fake, filepath.Join(dir, "anything.mp4"))
+	_, err := ProbeFile(ctx, Bins{FFprobe: fake}, filepath.Join(dir, "anything.mp4"))
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -417,7 +417,7 @@ func TestProbeFileDoesNotUseTheRelayInputWrapper(t *testing.T) {
 	ffprobe := bins[0]
 	path := filepath.Join(t.TempDir(), "missing.mp4")
 
-	_, err := ProbeFile(context.Background(), ffprobe, path)
+	_, err := ProbeFile(context.Background(), Bins{FFprobe: ffprobe}, path)
 	if err == nil {
 		t.Fatal("probing a file that does not exist should fail")
 	}
