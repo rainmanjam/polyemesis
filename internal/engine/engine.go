@@ -1163,6 +1163,25 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		return
 	}
 
+	// #255: the INHERITED pull source, re-examined here because the save-time
+	// gate cannot see one configured before it existed. Only a REFUSAL stops an
+	// ingest; an upload merely stored unchecked keeps streaming and is reported
+	// on the card. pullUploadRefusal carries the argument for the split, and it
+	// is the file to read before folding the two states back together.
+	//
+	// Above the signature comparison on purpose: a source already running on a
+	// refused upload has an unchanged signature, so a check placed below would
+	// take the `same` early return and never fire for the one case this exists
+	// for -- the one nothing re-examines.
+	if s.Ingest.Mode == db.IngestPull {
+		if refusal := e.pullUploadRefusal("this source", s.Ingest.Pull.URL); refusal != "" {
+			e.log.Error("pull ingest not started: "+refusal, "source", e.sourceID)
+			e.noteReload("ingest", "ingest", reloadStop, refusal)
+			e.stopIngestProcess()
+			return
+		}
+	}
+
 	spec := e.ingestSpec(s)
 	sig := hashStrings(append([]string{string(s.Ingest.Mode)}, spec...))
 

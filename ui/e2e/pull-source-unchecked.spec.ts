@@ -13,8 +13,14 @@ import { apiFetch } from "./destinations";
    design, is state the operator inherited: a URL saved while the upload still
    had a passing record, or one written by a build that predates the gate. #255
    offers two remedies for it, refuse at engine reconcile or say so on the card,
-   and Server.pullUploadUnchecked carries the argument for the second. This is
-   the assertion that the second one actually happens.
+   and the answer is that WHICH ONE depends on the state: an upload merely
+   stored unchecked keeps streaming and is reported here, and one that was
+   inspected and REFUSED stops the ingest at reconcile
+   (Engine.pullUploadRefusal, which carries the argument for the split).
+
+   This suite is the first of those two, and the verdict below is unverified for
+   that reason -- a refused one would take the ingest off air and there would be
+   no running source to carry the sentence.
 
    The state is built the way it really arises rather than by stubbing the
    response: a real upload with a real verdict beside it, saved through the real

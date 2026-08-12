@@ -111,35 +111,27 @@ func (s *Server) pullSourceUploadProblems(want db.Settings, storedPrimary, store
 // those would strand media an operator has had for a year over a file that was
 // never written. See uploads.Store.Verdict's second return.
 //
-// SPELLED ONCE BECAUSE THREE CALLERS MUST AGREE -- pullSourceUploadProblems
-// above, sourceIngestUploadProblem below, and Server.pullUploadUnchecked, which
-// reports rather than refuses. Two refuse a save and the third puts a sentence
-// on a card; a copy of this condition that drifted would let one of the three
-// disagree about which files are safe, and the disagreement would be invisible.
-// #264 inlined this switch into pullSourceUploadProblems, which was right when
-// that was the only caller and is not right now there are three -- so the
-// three-state logic moved in here rather than being pasted into each of them.
+// SPELLED ONCE BECAUSE FOUR CALLERS MUST AGREE -- pullSourceUploadProblems
+// above, sourceIngestUploadProblem below, Server.pullUploadUnchecked, which
+// reports rather than refuses, and now Engine.pullUploadRefusal, which stops an
+// inherited ingest. Two refuse a save, one puts a sentence on a card and one
+// takes a programme off air; a copy of this condition that drifted would let
+// them disagree about which files are safe, and the disagreement would be
+// invisible. #264 inlined this switch into pullSourceUploadProblems, which was
+// right when that was the only caller and stopped being right at the third.
 //
-// THE REMEDY IS PART OF THE ANSWER, not of the caller, because it is a function
-// of WHICH state the upload is in and nothing else. #264's whole point:
-// OutcomeRefused is "a statement about the FILE, it is permanent, and trying
-// again is not a remedy", so telling that operator to upload it again is advice
-// that cannot work. Returning the remedy alongside the objection is what keeps
-// a fourth caller from inventing its own.
+// THE SWITCH ITSELF NOW LIVES IN internal/uploads, and this is the adapter that
+// keeps the three handlers' call shape. It moved for one reason: internal/api
+// imports internal/engine (sourceView carries an engine.ListenerHealth), so the
+// engine cannot import this package to reach it, and #255's decision gives the
+// engine a fourth callsite. The alternative was a second copy of the switch in
+// the engine -- the exact drift this comment exists to prevent. See
+// uploads.Store.Objection, which also carries the Refused flag the engine needs
+// and these three callers do not: they refuse or report either way, and only
+// the engine treats the two states differently.
 func uploadObjection(store *uploads.Store, name string) (what, remedy string, bad bool) {
-	v, recorded := store.Verdict(name)
-	switch {
-	case !recorded:
-		// Stored before verdicts existed. Allowed; see above.
-		return "", "", false
-	case v.Outcome == uploads.OutcomeRefused:
-		return fmt.Sprintf("was inspected and refused (%s)", v.Reason),
-			"point it at a different file", true
-	case !v.Verified():
-		return fmt.Sprintf("was stored without being checked (%s)", v.Reason),
-			"upload it again before pulling from it", true
-	}
-	return "", "", false
+	o, bad := store.Objection(name)
+	return o.What, o.Remedy, bad
 }
 
 // sourceIngestUploadProblem is pullSourceUploadProblems for the route that
@@ -247,19 +239,25 @@ func (s *Server) sourceIngestUploadProblem(want db.IngestSettings, stored string
 //     wrong one of your own files" but bytes this server has already read and
 //     concluded are not media.
 //
-// I STILL DID NOT WRITE THE RECONCILE GATE, deliberately, for two reasons that
-// are about where a decision belongs and not about its merits. #255 asks the
-// maintainer to choose between failing closed and warning, and this PR's census
-// records "no engine-reconcile check at all" as a deliberate omission; deciding
-// that open question inside a merge resolution is the worst available place to
-// decide it. And nothing in the tree writes RefusedVerdict yet -- #202's
-// later-inspection path is what will -- so a gate on it today would be a gate
-// on a state no production code can currently produce, argued from a hypothetical.
+// THE MAINTAINER DECIDED IT AS A SPLIT, and #255 is closed against exactly the
+// asymmetry above: unverified is warned about here and keeps streaming, and a
+// refusal now stops the ingest at engine reconcile. See
+// engine.Engine.pullUploadRefusal, which is the fail-closed half and carries
+// the reasoning; everything above it is why the fail-open argument covers the
+// first state and not the second.
 //
-// What DOES change here is the sentence. The old one said "nothing has read a
-// byte of it, so upload it again", which for a refused file is false twice over,
-// and uploads.go says exactly why every consumer of the unverified state must
-// stop saying it. See uploadObjection, which owns both halves.
+// SO THIS FUNCTION KEEPS BOTH SENTENCES, and that is not an oversight. For an
+// unchecked upload it is the whole remedy. For a refused one the ingest is
+// already down, and the card is still where the operator finds out which file
+// and why -- a stopped programme with no sentence beside it is how the old
+// fail-closed proposal was going to land at 3am. The reconcile also records the
+// same sentence as a stop note (engine.reloadStop), so a save made afterwards
+// answers with it too.
+//
+// What DOES change in the sentence: the old one said "nothing has read a byte
+// of it, so upload it again", which for a refused file is false twice over, and
+// uploads.go says exactly why every consumer of the unverified state must stop
+// saying it. See uploads.Store.Objection, which owns both halves.
 func (s *Server) pullUploadUnchecked(src *db.Source) string {
 	if src == nil || src.Ingest.Mode != db.IngestPull {
 		return ""
