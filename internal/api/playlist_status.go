@@ -7,6 +7,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
 
 // GET /failover/playlist answers the question engine.playlistItemsReady only
@@ -48,6 +49,23 @@ type PlaylistItemStatus struct {
 	// operator which item or why -- Detail is the fix, so it is never left
 	// blank for the one state where an operator would ask.
 	Detail string `json:"detail,omitempty"`
+	// Warning carries a fact about the item that does NOT stop it going to
+	// air, which is why it is a separate field from Detail rather than a
+	// fourth State.
+	//
+	// It exists for exactly one situation today: the re-verify job recorded a
+	// refusal against an upload whose derivative already exists. State stays
+	// "ready" and the programme keeps playing, because the derivative was
+	// transcoded from those bytes and is itself intact -- taking a running
+	// item off air over a re-inspection of its SOURCE would black out a
+	// programme to report a fact the operator can act on at their leisure.
+	//
+	// The split is the one this file already draws: readiness answers "may
+	// this go to air", and a refusal is not an answer to that question once a
+	// derivative exists. Compare playlistUploadProblems, which DOES refuse the
+	// same upload -- but only as an item the operator is introducing, where
+	// nothing is on air to interrupt.
+	Warning string `json:"warning,omitempty"`
 }
 
 // PlaylistStatus is the whole playlist's readiness.
@@ -84,10 +102,49 @@ func (s *Server) handlePlaylistStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+// uploadRefusal reports the recorded reason this upload was refused, and
+// whether it was refused at all.
+//
+// IT RETURNS THE REASON, NOT A SENTENCE. The two callers in playlistItemStatus
+// share the finding and differ on the remedy -- one has a derivative on air to
+// keep, the other has nothing that can ever play -- and a helper that picked
+// the wording would force the caller's situation into it. This is the split
+// uploadObjection already draws in pull_verdict.go: the verdict is a fact, the
+// remedy is a function of the state the caller is in.
+//
+// AN UNCHECKED UPLOAD IS NOT REFUSED and returns false here. That asymmetry is
+// #255's, applied to the same question one layer up: an upload nobody managed
+// to inspect is a fact about THIS SERVER -- on a box with no ffprobe every
+// upload looks unchecked -- while a refusal exists only where an inspection
+// ran and read the bytes. Reporting the first as a refusal would put a warning
+// on every item on such a box.
+//
+// A store that cannot be opened yields no refusal rather than a false one.
+// This is a reporting path: it says what it observed, and "I could not look"
+// is not an accusation against the operator's file. The states that must fail
+// closed do so where they are enforced -- playlistUploadProblems returns an
+// error when it cannot build a store, because that one gates a write.
+func (s *Server) uploadRefusal(name string) (string, bool) {
+	store, err := s.uploadStore()
+	if err != nil {
+		return "", false
+	}
+	v, recorded := store.Verdict(name)
+	if !recorded || v.Outcome != uploads.OutcomeRefused {
+		return "", false
+	}
+	return v.Reason, true
+}
+
 // playlistItemStatus answers ready / transcoding / attention for one upload
 // name, already trimmed by db.PlaylistUploadName.
 func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	st := PlaylistItemStatus{Upload: name}
+
+	// READ BEFORE THE READY SHORT-CIRCUIT, because both branches need it and
+	// only one of them is reachable per call. Costs one small ReadFile per
+	// item, the same order as the Stat below, and playlists are short.
+	refusal, refused := s.uploadRefusal(name)
 
 	// READY asks the one question engine.playlistItemsReady asks: is there a
 	// NON-EMPTY derivative this profile produced. os.Stat, never store.Resolve
@@ -104,6 +161,12 @@ func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	// nothing if it is answering a different question from the gate.
 	if fi, err := os.Stat(playlistmedia.DerivativePath(s.cfg.DataDir, name)); err == nil && fi.Size() > 0 {
 		st.State = playlistItemReady
+		if refused {
+			// Deliberately does not touch State. See Warning's declaration.
+			st.Warning = "\"" + name + "\" was inspected and refused (" + refusal +
+				"), but the copy already on air was made before that; " +
+				"replace the file or remove this item when convenient"
+		}
 		return st
 	}
 
@@ -112,8 +175,20 @@ func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	// NewNormaliseJob submits under and the queue's Unique fold dedupes on, so
 	// this asks the identical question the queue itself would answer for "is
 	// this already being worked".
+	//
+	// NOT WHEN THE SOURCE IS REFUSED, and this clause is the whole reason the
+	// refusal is read at the top of the function rather than down in the
+	// attention block where it is reported.
+	//
+	// Saving a playlist enqueues a normalisation for every item, so a refused
+	// upload reliably HAS an active job -- one that will run, fail on the
+	// format allowlist, and be re-queued by the next save. Answering
+	// "transcoding" for it is the amber "working on it, wait" reading, given
+	// to an operator whose file can never finish. The queue state is true and
+	// the conclusion drawn from it is false, which is worse than saying
+	// nothing.
 	target := playlistmedia.NormaliseTarget(name)
-	if s.jobq != nil {
+	if s.jobq != nil && !refused {
 		active, err := s.jobq.List(jobs.Filter{
 			States: []jobs.State{jobs.StateQueued, jobs.StateRunning, jobs.StateDeferred},
 			Kinds:  []jobs.Kind{playlistmedia.KindNormalise},
@@ -147,6 +222,25 @@ func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 			st.Detail = "\"" + name + "\" is not a usable upload name: " + err.Error()
 			return st
 		}
+	}
+
+	// REFUSED OUTRANKS A FAILED JOB, and for the same reason a missing upload
+	// outranks one: it is the root cause, and it is the one a re-queue cannot
+	// fix. The normalisation below failed BECAUSE the source was refused, so
+	// reporting "normalisation failed: ..." here would name the symptom and
+	// send the operator to retry a job that will fail again for the same
+	// reason.
+	//
+	// The remedy differs from the ready case above even though the finding is
+	// identical, which is why the sentence is built here rather than returned
+	// by uploadRefusal: there is no copy on air to keep, so this one is not
+	// something to do "when convenient".
+	if refused {
+		st.State = playlistItemAttention
+		st.Detail = "\"" + name + "\" was inspected and refused (" + refusal +
+			"), so it cannot be normalised; sending the same file again will " +
+			"not change that -- replace the file or remove this item"
+		return st
 	}
 
 	if s.jobq != nil {

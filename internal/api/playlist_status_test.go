@@ -193,3 +193,129 @@ func TestAnEmptyPlaylistIsNotReady(t *testing.T) {
 		t.Errorf("an empty playlist reported items: %+v", status.Items)
 	}
 }
+
+// seedDerivative writes a non-empty derivative, which is the ONE question
+// readiness asks. Non-empty matters: all four readers of this path treat
+// zero-length as absent.
+func seedDerivative(t *testing.T, srv *Server, name string) {
+	t.Helper()
+	p := playlistmedia.DerivativePath(srv.cfg.DataDir, name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir derivative dir: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("already normalised"), 0o644); err != nil {
+		t.Fatalf("seed derivative %s: %v", name, err)
+	}
+}
+
+// A refusal recorded AFTER a derivative exists does not take the item off air.
+//
+// This is #273's on-air half, and the decision it records is deliberate: the
+// derivative was transcoded from those bytes and is itself intact, so pulling
+// it off air would black out a running programme to report a fact the operator
+// can act on whenever they like. The finding still has to reach them, which is
+// what Warning is for.
+//
+// The three assertions are separable on purpose, because the bug this guards
+// has two distinct wrong answers: reporting nothing (the state before this
+// change), and reporting it by breaking readiness.
+//
+// The mutation: delete the `if refused` block in playlistItemStatus's ready
+// branch and the Warning assertion fails while the other two still pass. Set
+// `st.State = playlistItemAttention` inside that block instead and the State
+// and Ready assertions fail while Warning still passes.
+func TestARefusalRecordedAfterNormalisationLeavesTheItemOnAir(t *testing.T) {
+	h, sign, srv, _ := playlistJobServer(t)
+	seedUpload(t, srv, "onair-abcd1234.ts")
+	seedDerivative(t, srv, "onair-abcd1234.ts")
+	savePlaylist(t, h, sign, []string{"onair-abcd1234.ts"}, http.StatusOK)
+
+	// Recorded AFTER the save, which is the whole shape of this bug: the item
+	// passed playlistUploadProblems when it was introduced, and the re-verify
+	// job refused it later. Seeding the refusal first would test the
+	// introduction gate instead, which already refuses and is not this.
+	seedVerdict(t, srv, "onair-abcd1234.ts", uploads.RefusedVerdict("not media"))
+
+	var status PlaylistStatus
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/failover/playlist", nil, http.StatusOK), &status)
+
+	if len(status.Items) != 1 {
+		t.Fatalf("want 1 item, got %+v", status.Items)
+	}
+	it := status.Items[0]
+	if it.State != playlistItemReady {
+		t.Errorf("a refused upload with a derivative left the item %q; it must stay ready and keep playing", it.State)
+	}
+	if !status.Ready {
+		t.Error("Ready went false over a refusal whose derivative is intact; the programme would go off air")
+	}
+	if !strings.Contains(it.Warning, "refused") || !strings.Contains(it.Warning, "not media") {
+		t.Errorf("Warning does not carry the refusal or its reason: %q", it.Warning)
+	}
+}
+
+// A refusal with NO derivative is the item's cause, and it outranks the
+// queue-state sentences that would otherwise be reported.
+//
+// "not yet queued for normalisation" is true and useless here: normalisation
+// cannot fix a refusal, and an operator told to wait will wait for ever. The
+// remedy differs from the on-air case above precisely because there is nothing
+// playing to keep.
+//
+// The mutation: delete the `if refused` block above the failed-job lookup and
+// Detail falls back to "not yet queued for normalisation", failing both the
+// substring assertions below.
+func TestARefusedItemWithNoDerivativeSaysSoRatherThanBlamingTheQueue(t *testing.T) {
+	h, sign, srv, _ := playlistJobServer(t)
+	seedUpload(t, srv, "refused-abcd1234.ts")
+	savePlaylist(t, h, sign, []string{"refused-abcd1234.ts"}, http.StatusOK)
+	seedVerdict(t, srv, "refused-abcd1234.ts", uploads.RefusedVerdict("not media"))
+
+	var status PlaylistStatus
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/failover/playlist", nil, http.StatusOK), &status)
+
+	if len(status.Items) != 1 {
+		t.Fatalf("want 1 item, got %+v", status.Items)
+	}
+	it := status.Items[0]
+	if it.State != playlistItemAttention {
+		t.Errorf("a refused upload with no derivative reported %q, want attention", it.State)
+	}
+	if !strings.Contains(it.Detail, "refused") || !strings.Contains(it.Detail, "not media") {
+		t.Errorf("Detail does not name the refusal or its reason: %q", it.Detail)
+	}
+	if strings.Contains(it.Detail, "not yet queued") {
+		t.Errorf("Detail blamed the queue for a refusal the queue cannot fix: %q", it.Detail)
+	}
+	if it.Warning != "" {
+		t.Errorf("an item that cannot play carries a Warning as well as a Detail: %q", it.Warning)
+	}
+}
+
+// An UNCHECKED upload is not a refusal and gets no warning.
+//
+// #255's asymmetry, one layer up: an upload nobody managed to inspect is a
+// fact about THIS SERVER -- on a box with no ffprobe every upload looks
+// unchecked -- while a refusal exists only where an inspection ran and read
+// the bytes. Without this distinction every item on such a box would carry a
+// warning accusing the operator's files.
+//
+// The mutation: relax uploadRefusal's `v.Outcome != uploads.OutcomeRefused`
+// check to `!v.Verified()` and this fails while both tests above still pass.
+func TestAnUncheckedUploadIsNotReportedAsRefused(t *testing.T) {
+	h, sign, srv, _ := playlistJobServer(t)
+	seedUpload(t, srv, "unchecked-abcd1234.ts")
+	seedDerivative(t, srv, "unchecked-abcd1234.ts")
+	savePlaylist(t, h, sign, []string{"unchecked-abcd1234.ts"}, http.StatusOK)
+	seedVerdict(t, srv, "unchecked-abcd1234.ts", uploads.UnverifiedVerdict("nobody read this"))
+
+	var status PlaylistStatus
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/failover/playlist", nil, http.StatusOK), &status)
+
+	if len(status.Items) != 1 {
+		t.Fatalf("want 1 item, got %+v", status.Items)
+	}
+	if w := status.Items[0].Warning; w != "" {
+		t.Errorf("an unchecked upload was reported as refused: %q", w)
+	}
+}
