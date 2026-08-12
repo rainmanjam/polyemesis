@@ -483,6 +483,12 @@ func (s *Server) registerRoutes(r chi.Router) {
 				// promises: a token can list media, and cannot write it.
 				r.Post("/media", s.handleUploadMedia)
 				r.Delete("/media/{name}", s.handleDeleteMedia)
+				// Re-inspecting a stored upload (#202). A WRITE, and here
+				// rather than beside GET /media, because it replaces the
+				// record that playlistUploadProblems and
+				// pullSourceUploadProblems both gate saves on. See
+				// handleVerifyMedia.
+				r.Post("/media/{name}/verify", s.handleVerifyMedia)
 
 				// Replacing the server's own binary, and putting the previous
 				// one back. #149 added these calling requireSession from
