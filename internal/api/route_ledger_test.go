@@ -1637,56 +1637,114 @@ func shapeRegistry() []shapeRow {
 	return []shapeRow{
 		{Shape: "json-body", Emitted: true, Inspector: inspectJSONBody,
 			Note: "the value sweep: real read-bearer bytes scanned for every planted sentinel"},
-		// NOT inspected, corrected from Inspected:true. This row named
-		// TestAConfiguredRedirectNeverCachesAWatchToken, which is declared in
-		// cmd/polyemesis/redirect_test.go -- package main. It is a real test and
-		// it really does assert this header, but it is not reachable from this
-		// ledger: it does not run when this ledger runs, no -run filter here
-		// selects it, and the TestMain preflight that gives these obligations
-		// jurisdiction does not cover it. Recording it as this package's
-		// inspection was a claim about another package's test suite.
+		// THE RESPONSE-HEADER FAMILY IS DERIVED (#168). Every row whose shape
+		// starts "response-header/" is joined to an AST scan of this package's
+		// own source: assertDerivedHeaderShapesAreRegistered fails if this
+		// package writes a header with no row here, and fails if a row here
+		// names a header no site in this package writes. See
+		// shape_derivation_test.go for what that scan can and cannot see.
 		//
-		// #176 names this row and its Cache-Control twin as the two that "need
-		// real work rather than a rename", and they still do: an inspector here
-		// would have to stand up the redirect wrapper, which lives in package
-		// main. Left deferred with the jurisdiction stated, which is what #176
-		// asks for, rather than given a token inspector that witnesses a header
-		// on some other route and calls the shape covered.
-		{Shape: "response-header/Location", Emitted: true, Issue: "#168",
-			Jurisdiction: &shapeJurisdiction{
-				Package: "cmd/polyemesis", Test: "TestAConfiguredRedirectNeverCachesAWatchToken",
-				Why: "the redirect wrapper lives in package main; that test drives it and " +
-					"asserts the Location it emits is never cacheable. Resolved by " +
-					"`go test -list`, not trusted."},
-			Note: "the HTTPS redirect's Location carries the request URI verbatim, watch token " +
-				"included. The assertion lives in cmd/polyemesis (package main), out of " +
-				"this ledger's jurisdiction. rawResponse now renders EVERY response header, " +
-				"so the invariance sweep does read headers -- but only for the routes it " +
-				"sweeps, and the redirect is not one of them."},
+		// THE MEASUREMENT THAT JUSTIFIES THE WHOLE FAMILY. Before the scan
+		// existed there were FOUR rows -- Location, Set-Cookie, Cache-Control,
+		// Content-Disposition -- and this package emits SIXTEEN distinct
+		// response headers. Twelve had never been written down, and nothing in
+		// this ledger could have said so, because the population was the list.
+		// That is #168's sentence, measured.
+		//
+		// CORRECTED, and this is the second thing the derivation found. This
+		// row carried a jurisdiction record pointing at package main on the
+		// reading that Location is emitted by the HTTPS redirect wrapper. It is
+		// also emitted HERE: http.Redirect is called twice in this package, both
+		// in oauth_handlers.go, and the OAuth flow's Location comes off this
+		// router. The ledger was excusing itself out of a header its own routes
+		// write, and no test in this package read a Location before
+		// inspectLocationHeader. cmd/polyemesis's redirect is still a second
+		// surface and is still covered as such -- see the plain-http-listener
+		// row, which is about that listener rather than about this header.
+		{Shape: "response-header/Location", Emitted: true, Inspector: inspectLocationHeader,
+			Note: "a redirect's target, and a credential-bearing shape twice over: the OAuth " +
+				"callback puts an outcome in it, and the package-main HTTPS redirect copies " +
+				"the request URI verbatim, watch token included. Two sites here, both " +
+				"through oauthDone; the inspector witnesses the callback's."},
 		{Shape: "response-header/Set-Cookie", Emitted: true, Inspector: inspectPlayoutCookie,
 			Note: "the playout watch cookie"},
-		{Shape: "response-header/Cache-Control", Emitted: true, Issue: "#168",
-			Jurisdiction: &shapeJurisdiction{
-				Package: "cmd/polyemesis", Test: "TestATokenlessWatchPathIsStillUncacheable",
-				Why: "same package-main jurisdiction as Location above, and the same " +
-					"redirect surface: the assertion that a watch path is never stored is " +
-					"there because the wrapper is there."},
-			Note: "whether a credential-bearing response may be stored. Same jurisdiction " +
-				"problem as response-header/Location above: asserted in package main, " +
-				"unasserted here for the routes outside the invariance sweep."},
-		{Shape: "response-header/Content-Disposition", Emitted: true, Issue: "#168",
-			Jurisdiction: &shapeJurisdiction{
-				Package: "internal/api", Test: "TestDownloadCAServesOnlyTheSelfSignedCACertificate",
-				Why: "IN THIS PACKAGE and still not an inspection, which is the honest " +
-					"reading of a jurisdiction record: that test drives a download route " +
-					"and asserts the attachment disposition on it, but the preflight does " +
-					"not call it and it covers one route rather than the shape. Weaker " +
-					"than an inspector, said out loud, and mechanically resolvable, which " +
-					"the issue number it replaces was not."},
-			Note: "download filenames; media names only, no stored credential. RE-POINTED from " +
-				"#154, which commit ae8df24 announces closing: what remains is that the " +
-				"download routes are excused from the sweep entirely, so no principal-pair " +
-				"comparison reads their headers."},
+		// CORRECTED with Location, and for the same reason: five sites in this
+		// package write Cache-Control, one of them the principalVaryingResponse
+		// that exists because those bodies depend on who asked. The package-main
+		// jurisdiction record was true about a surface and wrong about the
+		// header.
+		{Shape: "response-header/Cache-Control", Emitted: true, Inspector: inspectCacheControlHeader,
+			Note: "whether a credential-bearing response may be stored. Five sites; the " +
+				"inspector witnesses principalVaryingResponse's `private, no-store` on a " +
+				"redacted body, which is the one this row is about. The poster's `public, " +
+				"max-age` is the same header and not the same claim, which is why the " +
+				"inspector requires the substring rather than mere presence."},
+		{Shape: "response-header/Content-Disposition", Emitted: true,
+			Inspector: inspectContentDispositionHeader,
+			Note: "download filenames; media names only, no stored credential. Four sites " +
+				"(clips, automation, recordings, the CA certificate); the inspector drives " +
+				"the CA download, which is the one reachable without planting a media file. " +
+				"What is still true and is now the file-download row's business rather than " +
+				"this one's: the download routes are excused from the value sweep entirely, " +
+				"so no principal-pair comparison reads their headers."},
+		{Shape: "response-header/Content-Type", Emitted: true, Inspector: inspectContentTypeHeader,
+			Note: "eight sites, from JSON to PEM to image/jpeg to the HLS manifest type. The " +
+				"inspector witnesses writeJSON's, which is the one nearly every route in " +
+				"this API emits."},
+		{Shape: "response-header/X-Content-Type-Options", Emitted: true,
+			Inspector: inspectNosniffHeader,
+			Note: "nosniff. Four sites, one of them the security middleware every response " +
+				"passes through, so a browser is never invited to guess a type for bytes " +
+				"this API labelled."},
+		{Shape: "response-header/Vary", Emitted: true, Inspector: inspectVaryHeader,
+			Note: "the cache key. Five sites across principalVaryingResponse and " +
+				"playoutVaryingResponse; the inspector requires Authorization to be named, " +
+				"because a shared cache that keys a redacted body without it hands one " +
+				"principal another's response."},
+		{Shape: "response-header/Content-Security-Policy", Emitted: true, Inspector: inspectCSPHeader,
+			Note: "the security middleware's policy, plus the watch page's relaxed " +
+				"frame-ancestors when cross-origin embedding is on. Never previously a " +
+				"shape row despite being on every response this API sends."},
+		{Shape: "response-header/X-Frame-Options", Emitted: true, Inspector: inspectFrameOptionsHeader,
+			Note: "DENY, from the security middleware; deleted again by the watch handler " +
+				"when embedding is allowed. Del is not an emission and the derivation does " +
+				"not count it."},
+		{Shape: "response-header/Referrer-Policy", Emitted: true,
+			Inspector: inspectReferrerPolicyHeader,
+			Note: "no-referrer, so a watch URL carrying a playback token is not handed to " +
+				"whatever the page links to."},
+		{Shape: "response-header/Permissions-Policy", Emitted: true,
+			Inspector: inspectPermissionsPolicyHeader,
+			Note:      "camera, microphone and geolocation refused for this origin."},
+		{Shape: "response-header/Strict-Transport-Security", Emitted: true,
+			Inspector: inspectHSTSHeader,
+			Note: "emitted only on a certificate a browser will validate AND a genuinely " +
+				"encrypted hop, which is why no fixture in this package had ever produced " +
+				"one. The inspector drives securityHeaders directly with both conditions " +
+				"true; it is the only inspector in this registry with no server behind it."},
+		{Shape: "response-header/WWW-Authenticate", Emitted: true,
+			Inspector: inspectWWWAuthenticateHeader,
+			Note: "the Basic challenge a protected playout answers a tokenless viewer with. " +
+				"Asserted elsewhere in this package by TestPlayoutMediaChallengeNamesBasic; " +
+				"the ledger had never counted it."},
+		{Shape: "response-header/Access-Control-Allow-Origin", Emitted: true,
+			Inspector: inspectCORSHeader,
+			Note: "the constant `*`, never a reflected origin -- which is measured, and is " +
+				"why Vary: Origin is deliberately absent. Three sites, all behind the " +
+				"AllowCrossOrigin setting, so the inspector needs a fixture with embedding " +
+				"turned on."},
+		{Shape: "response-header/Retry-After", Emitted: true, Inspector: inspectRetryAfterHeader,
+			Note: "the login throttle's delay, and the one header in this API whose VALUE is " +
+				"a measurement rather than a constant. The inspector requires a positive " +
+				"number of seconds: a present `0` is a throttle inviting the caller " +
+				"straight back."},
+		{Shape: "response-header/Content-Length", Emitted: true,
+			Inspector: inspectContentLengthHeader,
+			Note: "one site, the playout poster, and the emission NO TEST IN THIS PACKAGE " +
+				"HAD EVER REACHED: posterJPEG needs a segment on disk and a real FFmpeg, so " +
+				"every fixture here gets the 404 branch. Surfaced by the derivation and " +
+				"inspected by priming the poster cache, which drives the real handler down " +
+				"the real 200 branch for one request."},
 		{Shape: "streaming-media", Emitted: true, Inspector: inspectStreamingManifest,
 			Note: "the HLS manifest and its segments -- the shape a body sweep reads none of, " +
 				"and the one that escaped the previous audit. The old `by` string named the " +
@@ -2497,6 +2555,12 @@ func TestLedgerPreflight(t *testing.T) {
 	// buys both properties.
 	TestEveryInspectedShapeWitnessesItself(t)
 	TestBlankingEveryShapeNoteChangesNoVerdict(t)
+	// #168's half one, and the same two reasons a third time. It parses this
+	// package's own source and drives nothing, so it costs the preflight under a
+	// tenth of a second -- and it is the only check in this ledger whose failure
+	// means "a shape appeared that nobody wrote down", which is the sentence the
+	// issue is made of. See shape_derivation_test.go.
+	assertDerivedHeaderShapesAreRegistered(t)
 	// The same two reasons again, for the file that deletes issue-numbers-as-
 	// discharge from the shape channel. The resolver shells out to `go test
 	// -list` in three packages; measured, and the number is in the PR body,
@@ -3458,6 +3522,37 @@ func deferredWithReasons() []coverageDefer {
 			// The residual of THIS round's own run-filter scanner, stated at the
 			// width the guard actually has rather than the width its name
 			// suggests.
+			// #168'S RESIDUAL, WRITTEN DOWN THE ROUND ITS FIRST HALF LANDED.
+			// The issue asks for the emitted-shape set to be derived from the
+			// code that emits. ONE FAMILY now is, and it is the family the
+			// issue names -- sixteen response headers, joined in both
+			// directions to an AST scan of this package's source. The rest of
+			// the registry is still eleven rows somebody wrote.
+			ID: "shape-derivation-reaches-only-the-response-header-family",
+			What: "assertDerivedHeaderShapesAreRegistered derives every response header " +
+				"this package emits and requires a shape row for each. The other shape " +
+				"rows -- json-body, streaming-media, websocket-frame, slog-output, " +
+				"outbound-hook-body, outbound-alert-body, on-disk-process-log, " +
+				"file-download, mqtt-retained-topic, plain-http-listener, sse -- are " +
+				"hand-written, and a genuinely new one of those is still invisible until " +
+				"somebody adds a row. Also underived: the header names net/http writes at " +
+				"this package's four http.ServeContent sites, which are net/http's rather " +
+				"than this package's and appear in no source line here.",
+			WhySafe: "a response header NAMES ITS OWN SHAPE at the call site -- " +
+				"`Header().Set(\"Vary\", ...)` -- which is what makes it derivable at all. " +
+				"A whole-payload shape has no such literal: nothing syntactic " +
+				"distinguishes a manifest from an error page, and the round that deleted " +
+				"the `By` string caught a green proof reading 50 bytes of " +
+				"{\"error\":...} while a row called the streaming shape covered. A " +
+				"derivation invented for those families would be a name resolver again, " +
+				"one abstraction up.",
+			WhatWouldMakeItUnsafe: "a new whole-payload egress. The two outbound bodies in " +
+				"this registry were exactly that -- principal-less sends, structurally " +
+				"identical to the retained MQTT topic, absent from the list until #169 " +
+				"went looking -- and no scan in this file would have found them either.",
+			Issue: "#168",
+		},
+		{
 			ID: "run-filter-scan-is-limited-to-regeneration-commands",
 			What: "TestEveryDocumentedRunFilterNamesALiveTest reads every .go file in " +
 				"this package and the artifact, but only matches a -run whose line also " +

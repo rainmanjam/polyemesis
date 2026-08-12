@@ -8,16 +8,16 @@
   "unstableCeiling": 3,
   "inertCeiling": 11,
   "varianceExemptCeiling": 2,
-  "shapeFloor": 14,
-  "shapesNotInspectedCeiling": 6,
+  "shapeFloor": 26,
+  "shapesNotInspectedCeiling": 3,
   "totals": {
     "methodPatternPairs": 212,
     "swept": 55,
     "excused": 57,
     "denied": 100,
     "nonTrieProbes": 12,
-    "shapesEmitted": 14,
-    "shapesNotInspected": 6
+    "shapesEmitted": 26,
+    "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
@@ -1900,15 +1900,9 @@
     {
       "shape": "response-header/Location",
       "emitted": true,
-      "inspected": false,
-      "inspectedBy": "",
-      "issue": "#168",
-      "jurisdiction": {
-        "package": "cmd/polyemesis",
-        "test": "TestAConfiguredRedirectNeverCachesAWatchToken",
-        "why": "the redirect wrapper lives in package main; that test drives it and asserts the Location it emits is never cacheable. Resolved by `go test -list`, not trusted."
-      },
-      "note": "the HTTPS redirect's Location carries the request URI verbatim, watch token included. The assertion lives in cmd/polyemesis (package main), out of this ledger's jurisdiction. rawResponse now renders EVERY response header, so the invariance sweep does read headers -- but only for the routes it sweeps, and the redirect is not one of them."
+      "inspected": true,
+      "inspectedBy": "api.inspectLocationHeader",
+      "note": "a redirect's target, and a credential-bearing shape twice over: the OAuth callback puts an outcome in it, and the package-main HTTPS redirect copies the request URI verbatim, watch token included. Two sites here, both through oauthDone; the inspector witnesses the callback's."
     },
     {
       "shape": "response-header/Set-Cookie",
@@ -1920,28 +1914,100 @@
     {
       "shape": "response-header/Cache-Control",
       "emitted": true,
-      "inspected": false,
-      "inspectedBy": "",
-      "issue": "#168",
-      "jurisdiction": {
-        "package": "cmd/polyemesis",
-        "test": "TestATokenlessWatchPathIsStillUncacheable",
-        "why": "same package-main jurisdiction as Location above, and the same redirect surface: the assertion that a watch path is never stored is there because the wrapper is there."
-      },
-      "note": "whether a credential-bearing response may be stored. Same jurisdiction problem as response-header/Location above: asserted in package main, unasserted here for the routes outside the invariance sweep."
+      "inspected": true,
+      "inspectedBy": "api.inspectCacheControlHeader",
+      "note": "whether a credential-bearing response may be stored. Five sites; the inspector witnesses principalVaryingResponse's `private, no-store` on a redacted body, which is the one this row is about. The poster's `public, max-age` is the same header and not the same claim, which is why the inspector requires the substring rather than mere presence."
     },
     {
       "shape": "response-header/Content-Disposition",
       "emitted": true,
-      "inspected": false,
-      "inspectedBy": "",
-      "issue": "#168",
-      "jurisdiction": {
-        "package": "internal/api",
-        "test": "TestDownloadCAServesOnlyTheSelfSignedCACertificate",
-        "why": "IN THIS PACKAGE and still not an inspection, which is the honest reading of a jurisdiction record: that test drives a download route and asserts the attachment disposition on it, but the preflight does not call it and it covers one route rather than the shape. Weaker than an inspector, said out loud, and mechanically resolvable, which the issue number it replaces was not."
-      },
-      "note": "download filenames; media names only, no stored credential. RE-POINTED from #154, which commit ae8df24 announces closing: what remains is that the download routes are excused from the sweep entirely, so no principal-pair comparison reads their headers."
+      "inspected": true,
+      "inspectedBy": "api.inspectContentDispositionHeader",
+      "note": "download filenames; media names only, no stored credential. Four sites (clips, automation, recordings, the CA certificate); the inspector drives the CA download, which is the one reachable without planting a media file. What is still true and is now the file-download row's business rather than this one's: the download routes are excused from the value sweep entirely, so no principal-pair comparison reads their headers."
+    },
+    {
+      "shape": "response-header/Content-Type",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectContentTypeHeader",
+      "note": "eight sites, from JSON to PEM to image/jpeg to the HLS manifest type. The inspector witnesses writeJSON's, which is the one nearly every route in this API emits."
+    },
+    {
+      "shape": "response-header/X-Content-Type-Options",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectNosniffHeader",
+      "note": "nosniff. Four sites, one of them the security middleware every response passes through, so a browser is never invited to guess a type for bytes this API labelled."
+    },
+    {
+      "shape": "response-header/Vary",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectVaryHeader",
+      "note": "the cache key. Five sites across principalVaryingResponse and playoutVaryingResponse; the inspector requires Authorization to be named, because a shared cache that keys a redacted body without it hands one principal another's response."
+    },
+    {
+      "shape": "response-header/Content-Security-Policy",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectCSPHeader",
+      "note": "the security middleware's policy, plus the watch page's relaxed frame-ancestors when cross-origin embedding is on. Never previously a shape row despite being on every response this API sends."
+    },
+    {
+      "shape": "response-header/X-Frame-Options",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectFrameOptionsHeader",
+      "note": "DENY, from the security middleware; deleted again by the watch handler when embedding is allowed. Del is not an emission and the derivation does not count it."
+    },
+    {
+      "shape": "response-header/Referrer-Policy",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectReferrerPolicyHeader",
+      "note": "no-referrer, so a watch URL carrying a playback token is not handed to whatever the page links to."
+    },
+    {
+      "shape": "response-header/Permissions-Policy",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectPermissionsPolicyHeader",
+      "note": "camera, microphone and geolocation refused for this origin."
+    },
+    {
+      "shape": "response-header/Strict-Transport-Security",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectHSTSHeader",
+      "note": "emitted only on a certificate a browser will validate AND a genuinely encrypted hop, which is why no fixture in this package had ever produced one. The inspector drives securityHeaders directly with both conditions true; it is the only inspector in this registry with no server behind it."
+    },
+    {
+      "shape": "response-header/WWW-Authenticate",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectWWWAuthenticateHeader",
+      "note": "the Basic challenge a protected playout answers a tokenless viewer with. Asserted elsewhere in this package by TestPlayoutMediaChallengeNamesBasic; the ledger had never counted it."
+    },
+    {
+      "shape": "response-header/Access-Control-Allow-Origin",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectCORSHeader",
+      "note": "the constant `*`, never a reflected origin -- which is measured, and is why Vary: Origin is deliberately absent. Three sites, all behind the AllowCrossOrigin setting, so the inspector needs a fixture with embedding turned on."
+    },
+    {
+      "shape": "response-header/Retry-After",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectRetryAfterHeader",
+      "note": "the login throttle's delay, and the one header in this API whose VALUE is a measurement rather than a constant. The inspector requires a positive number of seconds: a present `0` is a throttle inviting the caller straight back."
+    },
+    {
+      "shape": "response-header/Content-Length",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectContentLengthHeader",
+      "note": "one site, the playout poster, and the emission NO TEST IN THIS PACKAGE HAD EVER REACHED: posterJPEG needs a segment on disk and a real FFmpeg, so every fixture here gets the 404 branch. Surfaced by the derivation and inspected by priming the poster cache, which drives the real handler down the real 200 branch for one request."
     },
     {
       "shape": "streaming-media",
@@ -2046,6 +2112,13 @@
       "whySafe": "what the built column buys is BRANCH REACHABILITY, and every branch internal/web can take is distinguishable from outside by status, Content-Type and Cache-Control regardless of which bytes the file holds. The two properties that could have been assumptions rather than observations -- that no middleware rewrites the response on the way out, and that the asset branch never consults the principal -- are now observed, because the requests go through everything that is mounted above the terminal.",
       "whatWouldMakeItUnsafe": "a real bundle whose LAYOUT differs from the synthetic one in a way the handler branches on -- a nested assets directory, a service worker at the root, a file the sub-FS refuses to open. Nothing here can see that, and the honest fix for it is a CI job that builds the UI before the Go job, which costs a four-minute npm install on every Go run. NO ISSUE IS CITED: #167's two stated fix directions -- drive a build with assets embedded, and assert the emptiness precondition so the divergence is visible -- are both done and both done through the mux, so carrying the number forward would be citing, as a reason, work that has been carried out.",
       "issue": ""
+    },
+    {
+      "id": "shape-derivation-reaches-only-the-response-header-family",
+      "what": "assertDerivedHeaderShapesAreRegistered derives every response header this package emits and requires a shape row for each. The other shape rows -- json-body, streaming-media, websocket-frame, slog-output, outbound-hook-body, outbound-alert-body, on-disk-process-log, file-download, mqtt-retained-topic, plain-http-listener, sse -- are hand-written, and a genuinely new one of those is still invisible until somebody adds a row. Also underived: the header names net/http writes at this package's four http.ServeContent sites, which are net/http's rather than this package's and appear in no source line here.",
+      "whySafe": "a response header NAMES ITS OWN SHAPE at the call site -- `Header().Set(\"Vary\", ...)` -- which is what makes it derivable at all. A whole-payload shape has no such literal: nothing syntactic distinguishes a manifest from an error page, and the round that deleted the `By` string caught a green proof reading 50 bytes of {\"error\":...} while a row called the streaming shape covered. A derivation invented for those families would be a name resolver again, one abstraction up.",
+      "whatWouldMakeItUnsafe": "a new whole-payload egress. The two outbound bodies in this registry were exactly that -- principal-less sends, structurally identical to the retained MQTT topic, absent from the list until #169 went looking -- and no scan in this file would have found them either.",
+      "issue": "#168"
     },
     {
       "id": "run-filter-scan-is-limited-to-regeneration-commands",
