@@ -5,10 +5,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
 // The recurrence guard for #150's disclosure findings.
@@ -197,7 +201,154 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 		t.Fatalf("reconcile so the engine sees the planted settings: %v", err)
 	}
 
+	plantRows(t, store, s)
+
 	return h, store, sign
+}
+
+// plantRows creates the one row of each kind that the {id} routes need in order
+// to answer anything at all.
+//
+// This is the FIXTURE half of #163, and it is the half that was left. Seven GET
+// routes -- clipper recordings, library recordings and sessions, alert rules,
+// hooks, schedules, renditions -- were excused as "reached only with a row this
+// fixture does not create". That excuse was honest: each one DROVE the 404 it
+// claimed, so a body appearing there would have failed. What it cost was
+// coverage. Seven response bodies that no principal had ever been handed in a
+// test, whose leaf fields were traced by READING the handler rather than by
+// reading bytes off the wire.
+//
+// A row apiece is the whole fix. Every one of these routes is a store read
+// rendered through a view, and a 404 is the only thing an empty table can
+// produce; with a row present they answer 200 and the ordinary sweep applies --
+// three principals, byte comparison, every sentinel asserted absent.
+//
+// TWO ROWS CARRY A PLANTED CREDENTIAL, and they are the reason this is worth
+// more than a row count. An alert rule's URL and a hook's URL both carry their
+// secret in the PATH -- that is what a Slack-shaped webhook is -- and both
+// marshal through a MarshalJSON that replaces the path with a mask for EVERY
+// principal, admin included. So the interesting claim about them is not a
+// differential (there is none to draw: nobody is entitled to the URL) but an
+// ABSENCE that holds even for the operator. Planting sentinelDestKey in both --
+// an existing sentinel, witnessed on /destinations, rather than a new one that
+// would have no high-privilege witness anywhere -- puts RedactWebhookURL under
+// the sweep on four routes instead of zero.
+//
+// Everything is created DISABLED. A hook or an alert rule that fires would make
+// an outbound request from a unit test, and a schedule that fires would mutate
+// the fixture underneath the census.
+//
+// MUTATION TESTED, because a fixture that adds seven rows and seven list
+// entries is exactly the kind of change that can look like coverage and buy
+// nothing: a route that answers 200 with an empty object passes a sweep while
+// proving as little as the 404 it replaced. Each mutation below is a one-line
+// edit to the PRODUCTION line named, reverted immediately after, and each was
+// observed to fail by route name:
+//
+//	alerts.RedactWebhookURL -> scheme+host+u.Path (the mask dropped)
+//	  FAILS 4 routes: /alerts/rules, /alerts/rules/1, /hooks, /hooks/1
+//	  "handed a read-scoped token the credential SENTINEL-destination-streamkey-9f3a"
+//	hooks.Hook.MarshalJSON -> h.URL instead of h.RedactedURL()
+//	  FAILS exactly /hooks and /hooks/1, and neither alert-rule route
+//	alerts.Rule.MarshalJSON -> r.URL instead of r.RedactedURL()
+//	  FAILS exactly /alerts/rules and /alerts/rules/1, and neither hook route
+//	clips.go clipTimeline `rec.DurationMS <= 0` -> `>= 0` (every part skipped)
+//	  FAILS /clipper/recordings/1 with 409 "this recording has not been
+//	  measured yet", which is leakRoutes()'s 200 requirement catching a fixture
+//	  that stopped producing a timeline
+//
+// The second and third are the ones worth having separately. The first shows
+// only that SOMETHING masks these URLs; splitting it proves each of the two
+// MarshalJSON implementations is load-bearing on its own, which is the claim a
+// reader of this fixture would otherwise have to take on trust.
+func plantRows(t *testing.T, store *db.DB, s *Server) {
+	t.Helper()
+
+	// Two segments rather than one, and both MEASURED (DurationMS > 0).
+	// clipTimeline skips a segment whose duration is zero -- "not measured yet"
+	// -- and returns errClipNotMeasured when that leaves it with nothing, so a
+	// single unmeasured row would have kept /clipper/recordings/{id} on a 404
+	// while looking like a fixture that had one.
+	base := time.Date(2026, 3, 1, 20, 0, 0, 0, time.UTC)
+	for i, rec := range []db.Recording{
+		{Filename: "2026-03-01-2000-part1.mkv", StartedAt: base,
+			FinishedAt: base.Add(10 * time.Minute), Bytes: 4 << 20, DurationMS: 600_000, Tracks: 2},
+		{Filename: "2026-03-01-2010-part2.mkv", StartedAt: base.Add(10 * time.Minute),
+			FinishedAt: base.Add(20 * time.Minute), Bytes: 3 << 20, DurationMS: 600_000, Tracks: 2},
+	} {
+		if err := store.UpsertRecording(&rec); err != nil {
+			t.Fatalf("plant recording %d: %v", i+1, err)
+		}
+	}
+	recs, err := store.ListRecordings()
+	if err != nil {
+		t.Fatalf("list planted recordings: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("planted %d recordings, want 2; the {id} routes below address 1 and 2", len(recs))
+	}
+
+	sess, err := store.CreateSession(db.Metadata{
+		Title:       "monday night",
+		Description: "the planted session",
+		Tags:        []string{"fixture"},
+	}, false)
+	if err != nil {
+		t.Fatalf("plant session: %v", err)
+	}
+	ids := []int64{recs[0].ID, recs[1].ID}
+	if err := store.SetSessionRecordings(sess.ID, ids); err != nil {
+		t.Fatalf("group planted recordings: %v", err)
+	}
+	// RecalcSession is what fills the session's span, byte count and recording
+	// count from its members. Without it GET /library/sessions/{id} answers 200
+	// over a row whose every derived field is zero, which is a 200 that proves
+	// less than it looks like it does.
+	if err := store.RecalcSession(sess.ID); err != nil {
+		t.Fatalf("recalc planted session: %v", err)
+	}
+
+	if _, err := store.CreateRendition(&db.Rendition{
+		Name: "720p", Height: 720, VideoBitrate: 3000,
+	}); err != nil {
+		t.Fatalf("plant rendition: %v", err)
+	}
+
+	// A Slack-shaped webhook URL: the secret is the last path segment, and
+	// alerts.RedactWebhookURL drops the whole path. See the note above.
+	if _, err := store.CreateAlertRule(&alerts.Rule{
+		Name:    "ledger",
+		Enabled: false,
+		URL:     "https://hooks.example.com/services/T0/B1/" + sentinelDestKey,
+		Format:  alerts.FormatSlack,
+	}); err != nil {
+		t.Fatalf("plant alert rule: %v", err)
+	}
+
+	if _, _, err := store.CreateHook(s.box, &hooks.Hook{
+		Name:     "ledger",
+		Enabled:  false,
+		URL:      "https://hooks.example.com/services/T0/B1/" + sentinelDestKey,
+		Triggers: []hooks.Trigger{hooks.TriggerIngestPublished},
+	}); err != nil {
+		t.Fatalf("plant hook: %v", err)
+	}
+
+	// A ONE-SHOT in the far future, deliberately. scheduleViewOf calls
+	// scheduler.Next(sc, time.Now()) and puts the answer in the body, so a daily
+	// or weekly schedule would produce a nextAt that MOVES when the clock
+	// crosses its occurrence -- an unstable sweep, which costs a hand-raised
+	// unstableCeiling. For KindOnce, Next returns RunAt unchanged for as long as
+	// RunAt is in the future, so the body is a constant.
+	if _, err := store.CreateSchedule(&scheduler.Schedule{
+		Name:    "ledger",
+		Enabled: false,
+		Action:  scheduler.ActionStart,
+		Kind:    scheduler.KindOnce,
+		RunAt:   time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("plant schedule: %v", err)
+	}
 }
 
 // bearer stamps a token onto a request the way a script would.
@@ -289,6 +440,30 @@ func leakRoutes() []string {
 		"/api/v1/jobs/overview",
 		"/api/v1/jobs/policy",
 		"/api/v1/hooks/1/deliveries",
+
+		// PROMOTED OUT OF excusedRoutes BY plantRows, which is the fixture half
+		// of #163 and the half that was outstanding.
+		//
+		// Every one of these was excused as "reached only with a row this
+		// fixture does not create, so it answers 404". That premise was true and
+		// it was driven -- the excuse asserted the 404 rather than asserting
+		// prose -- so nothing here was being laundered. What it cost was the
+		// thing an excuse cannot buy back: these seven bodies had never been
+		// read by any principal in any test, so every claim about their leaf
+		// fields came from reading the handler.
+		//
+		// plantRows creates a row of each kind and the premise stops being true,
+		// which under the discharge rule one screen up leaves no excuse
+		// available for them. Two of them -- the alert rule and the hook -- now
+		// carry a planted webhook secret in the URL path, so their sweep is an
+		// assertion about alerts.RedactWebhookURL and not merely about a 200.
+		"/api/v1/alerts/rules/1",
+		"/api/v1/clipper/recordings/1",
+		"/api/v1/hooks/1",
+		"/api/v1/library/recordings/1",
+		"/api/v1/library/sessions/1",
+		"/api/v1/renditions/1",
+		"/api/v1/schedules/1",
 	}
 }
 

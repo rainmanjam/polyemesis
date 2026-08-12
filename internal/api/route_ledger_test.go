@@ -558,30 +558,35 @@ var excusedRoutes = map[string]coverageExcus{
 		Want: &routeWant{As: "read", Status: http.StatusNotFound, AnonMatchesRead: true},
 	},
 
-	// ---- reached only with a row this fixture does not create. The prose used
-	// to be the whole discharge. Now each one DRIVES the 404 it claims: if any
-	// of these ever starts answering a read token with a body, the drive fails
-	// naming the route and the observed status, and the fix is leakRoutes().
+	// ---- reached only with a row this fixture does not create. SEVEN ENTRIES
+	// LEFT THIS BLOCK when plantRows landed: clipper recordings, library
+	// recordings and sessions, alert rules, hooks, schedules and renditions are
+	// now value-swept, because the fixture creates the row each of them needed
+	// and the discharge rule leaves no excuse available for a pair that answers
+	// a read principal 200 with a body. See leakRoutes().
+	//
+	// What is left here is not "a row nobody wrote yet". Each of the two
+	// survivors needs something a store INSERT cannot produce, and each says
+	// which thing.
 	"GET /api/v1/recordings/{id}/download":             denied(),
 	"GET /api/v1/recordings/stems/{name}/download":     denied(),
 	"GET /api/v1/clips/{name}/download":                denied(),
-	"GET /api/v1/clipper/recordings/{id}":              needsRow(),
 	"GET /api/v1/clipper/recordings/{id}/transcript":   denied(),
 	"GET /api/v1/clipper/jobs/{id}/download":           denied(),
 	"GET /api/v1/library/recordings/{id}/transcript":   denied(),
 	"GET /api/v1/library/recordings/{id}/media/{file}": denied(),
-	"GET /api/v1/library/recordings/{id}":              needsRow(),
-	"GET /api/v1/library/sessions/{id}":                needsRow(),
 	"GET /api/v1/metadata/push/{id}": {
-		Why: "reached only with a metadata push row this fixture does not create; the " +
-			"404 body is the handler's own \"no such metadata push\", not the router's",
-		Want: &routeWant{As: "read", Status: http.StatusNotFound},
+		Why: "reached only with a LIVE metadata push, which is an entry in the " +
+			"in-process metadataRegistry rather than a row in any table: it is created " +
+			"by POST /metadata/push making a real call to a platform, and its snapshot " +
+			"moves while the push runs. Neither half is plantable by this fixture, and " +
+			"a body that changes between samples is an unstable sweep rather than a " +
+			"covered route. The 404 body is the handler's own \"no such metadata " +
+			"push\", not the router's",
+		Want:  &routeWant{As: "read", Status: http.StatusNotFound},
+		Issue: "#163",
 	},
-	"GET /api/v1/alerts/rules/{id}": needsRow(),
-	"GET /api/v1/hooks/{id}":        needsRow(),
-	"GET /api/v1/schedules/{id}":    needsRow(),
-	"GET /api/v1/renditions/{id}":   needsRow(),
-	"GET /api/v1/library/search":    denied(),
+	"GET /api/v1/library/search": denied(),
 }
 
 // The constructors below no longer take a test NAME or an ISSUE STRING. Both
@@ -658,16 +663,19 @@ func spa() coverageExcus {
 		Counterpart: "notFoundSurfaceIsPrincipalIndependent",
 	}
 }
-func needsRow() coverageExcus {
-	return coverageExcus{
-		Why: "reached only with a row this fixture does not create, so it answers 404. " +
-			"Traced to leaf fields and carrying no stored credential (media, " +
-			"transcripts and text). The FIXTURE is what is deferred, not the guard: " +
-			"the 404 is driven, and a body appearing here fails.",
-		Want:  &routeWant{As: "read", Status: http.StatusNotFound},
-		Issue: "#163",
-	}
-}
+
+// needsRow() USED TO STAND HERE, and its deletion is the point of this change
+// rather than a tidy-up beside it.
+//
+// It read "reached only with a row this fixture does not create, so it answers
+// 404 ... the FIXTURE is what is deferred, not the guard", and it was the single
+// most-used constructor in this registry: seven routes shared it. A constructor
+// that seven routes share is a constructor whose premise nobody re-checks, and
+// the premise was a statement about the FIXTURE -- the one thing in this file
+// that a test can change. plantRows changed it. There is now no route excused on
+// the grounds that no row exists, so there is no constructor for saying so, and
+// re-introducing one costs writing the sentence out again where a reviewer sees
+// it.
 
 // sweptCounterparts are proofs that run for a route that is ALSO value-swept.
 //
@@ -3683,18 +3691,32 @@ func deferredWithReasons() []coverageDefer {
 		},
 		{
 			ID: "empty-fixture-rows",
-			What: "the routes reached only with a row this fixture does not create -- " +
-				"clipper recordings, library recordings and sessions, alert rules, hooks, " +
-				"schedules, renditions. Their excuses no longer discharge on prose or on " +
-				"an issue number: each DRIVES the 404 it claims. What is still deferred " +
-				"is the FIXTURE, not the guard.",
-			WhySafe: "the 404 is now an assertion. If any of these starts answering a read " +
-				"token with a body, the excuse drive fails naming the route and the " +
-				"observed status, and the fix is leakRoutes().",
-			WhatWouldMakeItUnsafe: "nothing silently -- that is the change. What it costs " +
-				"is coverage: ten routes whose response bodies no principal has ever seen " +
-				"in a test, so their leaf fields are still traced by reading rather than " +
-				"by reading bytes.",
+			What: "SEVEN OF THE NINE ARE GONE. plantRows now creates a row of each kind, " +
+				"so clipper recordings, library recordings and sessions, alert rules, " +
+				"hooks, schedules and renditions answer 200 and are value-swept rather " +
+				"than excused; their bodies are read by three principals and scanned for " +
+				"every planted sentinel, which is the coverage this row used to record as " +
+				"missing. What is left is TWO routes that no row can drive. GET " +
+				"/metadata/push/{id} reads an in-process registry entry created by a real " +
+				"outbound platform call, whose snapshot moves while the push runs. GET " +
+				"/playout/poster.jpg renders a JPEG out of an MPEG-TS segment, and there " +
+				"is no segment on disk without running FFmpeg in a unit test. Both keep a " +
+				"driven excuse. Separately, /hooks/1/deliveries stays INERT: the row " +
+				"exists now, but a delivery record does not, and manufacturing one means " +
+				"an outbound HTTP attempt.",
+			WhySafe: "the 404 was already an assertion and still is for the two that " +
+				"remain: if either starts answering a read token with a body, the excuse " +
+				"drive fails naming the route and the observed status. For the seven that " +
+				"left, the claim is no longer a 404 at all -- it is the ordinary sweep, " +
+				"which is strictly stronger, and two of them (the alert rule and the " +
+				"hook) carry a planted webhook secret in the URL path so that " +
+				"alerts.RedactWebhookURL is under the sweep rather than merely under " +
+				"review.",
+			WhatWouldMakeItUnsafe: "a fixture row being deleted. That is not silent " +
+				"either: leakRoutes() requires a 200 from every path it names, so losing " +
+				"a row fails by name rather than quietly reverting these routes to " +
+				"unread. The residual cost is the two routes above, whose leaf fields are " +
+				"still traced by reading the handler rather than by reading bytes.",
 			Issue: "#163",
 		},
 		{
