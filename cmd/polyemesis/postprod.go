@@ -17,6 +17,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
+	"github.com/rainmanjam/polyemesis/internal/uploadverify"
 )
 
 // The post-production tier is assembled here and nowhere else.
@@ -205,6 +206,38 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *
 	if err := np.Register(q); err != nil {
 		log.Error("cannot register the playlist normalisation job kind", "error", err)
 	}
+
+	// Re-inspecting an upload already on disk (#202). Registered on the SAME
+	// store the normaliser resolves against, and unconditionally like everything
+	// else here: an install with no ffprobe registers the kind anyway and the
+	// job fails saying so, which is a sentence an operator can act on, where a
+	// button that does not exist is a feature that looks broken.
+	//
+	// It shares one store value with the normaliser rather than opening a
+	// second: uploads.New does an os.MkdirAll, and two stores over one directory
+	// would be two answers to "what is recorded about this file" for anyone who
+	// later gives Store a cache.
+	vp := uploadverify.New(log, uploadverify.Config{
+		FFprobe: tools.FFprobe,
+		FFmpeg:  tools.FFmpeg,
+		Uploads: verifyStore(upStore),
+	})
+	if err := vp.Register(q); err != nil {
+		log.Error("cannot register the media re-check job kind", "error", err)
+	}
+}
+
+// verifyStore hands the processor its store, or nothing at all.
+//
+// The same trap uploadResolver exists for, on a different interface: a typed nil
+// *uploads.Store assigned to the interface field is NOT nil as an interface, so
+// the worker's "no upload store is configured" guard would never fire and it
+// would panic on the first Resolve instead.
+func verifyStore(s *uploads.Store) uploadverify.Store {
+	if s == nil {
+		return nil
+	}
+	return s
 }
 
 // uploadResolver hands the processor its resolver, or nothing at all.

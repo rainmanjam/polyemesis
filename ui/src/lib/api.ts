@@ -231,6 +231,20 @@ export const api = {
   media: () => get<MediaFile[]>("/media"),
   deleteMedia: (name: string) => del<void>(`/media/${encodeURIComponent(name)}`),
   uploadMedia,
+  /** Queues a re-inspection of a file already on the server (#202).
+   *
+   *  It returns as soon as the job is QUEUED, not when the file has been read:
+   *  the inspection is an FFprobe against something that may be several
+   *  gigabytes, on a box that is also encoding a broadcast, so it runs in the
+   *  job queue under the resource policy. `created` is false when an identical
+   *  re-check was already queued or running and this one folded into it.
+   *
+   *  The listing does not change on the way back. Callers refresh when the job
+   *  finishes, not when this resolves. */
+  verifyMedia: (name: string) =>
+    post<{ job: JobView; created: boolean }>(
+      `/media/${encodeURIComponent(name)}/verify`,
+    ),
 
   // --- version ---
   /** The cached answer. Never triggers a network call to GitHub on its own. */

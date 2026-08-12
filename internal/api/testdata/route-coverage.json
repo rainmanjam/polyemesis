@@ -11,10 +11,10 @@
   "shapeFloor": 14,
   "shapesNotInspectedCeiling": 6,
   "totals": {
-    "methodPatternPairs": 211,
+    "methodPatternPairs": 212,
     "swept": 55,
     "excused": 57,
-    "denied": 99,
+    "denied": 100,
     "nonTrieProbes": 12,
     "shapesEmitted": 14,
     "shapesNotInspected": 6
@@ -560,6 +560,11 @@
     {
       "method": "DELETE",
       "pattern": "/api/v1/media/{name}",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/media/{name}/verify",
       "coverage": "denied-by-method"
     },
     {
