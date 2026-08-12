@@ -8,7 +8,7 @@ its first tagged release.
 
 ## [Unreleased]
 
-## [0.7.0] — 2026-08-11
+## [0.7.0] — 2026-08-12
 
 ### Security
 
