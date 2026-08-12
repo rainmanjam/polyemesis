@@ -819,17 +819,32 @@ jobs:
           # this is a latent hazard rather than an observed bug -- but its
           # failure mode is a ui/ PR silently NOT getting the browser suite,
           # which is the exact thing this job exists to stop happening.
+          # THIS FILE COUNTS AS WELL, and it was added after a change to the
+          # browser suite's OWN setup merged without that suite ever running.
+          #
+          # The Playwright install lives in this workflow, not under ui/, so a
+          # PR that rewrites how the browser is installed matched nothing here
+          # and the container job reported "skipping". A broken install step
+          # would have gone green on its own PR and failed on the next ui/
+          # change instead, pointing at whoever touched the UI.
+          #
+          # The whole file rather than a line range: a job's behaviour is not
+          # confined to the block that names it -- concurrency, permissions,
+          # the suite matrix and the runner image all sit elsewhere in here and
+          # all reach it. Matching the file is the honest boundary, and ci.yml
+          # changes are rare enough that one image build is the right price for
+          # never shipping an unexercised one again.
           if [ "$EVENT" = "pull_request" ]; then
             CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-            if grep -q '^ui/' <<<"$CHANGED"; then
+            if grep -qE '^(ui/|\.github/workflows/ci\.yml$)' <<<"$CHANGED"; then
               echo 'suites=["acceptance-browser"]' >> "$GITHUB_OUTPUT"
-              echo "browser only: this PR touches ui/"
+              echo "browser: this PR touches ui/ or this workflow"
               exit 0
             fi
           fi
 
           echo 'suites=[]' >> "$GITHUB_OUTPUT"
-          echo "none: no ui/ change on this PR"
+          echo "none: this PR touches neither ui/ nor this workflow"
 
   # The suites that need the shipped IMAGE rather than a host binary: SRT ingest
   # (Ubuntu's FFmpeg may lack libsrt, the image never does), the one-port
