@@ -94,11 +94,16 @@ type sourceView struct {
 	// there is nothing to say, which is every source that does not pull from a
 	// file:// upload.
 	//
-	// A source that is already saved this way keeps running -- this reports,
-	// it does not gate. The gate is on the save (see sourceIngestUploadProblem)
-	// and applies to what the save introduces. #255 spells out why the
-	// inherited case is reported rather than refused; the argument is on
-	// Server.pullUploadUnchecked, not repeated here.
+	// A source already saved this way keeps running when the upload was merely
+	// stored UNCHECKED -- this reports, it does not gate, and the save-time gate
+	// (see sourceIngestUploadProblem) covers only what a save introduces.
+	//
+	// A source naming an upload that was inspected and REFUSED does not keep
+	// running: #255 was decided as a split, and engine.Engine.pullUploadRefusal
+	// stops that ingest at reconcile. The field still carries the sentence for
+	// both, because the operator needs to be told either way and the two
+	// sentences already differ; what changes with the state is whether anything
+	// is still on air. The argument for the split is on pullUploadRefusal.
 	PullUploadUnchecked string `json:"pullUploadUnchecked,omitempty"`
 }
 

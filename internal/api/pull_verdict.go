@@ -239,19 +239,25 @@ func (s *Server) sourceIngestUploadProblem(want db.IngestSettings, stored string
 //     wrong one of your own files" but bytes this server has already read and
 //     concluded are not media.
 //
-// I STILL DID NOT WRITE THE RECONCILE GATE, deliberately, for two reasons that
-// are about where a decision belongs and not about its merits. #255 asks the
-// maintainer to choose between failing closed and warning, and this PR's census
-// records "no engine-reconcile check at all" as a deliberate omission; deciding
-// that open question inside a merge resolution is the worst available place to
-// decide it. And nothing in the tree writes RefusedVerdict yet -- #202's
-// later-inspection path is what will -- so a gate on it today would be a gate
-// on a state no production code can currently produce, argued from a hypothetical.
+// THE MAINTAINER DECIDED IT AS A SPLIT, and #255 is closed against exactly the
+// asymmetry above: unverified is warned about here and keeps streaming, and a
+// refusal now stops the ingest at engine reconcile. See
+// engine.Engine.pullUploadRefusal, which is the fail-closed half and carries
+// the reasoning; everything above it is why the fail-open argument covers the
+// first state and not the second.
 //
-// What DOES change here is the sentence. The old one said "nothing has read a
-// byte of it, so upload it again", which for a refused file is false twice over,
-// and uploads.go says exactly why every consumer of the unverified state must
-// stop saying it. See uploadObjection, which owns both halves.
+// SO THIS FUNCTION KEEPS BOTH SENTENCES, and that is not an oversight. For an
+// unchecked upload it is the whole remedy. For a refused one the ingest is
+// already down, and the card is still where the operator finds out which file
+// and why -- a stopped programme with no sentence beside it is how the old
+// fail-closed proposal was going to land at 3am. The reconcile also records the
+// same sentence as a stop note (engine.reloadStop), so a save made afterwards
+// answers with it too.
+//
+// What DOES change in the sentence: the old one said "nothing has read a byte
+// of it, so upload it again", which for a refused file is false twice over, and
+// uploads.go says exactly why every consumer of the unverified state must stop
+// saying it. See uploads.Store.Objection, which owns both halves.
 func (s *Server) pullUploadUnchecked(src *db.Source) string {
 	if src == nil || src.Ingest.Mode != db.IngestPull {
 		return ""

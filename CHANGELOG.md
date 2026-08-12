@@ -45,12 +45,24 @@ its first tagged release.
   no `ffprobe`, an inspection cut short — and never about your file, so on an
   install without `ffprobe` a fail-closed re-check would take every `file://`
   ingest off air at once, at whatever hour the supervisor next respawned. That
-  reasoning does not extend to a refusal, which *is* a fact about the file; the
-  choice between warning and refusing at reconcile is left open deliberately and
-  is still #255's to make. The field is on `GET /sources`, so a monitoring
-  script sees it too.
+  reasoning does not extend to a refusal, which *is* a fact about the file — see
+  the entry below, which is where that half was settled. The field is on
+  `GET /sources`, so a monitoring script sees it too.
   ([#255](https://github.com/rainmanjam/polyemesis/issues/255),
   [#264](https://github.com/rainmanjam/polyemesis/issues/264))
+
+- **A source pulling from a file this server inspected and rejected is now
+  taken off air.** The warning above is kept for an upload nothing could
+  inspect, and only for that: a missing inspection is a fact about this server,
+  so refusing on it would stop every `file://` ingest on a box without
+  `ffprobe`. A *refusal* cannot be that — it exists only where an inspection ran
+  and read the bytes — so an inherited pull source naming one is re-checked on
+  every engine reconcile and its ingest is not started, primary and standby
+  alike. The card still names the file and says why, and the reconcile records
+  the same sentence, so a save made afterwards answers with it rather than
+  leaving you a stopped programme and a log line. Nothing writes that verdict
+  yet; #202's re-verify job will be the first.
+  ([#255](https://github.com/rainmanjam/polyemesis/issues/255))
 
 - **A busy server stopped inspecting uploads, and the caller chose when.** The
   four-slot semaphore that bounds concurrent `ffprobe` children waited for its
