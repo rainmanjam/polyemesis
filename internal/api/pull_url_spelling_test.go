@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ which is the failure mode that produced this bug in the first place. */
 
 // pullSpelling is one way of writing a path to a file in the uploads directory.
 //
-// form and arg carry %s for the upload's filename, because every row is driven
+// form and rel carry %s for the upload's filename, because every row is driven
 // twice: once at an upload recorded unchecked (must be refused) and once at an
 // upload this server inspected and accepted (must NOT be refused). Without the
 // second pass a handler that rejected every unusual spelling would satisfy every
@@ -52,7 +53,38 @@ which is the failure mode that produced this bug in the first place. */
 type pullSpelling struct {
 	what string // what this spelling does differently
 	form string // the pull URL, with %s for the filename
-	arg  string // the -i FFmpeg is handed, with %s; "" when the engine refuses to build one
+	// rel is what this spelling NORMALISES TO: the path relative to the data
+	// directory, slash-spelled, with %s for the filename. "" means the engine
+	// refuses to build an -i at all.
+	//
+	// THE RELATIVE PATH RATHER THAN THE WHOLE -i, and this cost a red
+	// windows-latest at 3f9ecb5 to get right. The rows used to carry the
+	// finished argument as a literal ("file:/data/uploads/%s"), which is only
+	// the argument on a platform whose separator is "/": build.go joins with
+	// filepath.Join, so on Windows the -i is "file:\data\uploads\show.ts" and
+	// SHOULD BE -- the data directory there really is a backslash path and that
+	// is the string FFmpeg has to open. Production was right and the
+	// expectation was platform-naive.
+	//
+	// Storing the relative path instead separates the two claims that the
+	// single literal was carrying at once, which is exactly why one failure
+	// could not say which had broken:
+	//
+	//   CONVERGENCE -- every spelling here collapses to this one path. That is
+	//   the bypass property, it is the thing #266 refuted, and it is spelled
+	//   with forward slashes on every platform because ffmpeg.PullFilePath
+	//   returns ToSlash. Asserted directly against PullFilePath.
+	//
+	//   OPENABILITY -- the -i the OS is handed is this path under the data
+	//   directory, rendered in the host's own separator. Asserted against
+	//   PullSource with the same filepath.Join the engine uses, plus a separate
+	//   one-line check that the separator really is the native one.
+	//
+	// A spelling can converge correctly onto a path that is then rendered
+	// unopenably, and a path can be rendered natively while two spellings still
+	// disagree about which one it is. They are different defects and they now
+	// fail as different assertions.
+	rel string
 	// names is whether this spelling names the STORED UPLOAD -- the one thing
 	// uploads.Verdict can be asked about. Everything else in the row derives
 	// from it: a save is refused iff it names an unchecked upload, and the
@@ -60,32 +92,57 @@ type pullSpelling struct {
 	names bool
 }
 
+// pullDataDir is the data directory the -i is built against. A literal rather
+// than the fixture's t.TempDir(): normalisation is what is under test and it
+// does not depend on where the data lives, and a fixed value keeps the expected
+// argument readable in the failure message.
+const pullDataDir = "/data"
+
+// foreignSeparator is the path separator this platform does NOT use. Nothing in
+// this table has a filename containing either separator, so its appearance in a
+// built -i means a path was assembled in the other platform's spelling.
+func foreignSeparator() string {
+	if filepath.Separator == '/' {
+		return `\`
+	}
+	return "/"
+}
+
+// wantIArg renders a normalised relative path into the -i the engine builds
+// from it, using build.go's own construction: FromSlash then Join under the
+// data directory. Native by consequence rather than by assertion -- on Windows
+// this yields "file:\data\uploads\show.ts", which is what FFmpeg is handed and
+// what it has to open.
+func wantIArg(rel string) string {
+	return "file:" + filepath.Join(pullDataDir, filepath.FromSlash(rel))
+}
+
 // The four spellings the verifier measured, plus the four shapes that decide
 // whether the new normalisation is right rather than merely wider.
 var pullSpellings = []pullSpelling{{
 	what:  "the canonical spelling uploads.PullURL writes",
 	form:  "file://uploads/%s",
-	arg:   "file:/data/uploads/%s",
+	rel:   "uploads/%s",
 	names: true,
 }, {
 	what:  `a "." segment, which filepath.Join collapses`,
 	form:  "file://uploads/./%s",
-	arg:   "file:/data/uploads/%s",
+	rel:   "uploads/%s",
 	names: true,
 }, {
 	what:  "a doubled separator, which filepath.Join collapses",
 	form:  "file://uploads//%s",
-	arg:   "file:/data/uploads/%s",
+	rel:   "uploads/%s",
 	names: true,
 }, {
 	what:  `a leading "./", which filepath.Join collapses`,
 	form:  "file://./uploads/%s",
-	arg:   "file:/data/uploads/%s",
+	rel:   "uploads/%s",
 	names: true,
 }, {
 	what:  "two of them, because one collapse does not imply the loop",
 	form:  "file://uploads/././%s",
-	arg:   "file:/data/uploads/%s",
+	rel:   "uploads/%s",
 	names: true,
 }, {
 	// Already handled before the fix; kept because the fix REPLACED the code
@@ -93,7 +150,7 @@ var pullSpellings = []pullSpelling{{
 	// open the hole on Windows that #201's backslash note closed.
 	what:  "a Windows separator, which pullSource translates before anything else",
 	form:  `file://uploads\%s`,
-	arg:   "file:/data/uploads/%s",
+	rel:   "uploads/%s",
 	names: true,
 }, {
 	// The one place the gate is deliberately WIDER than the filesystem: on the
@@ -103,7 +160,7 @@ var pullSpellings = []pullSpelling{{
 	// real argument and not on a normalised-away idea of it.
 	what:  "a folded directory segment and surrounding whitespace",
 	form:  "  FILE://Uploads/%s  ",
-	arg:   "file:/data/Uploads/%s",
+	rel:   "Uploads/%s",
 	names: true,
 }, {
 	// NOT the upload: a nested path is a different file, and the uploads store
@@ -111,7 +168,7 @@ var pullSpellings = []pullSpelling{{
 	// it cannot ask uploads.Verdict about.
 	what:  "a nested path, which is a different file and not a stored upload",
 	form:  "file://uploads/sub/%s",
-	arg:   "file:/data/uploads/sub/%s",
+	rel:   "uploads/sub/%s",
 	names: false,
 }, {
 	// FFmpeg's file protocol does not percent-decode, so this is a filename
@@ -120,7 +177,7 @@ var pullSpellings = []pullSpelling{{
 	// file the engine never opens, and miss the file it does.
 	what:  "a percent-encoded separator, which the file protocol does not decode",
 	form:  "file://uploads%%2F%s",
-	arg:   "file:/data/uploads%%2F%s",
+	rel:   "uploads%%2F%s",
 	names: false,
 }, {
 	// Refused by ffmpeg.ValidatePullURL before the upload gate is consulted:
@@ -130,7 +187,7 @@ var pullSpellings = []pullSpelling{{
 	// reason from every other refusal in this table.
 	what:  `a ".." that would resolve back inside the uploads directory`,
 	form:  "file://uploads/sub/../%s",
-	arg:   "",
+	rel:   "",
 	names: false,
 }}
 
@@ -147,41 +204,75 @@ func TestEverySpellingOfOneInputArgumentGetsOneVerdict(t *testing.T) {
 		t.Run(sp.what, func(t *testing.T) {
 			raw := fmt.Sprintf(sp.form, unchecked)
 
-			// (1) WHAT THE ENGINE ACTUALLY OPENS. Asserted first and separately,
-			// because every verdict below is only meaningful as a statement
-			// about this string. PullDataDir is a literal rather than the
-			// fixture's temp directory: normalisation is what is under test and
-			// it does not depend on where the data lives.
-			spec := ffmpeg.IngestSpec{Kind: ffmpeg.IngestPull, PullURL: raw, PullDataDir: "/data"}
+			wantRel := fmt.Sprintf(sp.rel, unchecked)
+			spec := ffmpeg.IngestSpec{Kind: ffmpeg.IngestPull, PullURL: raw, PullDataDir: pullDataDir}
 			gotArg, argErr := spec.PullSource()
-			switch wantArg := fmt.Sprintf(sp.arg, unchecked); {
-			case sp.arg == "" && argErr == nil:
-				t.Fatalf("the engine built -i %q for %q; this spelling is supposed to be "+
-					"refused before it becomes an input argument", gotArg, raw)
-			case sp.arg == "":
-				// Refused, as intended. Nothing downstream to key on.
-			case argErr != nil:
-				t.Fatalf("the engine refused to build an -i for %q: %v; want %q",
-					raw, argErr, wantArg)
-			case gotArg != wantArg:
-				t.Fatalf("the engine builds -i %q for %q, want %q -- the verdicts below "+
-					"are assertions ABOUT this string, so they prove nothing until it is "+
-					"the string this test thinks it is", gotArg, raw, wantArg)
+
+			// (1a) CONVERGENCE, which is the property #266 was about: whatever
+			// the spelling, the engine resolves it to ONE path. Slash-spelled
+			// and identical on every platform, so this assertion says the same
+			// thing on windows-latest as it does here.
+			gotRel, gotResolves := ffmpeg.PullFilePath(raw)
+			if gotResolves != (sp.rel != "") || (sp.rel != "" && gotRel != wantRel) {
+				t.Fatalf("ffmpeg.PullFilePath(%q) = %q, %v; want %q, %v -- this is the "+
+					"normalisation every gate keys on, and two spellings that disagree here "+
+					"are two spellings the gate can disagree about",
+					raw, gotRel, gotResolves, wantRel, sp.rel != "")
 			}
 
-			// (2) THE PARSER THE GATES KEY ON. It has to agree with (1) about
-			// whether this argument opens a stored upload.
+			if sp.rel == "" {
+				if argErr == nil {
+					t.Fatalf("the engine built -i %q for %q; this spelling is supposed to be "+
+						"refused before it becomes an input argument", gotArg, raw)
+				}
+			} else {
+				// (1b) OPENABILITY. The -i is that path under the data directory
+				// in the HOST'S OWN SEPARATOR -- built with the same filepath.Join
+				// build.go uses, because on Windows the data directory really is a
+				// backslash path and "file:\data\uploads\show.ts" is the string
+				// FFmpeg must open. A hardcoded forward-slash literal here failed
+				// all nine rows on windows-latest at 3f9ecb5 for the one reason
+				// that is not a defect.
+				// (1c) The separator claim, and it runs BEFORE the exact
+				// comparison on purpose. It is the only assertion here that does
+				// not consult the expectation at all, which makes it the one that
+				// still holds if wantIArg is ever rewritten to hardcode a
+				// separator -- i.e. if today's bug is reintroduced in the test
+				// rather than in production. Below it, a wrong separator fatals
+				// on the exact match and this would never get to speak.
+				if sep := foreignSeparator(); strings.Contains(gotArg, sep) {
+					t.Errorf("the -i %q carries %q, which is not this platform's separator "+
+						"(%q) -- a path assembled in the other platform's spelling is not a "+
+						"path this OS opens", gotArg, sep, string(filepath.Separator))
+				}
+
+				// (1b) The exact argument, built with build.go's own construction
+				// so it is native on whatever this is running on.
+				wantArg := wantIArg(wantRel)
+				switch {
+				case argErr != nil:
+					t.Fatalf("the engine refused to build an -i for %q: %v; want %q",
+						raw, argErr, wantArg)
+				case gotArg != wantArg:
+					t.Fatalf("the engine builds -i %q for %q, want %q -- the verdicts below "+
+						"are assertions ABOUT this string, so they prove nothing until it is "+
+						"the string this test thinks it is", gotArg, raw, wantArg)
+				}
+			}
+
+			// (2) THE PARSER THE GATES KEY ON. It has to agree with (1a) about
+			// whether that path is a stored upload.
 			gotName, gotOK := uploads.UploadFromPullURL(raw)
 			if gotOK != sp.names || (sp.names && gotName != unchecked) {
-				t.Fatalf("uploads.UploadFromPullURL(%q) = %q, %v; want %q, %v -- the -i is %q, "+
-					"and a gate that disagrees with the engine about which file that names "+
-					"is a gate on a spelling",
-					raw, gotName, gotOK, map[bool]string{true: unchecked}[sp.names], sp.names, gotArg)
+				t.Fatalf("uploads.UploadFromPullURL(%q) = %q, %v; want %q, %v -- it resolves "+
+					"to %q, and a gate that disagrees with the engine about which file that "+
+					"names is a gate on a spelling",
+					raw, gotName, gotOK, map[bool]string{true: unchecked}[sp.names], sp.names, gotRel)
 			}
 
 			// A save is refused when it names an unchecked upload, and also
 			// when the engine would not dial it at all.
-			refused := sp.names || sp.arg == ""
+			refused := sp.names || sp.rel == ""
 
 			t.Run("PUT /sources", func(t *testing.T) {
 				h, store, sign := sourceServer(t)
@@ -191,7 +282,7 @@ func TestEverySpellingOfOneInputArgumentGetsOneVerdict(t *testing.T) {
 				// inspected must still be accepted, or "refused" below is
 				// satisfied by a handler that dislikes punctuation.
 				wantChecked := http.StatusOK
-				if sp.arg == "" {
+				if sp.rel == "" {
 					wantChecked = http.StatusBadRequest
 				}
 				putSourceIngest(t, h, sign, 1,
@@ -241,7 +332,7 @@ func TestEverySpellingOfOneInputArgumentGetsOneVerdict(t *testing.T) {
 				}
 
 				wantChecked := http.StatusCreated
-				if sp.arg == "" {
+				if sp.rel == "" {
 					wantChecked = http.StatusBadRequest
 				}
 				create("spelling control", fmt.Sprintf(sp.form, checked), wantChecked)
@@ -261,7 +352,7 @@ func TestEverySpellingOfOneInputArgumentGetsOneVerdict(t *testing.T) {
 				seedSpellingUploads(t, h)
 
 				wantChecked := http.StatusOK
-				if sp.arg == "" {
+				if sp.rel == "" {
 					wantChecked = http.StatusBadRequest
 				}
 				savePullSource(t, h, sign, "ingest", fmt.Sprintf(sp.form, checked), wantChecked)
@@ -289,7 +380,7 @@ func TestEverySpellingIsReportedOnTheSourceListing(t *testing.T) {
 	const name = "inherited-abcd1234.ts"
 
 	for _, sp := range pullSpellings {
-		if sp.arg == "" {
+		if sp.rel == "" {
 			continue // never becomes a stored pull source at all
 		}
 		t.Run(sp.what, func(t *testing.T) {
@@ -317,7 +408,7 @@ func TestEverySpellingIsReportedOnTheSourceListing(t *testing.T) {
 				// silent, or the field is decoration rather than a report.
 				if got != "" {
 					t.Errorf("a pull source spelled %q reports %q, but its -i is %q -- "+
-						"that is not this upload", raw, got, fmt.Sprintf(sp.arg, name))
+						"that is not this upload", raw, got, wantIArg(fmt.Sprintf(sp.rel, name)))
 				}
 				return
 			}
@@ -325,7 +416,7 @@ func TestEverySpellingIsReportedOnTheSourceListing(t *testing.T) {
 				t.Fatalf("a source pulling from %q -- -i %q, the same file the canonical "+
 					"spelling names -- reports nothing at all, so the monitoring script "+
 					"this field exists for sees a clean row over an uninspected file",
-					raw, fmt.Sprintf(sp.arg, name))
+					raw, wantIArg(fmt.Sprintf(sp.rel, name)))
 			}
 			for _, want := range []string{name, uploads.ReasonProbeUnusable} {
 				if !strings.Contains(got, want) {
