@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
@@ -577,6 +578,67 @@ func (d Destination) Validate() error {
 			}
 		case strings.Contains(target, ".."), strings.HasPrefix(target, "/"):
 			add("audio file destination must be a relative name inside the recordings directory")
+		}
+	}
+
+	// A STREAM KEY CARRYING A CONTROL CHARACTER IS REFUSED, NOT REPAIRED.
+	//
+	// #306. A key was configured with a bracketed-paste artefact glued onto it
+	// -- the real key followed by ESC [ 2 7 ; 2 ; 1 3 -- so the stored value was
+	// 65 bytes while the value FFmpeg opened, and printed back on stderr when the
+	// connect failed, was the 56-byte PREFIX ending at the ESC. The credential
+	// scrubber is an exact substring replacement over the literals it was handed,
+	// and it was handed the stored 65 bytes; a 65-byte needle does not occur
+	// inside a 56-byte haystack, so nothing matched and the key was written to
+	// data/logs/process.log in the clear.
+	//
+	// The root cause is not the escape sequence. It is that the stored spelling
+	// and the spelling that reaches the wire were allowed to be different
+	// strings, and every downstream defence -- scrub, the API leak scan, the
+	// acceptance harness -- is built on them being the same one.
+	//
+	// The OTHER half of Target() is already protected and that is why only this
+	// half leaked: url.Parse above returns "net/url: invalid control character in
+	// URL" for exactly these bytes, so a pasted URL with an ESC in it has never
+	// been storable. The key half is joined on by Target() with no parser
+	// anywhere in its path, so nothing looked.
+	//
+	// REFUSED rather than sanitised, and the choice is deliberate:
+	//
+	//   - Sanitising mints a credential the operator never typed. If the cut
+	//     point is ever wrong -- a control character in the middle rather than at
+	//     the end -- the destination is stored with a truncated key, fails to
+	//     publish, and says only that the platform refused it. A refusal at the
+	//     boundary is wrong in the direction the operator can see and fix.
+	//   - This function refuses; it does not repair. Every other problem it finds
+	//     is reported, and the only defaults applied to a destination are applied
+	//     by CreateDestination before it is called. A single silent rewrite here
+	//     would be the one place a stored value differs from the submitted one,
+	//     which is the very property that produced this bug.
+	//   - A refusal is a CHECKABLE invariant: no row can hold a divergent key. A
+	//     sanitiser leaves "does the sanitiser cover every transformation" open
+	//     for ever, and that open question is what engine.wireSpellings exists
+	//     for as defence in depth rather than as the fix.
+	//
+	// An existing row carrying such a key can no longer be saved without the key
+	// being re-entered. That is intended: it is a live credential leak, and the
+	// message says what to do about it.
+	//
+	// The message names the offending BYTE and its OFFSET and never the value. A
+	// validation error is rendered into a 400 body and into the server log, and a
+	// diagnostic that echoes the credential to say it is malformed would be the
+	// same disclosure by a shorter route.
+	for _, k := range []struct{ field, value string }{
+		{"stream key", d.StreamKey},
+		{"backup stream key", d.BackupStreamKey},
+	} {
+		if i := strings.IndexFunc(k.value, unicode.IsControl); i >= 0 {
+			add("%s contains a control character (0x%02x at byte %d). It is refused rather "+
+				"than trimmed because FFmpeg stops reading the publish URL there, so the "+
+				"stored key and the key that reaches the platform would be different "+
+				"strings and the credential scrubber only knows the stored one. This is "+
+				"almost always a bracketed-paste artefact from a terminal; re-enter the key",
+				k.field, k.value[i], i)
 		}
 	}
 

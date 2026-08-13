@@ -3,6 +3,7 @@ package engine
 import (
 	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -34,6 +35,73 @@ func destSecrets(row *db.Destination) []string {
 	out = append(out, urlSecrets(row.BackupURL)...)
 	out = append(out, expertArgsSecrets(row.ExtraInputArgs)...)
 	out = append(out, expertArgsSecrets(row.ExtraOutputArgs)...)
+	return wireSpellings(out)
+}
+
+// wireSpellings expands each collected literal into the other spellings that
+// value can wear by the time it reaches a command line or a log line.
+//
+// #306, and it is the same shape as userinfoSecrets below: SecretSet.Scrub
+// finds the secret INSIDE the text, so a literal collected in one spelling
+// masks nothing at all in text carrying another. userinfoSecrets learned that
+// url.URL DECODES; this learned that a value can be TRUNCATED.
+//
+// MEASURED on a live run. A destination's key was configured with a
+// bracketed-paste artefact glued on -- the real key followed by ESC [ 2 7 ; 2 ;
+// 1 3 -- so the stored value was 65 bytes. FFmpeg stopped reading the publish
+// URL at the ESC, opened the 56-byte prefix, failed, and printed that prefix
+// back on stderr. Against the actual process.log:
+//
+//	raw 65-byte value in log : False
+//	percent-encoded in log   : False
+//	value-before-ESC in log  : True   (len 56)
+//
+// The scrub was wired, the destination did declare its Secrets, and the key
+// still reached disk in the clear -- because the 65-byte needle does not occur
+// inside the 56-byte haystack.
+//
+// db.Destination.Validate now REFUSES a key with a control character in it, and
+// that is the fix; this is the defence in depth behind it. Part 1 only closes
+// the causes somebody thought of, and the general defect -- the stored spelling
+// and the wire spelling can diverge -- outlives its first instance. A row
+// written by an older release, a field this check does not cover, a
+// transformation nobody has hit yet: this pass costs one scan of a handful of
+// short strings and holds for all of them.
+//
+// TWO expansions, and the second is the one that carries the measurement:
+//
+//   - THE TRIMMED FORM. alerts.NewSecretSet trims every value it is handed
+//     today, so this is currently redundant THERE -- it is emitted because what
+//     destSecrets promises its callers is "every spelling", not "every spelling
+//     given what one particular consumer happens to do first".
+//
+//   - THE PREFIX ENDING AT THE FIRST CONTROL CHARACTER, which is the form the
+//     wire actually carried. Trimming does not reach it: ESC is not whitespace,
+//     so strings.TrimSpace returns the 65 bytes unchanged.
+//
+// ONLY THE FIRST PREFIX, and not every control-delimited segment, which the
+// first draft emitted. The mechanism is TRUNCATION AT THE FIRST CONTROL BYTE:
+// an artefact landing in FRONT of the material does not put the credential in a
+// later segment that needs covering, it stops FFmpeg before the credential and
+// the key never reaches the wire at all. Nothing in this repository can be made
+// to fail for the later segments -- and the argument against shipping a literal
+// no test can fail for is written out at length under pullURLSecrets below.
+// They also cost something real: every extra literal is more text masked out of
+// every log line this destination ever writes.
+//
+// Over-masking is the safe direction where it buys something, and that is the
+// direction every other decision in this file went.
+func wireSpellings(values []string) []string {
+	out := make([]string, 0, len(values)*2)
+	out = append(out, values...)
+	for _, v := range values {
+		if t := strings.TrimSpace(v); t != v && t != "" {
+			out = append(out, t)
+		}
+		if i := strings.IndexFunc(v, unicode.IsControl); i > 0 {
+			out = append(out, v[:i])
+		}
+	}
 	return out
 }
 
@@ -277,8 +345,16 @@ func belowAuthority(raw string) string {
 // db.BackupIngestSettings, which are the same three fields under two names. One
 // function over the fields is what stops the standby -- the feed that carries
 // the show when the primary drops -- from being the one that kept leaking.
+//
+// wireSpellings applies here too, and for a sharper reason than on the
+// destination side: srt.Passphrase and rtmp.StreamKey are operator-typed text
+// with no parser between the form and the argv, and unlike a destination's key
+// they have no db.Destination.Validate refusing a control character first. The
+// pull URL cannot carry one -- url.Parse inside pullURLSecrets rejects it and
+// returns nothing -- and the publish token is generated here, so for those two
+// the pass is a no-op.
 func ingestSecrets(srt db.SRTSettings, rtmp db.RTMPSettings, pull db.PullSettings, token string) []string {
 	out := []string{srt.Passphrase, rtmp.StreamKey, token}
 	out = append(out, pullURLSecrets(pull.URL)...)
-	return out
+	return wireSpellings(out)
 }

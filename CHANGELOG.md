@@ -10,6 +10,43 @@ its first tagged release.
 
 ### Security
 
+- **A destination's stream key could reach `data/logs/process.log` in the
+  clear.** When a publish endpoint refused a connection, FFmpeg printed the
+  output URL it could not open — key included — and the scrubber did not remove
+  it. Not because it was missing: the destination declared its key and the
+  stderr path did apply the scrub. `alerts.SecretSet` replaces the EXACT
+  literals it was given, and on the run this was measured on the configured
+  value was 65 bytes because a terminal had appended a bracketed-paste escape
+  to it, while what FFmpeg opened and printed back was the 56-byte prefix
+  ending at that escape. A 65-byte needle does not occur inside a 56-byte
+  haystack, so nothing matched. `process.log` is persisted and rotated, which
+  makes it exactly the artifact that gets collected into bug reports and
+  support bundles — and a failure is when an operator copies logs to somebody
+  else. ([#306](https://github.com/rainmanjam/polyemesis/issues/306))
+
+- **A stream key containing a control character is now refused when you save
+  it, rather than silently truncated.** The other half of a publish URL was
+  already protected — `url.Parse` has always rejected these bytes — but the key
+  is joined on afterwards and nothing looked at it. It is refused rather than
+  repaired, so what is stored is always what goes on the wire: sanitising would
+  mint a credential you never typed, and a destination that publishes with a
+  quietly shortened key fails with nothing to explain why. The message names
+  the offending byte and its position and never echoes the key. An existing
+  destination carrying such a key must have it re-entered before it can be
+  saved again. Behind that, `engine.destSecrets` now also declares the prefix a
+  value takes if it is truncated at a control character, so the scrub covers
+  what reaches the wire and not only what was stored.
+
+- **The multistream leak check certified clean while a key was in the log.**
+  Step 8b of `scripts/acceptance-multistream.sh` searched for the exact
+  configured value, so any transformation defeated it — and so did its positive
+  control, which searched the same bytes. It now searches for a distinctive
+  16-character prefix of each key, and a new check plants a truncated copy of
+  every configured key and proves the new predicate finds what the old one did
+  not. Measured: with the pre-#307 predicate restored, a truncated key planted
+  in `process.log` is certified clean by 8b and caught by the new control.
+  ([#307](https://github.com/rainmanjam/polyemesis/issues/307))
+
 - **Destination stream keys are encrypted at rest.** `internal/secrets` has
   sealed every OAuth client secret and access token since it existed, and its
   own docstring says what that buys: "a leaked database file — a backup, a
