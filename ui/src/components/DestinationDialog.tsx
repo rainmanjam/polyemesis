@@ -169,11 +169,14 @@ const PRESETS: DestPreset[] = [
     transport: "rtmps",
     kind: "rtmp",
     platform: "kick",
-    url: "rtmps://fa723fc1b171.global-contribute.live-video.net",
+    // Empty on purpose — see the matching comment in internal/db/platforms.go.
+    // Kick's host is per channel, so a prefill is somebody else's address, and
+    // the shape Kick's dashboard prints has no application path.
+    url: "",
     separateKey: true,
     helpUrl: "https://kick.com/dashboard/settings/stream",
     notes:
-      "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes your title and category and reports viewer counts. Kick issues the ingest host per channel, so replace the one prefilled here with yours if it differs.",
+      "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes your title and category and reports viewer counts. Kick issues the ingest host per channel, so there is nothing to prefill here. APPEND /app to the URL Kick shows you — the dashboard prints it without one, and a Kick destination without /app cannot publish at all. The result looks like rtmps://<your-host>.global-contribute.live-video.net:443/app",
   },
   {
     id: "facebook",

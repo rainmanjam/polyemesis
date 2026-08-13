@@ -507,14 +507,27 @@ var destinationPresets = []DestinationPreset{
 			Source: "https://help.kick.com/en/articles/7066931-how-to-stream-on-kick-com", Checked: "2026-08-06",
 		},
 		Transport: PresetRTMPS, Kind: DestRTMP, Platform: PlatformKick,
-		URL:         "rtmps://fa723fc1b171.global-contribute.live-video.net",
+		// EMPTY, and it must stay empty. Kick issues the ingest host per
+		// channel, so anything hardcoded here is one particular person's --
+		// and for a while this field held a real one, shipped in a public
+		// repository, with a note asking the operator to replace it.
+		//
+		// The prefill was also wrong in a way the note did not cover: Kick's
+		// dashboard prints the host with NO application path, and a preset
+		// that copies that shape teaches it. rtmps://<host>/<key> makes the
+		// stream key the RTMP app name, Amazon IVS refuses it, and the
+		// destination reports "reconnecting" forever while producing nothing.
+		// That cost a live debugging session; see internal/services.
+		URL:         "",
 		SeparateKey: true,
 		HelpURL:     "https://kick.com/dashboard/settings/stream",
 		Notes: "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and " +
 			"viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → " +
 			"Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes " +
-			"your title and category and reports viewer counts. Kick issues the ingest host per channel, so replace " +
-			"the one prefilled here with yours if it differs.",
+			"your title and category and reports viewer counts. Kick issues the ingest host per channel, so there " +
+			"is nothing to prefill here. APPEND /app to the URL Kick shows you — the dashboard prints it without " +
+			"one, and a Kick destination without /app cannot publish at all. The result looks like " +
+			"rtmps://<your-host>.global-contribute.live-video.net:443/app",
 	},
 	{
 		ID: "facebook", Name: "Facebook Live", Group: GroupMajor,
