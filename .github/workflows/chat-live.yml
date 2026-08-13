@@ -1,0 +1,70 @@
+# Chat, against the real platforms.
+#
+# scripts/acceptance-chat.sh opens sockets to irc.chat.twitch.tv and
+# api.kick.com. Like the SRT probe it is deliberately not in the main CI path:
+# a network dependency on somebody else's server, run on every push, is a flake
+# generator, and this repo has spent enough measurement on flakes already.
+#
+# THE SCHEDULE IS THE POINT, and it is what makes this different from
+# srt-probe. That probe measures OUR behaviour on neutral hardware, so it only
+# needs to run when our code changes. This measures THEIR behaviour, and every
+# failure it is built to catch happens with no commit of ours at all:
+#
+#   - Twitch rewords its login-failure NOTICE, fatalNotice() stops matching,
+#     and polyemesis retries a rejected password every thirty seconds.
+#   - Kick moves or retires the public-key URL and webhook signature
+#     verification silently stops being able to verify anything.
+#   - The Twitch certificate chain changes or expires.
+#
+# None of those would be caught by a test that only ran when somebody edited
+# internal/chat. Weekly, because the failure modes are slow-moving and the
+# certificate check warns fourteen days out -- two runs of notice.
+#
+# NO CREDENTIALS ARE USED HERE. Fifteen of the seventeen checks need none;
+# the authenticated step skips without a token and no token is configured for
+# this workflow. Nothing in this run can leak a secret because none is present.
+name: chat (live platforms)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays, 06:00 UTC. Off the hour: GitHub's scheduler queues everything
+    # submitted on the hour and runs it late.
+    - cron: "13 6 * * 1"
+  pull_request:
+    paths:
+      - "internal/chat/**"
+      - "scripts/acceptance-chat.sh"
+      - "scripts/acceptance_chat_driver.go"
+      - ".github/workflows/chat-live.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time. Two runs racing would double the failed-login attempts
+  # against Twitch from the same address, which is the one thing here worth
+  # being careful about.
+  group: chat-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chat:
+    name: chat against the real platforms
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: chat acceptance
+        # A shorter listen than the local default: the runner is not the place
+        # to sit on somebody's chat for half a minute, and the checks that
+        # matter here are the ones that do not depend on anyone talking.
+        env:
+          POLY_CHAT_ANON_HOLD: 15s
+        run: ./scripts/acceptance-chat.sh
