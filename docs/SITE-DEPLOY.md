@@ -14,7 +14,7 @@ registrar. None of it can be done from the repository.
 
 ## Why the site is not up now
 
-Probed 2026-08-09 and again 2026-08-11 (recorded in
+Probed 2026-08-09, 2026-08-11 and again 2026-08-13 — unchanged each time (recorded in
 [#143](https://github.com/rainmanjam/polyemesis/issues/143)):
 
 | Host | Result |
@@ -83,9 +83,29 @@ page assumes.
    Namecheap's parking IP, the `CNAME` for `www` pointing at
    `parkingpage.namecheap.com`, and any URL-redirect record. Leaving them is how
    the apex keeps timing out after everything else is correct.
-3. At Namecheap, set the domain's nameservers to the two Cloudflare assigns.
+3. **Check the mail records survived the import.** Measured 2026-08-13, this
+   domain carries Namecheap email forwarding:
+
+   | Type | Name | Content |
+   |---|---|---|
+   | MX | `polyemesis.com` | `eforward1.registrar-servers.com` (priority 10) |
+   | MX | `polyemesis.com` | `eforward2.registrar-servers.com` (priority 10) |
+   | MX | `polyemesis.com` | `eforward3.registrar-servers.com` (priority 10) |
+   | MX | `polyemesis.com` | `eforward4.registrar-servers.com` (priority 15) |
+   | TXT | `polyemesis.com` | `v=spf1 include:spf.efwd.registrar-servers.com ~all` |
+
+   THE TRAP IS IN STEP 2. Those hosts are `*.registrar-servers.com` — the same
+   domain as the nameservers being replaced — so "delete the Namecheap records"
+   reads as though it includes them. It does not. Deleting them stops mail to
+   this domain, and nothing about the website will look wrong; the failure is
+   silent and arrives as an email somebody never receives.
+
+   Delete only the `A` for `@`, the `CNAME` for `www`, and any URL-redirect
+   record. Leave every `MX` and the SPF `TXT` exactly as they are.
+
+4. At Namecheap, set the domain's nameservers to the two Cloudflare assigns.
    Propagation is usually minutes, occasionally hours.
-4. Cloudflare dashboard → **Workers & Pages → polyemesis → Custom domains → Set
+5. Cloudflare dashboard → **Workers & Pages → polyemesis → Custom domains → Set
    up a custom domain**, once for `polyemesis.com` and once for
    `www.polyemesis.com`.
 
