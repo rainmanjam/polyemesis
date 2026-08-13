@@ -1,0 +1,79 @@
+# Delete the Actions caches that can never be restored again.
+#
+# GitHub evicts least-recently-used across the WHOLE repository once the 10 GB
+# limit is reached, and that policy cannot tell a reachable cache from an
+# unreachable one. At the limit it will evict a live main-branch Go module
+# cache -- restored by every pull request -- to keep a cache belonging to a pull
+# request that merged last week and whose ref no longer exists.
+#
+# This repository reached 9.65 GB of 10 GB, and 6.40 GB of that was on merged
+# pull requests, release tags and deleted branches. Removing the unreachable
+# ones on a schedule means the eviction never has to choose.
+#
+# DAILY, because tiers 1-3 accumulate with every merge. The work is a handful of
+# API calls and deletes nothing that could be restored, so a shorter interval
+# buys nothing and a longer one lets the dead pile up between runs.
+#
+# The rules, and the reasoning for each, are in scripts/prune-actions-caches.sh.
+# It runs identically on a laptop, with --dry-run, which is how it was verified
+# before it was ever scheduled.
+name: prune actions caches
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would be deleted, delete nothing"
+        type: boolean
+        default: false
+  schedule:
+    # 04:17 UTC. Off the hour: GitHub queues everything submitted on the hour.
+    - cron: "17 4 * * *"
+
+permissions:
+  contents: read
+  # The one permission that matters here, and the reason this is its own
+  # workflow rather than a step in ci.yml -- nothing that builds or tests
+  # should be holding a token that can delete caches.
+  actions: write
+
+concurrency:
+  # Two prunes racing would both list, both classify, and both try to delete
+  # the same ids. The loser's deletes 404, which the script counts as failures
+  # and would report as an error it cannot do anything about.
+  group: cache-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: prune unreachable caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # Via env rather than inline in the run: script. The input is only
+          # settable by someone with write access, but interpolating any input
+          # into a shell line is the habit that produces the injection bugs.
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          if [ "${DRY:-false}" = "true" ]; then
+            ./scripts/prune-actions-caches.sh --dry-run
+          else
+            ./scripts/prune-actions-caches.sh
+          fi
+
+      - name: report what is left
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api --paginate "repos/$REPO/actions/caches?per_page=100" \
+            --jq '.actions_caches[] | .size_in_bytes' \
+          | awk '{n++; s+=$1} END {printf "%d caches, %.2f GB of the 10 GB limit\n", n, s/1e9}' \
+          >> "$GITHUB_STEP_SUMMARY"
