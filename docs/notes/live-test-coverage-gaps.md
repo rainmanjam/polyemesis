@@ -49,7 +49,7 @@ protocol and the failure path — everything except a valid login. It is the sam
 shape as the multistream suite's "a wrong key is refused" check (63c61a4), so
 the technique is already established here.
 
-### 2. OAuth — 10,693 lines, 19 external hosts, no acceptance suite
+### 2. OAuth — 10,693 lines, 19 external hosts — **covered, with one gap named below**
 
 The largest external-host count in the codebase. Token refresh is the classic
 silent failure: correct on day one, broken at hour four when the first token
@@ -58,6 +58,20 @@ expires, and invisible until then.
 It also populates destination URLs and keys automatically — the exact field
 whose hand-typed equivalent produced #312. A composition bug here would look
 identical and be harder to see, because no operator typed anything.
+
+`scripts/acceptance-oauth.sh` now covers this, and the split is worth recording
+because it was not what this note predicted. The note assumed OAuth had to wait
+for a connected account. Most of it did not: **twenty-eight of its forty-six
+checks need no credential**, because every provider's OAuth surface is public.
+Discovery documents, authorization and token endpoints, advertised grant types
+and PKCE methods, and the Graph API version Facebook actually serves are all
+fetchable by anybody and comparable against what `internal/oauth` hardcodes.
+
+The gap that remains is narrow and real: **nothing proves a refresh SUCCEEDS.**
+Step 8 does exactly that and skips without `POLY_OAUTH_<PLATFORM>_*`, so until
+an account is connected the hour-four failure is still only bounded from one
+side — the suite proves every token endpoint is present and refuses a bad
+grant, which is not the same claim.
 
 ### 3. Transcribe — 7,661 lines, 2 external hosts
 
@@ -86,9 +100,17 @@ Nothing is connected on the OVH server:
 So the full chat and OAuth suites need an account connected first. The
 credential-free Twitch IRC refusal check does not.
 
+That framing turned out to understate what was reachable. Both suites were
+built anyway, and between them **forty-three checks run with no credential at
+all** — because a platform's refusals, its certificate chain, its published
+public key and its whole OAuth surface are things anyone can ask for. The rule
+this yielded, worth carrying to the three packages below: *ask what the far end
+will tell a stranger before assuming the test needs an account.*
+
 ## Recommended order
 
-1. **Chat, refusal-only** — no credentials, largest untested surface, technique
-   already proven in this repo.
-2. **Hooks** — no credentials, self-contained.
-3. **Chat, authenticated** and **OAuth refresh** — once an account is connected.
+1. ~~**Chat, refusal-only**~~ — done, `scripts/acceptance-chat.sh` (#316).
+2. ~~**OAuth, credential-free**~~ — done, `scripts/acceptance-oauth.sh`.
+3. **Hooks** — no credentials, self-contained. Now the cheapest one left.
+4. **Chat, authenticated** and **OAuth refresh** — once an account is
+   connected. Both suites already have the step written and skipping.
