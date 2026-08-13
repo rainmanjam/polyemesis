@@ -12,6 +12,7 @@ package engine
 // after a stop.
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -31,8 +32,28 @@ import (
 // immediately for a Process that is not running.
 const engineFakeChildFlag = "-polyemesis-engine-fake-child"
 
+// engineFakeChildStderr names an environment variable whose value the fake
+// child writes to stderr, once, before failing.
+//
+// AN ENVIRONMENT VARIABLE AND NOT AN ARGUMENT, deliberately. The line this
+// carries is an FFmpeg failure containing a stream key, and a test that proved
+// a key never reaches process.log by putting one on a command line every other
+// account on the machine can read would be the same joke
+// scripts/acceptance-multistream.sh's 8b avoids with `grep -F -f <(...)`.
+// supervisor never sets cmd.Env, so the child inherits what t.Setenv put here.
+const engineFakeChildStderr = "POLYEMESIS_ENGINE_FAKE_CHILD_STDERR"
+
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == engineFakeChildFlag {
+		// A child that says something and dies, for the tests that need the
+		// stderr scan to run for real: the line goes through classify,
+		// (*Process).scrub, the log ring and the on-disk sink exactly as a
+		// destination's would. Exit 1 because a destination that could not open
+		// its output is a failure, and the tail of stderr becomes LastError.
+		if line := os.Getenv(engineFakeChildStderr); line != "" {
+			fmt.Fprintln(os.Stderr, line)
+			os.Exit(1)
+		}
 		// Long enough to outlive any test here, short enough that a run
 		// abandoned halfway does not leave it behind for a human to find. It
 		// installs no signal handlers, so the SIGTERM the teardown sends ends it
