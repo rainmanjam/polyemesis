@@ -134,6 +134,39 @@ export const TIER_LEGEND: { key: CapTier; label: string; help: string }[] = [
 
 /** Display order: most integrated first, unsupported last — because the last
  *  row is the one nobody should have to scroll to find. */
+/** The row shared by every platform polyemesis can stream to and has not
+ *  integrated: paste the key, and every other column is genuinely unverified.
+ *
+ *  A function rather than eight copies of one object. The copies were the
+ *  confusion — an identical eight-line block repeated invites the reader to
+ *  diff them looking for the difference, and there isn't one. What actually
+ *  differs between these platforms is readFirst, which is where it belongs.
+ *
+ *  Mirrors manualUnverified() in internal/oauth/capabilities.go. */
+function manualUnverified(
+  presetId: string,
+  name: string,
+  summary: string,
+  readFirst: string,
+): PlatformCapability {
+  return {
+    presetId,
+    name,
+    tier: "manual",
+    summary,
+    readFirst,
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  };
+}
+
 export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
   {
     presetId: "youtube",
@@ -258,150 +291,54 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       sso: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
     },
   },
-  {
-    presetId: "rumble",
-    name: "Rumble",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from Rumble Studio. Rumble has an API page, but it sits behind a login and nothing about it is published.",
-    readFirst:
-      "rumble.com/account/api requires an account to view and documents nothing publicly, so polyemesis makes no claim about what it can or cannot do. If you have access and it turns out to offer more, that is a gap in our knowledge rather than a limit of the platform.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "dlive",
-    name: "DLive",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from DLive → Dashboard → Stream settings. Streaming works; there is no integration to connect.",
-    readFirst:
-      "DLive's developer portal at dev.dlive.tv no longer resolves in DNS, so its developer support appears to be inactive. Nothing about streaming to DLive depends on that — but do not go looking for an API key, because there is currently nowhere to get one.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "trovo",
-    name: "Trovo",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from the Trovo creator dashboard. Streaming works; there is no integration to connect.",
-    readFirst:
-      "Trovo publishes an open platform API and it is answering — a request to open-api.trovo.live/openplatform/chat/... returns a structured invalidHeader error rather than a 404, which is a live chat service refusing an unauthenticated caller. Nothing here has been built against it. Trovo has been reported elsewhere as shut down; that appears to be wrong, and this row says so rather than repeating it.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "odysee",
-    name: "Odysee",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from Odysee. Streaming works; there is no integration to connect.",
-    readFirst:
-      "Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "vimeo",
-    name: "Vimeo Livestream",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from Vimeo. Streaming works; there is no integration to connect.",
-    readFirst:
-      "api.vimeo.com is live and answering. Vimeo's live event chat exists on paid plans, so what is reachable depends on the account's tier rather than on registration alone -- which is why this is unverified rather than a yes or a no.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "dailymotion",
-    name: "Dailymotion",
-    tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from Dailymotion. Streaming works; there is no integration to connect.",
-    readFirst:
-      "api.dailymotion.com is live and openly readable. Whether it exposes live-stream chat has not been checked, so every column below is genuinely unknown rather than known to be absent.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "tiktok",
-    name: "TikTok LIVE",
-    tier: "manual",
-    summary:
-      "Paste the server URL and key TikTok issues for the broadcast. Streaming works; there is no integration to connect.",
-    readFirst:
-      "TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
-  {
-    presetId: "linkedin",
-    name: "LinkedIn Live",
-    tier: "manual",
-    summary:
-      "Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
-    readFirst:
-      "LinkedIn Live requires approved broadcast-partner status, and its APIs sit behind the Marketing Developer Platform rather than open registration. api.linkedin.com answers, so the surface exists — but access to it is granted, not requested.",
-    caps: {
-      sso: "unknown",
-      streamKey: "manual",
-      metadata: "unknown",
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "unknown",
-    },
-  },
+  manualUnverified(
+    "rumble",
+    "Rumble",
+    "Paste your ingest URL and stream key from Rumble Studio. Rumble has an API page, but it sits behind a login and nothing about it is published.",
+    "rumble.com/account/api requires an account to view and documents nothing publicly, so polyemesis makes no claim about what it can or cannot do. If you have access and it turns out to offer more, that is a gap in our knowledge rather than a limit of the platform.",
+  ),
+  manualUnverified(
+    "dlive",
+    "DLive",
+    "Paste your ingest URL and stream key from DLive → Dashboard → Stream settings. Streaming works; there is no integration to connect.",
+    "DLive's developer portal at dev.dlive.tv no longer resolves in DNS, so its developer support appears to be inactive. Nothing about streaming to DLive depends on that — but do not go looking for an API key, because there is currently nowhere to get one.",
+  ),
+  manualUnverified(
+    "trovo",
+    "Trovo",
+    "Paste your ingest URL and stream key from the Trovo creator dashboard. Streaming works; there is no integration to connect.",
+    "Trovo publishes an open platform API and it is answering — a request to open-api.trovo.live/openplatform/chat/... returns a structured invalidHeader error rather than a 404, which is a live chat service refusing an unauthenticated caller. Nothing here has been built against it. Trovo has been reported elsewhere as shut down; that appears to be wrong, and this row says so rather than repeating it.",
+  ),
+  manualUnverified(
+    "odysee",
+    "Odysee",
+    "Paste your ingest URL and stream key from Odysee. Streaming works; there is no integration to connect.",
+    "Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
+  ),
+  manualUnverified(
+    "vimeo",
+    "Vimeo Livestream",
+    "Paste your ingest URL and stream key from Vimeo. Streaming works; there is no integration to connect.",
+    "api.vimeo.com is live and answering. Vimeo's live event chat exists on paid plans, so what is reachable depends on the account's tier rather than on registration alone -- which is why this is unverified rather than a yes or a no.",
+  ),
+  manualUnverified(
+    "dailymotion",
+    "Dailymotion",
+    "Paste your ingest URL and stream key from Dailymotion. Streaming works; there is no integration to connect.",
+    "api.dailymotion.com is live and openly readable. Whether it exposes live-stream chat has not been checked, so every column below is genuinely unknown rather than known to be absent.",
+  ),
+  manualUnverified(
+    "tiktok",
+    "TikTok LIVE",
+    "Paste the server URL and key TikTok issues for the broadcast. Streaming works; there is no integration to connect.",
+    "TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
+  ),
+  manualUnverified(
+    "linkedin",
+    "LinkedIn Live",
+    "Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
+    "LinkedIn Live requires approved broadcast-partner status, and its APIs sit behind the Marketing Developer Platform rather than open registration. api.linkedin.com answers, so the surface exists — but access to it is granted, not requested.",
+  ),
   {
     presetId: "instagram",
     name: "Instagram Live",
