@@ -36,6 +36,12 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **X (Twitter) Live** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
 | **Rumble** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Vimeo Livestream** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
 | *Everything else* | — | By hand | — | — | — | — | — |
 
@@ -146,6 +152,18 @@ like a bug in polyemesis, and there is nothing to fix. If your account is one of
 the exceptions that still has Live Producer RTMP, add a **Generic RTMPS**
 destination and paste what Meta gives you. Check that you have it before you
 build a show around it.
+
+**TikTok LIVE** and **LinkedIn Live** are *unverified* for a different reason
+than Rumble and DLive: their APIs demonstrably exist and answer — a request to
+`open.tiktokapis.com` or `api.linkedin.com` comes back with a structured
+authentication error, not a 404 — but the live surfaces sit behind partner
+programmes rather than open developer registration. Partner-gated is not the
+same as absent, and this project has not applied, so *unverified* is the honest
+word. Somebody inside either programme may well find every column is a yes.
+
+The stream key on both is *by hand* and, worth knowing, **per broadcast**:
+TikTok issues it for the LIVE session and LinkedIn for the event, so a saved
+destination goes stale between streams rather than persisting like a Twitch key.
 
 **Rumble** and **DLive** are marked *unverified* rather than *unsupported* on
 purpose. Rumble's API page at `rumble.com/account/api` sits behind a login and

@@ -295,6 +295,114 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     },
   },
   {
+    presetId: "trovo",
+    name: "Trovo",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key from the Trovo creator dashboard. Streaming works; there is no integration to connect.",
+    readFirst:
+      "Trovo publishes an open platform API and it is answering — a request to open-api.trovo.live/openplatform/chat/... returns a structured invalidHeader error rather than a 404, which is a live chat service refusing an unauthenticated caller. Nothing here has been built against it. Trovo has been reported elsewhere as shut down; that appears to be wrong, and this row says so rather than repeating it.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
+    presetId: "odysee",
+    name: "Odysee",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key from Odysee. Streaming works; there is no integration to connect.",
+    readFirst:
+      "Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
+    presetId: "vimeo",
+    name: "Vimeo Livestream",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key from Vimeo. Streaming works; there is no integration to connect.",
+    readFirst:
+      "api.vimeo.com is live and answering. Vimeo's live event chat exists on paid plans, so what is reachable depends on the account's tier rather than on registration alone -- which is why this is unverified rather than a yes or a no.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
+    presetId: "dailymotion",
+    name: "Dailymotion",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key from Dailymotion. Streaming works; there is no integration to connect.",
+    readFirst:
+      "api.dailymotion.com is live and openly readable. Whether it exposes live-stream chat has not been checked, so every column below is genuinely unknown rather than known to be absent.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
+    presetId: "tiktok",
+    name: "TikTok LIVE",
+    tier: "manual",
+    summary:
+      "Paste the server URL and key TikTok issues for the broadcast. Streaming works; there is no integration to connect.",
+    readFirst:
+      "TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
+    presetId: "linkedin",
+    name: "LinkedIn Live",
+    tier: "manual",
+    summary:
+      "Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
+    readFirst:
+      "LinkedIn Live requires approved broadcast-partner status, and its APIs sit behind the Marketing Developer Platform rather than open registration. api.linkedin.com answers, so the surface exists — but access to it is granted, not requested.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+  },
+  {
     presetId: "instagram",
     name: "Instagram Live",
     tier: "unsupported",

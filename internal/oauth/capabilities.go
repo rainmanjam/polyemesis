@@ -341,6 +341,98 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
+		PresetID: "trovo", Name: "Trovo", Tier: TierManual,
+		Summary:   "Paste your ingest URL and stream key from the Trovo creator dashboard. Streaming works; there is no integration to connect.",
+		ReadFirst: "Trovo publishes an open platform API and it is answering — a request to open-api.trovo.live/openplatform/chat/... returns a structured invalidHeader error rather than a 404, which is a live chat service refusing an unauthenticated caller. Nothing here has been built against it. Trovo has been reported elsewhere as shut down; that appears to be wrong, and this row says so rather than repeating it.",
+		Caps: map[Capability]Support{
+			CapSSO:         SupportUnknown,
+			CapStreamKey:   SupportManual,
+			CapMetadata:    SupportUnknown,
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
+			CapViewerStats: SupportUnknown,
+		},
+	},
+	{
+		PresetID: "odysee", Name: "Odysee", Tier: TierManual,
+		Summary:   "Paste your ingest URL and stream key from Odysee. Streaming works; there is no integration to connect.",
+		ReadFirst: "Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
+		Caps: map[Capability]Support{
+			CapSSO:         SupportUnknown,
+			CapStreamKey:   SupportManual,
+			CapMetadata:    SupportUnknown,
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
+			CapViewerStats: SupportUnknown,
+		},
+	},
+	{
+		PresetID: "vimeo", Name: "Vimeo Livestream", Tier: TierManual,
+		Summary:   "Paste your ingest URL and stream key from Vimeo. Streaming works; there is no integration to connect.",
+		ReadFirst: "api.vimeo.com is live and answering. Vimeo's live event chat exists on paid plans, so what is reachable depends on the account's tier rather than on registration alone -- which is why this is unverified rather than a yes or a no.",
+		Caps: map[Capability]Support{
+			CapSSO:         SupportUnknown,
+			CapStreamKey:   SupportManual,
+			CapMetadata:    SupportUnknown,
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
+			CapViewerStats: SupportUnknown,
+		},
+	},
+	{
+		PresetID: "dailymotion", Name: "Dailymotion", Tier: TierManual,
+		Summary:   "Paste your ingest URL and stream key from Dailymotion. Streaming works; there is no integration to connect.",
+		ReadFirst: "api.dailymotion.com is live and openly readable. Whether it exposes live-stream chat has not been checked, so every column below is genuinely unknown rather than known to be absent.",
+		Caps: map[Capability]Support{
+			CapSSO:         SupportUnknown,
+			CapStreamKey:   SupportManual,
+			CapMetadata:    SupportUnknown,
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
+			CapViewerStats: SupportUnknown,
+		},
+	},
+	{
+		PresetID: "tiktok", Name: "TikTok LIVE", Tier: TierManual,
+		Summary:   "Paste the server URL and key TikTok issues for the broadcast. Streaming works; there is no integration to connect.",
+		ReadFirst: "TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
+		Caps: map[Capability]Support{
+			CapSSO: SupportUnknown,
+			// Manual and PER BROADCAST, which is the part worth knowing: the
+			// key TikTok issues is not a standing credential, so a saved
+			// destination goes stale between streams.
+			CapStreamKey: SupportManual,
+			// Unknown rather than No, on the same reasoning the Rumble row
+			// gives: partner-gated is not the same as absent, and this project
+			// has not applied. Someone inside that programme may find all of
+			// these are yes.
+			CapMetadata:    SupportUnknown,
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
+			CapViewerStats: SupportUnknown,
+		},
+	},
+	{
+		PresetID: "linkedin", Name: "LinkedIn Live", Tier: TierManual,
+		Summary:   "Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
+		ReadFirst: "LinkedIn Live requires approved broadcast-partner status, and its APIs sit behind the Marketing Developer Platform rather than open registration. api.linkedin.com answers, so the surface exists — but access to it is granted, not requested.",
+		Caps: map[Capability]Support{
+			CapSSO: SupportUnknown,
+			// Per EVENT, like TikTok: created for one broadcast, not reusable.
+			CapStreamKey:   SupportManual,
+			CapMetadata:    SupportUnknown,
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
+			CapViewerStats: SupportUnknown,
+		},
+	},
+	{
 		PresetID: "instagram", Name: "Instagram Live", Tier: TierUnsupported,
 		Summary:   "polyemesis cannot automate Instagram: there is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a Generic RTMPS destination — copied by hand, and they change every broadcast.",
 		ReadFirst: "This entry exists to save you the evening. A destination that silently never connects is worse than no destination at all: it looks like a bug in polyemesis, and there is nothing to fix. If your account still has Live Producer RTMP access, add a Generic RTMPS destination and paste the server URL and key Meta gives you — but check that you have it before you build the show around it.",
