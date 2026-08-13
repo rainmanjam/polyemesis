@@ -558,9 +558,35 @@ for p in $SKIPPED; do
   sk "$p: no usable credential ($ke unset, or its ingest URL is unset) — NOT a pass"
 done
 
-# Let the fan-out run. 20s is comfortably longer than any startup transient and
-# leaves the publisher alive afterwards.
-sleep 20
+# Let the fan-out run.
+#
+# TWENTY SECONDS IS RIGHT FOR LOCAL SINKS AND WRONG FOR A LIVE PLATFORM, so the
+# window depends on which one is being measured.
+#
+# A local ffmpeg listener is delivering within a second of the connect, so 20s is
+# comfortably past any startup transient and every check downstream has the data
+# it needs. A real platform is a different system: it accepts the publish, then
+# transcodes, then populates a preview, and 20s routinely ends the run before
+# anything is visible to a human watching the dashboard. That is not a failure
+# the suite can see -- every assertion here reads bytes and out_time, both of
+# which are healthy long before a preview renders -- but it makes the run
+# useless for the one thing a person does with it, which is look.
+#
+# So: 20s in dry mode, 75s in live mode, and an override for either. The
+# publisher outlives the window in both cases; step 7 asserts it.
+#
+# KEYED ON $MODE, NOT ON $LIVE. $LIVE holds every destination that was created
+# successfully, which in dry mode is all of them -- a first attempt keyed on it
+# stretched the dry run to 75s and reported "live platforms configured" while
+# contacting nothing. $MODE is the flag that actually distinguishes them.
+MS_RUNTIME="${POLY_MS_RUNTIME:-}"
+if [ -z "$MS_RUNTIME" ]; then
+  if [ "$MODE" = dry ]; then MS_RUNTIME=20; else MS_RUNTIME=75; fi
+fi
+case "$MS_RUNTIME" in ''|*[!0-9]*) bad "POLY_MS_RUNTIME must be whole seconds, got: '$MS_RUNTIME'"; exit 1 ;; esac
+[ "$MS_RUNTIME" -ge 5 ] || { bad "POLY_MS_RUNTIME must be at least 5s, got: $MS_RUNTIME"; exit 1; }
+note "measuring over ${MS_RUNTIME}s ($MODE mode)"
+sleep "$MS_RUNTIME"
 
 # ----------------------------------------------- 3. what routing compiled
 
