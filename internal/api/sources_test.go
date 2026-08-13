@@ -3,10 +3,12 @@ package api
 import (
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
@@ -486,5 +488,62 @@ func TestTokenEnforcedTracksTheListenerNotTheSetting(t *testing.T) {
 	}
 	if listSources(t, h, sign)[0].TokenEnforced {
 		t.Error("tokenEnforced stayed true with nothing bound")
+	}
+}
+
+// The delete warning has to count what a delete would actually take.
+//
+// ISSUE #304. sourceView declares Destinations and Renditions with the comment
+// "what a delete would take with it", and viewSource never assigned either, so
+// every source reported 0 however many it owned.
+//
+// Zero is not a neutral wrong answer here. It is the REASSURING one: it tells a
+// caller the delete is free, in precisely the case where the warning is the
+// point. A UI asking "delete this source?" got "nothing else goes with it" for a
+// source owning five destinations.
+//
+// THE ASSERTION IS ON A NON-ZERO COUNT, and that is the whole design of this
+// test. A field hard-wired to 0 satisfies any `>= 0` check, so the only
+// assertion that can fail against the old code is one that names the number.
+// Two destinations rather than one, so an implementation returning a bare
+// boolean-ish 1 is caught as well.
+//
+// Mutation: delete the ListDestinationsBySource block in viewSource.
+// Observed to fail with "destinations = 0, want 2".
+func TestASourceReportsWhatADeleteWouldTakeWithIt(t *testing.T) {
+	srv, _, store := testServer(t, config.Config{})
+
+	src := &db.Source{Name: "counted", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := store.CreateSource(src); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	for i, name := range []string{"one", "two"} {
+		if _, err := store.CreateDestination(&db.Destination{
+			SourceID: &src.ID, Name: name, Kind: db.DestFile, URL: name + ".mkv",
+		}); err != nil {
+			t.Fatalf("create destination %d: %v", i, err)
+		}
+	}
+
+	// A second source with NOTHING attached, so a implementation that counted
+	// every destination in the install rather than this source's would fail
+	// here even while the count above looked right.
+	bare := &db.Source{Name: "bare", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := store.CreateSource(bare); err != nil {
+		t.Fatalf("create bare source: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sources", nil)
+	got := srv.viewSource(req, src, 0)
+	if got.Destinations != 2 {
+		t.Errorf("destinations = %d, want 2. This number is what a caller is told "+
+			"a delete would take with it, and 0 is the answer that says the delete "+
+			"is free", got.Destinations)
+	}
+
+	empty := srv.viewSource(req, bare, 0)
+	if empty.Destinations != 0 {
+		t.Errorf("a source with no destinations reported %d; the count is not scoped "+
+			"to the source", empty.Destinations)
 	}
 }
