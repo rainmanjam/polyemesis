@@ -56,7 +56,7 @@ protocol and the failure path — everything except a valid login. It is the sam
 shape as the multistream suite's "a wrong key is refused" check (63c61a4), so
 the technique is already established here.
 
-### 2. OAuth — 10,693 lines, 19 external hosts, no acceptance suite
+### 2. OAuth — 10,693 lines, 19 external hosts — **covered, with one gap named below**
 
 The largest external-host count in the codebase. Token refresh is the classic
 silent failure: correct on day one, broken at hour four when the first token
@@ -65,6 +65,20 @@ expires, and invisible until then.
 It also populates destination URLs and keys automatically — the exact field
 whose hand-typed equivalent produced #312. A composition bug here would look
 identical and be harder to see, because no operator typed anything.
+
+`scripts/acceptance-oauth.sh` now covers this, and the split is worth recording
+because it was not what this note predicted. The note assumed OAuth had to wait
+for a connected account. Most of it did not: **twenty-eight of its forty-six
+checks need no credential**, because every provider's OAuth surface is public.
+Discovery documents, authorization and token endpoints, advertised grant types
+and PKCE methods, and the Graph API version Facebook actually serves are all
+fetchable by anybody and comparable against what `internal/oauth` hardcodes.
+
+The gap that remains is narrow and real: **nothing proves a refresh SUCCEEDS.**
+Step 8 does exactly that and skips without `POLY_OAUTH_<PLATFORM>_*`, so until
+an account is connected the hour-four failure is still only bounded from one
+side — the suite proves every token endpoint is present and refuses a bad
+grant, which is not the same claim.
 
 ### 3. Transcribe — 7,661 lines, 2 external hosts
 
@@ -114,15 +128,37 @@ Nothing is connected on the OVH server:
 So the full chat and OAuth suites need an account connected first. The
 credential-free Twitch IRC refusal check does not.
 
+That framing turned out to understate what was reachable. Both suites were
+built anyway, and between them **forty-three checks run with no credential at
+all** — because a platform's refusals, its certificate chain, its published
+public key and its whole OAuth surface are things anyone can ask for. The rule
+this yielded, worth carrying to the three packages below: *ask what the far end
+will tell a stranger before assuming the test needs an account.*
+
 ## Recommended order
 
-1. ~~**Chat, refusal-only**~~ — done, #316.
-2. ~~**Automod**~~ — done. Needed no credentials either, for the same reason:
-   what the fail-open contract is about is refusal, and an unauthenticated
-   request to a real API is a real refusal.
-3. **Hooks** — no credentials, self-contained.
-4. **Chat, authenticated** and **OAuth refresh** — once an account is connected.
+1. ~~**Chat, refusal-only**~~ — done, `scripts/acceptance-chat.sh` (#316).
+2. ~~**OAuth, credential-free**~~ — done, `scripts/acceptance-oauth.sh` (#322).
+   Needed no credential at all: a provider's OAuth surface is public.
+3. ~~**Automod**~~ — done. Needed none either, for a different reason: the
+   fail-open contract is about refusal, and an unauthenticated request to a real
+   API is a real refusal.
+4. ~~**Transcribe**~~ — done, though the ranking was wrong about it. It is a
+   LOCAL package; see the correction above.
+5. ~~**Hooks**~~ — done. No defect found, and the reason it was worth doing
+   turned out not to be "no socket" but "no `*url.Error`".
+6. **Chat, authenticated** and **OAuth refresh** — still open, and the only ones
+   that need an account connected. Both suites already have the step written and
+   skipping.
 
-Both suites so far found their defect in the same place: not in the request, and
-not in the response, but in what an error was allowed to say afterwards. Worth
-looking there first in the remaining three.
+WHAT THE FIVE FOUND, since it was not what this note predicted. Two credential
+leaks (#310 in chat, and automod's endpoint in its own error text) sat in the
+same place: not in the request, not in the response, but in what an ERROR was
+allowed to say afterwards. `*url.Error` carries the full URL, and a test that
+stubs the HTTP client can never produce one — which is why five packages' worth
+of unit tests had never seen the string their scrubs existed for.
+
+Transcribe's two were a different shape and worth naming separately: a magic
+constant spelled the wrong way round, and a checksum compared against the wrong
+header. Both were invisible offline because the fixtures were generated from the
+same wrong constants. A closed loop that agrees with itself.
