@@ -1,0 +1,27 @@
+{
+    "meta": {
+        "schema_version": "2025-01-25",
+        "service": "IVS",
+        "config_id": "3080dd39-6867-437d-a249-21ad798d06fe",
+        "required_encode_resource_estimate_percent": 0
+    },
+    "status": {
+        "result": "error",
+        "html_en_us": "Your broadcast software (polyemesis) did not send GPU Information which is required by GetClientConfiguration provided by Twitch Enhanced Broadcasting. Try installing or updating the driver for your GPU."
+    },
+    "ingest_endpoints": [
+        {
+            "protocol": "RTMP",
+            "url_template": "rtmp://ingest.global-contribute.live-video.net/app/{stream_key}"
+        },
+        {
+            "protocol": "RTMPS",
+            "url_template": "rtmps://ingest.global-contribute.live-video.net/app/{stream_key}"
+        }
+    ],
+    "encoder_configurations": [],
+    "audio_configurations": {
+        "live": [],
+        "vod": []
+    }
+}

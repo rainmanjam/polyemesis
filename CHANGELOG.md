@@ -76,6 +76,54 @@ its first tagged release.
   a rename, a routing change — deliberately leaves the sealed bytes alone
   rather than destroying a key the right key file would have recovered.
 
+### Added
+
+- **`internal/multitrack` speaks Twitch Enhanced Broadcasting**, the negotiated
+  configuration behind what Amazon calls IVS Multitrack Video — the one path a
+  platform has published that takes a *second* audio track and says what it is
+  for. It fetches a configuration from Twitch, reads the verdict, and resolves
+  the ingest endpoint and stream key it hands back. Nothing publishes through it
+  yet; see below for what is deliberately not built.
+
+  Four things were measured against the live endpoint rather than assumed, and
+  each one changes what the code has to do:
+
+  - **A refusal arrives as HTTP 200.** Every response — valid, invalid,
+    unsupported hardware, unparseable schema version — was `200`, with the
+    verdict in `status.result`. A successful negotiation omits the `status`
+    object entirely rather than saying `"success"`, so a client that reads the
+    status code, or that treats an absent status as an error, has read the
+    wrong field.
+  - **`authentication` is the stream key, not an OAuth token.** This does not
+    depend on a connected account, which is what the issue expected. Better:
+    on a *successful* negotiation Twitch mints a new 312-character key that
+    carries the agreed ladder inside it, hex-encoded and signed, with the
+    operator's original key as its last segment. Publishing with the operator's
+    own key instead would connect and send a stream the ingest never agreed the
+    shape of.
+  - **A second audio track does not require a multi-rendition video ladder.**
+    Asking for `maximum_video_tracks: 1` returns exactly one rendition *and*
+    both audio tracks — live on track 0, VOD on track 1. That is what makes the
+    feature reachable at all for polyemesis, which publishes one video track to
+    an RTMP destination.
+  - **Twitch refuses a client with no supported GPU**, by name: no GPU
+    information, a vendor ID of zero, an unrecognised vendor, an out-of-date
+    driver. There is no software-encoder path through this endpoint, so on a
+    headless host encoding with libx264 the fallback to the ordinary ingest is
+    the *normal* outcome and not the exceptional one.
+
+  The operator's own settings are **the input to the negotiation, not something
+  it overrides** — the returned ladder is derived from the canvas the client
+  says it is producing, so an operator who picks 720p gets a 720p negotiation.
+  Where Twitch's answer differs anyway (a `maximum_aggregate_bitrate` ceiling
+  was simply ignored), the difference is reported and never silently applied,
+  following the rule already written into `services.URLProblem`.
+
+  Both the request and the response carry a credential, so neither may be
+  logged as it stands: `Config.Redacted` is the only shape of a configuration
+  fit to print, and every error the client returns is scrubbed of the key.
+  ([#326](https://github.com/rainmanjam/polyemesis/issues/326))
+
 ## [0.7.0] — 2026-08-12
 
 ### Security
