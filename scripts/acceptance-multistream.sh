@@ -46,6 +46,32 @@
 # difference, and a routing bug that scrambled destinations at random -- sending
 # each one somebody else's mix -- would pass every "these differ" check.
 #
+# ONE FAR END IS NOT AN FFMPEG LISTENER. IT IS THIS PRODUCT'S OWN RTMP INGEST.
+#
+# Every sink above is `ffmpeg -f flv -listen 1`, and that is an extremely
+# permissive receiver: it takes almost any bytes offered to it, on any playpath,
+# with no notion of whether the publisher was entitled to be there. It can say
+# "a stream arrived". It cannot say "a stream a real RTMP SERVER would accept
+# arrived", because it has no way to refuse one.
+#
+# internal/rtmpserver is a real one. It performs the handshake and addresses
+# sources BY STREAM KEY -- Lookup(streamKey) (Target, bool), StreamKey(u) -- and
+# a publish whose key it does not recognise is refused at the handshake, the way
+# Twitch or YouTube refuses a bad key. So step 4b creates a SECOND source with
+# its own publish token, points one extra destination at
+# rtmp://127.0.0.1:<ingest>/live/<that token>, and measures whether the product
+# ACCEPTED its own output. That is a claim none of the four sinks can support.
+#
+# AND IT IS MADE FALSIFIABLE IN THE SAME BREATH. "Accepted" means nothing from a
+# receiver that accepts everything, so the same listener is offered a WRONG key
+# at the same moment and must refuse it. Without that half, a loopback check is
+# unfalsifiable and would pass against a server with no key checking at all.
+#
+# THE LOOPBACK SOURCE HAS NO DESTINATIONS, AND MUST NOT. A far end that fans out
+# is a far end that can fan back into the source feeding it; RTMP will carry
+# that cycle happily, and each lap adds a full encode. The suite asserts the
+# count is zero rather than trusting that nobody adds one later.
+#
 # WHAT THE DRY RUN PROVES AND WHAT IT DOES NOT
 #
 # With no key set, all four "platforms" are local RTMP listeners and every check
@@ -129,6 +155,10 @@ note() { printf "        %s\n" "$1"; }
 cleanup() {
   pkill -f "multistream-publisher" 2>/dev/null
   pkill -f "multistream-sink" 2>/dev/null
+  # The wrong-key prober is expected to be dead long before this -- being
+  # refused is the whole point of it -- but a run that aborts between spawning
+  # it and reaping it would otherwise leave an encoder hammering the ingest.
+  pkill -f "multistream-wrongkey" 2>/dev/null
   poly_cleanup_exit "${1:-0}" "$PORT" "$WORK" "$INGEST"
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
@@ -330,6 +360,37 @@ case "$PUBKEY" in
   *) ok "publish token read from the API ($(printf %s "$PUBKEY" | cut -c1-4)…)" ;;
 esac
 
+# THE LOOPBACK FAR END'S SOURCE, CREATED HERE AND NOT LATER.
+#
+# Before any destination exists, deliberately. Creating a source calls
+# Manager.Reconcile, and a reconcile that lands while four destination children
+# are running is a reconcile that could restart one -- which step 4 would then
+# report as "the far end is dropping it", a confident accusation against a
+# platform for something this suite did to itself. Nothing is running yet at
+# this point, so there is nothing for it to disturb.
+#
+# It also gives engine.reconcileIngest time to spawn this source's ingest child
+# and have it SUBSCRIBE to the shared listener before anything publishes to it.
+# rtmpserver refuses a publish to a target with no subscriber (Target.Ready) and
+# only waits out the readiness grace for one that is Pending, so a loopback
+# destination created while the subscriber is still coming up would be refused
+# once and respawned -- and step 4b's restart check would read that as the
+# product rejecting its own output.
+LOOPSRC=loopback
+LOOPID=$(drive addsource "$LOOPSRC" 2>&1 | tail -1)
+case "$LOOPID" in
+  ''|*[!0-9]*) bad "could not create the loopback source: $LOOPID"; exit 1 ;;
+esac
+# Exported, never argv, for the reason every other key here is: the driver reads
+# it with os.Getenv. It is this install's own token for this run rather than an
+# operator's credential -- see srcToken in the driver for why reading it back is
+# a different act from reading a platform key.
+LOOPKEY=$(drive srctoken "$LOOPSRC" 2>&1 | tail -1)
+case "$LOOPKEY" in
+  ""|*" "*|driver:*) bad "could not read the loopback source's publish token"; exit 1 ;;
+esac
+export POLY_LOOPBACK_KEY="$LOOPKEY"
+
 poly_wait_port_ready "$INGEST" 15 || true
 # 150s: long enough for every destination to run its measurement window, be
 # stopped, and for the sinks to finalise, with the publisher still alive at the
@@ -455,6 +516,30 @@ for p in $PLATFORMS; do
   esac
 done
 
+# THE LOOPBACK DESTINATION. Created alongside the four platform destinations,
+# so it publishes through the same fan-out, in the same window, off the same
+# ingest -- and its far end is this product's own RTMP server rather than an
+# ffmpeg listener that accepts anything.
+#
+# NOT A PLATFORM AND NOT IN $PLATFORMS. Steps 3 to 6 iterate that list, and
+# adding a fifth entry to it would change what every one of them measures; the
+# loopback is a different question with its own step. It is created here rather
+# than in 4b because what is being measured is the fan-out's own output, and a
+# destination started twenty seconds after the others would be measured against
+# a different moment of it.
+#
+# BOTH TRACKS, so the mix offered to the product's ingest is the widest one
+# routing can build. Nothing downstream compares it with a platform's -- the
+# question here is acceptance, not content.
+LOOPDEST=loopback-ingest
+LOOPBACK_UP=no
+OUT=$(drive adddest "$LOOPDEST" custom "rtmp://127.0.0.1:$INGEST/live" \
+      POLY_LOOPBACK_KEY 0,1)
+case "$OUT" in
+  *DEST_OK*) LOOPBACK_UP=yes ;;
+  *) note "could not create the loopback destination: $OUT" ;;
+esac
+
 # recname is where a platform's readable mix lands: its own recording in a dry
 # run, its twin's in a live one. One name so every measurement below is written
 # once.
@@ -522,6 +607,191 @@ for p in $PLATFORMS; do
     bad "$p restarted $restarts times; the far end is dropping it"
   fi
 done
+
+# ------------------------- 4b. the far end that is allowed to say no
+
+step "4b. The loopback far end: polyemesis's own ingest accepted the publish"
+# WHY THIS STEP EXISTS AND THE OTHER FOUR CANNOT REPLACE IT.
+#
+# Every sink in this suite is `ffmpeg -f flv -listen 1`. It accepts essentially
+# any bytes on any playpath from anyone, so "the sink recorded something" proves
+# the fan-out produced A STREAM and nothing at all about whether a real RTMP
+# server would have taken it. internal/rtmpserver is a real one: it completes
+# the handshake, resolves the publish path through Lookup(streamKey), and
+# refuses a key it does not know. Publishing into it measures the one thing four
+# permissive listeners cannot -- that the output is ingestible by something with
+# the standing to refuse it.
+#
+# MEASURED BEFORE STEP 5'S stopall, because every fact here is about a LIVE
+# session: `publishing` is the listener's answer about a publisher it currently
+# holds, and after the stop it is correctly false.
+
+# 4b-1. THE TWO SOURCES MUST NOT SHARE AN ADDRESS.
+#
+# The whole safety of a loopback rests on the destination landing in a DIFFERENT
+# programme from the one feeding it. If both sources answered to one token, the
+# fan-out would be publishing back into its own ingest -- the cycle this design
+# exists to avoid -- and every check below would still pass, cheerfully, while
+# the install ate itself. Asserted rather than assumed because it is a property
+# of token minting, which is the product's to get right and this suite's to
+# notice if it ever stops.
+if [ -n "$LOOPKEY" ] && [ "$LOOPKEY" != "$PUBKEY" ]; then
+  ok "the loopback source has its own publish token, distinct from the fan-out source's"
+else
+  bad "the loopback source's token is not distinct from the fan-out source's; a publish to it would feed back into the source it came from"
+fi
+
+# 4b-2 and 4b-5 come from ONE read, so they describe the same instant.
+#
+# Polled rather than sampled once: the destination has been running since step 2
+# and should be long since accepted, but a machine under load can be a few
+# seconds behind, and a single early sample would report a refusal the product
+# never made.
+LOOP_PUBLISHING=unknown; LOOP_BYTES=-1; LOOP_DESTS=-1; LOOP_DESTS_CLAIMED=-1
+for _ in $(seq 1 30); do
+  set -- $(drive srcstat "$LOOPSRC" 2>&1 | tail -1)
+  LOOP_PUBLISHING="${1:-unknown}"; LOOP_BYTES="${2:--1}"
+  LOOP_DESTS="${3:--1}"; LOOP_DESTS_CLAIMED="${4:--1}"
+  [ "$LOOP_PUBLISHING" = true ] && isnum "$LOOP_BYTES" && [ "$LOOP_BYTES" -gt 0 ] && break
+  sleep 1
+done
+
+# 4b-2. THE PRODUCT ACCEPTED ITS OWN OUTPUT.
+#
+# Two facts, and both are needed. `publishing` is rtmpserver's own answer about
+# a session it is holding right now, so it says the handshake completed and the
+# key resolved to this source. BytesIn says media actually flowed afterwards --
+# a connection that is admitted and then sends nothing is a different and much
+# quieter failure, and the two are told apart here rather than folded together.
+if [ "$LOOP_PUBLISHING" = true ] && isnum "$LOOP_BYTES" && [ "$LOOP_BYTES" -gt 0 ]; then
+  ok "polyemesis's own RTMP ingest ACCEPTED the loopback publish (${LOOP_BYTES} bytes in on the loopback source)"
+else
+  bad "polyemesis's own RTMP ingest did not accept the loopback publish (publishing=$LOOP_PUBLISHING bytesIn=$LOOP_BYTES)"
+  note "the destination publishes to rtmp://127.0.0.1:$INGEST/live/<the loopback"
+  note "source's token>. A refusal here is rtmpserver declining the key, the"
+  note "source being not-ready, or the fan-out never having produced anything."
+fi
+
+# 4b-3. ACCEPTED ONCE, not accepted-on-the-fourth-try.
+#
+# Step 4 makes this argument for platforms and it is the same one here: a
+# refused publish drops the connection, the supervisor respawns it immediately,
+# and a destination that has been refused four times reads as "running" at any
+# instant you look at it. Only the restart count can tell a session that was
+# accepted from one that keeps being thrown out.
+if [ "$LOOPBACK_UP" = yes ]; then
+  set -- $(drive deststat "$LOOPDEST" 2>&1 | tail -1)
+  lstate="${1:-none}"; lrestarts="${2:--1}"
+  if isnum "$lrestarts" && [ "$lrestarts" -eq 0 ] && [ "$lstate" = running ]; then
+    ok "the loopback destination held ONE connection to the ingest (0 restarts)"
+  elif [ "$lrestarts" = "-1" ]; then
+    bad "the loopback destination has no process at all (state=$lstate)"
+  else
+    bad "the loopback destination restarted $lrestarts times (state=$lstate); the ingest is refusing it and the supervisor keeps redialling"
+  fi
+else
+  bad "the loopback destination was never created, so acceptance is unmeasured"
+fi
+
+# 4b-4. THE POSITIVE CONTROL, AND WITHOUT IT 4b-2 IS WORTH NOTHING.
+#
+# "The server accepted us" is not a measurement unless the server can refuse.
+# The four ffmpeg sinks cannot, which is the entire reason this step exists, and
+# a loopback check with no refusal half would pass identically against a server
+# that had no key checking at all. So the same listener, at the same moment, is
+# offered a key it has never issued and must throw it out.
+#
+# THE WRONG KEY IS FRESH RANDOM OF THE SAME LENGTH, never a mutation of the real
+# one. A one-character edit of a live token spelled on an argv discloses all but
+# one character of it to every user on the machine -- inside a check written to
+# prove this suite does not do that. Same length so the refusal is about the key
+# not being known, not about the path being the wrong shape.
+WRONGKEY="$(od -An -tx1 -N48 /dev/urandom | tr -d ' \n' | cut -c1-"${#LOOPKEY}")"
+rm -f wrongkey.rc
+# THE EXIT STATUS GOES TO A FILE, not to `wait`.
+#
+# bash reaps a background child asynchronously and remembers its status in a
+# table of bounded size; with a publisher, four sinks and this all in flight,
+# `wait $pid` on an already-reaped job can answer 127 -- "no such job" -- which
+# is non-zero and would be read here as a refusal. A check whose PASS can be
+# produced by its own bookkeeping is not a check. The subshell writes the real
+# status where nothing else can invent it.
+( ffmpeg -hide_banner -loglevel error -re \
+    -f lavfi -i "testsrc2=size=320x180:rate=15" \
+    -f lavfi -i "sine=frequency=$TONE_A:sample_rate=48000" \
+    -metadata comment=multistream-wrongkey \
+    -map 0:v -map 1:a \
+    -c:v libx264 -preset ultrafast -tune zerolatency -g 30 -pix_fmt yuv420p -b:v 300k \
+    -c:a aac -b:a 64k -ac 2 -t 5 \
+    -f flv "rtmp://127.0.0.1:$INGEST/live/$WRONGKEY" > wrongkey.log 2>&1
+  printf '%s\n' "$?" > wrongkey.rc ) &
+# BOUNDED, and the bound is a verdict rather than a shrug. An encoder still
+# alive after 30s was neither accepted nor refused, which is its own finding --
+# rtmpserver's handshakeTimeout is 10s and an unknown key is answered
+# immediately, so nothing legitimate takes this long. Waiting forever is issue
+# #179; carrying on regardless is what scripts/termination-guard.sh refuses.
+wrongrc=timeout
+for _ in $(seq 1 60); do
+  [ -s wrongkey.rc ] && { wrongrc="$(cat wrongkey.rc)"; break; }
+  sleep 0.5
+done
+if [ "$wrongrc" = timeout ]; then
+  pkill -9 -f "multistream-wrongkey" 2>/dev/null
+  bad "a publish with an UNKNOWN stream key was neither accepted nor refused in 30s; 4b-2's 'accepted' proves nothing while this hangs"
+elif [ "$wrongrc" -ne 0 ]; then
+  ok "a publish with an UNKNOWN stream key was REFUSED by the same listener (ffmpeg exit $wrongrc), so 'accepted' above means something"
+else
+  bad "a publish with an UNKNOWN stream key SUCCEEDED; the ingest accepts keys it never issued, and every acceptance check here is vacuous"
+  tail -3 wrongkey.log 2>/dev/null | sed 's/^/          /'
+fi
+
+# 4b-5. NO CYCLE. Read out of the same srcstat as 4b-2.
+#
+# A destination on the loopback source would publish that programme somewhere,
+# and the one place it could plausibly be pointed is back at the fan-out's own
+# ingest -- at which point each lap through the graph is a full decode, mix and
+# encode, and the install climbs to saturation with every card green. Nothing in
+# this suite creates one; the assertion is here so that a later change which
+# does is caught by a check rather than by a fan.
+#
+# COUNTED OFF GET /destinations, NOT read off the source view. The view's own
+# `destinations` field is always 0 -- see srcStat in the driver -- so asserting
+# on it would have made this check pass for a source with any number of
+# destinations, which is the exact state it exists to catch. The mutation that
+# found that is on the PR.
+if isnum "$LOOP_DESTS" && [ "$LOOP_DESTS" -eq 0 ]; then
+  ok "the loopback source fans out to NOTHING (0 destinations), so the graph cannot cycle"
+else
+  bad "the loopback source carries $LOOP_DESTS destination(s); the fan-out can feed back into itself and amplify"
+fi
+# A FINDING, REPORTED RATHER THAN JUDGED HERE, in step 8c's tradition.
+#
+# GET /sources renders `destinations` (and `renditions` beside it) for every
+# source, documented in api.sourceView as what deleting that source would take
+# with it -- the number a delete confirmation quotes -- and api.viewSource never
+# populates either. So the confirmation says 0 however much the delete would
+# really remove.
+#
+# MEASURED ON THE FAN-OUT SOURCE, not on the loopback one. The loopback source
+# genuinely owns nothing, so 0 == 0 there and the fault is invisible; the
+# fan-out source owns every destination this suite created, so the disagreement
+# is real on every run. That is the difference between a finding that is
+# reported and one that only appears when something else is already wrong.
+#
+# db.DefaultSourceName, spelled out because the driver addresses sources by
+# name. A rename makes the driver report no such source, the fields come back
+# non-numeric, and isnum below suppresses this quietly -- which is the right
+# failure for a line that reports rather than judges. Nothing is counted here.
+set -- $(drive srcstat Main 2>&1 | tail -1)
+FANOUT_DESTS="${3:--1}"; FANOUT_CLAIMED="${4:--1}"
+if isnum "$FANOUT_DESTS" && isnum "$FANOUT_CLAIMED" && [ "$FANOUT_DESTS" -ge 0 ] &&
+   [ "$FANOUT_CLAIMED" -ne "$FANOUT_DESTS" ]; then
+  printf "  \033[33mFINDING\033[0m  GET /sources claims %s destination(s) for the fan-out source; it owns %s\n" \
+    "$FANOUT_CLAIMED" "$FANOUT_DESTS"
+  note "api.sourceView.Destinations is declared and never assigned, so a delete"
+  note "confirmation quotes 0 whatever it would really remove. Not a fan-out"
+  note "fault and not counted; 4b-5 counts off GET /destinations because of it."
+fi
 
 # ------------------------------------------------- 5. what actually arrived
 
@@ -908,12 +1178,19 @@ fi
 #   2. one destination created per platform                                4
 #   3. compiled track selection per platform                               4
 #   4. delivering + restarts, per platform                                 8
+#   4b. loopback: distinct token, the ingest accepted it, one connection,
+#      a wrong key refused, and no destination on the loopback source      5
 #   5. selected tone present + excluded tone absent, per platform          8
 #   6. twitch/youtube differ, twitch/facebook match, and both again on
 #      the compiled graphs                                                 4
 #   7. the publisher outlived the run                                      1
 #   8. api leak, workdir leak, the search's positive control, argv leak    4
-EXPECTED_CHECKS=38
+#
+# 4b IS UNCONDITIONAL: it needs no platform credential, so it contributes the
+# same five in a dry run and in a live one. That is deliberate -- the one part
+# of this suite that measures a real RTMP server's acceptance must not be the
+# part that disappears when nobody has a key.
+EXPECTED_CHECKS=43
 total=$((pass + fail + skip))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  only %d of %d checks ran; the run stopped early\n\n" \
