@@ -134,6 +134,46 @@ type farEnd struct {
 	got []hit
 }
 
+// deliverOnce is the four steps every delivery check opens with: stand up a far
+// end with the given reply, point a dispatcher at it, publish one event, and
+// wait for the delivery to be recorded.
+//
+// A function rather than the fifth copy of the same twenty lines. The copies
+// were not merely repetitive, they were misleading: four blocks differing only
+// in their reply invite the reader to diff them for a difference in the SETUP,
+// and there was never one. What actually differs is what each check measures
+// afterwards, which is what the callback is for.
+//
+// The wait is on the RECORD rather than on Stats.Sent, and that is load-bearing:
+// deliver bumps Sent before it appends the record, so waiting on the counter can
+// read the log one entry short.
+//
+// A false return means the delivery never landed. Callers emit what they can and
+// stop rather than measuring an event that did not happen.
+func deliverOnce(pathSecret, signSecret string,
+	reply func(w http.ResponseWriter, r *http.Request, n int),
+	measure func(far *farEnd, r *rig)) {
+	far := newFarEnd(reply)
+	defer far.close()
+
+	rn := start(hooks.Hook{
+		ID: 1, Name: "acceptance", Enabled: true,
+		URL: far.srv.URL + "/webhook/" + pathSecret, Secret: signSecret,
+		TimeoutSeconds: 5, MaxAttempts: 3,
+	}.Normalized())
+	defer rn.stop()
+
+	rn.d.Publish(hooks.Event{
+		Trigger: hooks.TriggerIngestPublished,
+		Source:  hooks.SourceRef{ID: 7, Name: "Main"},
+	})
+	if !waitFor(30*time.Second, func() bool { return len(rn.d.Deliveries(1)) == 1 }) {
+		emit("attempts", far.count())
+		return
+	}
+	measure(far, rn)
+}
+
 // newFarEnd starts the server. reply is handed the attempt number, one-based,
 // so a handler can fail the first two and accept the third without keeping its
 // own counter.
@@ -496,39 +536,26 @@ func retry() {
 // behind it on the same endpoint.
 func permanent() {
 	pathSecret, signSecret := plant(), mustSecret()
-	far := newFarEnd(func(w http.ResponseWriter, r *http.Request, n int) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = io.WriteString(w, "no such webhook")
-	})
-	defer far.close()
-
-	r := start(hooks.Hook{
-		ID: 1, Name: "acceptance", Enabled: true,
-		URL: far.srv.URL + "/webhook/" + pathSecret, Secret: signSecret,
-		TimeoutSeconds: 5, MaxAttempts: 3,
-	}.Normalized())
-	defer r.stop()
-
-	r.d.Publish(hooks.Event{
-		Trigger: hooks.TriggerIngestPublished,
-		Source:  hooks.SourceRef{ID: 7, Name: "Main"},
-	})
-	if !waitFor(30*time.Second, func() bool { return len(r.d.Deliveries(1)) == 1 }) {
-		emit("attempts", far.count())
-		return
-	}
-	// A moment's grace before counting, so "did not retry" is a measurement
-	// rather than a race won. Backoff before a second attempt would be a whole
-	// second, so a tenth of one is ample and is not a guess at a delivery time.
-	time.Sleep(100 * time.Millisecond)
-	emit("attempts", far.count())
-	rec := r.d.Deliveries(1)[0]
-	emit("recAttempts", rec.Attempts)
-	emit("recStatus", rec.Status)
-	s := r.d.Stats()
-	emit("failed", s.Failed)
-	emit("retries", s.Retries)
-	emit("sent", s.Sent)
+	deliverOnce(pathSecret, signSecret,
+		func(w http.ResponseWriter, r *http.Request, n int) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, "no such webhook")
+		},
+		func(far *farEnd, r *rig) {
+			// A moment's grace before counting, so "did not retry" is a
+			// measurement rather than a race won. Backoff before a second
+			// attempt would be a whole second, so a tenth of one is ample and is
+			// not a guess at a delivery time.
+			time.Sleep(100 * time.Millisecond)
+			emit("attempts", far.count())
+			rec := r.d.Deliveries(1)[0]
+			emit("recAttempts", rec.Attempts)
+			emit("recStatus", rec.Status)
+			s := r.d.Stats()
+			emit("failed", s.Failed)
+			emit("retries", s.Retries)
+			emit("sent", s.Sent)
+		})
 }
 
 // transportTimeout points a one-second hook at an endpoint that never answers.
