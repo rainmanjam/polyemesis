@@ -310,11 +310,46 @@ var platformCapabilities = []PlatformCapability{
 			CapSSO: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
 		},
 	},
-	manualUnverified(
-		"rumble", "Rumble",
-		"Paste your ingest URL and stream key from Rumble Studio. Rumble has an API page, but it sits behind a login and nothing about it is published.",
-		"rumble.com/account/api requires an account to view and documents nothing publicly, so polyemesis makes no claim about what it can or cannot do. If you have access and it turns out to offer more, that is a gap in our knowledge rather than a limit of the platform.",
-	),
+	{
+		PresetID: "rumble", Name: "Rumble", Platform: db.PlatformRumble,
+		Tier:      TierManual,
+		Summary:   "Paste your ingest URL and stream key from Rumble Studio. Chat is different: Rumble's live-stream API hands over the chat with a key from your own account settings, so the pane works without any sign-in.",
+		ReadFirst: "The chat key is NOT the stream key and is not pasted into polyemesis's UI. It comes from rumble.com/account/livestream-api and is supplied in the RUMBLE_CHAT_API_KEY environment variable, because there is no account to store it against — this API has no sign-in. Treat that URL as a secret: it is the whole credential, and anyone holding it can read your chat.",
+		HelpURL:   "https://rumble.com/account/livestream-api",
+		Caps: map[Capability]Support{
+			// Unchanged, and still unverified rather than refused: this key is
+			// not a sign-in and tells us nothing about whether Rumble has OAuth.
+			CapSSO: SupportUnknown,
+			// Unchanged. Note that the live-stream API response DOES carry
+			// livestreams[].stream_key, so a key fetch may well be possible —
+			// but nothing here reads that field, deliberately, and a capability
+			// nothing implements is not a capability. Recorded rather than
+			// quietly claimed.
+			CapStreamKey: SupportManual,
+			CapMetadata:  SupportUnknown,
+			CapChatRead:  SupportYes,
+			// SupportUnknown, not SupportNo, and the sourcing rule at the top of
+			// this file is why. get-data returns data and Rumble publishes no
+			// endpoint for posting a message or removing one — but "I looked and
+			// did not find it" on an API this thinly documented is not the same
+			// as reading a published spec and finding the thing absent. A wrong
+			// SupportNo here would become a refusal an operator cannot argue
+			// with, on a platform whose surface we have barely seen.
+			CapChatSend:   SupportUnknown,
+			CapModeration: SupportUnknown,
+			// Also present in the payload as watching_now, also unread.
+			CapViewerStats: SupportUnknown,
+		},
+		Reasons: map[Capability]string{
+			CapChatRead: "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your " +
+				"account settings is the whole credential. Chat only exists while you are live, and the pane says it " +
+				"is waiting rather than going quiet. Two caveats worth knowing before you rely on it: Rumble sends " +
+				"no message id, so polyemesis derives one from the content, and two identical messages from one " +
+				"person inside the same second are indistinguishable and show as one. And Rumble publishes no rate " +
+				"limit, so the poll is deliberately conservative at ten seconds rather than as fast as it could be.",
+			CapStreamKey: "Rumble Studio issues both fields per stream; copy them across by hand.",
+		},
+	},
 	manualUnverified(
 		"dlive", "DLive",
 		"Paste your ingest URL and stream key from DLive → Dashboard → Stream settings. Streaming works; there is no integration to connect.",
