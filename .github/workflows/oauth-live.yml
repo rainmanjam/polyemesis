@@ -1,0 +1,77 @@
+# OAuth, against the real authorization servers.
+#
+# scripts/acceptance-oauth.sh fetches discovery documents from Google, Twitch
+# and Facebook and sends deliberately-doomed token requests to all four
+# authorization servers. Like chat-live and the SRT probe it is deliberately
+# not in the main CI path: a network dependency on somebody else's server, run
+# on every push, is a flake generator, and this repo has spent enough
+# measurement on flakes already.
+#
+# THE SCHEDULE IS THE POINT. This measures THEIR behaviour, and every failure it
+# is built to catch happens with no commit of ours at all:
+#
+#   - Meta retires Graph v24.0. Nothing breaks loudly: Graph silently serves a
+#     supported version instead, so every Facebook call keeps working and
+#     starts behaving differently. The facebook-api-version header is the only
+#     place the substitution is visible.
+#   - Google stops advertising the refresh_token grant, or moves the token
+#     endpoint. Every connected YouTube account keeps working until its access
+#     token expires, and then all of them stop at once.
+#   - Twitch documents PKCE support, at which point twitch.go's reason for
+#     keeping it off stops being true.
+#   - Kick starts publishing authorization-server metadata, at which point its
+#     endpoints can be compared the way Google's are instead of probed.
+#
+# None of those would be caught by a test that only ran when somebody edited
+# internal/oauth. Weekly, because the failure modes are slow-moving -- Meta
+# announces version retirements months ahead, and the point of this is to hear
+# about it from a failing check rather than from an operator.
+#
+# NO CREDENTIALS ARE USED HERE, and none are configured. Twenty-eight of the
+# forty-six checks need none; step 8 skips without a complete credential set,
+# and nothing in this run can leak a secret because none is present. If a
+# credential set is ever added to this workflow, read the suite's step 8 first:
+# it reports lengths and character classes rather than values, and the driver's
+# redact() is the backstop underneath that.
+name: oauth (live platforms)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays, 06:00 UTC. Off the hour, and off chat-live's minute: GitHub's
+    # scheduler queues everything submitted on the hour and runs it late, and
+    # two suites hitting Twitch from the same runner pool at the same moment is
+    # a needless coincidence.
+    - cron: "27 6 * * 1"
+  pull_request:
+    paths:
+      - "internal/oauth/**"
+      - "scripts/acceptance-oauth.sh"
+      - "scripts/acceptance_oauth_driver.go"
+      - ".github/workflows/oauth-live.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time. Two runs racing would double the failed token requests
+  # against four authorization servers from the same address, which is the one
+  # thing here worth being careful about.
+  group: oauth-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oauth:
+    name: oauth against the real authorization servers
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: oauth acceptance
+        run: ./scripts/acceptance-oauth.sh

@@ -36,7 +36,7 @@ Taken from `internal/oauth/capabilities.go`, which is the real matrix:
 | **Twitch** | 200 | Y | Y | Y | Y | Y | Y | Y | ? | **integrated** |
 | **Facebook Live** | 400 | Y | Y | Y | Y | Y | ? | Y | ? | **integrated** |
 | **Kick** | 400 | Y | Y | Y | Y | Y | Y | Y | Y | **partial** |
-| **Rumble** | 403 | Y | ? | – | ? | ? | ? | ? | ? | manual |
+| **Rumble** | 403 | Y | ? | – | ? | Y | ? | ? | ? | manual + chat |
 | **X (Twitter)** | 401 | Y | – | – | – | – | – | – | – | manual |
 | **Instagram Live** | 400 | – | – | – | – | – | – | – | – | unsupported |
 | **TikTok LIVE** | 401 | Y | ‼ | ‼ | ‼ | ‼ | ‼ | ‼ | ‼ | **not in the matrix** |
@@ -60,6 +60,32 @@ which is a real API refusing an invalid key, not a dead endpoint. The key comes
 from the user's own Rumble account rather than a partner programme, which makes
 it the only one of the five unintegrated platforms plausibly reachable without
 an approval process. **Confirm the chat payload before committing to it.**
+
+> **CONFIRMED, and built.** The payload does carry chat. Rumble publishes the
+> full response shape at rumble.support ("Rumble's Live Stream API", last
+> updated 20 Nov 2025): `livestreams[].chat` holds `recent_messages` and
+> `recent_rants`, each entry carrying `username`, `badges[]`, `text` and an
+> RFC 3339 `created_on`, capped at 50 results and populated only while live.
+> Polling only — there is no socket or webhook. `internal/chat/rumble.go` is
+> the adapter; the row in the capability matrix moved from *unverified* to
+> *works* for chat read and stayed *unverified* for everything else.
+>
+> Three things the note above did not anticipate, all of which shaped the
+> adapter:
+>
+> 1. **No message id.** Rumble sends nothing that identifies a message, so
+>    dedupe runs on `Message.Normalise`'s content hash. Two identical messages
+>    from one person inside the same second collapse to one.
+> 2. **No published rate limit.** Five requests in close succession drew no 429
+>    and no `Retry-After`, which is not the same as there being no limit. The
+>    poll is floored at 5s and defaults to 10s for that reason.
+> 3. **The response contains `livestreams[].stream_key`.** A secret rides in the
+>    same JSON as the chat. The adapter does not decode that field at all — see
+>    #310, which is the same shape.
+>
+> Still unknown: whether any send or moderation endpoint exists, and whether the
+> `since` / `max_num_results` parameters the response echoes are honoured as
+> request parameters. Neither was testable without a real key.
 
 **X** has a live, paid API. The matrix marks every capability `–`, which is
 accurate for the free tier. Live video producer access was retired; "chat" on
