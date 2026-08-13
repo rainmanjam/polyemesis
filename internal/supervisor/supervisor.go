@@ -644,7 +644,18 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 		msg := ""
 		if err != nil {
 			msg = err.Error()
-			p.log.Warn("process exited", "err", err, "ranFor", ranFor.Round(time.Second))
+			// SCRUBBED, like every other rendering of this text. The error carries
+			// the child's own stderr, and for a destination that stderr is FFmpeg
+			// reporting the output URL it could not open -- stream key included.
+			//
+			// Found on a live run against a real platform: a refused publish put
+			// the key in server.log six times as the supervisor retried, while
+			// process.log was clean because that path already scrubbed. One sink
+			// was covered and its sibling was not.
+			//
+			// A refusal is exactly when this fires, and a refusal is exactly when
+			// an operator copies logs to somebody who can help. See #306.
+			p.log.Warn("process exited", "err", p.scrub(msg), "ranFor", ranFor.Round(time.Second))
 		} else {
 			p.log.Info("process exited cleanly", "ranFor", ranFor.Round(time.Second))
 		}
