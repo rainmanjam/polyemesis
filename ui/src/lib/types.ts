@@ -421,6 +421,41 @@ export interface VideoGuidance {
 /** One entry of the server's platform catalogue. Only the fields the dialog
  *  reads are typed here — the UI keeps its own preset list for the picker and
  *  consults this for the researched data it must not duplicate. */
+/** One ingest endpoint offered by a platform. The URL always carries an
+ *  application path — that is the whole point of shipping a list rather than
+ *  asking the operator to type one. */
+export interface ServiceServer {
+  name: string;
+  url: string;
+}
+
+/** The platform's own published encoder ceiling. Zero means "no published
+ *  figure", NOT "zero" — every reader has to check before comparing. */
+export interface ServiceRecommended {
+  keyintSeconds?: number;
+  maxVideoKbps?: number;
+  maxAudioKbps?: number;
+  maxFps?: number;
+  x264opts?: string;
+}
+
+/** A platform in the registry: where to publish, and what it will accept.
+ *  Mirrors internal/services.Service. */
+export interface ServiceInfo {
+  id: string;
+  name: string;
+  /** True when the platform issues a different ingest host per channel, so
+   *  `servers` is empty and the operator must supply the URL. Kick only. */
+  perChannelIngest?: boolean;
+  servers?: ServiceServer[];
+  recommended: ServiceRecommended;
+  videoCodecs?: string[];
+  audioCodecs?: string[];
+  streamKeyLink?: string;
+  /** Why there is no server to pick, and what to paste instead. */
+  note?: string;
+}
+
 export interface PlatformPresetInfo {
   id: string;
   name: string;

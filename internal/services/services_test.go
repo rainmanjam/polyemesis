@@ -166,3 +166,30 @@ func TestProvenanceIsRecorded(t *testing.T) {
 		t.Errorf("the registry does not record where its data came from.\ngot: %q", Provenance())
 	}
 }
+
+// The registry is seeded from OBS's file, and OBS's file carries adult cam
+// platforms among its ~200 services. Regenerating this registry wholesale from
+// that source would pull them in silently, so the allowed set is written down
+// here rather than left to whoever runs the script next.
+//
+// This is a product decision, not a technical one: those platforms issue a
+// per-account ingest URL and key anyway, so a preset saves nobody any typing.
+// Anyone publishing to one enters the URL and key by hand, exactly as they
+// would for any endpoint polyemesis has never heard of.
+//
+// Proven able to fail against the committed tree by adding a service with
+// id "camsoda" to services.json.
+func TestTheRegistryStaysCurated(t *testing.T) {
+	allowed := map[string]bool{
+		"twitch": true, "youtube": true, "facebook": true, "kick": true,
+	}
+	for _, s := range All() {
+		if !allowed[s.ID] {
+			t.Errorf("service %q (%s) is not in the curated set.\n"+
+				"Adding one is a deliberate act: put it in `allowed` above and "+
+				"say why in the commit. Re-seeding from OBS wholesale is not, "+
+				"because that file carries platforms this project does not ship "+
+				"a preset for.", s.ID, s.Name)
+		}
+	}
+}

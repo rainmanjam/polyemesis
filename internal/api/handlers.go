@@ -1317,6 +1317,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// client ever mentioning compliance. Checking the request body instead of
 	// the merged row would see nothing at all.
 	warnings := s.dropUnsendableSettings(existing)
+	// Same registry check create does. An edit is the more likely place for a
+	// URL to acquire this problem, not the less: creation usually starts from
+	// a preset, and editing is where somebody pastes a fresh address in.
+	for _, w := range existing.Warnings() {
+		warnings = append(warnings, w.Detail)
+	}
 
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
