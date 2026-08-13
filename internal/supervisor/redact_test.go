@@ -9,8 +9,13 @@
 package supervisor
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 )
@@ -268,4 +273,85 @@ func TestTheOnLogCallbackIsNeverHandedAStreamKey(t *testing.T) {
 		t.Errorf("the OnLog callback was handed the stream key, and it goes straight "+
 			"to the console's log panel.\ngot: %s", got)
 	}
+}
+
+// The supervisor's own logger is a sink in its own right, and it was the one
+// left uncovered. LastError above is scrubbed, the process log is scrubbed,
+// and "process exited" -- the line that fires on exactly the failure an
+// operator will be sharing with somebody -- was handed the raw error.
+//
+// Found on a live multistream run: a platform refused the publish, the
+// supervisor retried, and each retry wrote the key to server.log. process.log
+// was clean, so the leak survived a check that only looked at the sink that
+// had already been fixed. See #306.
+//
+// Proven able to fail against the committed tree by changing the Warn call in
+// supervisor.go back to `"err", err`: the key reappeared in the log buffer and
+// the first assertion below failed.
+func TestTheProcessExitedLogLineCarriesNoStreamKey(t *testing.T) {
+	// FFmpeg's real refusal, whose whole point is to name the URL it could
+	// not open -- so the key travels inside the exit error, not the argv.
+	refusal := "[out#0/flv @ 0x65431867e200] Error opening output rtmps://" +
+		fbHost + ":443/rtmp/" + mainStreamKey + ": Connection refused"
+
+	var buf syncBuffer
+	spec := Spec{
+		Name:    "dest:5",
+		Kind:    "destination",
+		Secrets: []string{mainStreamKey},
+	}
+	f := fakeExitSaying(251, refusal)
+	spec.Bin, spec.Args = f.bin, f.args
+	p := New(slog.New(slog.NewTextHandler(&buf, nil)), spec)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
+
+	p.Start()
+	waitFor(t, "the process to be recorded as failed", func() bool {
+		return p.Status().State == StateFailed
+	})
+	waitFor(t, "the exit to reach the log", func() bool {
+		return strings.Contains(buf.String(), "process exited")
+	})
+
+	got := buf.String()
+	if strings.Contains(got, mainStreamKey) {
+		t.Errorf("the \"process exited\" log line carries the stream key.\n" +
+			"server.log is the file an operator copies to a forum when a\n" +
+			"destination will not connect, and a refusal is when it fires.")
+	}
+	// Not merely absent: absent because it was masked. A scrub that dropped
+	// the error text entirely would pass the check above and take the
+	// diagnostic with it.
+	if !strings.Contains(got, alerts.Mask) {
+		t.Errorf("the key was neither present nor masked -- the error text\n"+
+			"has gone missing rather than been scrubbed.\ngot: %s", got)
+	}
+	for _, want := range []string{"exit status 251", "Error opening output", fbHost, "Connection refused"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the log line has lost %q, which is what makes it worth\n"+
+				"logging at all.\ngot: %s", want, got)
+		}
+	}
+}
+
+// syncBuffer is a bytes.Buffer the run goroutine writes and the test reads.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

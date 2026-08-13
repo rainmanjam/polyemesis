@@ -45,6 +45,12 @@ func runFakeChild(mode string, args []string) int {
 		if err != nil {
 			return 2
 		}
+		// An optional stderr line, so a test can choose the text that becomes
+		// the tail of the exit error. FFmpeg's refusal names the output URL,
+		// and a destination's output URL carries the stream key.
+		if len(args) > 1 {
+			fmt.Fprintln(os.Stderr, args[1])
+		}
 		return code
 
 	case "sleep":
@@ -169,6 +175,11 @@ func newFake(mode string, args ...string) fake {
 
 // fakeExit spawns a child that exits immediately with code.
 func fakeExit(code int) fake { return newFake("exit", strconv.Itoa(code)) }
+
+// fakeExitSaying is fakeExit with a chosen last word on stderr.
+func fakeExitSaying(code int, line string) fake {
+	return newFake("exit", strconv.Itoa(code), line)
+}
 
 // fakeSleep spawns a child that stays up until it is signalled.
 func fakeSleep(d time.Duration) fake { return newFake("sleep", d.String()) }
