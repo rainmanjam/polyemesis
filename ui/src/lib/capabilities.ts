@@ -291,12 +291,31 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       sso: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
     },
   },
-  manualUnverified(
-    "rumble",
-    "Rumble",
-    "Paste your ingest URL and stream key from Rumble Studio. Rumble has an API page, but it sits behind a login and nothing about it is published.",
-    "rumble.com/account/api requires an account to view and documents nothing publicly, so polyemesis makes no claim about what it can or cannot do. If you have access and it turns out to offer more, that is a gap in our knowledge rather than a limit of the platform.",
-  ),
+  {
+    presetId: "rumble",
+    name: "Rumble",
+    tier: "manual",
+    summary:
+      "Paste your ingest URL and stream key from Rumble Studio. Chat is different: Rumble's live-stream API hands over the chat with a key from your own account settings, so the pane works without any sign-in.",
+    readFirst:
+      "The chat key is NOT the stream key and is not pasted into polyemesis's UI. It comes from rumble.com/account/livestream-api and is supplied in the RUMBLE_CHAT_API_KEY environment variable, because there is no account to store it against — this API has no sign-in. Treat that URL as a secret: it is the whole credential, and anyone holding it can read your chat.",
+    caps: {
+      sso: "unknown",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "yes",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+    },
+    reasons: {
+      chatRead:
+        "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your account settings is the whole credential. Chat only exists while you are live, and the pane says it is waiting rather than going quiet. Two caveats worth knowing before you rely on it: Rumble sends no message id, so polyemesis derives one from the content, and two identical messages from one person inside the same second are indistinguishable and show as one. And Rumble publishes no rate limit, so the poll is deliberately conservative at ten seconds rather than as fast as it could be.",
+      chatSend:
+        "Unverified rather than impossible. Rumble's get-data endpoint returns data and no endpoint for posting or deleting a message is published — but this API is documented thinly enough that “we could not find it” is not the same as “it is not there”, so polyemesis does not refuse on the strength of it.",
+      streamKey: "Rumble Studio issues both fields per stream; copy them across by hand.",
+    },
+  },
   manualUnverified(
     "dlive",
     "DLive",

@@ -30,7 +30,7 @@ reading before any adapter is written.
 | **Owncast** | `/api/chat` | **400** | *"Query argument accessToken is required"* — that is the chat API itself, answering. We already ship an Owncast destination preset. |
 | **PeerTube** | `/api/v1/config` | **200** | Core API live. **Chat is a plugin** (`peertube-plugin-livechat`, XMPP-backed), not core — so support is per-instance, not universal. |
 | **Picarto** | `api.picarto.tv/api/v1/online` | **200** | Public API. |
-| **Rumble** | `-livestream-api/get-data` | **400** | Needs an API key; endpoint is real. |
+| **Rumble** | `-livestream-api/get-data` | **400** | Needs an API key; endpoint is real. **Now integrated** — 400 with no key, 403 with a bad one. Chat rides in `livestreams[].chat.recent_messages`. See `internal/chat/rumble.go`. |
 | **Twitcasting** | `verify_credentials` | **401** | Official API. |
 | **Vimeo** | `api.vimeo.com` | **401** | Live event chat exists on paid tiers. |
 | **Dailymotion** | `api.dailymotion.com` | **200** | API live; live-chat surface needs checking. |

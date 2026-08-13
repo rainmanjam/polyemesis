@@ -47,6 +47,22 @@ const (
 	// to work at all. The string matches routing.PlatformFacebook, which is what
 	// makes the Rights Manager music policy apply to these destinations.
 	PlatformFacebook Platform = "facebook"
+	// PlatformRumble exists for CHAT and for nothing else, which makes it the
+	// first entry here that is not about a destination.
+	//
+	// The other five are named because polyemesis either fetches the stream key
+	// or, for Facebook, creates the broadcast. Rumble does neither: its ingest
+	// URL and key are still pasted by hand from Rumble Studio, and the
+	// destination preset deliberately does NOT carry this platform, so nothing
+	// about streaming to Rumble changes. What exists is a read-only live-stream
+	// API keyed from the operator's own account settings, and internal/chat's
+	// adapter needs a Platform value to stamp on every message it normalises.
+	//
+	// Recorded because the asymmetry looks like an oversight and is not: a
+	// platform can be integrated for one capability and manual for another, and
+	// pretending otherwise is how a destination starts claiming a key fetch that
+	// does not exist.
+	PlatformRumble Platform = "rumble"
 )
 
 // ErrNotFound is returned by the typed getters.
@@ -526,7 +542,7 @@ func (d Destination) Validate() error {
 		add("unknown destination kind %q", d.Kind)
 	}
 	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, "":
+	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, "":
 	default:
 		add("unknown platform %q", d.Platform)
 	}
