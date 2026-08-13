@@ -308,13 +308,20 @@ func assertBand(t *testing.T, who, bin, path string, track int, want, wantW, oth
 // buildTwoToneSource writes the ingest this destination is fed from: video plus
 // two STEREO tone tracks, stereo because routing's pan matrix addresses c0 and
 // c1 and a mono source would make the graph under test unbuildable.
+//
+// FIFTEEN SECONDS FOR A THREE-SECOND RECORDING, and the margin is free: the
+// publisher is paced with -re and killed the moment the recording is in hand, so
+// the length of the source costs nothing but headroom. Sized to the failure it
+// removes rather than to the recording -- a source that runs out while a loaded
+// runner is still starting the subscriber leaves it waiting on a stream nobody
+// is publishing, which fails as a timeout that reads like a defect.
 func buildTwoToneSource(t *testing.T, bin, path string) {
 	t.Helper()
 	args := []string{"-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc2=size=160x120:rate=15:duration=6"}
+		"-f", "lavfi", "-i", "testsrc2=size=160x120:rate=15:duration=15"}
 	for _, hz := range []int{toneLive, toneVOD} {
 		args = append(args, "-f", "lavfi", "-i",
-			fmt.Sprintf("sine=frequency=%d:duration=6:sample_rate=48000", hz))
+			fmt.Sprintf("sine=frequency=%d:duration=15:sample_rate=48000", hz))
 	}
 	args = append(args, "-map", "0:v", "-map", "1:a", "-map", "2:a",
 		"-ac", "2", "-c:v", "libx264", "-preset", "ultrafast", "-g", "15",
