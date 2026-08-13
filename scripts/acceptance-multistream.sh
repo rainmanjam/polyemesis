@@ -1045,32 +1045,129 @@ fi
 # 8b. The working directory, which is server.log, every publisher and sink log,
 # and every recording.
 #
-# THE PATTERN IS PASSED ON A FILE DESCRIPTOR, NOT AN ARGUMENT. `grep -F "$KEY"`
-# would put the credential on grep's own argv and disclose it to every user on
-# the machine -- inside the check written to prove that never happens. Process
-# substitution gives grep /dev/fd/N backed by a pipe: nothing on a command line,
-# nothing on disk.
+# THE PATTERN IS A DISTINCTIVE PREFIX OF EACH KEY, NOT THE WHOLE VALUE, and that
+# is #307 -- the defect in the INSTRUMENT rather than in the product.
+#
+# This check used to search for the exact configured bytes. It PASSED on a live
+# run while a stream key sat in data/logs/process.log, and so did 8c, because
+# 8c's positive control searched the same exact bytes in a place that did hold
+# them. Measured on that run:
+#
+#   exact env value present in log : False
+#   key PREFIX (first 20 chars)    : True
+#
+# The configured value carried a trailing bracketed-paste artefact, so what
+# reached the wire and the log was the value WITHOUT it -- see #306. That
+# specific cause is incidental and is now refused at the API boundary. The
+# general one is not: URL-encoding, truncation at a delimiter, a wrapped or
+# split line, a key embedded in a longer token, all defeat an exact search
+# equally. The question this step is here to answer is "is a recognisable
+# credential present", and only a prefix asks it.
+#
+# 16 CHARACTERS. Far past coincidence for these formats -- a 16-character run of
+# a platform's key alphabet does not occur by accident in an FFmpeg log or an
+# MPEG-TS recording -- and short enough to survive the transformations above,
+# which take bytes off the END. A key shorter than this is searched whole, which
+# is the old behaviour and is stated below rather than silently applied.
+#
+# THE PATTERN IS STILL PASSED ON A FILE DESCRIPTOR, NOT AN ARGUMENT.
+# `grep -F "$KEY"` would put the credential on grep's own argv and disclose it
+# to every user on the machine -- inside the check written to prove that never
+# happens. Process substitution gives grep /dev/fd/N backed by a pipe: nothing
+# on a command line, nothing on disk. Everything below that touches a key value
+# does so through shell builtins (parameter expansion, printf), which fork
+# nothing and therefore expose nothing.
 #
 # The state database is excluded BY DESIGN and audited separately in 8c. It is
 # where the key is meant to live; a destination whose credential the server had
 # forgotten could not publish at all.
+KEY_PREFIX_LEN=16
+# key_pattern writes the bytes 8b searches for to stdout, given a key value.
+#
+# ONE definition, called by 8b and by 8b' below, so the control exercises the
+# predicate under test rather than a second copy of it that can drift away from
+# it silently. Its argument is a shell function's positional parameter: no fork,
+# no exec, so the value reaches no process's argv.
+key_pattern() { printf '%s\n' "${1:0:$KEY_PREFIX_LEN}"; }
 leaked=""
+short=""
 for e in $KEY_ENVS; do
   v="${!e}"
-  if grep -rIl -F -f <(printf '%s\n' "$v") . \
+  [ -n "$v" ] || continue
+  [ "${#v}" -lt "$KEY_PREFIX_LEN" ] && short="$short $e"
+  if grep -rIl -F -f <(key_pattern "$v") . \
        --exclude=polyemesis.db --exclude=polyemesis.db-wal --exclude=polyemesis.db-shm \
        2>/dev/null | grep -q .; then
     leaked="$leaked $e"
   fi
 done
 if [ -z "$leaked" ]; then
-  ok "no configured key appears in any log, recording or artifact under the work dir"
+  ok "no recognisable prefix of any configured key appears in a log, recording or artifact"
 else
   bad "a key was written to the working directory:$leaked"
   for e in $leaked; do
-    note "$e found in: $(grep -rIl -F -f <(printf '%s\n' "${!e}") . '--exclude=polyemesis.db*' 2>/dev/null | tr '\n' ' ')"
+    v="${!e}"
+    note "$e found in: $(grep -rIl -F -f <(key_pattern "$v") . '--exclude=polyemesis.db*' 2>/dev/null | tr '\n' ' ')"
   done
 fi
+[ -n "$short" ] && note "searched whole (shorter than $KEY_PREFIX_LEN chars):$short"
+
+# 8b'. THE CONTROL FOR 8b's PREDICATE, which is a different question from 8c's.
+#
+# 8c proves the MECHANISM works -- the file set, the encoding and the grep --
+# by finding a destination name this suite wrote. It cannot prove the PREDICATE
+# is the right one, and on the run behind #307 the mechanism was correct and the
+# predicate was wrong, so both the check and its control agreed on a false clean.
+#
+# This plants exactly the case the old predicate missed: a TRUNCATED copy of
+# each key, which is what a paste artefact produced in the real log, and then
+# runs both predicates over it. The prefix search must find it and the exact
+# search must NOT -- the second half is the whole point, because it is the
+# measurement that says the new predicate catches something the old one let
+# through rather than merely agreeing with it.
+#
+# Written with printf into a file under the work dir, and removed the moment the
+# verdict is in. It is planted AFTER 8b has already scanned, so it cannot be
+# what 8b found.
+PROBE_DIR="$WORK/leakcheck-predicate-probe"
+rm -rf "$PROBE_DIR"; mkdir -p "$PROBE_DIR"
+probe_found=""; probe_missed=""; probe_exact=""; probe_skipped=""
+for e in $KEY_ENVS; do
+  v="${!e}"
+  # A truncated copy has to be shorter than the value and longer than the
+  # prefix, or it is not the case under test. 8 characters off the end, so the
+  # value needs KEY_PREFIX_LEN+8 to spare.
+  if [ "${#v}" -lt "$((KEY_PREFIX_LEN + 8))" ]; then
+    probe_skipped="$probe_skipped $e"
+    continue
+  fi
+  printf '%s\n' "dest:9: Error opening output file rtmp://ingest.invalid/${v:0:$((${#v} - 8))}" \
+    > "$PROBE_DIR/$e.log"
+  if grep -q -F -f <(key_pattern "$v") "$PROBE_DIR/$e.log" 2>/dev/null; then
+    probe_found="$probe_found $e"
+  else
+    probe_missed="$probe_missed $e"
+  fi
+  if grep -q -F -f <(printf '%s\n' "$v") "$PROBE_DIR/$e.log" 2>/dev/null; then
+    probe_exact="$probe_exact $e"
+  fi
+done
+if [ -n "$probe_missed" ]; then
+  bad "8b's predicate does not find a truncated key it was planted:$probe_missed"
+  note "8b's 'nothing found' means nothing while this fails."
+elif [ -n "$probe_exact" ]; then
+  bad "the OLD exact-match predicate also finds the planted truncation:$probe_exact"
+  note "the probe does not reproduce #307, so the new predicate is not shown to"
+  note "catch anything the old one missed. Fix the probe, not the check."
+elif [ -z "$probe_found" ]; then
+  bad "no key was long enough to probe with:$probe_skipped"
+else
+  ok "8b's predicate finds a truncated key that an exact search does not"
+  note "planted$probe_found, each as the configured value minus its last 8"
+  note "characters -- the shape that certified clean on the run behind #307."
+  [ -n "$probe_skipped" ] && note "too short to probe with:$probe_skipped"
+fi
+rm -rf "$PROBE_DIR"
 
 # 8c. THE POSITIVE CONTROL FOR 8b, and without it 8b is worth very little.
 #
@@ -1220,13 +1317,18 @@ fi
 #   6. twitch/youtube differ, twitch/facebook match, and both again on
 #      the compiled graphs                                                 4
 #   7. the publisher outlived the run                                      1
-#   8. api leak, workdir leak, the search's positive control, argv leak    4
+#   8. api leak, workdir leak, the workdir predicate's own control, the
+#      search's positive control, argv leak                                5
 #
 # 4b IS UNCONDITIONAL: it needs no platform credential, so it contributes the
 # same five in a dry run and in a live one. That is deliberate -- the one part
 # of this suite that measures a real RTMP server's acceptance must not be the
 # part that disappears when nobody has a key.
-EXPECTED_CHECKS=43
+# 44 since #307 added 8b', the control that proves 8b's PREDICATE rather than
+# its mechanism. It is unconditional: POLY_DRY_STREAM_KEY is generated every run
+# at 32 characters, so there is always a key long enough to plant a truncation
+# of, in a dry run and in a live one alike.
+EXPECTED_CHECKS=44
 total=$((pass + fail + skip))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  only %d of %d checks ran; the run stopped early\n\n" \

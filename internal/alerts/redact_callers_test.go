@@ -74,6 +74,12 @@ var redactAllowlist = map[string]string{
 	"internal/api/ws_policy_array_test.go": "asserts the soundness argument the []any arm " +
 		"rests on -- that Redact over the space-JOIN only ever matches more than Redact " +
 		"over the elements. It calls Redact on both sides to measure the difference.",
+	"internal/engine/secrets_wire_spelling_test.go": "calls Redact ON THE FIXTURE, not on " +
+		"the thing under test, and asserts it does NOT remove the key. Process.scrub is " +
+		"secrets.Scrub then Redact, so a line the residual can mask on its own would come " +
+		"back clean whatever destSecrets emitted and the test would measure nothing while " +
+		"looking green. This is that guard: it fails the day Redact grows to cover the " +
+		"shape, and says the test stopped being a test.",
 }
 
 // skipWalkDir decides which directories the walk below does not descend into.
