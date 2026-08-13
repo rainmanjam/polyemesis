@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -262,5 +263,108 @@ func TestPlatformCapabilitiesCannotBeMutatedByCallers(t *testing.T) {
 
 	if PlatformCapabilities()[0].Name != original {
 		t.Fatal("the matrix is shared mutable state; one handler could rewrite it for every other")
+	}
+}
+
+// The direction TestMatrixPresetIDsExistInTheDestinationCatalogue does not
+// check. That one asks "does every matrix row name a real preset"; this asks
+// "does every preset an operator can pick have a matrix row", and only the
+// second catches a platform shipping with no answer to "what else works here".
+//
+// TikTok LIVE and LinkedIn Live shipped that way. Both had destination presets
+// -- you could stream to them -- and neither had a row, so the product could
+// tell an operator how to send pixels and nothing about whether chat, metadata
+// or moderation would follow. Instagram is in the matrix precisely so that the
+// answer "none of it" is visible; the two that were missing gave no answer at
+// all, which reads as "nobody thought about it" and is worse than a no.
+//
+// Scoped to the consumer platforms. GroupSelfHosted, GroupCloud and
+// GroupGeneric are infrastructure -- an operator pointing polyemesis at their
+// own Wowza is not wondering whether polyemesis can moderate its chat.
+//
+// Proven able to fail against the committed tree by deleting the tiktok row
+// from capabilities.go.
+func TestEveryConsumerPresetHasACapabilityRow(t *testing.T) {
+	have := map[string]bool{}
+	for _, row := range PlatformCapabilities() {
+		have[row.PresetID] = true
+	}
+	checked := 0
+	for _, p := range db.DestinationPresets() {
+		if p.Group != db.GroupMajor && p.Group != db.GroupVideo {
+			continue
+		}
+		// Transport variants inherit their base platform's row: "Twitch
+		// (RTMPS)" is Twitch with a different scheme, and a second identical
+		// row would be two things to keep in step for no added truth.
+		if base, _, found := strings.Cut(p.ID, "-"); found && have[base] {
+			continue
+		}
+		checked++
+		if !have[p.ID] {
+			t.Errorf("preset %q (%s) is offered in the destination picker and has no "+
+				"capability row.\nThe operator can stream there and cannot find out "+
+				"whether chat, metadata or moderation work. If the answer is \"none of "+
+				"it\", say so in a row -- that is what the Instagram row is for.", p.ID, p.Name)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no consumer presets checked; this test would pass on an empty catalogue")
+	}
+}
+
+// The defect the drift tests could not see. Both catalogues had a Kick entry,
+// both entries had the same id, and the preset-drift check passed -- while the
+// note an operator reads said
+//
+//	Kick is the one platform where the key stays manual: its public API exposes
+//	the channel, chat and viewer counts but no stream key anywhere.
+//
+// and the capability matrix, corrected later, said the key is fetched over the
+// streamkey:read scope. The limitation was real, was lifted, and the sentence
+// the operator actually sees still described the old world -- telling them to
+// copy by hand a key polyemesis would fetch for them.
+//
+// DELIBERATELY NARROW. It matches a short list of phrases that assert the key
+// cannot be fetched, and only for platforms whose matrix row says it can. A
+// general "is this prose true" check is not a thing a test can be; this catches
+// the one contradiction that has actually shipped.
+//
+// Proven able to fail against the committed tree by restoring any of the
+// phrases below to the kick preset's Notes.
+func TestNoPresetNoteDeniesAKeyTheMatrixSaysWeFetch(t *testing.T) {
+	denials := []string{
+		"no stream key anywhere",
+		"key stays manual",
+		"stream key is manual",
+		"there is no way to fetch",
+	}
+	byID := map[string]db.DestinationPreset{}
+	for _, p := range db.DestinationPresets() {
+		byID[p.ID] = p
+	}
+	checked := 0
+	for _, row := range PlatformCapabilities() {
+		if row.Caps[CapStreamKey] != SupportYes {
+			continue
+		}
+		p, ok := byID[row.PresetID]
+		if !ok {
+			continue
+		}
+		checked++
+		notes := strings.ToLower(p.Notes)
+		for _, d := range denials {
+			if strings.Contains(notes, d) {
+				t.Errorf("the %s preset note says %q, but the capability matrix says "+
+					"polyemesis fetches the stream key for this platform.\n"+
+					"The note is what the operator reads, so they will copy by hand a "+
+					"key we would have fetched.", p.Name, d)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no platform has CapStreamKey=SupportYes, so this test checked " +
+			"nothing and would pass on any note at all")
 	}
 }

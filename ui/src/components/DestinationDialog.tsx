@@ -177,7 +177,7 @@ const PRESETS: DestPreset[] = [
     separateKey: true,
     helpUrl: "https://kick.com/dashboard/settings/stream",
     notes:
-      "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes your title and category and reports viewer counts. Kick issues the ingest host per channel, so there is nothing to prefill here. APPEND /app to the URL Kick shows you — the dashboard prints it without one, and a Kick destination without /app cannot publish at all. The result looks like rtmps://<your-host>.global-contribute.live-video.net:443/app",
+      "Connect a Kick account in Settings → Platform credentials and polyemesis fetches the stream key itself, over the streamkey:read scope — an account connected before that scope existed needs reconnecting once. Without a connected account, copy the key from Kick → Settings → Stream. Either way the ingest URL is yours to supply: Kick issues the host per channel, so there is nothing to prefill here. APPEND /app to the URL Kick shows you — the dashboard prints it without one, and a Kick destination without /app cannot publish at all. The result looks like rtmps://<your-host>.global-contribute.live-video.net:443/app",
   },
   {
     id: "facebook",

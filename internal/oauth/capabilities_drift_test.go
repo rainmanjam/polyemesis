@@ -82,8 +82,14 @@ type uiRow struct {
 
 var (
 	reUIPreset = regexp.MustCompile(`presetId:\s*"([^"]+)"`)
-	reUITier   = regexp.MustCompile(`tier:\s*"([^"]+)"`)
-	reUICap    = regexp.MustCompile(`(\w+):\s*"(yes|manual|no|unknown)"`)
+	// The helper-call form: manualUnverified("rumble", "Rumble", ...). Its caps
+	// come from the helper body, which this file reads rather than restates --
+	// a second copy of that block here would be the very duplication the
+	// helper removed, and would drift the same way.
+	reUIHelper   = regexp.MustCompile(`manualUnverified\(\s*\n\s*"([^"]+)"`)
+	reUIHelperFn = regexp.MustCompile(`(?s)function manualUnverified\(.*?caps:\s*\{(.*?)\}`)
+	reUITier     = regexp.MustCompile(`tier:\s*"([^"]+)"`)
+	reUICap      = regexp.MustCompile(`(\w+):\s*"(yes|manual|no|unknown)"`)
 )
 
 // parseUICapabilities reads the TypeScript table by structure rather than by
@@ -108,6 +114,16 @@ func parseUICapabilities(t *testing.T, src string) map[string]uiRow {
 	if len(idx) == 0 {
 		t.Fatalf("PLATFORM_CAPABILITIES parsed to zero rows; the shape changed and this guard " +
 			"would now pass for the wrong reason")
+	}
+
+	// The caps every manualUnverified() row carries, read out of the helper
+	// itself so this guard cannot disagree with it.
+	var helperCaps map[string]string
+	if hm := reUIHelperFn.FindStringSubmatch(src); len(hm) == 2 {
+		helperCaps = map[string]string{}
+		for _, c := range reUICap.FindAllStringSubmatch(hm[1], -1) {
+			helperCaps[c[1]] = c[2]
+		}
 	}
 
 	out := make(map[string]uiRow, len(idx))
@@ -141,6 +157,23 @@ func parseUICapabilities(t *testing.T, src string) map[string]uiRow {
 			row.caps[c[1]] = c[2]
 		}
 		out[id] = row
+	}
+
+	// Rows written as manualUnverified(...) calls. They carry no presetId key
+	// and no caps block of their own, so the loop above never sees them -- and
+	// before this existed, refactoring eight rows into the helper made them
+	// silently vanish from the comparison while the test still passed for the
+	// rows that remained.
+	for _, m := range reUIHelper.FindAllStringSubmatch(body, -1) {
+		if helperCaps == nil {
+			t.Fatalf("the UI matrix calls manualUnverified() but this guard could not "+
+				"find the helper's caps block, so %q would be compared against nothing", m[1])
+		}
+		caps := make(map[string]string, len(helperCaps))
+		for k, v := range helperCaps {
+			caps[k] = v
+		}
+		out[m[1]] = uiRow{tier: "manual", caps: caps}
 	}
 	return out
 }
