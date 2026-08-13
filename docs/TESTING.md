@@ -389,7 +389,7 @@ Note that `e2e/` is Playwright's and is excluded from vitest in
 
 ## 10. Acceptance suites
 
-Fourteen scripts drive the built binary — or the shipped image — through a real
+Fifteen scripts drive the built binary — or the shipped image — through a real
 ingest and assert on what came out the other end. They need `make build` first,
 and they are the only tests that can fail on something the unit tests cannot
 see.
@@ -408,7 +408,22 @@ Against the host binary:
 ./scripts/acceptance-playlist-phase0.sh  # scheduled file broadcast, no encoder
 ./scripts/acceptance-postprod.sh     # recording, jobs, retention
 ./scripts/acceptance-mqtt.sh         # retained telemetry, against a real broker
+./scripts/acceptance-multistream.sh  # one source to four platforms, each with its own mix
 ```
+
+`acceptance-multistream.sh` is the second odd one out, and for the opposite
+reason to `acceptance-encoders.sh`: run with credentials it publishes to a REAL
+account, so it is never wired into CI and is dispatch-only or local-only. With
+no credential set it is a full self-test against local RTMP listeners and
+contacts nothing, which is what makes it safe to run on a laptop. Platforms
+without a key are reported as SKIP and counted; a skipped platform is never a
+pass. Keys come from the environment only —
+`TWITCH_STREAM_KEY`, `YOUTUBE_STREAM_KEY`, `KICK_STREAM_KEY`,
+`FACEBOOK_STREAM_KEY` — because a key on a command line is world-readable
+through `ps(1)`, and the suite's own step 8 measures that it stayed off every
+argv, log and artifact. See issue #141 for why the question it asks is
+"does each destination receive ITS mix" rather than "does a platform accept two
+audio tracks".
 
 Against the shipped container — these build the image and are the ones CI runs
 only on `main` and on a schedule:
