@@ -736,7 +736,17 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 if [ "$wrongrc" = timeout ]; then
+  # OBSERVED, not requested. scripts/termination-guard.sh refuses a kill followed
+  # by a verdict, and it is right to here: this branch is about a prober that
+  # would not resolve, so rendering the finding while it may still be publishing
+  # leaves an encoder holding the ingest through everything below.
   pkill -9 -f "multistream-wrongkey" 2>/dev/null
+  wrongdead=no
+  for _ in $(seq 1 20); do
+    pgrep -f "multistream-wrongkey" >/dev/null 2>&1 || { wrongdead=yes; break; }
+    sleep 0.25
+  done
+  [ "$wrongdead" = yes ] || note "the unknown-key prober outlived SIGKILL; it may still hold the ingest"
   bad "a publish with an UNKNOWN stream key was neither accepted nor refused in 30s; 4b-2's 'accepted' proves nothing while this hangs"
 elif [ "$wrongrc" -ne 0 ]; then
   ok "a publish with an UNKNOWN stream key was REFUSED by the same listener (ffmpeg exit $wrongrc), so 'accepted' above means something"
