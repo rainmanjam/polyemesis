@@ -28,6 +28,12 @@
 // and nothing local can hear what arrived. The received-audio half needs a sink
 // we control, which is what the dry-run path is for.
 //
+// The HTTP session, login, setup, the settings read-modify-write, the profile
+// track rows, destination creation and stopall live in
+// scripts/internal/driverlib, shared with the failover driver. What stays here
+// is what this suite alone does: reading the compiled routing back off /status,
+// and the credential sweep.
+//
 //	setup <rtmp-port>        first-run setup; put the ingest on that RTMP port
 //	publishkey               print the source's publish token
 //	srctracks                print how many AUDIO tracks the ingest was probed with
@@ -44,226 +50,99 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
+
+	"github.com/rainmanjam/polyemesis/scripts/internal/driverlib"
 )
 
 const (
 	// Named because Sonar counts a literal repeated three times as a
 	// maintenance hazard, and it is right here: a typo in one of three
-	// copies of a path is a driver that talks to the wrong endpoint on one
+	// copies of a message is a driver that reports a different fault on one
 	// code path only.
-	settingsPath = "/settings"
-	noSuchDest   = "no destination named "
-	user         = "admin"
-	pass         = "MultistreamAcceptance!7q"
-	// profileTracks is how many track rows a profile declares. The ingest this
-	// suite publishes carries two; six is what OBS sends and what
-	// routing.PlaceholderTracks guesses, so a profile of that width is the
-	// ordinary shape rather than one tailored to the fixture. Rows past the
-	// ingest's width compile to nothing.
-	profileTracks = 6
-)
-
-var (
-	client *http.Client
-	base   string
-	csrf   string
+	noSuchDest = "no destination named "
+	user       = "admin"
+	pass       = "MultistreamAcceptance!7q"
 )
 
 func main() {
 	if len(os.Args) < 3 {
-		die("usage: acceptance_multistream_driver.go <base-url> <subcommand> [args]")
+		driverlib.Die("usage: acceptance_multistream_driver.go <base-url> <subcommand> [args]")
 	}
-	base = strings.TrimSuffix(os.Args[1], "/") + "/api/v1"
-	jar, _ := cookiejar.New(nil)
-	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
-	waitUp()
+	driverlib.Init(os.Args[1])
+	driverlib.WaitUp()
 
 	args := os.Args[3:]
 	switch os.Args[2] {
 	case "setup":
 		if len(args) < 1 {
-			die("usage: setup <rtmp-port>")
+			driverlib.Die("usage: setup <rtmp-port>")
 		}
-		setup()
+		driverlib.Setup(user, pass)
 		ingest(args[0])
 	case "publishkey":
-		login()
-		publishKey()
+		driverlib.Login(user, pass)
+		driverlib.PublishKey()
 	case "srctracks":
-		login()
+		driverlib.Login(user, pass)
 		srcTracks()
 	case "adddest":
 		if len(args) < 5 {
-			die("usage: adddest <name> <platform> <url> <key-env> <tracks-csv>")
+			driverlib.Die("usage: adddest <name> <platform> <url> <key-env> <tracks-csv>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		addDest(args[0], args[1], args[2], args[3], args[4])
 	case "tracks":
 		if len(args) < 1 {
-			die("usage: tracks <name>")
+			driverlib.Die("usage: tracks <name>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		printTracks(args[0])
 	case "graph":
 		if len(args) < 1 {
-			die("usage: graph <name>")
+			driverlib.Die("usage: graph <name>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		printGraph(args[0])
 	case "deststat":
 		if len(args) < 1 {
-			die("usage: deststat <name>")
+			driverlib.Die("usage: deststat <name>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		destStat(args[0])
 	case "stopall":
-		login()
-		stopAll()
+		driverlib.Login(user, pass)
+		driverlib.StopAll()
 	case "leakscan":
 		if len(args) < 1 {
-			die("usage: leakscan <key-env>...")
+			driverlib.Die("usage: leakscan <key-env>...")
 		}
-		login()
+		driverlib.Login(user, pass)
 		leakScan(args)
 	default:
-		die("unknown subcommand " + os.Args[2])
+		driverlib.Die("unknown subcommand " + os.Args[2])
 	}
-}
-
-func waitUp() {
-	for i := 0; i < 60; i++ {
-		resp, err := client.Get(base + "/health")
-		if err == nil {
-			resp.Body.Close()
-			return
-		}
-		time.Sleep(time.Second)
-	}
-	die("server never became healthy at " + base)
-}
-
-func do(method, path string, body any) (int, []byte) {
-	var rdr io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		rdr = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, base+path, rdr)
-	if err != nil {
-		die(err.Error())
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for _, c := range client.Jar.Cookies(req.URL) {
-		if c.Name == "polyemesis_csrf" {
-			csrf = c.Value
-		}
-	}
-	if csrf != "" {
-		req.Header.Set("X-CSRF-Token", csrf)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		die(err.Error())
-	}
-	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, out
-}
-
-func login() {
-	if code, out := do(http.MethodPost, "/auth/login",
-		map[string]string{"username": user, "password": pass}); code != http.StatusOK {
-		die(fmt.Sprintf("login failed: %d %s", code, out))
-	}
-}
-
-func setup() {
-	code, out := do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass})
-	if code != http.StatusOK && code != http.StatusCreated {
-		die(fmt.Sprintf("setup failed: %d %s", code, out))
-	}
-	fmt.Println("SETUP_OK")
 }
 
 // ingest puts the install's shared RTMP listener on a port of this suite's own.
 //
-// RTMP rather than SRT for the reason acceptance-failover.sh gives: the host
-// FFmpeg on macOS is built without libsrt, so it can neither listen nor publish
-// on SRT, and this suite has to run on a developer's machine before it is ever
-// pointed at a real platform. What is measured -- which mix each destination
-// receives -- is independent of how the bytes arrived.
-//
-// Read-modify-write of the whole settings document. PUT /settings REPLACES the
-// settings, so posting a lone ingest block would reset everything else.
+// The transport choice and the empty stream key are driverlib.UseRTMPIngest's
+// to explain; what belongs here is only that the port is this suite's, so a
+// stray listener from another suite cannot be mistaken for this one's encoder.
 func ingest(rtmpPort string) {
 	port, err := strconv.Atoi(rtmpPort)
 	if err != nil {
-		die("rtmp port is not a number: " + rtmpPort)
+		driverlib.Die("rtmp port is not a number: " + rtmpPort)
 	}
-	_, out := do(http.MethodGet, settingsPath, nil)
-	var s map[string]any
-	if err := json.Unmarshal(out, &s); err != nil {
-		die("settings unreadable: " + err.Error())
-	}
-	ing, _ := s["ingest"].(map[string]any)
-	if ing == nil {
-		die("settings carried no ingest block")
-	}
-	ing["mode"] = "rtmp"
-	rtmp, _ := ing["rtmp"].(map[string]any)
-	if rtmp == nil {
-		rtmp = map[string]any{}
-		ing["rtmp"] = rtmp
-	}
-	rtmp["app"] = "live"
-	// Empty: the listener addresses sources by the per-source publish TOKEN
-	// now, which publishkey below reads back. See the failover suite's note --
-	// a keyless publish reaches nothing.
-	rtmp["streamKey"] = ""
-	s["listeners"] = map[string]any{"srtPort": 6000, "rtmpPort": port}
-	code, body := do(http.MethodPut, settingsPath, s)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("ingest settings failed: %d %s", code, body))
-	}
+	s := driverlib.LoadSettings()
+	driverlib.UseRTMPIngest(s, port)
+	driverlib.SaveSettings(s, "ingest settings")
 	fmt.Println("INGEST_OK")
-}
-
-func publishKey() {
-	code, out := do(http.MethodGet, "/sources", nil)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("cannot read sources: %d %s", code, out))
-	}
-	var rows []struct {
-		Source struct {
-			Token string `json:"token"`
-		} `json:"source"`
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		die("sources unreadable: " + err.Error())
-	}
-	for _, r := range rows {
-		if t := r.Source.Token; t != "" {
-			fmt.Println(t)
-			return
-		}
-		if r.Token != "" {
-			fmt.Println(r.Token)
-			return
-		}
-	}
-	die("no source carried a publish token")
 }
 
 // srcTracks prints how many AUDIO tracks the running ingest was probed with.
@@ -279,19 +158,6 @@ func srcTracks() {
 	fmt.Println(len(st.Source.Tracks))
 }
 
-// sel builds a profile's track rows with exactly the named tracks enabled.
-func sel(on []int) []map[string]any {
-	want := map[int]bool{}
-	for _, t := range on {
-		want[t] = true
-	}
-	rows := make([]map[string]any, 0, profileTracks)
-	for i := 0; i < profileTracks; i++ {
-		rows = append(rows, map[string]any{"track": i, "enabled": want[i], "gain": 1.0})
-	}
-	return rows
-}
-
 func parseTracks(csv string) []int {
 	var out []int
 	for _, f := range strings.Split(csv, ",") {
@@ -301,12 +167,12 @@ func parseTracks(csv string) []int {
 		}
 		n, err := strconv.Atoi(f)
 		if err != nil {
-			die("not a track index: " + f)
+			driverlib.Die("not a track index: " + f)
 		}
 		out = append(out, n)
 	}
 	if len(out) == 0 {
-		die("a destination with no tracks selected would prove nothing")
+		driverlib.Die("a destination with no tracks selected would prove nothing")
 	}
 	return out
 }
@@ -318,7 +184,9 @@ func parseTracks(csv string) []int {
 // with curl: a key interpolated into a shell command line is visible in ps(1)
 // to every user on the machine for as long as the command runs, and a key in a
 // heredoc is visible in the shell's own /proc entry and in any xtrace output.
-// os.Getenv is the only path in this file that touches the value.
+// os.Getenv is the only path in this file that touches the value, and nothing
+// downstream of it -- including driverlib.CreateDest's failure report, which
+// prints only the server's own already-scrubbed body -- echoes it back.
 //
 // NORMALISATION OFF, deliberately. A limiter between the ingest and the
 // platform would compress exactly the level difference every assertion in this
@@ -327,24 +195,17 @@ func parseTracks(csv string) []int {
 func addDest(name, platform, url, keyEnv, tracksCSV string) {
 	key := os.Getenv(keyEnv)
 	if strings.TrimSpace(key) == "" {
-		die(keyEnv + " is empty; a destination with no credential is not a measurement")
+		driverlib.Die(keyEnv + " is empty; a destination with no credential is not a measurement")
 	}
-	code, out := do(http.MethodPost, "/destinations", map[string]any{
+	driverlib.CreateDest(name, map[string]any{
 		"name": name, "kind": "rtmp", "platform": platform,
 		"url": url, "streamKey": key,
 		"enabled": true, "audioBitrate": 160,
 		"profile": map[string]any{
-			"mode": "simple", "tracks": sel(parseTracks(tracksCSV)), "matrix": []any{},
+			"mode": "simple", "tracks": driverlib.Sel(parseTracks(tracksCSV)...), "matrix": []any{},
 			"normalize": "off", "sampleRate": 48000,
 		},
 	})
-	if code != http.StatusOK && code != http.StatusCreated {
-		// The body is the server's, which scrubs its own credentials before it
-		// renders anything; printing it is how a validation failure becomes
-		// readable. Nothing here echoes `key`.
-		die(fmt.Sprintf("create destination %s failed: %d %s", name, code, out))
-	}
-	fmt.Println("DEST_OK")
 }
 
 // destProcess is the supervised child as /status reports it. Named rather than
@@ -376,15 +237,13 @@ type statusDoc struct {
 	} `json:"destinations"`
 }
 
+// readStatus is local rather than shared because the DOCUMENT is local: this
+// suite decodes the source's tracks and each destination's compiled routing,
+// and the failover driver decodes the failover block and a restart count. The
+// fetch-and-decode underneath both is driverlib.GetJSON.
 func readStatus() statusDoc {
-	code, out := do(http.MethodGet, "/status", nil)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("cannot read status: %d %s", code, out))
-	}
 	var st statusDoc
-	if err := json.Unmarshal(out, &st); err != nil {
-		die("status unreadable: " + err.Error())
-	}
+	driverlib.GetJSON("/status", "status", &st)
 	return st
 }
 
@@ -416,7 +275,7 @@ func printTracks(name string) {
 		fmt.Println(strings.Join(parts, ","))
 		return
 	}
-	die(noSuchDest + name)
+	driverlib.Die(noSuchDest + name)
 }
 
 // printGraph prints the compiled filter_complex on ONE line.
@@ -435,7 +294,7 @@ func printGraph(name string) {
 			return
 		}
 	}
-	die(noSuchDest + name)
+	driverlib.Die(noSuchDest + name)
 }
 
 // destStat prints "<state> <restarts> <outTimeMs>".
@@ -456,29 +315,7 @@ func destStat(name string) {
 		fmt.Printf("%s %d %d\n", d.Process.State, d.Process.Restarts, d.Process.Progress.OutTimeMS)
 		return
 	}
-	die(noSuchDest + name)
-}
-
-func stopAll() {
-	_, out := do(http.MethodGet, "/destinations", nil)
-	var rows []struct {
-		Destination struct {
-			ID int64 `json:"id"`
-		} `json:"destination"`
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		die("destinations unreadable: " + err.Error())
-	}
-	for _, r := range rows {
-		if r.Destination.ID == 0 {
-			die("a destination came back with no id; the list shape has changed")
-		}
-		if code, body := do(http.MethodPost,
-			fmt.Sprintf("/destinations/%d/stop", r.Destination.ID), nil); code != http.StatusOK {
-			die(fmt.Sprintf("stop %d failed: %d %s", r.Destination.ID, code, body))
-		}
-	}
-	fmt.Println("STOPPED")
+	driverlib.Die(noSuchDest + name)
 }
 
 // leakScan asks every read-reachable rendering of a running destination whether
@@ -511,7 +348,7 @@ func leakScan(envs []string) {
 	targets := []target{
 		{"GET /status", "/status"},
 		{"GET /processes", "/processes"},
-		{"GET /settings", settingsPath},
+		{"GET /settings", driverlib.SettingsPath},
 	}
 	for _, d := range readStatus().Destinations {
 		if d.Process == nil {
@@ -522,7 +359,7 @@ func leakScan(envs []string) {
 	}
 	bodies := make(map[string]string, len(targets))
 	for _, t := range targets {
-		_, out := do(http.MethodGet, t.path, nil)
+		_, out := driverlib.Do(http.MethodGet, t.path, nil)
 		bodies[t.label] = string(out)
 	}
 	// Sorted so a run that finds two leaks reports them in a stable order; an
@@ -550,9 +387,4 @@ func leakScan(envs []string) {
 	if !found {
 		fmt.Println("SAFE")
 	}
-}
-
-func die(msg string) {
-	fmt.Fprintln(os.Stderr, "driver: "+msg)
-	os.Exit(1)
 }

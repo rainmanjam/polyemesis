@@ -104,8 +104,19 @@ DATA="$WORK/data"
 # second cadence through three waits, and a fresh compile each time would make
 # the poll interval meaningless -- the switch would be measured against the Go
 # toolchain's speed rather than the tier's.
+#
+# BUILT FROM $ROOT, IN A SUBSHELL, AND THAT IS NOT COSMETIC. The driver now
+# imports scripts/internal/driverlib -- the plumbing it shares with the
+# multistream driver -- and `go build` resolves a module import against the
+# CURRENT DIRECTORY's go.mod, not against the source file's location. This runs
+# after the cd into $WORK, which is outside the module, so a build started here
+# would fail with "go.mod file not found" no matter how absolute the source path
+# is. A driver importing nothing but the standard library did not care. $DRIVER
+# is absolute (WORK was re-anchored to pwd above), so the output still lands
+# where the rest of the suite looks for it, and the subshell leaves this
+# script's own working directory alone.
 DRIVER="$WORK/failover-driver"
-go build -o "$DRIVER" "$SCRIPTS/acceptance_failover_driver.go" || {
+( cd "$ROOT" && go build -o "$DRIVER" "$SCRIPTS/acceptance_failover_driver.go" ) || {
   echo "cannot build the driver"; exit 1; }
 drive() { "$DRIVER" "http://127.0.0.1:$PORT" "$@" 2>&1; }
 

@@ -11,6 +11,12 @@
 // works at all -- PTS continuity across a switch, and a destination riding the
 // switch without restarting -- and both were covered only against fakes.
 //
+// The HTTP session, login, setup, the settings read-modify-write, the profile
+// track rows, destination creation and stopall live in
+// scripts/internal/driverlib, shared with the multistream driver. What stays
+// here is what this suite alone does: the failover tier's settings, the
+// playlist subcommands, and the four numbers status prints.
+//
 //	(no subcommand)      set up, enable failover with a slate, add one destination
 //	status               print "<active> <switches> <primaryLive> <destRestarts>"
 //	stopall              stop every destination so its file finalises
@@ -25,15 +31,12 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"os"
 	"strings"
-	"time"
+
+	"github.com/rainmanjam/polyemesis/scripts/internal/driverlib"
 )
 
 const (
@@ -51,20 +54,12 @@ const (
 	ingestPort = 1938
 )
 
-var (
-	client *http.Client
-	base   string
-	csrf   string
-)
-
 func main() {
 	if len(os.Args) < 2 {
-		die("usage: acceptance_failover_driver.go <base-url> [subcommand]")
+		driverlib.Die("usage: acceptance_failover_driver.go <base-url> [subcommand]")
 	}
-	base = strings.TrimSuffix(os.Args[1], "/") + "/api/v1"
-	jar, _ := cookiejar.New(nil)
-	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
-	waitUp()
+	driverlib.Init(os.Args[1])
+	driverlib.WaitUp()
 
 	cmd := ""
 	if len(os.Args) > 2 {
@@ -72,109 +67,54 @@ func main() {
 	}
 	switch cmd {
 	case "":
-		setup()
+		driverlib.Setup(user, pass)
 		enableFailover()
 		dest()
 	case "status":
-		login()
+		driverlib.Login(user, pass)
 		status()
 	case "stopall":
-		login()
-		stopAll()
+		driverlib.Login(user, pass)
+		driverlib.StopAll()
 	case "pin":
 		if len(os.Args) < 4 {
-			die("usage: pin <primary|backup|slate|auto>")
+			driverlib.Die("usage: pin <primary|backup|slate|auto>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		pin(os.Args[3])
 	case "playlist":
 		if len(os.Args) < 5 {
-			die("usage: playlist <on|off> <stored-upload-name>...")
+			driverlib.Die("usage: playlist <on|off> <stored-upload-name>...")
 		}
-		login()
+		driverlib.Login(user, pass)
 		playlist(os.Args[3] == "on", os.Args[4:])
 	case "plready":
-		login()
+		driverlib.Login(user, pass)
 		playlistReady()
 	case "adddest":
 		if len(os.Args) < 5 {
-			die("usage: adddest <name> <file-url>")
+			driverlib.Die("usage: adddest <name> <file-url>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		addDest(os.Args[3], os.Args[4])
 	case "restarts":
 		if len(os.Args) < 4 {
-			die("usage: restarts <destination-name>")
+			driverlib.Die("usage: restarts <destination-name>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		restarts(os.Args[3])
 	case "outtime":
 		if len(os.Args) < 4 {
-			die("usage: outtime <destination-name>")
+			driverlib.Die("usage: outtime <destination-name>")
 		}
-		login()
+		driverlib.Login(user, pass)
 		outtime(os.Args[3])
 	case "publishkey":
-		login()
-		publishKey()
+		driverlib.Login(user, pass)
+		driverlib.PublishKey()
 	default:
-		die("unknown subcommand " + cmd)
+		driverlib.Die("unknown subcommand " + cmd)
 	}
-}
-
-func waitUp() {
-	for i := 0; i < 60; i++ {
-		resp, err := client.Get(base + "/health")
-		if err == nil {
-			resp.Body.Close()
-			return
-		}
-		time.Sleep(time.Second)
-	}
-	die("server never became healthy at " + base)
-}
-
-func do(method, path string, body any) (int, []byte) {
-	var rdr io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		rdr = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, base+path, rdr)
-	if err != nil {
-		die(err.Error())
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for _, c := range client.Jar.Cookies(req.URL) {
-		if c.Name == "polyemesis_csrf" {
-			csrf = c.Value
-		}
-	}
-	if csrf != "" {
-		req.Header.Set("X-CSRF-Token", csrf)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		die(err.Error())
-	}
-	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, out
-}
-
-func login() {
-	if code, out := do(http.MethodPost, "/auth/login",
-		map[string]string{"username": user, "password": pass}); code != http.StatusOK {
-		die(fmt.Sprintf("login failed: %d %s", code, out))
-	}
-}
-
-func setup() {
-	code, out := do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass})
-	if code != http.StatusOK && code != http.StatusCreated {
-		die(fmt.Sprintf("setup failed: %d %s", code, out))
-	}
-	fmt.Println("SETUP_OK")
 }
 
 // enableFailover turns on the selector tier with a COLOUR slate.
@@ -183,32 +123,11 @@ func setup() {
 // and nothing about the switch, and the suite's real subject is what happens to
 // the timeline when the feed underneath a destination is replaced.
 func enableFailover() {
-	_, out := do(http.MethodGet, "/settings", nil)
-	var s map[string]any
-	if err := json.Unmarshal(out, &s); err != nil {
-		die("settings unreadable: " + err.Error())
-	}
-	// Move the ingest off the default port so a stray listener from another
-	// suite cannot be mistaken for this one's encoder.
-	ing, _ := s["ingest"].(map[string]any)
-	if ing == nil {
-		die("settings carried no ingest block")
-	}
-	// RTMP rather than SRT. This suite is about what happens to the TIMELINE
-	// when the feed under a destination is replaced, and the ingest transport
-	// is incidental to that -- but a host FFmpeg built without libsrt cannot
-	// listen or publish on SRT at all, and Homebrew's is. SRT ingest is covered
-	// by the container suites, which ship an FFmpeg that has it.
-	ing["mode"] = "rtmp"
-	rtmp, _ := ing["rtmp"].(map[string]any)
-	if rtmp == nil {
-		rtmp = map[string]any{}
-		ing["rtmp"] = rtmp
-	}
-	rtmp["app"] = "live"
-	rtmp["streamKey"] = ""
-	// The port is install-wide now, not a property of the source.
-	s["listeners"] = map[string]any{"srtPort": 6000, "rtmpPort": ingestPort}
+	s := driverlib.LoadSettings()
+	// The ingest moves off the default port so a stray listener from another
+	// suite cannot be mistaken for this one's encoder. driverlib.UseRTMPIngest
+	// records why the transport is RTMP rather than SRT.
+	driverlib.UseRTMPIngest(s, ingestPort)
 
 	s["failover"] = map[string]any{
 		"enabled":             true,
@@ -226,23 +145,8 @@ func enableFailover() {
 			"videoKbps": 800,
 		},
 	}
-	code, body := do(http.MethodPut, "/settings", s)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("enable failover failed: %d %s", code, body))
-	}
+	driverlib.SaveSettings(s, "enable failover")
 	fmt.Println("FAILOVER_OK")
-}
-
-func sel(on ...int) []map[string]any {
-	want := map[int]bool{}
-	for _, t := range on {
-		want[t] = true
-	}
-	rows := make([]map[string]any, 0, 6)
-	for i := 0; i < 6; i++ {
-		rows = append(rows, map[string]any{"track": i, "enabled": want[i], "gain": 1.0})
-	}
-	return rows
 }
 
 func dest() { addDest("onair", "onair.ts") }
@@ -254,21 +158,17 @@ func dest() { addDest("onair", "onair.ts") }
 // truncates the file the destination is writing -- pointed at onair.mkv it
 // would erase the very recording the timeline checks measured.
 func addDest(name, url string) {
-	code, out := do(http.MethodPost, "/destinations", map[string]any{
+	driverlib.CreateDest(name, map[string]any{
 		"name": name, "kind": "file", "url": url,
 		"enabled": true, "audioBitrate": 160,
 		"profile": map[string]any{
-			"mode": "simple", "tracks": sel(0), "matrix": []any{},
+			"mode": "simple", "tracks": driverlib.Sel(0), "matrix": []any{},
 			// Normalisation off: a limiter between the source and the file
 			// would smooth exactly the level difference the suite uses to tell
 			// the primary apart from the slate.
 			"normalize": "off", "sampleRate": 48000,
 		},
 	})
-	if code != http.StatusOK && code != http.StatusCreated {
-		die(fmt.Sprintf("create destination failed: %d %s", code, out))
-	}
-	fmt.Println("DEST_OK")
 }
 
 // status prints the four numbers the suite makes its decisions on.
@@ -329,12 +229,13 @@ type statusDoc struct {
 	} `json:"destinations"`
 }
 
+// readStatus is local rather than shared because the DOCUMENT is local: this
+// suite decodes the failover block and a destination's restart count, and the
+// multistream driver decodes the source's tracks and each destination's
+// compiled routing. The fetch-and-decode underneath both is driverlib.GetJSON.
 func readStatus() statusDoc {
-	_, out := do(http.MethodGet, "/status", nil)
 	var st statusDoc
-	if err := json.Unmarshal(out, &st); err != nil {
-		die("status unreadable: " + err.Error())
-	}
+	driverlib.GetJSON("/status", "status", &st)
 	return st
 }
 
@@ -372,55 +273,11 @@ func outtime(name string) {
 	fmt.Println(-1)
 }
 
-// publishKey prints the stream key an encoder must use to reach the source.
-//
-// This exists because the RTMP ingest stopped being "whatever turns up on the
-// port". There is now one shared RTMP listener for the whole install, and it
-// addresses sources BY KEY -- so a publisher with no key, or the wrong one, is
-// refused at the handshake and the suite sees an encoder that connected and
-// then died with a broken pipe.
-//
-// The token is what the UI puts in the publish URL, so this is also the address
-// a real operator would be given. Reading it from the API rather than pinning a
-// constant here keeps the suite honest about rotation: if the token changes
-// shape, this follows it.
-func publishKey() {
-	code, out := do(http.MethodGet, "/sources", nil)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("cannot read sources: %d %s", code, out))
-	}
-	var rows []struct {
-		Source struct {
-			ID    int64  `json:"id"`
-			Token string `json:"token"`
-		} `json:"source"`
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		die("sources unreadable: " + err.Error())
-	}
-	for _, r := range rows {
-		// The list endpoint wraps each row, but has carried the token at both
-		// levels over its life. Take whichever is populated rather than
-		// silently publishing to an empty key, which is the exact failure this
-		// function exists to prevent.
-		if t := r.Source.Token; t != "" {
-			fmt.Println(t)
-			return
-		}
-		if r.Token != "" {
-			fmt.Println(r.Token)
-			return
-		}
-	}
-	die("no source carried a publish token")
-}
-
 func pin(kind string) {
 	// "auto" is accepted by name and clears the pin; no translation needed.
-	code, out := do(http.MethodPost, "/failover/source", map[string]any{"source": kind})
+	code, out := driverlib.Do(http.MethodPost, "/failover/source", map[string]any{"source": kind})
 	if code != http.StatusOK {
-		die(fmt.Sprintf("pin %s failed: %d %s", kind, code, out))
+		driverlib.Die(fmt.Sprintf("pin %s failed: %d %s", kind, code, out))
 	}
 	fmt.Println("PIN_OK")
 }
@@ -449,19 +306,12 @@ func pin(kind string) {
 // measure, because the playlist outranks the slate.
 //
 // Read-modify-write of the whole settings document, exactly as enableFailover
-// does. PUT /settings REPLACES the settings, so posting a lone failover block
-// would reset the ingest to its defaults, move the listener off port 1938 and
-// strand the publisher -- which would look from the outside like the failover
-// this suite is measuring.
+// does, and driverlib.LoadSettings records why that is not optional.
 func playlist(enabled bool, uploads []string) {
-	_, out := do(http.MethodGet, "/settings", nil)
-	var s map[string]any
-	if err := json.Unmarshal(out, &s); err != nil {
-		die("settings unreadable: " + err.Error())
-	}
+	s := driverlib.LoadSettings()
 	f, _ := s["failover"].(map[string]any)
 	if f == nil {
-		die("settings carried no failover block")
+		driverlib.Die("settings carried no failover block")
 	}
 	// Bare stored names, never paths: db.PlaylistSettings.PlaylistFileProblem
 	// refuses anything carrying a separator, and the engine resolves what is
@@ -471,10 +321,7 @@ func playlist(enabled bool, uploads []string) {
 		items = append(items, map[string]any{"upload": u})
 	}
 	f["playlist"] = map[string]any{"enabled": enabled, "items": items}
-	code, body := do(http.MethodPut, "/settings", s)
-	if code != http.StatusOK {
-		die(fmt.Sprintf("save playlist failed: %d %s", code, body))
-	}
+	driverlib.SaveSettings(s, "save playlist")
 	fmt.Println("PLAYLIST_OK")
 }
 
@@ -491,7 +338,6 @@ func playlist(enabled bool, uploads []string) {
 // derivative to a name the code had stopped looking for, and every check
 // downstream went on passing.
 func playlistReady() {
-	_, out := do(http.MethodGet, "/failover/playlist", nil)
 	var st struct {
 		Ready bool `json:"ready"`
 		Items []struct {
@@ -500,9 +346,7 @@ func playlistReady() {
 			Detail string `json:"detail"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal(out, &st); err != nil {
-		die("playlist status unreadable: " + err.Error())
-	}
+	driverlib.GetJSON("/failover/playlist", "playlist status", &st)
 	if st.Ready {
 		fmt.Println("READY")
 		return
@@ -516,41 +360,4 @@ func playlistReady() {
 		parts = append(parts, p)
 	}
 	fmt.Println("NOTREADY " + strings.Join(parts, " "))
-}
-
-// stopAll stops every destination so its file finalises.
-//
-// The list body is [{"destination": {...}, "routing": {...}}], NOT a bare array
-// of destinations. Decoding it as the latter was silently reading id 0 off every
-// row, POSTing /destinations/0/stop, taking the 404 without looking and printing
-// STOPPED -- so no destination was ever stopped and the recording the timeline
-// checks read was always an unfinalised Matroska. The checks were written around
-// that damage rather than against it: the duration one reads the last decode
-// timestamp because "format=duration" came back N/A, which is what an
-// unfinalised file reports.
-func stopAll() {
-	_, out := do(http.MethodGet, "/destinations", nil)
-	var rows []struct {
-		Destination struct {
-			ID int64 `json:"id"`
-		} `json:"destination"`
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		die("destinations unreadable: " + err.Error())
-	}
-	for _, r := range rows {
-		if r.Destination.ID == 0 {
-			die("a destination came back with no id; the list shape has changed")
-		}
-		if code, body := do(http.MethodPost,
-			fmt.Sprintf("/destinations/%d/stop", r.Destination.ID), nil); code != http.StatusOK {
-			die(fmt.Sprintf("stop %d failed: %d %s", r.Destination.ID, code, body))
-		}
-	}
-	fmt.Println("STOPPED")
-}
-
-func die(msg string) {
-	fmt.Fprintln(os.Stderr, "driver: "+msg)
-	os.Exit(1)
 }

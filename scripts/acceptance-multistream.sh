@@ -144,8 +144,12 @@ WORK="$(pwd)"
 DATA="$WORK/data"
 mkdir -p "$DATA/recordings"
 
+# BUILT FROM $ROOT, IN A SUBSHELL, for the reason acceptance-failover.sh
+# records at length: the driver imports scripts/internal/driverlib, `go build`
+# resolves a module import against the current directory's go.mod, and this
+# line runs after the cd into $WORK -- which is outside the module.
 DRIVER="$WORK/multistream-driver"
-go build -o "$DRIVER" "$SCRIPTS/acceptance_multistream_driver.go" || {
+( cd "$ROOT" && go build -o "$DRIVER" "$SCRIPTS/acceptance_multistream_driver.go" ) || {
   echo "cannot build the driver"; exit 1; }
 drive() { "$DRIVER" "http://127.0.0.1:$PORT" "$@" 2>&1; }
 
