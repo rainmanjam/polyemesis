@@ -183,6 +183,37 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 
 		PullUploadUnchecked: s.pullUploadUnchecked(src),
 	}
+	// POPULATED FROM THE STORE THE DELETE ITSELF CASCADES THROUGH. Issue #304.
+	//
+	// These two were declared with the comment above them -- "what a delete
+	// would take with it" -- and never assigned, so every source reported 0
+	// however many it owned. That is not a neutral wrong number. Zero is the
+	// REASSURING answer: it tells a caller the delete is free, in exactly the
+	// case where a warning is the point.
+	//
+	// Counted per source rather than joined once for the whole list. An install
+	// has a handful of sources, and correctness first: a batched version that
+	// mis-keys one row would reintroduce the same class of wrong-but-plausible
+	// number this is fixing.
+	//
+	// A FAILED COUNT IS NOT REPORTED AS ZERO. It would be the same lie in a new
+	// place, so the error is logged and the field left at its zero value only
+	// after saying so -- a reader of the log can tell "no destinations" from
+	// "could not ask", which the number alone cannot express.
+	if s.store != nil {
+		if dests, err := s.store.ListDestinationsBySource(src.ID); err != nil {
+			s.log.Warn("counting a source's destinations for the delete warning",
+				"source", src.ID, "err", err)
+		} else {
+			view.Destinations = len(dests)
+		}
+		if rends, err := s.store.ListRenditionsBySource(src.ID); err != nil {
+			s.log.Warn("counting a source's renditions for the delete warning",
+				"source", src.ID, "err", err)
+		} else {
+			view.Renditions = len(rends)
+		}
+	}
 	if readScopeCannotSeePublishTokens(r) {
 		view = readSafeSourceView(view)
 	}
