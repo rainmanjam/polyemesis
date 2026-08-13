@@ -34,7 +34,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Facebook Live** | Works | Works | Works | Works | Unverified | Works | Unverified |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works |
 | **X (Twitter) Live** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
-| **Rumble** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Rumble** | Unverified | By hand | Unverified | Works | Unverified | Unverified | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
@@ -154,7 +154,7 @@ destination and paste what Meta gives you. Check that you have it before you
 build a show around it.
 
 **TikTok LIVE** and **LinkedIn Live** are *unverified* for a different reason
-than Rumble and DLive: their APIs demonstrably exist and answer — a request to
+than DLive: their APIs demonstrably exist and answer — a request to
 `open.tiktokapis.com` or `api.linkedin.com` comes back with a structured
 authentication error, not a 404 — but the live surfaces sit behind partner
 programmes rather than open developer registration. Partner-gated is not the
@@ -165,12 +165,28 @@ The stream key on both is *by hand* and, worth knowing, **per broadcast**:
 TikTok issues it for the LIVE session and LinkedIn for the event, so a saved
 destination goes stale between streams rather than persisting like a Twitch key.
 
-**Rumble** and **DLive** are marked *unverified* rather than *unsupported* on
-purpose. Rumble's API page at `rumble.com/account/api` sits behind a login and
-publishes nothing, and DLive's developer portal at `dev.dlive.tv` no longer
-resolves in DNS. Neither fact tells us what those APIs can do, so we make no
-claim — undocumented is not the same as absent. Streaming to both works today
-with a pasted URL and key.
+**Rumble** is the row that changed, and it is worth reading as a case study in
+why this table says *unverified* rather than *no*. It used to be unverified all
+the way across, on the grounds that `rumble.com/account/api` sits behind a login
+and publishes nothing. That was true and it was not the whole picture: Rumble
+also runs a **live-stream API** at `rumble.com/-livestream-api/get-data`, keyed
+from the operator's own account settings at `rumble.com/account/livestream-api`
+rather than from a partner programme, and it carries chat. Nobody had to be
+approved by anybody — the row was blank because nobody had looked in the right
+place. Chat read now works. Everything else stays unverified: the endpoint
+returns data and no endpoint for sending or moderating is published, which is
+not the same as one being known not to exist.
+
+Two things to know before relying on Rumble chat. The key goes in the
+`RUMBLE_CHAT_API_KEY` environment variable and nowhere else — there is no
+sign-in to store it against, and it never goes into the database or onto a
+command line. And Rumble publishes no rate limit, so polyemesis polls
+conservatively (ten seconds, backing off while chat is quiet) rather than as
+fast as the pane could use.
+
+**DLive** stays *unverified* rather than *unsupported*: its developer portal at
+`dev.dlive.tv` no longer resolves in DNS, which tells us nothing about what the
+API can do. Streaming to it works today with a pasted URL and key.
 
 ---
 
