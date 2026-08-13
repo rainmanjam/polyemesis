@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,71 @@ func TestEngineFailsOpenThroughToTheVerdict(t *testing.T) {
 	}
 	if len(v.Act) != 0 {
 		t.Fatalf("the engine would act despite a failed check: %+v", v.Act)
+	}
+}
+
+// ------------------------------------------------- the endpoint's own key
+
+// A transport failure must not carry the endpoint's credential out with it.
+//
+// Found by scripts/acceptance-automod.sh, which pointed the connector at a real
+// host on a closed port with a sentinel in the query string and read back what
+// the operator would see. Both surfaces had it verbatim: the error handed to
+// internal/chat, which writes it to server.log once per message for as long as
+// the endpoint is down, and ModelStats.LastError, which is the spend panel.
+//
+// The endpoint is free text an operator pastes, and internal/api's redact.go
+// already masks it out of GET /settings for exactly this reason -- a proxied or
+// self-hosted inference endpoint most often arrives as
+// .../chat/completions?api_key=sk-..., and a key in a query string is still a
+// key. That reasoning had been applied to the settings blob and nowhere else.
+// This is #310's shape a second time: a refused far end writing a credential to
+// the log on every attempt.
+//
+// Proven able to fail against the committed tree by making redactEndpoint
+// return its argument unchanged.
+func TestATransportFailureDoesNotCarryTheEndpointsCredential(t *testing.T) {
+	const sentinel = "sk-sentinel-must-not-be-logged"
+
+	// A server started and immediately closed, so the port is a real port that
+	// really refuses. A hostname that does not resolve would fail earlier, in
+	// the resolver, and would not exercise the same wrapping.
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	endpoint := srv.URL + "/v1/chat/completions?api_key=" + sentinel
+	srv.Close()
+
+	cfg := DefaultModelConfig()
+	cfg.Enabled = true
+	cfg.Endpoint = endpoint
+	m := NewModel(cfg)
+
+	findings, err := m.Check(context.Background(), "synthetic text, never a real message")
+	if err == nil {
+		t.Fatal("the connection was not refused; this test measured nothing")
+	}
+	if len(findings) != 0 {
+		t.Fatalf("a refused connection produced findings: %+v", findings)
+	}
+
+	// The vacuity guard. Every assertion below is "the sentinel is absent", and
+	// all of them would hold if the request had never been built, if the
+	// endpoint had been dropped on the floor, or if the error had come back
+	// empty. So: the sentinel was really in what we configured, and the error
+	// still names the host it failed to reach.
+	if !strings.Contains(endpoint, sentinel) {
+		t.Fatal("the fixture endpoint has no sentinel in it")
+	}
+	host := strings.TrimPrefix(srv.URL, "http://")
+	if !strings.Contains(err.Error(), host) {
+		t.Fatalf("the error does not name the endpoint that failed, so an operator "+
+			"cannot tell which one stopped answering: %v", err)
+	}
+
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("the endpoint's key is in the error internal/chat logs: %v", err)
+	}
+	if got := m.Stats().LastError; strings.Contains(got, sentinel) {
+		t.Fatalf("the endpoint's key is in ModelStats.LastError, which the spend panel shows: %q", got)
 	}
 }
 

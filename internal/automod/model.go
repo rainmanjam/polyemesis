@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 )
 
 // The model checker: an external API, asked only about what the first two
@@ -194,7 +198,14 @@ func (m *Model) record(err error) {
 	if err != nil {
 		m.failures++
 		// The message only. An API error can echo the request, and the request
-		// carries a chat message; the key is never in it either way.
+		// carries a chat message.
+		//
+		// This line used to add "the key is never in it either way", and that
+		// was wrong twice over. The sealed key is not in it, true -- but the
+		// ENDPOINT was, verbatim, because net/http puts the request URL in
+		// *url.Error, and the endpoint is free text an operator pasted that
+		// commonly carries ?api_key=. redactEndpoint is what makes the sentence
+		// true; without it this field is a credential.
 		m.lastErr = err.Error()
 	}
 }
@@ -237,7 +248,7 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.cfg.Endpoint, bytes.NewReader(buf))
 	if err != nil {
-		return modelVerdict{}, err
+		return modelVerdict{}, redactEndpoint(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if m.cfg.APIKey != "" {
@@ -246,7 +257,7 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return modelVerdict{}, err
+		return modelVerdict{}, redactEndpoint(err)
 	}
 	defer resp.Body.Close()
 
@@ -279,6 +290,44 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 		return modelVerdict{}, fmt.Errorf("model verdict was not the requested JSON: %w", err)
 	}
 	return v, nil
+}
+
+// redactEndpoint takes the operator's endpoint back out of a transport error.
+//
+// net/http wraps a failed request in *url.Error, whose message is the request
+// URL verbatim -- and this URL is free text an operator pasted into a settings
+// field. internal/api's redact.go already masks automod.model.endpoint out of
+// GET /settings, for a reason stated there at length: a self-hosted or proxied
+// inference endpoint most often arrives as
+// https://host/v1/chat/completions?api_key=sk-..., and a key in a query string
+// is still a key. That reasoning was applied to the settings blob and stopped
+// there.
+//
+// The same string leaves through here on every failed call: into
+// ModelStats.LastError, which is what the operator's spend panel shows, and
+// into internal/chat's fail-open warning, which is written once per message for
+// as long as the endpoint is unreachable. #310 was that exact shape -- a
+// refused destination wrote its stream key to server.log on every retry -- and
+// the fail-open contract makes this one noisier, because a model that cannot be
+// reached is retried on the next message rather than backed off.
+//
+// Structural rather than lexical: the URL is masked AS a URL, by the same
+// function that masks it for the settings endpoint, so the two cannot come to
+// different conclusions about what counts as a credential.
+func redactEndpoint(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	// A new value rather than a mutation. Both call sites hand us the error
+	// net/http built, unwrapped, so nothing is lost by rebuilding it -- and
+	// editing an error somebody else may still hold is not ours to do.
+	//
+	// The host survives on purpose. An operator whose moderation has quietly
+	// stopped needs to know WHICH endpoint stopped answering, and an error that
+	// said only "the request failed" would trade one silent failure for
+	// another.
+	return &url.Error{Op: ue.Op, URL: alerts.RedactURL(ue.URL), Err: ue.Err}
 }
 
 func (m *Model) systemPrompt() string {
