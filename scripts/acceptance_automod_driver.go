@@ -36,7 +36,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -148,11 +147,12 @@ func modelFor(tweak func(*automod.ModelConfig)) *automod.Model {
 // wrong.host.badssl.com, which now fail the certificate check while still
 // reporting a successful dial.
 //
-// InsecureSkipVerify is safe HERE and nowhere else in this repo: nothing is
-// ever sent over this connection. It is opened to read the chain, the chain is
-// then verified against the system roots by hand, and the socket is closed. The
-// connector's own requests go through net/http with ordinary verification --
-// this function does not build, configure or hand off a client.
+// NOTHING HERE SKIPS VERIFICATION. An earlier draft did, so that a bad
+// certificate could be told from an unreachable host, and re-ran the x509
+// checks by hand afterwards. The distinction was worth keeping and the method
+// was not: it tested a connection the product never opens, and kept a second
+// copy of a verification crypto/tls already performs. The error type carries
+// the same distinction -- see the comment inside reach().
 //
 // A plain-http endpoint is the SUPPORTED case rather than an error: model.go
 // says the local deployment is what this feature is built for, and Ollama on
@@ -177,17 +177,46 @@ func reach() {
 	if port == "" {
 		port = "443"
 	}
+	// VERIFICATION STAYS ON, and the distinction comes from the ERROR TYPE.
+	//
+	// This dialled with InsecureSkipVerify and re-ran x509 verification by hand,
+	// to tell "unreachable" from "reachable with a bad certificate" -- a real
+	// distinction, because an operator debugging one is not debugging the other.
+	// But it bought that distinction by testing a connection the product never
+	// makes, and by reimplementing a verification crypto/tls already does. Two
+	// copies of that logic drift, and the hand-rolled one is the copy nobody
+	// maintains.
+	//
+	// A verified dial gives the same three answers, because a certificate
+	// failure has its own error type:
+	//
+	//	dial succeeds                          -> reachable, certificate good
+	//	fails as CertificateVerificationError  -> reachable, certificate bad
+	//	fails otherwise                        -> not reachable
+	//
+	// Same information, one implementation, and the connection under test is the
+	// one net/http would open.
 	start := time.Now()
 	d := &tls.Dialer{Config: &tls.Config{
-		ServerName:         u.Hostname(),
-		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: true, // verified below, by hand -- see the comment
+		ServerName: u.Hostname(),
+		MinVersion: tls.VersionTLS12,
 	}}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	conn, err := d.DialContext(ctx, "tcp", u.Hostname()+":"+port)
 	if err != nil {
+		var certErr *tls.CertificateVerificationError
+		if errors.As(err, &certErr) {
+			// The TCP connection was made and the handshake got far enough to
+			// present a certificate, so the host is reachable and its
+			// certificate is what failed.
+			emit("reached", true)
+			emit("nameOK", false)
+			emit("certError", err.Error())
+			emit("dialMs", time.Since(start).Milliseconds())
+			return
+		}
 		emit("reached", false)
 		emit("error", err.Error())
 		return
@@ -199,30 +228,17 @@ func reach() {
 	emit("tlsVersion", tlsName(st.Version))
 	emit("chainLen", len(st.PeerCertificates))
 	emit("dialMs", time.Since(start).Milliseconds())
-	if len(st.PeerCertificates) == 0 {
-		emit("nameOK", false)
-		return
-	}
-	leaf := st.PeerCertificates[0]
-
-	// The verification net/http would have done: chain to a system root, valid
-	// for this hostname, valid now. Intermediates the server sent go in as
-	// candidates, which is what crypto/tls does internally.
-	pool := x509.NewCertPool()
-	for _, c := range st.PeerCertificates[1:] {
-		pool.AddCert(c)
-	}
-	_, verr := leaf.Verify(x509.VerifyOptions{
-		DNSName:       u.Hostname(),
-		Intermediates: pool,
-	})
-	emit("nameOK", verr == nil)
-	if verr != nil {
-		emit("certError", verr.Error())
-	}
+	// Reaching here means crypto/tls verified the chain, the hostname and the
+	// validity window against the system roots. Emitted as its own field rather
+	// than inferred from `reached`, so the check that reads it says what it
+	// means.
+	emit("nameOK", true)
 	// Days remaining, so a suite can warn before an expiry becomes an outage
-	// rather than after.
-	emit("certDaysLeft", int(time.Until(leaf.NotAfter).Hours()/24))
+	// rather than after. Read from the verified chain rather than a separately
+	// fetched copy: this is the certificate the connection actually used.
+	if len(st.PeerCertificates) > 0 {
+		emit("certDaysLeft", int(time.Until(st.PeerCertificates[0].NotAfter).Hours()/24))
+	}
 }
 
 func tlsName(v uint16) string {
