@@ -331,6 +331,23 @@ jobs:
       - run: ./scripts/test-obs-stop.sh
         timeout-minutes: 6
 
+      # Outbound webhooks over a real socket. IN THIS JOB RATHER THAN THE
+      # acceptance MATRIX, because it needs neither FFmpeg nor `make build` --
+      # the far end is an http.Server the driver starts on a loopback port, so
+      # Go alone is the whole dependency and the suite finishes in about 20
+      # seconds. Scheduling it beside the FFmpeg suites would cost a six-minute
+      # apt step to test a package that never touches FFmpeg.
+      #
+      # ON EVERY PUSH RATHER THAN WEEKLY, which is the opposite of chat-live.yml
+      # and for the reason that workflow gives for its own schedule: that suite
+      # measures THEIR behaviour, so its failures arrive with no commit of ours.
+      # This one measures OURS, contacts nothing outside the runner, and has
+      # nothing to be flaky about. Its credentialed step skips here; no
+      # POLY_HOOKS_URL is configured for this workflow and none is needed --
+      # 29 of its 31 checks run without one.
+      - run: ./scripts/acceptance-hooks.sh
+        timeout-minutes: 6
+
       # The acceptance suites' shared teardown. Same argument as the guard
       # above, and a sharper one: this teardown was silently leaking the ingest
       # port on every run, which made acceptance-failover fail 10 times out of

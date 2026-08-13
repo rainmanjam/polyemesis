@@ -63,10 +63,25 @@ identical and be harder to see, because no operator typed anything.
 
 ### 4. Automod — 2,454 lines, 2 external hosts
 
-### 5. Hooks — 2,150 lines, outbound webhooks
+### 5. Hooks — 2,150 lines, outbound webhooks — **CLOSED**
 
 Cheapest of all to test: it needs a listener we control, not a platform
 account. No credentials, no rate limits, no account state.
+
+Closed by `scripts/acceptance-hooks.sh`. The prediction above was right about
+the cost and wrong about the reason it was worth doing. The interesting gap
+turned out not to be "no socket" but "no `*url.Error`": the package's unit
+tests all pass a `WithDoer` that returns a hand-built response, so the one
+string that has ever leaked a webhook credential in this codebase — net/http's
+`Post "https://host/PATH-IS-THE-SECRET": dial tcp ...` — was a string no test
+had ever constructed, and the whole three-pass scrub in `dispatch.go` existed
+for an input nothing had fed it. `WithSleep` had the same shape: the retry test
+stubs the wait out, so `backoffBase` could have been a nanosecond.
+
+31 checks, 29 of which need nothing outside the machine, wired into the `go`
+job in `ci.yml`. No defect found — every scrub, both layers of it, holds
+against real transport errors, and the backoff is the documented 1s then 2s on
+a wall clock.
 
 ### Not in this list
 
@@ -88,7 +103,8 @@ credential-free Twitch IRC refusal check does not.
 
 ## Recommended order
 
-1. **Chat, refusal-only** — no credentials, largest untested surface, technique
-   already proven in this repo.
-2. **Hooks** — no credentials, self-contained.
+1. ~~**Chat, refusal-only**~~ — done, `scripts/acceptance-chat.sh`.
+2. ~~**Hooks**~~ — done, `scripts/acceptance-hooks.sh`.
 3. **Chat, authenticated** and **OAuth refresh** — once an account is connected.
+4. **Transcribe** and **Automod**, still untouched, and both still need a
+   credential before the interesting half of either is reachable.

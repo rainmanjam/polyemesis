@@ -425,6 +425,30 @@ argv, log and artifact. See issue #141 for why the question it asks is
 "does each destination receive ITS mix" rather than "does a platform accept two
 audio tracks".
 
+Two more do **not** drive the built binary and need no `make build`. They drive
+one package against a socket, which is the gap `docs/notes/live-test-coverage-
+gaps.md` ranks: seventeen suites, and until these were written exactly one of
+them talked to anything outside the process.
+
+```bash
+./scripts/acceptance-chat.sh         # the real Twitch and Kick, no credentials for 15 of 17 checks
+./scripts/acceptance-hooks.sh        # outbound webhooks, against a listener the driver starts
+```
+
+`acceptance-hooks.sh` is the cheapest of the class and the only one with no
+external dependency at all: the far end is an `http.Server` the driver starts on
+a loopback port, so it runs anywhere, every time, in about twenty seconds, and
+it is wired into the `go` job rather than the acceptance matrix because it needs
+neither FFmpeg nor a built binary. What it measures that `go test
+./internal/hooks/` cannot is everything the package's `WithDoer`, `WithSleep`
+and `WithClock` options define out of existence — a real `*url.Error` carrying
+the endpoint URL, backoff on a wall clock, and the exact bytes an independent
+HTTP server received. Its step 9 posts to a real remote endpoint and skips
+without one; `POLY_HOOKS_URL` is a credential in its own right (a webhook URL
+carries its secret in the path), so it comes from the environment only and
+nothing derived from it is ever printed — not the URL, not the host, not the
+endpoint's reply.
+
 Against the shipped container — these build the image and are the ones CI runs
 only on `main` and on a schedule:
 
