@@ -146,11 +146,13 @@ func TestNamingTheSameMixTwiceDoesNotBuildATwoTrackCommand(t *testing.T) {
 // newer build wrote, because a row nobody validated would start a process
 // nobody designed.
 //
-// Proven able to fail against the committed tree by deleting `|| s.Kind ==
-// DestAudio` from secondAudioMap's first guard: the audio-only case fails with
-// two maps. Removing the early `if s.CopyAudio` return in DestinationArgs is not
-// the mutation for the copy case -- copyAudioArgs never calls secondAudioMap, so
-// the copy case is structural and is asserted here to keep it that way.
+// Proven able to fail against the committed tree twice, once per arm. Deleting
+// `|| s.Kind == DestAudio` from secondAudioMap's first guard fails the
+// audio-only arm with "an audio-only destination built a second audio track".
+// Adding `args = append(args, secondAudioMap(s)...)` to copyAudioArgs after its
+// track loop -- the obvious way somebody would extend this feature to the copy
+// path -- fails the copy arm with "a copy destination mapped a filter graph it
+// does not have", the graph FFmpeg would then refuse to bind.
 func TestTheSecondMixIsIgnoredWhereThereIsNoSecondTrackToCarryIt(t *testing.T) {
 	audio := twoMixSpec("icecast://source:pw@a.example:8000/live.mp3", "0:a:0", "0:a:1")
 	audio.Kind = DestAudio
