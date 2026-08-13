@@ -52,6 +52,17 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"rumble sign-in is unverified, not refused", "rumble", CapSSO, SupportUnknown,
 			"the API sits behind a login wall; undocumented is not the same as absent"},
 		{"rumble key is pasted", "rumble", CapStreamKey, SupportManual, "Rumble Studio issues both fields"},
+		// Rumble's chat came from the live-stream API, which is a different
+		// surface from the account API page the row used to be written about.
+		{"rumble chat is read", "rumble", CapChatRead, SupportYes,
+			"the live-stream API carries chat and is keyed from the operator's own settings, not a partner programme"},
+		// The half of that row that did NOT move, and the more important half to
+		// pin: shipping chat read is not evidence about sending, and this row
+		// must not drift into a yes because the platform now feels integrated.
+		{"rumble chat send stays unverified rather than becoming a refusal", "rumble", CapChatSend, SupportUnknown,
+			"get-data returns data; no send endpoint is published, which is not the same as one being known absent"},
+		{"rumble moderation stays unverified", "rumble", CapModeration, SupportUnknown,
+			"nothing was checked either way, and a wrong 'no' becomes a refusal an operator cannot argue with"},
 
 		{"dlive sign-in is unverified, not refused", "dlive", CapSSO, SupportUnknown,
 			"the developer portal does not resolve, which tells us nothing about the API itself"},
@@ -159,6 +170,11 @@ func TestCapabilityForPlatformResolvesIntegratedPlatformsOnly(t *testing.T) {
 		// Facebook became a real Platform once it had integration code behind
 		// it; the matrix must resolve it like the other three.
 		{"facebook", db.PlatformFacebook, true, "facebook"},
+		// Rumble resolves for CHAT while its stream key is still pasted by
+		// hand, which is the first time those two have come apart. The row has
+		// to be reachable by platform or a chat message stamped
+		// db.PlatformRumble describes nothing.
+		{"rumble", db.PlatformRumble, true, "rumble"},
 		{"custom has no platform capabilities", db.PlatformCustom, false, ""},
 		{"empty platform has no row", db.Platform(""), false, ""},
 	}

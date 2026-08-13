@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -100,7 +101,58 @@ func (s *Server) StartChat(ctx context.Context) int {
 		}
 		attached++
 	}
+
+	// Rumble hangs off no account row, so it cannot come out of the loop above.
+	// See attachRumble.
+	if s.attachRumble(ctx) {
+		attached++
+	}
 	return attached
+}
+
+// attachRumble connects Rumble chat when a key is present in the environment,
+// and reports whether it did.
+//
+// SEPARATE FROM chatAdapter ON PURPOSE, because Rumble is the first platform
+// here that does not fit the account model at all. The other four are rows in
+// platform_accounts with an OAuth token behind them; Rumble's live-stream API
+// has no sign-in to produce such a row, only a key the operator copies out of
+// their own settings page. Threading a fake account row through the store so it
+// could ride the loop above would put a credential in the database that nothing
+// can refresh, revoke or expire -- so the key stays in the process environment
+// and never touches disk.
+//
+// An absent key is SILENT and is not an error. Rumble chat is opt-in, and every
+// install that has not set the variable would otherwise get a startup warning
+// about a platform they have never heard of.
+func (s *Server) attachRumble(ctx context.Context) bool {
+	// os.Getenv is the ONLY path that touches this value. Never a flag: argv is
+	// world-readable in ps, and a key every local user can read has leaked. See
+	// chat.RumbleChatKeyEnv.
+	key := strings.TrimSpace(os.Getenv(chat.RumbleChatKeyEnv))
+	if key == "" {
+		return false
+	}
+
+	adapter, err := chat.NewRumble(chat.RumbleConfig{
+		// There is no account id to use, and the ref travels on every message
+		// to keep two accounts on one platform distinguishable. Rumble can only
+		// ever have one here, because there is only one environment variable.
+		AccountRef: "rumble",
+		Channel:    strings.TrimSpace(os.Getenv("RUMBLE_CHAT_CHANNEL")),
+		Key:        key,
+	})
+	if err != nil {
+		// The error names the variable, never its value -- chat.NewRumble is
+		// written so it cannot do otherwise.
+		s.log.Info("chat: not connecting Rumble", "reason", err)
+		return false
+	}
+	if err := s.chat.Attach(ctx, adapter); err != nil {
+		s.log.Warn("chat: could not attach", "platform", db.PlatformRumble, "err", err)
+		return false
+	}
+	return true
 }
 
 // chatToken is the closure every adapter refreshes through. It goes back to the
