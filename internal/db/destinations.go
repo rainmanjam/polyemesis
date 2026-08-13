@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rainmanjam/polyemesis/internal/services"
 	"net/url"
 	"strings"
 	"time"
@@ -685,6 +686,48 @@ const keyUnreadableReason = "the stream key could not be read on this machine â€
 	"re-enter it to enable this destination"
 
 // sealStreamKey splits a stream key into the pair of columns that store it:
+// Warning is one advisory finding about a destination: something that will
+// probably not work, reported without refusing it. Separate from Validate's
+// errors on purpose -- Validate refuses, and refusal has to stay narrow enough
+// that it is never wrong.
+type Warning struct {
+	Field  string `json:"field"`
+	Detail string `json:"detail"`
+	// Fix is a corrected value when one can be derived, offered rather than
+	// applied. Silently rewriting what somebody typed produces a bug report
+	// that says "it changed my URL".
+	Fix string `json:"fix,omitempty"`
+}
+
+// Warnings reports what the platform registry knows that this destination
+// appears to contradict. Empty for a well-formed destination, and empty for a
+// custom one, since the registry has no opinion about an endpoint it has never
+// heard of.
+//
+// WHAT IT DOES NOT CHECK, stated so the gap is not mistaken for a pass: video
+// bitrate, resolution and frame rate belong to the rendition, not to the
+// destination, so the ceilings services.CheckEncoder can compare against them
+// are not reachable from here. Only the audio bitrate and the URL are.
+func (d Destination) Warnings() []Warning {
+	var out []Warning
+	for _, p := range services.AnalyseURL(d.URL) {
+		out = append(out, Warning{Field: p.Field, Detail: p.Detail, Fix: p.Fix})
+	}
+	// A destination with no registry entry -- "custom", or a platform we do
+	// not carry -- gets no encoder opinion rather than a default one.
+	if svc, ok := services.Lookup(string(d.Platform)); ok {
+		for _, p := range services.CheckEncoder(svc, d.AudioBitrate, 0, 0) {
+			out = append(out, Warning{Field: p.Field, Detail: p.Detail})
+		}
+		if svc.PerChannelIngest && svc.Note != "" && len(out) > 0 {
+			// Only alongside another finding: the note explains how to fix a
+			// URL, and on its own it is noise on every correct Kick setup.
+			out = append(out, Warning{Field: "url", Detail: svc.Note})
+		}
+	}
+	return out
+}
+
 // the ciphertext and the plaintext, of which exactly one is ever populated.
 //
 // With a box: ciphertext, and the plaintext column written EMPTY. Writing both

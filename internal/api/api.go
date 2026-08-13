@@ -555,6 +555,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Get("/tls", s.handleTLSStatus)
 
+			// The platform registry: ingest servers, encoder ceilings and
+			// codecs, so the operator picks "Twitch" instead of typing a URL.
+			// Static data, but authenticated like everything else here --
+			// there is no reason for an unauthenticated caller to enumerate
+			// what this install can publish to.
+			r.Get("/services", s.handleListServices)
+
 			r.Get("/destinations", s.handleListDestinations)
 			r.Post("/destinations", s.handleCreateDestination)
 			// chi matches the static segment ahead of {id}, so this does not

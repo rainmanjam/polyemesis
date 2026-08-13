@@ -1261,6 +1261,13 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Before the write, so what is stored is what the response describes.
 	warnings := s.dropUnsendableSettings(&row)
+	// What the platform registry knows and this destination contradicts --
+	// most often an RTMP URL with no application path, which the far end
+	// refuses by dropping the connection rather than by saying anything. The
+	// destination is still created: this is advice, and Validate owns refusal.
+	for _, w := range row.Warnings() {
+		warnings = append(warnings, w.Detail)
+	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
