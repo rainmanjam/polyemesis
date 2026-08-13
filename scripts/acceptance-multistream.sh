@@ -787,21 +787,51 @@ CTLFILES="$DBF"
 # suite a run; acceptance-docker.sh carries the same note about `docker logs`.
 if [ ! -f "$DBF" ]; then
   bad "no state database at $DBF; 8b searched an install that stored nothing"
+# THE ANCHOR IS A DESTINATION NAME, NOT THE KEY, and it changed because the
+# product changed underneath this control.
+#
+# It used to assert the KEY was findable here, on the reasoning that 8b's "found
+# nowhere" is worthless until the search is shown to find something. That
+# reasoning is right and the anchor was wrong: destination stream keys are now
+# sealed at rest with NaCl secretbox, so the plaintext key is DELIBERATELY absent
+# from this file. Run against a server carrying that change, this control failed
+# and correctly refused to let 8b be trusted -- it could not tell "the search is
+# broken" from "the product stopped storing this in the clear".
+#
+# A destination NAME is stored in the clear, and this suite knows what it wrote,
+# so it proves the file set, the encoding and the grep all work. Only then does
+# the key's absence mean what 8b needs it to mean.
+elif ! grep -q -F -f <(printf '%s\n' "twitch") $CTLFILES 2>/dev/null; then
+  bad "a destination name this suite created is not in the state database"
+  note "8b's 'no key found' cannot be trusted while this fails: the file set,"
+  note "the encoding or the grep is wrong, not the product."
 elif grep -q -F -f <(printf '%s\n' "$POLY_DRY_STREAM_KEY") $CTLFILES 2>/dev/null; then
-  ok "the key is in the state database and in no other file, so 8b's search works"
+  # A pass: the search demonstrably works, which is all 8b needs from it. That
+  # the key is also READABLE here is a separate finding and gets its own line
+  # rather than being folded into a control's verdict.
+  ok "8b's search works -- a destination name is findable in the state database"
+  note "FINDING: the stream key is ALSO present in plaintext, so this install is"
+  note "not sealing destination keys. Expected only on a build predating that."
 else
-  bad "the key is not in the state database either; 8b's search finds nothing anywhere"
-  note "8b's 'no key found' result cannot be trusted while this fails -- the"
-  note "pattern, the encoding or the file set is wrong, not the product."
+  ok "8b's search works, and the stream key is not in the state database at all"
+  note "the key is sealed at rest, and a name this suite wrote IS findable in the"
+  note "same files -- so the absence is the product's doing, not the search's."
 fi
 
 # A FINDING, REPORTED RATHER THAN JUDGED HERE.
 #
-# The database that 8c just confirmed holds every destination's stream key in
-# plaintext is created at SQLite's default mode. On this run that is 0644 inside
-# a 0755 data directory, and deploy/polyemesis.service sets no UMask, so a
-# packaged install puts every platform credential, the admin bcrypt hash and the
-# session secrets in a file every account on the host can read.
+# FIXED SINCE THIS WAS WRITTEN, and the note is kept because the reasoning is
+# what mattered. This suite's positive control read the state database to prove
+# its own search worked, and in doing so inventoried where the secret actually
+# lived: mode 0644 inside a 0755 data directory, with no UMask in
+# deploy/polyemesis.service -- every platform credential, the admin bcrypt hash
+# and the session secrets readable by every account on the host.
+#
+# That became issue #297. The database, its -wal and -shm sidecars and the data
+# directory are now narrowed at db.Open and in both deployment paths, and the
+# keys themselves are sealed with NaCl secretbox rather than stored in the clear.
+# What remains true, and is the reason this paragraph survives: a control that
+# keeps a negative honest also tells you where the secret really is.
 #
 # It is NOT this suite's verdict. acceptance-failover.sh set the precedent when
 # it found the relative --data fault: a suite does not get to change what it
