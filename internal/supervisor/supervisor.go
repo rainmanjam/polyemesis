@@ -250,6 +250,17 @@ type Process struct {
 	// invariant defended by nothing, and it could only be consulted after the
 	// escalator had already slept the whole grace period.
 	exited chan struct{}
+	// signalled records that THIS cmd has already been sent its SIGTERM, so a
+	// second terminate() for the same spawn is a no-op. Cleared where cmd is
+	// published, which makes it per-run exactly as `exited` is.
+	//
+	// It exists because terminate() acquired two callers the moment runOnce
+	// learned to honour a cancelled context: stop(), and the spawn itself. Both
+	// can reach it for one cmd, and a SECOND SIGTERM IS NOT FREE -- FFmpeg
+	// answers a repeated SIGTERM by exiting immediately instead of flushing,
+	// which turns the finalised recording the grace period exists to protect
+	// into a truncated one.
+	signalled bool
 
 	// escalators tracks terminate()'s grace goroutines. Each one is a live
 	// commitment to kill a process group, so something must be able to observe
@@ -781,7 +792,44 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.cmdMu.Lock()
 	p.cmd = cmd
 	p.exited = exited
+	p.signalled = false
 	p.cmdMu.Unlock()
+
+	// A STOP THAT LANDED WHILE THIS SPAWN WAS IN FLIGHT SIGNALLED NOTHING, and
+	// until this line nothing ever went back for it.
+	//
+	// Start() sets p.running under runMu and returns; p.cmd is not published
+	// until the two lines above. Between those two points stop() takes its
+	// `p.running` arm -- so it does NOT return early -- cancels this ctx, and
+	// calls terminate(), which finds p.cmd nil and returns having sent no
+	// signal and armed no escalator. `p.cmd == nil` means two different things
+	// there, "no child yet" and "the child is already reaped", and terminate()
+	// could not tell them apart. The child was then spawned BEHIND a stop that
+	// had already given up on it: exec.Command is not CommandContext, so the
+	// cancelled ctx kills nothing, cmd.Wait() below blocks on a child nobody
+	// has asked to leave, and stop() waits out its whole deadline before
+	// SIGKILLing on the way past. Measured window: a Stop landing 50µs to ~2ms
+	// after Start reproduced it 25 times out of 25.
+	//
+	// For the selector that is a twelve-second teardown -- issue #126's seam 6,
+	// whose predecessor's own 7.3s teardown pushed the next sweep to within a
+	// millisecond of the new feed's Start -- during which the outgoing feed
+	// keeps publishing into the same hub the replacement is about to join, with
+	// its timestamps advancing past the offset the replacement was already
+	// given. For a destination it is worse: SIGKILL without the SIGTERM that
+	// precedes it is FFmpeg's output never finalised, which is a recording that
+	// holds a header and nothing else.
+	//
+	// Checked AFTER the publish, and that ordering is the proof rather than a
+	// preference. stop() cancels before it calls terminate(), so a terminate()
+	// that saw nil ran after the cancel and before this publish -- which puts
+	// the cancel before this check, and this check therefore sees it. A
+	// terminate() that saw a non-nil cmd ran after the publish, signalled, and
+	// left p.signalled set, so the call below is the no-op it should be. There
+	// is no interleaving in which both fire and none in which neither does.
+	if ctx.Err() != nil {
+		p.terminate()
+	}
 
 	p.mu.Lock()
 	p.pid = cmd.Process.Pid
@@ -896,8 +944,16 @@ func (p *Process) defaultStdout(r io.Reader) error {
 func (p *Process) terminate() {
 	p.cmdMu.Lock()
 	cmd, exited := p.cmd, p.exited
+	// IDEMPOTENT PER SPAWN. Two callers reach this for one cmd -- stop(), and
+	// runOnce when it finds the ctx already cancelled -- and only one of them
+	// may signal, because FFmpeg answers a repeated SIGTERM by exiting without
+	// flushing.
+	already := p.signalled
+	if cmd != nil && cmd.Process != nil {
+		p.signalled = true
+	}
 	p.cmdMu.Unlock()
-	if cmd == nil || cmd.Process == nil {
+	if cmd == nil || cmd.Process == nil || already {
 		return
 	}
 	signalGroup(cmd)
