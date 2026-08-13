@@ -59,7 +59,40 @@ It also populates destination URLs and keys automatically — the exact field
 whose hand-typed equivalent produced #312. A composition bug here would look
 identical and be harder to see, because no operator typed anything.
 
-### 3. Transcribe — 7,661 lines, 2 external hosts
+### 3. Transcribe — 7,661 lines, 2 external hosts — DONE, and the ranking was wrong about why
+
+`scripts/acceptance-transcribe.sh` covers this now, but the entry above was
+misleading and the correction is worth keeping.
+
+The "2 external hosts" came from grepping for URLs. One of the two is a
+`github.com` link inside an error message that is never fetched. Transcription
+is **local** — a whisper.cpp binary and an ffmpeg command line — so the ranking
+metric, "has a real external far end", scored this package for the wrong
+reason and nearly produced a network-shaped suite for a local-shaped package.
+
+The untested surface was real, just a different shape: ten hardcoded claims
+about a Hugging Face repo (a name per model, from which a URL is composed, and
+a byte count that `VerifyModelFile` gates on), plus two argument builders that
+were pinned by exhaustive unit tests and had never been shown to ffmpeg or
+whisper.cpp.
+
+On its first run it found three defects, all in the #310/#312 class — each half
+individually correct, the composition wrong:
+
+- `ggmlMagic` was byte-reversed, so `looksLikeGGML` rejected every genuine
+  model: no download could succeed and `InstalledModels` hid hand-copied
+  models. Invisible offline because every test fixture is built with
+  `copy(buf, ggmlMagic)` — the same wrong constant.
+- The SHA-256 check compared against Hugging Face's **xetHash** rather than the
+  content hash, because the checksum is on the redirect and the CDN it points
+  at now sets a different-but-same-shaped hash. Every download was rejected.
+- whisper-cli exits **0** after refusing an argument list. `worker.go` treats a
+  zero exit as success, finds no JSON, falls back to stdout segments it never
+  got, and returns an empty transcript with a nil error. **Not fixed** — see
+  the PR.
+
+The lesson for the entries below: "external hosts" counts URLs, not
+dependencies. Read the package before choosing the shape of its suite.
 
 ### 4. Automod — 2,454 lines, 2 external hosts
 

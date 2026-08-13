@@ -53,9 +53,21 @@ const partSuffix = ".part"
 // gigabytes, and an operator on a slow connection is not an error.
 const downloadTimeout = 2 * time.Hour
 
-// ggmlMagic is the four bytes every ggml model starts with, little-endian
-// "lmgg" as written by the converter.
-var ggmlMagic = []byte{0x67, 0x67, 0x6d, 0x6c}
+// ggmlMagic is the four bytes every ggml model starts with.
+//
+// GGML_FILE_MAGIC is the uint32 0x67676d6c, and the converter writes it with a
+// plain fwrite of the integer — so what lands on disk is its LITTLE-ENDIAN
+// spelling, 6c 6d 67 67, which reads as "lmgg". Writing the bytes in the order
+// the constant is pronounced gives "ggml", which is the byte sequence no real
+// model has ever started with.
+//
+// That was this variable's value until scripts/acceptance-transcribe.sh
+// compared it against a model fetched from the real host. Every test in this
+// package builds its fixtures with `copy(buf, ggmlMagic)`, so the offline suite
+// agreed with itself perfectly while looksLikeGGML rejected every genuine
+// whisper.cpp model: downloads failed as "the server most likely returned an
+// error page", and InstalledModels hid models copied in by hand.
+var ggmlMagic = []byte{0x6c, 0x6d, 0x67, 0x67}
 
 // minModelBytes is a floor no real model is under. It exists to reject an error
 // page, not to validate a model; the real size check is Content-Length.
@@ -125,9 +137,41 @@ func (d *Downloader) Download(ctx context.Context, m Model, progress ProgressFun
 	if err != nil {
 		return DownloadResult{}, err
 	}
-	client := d.Client
-	if client == nil {
-		client = http.DefaultClient
+	base := d.Client
+	if base == nil {
+		base = http.DefaultClient
+	}
+	// The content hash is on the REDIRECT, not on the response we end up reading.
+	//
+	// huggingface.co answers with a 302 carrying X-Linked-Etag — the LFS object's
+	// SHA-256, which is what check 3 above is describing — and points at a CDN
+	// whose own response does not repeat it. Since Hugging Face moved to Xet
+	// storage that CDN sets a plain Etag holding the xetHash, a DIFFERENT hash of
+	// the same bytes that is also bare 64-hex and therefore also matches
+	// etagSHA256RE. Reading only the final response meant hashing the content
+	// with SHA-256 and comparing it to something that was never a SHA-256, so
+	// every model download failed as a checksum mismatch — the restrictive
+	// direction this file's opening comment says it will not fail in.
+	//
+	// Capturing it here rather than trusting the last hop is the fix: a redirect
+	// request carries the response that caused it, which is the only place the
+	// figure we can actually verify against appears.
+	var linkedETag string
+	client := *base // shallow copy: the caller's client must not grow our hook
+	prior := base.CheckRedirect
+	client.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		if linkedETag == "" && r.Response != nil {
+			linkedETag = strings.TrimSpace(r.Response.Header.Get("X-Linked-Etag"))
+		}
+		if prior != nil {
+			return prior(r, via)
+		}
+		// net/http's own default, restated because replacing CheckRedirect
+		// replaces that default along with it.
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -165,7 +209,7 @@ func (d *Downloader) Download(ctx context.Context, m Model, progress ProgressFun
 	}
 
 	res := DownloadResult{Path: final, Bytes: written, SHA1: hex.EncodeToString(sha1sum.Sum(nil))}
-	verified, err := verifyTransfer(tmp, m, written, total, resp.Header, sha1sum, sha256sum)
+	verified, err := verifyTransfer(tmp, m, written, total, linkedETag, resp.Header, sha1sum, sha256sum)
 	if err != nil {
 		os.Remove(tmp)
 		return DownloadResult{}, err
@@ -180,7 +224,7 @@ func (d *Downloader) Download(ctx context.Context, m Model, progress ProgressFun
 }
 
 // verifyTransfer runs the three checks and reports which one was strongest.
-func verifyTransfer(path string, m Model, written, promised int64, hdr http.Header, sha1sum, sha256sum hash.Hash) (string, error) {
+func verifyTransfer(path string, m Model, written, promised int64, linkedETag string, hdr http.Header, sha1sum, sha256sum hash.Hash) (string, error) {
 	if written < minModelBytes {
 		return "", fmt.Errorf("%w: %s is only %d bytes, which is not a model", ErrChecksum, m.Name, written)
 	}
@@ -192,7 +236,7 @@ func verifyTransfer(path string, m Model, written, promised int64, hdr http.Head
 		return "", fmt.Errorf("%w: %s is truncated — got %d bytes, the server promised %d",
 			ErrChecksum, m.Name, written, promised)
 	}
-	if want, ok := checksumFromHeaders(hdr); ok {
+	if want, ok := checksumForTransfer(linkedETag, hdr); ok {
 		if got := hex.EncodeToString(sha256sum.Sum(nil)); !strings.EqualFold(got, want) {
 			return "", fmt.Errorf("%w: %s hashed to %s, the server said %s", ErrChecksum, m.Name, got, want)
 		}
@@ -219,6 +263,23 @@ func verifyTransfer(path string, m Model, written, promised int64, hdr http.Head
 // short opaque one says nothing about the content and is ignored rather than
 // being misread as a checksum.
 var etagSHA256RE = regexp.MustCompile(`^"?([0-9a-fA-F]{64})"?$`)
+
+// checksumForTransfer picks the strongest content hash the transfer offered,
+// preferring the X-Linked-Etag carried on a redirect over anything the last hop
+// said.
+//
+// The order matters and is not a stylistic preference. A CDN's own Etag
+// describes the object however that CDN chooses to; Hugging Face's Xet storage
+// puts a xetHash there, which is bare 64-hex and so indistinguishable by shape
+// from the SHA-256 we are looking for. The redirect's X-Linked-Etag is the one
+// Hugging Face documents as the LFS object's SHA-256, so when it is present it
+// is the only figure worth comparing against.
+func checksumForTransfer(linkedETag string, hdr http.Header) (string, bool) {
+	if m := etagSHA256RE.FindStringSubmatch(strings.TrimSpace(linkedETag)); m != nil {
+		return strings.ToLower(m[1]), true
+	}
+	return checksumFromHeaders(hdr)
+}
 
 // checksumFromHeaders extracts a content SHA-256 the server has advertised.
 func checksumFromHeaders(h http.Header) (string, bool) {

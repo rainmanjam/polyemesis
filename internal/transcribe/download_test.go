@@ -16,6 +16,43 @@ import (
 // A truncated model does not fail to load — it produces fluent nonsense. These
 // tests are about making that failure loud.
 
+// TestTheGGMLMagicIsTheBytesOnDiskNotTheBytesInTheName pins the magic to a
+// literal, because every other test in this package builds its fixtures with
+// `copy(buf, ggmlMagic)` and would therefore agree with any value it held.
+//
+// That is not hypothetical. ggmlMagic shipped byte-reversed as {0x67, 0x67,
+// 0x6d, 0x6c} — the order the constant is pronounced, "ggml" — while a real
+// model begins 6c 6d 67 67, the little-endian spelling of the uint32
+// GGML_FILE_MAGIC (0x67676d6c) that the converter fwrites. looksLikeGGML
+// therefore rejected every genuine whisper.cpp model: Download failed claiming
+// "the server most likely returned an error page", and InstalledModels silently
+// skipped models copied in by hand. The whole offline suite stayed green
+// throughout, which is exactly why this test spells the bytes out.
+//
+// Proven able to fail against the committed tree by reversing ggmlMagic in
+// download.go back to []byte{0x67, 0x67, 0x6d, 0x6c}.
+func TestTheGGMLMagicIsTheBytesOnDiskNotTheBytesInTheName(t *testing.T) {
+	// Transcribed from the head of ggml-tiny.bin as served by Hugging Face, and
+	// deliberately not derived from anything in the package under test.
+	onDisk := []byte{0x6c, 0x6d, 0x67, 0x67}
+	if string(ggmlMagic) != string(onDisk) {
+		t.Fatalf("ggmlMagic = % x (%q), want % x (%q) — a real model starts with the little-endian "+
+			"spelling of GGML_FILE_MAGIC, so this value rejects every genuine model",
+			ggmlMagic, ggmlMagic, onDisk, onDisk)
+	}
+
+	// And the consequence, stated where it bites: the gate that decides whether
+	// a file is a model at all.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ggml-real.bin")
+	if err := os.WriteFile(path, append(onDisk, make([]byte, minModelBytes)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !looksLikeGGML(path) {
+		t.Fatal("looksLikeGGML rejected a file starting with the real on-disk magic")
+	}
+}
+
 // modelBody builds a plausible model payload: the ggml magic, then filler.
 func modelBody(n int) []byte {
 	buf := make([]byte, n)
