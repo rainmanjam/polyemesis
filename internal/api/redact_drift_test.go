@@ -83,6 +83,14 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.facebook.donateCharityId":           sPublic,
 	"destination.facebook.scheduledFor":              sPublic,
 	"destination.id":                                 sPublic,
+	// The reason a stream key could not be decrypted on this machine. sPublic
+	// despite sitting next to two sSecret leaves and despite the word "key"
+	// being in it: it is a fixed instruction to the operator -- re-enter the
+	// key -- and carries no part of the credential, not the plaintext, not the
+	// ciphertext and not the failure's own text. Masking it would blank the
+	// only explanation a flagged destination has, in the read-safe views that
+	// are exactly where somebody debugging one would look.
+	"destination.keyUnreadable":                      sPublic,
 	"destination.kind":                               sPublic,
 	"destination.name":                               sPublic,
 	"destination.platform":                           sPublic,

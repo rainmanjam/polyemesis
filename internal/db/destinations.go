@@ -74,6 +74,27 @@ type Destination struct {
 	// destination is. Nothing but Facebook populates them today.
 	BackupURL       string `json:"backupUrl,omitempty"`
 	BackupStreamKey string `json:"backupStreamKey,omitempty"`
+	// KeyUnreadable is the reason this destination's stored stream key could
+	// not be decrypted on this machine, empty for every destination whose key
+	// was read normally -- which is all of them on a healthy install.
+	//
+	// It is set by scanDestination and NEVER by a column: it is a fact about
+	// this process's key file, not about the row, so it must be recomputed on
+	// every read rather than remembered. Restore the right key file and it
+	// goes away by itself, with no repair step and nothing to un-set.
+	//
+	// WHEN IT IS SET, StreamKey AND BackupStreamKey ARE EMPTY AND Enabled IS
+	// FALSE. That is the whole point: an unopenable ciphertext means the key
+	// this destination would publish with is not knowable, and the alternative
+	// to refusing is FFmpeg connecting to somebody's ingest with an empty key.
+	// A destination that silently stops going out is a bad afternoon; a
+	// destination that goes out wrong is a broadcast on the wrong channel or a
+	// rejected connection nobody can explain.
+	//
+	// The row itself is not touched. enabled is still 1 in the database, so
+	// this is reversible by restoring the key file rather than by re-enabling
+	// twenty destinations by hand.
+	KeyUnreadable string `json:"keyUnreadable,omitempty"`
 	// BackupIngestWanted is the operator's intent: "publish a redundant feed
 	// for this destination". It sits here, beside the endpoint it gates, for
 	// the reason stated directly above -- it used to live in FacebookSettings,
@@ -585,12 +606,84 @@ func (d Destination) Validate() error {
 	return nil
 }
 
-func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
+// ErrKeyUnreadable is the sentinel behind Destination.KeyUnreadable.
+//
+// Deliberately never returned to a caller of ListDestinations or
+// GetDestination: a destination whose key will not open must still appear, with
+// its name and platform and everything else intact, or an operator whose key
+// file went missing opens the dashboard to an empty page and a 500. It is an
+// error type only so openStreamKey has one thing to return and scanDestination
+// has one thing to match on.
+var ErrKeyUnreadable = errors.New("the stream key could not be read on this machine")
+
+// keyUnreadableReason is what the operator is shown. It names the fix, because
+// "decryption failed" tells somebody staring at a dead destination nothing they
+// can act on, and the fix really is this small: type the key in again.
+const keyUnreadableReason = "the stream key could not be read on this machine — " +
+	"re-enter it to enable this destination"
+
+// sealStreamKey splits a stream key into the pair of columns that store it:
+// the ciphertext and the plaintext, of which exactly one is ever populated.
+//
+// With a box: ciphertext, and the plaintext column written EMPTY. Writing both
+// would make the plaintext column the answer to "where is the stream key",
+// which is the thing this whole change exists to stop -- a leaked database
+// would still be a leaked set of live credentials, and the encryption would be
+// decoration.
+//
+// Without a box: no ciphertext and the plaintext, which is what every install
+// did before this existed.
+func (d *DB) sealStreamKey(key string) (enc []byte, plain string, err error) {
+	if d.box == nil {
+		return nil, key, nil
+	}
+	enc, err = d.box.Seal(key)
+	if err != nil {
+		return nil, "", err
+	}
+	return enc, "", nil
+}
+
+// openStreamKey is sealStreamKey's inverse, and the fallback in the middle of
+// it is what lets an install upgrade without a flag day.
+//
+// PREFER THE CIPHERTEXT, FALL BACK TO THE PLAINTEXT. A row written by the
+// previous release has bytes in the plaintext column and nothing in the sealed
+// one, and it has to keep working from the first read after the upgrade --
+// before the backfill has run, in fact, because Open backfills and then
+// something reads, and a crash in between must not lose a destination.
+//
+// The empty ciphertext is not a special case that needs a flag beside it:
+// Seal("") returns no bytes, so a destination with no stream key at all (every
+// file destination, every SRT one) reads back through the same fallback as a
+// pre-upgrade row and gets the same empty string either way.
+func (d *DB) openStreamKey(enc []byte, plain string) (string, error) {
+	if len(enc) == 0 {
+		return plain, nil
+	}
+	if d.box == nil {
+		// Sealed bytes and no key to open them with. This is the same failure
+		// as a wrong key, reached by a different route -- an install that had
+		// encryption configured and no longer does -- and it fails the same
+		// way rather than falling back to the plaintext column, which is blank
+		// for exactly these rows and would publish an empty key.
+		return "", ErrKeyUnreadable
+	}
+	out, err := d.box.Open(enc)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrKeyUnreadable, err)
+	}
+	return out, nil
+}
+
+func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 	var (
-		d          Destination
+		dst        Destination
 		acct       sql.NullInt64
 		rendition  sql.NullInt64
 		source     sql.NullInt64
+		streamEnc  []byte
+		backupEnc  []byte
 		profileRaw string
 		// Defaulted to "{}" so a row written before the column existed decodes
 		// to a zero Compliance -- touch nothing -- rather than failing the scan.
@@ -601,32 +694,55 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		created      int64
 		updated      int64
 	)
-	err := s.Scan(&d.ID, &d.Name, &d.Kind, &d.Platform, &acct, &d.URL, &d.StreamKey,
-		&d.BackupURL, &d.BackupStreamKey, &d.BackupIngestWanted,
-		&d.Enabled, &d.AudioBitrate, &profileRaw, &rendition, &source,
-		&d.ExtraInputArgs, &d.ExtraOutputArgs, &d.ExpertAckReencode,
-		&d.Transport.NoDurationFilesize, &d.Transport.MuxQueuePackets,
-		&d.Transport.MuxQueueBytes, &d.Transport.RWTimeoutSeconds,
-		&d.Resilience.MinBackoffSeconds, &d.Resilience.MaxBackoffSeconds,
-		&d.Resilience.GiveUpAfter,
-		&d.Audio.Codec, &d.Audio.Mono, &d.Audio.Copy, &complianceJSON, &facebookJSON,
-		&d.Position, &created, &updated)
+	err := s.Scan(&dst.ID, &dst.Name, &dst.Kind, &dst.Platform, &acct, &dst.URL,
+		&dst.StreamKey, &streamEnc,
+		&dst.BackupURL, &dst.BackupStreamKey, &backupEnc, &dst.BackupIngestWanted,
+		&dst.Enabled, &dst.AudioBitrate, &profileRaw, &rendition, &source,
+		&dst.ExtraInputArgs, &dst.ExtraOutputArgs, &dst.ExpertAckReencode,
+		&dst.Transport.NoDurationFilesize, &dst.Transport.MuxQueuePackets,
+		&dst.Transport.MuxQueueBytes, &dst.Transport.RWTimeoutSeconds,
+		&dst.Resilience.MinBackoffSeconds, &dst.Resilience.MaxBackoffSeconds,
+		&dst.Resilience.GiveUpAfter,
+		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
+		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
+	// THE FAIL-CLOSED POINT, and it is here rather than in the four methods
+	// above it because here is the only place every read passes through.
+	//
+	// Both keys are decided together and one failure condemns both: they are
+	// two halves of one destination's credentials, sealed with the same key at
+	// the same moment, so a box that cannot open one cannot be trusted with the
+	// other. Refusing the pair also means the operator is told once, about the
+	// destination, instead of twice about columns they never think of
+	// separately.
+	primary, perr := d.openStreamKey(streamEnc, dst.StreamKey)
+	backup, berr := d.openStreamKey(backupEnc, dst.BackupStreamKey)
+	switch {
+	case perr != nil || berr != nil:
+		// NOT returned as an error. See ErrKeyUnreadable: the row still has to
+		// be listed, or a lost key file is a dashboard that will not load
+		// rather than a destination that says what is wrong with it.
+		dst.StreamKey, dst.BackupStreamKey = "", ""
+		dst.Enabled = false
+		dst.KeyUnreadable = keyUnreadableReason
+	default:
+		dst.StreamKey, dst.BackupStreamKey = primary, backup
+	}
 	if acct.Valid {
 		v := acct.Int64
-		d.AccountID = &v
+		dst.AccountID = &v
 	}
 	// NULL stays nil: that is passthrough, which is what every destination
 	// created before renditions existed reads back as.
 	if rendition.Valid {
 		v := rendition.Int64
-		d.RenditionID = &v
+		dst.RenditionID = &v
 	}
 	if source.Valid {
 		v := source.Int64
-		d.SourceID = &v
+		dst.SourceID = &v
 	} else {
 		// A NULL source_id is a row that no reconciler will ever start: it
 		// belongs to no programme, so nothing lists it as work to do. It is
@@ -638,28 +754,29 @@ func scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 		// reaching this means the database was edited by hand or a migration
 		// half-finished -- both worth failing loudly over.
 		return nil, fmt.Errorf("destination %d has no source: it belongs to no "+
-			"programme and would never be started", d.ID)
+			"programme and would never be started", dst.ID)
 	}
 	if complianceJSON != "" {
-		if err := json.Unmarshal([]byte(complianceJSON), &d.Compliance); err != nil {
-			return nil, fmt.Errorf("destination %d has unreadable compliance metadata: %w", d.ID, err)
+		if err := json.Unmarshal([]byte(complianceJSON), &dst.Compliance); err != nil {
+			return nil, fmt.Errorf("destination %d has unreadable compliance metadata: %w", dst.ID, err)
 		}
 	}
 	if facebookJSON != "" {
-		if err := json.Unmarshal([]byte(facebookJSON), &d.Facebook); err != nil {
-			return nil, fmt.Errorf("destination %d has unreadable Facebook settings: %w", d.ID, err)
+		if err := json.Unmarshal([]byte(facebookJSON), &dst.Facebook); err != nil {
+			return nil, fmt.Errorf("destination %d has unreadable Facebook settings: %w", dst.ID, err)
 		}
 	}
-	if err := json.Unmarshal([]byte(profileRaw), &d.Profile); err != nil {
-		return nil, fmt.Errorf("destination %d: decode routing profile: %w", d.ID, err)
+	if err := json.Unmarshal([]byte(profileRaw), &dst.Profile); err != nil {
+		return nil, fmt.Errorf("destination %d: decode routing profile: %w", dst.ID, err)
 	}
-	d.CreatedAt = time.Unix(created, 0)
-	d.UpdatedAt = time.Unix(updated, 0)
-	return &d, nil
+	dst.CreatedAt = time.Unix(created, 0)
+	dst.UpdatedAt = time.Unix(updated, 0)
+	return &dst, nil
 }
 
-const destColumns = `id, name, kind, platform, account_id, url, stream_key,
-	backup_url, backup_stream_key, backup_ingest_wanted,
+const destColumns = `id, name, kind, platform, account_id, url,
+	stream_key, stream_key_enc,
+	backup_url, backup_stream_key, backup_stream_key_enc, backup_ingest_wanted,
 	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
@@ -680,6 +797,55 @@ const (
 	destListQuery     = `SELECT ` + destColumns + ` FROM destinations ORDER BY position, id`
 	destByIDQuery     = `SELECT ` + destColumns + ` FROM destinations WHERE id = ?`
 )
+
+// The two shapes of UpdateDestination's write, split at the key columns and
+// assembled the same way the reads above are: whole constants, folded at
+// compile time, with nothing left for a value to reach.
+//
+// The key columns lead, so the two differ by a prefix and the argument list is
+// the same list with four values on the front or not.
+const (
+	destUpdateKeyCols = `stream_key=?, stream_key_enc=?,
+		backup_stream_key=?, backup_stream_key_enc=?, `
+	destUpdateCols = `name=?, kind=?, platform=?, account_id=?, url=?,
+		backup_url=?, backup_ingest_wanted=?,
+		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
+		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
+		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
+		tr_rw_timeout_seconds=?,
+		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
+		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
+		updated_at=? WHERE id=?`
+	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
+	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
+)
+
+// keepsSealedKey reports whether a write must leave the stored key columns
+// exactly as they are.
+//
+// THIS IS A DATA-LOSS GUARD, and the loss it stops is not hypothetical. A
+// destination whose key would not open reads back with an empty StreamKey --
+// that is the fail-closed rule -- and the API's update handler decodes the
+// request body OVER the row it just read. So an operator who does nothing more
+// than rename such a destination sends a body with no key in it, the merged row
+// carries the empty string, and without this the write would seal "" over the
+// ciphertext and destroy it.
+//
+// The ciphertext is worth keeping precisely because the failure it belongs to
+// is usually recoverable: a key file that was not copied with the database, a
+// restore onto the wrong machine, a data directory mounted late. Put the right
+// key file back and every destination returns. Overwrite the sealed bytes and
+// nothing brings them back, and the operator was never asked.
+//
+// Typing a new key still works, and that is the whole exit: a non-empty
+// StreamKey means the operator supplied one, so the guard does not apply and
+// the new value is sealed over the old. KeyUnreadable is what limits this to
+// destinations that are actually in that state -- a client cannot use it to
+// pin a key it does not know, because with no key in the body there is no
+// value for the write to have carried anyway.
+func keepsSealedKey(dst *Destination) bool {
+	return dst.KeyUnreadable != "" && dst.StreamKey == "" && dst.BackupStreamKey == ""
+}
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
 // key would catch it anyway, but only as "FOREIGN KEY constraint failed",
@@ -713,7 +879,7 @@ func (d *DB) ListDestinationsBySource(sourceID int64) ([]*Destination, error) {
 
 	out := []*Destination{}
 	for rows.Next() {
-		dst, err := scanDestination(rows)
+		dst, err := d.scanDestination(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -731,7 +897,7 @@ func (d *DB) ListDestinations() ([]*Destination, error) {
 
 	out := []*Destination{}
 	for rows.Next() {
-		dst, err := scanDestination(rows)
+		dst, err := d.scanDestination(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -743,7 +909,7 @@ func (d *DB) ListDestinations() ([]*Destination, error) {
 // GetDestination loads one destination.
 func (d *DB) GetDestination(id int64) (*Destination, error) {
 	row := d.sql.QueryRow(destByIDQuery, id)
-	dst, err := scanDestination(row)
+	dst, err := d.scanDestination(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -798,6 +964,14 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
+	if err != nil {
+		return nil, fmt.Errorf("seal stream key: %w", err)
+	}
+	backupEnc, backupPlain, err := d.sealStreamKey(dst.BackupStreamKey)
+	if err != nil {
+		return nil, fmt.Errorf("seal backup stream key: %w", err)
+	}
 	now := time.Now().Unix()
 
 	var maxPos sql.NullInt64
@@ -807,7 +981,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	dst.Position = int(maxPos.Int64) + 1
 
 	res, err := d.sql.Exec(`INSERT INTO destinations
-		(name, kind, platform, account_id, url, stream_key, backup_url, backup_stream_key,
+		(name, kind, platform, account_id, url,
+		 stream_key, stream_key_enc,
+		 backup_url, backup_stream_key, backup_stream_key_enc,
 		 backup_ingest_wanted,
 		 enabled, audio_bitrate, profile, rendition_id, source_id,
 		 extra_input_args, extra_output_args, expert_ack_reencode,
@@ -815,9 +991,10 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 		 au_codec, au_mono, au_copy, compliance, facebook,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.BackupURL, dst.BackupStreamKey, dst.BackupIngestWanted,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
+		keyPlain, keyEnc,
+		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
@@ -860,18 +1037,11 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := d.sql.Exec(`UPDATE destinations SET
-		name=?, kind=?, platform=?, account_id=?, url=?, stream_key=?,
-		backup_url=?, backup_stream_key=?, backup_ingest_wanted=?,
-		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
-		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
-		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
-		tr_rw_timeout_seconds=?,
-		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
-		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
-		updated_at=? WHERE id=?`,
-		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL, dst.StreamKey,
-		dst.BackupURL, dst.BackupStreamKey, dst.BackupIngestWanted,
+	// The key columns first, so that the two statements below differ only by a
+	// prefix and the arguments line up with whichever one is used.
+	args := []any{
+		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
+		dst.BackupURL, dst.BackupIngestWanted,
 		dst.Enabled, dst.AudioBitrate, string(profile), dst.RenditionID, dst.SourceID,
 		dst.ExtraInputArgs, dst.ExtraOutputArgs, dst.ExpertAckReencode,
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
@@ -879,7 +1049,23 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		time.Now().Unix(), dst.ID)
+		time.Now().Unix(), dst.ID,
+	}
+	query := destUpdateQuery
+	if keepsSealedKey(dst) {
+		query = destUpdateKeepKeyQuery
+	} else {
+		keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
+		if err != nil {
+			return nil, fmt.Errorf("seal stream key: %w", err)
+		}
+		backupEnc, backupPlain, err := d.sealStreamKey(dst.BackupStreamKey)
+		if err != nil {
+			return nil, fmt.Errorf("seal backup stream key: %w", err)
+		}
+		args = append([]any{keyPlain, keyEnc, backupPlain, backupEnc}, args...)
+	}
+	res, err := d.sql.Exec(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -926,7 +1112,7 @@ func (d *DB) UpdateAnnouncement(id int64, apply func(*Destination) bool) (*Desti
 	}
 	defer tx.Rollback()
 
-	cur, err := scanDestination(tx.QueryRow(destByIDQuery, id))
+	cur, err := d.scanDestination(tx.QueryRow(destByIDQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -940,10 +1126,40 @@ func (d *DB) UpdateAnnouncement(id int64, apply func(*Destination) bool) (*Desti
 	if err != nil {
 		return nil, err
 	}
+	// The same guard as UpdateDestination's, for the same reason and one more.
+	// This sweep runs unattended, every few minutes, over every Facebook
+	// destination -- so if it wrote empty keys over unopenable ciphertext it
+	// would do it to all of them, at three in the morning, with nobody to
+	// notice. apply is what would normally put a fresh key here; when it has
+	// not, there is nothing to write and the stored bytes stay.
+	if keepsSealedKey(cur) {
+		res, err := tx.Exec(`UPDATE destinations SET
+			backup_url=?, facebook=?, updated_at=? WHERE id=?`,
+			cur.BackupURL, string(facebook), time.Now().Unix(), id)
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil, ErrNotFound
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return d.GetDestination(id)
+	}
+	keyEnc, keyPlain, err := d.sealStreamKey(cur.StreamKey)
+	if err != nil {
+		return nil, fmt.Errorf("seal stream key: %w", err)
+	}
+	backupEnc, backupPlain, err := d.sealStreamKey(cur.BackupStreamKey)
+	if err != nil {
+		return nil, fmt.Errorf("seal backup stream key: %w", err)
+	}
 	res, err := tx.Exec(`UPDATE destinations SET
-		stream_key=?, backup_url=?, backup_stream_key=?, facebook=?, updated_at=?
+		stream_key=?, stream_key_enc=?, backup_url=?,
+		backup_stream_key=?, backup_stream_key_enc=?, facebook=?, updated_at=?
 		WHERE id=?`,
-		cur.StreamKey, cur.BackupURL, cur.BackupStreamKey, string(facebook),
+		keyPlain, keyEnc, cur.BackupURL, backupPlain, backupEnc, string(facebook),
 		time.Now().Unix(), id)
 	if err != nil {
 		return nil, err
@@ -1118,6 +1334,22 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		// right default for a NEW row and the WRONG one for an existing row
 		// that had it on -- see the backfill below.
 		{"backup_ingest_wanted", `ALTER TABLE destinations ADD COLUMN backup_ingest_wanted INTEGER NOT NULL DEFAULT 0`},
+		// The sealed halves of the two stream-key columns. NULL is "this row's
+		// key is still in the plaintext column beside it", which is true of
+		// every row at the instant the ALTER lands and stops being true when
+		// backfillDestinationStreamKeys runs a few lines later in Open.
+		//
+		// No NOT NULL and no default, unlike everything above: a BLOB column
+		// defaulting to '' would make "no ciphertext" and "the ciphertext of
+		// the empty string" the same value, and the read path distinguishes
+		// them to decide whether to fall back to the plaintext.
+		//
+		// No backfill keyed off `added` here either, deliberately. Sealing
+		// needs the box, which the guard above knows nothing about, and a
+		// once-only guard is the wrong shape for a step that must also catch
+		// rows written by a release that had no box configured.
+		{"stream_key_enc", `ALTER TABLE destinations ADD COLUMN stream_key_enc BLOB`},
+		{"backup_stream_key_enc", `ALTER TABLE destinations ADD COLUMN backup_stream_key_enc BLOB`},
 	}
 	// added records the columns this pass created. columnExists is the only
 	// guard this function has and it is the right one: on every later open the
@@ -1206,6 +1438,109 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 	}
 	if _, err := d.sql.Exec(`DROP TABLE destination_expert_args`); err != nil {
 		return fmt.Errorf("drop destination_expert_args: %w", err)
+	}
+	return nil
+}
+
+// backfillDestinationStreamKeys seals every stream key still sitting in a
+// plaintext column and blanks the column it came out of.
+//
+// WHY IT EXISTS AT ALL. The read path falls back to the plaintext column, so an
+// upgraded install works perfectly without this -- and would go on storing
+// every stream key in the clear for ever, which is the entire thing this change
+// is for. The fallback keeps the upgrade safe; this is what makes it finish.
+//
+// IDEMPOTENT BY ITS GUARD, not by a marker. The WHERE clause is "is there still
+// plaintext here", so the second open matches no rows, and so does the second
+// open after a crash halfway through the first. Nothing records that it ran,
+// because nothing needs to: the question it asks is about the data in front of
+// it. That also means it picks up rows written later by a release running
+// WITHOUT a box, which a once-only migration flag would miss for ever.
+//
+// NO BOX, NO WORK. An install with no key file keeps its keys where they are;
+// see WithSecretBox.
+func (d *DB) backfillDestinationStreamKeys() error {
+	if d.box == nil {
+		return nil
+	}
+	type pending struct {
+		id                   int64
+		key, backup          string
+		keyEnc, backupEnc    []byte
+		newKeyEnc, newBakEnc []byte
+	}
+	// READ EVERYTHING FIRST, then write, and that is not a style choice.
+	// db.go sets SetMaxOpenConns(1), so a query issued while the transaction
+	// below holds the one connection waits for a connection that transaction
+	// will not release until it commits -- a startup that hangs rather than
+	// fails. MigrateDestinationExpertArgs opens with the same warning.
+	rows, err := d.sql.Query(`SELECT id, stream_key, stream_key_enc,
+		backup_stream_key, backup_stream_key_enc FROM destinations
+		WHERE stream_key <> '' OR backup_stream_key <> ''`)
+	if err != nil {
+		return fmt.Errorf("scan destinations for plaintext stream keys: %w", err)
+	}
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.key, &p.keyEnc, &p.backup, &p.backupEnc); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan destinations for plaintext stream keys: %w", err)
+		}
+		todo = append(todo, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("scan destinations for plaintext stream keys: %w", err)
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+
+	for i := range todo {
+		p := &todo[i]
+		// Each column decided on its own. A row can have a sealed primary and a
+		// plaintext backup -- that is exactly what a row created after the
+		// upgrade and then pre-announced by an older binary looks like -- and
+		// sealing "" over the primary's ciphertext because the backup needed
+		// work would destroy a live credential.
+		p.newKeyEnc, p.newBakEnc = p.keyEnc, p.backupEnc
+		if p.key != "" {
+			if p.newKeyEnc, err = d.box.Seal(p.key); err != nil {
+				return fmt.Errorf("seal stream key of destination %d: %w", p.id, err)
+			}
+		}
+		if p.backup != "" {
+			if p.newBakEnc, err = d.box.Seal(p.backup); err != nil {
+				return fmt.Errorf("seal backup stream key of destination %d: %w", p.id, err)
+			}
+		}
+	}
+
+	// ONE TRANSACTION over the whole set. Half a backfill is not a state worth
+	// having: it would leave some rows sealed and some not, and an interruption
+	// during it must land back on "some plaintext remains", which the guard
+	// above already knows how to finish.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("begin stream key backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare(`UPDATE destinations SET
+		stream_key='', stream_key_enc=?,
+		backup_stream_key='', backup_stream_key_enc=? WHERE id=?`)
+	if err != nil {
+		return fmt.Errorf("prepare stream key backfill: %w", err)
+	}
+	defer stmt.Close()
+	for _, p := range todo {
+		if _, err := stmt.Exec(p.newKeyEnc, p.newBakEnc, p.id); err != nil {
+			return fmt.Errorf("seal stream key of destination %d: %w", p.id, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit stream key backfill: %w", err)
 	}
 	return nil
 }

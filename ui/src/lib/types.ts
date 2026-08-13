@@ -220,6 +220,18 @@ export interface Destination {
    *  Empty when the platform offered none. */
   backupUrl?: string;
   backupStreamKey?: string;
+  /** Why this destination's stored stream key could not be read on this
+   *  machine — a key file that was not restored alongside the database, or a
+   *  database moved to a different host. Absent for every destination on a
+   *  healthy install.
+   *
+   *  When it is present the server has already refused to run this
+   *  destination: `enabled` reads false and `streamKey` is empty no matter
+   *  what the row holds, because publishing with a key nobody can read is
+   *  worse than not publishing. The text is the operator's instruction — type
+   *  the key in again and switch it back on — and it is also carried on the
+   *  status card's `warnings`, which is where the dashboard shows it. */
+  keyUnreadable?: string;
   /** The operator's intent: publish a redundant feed for this destination.
    *  Sits beside the endpoint it gates rather than under `facebook`, because
    *  neither the engine nor the endpoint is platform-specific. Intent without

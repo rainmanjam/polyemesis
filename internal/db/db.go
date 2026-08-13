@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -43,6 +44,28 @@ type DB struct {
 	// their package -- see internal/oauth/endpoints.go, which opens with that
 	// reasoning. A field on the thing being configured has neither problem.
 	passwordCost int
+
+	// box seals and opens the destination stream keys. nil is a supported
+	// configuration and means "store them in plaintext, exactly as before".
+	//
+	// ON THE DB RATHER THAN IN THE SIGNATURES, unlike every other sealed thing
+	// in this package. PutPlatformCreds, UpsertPlatformAccount, ListHooks and
+	// the rest all take a *secrets.Box parameter, and that is the right shape
+	// for them: they are a handful of methods with a handful of callers each,
+	// and the parameter makes the encryption visible at the call site.
+	//
+	// Destinations are not that. The stream key rides on Destination, which is
+	// returned by eight CRUD methods called from roughly ninety-seven places
+	// across twenty-four files -- ListDestinations alone has nine callers in
+	// three packages. Threading a box through all of them would be a mechanical
+	// edit of the whole repository to express one fact that never varies within
+	// a process: which key file this install uses. So it is configured once, at
+	// Open, beside the other thing that is fixed for the life of the handle.
+	//
+	// The cost is that the encryption is invisible at those call sites. What
+	// pays for it is that there is exactly one place to get it wrong, and
+	// scanDestination is that place.
+	box *secrets.Box
 
 	// settingsMu serialises READ-MODIFY-WRITE callers of the settings
 	// singleton, and nothing else.
@@ -91,6 +114,22 @@ type Option func(*DB)
 // is what says so.
 func WithPasswordCost(cost int) Option {
 	return func(d *DB) { d.passwordCost = cost }
+}
+
+// WithSecretBox encrypts destination stream keys at rest with box.
+//
+// Passing it turns on three things at once, and they only make sense together:
+// CreateDestination and UpdateDestination seal the key instead of storing it,
+// Open backfills any row still carrying a plaintext one, and a row whose
+// ciphertext will not open is disabled rather than started with a wrong key.
+//
+// OMITTING IT IS SUPPORTED and is not a degraded mode with a warning: the keys
+// stay in the plaintext column, which is what every install did before this
+// existed. cmd/polyemesis always passes a box; the tests that do not are
+// asserting the unencrypted path still works, because an embedded user of this
+// package has no key file to give it.
+func WithSecretBox(box *secrets.Box) Option {
+	return func(d *DB) { d.box = box }
 }
 
 // Open opens (creating if needed) the database at path and applies the schema.
@@ -217,6 +256,18 @@ func Open(path string, opts ...Option) (*DB, error) {
 	// configuration, which is what keeps an upgraded install reachable by the
 	// encoder that was already pointed at it.
 	if err := d.MigrateSources(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// AFTER every migration, because it writes to two columns the migrations
+	// above are what create, and because it is the one step that needs the
+	// options applied -- it does nothing at all without a box.
+	//
+	// A DATA migration rather than a schema one, which is why it does not live
+	// with the ALTERs: it is guarded by "is there still plaintext here", not by
+	// "did this pass add the column", so it stays correct if it is interrupted
+	// and correct if it runs a thousand times.
+	if err := d.backfillDestinationStreamKeys(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

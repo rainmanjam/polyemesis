@@ -190,8 +190,23 @@ func run(h *hooks) error {
 	}
 	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
 
+	// BEFORE the database, which is a move rather than an addition: this used
+	// to sit below, because the only things that needed it were the OAuth
+	// tables and MQTT, and both are handed it per call. db.Open now takes it
+	// too -- destination stream keys are sealed with it, and Open is what
+	// backfills the ones an older release left in plaintext -- so the key has
+	// to exist before the handle does.
+	//
+	// A failure here is still fatal, and stays fatal for the same reason it
+	// always was: an unreadable key file is not a reason to start up and
+	// quietly serve an install whose credentials cannot be decrypted.
+	box, err := secrets.LoadOrCreate(cfg.SecretPath())
+	if err != nil {
+		return err
+	}
+
 	h.progress("opening the database")
-	store, err := db.Open(cfg.DBPath())
+	store, err := db.Open(cfg.DBPath(), db.WithSecretBox(box))
 	if err != nil {
 		return err
 	}
@@ -205,11 +220,6 @@ func run(h *hooks) error {
 	// the product ever removes a staged file a killed process left behind. See
 	// sweepUploadLeftovers.
 	sweepUploadLeftovers(cfg.DataDir, log)
-
-	box, err := secrets.LoadOrCreate(cfg.SecretPath())
-	if err != nil {
-		return err
-	}
 
 	bus := events.NewBroker()
 
