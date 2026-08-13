@@ -37,6 +37,12 @@
 //	setup <rtmp-port>        first-run setup; put the ingest on that RTMP port
 //	publishkey               print the source's publish token
 //	srctracks                print how many AUDIO tracks the ingest was probed with
+//	addsource <name>         create a SECOND source on the shared RTMP listener,
+//	                         with no destinations of its own; print its id
+//	srctoken <name>          print that source's publish token
+//	srcstat <name>           print "<publishing> <bytesIn> <destinations>
+//	                         <destinationsClaimed>", the last being what the
+//	                         source view claims and does not populate
 //	adddest <name> <platform> <url> <key-env> <tracks-csv>
 //	                         create one RTMP destination whose profile selects
 //	                         exactly those ingest tracks. The key is read from
@@ -50,6 +56,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -91,6 +98,24 @@ func main() {
 	case "srctracks":
 		driverlib.Login(user, pass)
 		srcTracks()
+	case "addsource":
+		if len(args) < 1 {
+			driverlib.Die("usage: addsource <name>")
+		}
+		driverlib.Login(user, pass)
+		addSource(args[0])
+	case "srctoken":
+		if len(args) < 1 {
+			driverlib.Die("usage: srctoken <name>")
+		}
+		driverlib.Login(user, pass)
+		srcToken(args[0])
+	case "srcstat":
+		if len(args) < 1 {
+			driverlib.Die("usage: srcstat <name>")
+		}
+		driverlib.Login(user, pass)
+		srcStat(args[0])
 	case "adddest":
 		if len(args) < 5 {
 			driverlib.Die("usage: adddest <name> <platform> <url> <key-env> <tracks-csv>")
@@ -156,6 +181,165 @@ func ingest(rtmpPort string) {
 func srcTracks() {
 	st := readStatus()
 	fmt.Println(len(st.Source.Tracks))
+}
+
+// sourceRow is one row of GET /sources.
+//
+// The API renders a VIEW that embeds the stored source, so the row's own fields
+// (id, name, token) are flattened alongside the view's (publishing, rtmpLink,
+// destinations) rather than nested under a "source" key. Decoded flat here for
+// that reason; a nested struct silently yields a zero-valued row, which is the
+// failure driverlib.StopAll's comment records at length.
+type sourceRow struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Token string `json:"token"`
+	// Publishing is the LISTENER's answer, not the configuration's: it is true
+	// only while a publisher holds a live session on this source's slot. That
+	// is what makes it usable as "the product accepted this publish" rather
+	// than "the product was told to expect one".
+	Publishing bool `json:"publishing"`
+	// Destinations is what the VIEW claims this source fans out to, and it is
+	// decoded only so the suite can report that the claim is not true. See
+	// srcStat: api.sourceView declares the field and api.viewSource never
+	// assigns it, so it reads 0 for every source however many destinations that
+	// source owns. Nothing is asserted on it.
+	Destinations int  `json:"destinations"`
+	Running      bool `json:"running"`
+	// RTMPLink is absent when nothing is publishing, which is why it is a
+	// pointer: a zero BytesIn on a present link and no link at all are
+	// different findings.
+	RTMPLink *struct {
+		BytesIn uint64 `json:"bytesIn"`
+	} `json:"rtmpLink"`
+}
+
+func listSources() []sourceRow {
+	var rows []sourceRow
+	driverlib.GetJSON("/sources", "sources", &rows)
+	return rows
+}
+
+func findSource(name string) sourceRow {
+	for _, r := range listSources() {
+		if r.Name == name {
+			return r
+		}
+	}
+	driverlib.Die("no source named " + name)
+	return sourceRow{}
+}
+
+// addSource creates the SECOND source this suite publishes back into.
+//
+// THE INGEST BLOCK IS SPELLED OUT rather than left to the server's defaults.
+// db.DefaultSettings().Ingest carries db.IngestUnset, and handleCreateSource
+// falls back to it for a payload with no ingest -- deliberately, because a
+// fresh install must not pick a transport on the operator's behalf. A source in
+// that state spawns no ingest child at all (engine.reconcileIngest returns
+// early on IngestUnset), so the listener would find its target permanently
+// not-ready and refuse every publish to it. Naming the mode here is what makes
+// this source a far end rather than a black hole.
+//
+// NO DESTINATIONS ARE CREATED FOR IT, HERE OR ANYWHERE. That is the whole
+// safety property of the loopback: a source that fans out is a source that can
+// fan back into the one feeding it, and RTMP will happily carry that cycle
+// until something runs out of CPU. The shell asserts the count stayed zero.
+func addSource(name string) {
+	code, out := driverlib.Do(http.MethodPost, "/sources", map[string]any{
+		"name": name,
+		"ingest": map[string]any{
+			"mode": "rtmp",
+			"rtmp": map[string]any{"app": "live"},
+			// THE SRT BLOCK IS CARRIED EVEN THOUGH THIS SOURCE IS RTMP.
+			// db.IngestSettings.Validate checks the SRT latency whatever the
+			// mode is, so a payload naming only the rtmp block is refused with
+			// "srt latency 0ms out of range (20-8000)" -- measured, not
+			// guessed. 200 is db.DefaultSettings()'s own value, so this is the
+			// default it would have inherited had the mode not had to be
+			// spelled out.
+			"srt": map[string]any{"latencyMs": 200},
+		},
+	})
+	if code != http.StatusOK && code != http.StatusCreated {
+		driverlib.Die(fmt.Sprintf("create source %s failed: %d %s", name, code, out))
+	}
+	var row sourceRow
+	if err := json.Unmarshal(out, &row); err != nil {
+		driverlib.Die("created source unreadable: " + err.Error())
+	}
+	if row.ID == 0 {
+		driverlib.Die("the created source came back with no id; the view shape has changed")
+	}
+	fmt.Println(row.ID)
+}
+
+// srcToken prints a source's publish token.
+//
+// PRINTED, WHERE A PLATFORM KEY NEVER IS, and the difference is what the value
+// is. A platform key is an operator's credential for somebody else's service
+// and this suite never reads one; this token is minted by this install, for
+// this run, and dies with the work directory -- it is the ADDRESS of a far end
+// the suite has to be able to dial. The existing `publishkey` subcommand has
+// read the first source's token to stdout since this suite was written, for the
+// same reason.
+//
+// It still never reaches an argv: the shell exports it and the driver reads it
+// back with os.Getenv, exactly as it does for a real platform key.
+func srcToken(name string) {
+	tok := findSource(name).Token
+	if strings.TrimSpace(tok) == "" {
+		driverlib.Die("source " + name + " carries no publish token; nothing could address it")
+	}
+	fmt.Println(tok)
+}
+
+// srcStat prints "<publishing> <bytesIn> <destinations> <destinationsClaimed>"
+// for one source.
+//
+// Read in ONE pass so the facts describe the same instant. Asking separately
+// would let a publisher come or go between the calls and produce a row that
+// never existed.
+//
+// THE DESTINATION COUNT IS COUNTED OFF GET /destinations, NOT READ OFF THE
+// SOURCE VIEW, and that is a correction rather than a preference.
+//
+// sourceView.Destinations is documented in internal/api/sources.go as "what a
+// delete would take with it" -- a number a confirmation dialog is meant to
+// quote -- and viewSource never assigns it. It is therefore 0 for every source
+// on every route that renders one. The loopback check asserts that its far end
+// fans out to NOTHING, so reading that field would have made the assertion
+// unfalsifiable: it would report zero for a source with ten destinations, which
+// is precisely the state it exists to catch. Found by mutating the suite --
+// giving the loopback source a real destination left the check passing.
+//
+// Both numbers are printed. The counted one is what the suite asserts on; the
+// claimed one is printed beside it so the disagreement is REPORTED every run
+// rather than quietly worked around. It is not this suite's verdict to fail the
+// product on -- the same line acceptance-failover.sh drew, and step 8c's note
+// on the state database's permissions draws again.
+func srcStat(name string) {
+	r := findSource(name)
+	var bytesIn uint64
+	if r.RTMPLink != nil {
+		bytesIn = r.RTMPLink.BytesIn
+	}
+	// The list body is [{"destination": {...}, "routing": {...}}]; decoding it
+	// as bare destinations reads zero out of every row, which is the fault
+	// driverlib.StopAll's comment records at length.
+	var rows []struct {
+		Destination struct {
+			SourceID *int64 `json:"sourceId"`
+		} `json:"destination"`
+	}
+	driverlib.GetJSON("/destinations", "destinations", &rows)
+	owned := 0
+	for _, d := range rows {
+		if d.Destination.SourceID != nil && *d.Destination.SourceID == r.ID {
+			owned++
+		}
+	}
+	fmt.Printf("%t %d %d %d\n", r.Publishing, bytesIn, owned, r.Destinations)
 }
 
 func parseTracks(csv string) []int {
