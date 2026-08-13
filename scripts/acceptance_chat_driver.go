@@ -377,6 +377,11 @@ func kickVerify() {
 	msgID, ts := "acceptance-1", time.Now().UTC().Format(time.RFC3339)
 	signed := []byte(msgID + "." + ts + "." + string(body))
 	sum := sha256.Sum256(signed)
+	// PKCS#1 v1.5 BECAUSE KICK USES IT, not because it was chosen here. PSS is
+	// the better scheme and a scanner will say so; the scheme is not ours to
+	// pick. Kick signs its webhooks with v1.5, kick_verify.go must call
+	// VerifyPKCS1v15 to verify them at all, and a test that signed with PSS
+	// would exercise a code path that never runs in production.
 	sig, err := rsa.SignPKCS1v15(rand.Reader, ours, crypto.SHA256, sum[:])
 	if err != nil {
 		fail("signing: %v", err)
