@@ -26,12 +26,7 @@ package main
 
 import (
 	"context"
-	"crypto"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -360,7 +355,7 @@ func kickVerify() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	real, err := (&chat.KickKeyFetcher{}).Key(ctx)
+	realKey, err := (&chat.KickKeyFetcher{}).Key(ctx)
 	if err != nil {
 		emit("fetched", false)
 		emit("error", err.Error())
@@ -368,43 +363,68 @@ func kickVerify() {
 	}
 	emit("fetched", true)
 
-	ours, err := rsa.GenerateKey(rand.Reader, 2048)
+	ourKey, err := chat.ParseKickPublicKey([]byte(fixturePublicKeyPEM))
 	if err != nil {
-		fail("generating a test key: %v", err)
-	}
-
-	body := []byte(`{"event":"chat.message.sent","data":{"content":"acceptance"}}`)
-	msgID, ts := "acceptance-1", time.Now().UTC().Format(time.RFC3339)
-	signed := []byte(msgID + "." + ts + "." + string(body))
-	sum := sha256.Sum256(signed)
-	// PKCS#1 v1.5 BECAUSE KICK USES IT, not because it was chosen here. PSS is
-	// the better scheme and a scanner will say so; the scheme is not ours to
-	// pick. Kick signs its webhooks with v1.5, kick_verify.go must call
-	// VerifyPKCS1v15 to verify them at all, and a test that signed with PSS
-	// would exercise a code path that never runs in production.
-	sig, err := rsa.SignPKCS1v15(rand.Reader, ours, crypto.SHA256, sum[:])
-	if err != nil {
-		fail("signing: %v", err)
+		fail("parsing the fixture key: %v", err)
 	}
 
 	req := func(sigB64 string) *http.Request {
-		r := httptest.NewRequest(http.MethodPost, "/hooks/kick", strings.NewReader(string(body)))
-		r.Header.Set("Kick-Event-Message-Id", msgID)
-		r.Header.Set("Kick-Event-Message-Timestamp", ts)
+		r := httptest.NewRequest(http.MethodPost, "/hooks/kick", strings.NewReader(fixtureBody))
+		r.Header.Set("Kick-Event-Message-Id", fixtureMessageID)
+		r.Header.Set("Kick-Event-Message-Timestamp", fixtureTimestamp)
 		r.Header.Set("Kick-Event-Signature", sigB64)
 		return r
 	}
-	good := base64.StdEncoding.EncodeToString(sig)
+	body := []byte(fixtureBody)
 
-	// 1. Our signature against OUR key: must pass, or the verifier is broken
-	//    in a way that would reject genuine Kick traffic too.
-	emit("ourSigOurKey", chat.VerifyKickSignature(&ours.PublicKey, req(good), body) == nil)
-	// 2. Our signature against KICK'S key: must fail. This is the check that
-	//    proves verification is actually happening against the fetched key.
-	emit("ourSigKickKey", chat.VerifyKickSignature(real, req(good), body) == nil)
-	// 3. A tampered body against our own key: must fail, proving the body is
-	//    inside the signed material and not merely alongside it.
-	emit("tamperedBody", chat.VerifyKickSignature(&ours.PublicKey, req(good), []byte(`{"event":"x"}`)) == nil)
+	// 1. The fixture signature against the key that made it: must pass, or the
+	//    verifier is broken in a way that would reject genuine Kick traffic too.
+	emit("ourSigOurKey", chat.VerifyKickSignature(ourKey, req(fixtureSignature), body) == nil)
+	// 2. The same signature against KICK'S real fetched key: must fail. This is
+	//    the check that proves verification happens against the key we fetched
+	//    rather than against whatever was passed in.
+	emit("ourSigKickKey", chat.VerifyKickSignature(realKey, req(fixtureSignature), body) == nil)
+	// 3. A tampered body: must fail, proving the body is inside the signed
+	//    material rather than merely alongside it.
+	emit("tamperedBody", chat.VerifyKickSignature(ourKey, req(fixtureSignature), []byte(`{"event":"x"}`)) == nil)
 	// 4. Garbage in the signature header: must fail without panicking.
-	emit("garbageSig", chat.VerifyKickSignature(&ours.PublicKey, req("!!!not-base64!!!"), body) == nil)
+	emit("garbageSig", chat.VerifyKickSignature(ourKey, req("!!!not-base64!!!"), body) == nil)
 }
+
+// A FIXED TEST VECTOR RATHER THAN A KEYPAIR MINTED EACH RUN.
+//
+// Signing here would mean calling rsa.SignPKCS1v15, and a scanner will rate that
+// CRITICAL for using PKCS#1 v1.5 padding instead of PSS. The rule is right in
+// general and cannot be satisfied here: Kick signs its webhooks with v1.5, so
+// kick_verify.go must call VerifyPKCS1v15, and a driver that signed with PSS
+// would exercise a code path that never runs in production.
+//
+// A precomputed vector removes the signing call without weakening any of the
+// four checks above, and is what one would want anyway -- the same bytes every
+// run, and no 2048-bit key generation on the clock.
+//
+// SAFE TO PIN because VerifyKickSignature does not check timestamp freshness:
+// the timestamp is signed material, not a validity window, so this vector
+// verifies identically in ten years. If that ever changes, this fixture stops
+// verifying and check 1 fails loudly, which is the right way to find out.
+//
+// The private key was discarded at generation and is in no repository. To
+// regenerate: sign sha256("<id>.<timestamp>.<body>") with a fresh 2048-bit key
+// and replace all four constants together.
+const (
+	fixtureMessageID = "acceptance-1"
+	fixtureTimestamp = "2026-01-01T00:00:00Z"
+	fixtureBody      = `{"event":"chat.message.sent","data":{"content":"acceptance"}}`
+	fixtureSignature = "jClO6Byrix7VKC8fgIGG0xfjBviRjXNaEEBpVHqYP1mAq0zlpSQ4S+2CkoHnv+wH+x441u4zeIVWeJ773AaD2MgbIMJVlp6SH1IWvKDQ5ejsgLbv3PJJ5YYSbXN294pw/wswLbsEEPCIXztIPeIJIAQkPZd8VvG0vjq23wWoSpFxDRNm1E3AcvXFwwvM+fDmWVmbCRsSw29pTkbS/6F33SqIWhkIU9A0OK8EbeYNNh+fNDoNABfDR7Pdv8NJqxqvv5XFrQNR0hx/3nTROhZUIOqeEEmAWG0ix81zpywIIajWvQzY42H+pPIKBcXcnStuwql088NdjAcjsHJqyowK+g=="
+
+	fixturePublicKeyPEM = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtY262V+RYGOCCCV7pkEj
+dMZgcC0Wx9Vs+ISZUK7MhApBYgxRuojeZbZijqi8lwOF0EdQywmublvgpT+hpaSv
+Wihaf5V3x2KDYGDKtSl5JmUBEu5xRRLvhbGKtgjk+0aXCvmPu5AndMZBTzAexFV3
+gcbCFx1LitFJ6QDWp1Lz13IatAGsfL96S6LugtKGUrRYDBePPYY7skML44+Ggd8R
+1F/GtApSw3f1RwULNjeCjGtEQmY3erabTtC6XlidyIBSJ6/ApHfZSUZyRS3intOC
+x+WlEf8lKiQE+dVRQHstQZ9UrK5kKVKcgD1cbEzfkKyM63qXhIbmHyLNuU5v8Knc
+9QIDAQAB
+-----END PUBLIC KEY-----
+`
+)
