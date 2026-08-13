@@ -58,6 +58,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -382,8 +383,26 @@ func buildTwoTrackMKV(ff, path string) error {
 	return nil
 }
 
+// ffprobeBin is resolved once, at first use, rather than being spelled as a
+// bare name at each call. exec.Command with a bare name searches PATH at the
+// moment of the call, so what runs depends on the environment the suite happens
+// to inherit -- internal/ffmpeg/detect.go resolves both binaries the same way
+// and for the same reason.
+//
+// Resolving early also turns "ffprobe is not installed" into one clear failure
+// instead of a -1 from every stream count, which reads as a malformed file.
+var ffprobeBin = func() string {
+	if bin, err := exec.LookPath("ffprobe"); err == nil {
+		return bin
+	}
+	return ""
+}()
+
 func countStreams(path, kind string) int {
-	out, err := exec.Command("ffprobe", "-v", "error",
+	if ffprobeBin == "" {
+		return -1
+	}
+	out, err := exec.Command(ffprobeBin, "-v", "error",
 		"-select_streams", kind, "-show_entries", "stream=index",
 		"-of", "csv=p=0", path).Output()
 	if err != nil {
@@ -505,11 +524,17 @@ func modelDir() string {
 	if d := os.Getenv("POLY_TRANSCRIBE_MODEL_DIR"); d != "" {
 		return d
 	}
-	home, err := os.UserHomeDir()
+	// NO os.TempDir() FALLBACK. A 74 MB model cached under a fixed name in a
+	// world-writable directory is a file any other user on the box can replace
+	// between the download and the read, and the suite would then verify and
+	// transcribe with somebody else's bytes. os.UserCacheDir is the right home
+	// for a cache and is per-user by construction; if there is no such directory
+	// the correct answer is to have no cache, not to pick a shared one.
+	cache, err := os.UserCacheDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "polyemesis-acceptance-models")
+		return ""
 	}
-	return filepath.Join(home, ".cache", "polyemesis-acceptance", "models")
+	return filepath.Join(cache, "polyemesis-acceptance", "models")
 }
 
 // modelName is the model the opt-in steps use. tiny is 74 MB -- the smallest
@@ -534,8 +559,17 @@ func download() {
 		fail("model %q is not in the catalogue", modelName())
 	}
 	dir := modelDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		fail("mkdir %s: %v", dir, err)
+	if dir == "" {
+		fail("no per-user cache directory is available, and this suite will not " +
+			"fall back to a shared one -- see modelDir")
+	}
+	// 0o700, not 0o755, and through fsperm for the reason internal/config gives:
+	// a FileMode restricts nothing on Windows, so the mode has to be applied by
+	// the platform-aware helper rather than by MkdirAll. The model is not secret;
+	// the point is that nobody else can swap it out between the verify and the
+	// read.
+	if err := fsperm.SecureDir(dir); err != nil {
+		fail("preparing %s: %v", dir, err)
 	}
 	emit("model", m.Name)
 	emit("dir", dir)
@@ -622,7 +656,13 @@ func endToEnd() {
 		emit("error", "model "+modelName()+" not in catalogue")
 		return
 	}
-	model, err := transcribe.ResolveModel(modelDir(), m.Name)
+	cacheDir := modelDir()
+	if cacheDir == "" {
+		emit("ready", false)
+		emit("error", "no per-user cache directory is available")
+		return
+	}
+	model, err := transcribe.ResolveModel(cacheDir, m.Name)
 	if err != nil {
 		emit("ready", false)
 		emit("error", firstLine(err.Error()))
