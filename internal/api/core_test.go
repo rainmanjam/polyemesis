@@ -251,3 +251,86 @@ func TestSwitchSourceIsRefusedWhenFailoverIsOff(t *testing.T) {
 	send(t, h, sign, http.MethodPost, "/api/v1/failover/source",
 		map[string]string{"source": "nonsense"}, http.StatusBadRequest)
 }
+
+// The registry warning has to survive the trip from db.Destination.Warnings to
+// the create response, because that is the only place an operator will ever
+// see it. A unit test on AnalyseURL proves the warning can be produced; this
+// proves it is delivered.
+//
+// The URL is the one Kick's Stream Settings page prints, verbatim -- the whole
+// defect is that pasting it changes nothing visible until the far end drops the
+// connection several minutes later.
+//
+// Proven able to fail against the committed tree by deleting the
+// `for _, w := range row.Warnings()` loop in handleCreateDestination: the
+// destination is still created, still 201, and the response carries no
+// warnings at all.
+func TestAPathlessRTMPURLIsCreatedButWarnedAbout(t *testing.T) {
+	h, _, sign := sourceServer(t)
+
+	raw := send(t, h, sign, http.MethodPost, "/api/v1/destinations", map[string]any{
+		"name":         "kick-pasted-verbatim",
+		"kind":         "rtmp",
+		"platform":     "kick",
+		"url":          "rtmps://fa723fc1b171.global-contribute.live-video.net/",
+		"streamKey":    "sk_us-west-2_ThisIsFiftySixCharactersOfStreamKeyMaterial",
+		"enabled":      false,
+		"audioBitrate": 160,
+		"profile": map[string]any{
+			"mode": "simple", "tracks": trackSel(0), "matrix": []any{},
+			"normalize": "off", "sampleRate": 48000,
+		},
+	}, http.StatusCreated)
+
+	var out map[string]any
+	decodeInto(t, raw, &out)
+
+	// CREATED, not refused. A registry warning is advice; 11 of OBS's 540
+	// ingest URLs genuinely have no application path, and refusing would
+	// break a real if rare setup.
+	if _, ok := out["destination"]; !ok {
+		t.Fatalf("the destination was not created; a warning must not refuse.\ngot: %s", raw)
+	}
+
+	ws, ok := out["warnings"].([]any)
+	if !ok || len(ws) == 0 {
+		t.Fatalf("no warning for a URL with no application path.\n"+
+			"This is the exact URL Kick's dashboard hands an operator, and it "+
+			"cannot be published to.\ngot: %s", raw)
+	}
+	joined := ""
+	for _, w := range ws {
+		joined += w.(string) + "\n"
+	}
+	if !strings.Contains(joined, "application path") {
+		t.Errorf("the warnings do not say what is wrong.\ngot: %s", joined)
+	}
+}
+
+// The complement: a correct URL must produce no warning at all. Without this,
+// the test above passes just as well against a handler that warns on every
+// destination, and operators learn to ignore the field within a day.
+func TestAWellFormedDestinationIsNotWarnedAbout(t *testing.T) {
+	h, _, sign := sourceServer(t)
+
+	raw := send(t, h, sign, http.MethodPost, "/api/v1/destinations", map[string]any{
+		"name":         "kick-corrected",
+		"kind":         "rtmp",
+		"platform":     "kick",
+		"url":          "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app",
+		"streamKey":    "sk_us-west-2_ThisIsFiftySixCharactersOfStreamKeyMaterial",
+		"enabled":      false,
+		"audioBitrate": 160,
+		"profile": map[string]any{
+			"mode": "simple", "tracks": trackSel(0), "matrix": []any{},
+			"normalize": "off", "sampleRate": 48000,
+		},
+	}, http.StatusCreated)
+
+	var out map[string]any
+	decodeInto(t, raw, &out)
+	if ws, ok := out["warnings"].([]any); ok && len(ws) > 0 {
+		t.Errorf("the corrected URL -- the one that delivered 75s of media to Kick "+
+			"on a live run -- still warns:\n%v", ws)
+	}
+}

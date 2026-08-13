@@ -50,6 +50,7 @@ import type {
   PlatformAccount,
   Rendition,
   PlatformPresetInfo,
+  ServiceInfo,
   RenditionView,
 } from "@/lib/types";
 
@@ -169,11 +170,14 @@ const PRESETS: DestPreset[] = [
     transport: "rtmps",
     kind: "rtmp",
     platform: "kick",
-    url: "rtmps://fa723fc1b171.global-contribute.live-video.net",
+    // Empty on purpose — see the matching comment in internal/db/platforms.go.
+    // Kick's host is per channel, so a prefill is somebody else's address, and
+    // the shape Kick's dashboard prints has no application path.
+    url: "",
     separateKey: true,
     helpUrl: "https://kick.com/dashboard/settings/stream",
     notes:
-      "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes your title and category and reports viewer counts. Kick issues the ingest host per channel, so replace the one prefilled here with yours if it differs.",
+      "Kick is the one platform where the key stays manual: its public API exposes the channel, chat and viewer counts but no stream key anywhere. Copy both the ingest URL and the key from Kick → Settings → Stream. Connecting a Kick account in Settings → Platform credentials is still worth doing — it pushes your title and category and reports viewer counts. Kick issues the ingest host per channel, so there is nothing to prefill here. APPEND /app to the URL Kick shows you — the dashboard prints it without one, and a Kick destination without /app cannot publish at all. The result looks like rtmps://<your-host>.global-contribute.live-video.net:443/app",
   },
   {
     id: "facebook",
@@ -608,6 +612,23 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // the entire argument for renditions existing, and the UI could not state it.
   const [renditions, setRenditions] = useState<RenditionView[]>([]);
   const [guidance, setGuidance] = useState<PlatformPresetInfo[]>([]);
+  const [services, setServices] = useState<ServiceInfo[]>([]);
+
+  /** The registry entry for whatever platform is selected, or null for a
+   *  custom destination — which the registry has no opinion about, and must
+   *  not acquire one. */
+  const service = useMemo(
+    () => services.find((sv) => sv.id === platform) ?? null,
+    [services, platform],
+  );
+
+  /** Whether the typed URL is one of the platform's own published servers.
+   *  "no" is not an error: Twitch's regional hosts change, and an operator
+   *  with a newer address than our copy is right and we are stale. */
+  const urlIsAPublishedServer = useMemo(
+    () => !!service?.servers?.some((sv) => sv.url === url),
+    [service, url],
+  );
   const [busy, setBusy] = useState(false);
   // The variant form: an operator wanting "this tier but 4500 kbps for the
   // constrained uplink". Deliberately NOT a per-destination override of the
@@ -638,6 +659,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       .platformPresets()
       .then((r) => setGuidance(r.presets))
       .catch(() => setGuidance([]));
+    // The ingest servers and the platform's own encoder ceilings. Fetched for
+    // the same reason the guidance is: these are other people's published
+    // figures and a second copy in the bundle would drift from the one the
+    // server serves.
+    api
+      .listServices()
+      .then((r) => setServices(r.services))
+      .catch(() => setServices([]));
 
     setPickerOpen(false);
     setQuery("");
@@ -1117,6 +1146,47 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           )}
 
+          {/* The platform's own ingest servers, when it publishes a list. Above
+              the URL box rather than replacing it: picking fills the box, and
+              the box stays editable, because a regional host we have not heard
+              of is the operator's to type and not ours to refuse. */}
+          {kind === "rtmp" && (service?.servers?.length ?? 0) > 0 && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="dest-server">{service?.name} ingest server</Label>
+              <Select
+                value={urlIsAPublishedServer ? url : ""}
+                onValueChange={(v) => setUrl(v)}
+              >
+                <SelectTrigger id="dest-server" data-testid="ingest-server-picker">
+                  <SelectValue placeholder="Choose the one nearest you" />
+                </SelectTrigger>
+                <SelectContent>
+                  {service?.servers?.map((sv) => (
+                    <SelectItem key={sv.url} value={sv.url}>
+                      {sv.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-[10px] text-muted-foreground">
+                Nearest is usually best. Every address here already carries the
+                application path the platform needs.
+              </span>
+            </div>
+          )}
+
+          {/* Kick, and anything else that issues its ingest per channel: there
+              is no server to offer, so the note carries the instructions the
+              dashboard leaves out. Shown before the empty box, not after it. */}
+          {kind === "rtmp" && service?.perChannelIngest && service.note && (
+            <p
+              className="rounded-md border border-warn/40 bg-warn/10 p-2 text-[11px] leading-snug"
+              data-testid="per-channel-ingest-note"
+            >
+              {service.note}
+            </p>
+          )}
+
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-url">
               {kind === "file" ? "Filename" : kind === "srt" ? "SRT URL" : "RTMP URL"}
@@ -1529,6 +1599,24 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 ? "Not used: nothing is encoded, so the bitrate is whatever your encoder sent."
                 : "Mixed here from this destination's own routing profile, whichever rendition it is on — a rendition never touches audio."}
             </span>
+            {/* The platform's own ceiling, read from the registry rather than
+                recomputed here. Over it is not refused — the server decides
+                that, and a second copy of the rule in this file is how the two
+                come to disagree. */}
+            {!copyOn && (service?.recommended.maxAudioKbps ?? 0) > 0 && (
+              <span
+                className={
+                  bitrate > (service?.recommended.maxAudioKbps ?? 0)
+                    ? "text-[10px] text-warn"
+                    : "text-[10px] text-muted-foreground"
+                }
+                data-testid="audio-ceiling-hint"
+              >
+                {bitrate > (service?.recommended.maxAudioKbps ?? 0)
+                  ? `Above ${service?.name}'s published maximum of ${service?.recommended.maxAudioKbps} kbps — it will re-encode or refuse this.`
+                  : `${service?.name} accepts up to ${service?.recommended.maxAudioKbps} kbps.`}
+              </span>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-2">

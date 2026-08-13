@@ -1261,6 +1261,13 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Before the write, so what is stored is what the response describes.
 	warnings := s.dropUnsendableSettings(&row)
+	// What the platform registry knows and this destination contradicts --
+	// most often an RTMP URL with no application path, which the far end
+	// refuses by dropping the connection rather than by saying anything. The
+	// destination is still created: this is advice, and Validate owns refusal.
+	for _, w := range row.Warnings() {
+		warnings = append(warnings, w.Detail)
+	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -1310,6 +1317,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// client ever mentioning compliance. Checking the request body instead of
 	// the merged row would see nothing at all.
 	warnings := s.dropUnsendableSettings(existing)
+	// Same registry check create does. An edit is the more likely place for a
+	// URL to acquire this problem, not the less: creation usually starts from
+	// a preset, and editing is where somebody pastes a fresh address in.
+	for _, w := range existing.Warnings() {
+		warnings = append(warnings, w.Detail)
+	}
 
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {

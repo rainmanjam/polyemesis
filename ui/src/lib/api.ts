@@ -49,6 +49,7 @@ import type {
   RenditionDeleted,
   RenditionPreset,
   PlatformPresetInfo,
+  ServiceInfo,
   RenditionView,
   RoutingProfile,
   RoutingResult,
@@ -399,6 +400,13 @@ export const api = {
    *  a second copy of them in the UI would drift silently. */
   platformPresets: () =>
     get<{ presets: PlatformPresetInfo[]; disclaimer: string }>("/platforms/presets"),
+  /** The platform registry: ingest servers, encoder ceilings and codecs.
+   *
+   *  Seeded from OBS Studio's rtmp-services data, and `provenance` says so —
+   *  these are the platforms' published figures, copied, not ours. Shown to
+   *  the operator with that attribution rather than as house numbers. */
+  listServices: () =>
+    get<{ provenance: string; services: ServiceInfo[] }>("/services"),
   listRenditions: () => get<RenditionView[]>("/renditions"),
   getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
   createRendition: (r: Partial<Rendition>) =>

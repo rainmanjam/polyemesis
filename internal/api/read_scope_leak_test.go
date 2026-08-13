@@ -365,6 +365,7 @@ func bearer(tok string) func(*http.Request) {
 // fail-open bug this list's contract exists to refuse.
 func leakRoutes() []string {
 	return []string{
+		"/api/v1/services",
 		"/api/v1/sources",
 		"/api/v1/sources/1",
 		"/api/v1/settings",

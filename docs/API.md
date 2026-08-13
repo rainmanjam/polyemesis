@@ -271,7 +271,28 @@ could contradict.
 Send only stored fields on a `PUT`. Server-computed ones (`publishUrls`,
 `publishing`, `tokenEnforced`) are rejected.
 
+### Services
+
+The platform registry: ingest servers, encoder ceilings and codecs for the
+platforms polyemesis knows. Static — the same answer for every install — so
+that an operator picks `Twitch` rather than typing an ingest URL.
+
+Seeded from OBS Studio's `rtmp-services` data, and the response carries a
+`provenance` string saying so; the ceilings are the platforms' published
+figures, not ours.
+
+Platforms that issue a per-channel ingest host (Kick) have an empty `servers`
+list and a `note` explaining what to paste instead.
+
+| Method | Path |
+|---|---|
+| `GET` | `/services` |
+
 ### Destinations
+
+A destination that will probably not work is created anyway, with `warnings[]`
+describing why — most commonly an RTMP URL with no application path, which the
+far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 
 | Method | Path |
 |---|---|
