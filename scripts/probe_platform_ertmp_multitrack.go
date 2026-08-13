@@ -18,22 +18,22 @@
 //
 // WHAT IT DOES
 //
-//	1. Preflight: ffmpeg >= 7.1, because E-RTMP multitrack muxing lands there.
-//	   scripts/verify_ertmp_multitrack.go established that; below 7.1 -- which
-//	   includes the stock build on Ubuntu 24.04 -- there is nothing to send and
-//	   the only correct verdict is INCONCLUSIVE.
-//	2. Starts an RTMP listener on loopback and has FFmpeg publish testsrc2 plus
-//	   two AAC sine tracks (440 Hz and 880 Hz) into it.
-//	3. Reads that session message by message and FORWARDS each message verbatim
-//	   to the platform over a gortmplib publish connection, the same shape
-//	   internal/rtmpserver's pump uses.
-//	4. Counts the AudioExMultitrack messages actually forwarded, and watches for
-//	   the platform hanging up.
-//	5. With -hls-url, probes the platform's own playback and identifies the
-//	   tracks by tone, which is the only step that can distinguish "accepted"
-//	   from "accepted and silently discarded".
+//  1. Preflight: ffmpeg >= 7.1, because E-RTMP multitrack muxing lands there.
+//     scripts/verify_ertmp_multitrack.go established that; below 7.1 -- which
+//     includes the stock build on Ubuntu 24.04 -- there is nothing to send and
+//     the only correct verdict is INCONCLUSIVE.
+//  2. Starts an RTMP listener on loopback and has FFmpeg publish testsrc2 plus
+//     two AAC sine tracks (440 Hz and 880 Hz) into it.
+//  3. Reads that session message by message and FORWARDS each message verbatim
+//     to the platform over a gortmplib publish connection, the same shape
+//     internal/rtmpserver's pump uses.
+//  4. Counts the AudioExMultitrack messages actually forwarded, and watches for
+//     the platform hanging up.
+//  5. With -hls-url, probes the platform's own playback and identifies the
+//     tracks by tone, which is the only step that can distinguish "accepted"
+//     from "accepted and silently discarded".
 //
-// WHY FFMPEG DOES NOT PUBLISH TO THE PLATFORM DIRECTLY
+// # WHY FFMPEG DOES NOT PUBLISH TO THE PLATFORM DIRECTLY
 //
 // The stream key would be an argv element, visible in `ps` to every user on the
 // box for the whole run. Forwarding through this process keeps the key in
@@ -116,6 +116,8 @@ func main() {
 	platform := flag.String("platform", "", "twitch, youtube or kick; selects the env var pair")
 	hlsURL := flag.String("hls-url", "", "playback URL to probe downstream (optional but the only way to reach ACCEPTED_2_TRACKS)")
 	seconds := flag.Int("duration", 60, "how long to publish, in seconds")
+	tracks := flag.Int("tracks", 2, "how many audio tracks to publish. 2 is the probe; "+
+		"1 is THE CONTROL -- see the comment on publishMultitrack")
 	selftest := flag.Bool("selftest", false, "forward to a second loopback listener instead of a platform")
 	flag.Parse()
 
@@ -142,7 +144,7 @@ func main() {
 	// harness had printed its answer and gone. Every cleanup here matters --
 	// a live child, a held port, and the self-test sink's own count, which was
 	// printed by a defer that never ran.
-	verdict, why := run(target, redact, *hlsURL, time.Duration(*seconds)*time.Second, *selftest)
+	verdict, why := run(target, redact, *hlsURL, time.Duration(*seconds)*time.Second, *selftest, *tracks)
 	finish(verdict, why)
 }
 
@@ -245,24 +247,43 @@ func platformTarget(platform string) (*url.URL, *regexp.Regexp, error) {
 			"fragment: give the bare ingest endpoint and let %s_STREAM_KEY supply the key", p, p)
 	}
 
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + key
+	// THE KEY GOES IN THE FRAGMENT, NOT THE PATH, and the difference is the
+	// whole reason this probe reported REJECTED against three platforms that
+	// were never asked anything. gortmplib's splitURL reads the stream key from
+	// the URL FRAGMENT and treats the entire path as the RTMP `app`:
+	//
+	//	streamKey, nu.Fragment = nu.Fragment, ""
+	//	app := strings.TrimPrefix(nu.RequestURI(), "/")
+	//
+	// Appending the key to the path therefore sent connect(app: "app/live_...")
+	// with an empty stream name. Twitch, YouTube and Kick each closed the
+	// connection on it, and the probe classified every one of those as "the
+	// platform declining" -- an answer about multitrack audio that was really an
+	// answer about a malformed connect.
+	//
+	// The fragment never reaches the wire as a fragment; gortmplib moves it into
+	// the publish call. The guard above still refuses a fragment on the INPUT,
+	// which is unchanged: the operator supplies a bare endpoint and the key
+	// arrives from the environment.
+	u.Fragment = key
 	return u, regexp.MustCompile(regexp.QuoteMeta(key)), nil
 }
 
-// redactURL renders the target with the key replaced. The key is always the
-// final path element, because platformTarget is the only thing that ever
-// appends one.
+// redactURL renders the target with the key replaced. The key is the URL
+// FRAGMENT, because that is where gortmplib reads a stream key from and
+// platformTarget is the only thing that ever sets one.
 //
 // Assembled by hand rather than through url.URL.String(), which percent-encodes
 // the placeholder into rtmp://host/app/%3CKEY%3E -- unreadable, and unreadable
 // in the one line an operator uses to check they are pointed at the right
 // ingest.
 func redactURL(u *url.URL) string {
-	p := u.Path
-	if i := strings.LastIndex(p, "/"); i >= 0 {
-		p = p[:i+1]
-	}
-	return u.Scheme + "://" + u.Host + p + "<KEY>"
+	// THE FRAGMENT, not the last path element. This stripped a path segment
+	// back when platformTarget appended the key to the path; left unchanged
+	// after the key moved to the fragment, it would have printed the path
+	// correctly and the key verbatim beside it -- a redactor that redacts the
+	// wrong field is worse than none, because the caller believes it worked.
+	return u.Scheme + "://" + u.Host + u.Path + "#<KEY>"
 }
 
 // scrub removes the stream key from anything about to be printed.
@@ -309,7 +330,7 @@ func (c counts) audioTracks() int {
 	return n
 }
 
-func run(target *url.URL, redact *regexp.Regexp, hlsURL string, dur time.Duration, selftest bool) (string, string) {
+func run(target *url.URL, redact *regexp.Regexp, hlsURL string, dur time.Duration, selftest bool, tracks int) (string, string) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return verdictInconclusive, "cannot listen on loopback: " + err.Error()
@@ -340,7 +361,7 @@ func run(target *url.URL, redact *regexp.Regexp, hlsURL string, dur time.Duratio
 	}
 	defer sink.Close()
 
-	pub, err := publishMultitrack(local, dur)
+	pub, err := publishMultitrack(local, dur, tracks)
 	if err != nil {
 		return verdictInconclusive, "cannot start ffmpeg: " + err.Error()
 	}
@@ -414,6 +435,17 @@ func run(target *url.URL, redact *regexp.Regexp, hlsURL string, dur time.Duratio
 	// tracks left this machine, the platform was sent an ordinary stream and
 	// accepting it says nothing whatsoever about #141.
 	if n := c.audioTracks(); n < 2 {
+		// -tracks 1 REACHING HERE IS THE CONTROL SUCCEEDING. The platform took a
+		// single-track publish and held it for the whole run, so the connection,
+		// the credential and this forwarder all work -- which is exactly what a
+		// multitrack REJECTED verdict needs ruled out before it means anything.
+		if tracks < 2 && !selftest {
+			return verdictInconclusive, fmt.Sprintf("CONTROL PASSED: a %d-track publish "+
+				"was accepted and held for the whole run, so the connection, the "+
+				"credential and the forwarder are all working. This says nothing about "+
+				"multitrack -- it removes the reasons a -tracks 2 refusal might not be "+
+				"about multitrack. Now run -tracks 2.", n)
+		}
 		return verdictInconclusive, fmt.Sprintf("only %d audio track(s) reached the "+
 			"forwarder, so the platform was never asked the question. Run -selftest "+
 			"to find out why before believing anything about the platform.", n)
@@ -561,19 +593,42 @@ func (s *loopbackSink) Close() {
 
 // ---------------------------------------------------------------- the publisher
 
-// publishMultitrack starts FFmpeg publishing video plus two distinct tones as
-// E-RTMP multitrack, to the LOOPBACK listener only. No credential is anywhere
-// in this argv, by construction: the only URL it is given is 127.0.0.1.
-func publishMultitrack(local string, dur time.Duration) (*exec.Cmd, error) {
+// publishMultitrack starts FFmpeg publishing video plus one or two distinct
+// tones, to the LOOPBACK listener only. No credential is anywhere in this argv,
+// by construction: the only URL it is given is 127.0.0.1.
+//
+// TRACKS=1 IS THE CONTROL, AND WITHOUT IT NO VERDICT HERE MEANS ANYTHING.
+//
+// The first real run of this probe reported REJECTED for Twitch, YouTube and
+// Kick, all with "the platform refused the connection: EOF" -- and every one of
+// those refusals arrived during the RTMP handshake, BEFORE a single multitrack
+// audio message had been sent. A refusal that happens before the thing under
+// test is sent cannot be evidence about the thing under test. Read literally,
+// the old verdict said "these platforms reject multitrack" when what was
+// measured was "this publish path did not connect".
+//
+// So: run with -tracks 1 first. If a single-track stream is refused the same
+// way, the finding is about this harness or these credentials and there is no
+// platform verdict to give. Only if -tracks 1 is ACCEPTED and -tracks 2 is
+// REJECTED has a platform actually declined multitrack audio.
+func publishMultitrack(local string, dur time.Duration, tracks int) (*exec.Cmd, error) {
 	secs := strconv.Itoa(int(dur.Seconds()) + 2)
 	argv := []string{"-hide_banner", "-loglevel", "warning", "-re",
 		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=" + secs,
 		"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=%d:duration=%s:sample_rate=48000", toneA, secs),
-		"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=%d:duration=%s:sample_rate=48000", toneB, secs),
-		"-map", "0:v", "-map", "1:a", "-map", "2:a",
+	}
+	if tracks >= 2 {
+		argv = append(argv,
+			"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=%d:duration=%s:sample_rate=48000", toneB, secs))
+	}
+	argv = append(argv, "-map", "0:v", "-map", "1:a")
+	if tracks >= 2 {
+		argv = append(argv, "-map", "2:a")
+	}
+	argv = append(argv,
 		"-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-g", "60",
 		"-c:a", "aac", "-b:a", "128k", "-ar", "48000",
-		"-f", "flv", local}
+		"-f", "flv", local)
 	cmd := exec.Command(ffmpegBin, argv...)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
