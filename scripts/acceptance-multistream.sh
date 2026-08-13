@@ -273,14 +273,50 @@ export POLY_DRY_STREAM_KEY
 # failure several checks later.
 #
 # Named through -metadata comment so cleanup and the argv guard can find it.
+# THE SOURCE IS A REAL BROADCAST SHAPE, and was not always.
+#
+# This published 640x360 at 30fps and 1200 kbps for a long time, for no recorded
+# reason -- an unexamined default rather than a decision. It made the suite's
+# name a slight lie: "measure real multistream fan-out" was measuring the fan-out
+# of a signal no broadcast resembles. Kick's own dashboard recommends 1920x1080
+# at 60fps and 8000 kbps; every platform in internal/services publishes a ceiling
+# (Twitch 6000, Facebook 9000, Kick 8000) and 1200 came within sight of none of
+# them, so nothing here had ever exercised one.
+#
+# 6000 kbps because that is exactly Twitch's published maximum: at the ceiling
+# rather than over it, so a refusal means something is wrong rather than that we
+# asked for too much.
+#
+# THE COST IS ONE ENCODE, NOT NINE. Destinations are -c:v copy -- video passes
+# through untouched and only audio is mixed per destination -- so raising the
+# source costs a single libx264 process. Measured on the 6-core Haswell this
+# suite runs on:
+#
+#   640x360   30fps 1200k   10s of video encoded in 0.3s   33x realtime
+#   1920x1080 30fps 6000k   10s of video encoded in 1.5s  6.7x realtime
+#   1920x1080 60fps 6000k   10s of video encoded in 2.7s  3.7x realtime
+#
+# What this newly puts under test is the network: four destinations at 6000 kbps
+# is ~24 Mbit/s sustained upstream, against ~5 at the old size.
+MS_WIDTH="${POLY_MS_WIDTH:-1920}"
+MS_HEIGHT="${POLY_MS_HEIGHT:-1080}"
+MS_FPS="${POLY_MS_FPS:-60}"
+MS_VBITRATE="${POLY_MS_VBITRATE:-6000k}"
+
 publish() { # publish <seconds>
+  # GOP DERIVED, NOT CONSTANT. Every platform in the registry publishes
+  # keyintSeconds: 2, and this was a literal -g 60 back when the source was
+  # 30fps -- correct then, and silently wrong the moment the rate changed, since
+  # 60 frames at 60fps is a one-second GOP. Deriving it means the framerate is
+  # the only thing to get right.
+  local gop=$(( MS_FPS * 2 ))
   ffmpeg -hide_banner -loglevel error -re \
-    -f lavfi -i "testsrc2=size=640x360:rate=30" \
+    -f lavfi -i "testsrc2=size=${MS_WIDTH}x${MS_HEIGHT}:rate=$MS_FPS" \
     -f lavfi -i "sine=frequency=$TONE_A:sample_rate=48000" \
     -f lavfi -i "sine=frequency=$TONE_B:sample_rate=48000" \
     -metadata comment=multistream-publisher \
     -map 0:v -map 1:a -map 2:a \
-    -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -b:v 1200k \
+    -c:v libx264 -preset ultrafast -tune zerolatency -g "$gop" -pix_fmt yuv420p -b:v "$MS_VBITRATE" \
     -c:a aac -b:a 128k -ac 2 -t "$1" \
     -f flv "rtmp://127.0.0.1:$INGEST/live/$PUBKEY" \
     > "publisher.log" 2>&1 &
@@ -734,6 +770,12 @@ fi
 # not being known, not about the path being the wrong shape.
 WRONGKEY="$(od -An -tx1 -N48 /dev/urandom | tr -d ' \n' | cut -c1-"${#LOOPKEY}")"
 rm -f wrongkey.rc
+# DELIBERATELY TINY, and unlike the publisher above that is a decision rather
+# than an oversight. This encoder exists to be REFUSED: it proves a wrong key is
+# rejected, and a rejection arrives during the handshake, before a single frame
+# of video matters. Sending 1080p60 at it would cost bandwidth to test nothing
+# the handshake has not already settled.
+#
 # THE EXIT STATUS GOES TO A FILE, not to `wait`.
 #
 # bash reaps a background child asynchronously and remembers its status in a
