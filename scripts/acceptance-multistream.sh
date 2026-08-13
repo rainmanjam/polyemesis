@@ -22,6 +22,13 @@
 # which is what this product already does, and which has never been measured end
 # to end. So the useful question is the one next door:
 #
+# STILL TRUE, WITH ONE CORRECTION. "No platform documents accepting a second
+# audio track" is a statement about platforms and it stands. It was also read
+# for years as "polyemesis cannot send one", which was never measured either
+# way. It can: internal/ffmpeg.TestTwoDistinctMixesReachAnRTMPFarEnd publishes
+# two mixes through this product's own RTMP server and reads both tones back off
+# the far end. The default is still one track, per the paragraph above.
+#
 #   does one source fan out to Twitch + YouTube + Kick + Facebook at once, each
 #   receiving its own correct mix?
 #
