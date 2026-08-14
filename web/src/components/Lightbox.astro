@@ -107,11 +107,47 @@
      does not change the page's appearance -- only its behaviour. */
   :global(.shot-open) {
     display: block;
+    position: relative;
     width: 100%;
     padding: 0;
     border: 0;
     background: none;
     cursor: zoom-in;
+  }
+
+  /* A VISIBLE GLYPH, because `cursor: zoom-in` says nothing to a phone.
+
+     A touch device has no pointer to change shape, so on the viewport where
+     these images are SMALLEST the affordance was entirely absent: measured at
+     390px each 2880x1800 capture renders at 335x210 CSS px, an 8.6x reduction,
+     and nothing on screen suggested it could be opened. The one reader who most
+     needs to expand the picture was the one reader never told they could.
+
+     Drawn in the corner rather than centred so it never covers the part of the
+     screenshot someone is trying to read, and always present rather than
+     hover-only -- a hover-revealed hint has the same problem as the cursor. */
+  :global(.shot-open::after) {
+    content: "";
+    position: absolute;
+    right: 0.625rem;
+    bottom: 0.625rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 1px solid var(--color-line-strong, #39435a);
+    border-radius: 0.5rem;
+    background-color: rgb(11 13 17 / 0.72);
+    /* The two-arrow expand mark, inline so it costs no request. currentColor is
+       not available to a background image, hence the literal stroke. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23edf2f8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4h4v4M8 16H4v-4M16 4l-5 5M4 16l5-5'/%3E%3C/svg%3E");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 1rem 1rem;
+    backdrop-filter: blur(4px);
+    transition: background-color 140ms ease;
+    pointer-events: none;
+  }
+  :global(.shot-open:hover::after) {
+    background-color: rgb(11 13 17 / 0.9);
   }
   :global(.shot-open:focus-visible) {
     outline: 2px solid var(--color-primary-bright, #78a6e8);

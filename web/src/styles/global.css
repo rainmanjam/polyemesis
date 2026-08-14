@@ -216,7 +216,20 @@
      Pinning the first column keeps the question on screen next to the answer.
      An opaque background is required, not decorative: without it the scrolling
      cells slide visibly underneath the label. */
-  .cmp :is(th, td):first-child {
+  /* EVERY wide table, not just the comparison ones.
+   *
+   * This started as a fix for /comparison and was measured afterwards on the
+   * other two: the routing matrix on the home page hides 403px of 736 (55%) at
+   * a 390px viewport, and it is the worse case of the two. That table is
+   * INTERACTIVE -- you scroll right to reach a destination column and click a
+   * crosspoint -- so losing the track label means clicking a cell without
+   * knowing which of six tracks it belongs to.
+   *
+   * The background is a variable because the two tables sit on different
+   * grounds: the comparison tables on the page, the matrix inside a
+   * surface-filled card. An opaque background is required either way, and the
+   * wrong opaque colour is as visible as none. */
+  :is(.cmp, .patch) :is(th, td):first-child {
     position: sticky;
     left: 0;
     z-index: 1;
@@ -224,23 +237,57 @@
        rather than the role, so the obvious guess (--color-bg) does not exist
        and silently resolves to transparent -- which still LOOKS like a working
        sticky column until something scrolls underneath it. */
-    background: var(--color-ink);
+    background: var(--sticky-bg, var(--color-ink));
   }
   /* The head row paints its own surface, so its pinned cell has to match that
      rather than the page, or the corner reads as a hole in the header. */
   .cmp thead :is(th, td):first-child {
     background: var(--color-surface);
   }
+  /* The matrix is inside a card that is already surface-coloured, so both its
+     head and its body cells take that instead of the page colour. */
+  .patch {
+    --sticky-bg: var(--color-surface);
+  }
   /* The edge that says "this column is pinned, the rest moved". Drawn with a
      shadow rather than a border so it costs no layout width and cannot push the
      table wider -- which is the problem one row up in this file. */
-  .cmp :is(th, td):first-child::after {
+  :is(.cmp, .patch) :is(th, td):first-child::after {
     content: "";
     position: absolute;
     inset-block: 0;
     right: 0;
     width: 1px;
     background: var(--color-line);
+  }
+
+  /* THE TABLE GIVES NO SIGN IT SCROLLS, so this draws one.
+   *
+   * macOS and iOS both hide overlay scrollbars until a scroll is already in
+   * progress, which means the affordance only appears once you have performed
+   * the action it exists to suggest. Measured at 390px, the visible frame shows
+   * 348 of 736px -- 47% -- and the other 53% is undiscoverable.
+   *
+   * A fade at the right edge is the conventional answer and it reads without
+   * instructions: content that dissolves rather than ending says it continues.
+   *
+   * Scoped by width rather than by measuring overflow, because every table
+   * carrying this is min-width 46rem and therefore always overflows below it.
+   * A JS-measured version would be exact and would also be one more script for
+   * a hint that is already correct at every width it applies to. */
+  @media (max-width: 48rem) {
+    .scroll-hint {
+      position: relative;
+    }
+    .scroll-hint::after {
+      content: "";
+      position: absolute;
+      inset-block: 0;
+      right: 0;
+      width: 2.5rem;
+      pointer-events: none;
+      background: linear-gradient(to right, rgb(11 13 17 / 0), var(--sticky-bg, var(--color-ink)));
+    }
   }
 
   .chip {
