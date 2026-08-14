@@ -12,6 +12,21 @@ import (
 // destination command builder maps it with -map "[aout]".
 const OutLabel = "aout"
 
+// ns is a label namespace. Every intermediate label a compile emits goes
+// through it, so that two graphs can share one filter_complex without colliding.
+//
+// The empty namespace reproduces the labels this package emitted before it
+// existed, BYTE FOR BYTE -- that is asserted, not assumed, because a destination
+// that gains a second mix must not have its first mix quietly rewritten. See
+// TestTheEmptyNamespaceIsByteIdenticalToTheSingleMixGraph.
+type ns struct{ prefix string }
+
+// of namespaces a fixed label.
+func (n ns) of(name string) string { return n.prefix + name }
+
+// track names the per-track pan output for ingest track t.
+func (n ns) track(t int) string { return fmt.Sprintf("%sa_t%d", n.prefix, t) }
+
 // Result is a compiled routing profile.
 type Result struct {
 	// FilterComplex is the full -filter_complex argument, ready to hand to
@@ -62,7 +77,7 @@ type Result struct {
 // (or, for denoise, the source annotation) asked for it, so a profile that uses
 // none of them produces the string above byte for byte.
 func Compile(p Profile, src Source) (Result, error) {
-	return compile(p, src, false)
+	return compile(p, src, false, ns{})
 }
 
 // CompileProvisional builds the same graph for a layout that has NOT been
@@ -78,15 +93,15 @@ func Compile(p Profile, src Source) (Result, error) {
 // one, because an operator has to know the mix is being decided by FFmpeg at
 // runtime rather than by the matrix they drew.
 func CompileProvisional(p Profile, src Source) (Result, error) {
-	return compile(p, src, true)
+	return compile(p, src, true, ns{})
 }
 
-func compile(p Profile, src Source, provisional bool) (Result, error) {
+func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	if err := p.Validate(); err != nil {
 		return Result{}, err
 	}
 
-	res := Result{OutLabel: OutLabel}
+	res := Result{OutLabel: n.of(OutLabel)}
 
 	cells, warns := resolveCells(p, src)
 	if provisional {
@@ -131,7 +146,7 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	var chains []string
 	label := make(map[int]string, len(tracks))
 	for _, t := range tracks {
-		label[t] = fmt.Sprintf("a_t%d", t)
+		label[t] = n.track(t)
 		chain := trackChain(src, t, byTrack[t])
 		if provisional {
 			chain = provisionalChain(src, t, trackGain(p, t))
@@ -143,7 +158,7 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	// trigger down along with everything else.
 	legs := make([]string, 0, len(tracks))
 	if d, ok := p.EffectiveDucking(); ok {
-		duckChains, duckLegs, duckWarns := duckGraph(d, src, tracks, label, provisional)
+		duckChains, duckLegs, duckWarns := duckGraph(d, src, tracks, label, provisional, n)
 		chains = append(chains, duckChains...)
 		legs = duckLegs
 		if len(duckWarns) > 0 {
@@ -161,9 +176,9 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	// the resulting clip risk explicitly, below.
 	cur := legs[0]
 	if len(legs) > 1 {
-		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[a_mix]",
-			bracket(legs), len(legs)))
-		cur = "a_mix"
+		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[%s]",
+			bracket(legs), len(legs), n.of("a_mix")))
+		cur = n.of("a_mix")
 	}
 
 	norm := resolveNorm(p.Normalize, len(tracks), peakGain(cells))
@@ -177,8 +192,8 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	}
 	res.Normalization = norm
 	if f := normFilterFor(norm, loud, loudOK); f != "" {
-		chains = append(chains, fmt.Sprintf("[%s]%s[a_norm]", cur, f))
-		cur = "a_norm"
+		chains = append(chains, fmt.Sprintf("[%s]%s[%s]", cur, f, n.of("a_norm")))
+		cur = n.of("a_norm")
 	}
 
 	// Delay last but one: holding the finished mix is what "this destination is
@@ -186,8 +201,8 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	// loudness measurement looking at the same samples it always did.
 	switch {
 	case p.DelayMS > 0:
-		chains = append(chains, fmt.Sprintf("[%s]adelay=delays=%d:all=1[a_delay]", cur, p.DelayMS))
-		cur = "a_delay"
+		chains = append(chains, fmt.Sprintf("[%s]adelay=delays=%d:all=1[%s]", cur, p.DelayMS, n.of("a_delay")))
+		cur = n.of("a_delay")
 	case p.DelayMS < 0:
 		res.VideoDelayMS = -p.DelayMS
 	}
@@ -198,7 +213,7 @@ func compile(p Profile, src Source, provisional bool) (Result, error) {
 	if rate == 0 {
 		rate = 48000
 	}
-	chains = append(chains, fmt.Sprintf("[%s]aresample=%d:async=1:first_pts=0[%s]", cur, rate, OutLabel))
+	chains = append(chains, fmt.Sprintf("[%s]aresample=%d:async=1:first_pts=0[%s]", cur, rate, n.of(OutLabel)))
 
 	res.FilterComplex = strings.Join(chains, ";")
 	res.Summary = summarize(tracks)
@@ -325,7 +340,7 @@ const DenoiseFilter = "afftdn=nr=12:nf=-25:tn=1"
 // legs. Returning no legs means nothing was ducked and the caller should mix as
 // usual; that is the deliberate response to a duck that cannot be built, since
 // an un-ducked mix is still the operator's audio and a broken graph is silence.
-func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provisional bool) (chains, legs, warns []string) {
+func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provisional bool, n ns) (chains, legs, warns []string) {
 	inMix := map[int]bool{}
 	for _, t := range tracks {
 		inMix[t] = true
@@ -359,15 +374,15 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 	var keys []string
 	for _, t := range triggers {
 		if inMix[t] {
-			mixLbl := fmt.Sprintf("a_t%d_mix", t)
-			keyLbl := fmt.Sprintf("a_t%d_key", t)
+			mixLbl := fmt.Sprintf("%sa_t%d_mix", n.prefix, t)
+			keyLbl := fmt.Sprintf("%sa_t%d_key", n.prefix, t)
 			chains = append(chains, fmt.Sprintf("[%s]asplit=2[%s][%s]", label[t], mixLbl, keyLbl))
 			label[t] = mixLbl
 			keys = append(keys, keyLbl)
 			continue
 		}
 		tr, _ := src.TrackByIndex(t)
-		keyLbl := fmt.Sprintf("a_k%d", t)
+		keyLbl := fmt.Sprintf("%sa_k%d", n.prefix, t)
 		// Downmix the tap the same way a contributing track would, so the two
 		// sidechaincompress inputs always agree on channel layout, and denoise
 		// it if it is annotated: room noise opening the duck is precisely the
@@ -387,9 +402,9 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 
 	key := keys[0]
 	if len(keys) > 1 {
-		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[a_duckkey]",
-			bracket(keys), len(keys)))
-		key = "a_duckkey"
+		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[%s]",
+			bracket(keys), len(keys), n.of("a_duckkey")))
+		key = n.of("a_duckkey")
 	}
 
 	bus := label[targets[0]]
@@ -402,17 +417,17 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 		// amix=normalize=0 is a plain sum, so summing early is arithmetically
 		// identical, and one compressor means one gain-reduction envelope
 		// instead of several that could drift apart.
-		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[a_duckin]",
-			bracket(in), len(in)))
-		bus = "a_duckin"
+		chains = append(chains, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0[%s]",
+			bracket(in), len(in), n.of("a_duckin")))
+		bus = n.of("a_duckin")
 	}
-	chains = append(chains, fmt.Sprintf("[%s][%s]sidechaincompress=%s[a_duck]", bus, key, duckParams(d)))
+	chains = append(chains, fmt.Sprintf("[%s][%s]sidechaincompress=%s[%s]", bus, key, duckParams(d), n.of("a_duck")))
 
 	placed := false
 	for _, t := range tracks {
 		if isTarget[t] {
 			if !placed {
-				legs = append(legs, "a_duck")
+				legs = append(legs, n.of("a_duck"))
 				placed = true
 			}
 			continue
