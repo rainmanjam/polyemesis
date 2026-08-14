@@ -7,9 +7,20 @@
 # them. Putting both in a file that Wrangler treats as the source of truth gives
 # internal/testenv/pagesdeploy_test.go something to compare against.
 #
-# `pages_build_output_dir` is RELATIVE TO THIS FILE, so it is ./dist because this
-# file is web/wrangler.toml and Astro builds into web/dist. The workflow runs
-# wrangler with working-directory: web for the same reason.
+# `assets.directory` is RELATIVE TO THIS FILE, so it is ./dist because this file
+# is web/wrangler.toml and Astro builds into web/dist. The workflow runs wrangler
+# with working-directory: web for the same reason.
+#
+# WORKERS, NOT PAGES, AND NOT BY PREFERENCE. Cloudflare no longer offers Pages
+# project creation in its dashboard -- the "create" flow builds a Worker, and
+# "Upload your static files" there is Workers Static Assets. `wrangler pages
+# deploy` refused with `The Pages project "polyemesis" does not exist` and there
+# was no supported way to create one by hand.
+#
+# The migration is small because this site has no Pages Functions to carry over:
+# astro.config.mjs sets output: "static", and there is no functions/ directory,
+# no _worker.js and no _routes.json. What would have been the hard part does not
+# exist here.
 #
 # This file is the source of truth once it is used: fields set here CANNOT be
 # edited in the Cloudflare dashboard. That is deliberate — the dashboard is not
@@ -21,4 +32,20 @@
 # upload of files and nothing runs per request. Adding a date here would suggest
 # a runtime that does not exist.
 name = "polyemesis"
-pages_build_output_dir = "./dist"
+
+# Required for a Worker and not for a Pages project. Pinned rather than floating:
+# a compatibility date is the runtime contract, and one that moved on its own
+# would change behaviour with no commit to point at.
+compatibility_date = "2026-08-13"
+
+[assets]
+directory = "./dist"
+# A static site's 404 is a page, not an empty body. Astro emits 404.html.
+not_found_handling = "404-page"
+# MUST MATCH astro.config.mjs, and the default does not. Cloudflare defaults to
+# `auto-trailing-slash`, which answers /features with a redirect to /features/.
+# astro.config.mjs sets `build: { format: "file" }` and `trailingSlash: "never"`
+# precisely to avoid that -- its comment says directory output "costs every
+# internal navigation an extra round trip for nothing". Leaving the default here
+# would have reinstated the redirect the site is built to avoid, on every page.
+html_handling = "drop-trailing-slash"

@@ -1,4 +1,4 @@
-# Response headers for Cloudflare Pages.
+# Response headers for Cloudflare Workers static assets.
 #
 # THIS FILE IS THE nginx SECURITY HEADERS, AGAIN, FOR A HOST THAT CANNOT READ
 # THEM. web/nginx.conf and web/nginx-security-headers.conf were written for a
