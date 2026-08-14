@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  Info,
   KeyRound,
   MoreVertical,
   Pencil,
@@ -235,6 +236,41 @@ export function DestinationCard({
             <span>{w}</span>
           </div>
         ))}
+
+        {/* What Enhanced Broadcasting decided for THIS run.
+            MUTED, NOT AMBER, and never behind an alert triangle. Twitch grants
+            it only to a client with a supported GPU and a rented server has
+            none, so on most installs the fallback happens every time, for ever
+            — an operator who is shown a warning every broadcast learns to
+            ignore warnings. The toggle in the dialog promises this sentence;
+            this is where it is kept. */}
+        {dest.multitrackNote && (
+          <div className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+            <Info className="mt-0.5 h-3 w-3 shrink-0" />
+            <span className="break-words">{dest.multitrackNote}</span>
+          </div>
+        )}
+        {/* Advisory only. Twitch agreed and said something about it; the
+            destination IS publishing. Rendering these as faults would make an
+            optional annotation look like the reason a stream is not working. */}
+        {(dest.multitrackDivergences ?? []).map((d) => (
+          <div
+            key={`${d.field}:${d.detail}`}
+            className="flex items-start gap-1.5 pl-4 text-[10px] text-muted-foreground"
+          >
+            <span className="break-words">{d.detail}</span>
+          </div>
+        ))}
+        {/* One track short of what was configured, and the destination is
+            otherwise fine — so this is stated rather than alarmed about. It
+            exists because the alternative was silence: two audio tracks pushed
+            at a one-track ingest with nothing anywhere saying so. */}
+        {dest.vodAudioDropped && (
+          <div className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+            <Info className="mt-0.5 h-3 w-3 shrink-0" />
+            <span className="break-words">{dest.vodAudioDropped}</span>
+          </div>
+        )}
 
         {/* A backup nobody can see is worse than none: the operator believes
             they have redundancy. So its state is rendered beside the primary's

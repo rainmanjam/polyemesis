@@ -66,6 +66,7 @@ import type {
   CredentialCheck,
   FailoverReturn,
   IngestMode,
+  MultitrackGpu,
   PlatformAccount,
   PlatformCreds,
   Settings,
@@ -618,6 +619,8 @@ function PipelineSettings({
           </Button>
         </CardContent>
       </Card>
+
+      <MultitrackHardware draft={draft} setDraft={setDraft} onSave={onSave} saving={saving} />
 
       <Card>
         <CardHeader>
@@ -1305,6 +1308,170 @@ function PipelineSettings({
         </Button>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------- multitrack hardware */
+
+/** The three PCI vendor IDs Twitch's encoders come from, in the DECIMAL
+ *  spelling the wire format uses. Offered as a picker rather than a free number
+ *  because a hex/decimal mix-up is the single easiest way to send a vendor ID
+ *  Twitch refuses — 0x10de typed as 10 is not NVIDIA, it is nothing. */
+const PCI_VENDORS = [
+  { id: 4318, label: "NVIDIA (4318 / 0x10de)" },
+  { id: 4098, label: "AMD (4098 / 0x1002)" },
+  { id: 32902, label: "Intel (32902 / 0x8086)" },
+];
+
+/** The declared GPU inventory for Twitch Enhanced Broadcasting.
+ *
+ *  DECLARED RATHER THAN DETECTED, and the copy says so, because an operator who
+ *  sees an empty form on a machine that plainly has a GPU will otherwise read it
+ *  as a bug. polyemesis can measure exactly one of these six fields on one
+ *  platform; the rest are not enumerated anywhere, and a request that filled
+ *  them with zeros would describe a machine that does not exist. See
+ *  db.MultitrackSettings.
+ *
+ *  Copy is inline English rather than catalogue keys, following the Enhanced
+ *  Broadcasting toggle in DestinationDialog that this block exists to make
+ *  work — the two are read together and a half-translated pair is worse than an
+ *  untranslated one. */
+function MultitrackHardware({
+  draft,
+  setDraft,
+  onSave,
+  saving,
+}: {
+  draft: Settings;
+  setDraft: (s: Settings) => void;
+  onSave: (s: Settings) => void;
+  saving: boolean;
+}) {
+  const gpus = draft.multitrack?.gpus ?? [];
+  // Always sent as an explicit array, never omitted, so clearing the last entry
+  // is a value this form can actually send. An absent key would leave the
+  // stored list alone and the operator would watch a delete undo itself.
+  const write = (next: MultitrackGpu[]) =>
+    setDraft({ ...draft, multitrack: { gpus: next } });
+
+  const patch = (i: number, p: Partial<MultitrackGpu>) =>
+    write(gpus.map((g, n) => (n === i ? { ...g, ...p } : g)));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Enhanced Broadcasting hardware (Twitch)</CardTitle>
+        <CardDescription>
+          What this machine's GPU is, for the negotiation a destination with Enhanced Broadcasting
+          switched on makes at go-live.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <span className="text-[10px] text-muted-foreground">
+          Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks
+          what it is told: a zero vendor ID, a vendor it does not know and an out-of-date driver are
+          each refused by name. polyemesis does not fill this in for you — it can read the PCI vendor
+          ID of a render node on Linux and nothing else, and sending that one field with zeros in the
+          rest would be describing a machine that does not exist. Leaving it empty is fine and is the
+          normal state: nothing is asked, and a destination with the toggle on simply publishes to
+          the ordinary Twitch ingest and says so once.
+        </span>
+        {gpus.map((g, i) => (
+          <div key={i} className="flex flex-col gap-2 rounded-md border border-border p-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex min-w-56 flex-1 flex-col gap-1">
+                <Label htmlFor={`mt-model-${i}`}>Model</Label>
+                <Input
+                  id={`mt-model-${i}`}
+                  value={g.model ?? ""}
+                  placeholder="NVIDIA GeForce RTX 4070"
+                  onChange={(e) => patch(i, { model: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`mt-vendor-${i}`}>Vendor</Label>
+                <Select
+                  value={g.vendorId ? String(g.vendorId) : ""}
+                  onValueChange={(v) => patch(i, { vendorId: Number(v) })}
+                >
+                  <SelectTrigger id={`mt-vendor-${i}`} className="w-52">
+                    <SelectValue placeholder="Choose the vendor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PCI_VENDORS.map((v) => (
+                      <SelectItem key={v.id} value={String(v.id)} data-value={String(v.id)}>
+                        {v.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`mt-driver-${i}`}>Driver version</Label>
+                <Input
+                  id={`mt-driver-${i}`}
+                  value={g.driverVersion ?? ""}
+                  placeholder="550.54.14"
+                  className="w-36"
+                  onChange={(e) => patch(i, { driverVersion: e.target.value })}
+                />
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Remove this GPU"
+                onClick={() => write(gpus.filter((_, n) => n !== i))}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`mt-device-${i}`}>Device ID (decimal)</Label>
+                <Input
+                  id={`mt-device-${i}`}
+                  type="number"
+                  min={0}
+                  className="w-32"
+                  value={g.deviceId ?? 0}
+                  onChange={(e) => patch(i, { deviceId: Number(e.target.value) })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`mt-vram-${i}`}>Video memory (bytes)</Label>
+                <Input
+                  id={`mt-vram-${i}`}
+                  type="number"
+                  min={0}
+                  className="w-44"
+                  value={g.dedicatedVideoMemory ?? 0}
+                  onChange={(e) => patch(i, { dedicatedVideoMemory: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+            {/* Optional, and said so rather than left for the operator to
+                discover by saving. A number invented to fill a box is worse
+                than an empty one: Twitch checks these. */}
+            <span className="text-[10px] text-muted-foreground">
+              Device ID and video memory are optional — leave them at zero rather than guessing. The
+              model and the vendor are not: a vendor ID of zero is refused by name.
+            </span>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => write([...gpus, { model: "", vendorId: 0 }])}
+          >
+            Add a GPU
+          </Button>
+          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

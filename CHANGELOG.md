@@ -78,6 +78,45 @@ its first tagged release.
 
 ### Added
 
+- **Twitch Enhanced Broadcasting is now reachable.** `internal/multitrack` was
+  complete, documented and tested, and nothing imported it: `go list -deps
+  ./cmd/polyemesis` did not include the package, the `multitrack` column on a
+  destination was written by the API, migrated, persisted, scanned back and
+  shown as a toggle, and no code path ever read it. It is wired into the
+  go-live path. A destination that opted in negotiates once per start — not per
+  reconcile and not per reconnect — and on success publishes to the ingest
+  Twitch names with the 312-character key Twitch mints, which carries the
+  agreed rendition ladder signed inside it. That key is registered as a
+  credential in its own right rather than assumed covered by the operator's:
+  the minted value ENDS WITH the original, so a scrubber that knows only the
+  original masks the last segment and leaves the signature and the manifest
+  standing in `process.log` — a partially redacted live credential, which is
+  the shape of #310 and #324.
+
+  The hardware the negotiation needs is DECLARED under Settings → Pipeline →
+  Enhanced Broadcasting hardware, not detected. Twitch validates the inventory
+  and refuses by name on a zero vendor ID, an unrecognised vendor and an
+  out-of-date driver; polyemesis can measure one of `multitrack.GPU`'s six
+  fields on one platform, so a request assembled from that one with zeros in
+  the rest would describe a machine that does not exist. With nothing declared
+  no request is made at all, which is the state every install starts in and is
+  not a fault: the destination publishes to the ordinary Twitch ingest and says
+  so once, on its card, in plain text rather than behind an alert triangle.
+  A refusal, a 5xx, a timeout and a hung platform all reach the same place.
+
+- **A second audio mix is no longer pushed silently at an ingest that takes
+  one.** The engine compiled the VOD pair on `destination.vodProfile` alone and
+  never read `destination.multitrack`, so a Twitch destination with a second
+  mix configured sent TWO audio tracks to an ingest documented as carrying one
+  — with nothing in the log, the status or the card saying so, while
+  `db.Destination.VODProfile`'s own comment promised "the engine reports it".
+  It reports it now, in both directions: the pair is refused outright at plan
+  time on a Twitch destination that did not opt in, and dropped at go-live on
+  one that did and whose negotiation did not succeed. Both say why. The
+  redundant feed of such a destination carries one track too, because it
+  publishes to the operator's own backup URL whatever the negotiation said.
+  The generic two-mix egress to every non-Twitch target is untouched.
+
 - **RTMP egress can carry a second audio track, and it has been measured doing
   it.** `ffmpeg.DestSpec.SecondAudioOutLabel` names a second finished mix from
   the destination's filter graph; it is mapped and encoded as a second audio

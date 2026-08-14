@@ -1888,6 +1888,17 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 the ordinary Twitch ingest and says so once. Nothing is lost by leaving it on,
                 and nothing is wrong when it falls back.
               </span>
+              {/* The two things the sentence above leaves out, and both are
+                  things an operator would otherwise have to guess: nothing is
+                  asked at all until the machine's GPU is declared, and the
+                  answer is a line on this destination's card rather than a
+                  dialog nobody is standing in front of at go-live. */}
+              <span className="text-[10px] text-muted-foreground">
+                Nothing is asked until this machine's GPU is declared under Settings &rarr;
+                Pipeline &rarr; Enhanced Broadcasting hardware; with none declared the negotiation
+                is skipped rather than attempted and failed. What was decided appears on this
+                destination's card once it goes live.
+              </span>
             </div>
           )}
 

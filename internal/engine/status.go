@@ -68,6 +68,44 @@ type DestStatus struct {
 	// because the card is where an operator looks, and a public event page
 	// created on their behalf that they cannot reach is half a feature.
 	FacebookBroadcastID string `json:"facebookBroadcastId,omitempty"`
+
+	// MultitrackNote is what the Twitch Enhanced Broadcasting negotiation for
+	// this destination's CURRENT run decided, in one sentence. Absent for every
+	// destination that did not ask, which is nearly all of them.
+	//
+	// DELIBERATELY NOT IN Warnings. Warnings is what the card renders in amber
+	// behind an alert triangle, and Twitch refuses any client without a
+	// supported GPU -- so on most installs a fallback is what happens every
+	// time, for ever. Putting it there would train an operator to read a
+	// perfectly normal broadcast as broken, which is the failure
+	// multitrack.Outcome refuses an error return to avoid.
+	MultitrackNote string `json:"multitrackNote,omitempty"`
+	// MultitrackVerdict is "negotiated", "advisory" or "refused", so the card
+	// can tell "we asked and were turned down" from "we never asked".
+	MultitrackVerdict string `json:"multitrackVerdict,omitempty"`
+	// MultitrackDivergences are the places Twitch's configuration departs from
+	// what this destination asked for. ADVISORY ONLY: they annotate a
+	// destination that IS publishing and must never be rendered as faults.
+	MultitrackDivergences []DivergenceStatus `json:"multitrackDivergences,omitempty"`
+	// VODAudioDropped says why this destination's second (VOD) audio mix is not
+	// on the wire. Empty when there is no second mix, and empty when there is
+	// one and it is going out.
+	//
+	// It exists because the alternative was silence: the engine compiled the
+	// pair on the profile alone and pushed two audio tracks at Twitch's
+	// one-track RTMP ingest with nothing anywhere saying so. Not a warning
+	// either -- the destination is publishing correctly, one track short of
+	// what was configured, and the operator's fix is a toggle rather than a
+	// repair.
+	VODAudioDropped string `json:"vodAudioDropped,omitempty"`
+}
+
+// DivergenceStatus is one advisory note about the negotiated configuration.
+// Mirrors multitrack.Divergence rather than embedding it, so the wire shape of
+// the status payload does not move when that package's internals do.
+type DivergenceStatus struct {
+	Field  string `json:"field"`
+	Detail string `json:"detail"`
 }
 
 // RenditionStatus is one shared video encode's live state.
@@ -245,6 +283,20 @@ func (e *Engine) Status() Status {
 			if live != nil {
 				ds.BackupProcess = procStatus(live.backup)
 				ds.BackupError = live.backupErr
+				// What THIS run negotiated, which is the only run an operator
+				// can ask about. A destination that is not running has nothing
+				// to report here rather than a stale answer from last time --
+				// the negotiation is per go-live and a minted key expires with
+				// the broadcast it was minted for.
+				ds.MultitrackNote = live.multitrack.Note
+				if live.multitrack.Asked {
+					ds.MultitrackVerdict = string(live.multitrack.Verdict)
+				}
+				for _, d := range live.multitrack.Divergences {
+					ds.MultitrackDivergences = append(ds.MultitrackDivergences,
+						DivergenceStatus{Field: d.Field, Detail: d.Detail})
+				}
+				ds.VODAudioDropped = live.vodDropped
 			}
 			if live != nil {
 				ds.Summary = live.compiled.Summary

@@ -37,6 +37,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/meters"
+	"github.com/rainmanjam/polyemesis/internal/multitrack"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -345,6 +346,16 @@ type Engine struct {
 	levelsAt time.Time
 	settings db.Settings
 
+	// mtClient negotiates Twitch Enhanced Broadcasting. Nil is the production
+	// value and means multitrack.Client's zero value, which talks to the real
+	// endpoint. It is a field solely so a test can point the negotiation at an
+	// httptest server through multitrack.Client.BaseURL -- the one seam that
+	// package has, and one nothing at runtime writes.
+	//
+	// NOT UNDER e.mu and not atomic: it is written once, before the engine is
+	// started, by a test in this package, and read on the reconcile goroutine.
+	mtClient *multitrack.Client
+
 	// previewMu serializes preview lifecycle changes. Unlike every other
 	// child, the preview is started from an HTTP handler, so two playlist
 	// requests can race to spawn it.
@@ -454,6 +465,23 @@ type destination struct {
 	// alone, because an operator who enabled redundancy and silently did not
 	// get it is worse off than one who never tried.
 	backupErr string
+
+	// multitrack is what the Enhanced Broadcasting negotiation for THIS start
+	// decided. Zero for every destination that did not ask, which is nearly
+	// all of them.
+	//
+	// HELD RATHER THAN ONLY LOGGED, because the operator's question is "what is
+	// this destination doing right now" and a line that scrolled past at
+	// go-live cannot answer it. It is written once, on the start that produced
+	// it, and never mutated -- Status hands these pointers out and reads them
+	// after dropping the lock, which is only safe while a published destination
+	// never changes again.
+	multitrack mtDecision
+	// vodDropped explains why this destination's second audio mix is not on the
+	// wire, empty when there is nothing to explain. Separate from multitrack
+	// because the two have different causes: the pair can be refused with no
+	// negotiation attempted at all.
+	vodDropped string
 }
 
 // rendition is one running shared video encode.
