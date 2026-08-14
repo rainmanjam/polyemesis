@@ -1,0 +1,221 @@
+# Transcription, against the real model host and the real binaries.
+#
+# scripts/acceptance-transcribe.sh has existed and run NOWHERE. It was the last
+# suite in the repository that needs no credential, no GPU and no account and
+# still had no home -- the only thing standing in the way was that somebody has
+# to install a binary and fetch a model, and no workflow had ever been asked to.
+#
+# WHY ITS OWN WORKFLOW RATHER THAN ci.yml's ACCEPTANCE MATRIX. Seven of the
+# nineteen checks -- steps 1 to 3 -- are not about polyemesis at all. models.go
+# names ten models, composes a Hugging Face URL from each name, and gates
+# VerifyModelFile on a hardcoded byte count for each. Those are twenty hardcoded
+# claims about SOMEBODY ELSE'S SERVER, and every way they go wrong arrives with
+# no commit of ours:
+#
+#   - A model is renamed or withdrawn upstream. The picker offers a download
+#     that 404s, and the only person who finds out is a user who clicked it.
+#   - A model is re-uploaded a few bytes different. VerifyModelFile then rejects
+#     a PERFECTLY GOOD download as "most likely an interrupted download" -- a
+#     check wrong in the restrictive direction, which is the shape download.go's
+#     own comment says it is afraid of.
+#   - Hugging Face stops advertising a content hash on the redirect, and
+#     Download silently drops to a byte-count check and records the downgrade in
+#     a field nobody reads.
+#
+# That is chat-live.yml's argument verbatim, and automod-live.yml's and
+# oauth-live.yml's: a suite that measures THEIR behaviour has to run on a clock,
+# because a suite that only runs when we touch internal/transcribe would never
+# run on the day the thing it guards breaks. Weekly, because the failure modes
+# are slow -- an upstream re-upload sits there until somebody tries to download.
+#
+# The pull_request paths filter is the other half: the seven remote checks want
+# a clock, and the twelve local ones want a diff. Both are cheap enough to have
+# together.
+#
+# THE DOWNLOAD STEP IS ON HERE, and that is a deliberate departure from the
+# other three live workflows, which leave their opt-in step skipping. Theirs
+# skips for want of a credential; this one skips for want of 74 MB. Without
+# POLY_TRANSCRIBE_DOWNLOAD six of the nineteen checks skip -- all of step 6 and
+# all of step 7 -- and step 6 is the step that caught the second of the two
+# defects this suite found on its first run: the SHA-256 was being compared
+# against Hugging Face's Xet `Etag` instead of the LFS object's `X-Linked-Etag`,
+# so every download in the shipped product was rejected. A weekly run that skips
+# the check that has already caught a shipped defect is not worth scheduling.
+#
+# COST PER RUN: one 74 MB model, one 9 MB whisper.cpp release, and the apt
+# ffmpeg. Under four minutes.
+#
+# THE MODEL IS NOT CACHED, AND MUST NOT BE. The driver deletes any cached copy
+# before it calls Download, and says why: Download returns immediately with
+# Verified "existing" when a valid model is already on disk, so "the checksum
+# was enforced against the host's own figure" would be reported as proven having
+# transferred nothing. An actions/cache around that directory would either be
+# defeated (the driver removes the file it restored) or, if the driver ever
+# stopped removing it, would quietly turn the strongest check in the suite into
+# a check of our own cache. 74 MB a week is the price of the check being real.
+#
+# THE WHISPER.CPP RELEASE IS NOT CACHED EITHER, which is a smaller call: it is
+# 9 MB and arrives in about two seconds, and cache-prune.yml exists because this
+# repository reached 9.65 GB of its 10 GB cache limit and eviction cannot tell a
+# reachable cache from an unreachable one. An entry that saves two seconds is
+# not worth a slot that eviction has to weigh against a live Go module cache.
+# What a fresh download actually needs is a retry, which is what it has, in the
+# shape ci.yml uses for its own FFmpeg fetch.
+#
+# WHISPER.CPP IS TAKEN AT LATEST, NOT PINNED, and this is the one place where a
+# pin would be actively wrong. Step 5 asserts that a real build advertises the
+# three long options args.go gates on -- output-json-full, print-progress,
+# no-gpu -- because whisper.cpp answers an unknown option with a usage dump, and
+# as args.go puts it, passing one to a build that lacks it "does not lose the
+# confidences, it loses the whole job". That is a claim about UPSTREAM, and a
+# pin would freeze exactly the drift the check exists to notice, leaving a green
+# run every week for a build nobody uses. ci.yml makes the same argument against
+# its own FFmpeg cache key.
+#
+# FFMPEG FROM apt, not the pinned BtbN static build ci.yml goes to trouble for.
+# That build exists there because the acceptance matrix needs SRT and a version
+# users actually run. This suite needs lavfi, libx264 and flac -- to synthesise a
+# two-track recording with tones a measurement can tell apart -- and every distro
+# build has all three. Nothing here is a claim about a particular FFmpeg.
+#
+# NO CREDENTIALS ARE USED HERE, and none exist to use. The Hugging Face repo is
+# public and every request the driver makes is anonymous; the driver's own header
+# says there is nothing in this suite to leak and nothing to put in argv.
+name: transcribe (live model host)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays, 06:51 UTC. Off the hour, and off every other suite's minute:
+    # GitHub's scheduler queues everything submitted on the same tick and runs
+    # it late. 13 is chat, 17 is ci, 27 is automod and oauth, 43 is security.
+    - cron: "51 6 * * 1"
+  pull_request:
+    paths:
+      - "internal/transcribe/**"
+      - "scripts/acceptance-transcribe.sh"
+      - "scripts/acceptance_transcribe_driver.go"
+      - ".github/workflows/transcribe-live.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time. Two runs racing would pull two 74 MB models and twenty
+  # catalogue probes from the same address at the same moment, which is the one
+  # thing here worth being careful about.
+  group: transcribe-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  transcribe:
+    name: transcribe against the real model host
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install FFmpeg
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          # THE THREE THINGS THIS SUITE ACTUALLY NEEDS, asserted rather than
+          # assumed. A `ffmpeg -version` that prints is not a build that can
+          # write the fixture: without libx264 there is no video stream, and
+          # without a video stream the absolute and stream-relative audio
+          # indices agree -- which is precisely the bug step 4 exists to catch,
+          # and the suite would pass under it. The suite's own step 4 asserts
+          # the fixture premise too; this fails earlier and names the reason.
+          ffmpeg -hide_banner -encoders | grep -qw libx264
+          ffmpeg -hide_banner -encoders | grep -qw flac
+          ffmpeg -hide_banner -filters  | grep -qw sine
+          ffprobe -hide_banner -version | head -1
+
+      # whisper.cpp ships a prebuilt Linux x64 tarball on every release, so
+      # there is no compiler here and no build variance -- the binary CI
+      # measures is the binary upstream published, which is the only one the
+      # claim in step 5 is about.
+      - name: Install whisper.cpp
+        timeout-minutes: 8
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="$(gh release view --repo ggml-org/whisper.cpp --json tagName --jq .tagName)"
+          echo "whisper.cpp $tag"
+
+          # Retried, because this is the one step that can fail for a reason
+          # that has nothing to do with the code under test, and a weekly job
+          # that goes red on a transient 503 trains people to ignore it. Three
+          # attempts with a widening gap; if all three fail the step fails
+          # loudly rather than leaving the suite to report a tidy SKIP, which
+          # would read as "whisper is not installed here" and be a lie.
+          for attempt in 1 2 3; do
+            if gh release download "$tag" --repo ggml-org/whisper.cpp \
+                 --pattern 'whisper-bin-ubuntu-x64.tar.gz' --dir /tmp --clobber; then
+              break
+            fi
+            echo "whisper.cpp download attempt $attempt failed"
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep $((attempt * 10))
+          done
+
+          sudo mkdir -p /opt/whisper-cpp
+          sudo tar -xzf /tmp/whisper-bin-ubuntu-x64.tar.gz \
+            -C /opt/whisper-cpp --strip-components=1
+
+          # EVERYTHING EXCEPT whisper-cli AND THE SHARED LIBRARIES GOES. The
+          # tarball also carries `main`, `bench`, a parakeet CLI and seven test
+          # binaries, and `main` is the last entry in transcribe.BinaryNames --
+          # the driver searches PATH itself, deliberately not through the list
+          # under test, so a stray `main` on PATH would let Detect look like it
+          # had found whisper.cpp when what it found was a name collision. That
+          # is the exact confusion the comment on BinaryNames says the ordering
+          # exists to avoid, and there is no reason to stage it here.
+          #
+          # A KEEP-LIST, not a delete-list, so a binary added by a future
+          # release is removed by default rather than arriving unnoticed. The
+          # `-type f` is what protects the libwhisper.so -> libwhisper.so.1 ->
+          # libwhisper.so.1.9.2 symlink chains, which are the names the loader
+          # actually asks for.
+          sudo find /opt/whisper-cpp -maxdepth 1 -type f \
+            ! -name 'whisper-cli' ! -name 'LICENSE' \
+            ! -name '*.so' ! -name '*.so.*' -delete
+          ls /opt/whisper-cpp
+
+          # The directory goes on PATH whole, rather than the binary being
+          # copied to /usr/local/bin: the CPU backends are dlopen'd at run time
+          # by libggml, which looks beside itself, so splitting the binary from
+          # its libraries is how this stops working on a machine nobody is
+          # watching.
+          echo "/opt/whisper-cpp" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=/opt/whisper-cpp" >> "$GITHUB_ENV"
+
+      # Detection, before the suite rather than inside it. Step 5 reports a
+      # missing binary as a SKIP -- correct on a developer's laptop, wrong here,
+      # where nobody installed whisper.cpp by hand and a skip means this
+      # workflow's own install step produced something that does not run. A
+      # weekly green with three quiet skips in it is the outcome this repository
+      # treats as a defect.
+      - name: whisper.cpp runs
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          command -v whisper-cli
+          whisper-cli --help > /dev/null
+
+      - name: transcribe acceptance
+        timeout-minutes: 12
+        env:
+          # The 74 MB step. See the header: without it the two checks that have
+          # already caught a shipped defect do not run.
+          POLY_TRANSCRIBE_DOWNLOAD: "1"
+        run: ./scripts/acceptance-transcribe.sh
