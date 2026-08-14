@@ -14,9 +14,15 @@ name: installer
 on:
   push:
     branches: [main]
-    paths: ["scripts/install.sh", ".github/workflows/installer.yml"]
+    paths:
+      - "scripts/install.sh"
+      - "scripts/acceptance-install.sh"
+      - ".github/workflows/installer.yml"
   pull_request:
-    paths: ["scripts/install.sh", ".github/workflows/installer.yml"]
+    paths:
+      - "scripts/install.sh"
+      - "scripts/acceptance-install.sh"
+      - ".github/workflows/installer.yml"
   # Distributions change under us; a monthly run catches a moved floor before a
   # user does.
   schedule:
@@ -78,6 +84,15 @@ jobs:
           [ "$rc" -ne 0 ] || { echo "ran as a non-root user"; exit 1; }
           echo "$out" | grep -q "run this with sudo" \
             || { echo "failed for some reason other than privilege: $out"; exit 1; }
+
+      # The decisions install.sh makes without installing: the capability case,
+      # the 443 offer, the firewall rules, and the upgrade script it writes.
+      # That last one is why this step exists at all -- the suite had never run
+      # anywhere but a laptop, and update.sh's five refusals had no test on any
+      # machine. Pure bash against a temporary directory, about a second, and
+      # the docker cases drive a stub rather than a daemon.
+      - name: the installer's acceptance suite
+        run: ./scripts/acceptance-install.sh
 
   # The preflight against each distribution's real package set. The floor and
   # the package names are what drift.
