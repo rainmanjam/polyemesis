@@ -96,8 +96,28 @@ type Rendition struct {
 	FPS int `json:"fps"`
 	// VideoBitrate is the target in kbps. Always set — a rendition that does
 	// not change size, rate or bitrate has no reason to exist.
-	VideoBitrate int          `json:"videoBitrate"`
-	Encoder      VideoEncoder `json:"encoder"`
+	VideoBitrate int `json:"videoBitrate"`
+	// MaxrateKbps and BufsizeKbps are the rest of the rate-control triple, and
+	// 0 on either means "derive it": maxrate falls back to the bitrate and
+	// bufsize to twice the maxrate, which is CBR and is what every rendition
+	// did before these existed.
+	//
+	// WHY THEY ARE SETTABLE AT ALL, given CBR is right for live. The services
+	// registry carries a MaxVideoKbps per platform, read out of OBS's own
+	// service list, and a ceiling is precisely what a maxrate is for: a
+	// destination can average below what the platform recommends and still be
+	// allowed the burst it permits. Before this, the fields existed on
+	// ffmpeg.RenditionSpec and the argv builder used them, and nothing in the
+	// database or the API could reach them -- so the code described a
+	// capability the product did not have. See #341.
+	//
+	// A maxrate BELOW the bitrate is refused rather than clamped: it is not a
+	// preference the encoder can honour, it is a contradiction, and silently
+	// rewriting one of the two numbers is how a stream ends up at a bitrate
+	// nobody chose.
+	MaxrateKbps int          `json:"maxrateKbps"`
+	BufsizeKbps int          `json:"bufsizeKbps"`
+	Encoder     VideoEncoder `json:"encoder"`
 	// Preset is the encoder's own speed/quality knob ("veryfast" for x264,
 	// "p4" for nvenc, "quality" for amf...). Free text because the vocabulary
 	// is per-encoder and changes between FFmpeg releases; validated only for
@@ -552,6 +572,41 @@ func (r Rendition) Validate() error {
 		add("gop %.4gs out of range (%g-%g seconds)", r.GOPSeconds, MinRenditionGOP, MaxRenditionGOP)
 	}
 
+	// RATE CONTROL. Zero on either is "derive it" and always legal; the checks
+	// below only apply to a value somebody actually set.
+	//
+	// REFUSED RATHER THAN CLAMPED. A maxrate below the target bitrate is not a
+	// preference an encoder can honour, it is a contradiction between two
+	// numbers, and there is no way to resolve it without overriding one of them.
+	// Picking either silently produces a stream at a bitrate nobody chose, and
+	// the operator's evidence would be an output that disagrees with the form
+	// they filled in.
+	if r.MaxrateKbps != 0 {
+		if r.MaxrateKbps < MinRenditionBitrate || r.MaxrateKbps > MaxRenditionBitrate {
+			add("maxrate %d kbps out of range (%d-%d)", r.MaxrateKbps, MinRenditionBitrate, MaxRenditionBitrate)
+		} else if r.MaxrateKbps < r.VideoBitrate {
+			add("maxrate %d kbps is below the target bitrate %d kbps: the encoder cannot average above its own ceiling",
+				r.MaxrateKbps, r.VideoBitrate)
+		}
+	}
+	// A bufsize smaller than one second at the ceiling makes the rate controller
+	// correct over a window too short to hold a GOP, which shows up as visible
+	// pumping on a scene cut rather than as an error. Half a second is already
+	// well outside anything deliberate.
+	if r.BufsizeKbps != 0 {
+		ceiling := r.MaxrateKbps
+		if ceiling == 0 {
+			ceiling = r.VideoBitrate
+		}
+		if r.BufsizeKbps < ceiling/2 {
+			add("bufsize %d kbps is less than half the %d kbps ceiling: the rate controller would correct over a window shorter than one keyframe interval",
+				r.BufsizeKbps, ceiling)
+		}
+		if r.BufsizeKbps > MaxRenditionBitrate*4 {
+			add("bufsize %d kbps out of range (max %d)", r.BufsizeKbps, MaxRenditionBitrate*4)
+		}
+	}
+
 	// An unknown mode is refused here rather than at start time, because the
 	// filter builder degrades it to a plain scale — which is a silently
 	// different picture, and the operator would have no way to tell that the
@@ -681,6 +736,7 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 		updated int64
 	)
 	err := s.Scan(&r.ID, &r.Name, &r.Width, &r.Height, &r.FPS, &r.VideoBitrate,
+		&r.MaxrateKbps, &r.BufsizeKbps,
 		&r.Encoder, &r.Preset, &r.GOPSeconds, &r.AspectMode, &r.PadColor,
 		&r.Deinterlace, &r.Overlay.Image, &r.Overlay.Anchor, &r.Overlay.WidthPct,
 		&r.Overlay.MarginXPct, &r.Overlay.MarginYPct, &r.Overlay.Opacity,
@@ -706,6 +762,7 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 }
 
 const renditionColumns = `id, name, width, height, fps, video_bitrate,
+	maxrate_kbps, bufsize_kbps,
 	encoder, preset, gop_seconds, aspect_mode, pad_color, deinterlace,
 	overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
 	overlay_margin_y_pct, overlay_opacity,
@@ -810,7 +867,7 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO renditions
-		(name, width, height, fps, video_bitrate, encoder, preset, gop_seconds,
+		(name, width, height, fps, video_bitrate, maxrate_kbps, bufsize_kbps, encoder, preset, gop_seconds,
 		 aspect_mode, pad_color, deinterlace,
 		 overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
 		 overlay_margin_y_pct, overlay_opacity,
@@ -818,8 +875,9 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 		 text_margin_x_pct, text_margin_y_pct, text_box, text_box_color,
 		 text_box_opacity,
 		 note, source_id, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
+		r.MaxrateKbps, r.BufsizeKbps,
 		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Deinterlace,
 		r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
 		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
@@ -844,6 +902,7 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 	}
 	res, err := d.sql.Exec(`UPDATE renditions SET
 		name=?, width=?, height=?, fps=?, video_bitrate=?,
+		maxrate_kbps=?, bufsize_kbps=?,
 		encoder=?, preset=?, gop_seconds=?, aspect_mode=?, pad_color=?,
 		deinterlace=?, overlay_image=?, overlay_anchor=?, overlay_width_pct=?,
 		overlay_margin_x_pct=?, overlay_margin_y_pct=?, overlay_opacity=?,
@@ -852,6 +911,7 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 		text_box_opacity=?,
 		note=?, source_id=?, updated_at=? WHERE id=?`,
 		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
+		r.MaxrateKbps, r.BufsizeKbps,
 		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor,
 		r.Deinterlace, r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
 		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
@@ -949,6 +1009,13 @@ func (d *DB) MigrateRenditions() error {
 // picks a mode.
 func (d *DB) MigrateRenditionAspect() error {
 	for _, col := range []struct{ name, ddl string }{
+		// RATE CONTROL. Both default to 0, which RenditionArgs already reads as
+		// "derive the CBR relationship" -- maxrate = bitrate, bufsize = 2x
+		// maxrate. So an upgraded install emits byte-for-byte the command line
+		// it emitted yesterday, and these only do anything once somebody sets
+		// them. See #341 and docs/ENCODING.md.
+		{"maxrate_kbps", `ALTER TABLE renditions ADD COLUMN maxrate_kbps INTEGER NOT NULL DEFAULT 0`},
+		{"bufsize_kbps", `ALTER TABLE renditions ADD COLUMN bufsize_kbps INTEGER NOT NULL DEFAULT 0`},
 		{"aspect_mode", `ALTER TABLE renditions ADD COLUMN aspect_mode TEXT NOT NULL DEFAULT ''`},
 		{"pad_color", `ALTER TABLE renditions ADD COLUMN pad_color TEXT NOT NULL DEFAULT ''`},
 		{"deinterlace", `ALTER TABLE renditions ADD COLUMN deinterlace TEXT NOT NULL DEFAULT ''`},
