@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
 
 /* Sourced from docs/COMPARISON.md, which is itself sourced from a survey of
  * Restreamer's issue trackers.
@@ -127,7 +128,7 @@ const selectors = [
       One axis, and it is the one this project exists for. The shared ground —
       everything all three do — is in the table below this one.
     </p>
-    <div class="scroll-hint mt-6 overflow-x-auto rounded-token border border-line">
+    <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
       <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
         <thead class="bg-surface">
           <tr class="border-b border-line">
@@ -185,7 +186,7 @@ const selectors = [
           <div class="card p-5">
             <p class="font-medium text-fg">{s.name}</p>
             <p class="mt-2 text-sm leading-relaxed text-muted">{s.what}</p>
-            <pre class="mt-4 overflow-x-auto rounded-token border border-line bg-surface/60 p-3 font-mono text-[11px] leading-relaxed text-fg"><code>{s.src}</code></pre>
+            <CodeBlock code={s.src} variant="quote" />
             <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>
             <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
           </div>
@@ -215,7 +216,7 @@ const selectors = [
         plainly — it means the choice between these three comes down to the
         audio, and not to whether the fundamentals are there.
       </p>
-      <div class="scroll-hint mt-6 overflow-x-auto rounded-token border border-line">
+      <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
         <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
           <thead class="bg-surface">
             <tr class="border-b border-line">

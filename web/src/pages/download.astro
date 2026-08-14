@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
 
 const REPO = "https://github.com/rainmanjam/polyemesis";
 ---
@@ -24,7 +25,17 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
     </p>
   </section>
 
-  <section class="wrap grid gap-6 pb-16 lg:grid-cols-2">
+  {/* md: as well as lg:, because the tablet band had nothing.
+
+      `md:` appears four times in this whole site and all four are the Nav
+      showing and hiding -- not one is a grid. So every layout here went from
+      one column straight to lg:, and 768px got the PHONE layout at desktop
+      type. Measured: this page is 3122px at 768 against 2294px at 1440, 36%
+      taller for the same content, with half the width unused.
+
+      Two install cards side by side at 768 gives each ~360px, which the
+      commands fit now that they wrap. */}
+  <section class="wrap grid gap-6 pb-16 md:grid-cols-2">
     <div class="card p-6" data-reveal>
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-lg font-medium">Docker</h2>
@@ -34,12 +45,15 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
         FFmpeg is pinned and bundled, so the SRT support is known-good. This is
         the build the container test suites run against.
       </p>
-      <pre class="mt-4 overflow-x-auto rounded border border-line bg-ink p-4 font-mono text-xs leading-relaxed text-muted"><code>docker run -d \
-  --name polyemesis \
-  -p 8080:8080 \
-  -p 6000:6000/udp \
-  -v polyemesis-data:/data \
-  rainmanjam/polyemesis</code></pre>
+      <CodeBlock
+        label="docker"
+        code={`docker run -d \\
+  --name polyemesis \\
+  -p 8080:8080 \\
+  -p 6000:6000/udp \\
+  -v polyemesis-data:/data \\
+  rainmanjam/polyemesis`}
+      />
       <p class="mt-3 font-mono text-[11px] text-subtle">
         UI on :8080 · SRT ingest on :6000/udp
       </p>
@@ -58,9 +72,12 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
         root shell — it is long, but it is one file and declares every flag up
         front.
       </p>
-      <pre class="mt-4 overflow-x-auto rounded border border-line bg-ink p-4 font-mono text-xs leading-relaxed text-muted"><code>curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/\
-rainmanjam/polyemesis/main/scripts/install.sh \
-  | sudo bash -s -- --tls selfsigned</code></pre>
+      <CodeBlock
+        label="install.sh"
+        code={`curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/\\
+rainmanjam/polyemesis/main/scripts/install.sh \\
+  | sudo bash -s -- --tls selfsigned`}
+      />
       <p class="mt-3 text-[11px] leading-relaxed text-subtle">
         It installs a self-signed certificate unless told otherwise. For Let's
         Encrypt pass <span class="font-mono">--tls acme</span> with
@@ -132,7 +149,7 @@ rainmanjam/polyemesis/main/scripts/install.sh \
         <a
           href="https://github.com/rainmanjam/polyemesis/blob/main/docs/OBS.md"
           rel="noopener"
-          class="text-sm text-primary-bright hover:underline"
+          class="inline-block py-1 text-sm text-primary-bright hover:underline"
         >
           The full OBS guide →
         </a>

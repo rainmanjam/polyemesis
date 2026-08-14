@@ -18,6 +18,7 @@ const sections = [
       "Nothing is filtered until a destination asks for it. Track annotations describe the ingest — what track 3 actually is — and save on their own, independent of any destination.",
     ],
     shot: "02-routing.png",
+    caption: "Three destinations, three different track selections — and the switch that keeps a music bed out of one of them.",
     alt: "polyemesis routing page: per-destination track selection with music policy and loudness target",
   },
   {
@@ -29,6 +30,7 @@ const sections = [
       "The resolved FFmpeg filtergraph is shown before you apply it, so nothing about the mix is hidden behind the UI.",
     ],
     shot: "08-mix-matrix.png",
+    caption: "Input channels down, output channels across, a gain in every cell. The resolved filtergraph is shown before it is applied.",
     alt: "polyemesis mix matrix: input channels against output channels with a gain in each cell",
   },
   {
@@ -40,6 +42,7 @@ const sections = [
       "It re-encodes video only. Audio still routes per destination underneath it, which is the whole point.",
     ],
     shot: "06-renditions.png",
+    caption: "One shared encode, ref-counted across the destinations that selected it. Audio still routes per destination underneath.",
     alt: "polyemesis renditions page: shared video encodes with overlays and hardware encoder selection",
   },
   {
@@ -51,6 +54,7 @@ const sections = [
       "Prometheus metrics and in-process alert rules with webhook delivery, so a stream that stops can page you rather than wait to be noticed.",
     ],
     shot: "07-monitoring.png",
+    caption: "Each child process with its own live FFmpeg stderr, beside host CPU, memory and ingest loss.",
     alt: "polyemesis monitoring page: process table, host resources and live FFmpeg log",
   },
   {
@@ -63,6 +67,7 @@ const sections = [
       "Then a job queue that yields to the live stream: Whisper transcription with full-text search, proxies, thumbnails, and a clipper. A dropped frame is unrecoverable; a transcript arriving an hour later costs only the wait.",
     ],
     shot: "15-recordings.png",
+    caption: "Segments with every ingest track preserved, next to retention by age and size and the free-space floor.",
     alt: "polyemesis recordings page: segment list with tracks, stems, retention settings and disk usage",
   },
   {
@@ -74,6 +79,7 @@ const sections = [
       "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick — and a moderator card showing what one person has said across every platform at once.",
     ],
     shot: "09-chat.png",
+    caption: "One timeline across four platforms, with a per-platform verdict when only half a fan-out succeeds.",
     alt: "polyemesis chat page: merged timeline across platforms with a single send box",
   },
 ];
@@ -110,8 +116,30 @@ const sections = [
         id={s.id}
         class:list={["border-t border-line py-16 sm:py-20", i % 2 === 1 && "bg-surface/30"]}
       >
-        <div class="wrap grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
-          <div class="lg:sticky lg:top-20">
+        {/* THE SIDE ALTERNATES, because six of these in a row did not.
+
+            Measured before this: #routing #matrix #renditions #monitoring
+            #recording and #chat were 593px tall EACH -- six identical blocks,
+            zero variance, every one a 510px text column beside a 690px figure
+            in the same order. That is a conveyor belt, and it tells a reader
+            that all six capabilities weigh the same, which is the opposite of
+            what this page is arguing.
+
+            The ratio swaps WITH the order so the screenshot keeps the wider
+            track either way; the figure is what a reader is here to look at,
+            and shrinking it on alternate rows to get variety would be paying
+            for rhythm with legibility.
+
+            DOM order is unchanged -- heading, prose, then figure -- so reading
+            order and tab order still match the argument. Only the visual
+            columns swap, via `order`, which is what `order` is for. */}
+        <div
+          class:list={[
+            "wrap grid gap-10 lg:items-start",
+            i % 2 === 0 ? "lg:grid-cols-[0.85fr_1.15fr]" : "lg:grid-cols-[1.15fr_0.85fr]",
+          ]}
+        >
+          <div class:list={["lg:sticky lg:top-20", i % 2 === 1 && "lg:order-last"]}>
             <p class="eyebrow">{s.eyebrow}</p>
             <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">{s.title}</h2>
             <div class="mt-4 space-y-3">
@@ -141,8 +169,20 @@ const sections = [
                 loading="lazy"
                 decoding="async"
                 class="w-full rounded-token border border-line"
+                data-shot-img
               />
             </button>
+            {/* A CAPTION SAYS WHAT TO NOTICE. None of the six had one, while
+                the single figure on the home page did.
+
+                Deliberately NOT a restatement of `alt`: both are exposed to
+                assistive technology, so duplicating one in the other makes a
+                screen reader read the same sentence twice. `alt` describes the
+                picture for someone who cannot see it; this points a reader who
+                CAN see it at the part that matters. */}
+            <figcaption class="mt-3 text-sm leading-relaxed text-subtle">
+              {s.caption}
+            </figcaption>
           </figure>
         </div>
       </section>
@@ -201,7 +241,7 @@ const sections = [
           the full mix, from a single upload and without re-encoding the picture.
         </p>
         <p class="mt-5">
-          <a href="/comparison" class="text-sm text-primary underline-offset-4 hover:underline">
+          <a href="/comparison" class="inline-block py-1 text-sm text-primary underline-offset-4 hover:underline">
             All eight capabilities, against five products →
           </a>
         </p>

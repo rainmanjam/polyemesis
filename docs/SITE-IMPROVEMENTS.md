@@ -26,6 +26,17 @@ next pass does not spend effort on them again.
 | Site never said who it is *not* for | — | "Is this for you?" with a not-for column |
 | Screenshots a week stale, 18 UI commits behind | 2026-08-06 | re-shot; `docs/media` 4013K→1587K, site 1819K→707K |
 | `og:image` had no dimensions or alt | — | added, stating the real 2560×1280 |
+| `/features` repeated the whole comparison table | 9 of 9 rows character-identical | one callout, linking to `/comparison` |
+| The lightbox was invisible on touch (`cursor: zoom-in` only) | 335×210 shot, no affordance | a persistent corner glyph |
+| Wide tables gave no sign they scrolled | 47% visible, overlay scrollbars hidden | right-edge fade |
+| The sticky column was on `.cmp` but not `.patch` | matrix: 403px (55%) hidden | both, background by token |
+| The install command could not be read or copied | 275px (49%) hidden, no Copy | wraps at any width, Copy verified against the clipboard |
+| Three code-block treatments, two copy implementations | radius 0/4/8 | one component, one copy path |
+| Tap targets below WCAG 2.2 AA | footer 18px, chips 23px | 28px and 25px |
+| The tablet band had no layout | `/download` 3122px vs 2294px | 2844px; nine other grids deliberately unchanged |
+| `/features` was a six-section conveyor belt | 593px × 6, zero variance | sides alternate, 651/628 |
+| No screenshot on `/features` was captioned | 0 of 6 | all six, saying what to notice |
+| The comparison label column was half empty | 854px box, 406px label | 1022px table, dead space 49% → 31% |
 
 Three of these are guarded in `web/scripts/check-build.mjs` and each guard was
 mutation-tested. The nav guard asserts **two** marked anchors per page rather
@@ -91,6 +102,11 @@ prescribes a fix for a cause that is not the actual one.
 | "Active nav links render in identical `rgb(155,169,186)`" | "Apply `aria-current` and high-contrast styling" | `aria-current` and `text-fg` were **already there**. The input was wrong: flat-file output makes `pathname` `/features.html`, so the comparison was false on every page. |
 | "Downscale screenshots to 1440px, 73.5% saving" | resize + quantise | Resizing makes PNG compression **worse** here. At 2304px the saving fell to 42.6% and `02-routing.png` came out **19% larger** than full-res. Quantise, do not resize. |
 | (my own first fix) sticky column with `var(--color-bg)` | — | That token does not exist in this theme. It resolved to transparent while `position: sticky` and `stayedPinned: true` both read as correct. The mechanism was right and the thing it exists to do was broken. |
+| "8 of 12 grids skip the tablet band" — add the missing step to each | `md:grid-cols-*` throughout | True for the count, wrong for the fix on most of them. Nine are a text column beside a screenshot, and there the **single column at 768 is the better layout**: stacked, the shot gets 726px; the desktop two-column arrangement gives it 688px. Only `/download` was changed. |
+| "Body measure exceeds 85ch — docs has 16 rows at 101ch" | narrow the reading column | **Zero** actual prose paragraphs exceed 85ch. The 101ch elements are `<li>`s wrapping card content — a title, a filename and a description stacked — not reading columns. The guideline does not apply to them. |
+| (my own tablet fix) wrap rule below a 40rem viewport | — | What decides whether a command fits is its **container**, not the window. The moment `/download` had two columns, the block sat in a 293px column at a 768px viewport: too wide for the query, far too narrow for the command. 265px hidden again, worse than before the fix. |
+| "Two different H1 treatments, including two different line-heights" | unify them | The four interior pages are **identical to each other** (`text-4xl sm:text-5xl leading-tight`). Only the home hero differs, at `lg:text-[3.4rem] leading-[1.08]` — a larger hero with tighter leading. That is hierarchy, and tighter leading on larger type is correct typography, not drift. Unifying it would flatten the one distinction the scale is making. |
+| "The section-heading step is different on every page — five H2 scales" | one scale | Most of the spread is `h2` used at different **depths**, not the same level styled differently: `/download`'s `text-lg` H2s are card titles inside `.card`, and a card title at 30px would be wrong. Semantically arguable; visually correct. Not changed. |
 
 ---
 
