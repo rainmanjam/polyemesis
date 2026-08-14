@@ -72,6 +72,15 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
         system is 94 KB — one file per family covering every weight used. */}
     <link rel="preload" href="/fonts/space-grotesk.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/ibm-plex-sans.woff2" as="font" type="font/woff2" crossorigin />
+    {/* THE THIRD FACE WAS THE ONE LEFT OUT, and it is above the fold on every
+        page: the hero eyebrow, the `docker run` line a visitor copies, the
+        footer column labels. Measured on the live site over Slow 4G it began
+        loading 592ms after its two preloaded siblings, because the browser only
+        learned it was needed once the stylesheet had been parsed.
+
+        No extra bytes — the file is fetched either way. This only moves the
+        discovery earlier. */}
+    <link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin />
     <style is:inline>
       @font-face {
         font-family: "Space Grotesk";

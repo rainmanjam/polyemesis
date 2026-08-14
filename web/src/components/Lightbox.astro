@@ -1,0 +1,214 @@
+---
+/* One dialog for every screenshot on the page, rather than one per image.
+ *
+ * WHY A SHARED DIALOG. The features page carries six 2880x1800 screenshots. Six
+ * dialogs would mean six copies of the markup and six more <img> elements the
+ * browser has to consider, for a UI that can only ever show one at a time. The
+ * buttons carry the source and the caption; this fills itself in on open.
+ *
+ * WHY <dialog> AND NOT A DIV. The three things a hand-rolled overlay reliably
+ * gets wrong are all free here: Escape closes it, focus is trapped inside while
+ * it is open, and focus returns to the button that opened it when it closes.
+ * ::backdrop is a real element, so the dimming needs no extra node.
+ *
+ * PROGRESSIVE. Without JavaScript the <img> inside each button still renders at
+ * its normal size and the page reads exactly as it did before. The button is
+ * only an affordance; nothing depends on it.
+ */
+---
+
+<dialog
+  id="lightbox"
+  class="lightbox"
+  aria-label="Expanded screenshot"
+>
+  <button type="button" class="lightbox-close" data-lightbox-close aria-label="Close expanded screenshot">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" />
+    </svg>
+  </button>
+  {/* alt is set from the trigger, so the expanded view says the same thing the
+      inline one did rather than going unlabelled. */}
+  <img id="lightbox-img" src="" alt="" />
+  <p class="lightbox-caption" id="lightbox-caption" aria-live="polite"></p>
+</dialog>
+
+<style>
+  .lightbox {
+    /* max-width/height rather than width: a 2880x1800 shot must fit the viewport
+       on a laptop without cropping, and `contain` keeps the aspect ratio. */
+    max-width: min(96vw, 1600px);
+    max-height: 92vh;
+    padding: 0;
+    /* EXPLICIT, because Tailwind's preflight resets the UA stylesheet's
+       `dialog { margin: auto }` to 0 and a modal dialog then pins to the top
+       left. Measured before this line: left=0, right gap=167px in a 1200px
+       viewport. */
+    margin: auto;
+    border: 1px solid var(--color-line, #2a3140);
+    border-radius: 0.75rem;
+    background: var(--color-surface, #12151c);
+    color: var(--color-fg, #edf2f8);
+    overflow: hidden;
+  }
+  /* THE BACKDROP FADES TOO, and it has to be driven from the same [open] state
+     as the box or the dimming snaps on while the picture eases in -- which reads
+     as a flash rather than a transition. */
+  .lightbox::backdrop {
+    background: rgb(0 0 0 / 0);
+    transition:
+      background 220ms ease,
+      overlay 220ms ease allow-discrete,
+      display 220ms ease allow-discrete;
+  }
+  .lightbox[open]::backdrop {
+    background: rgb(0 0 0 / 0.8);
+  }
+  .lightbox img {
+    display: block;
+    max-width: 100%;
+    max-height: calc(92vh - 3.25rem);
+    object-fit: contain;
+    margin: 0 auto;
+  }
+  .lightbox-caption {
+    margin: 0;
+    padding: 0.6rem 0.9rem 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--color-muted, #9ba9ba);
+  }
+  .lightbox-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--color-line, #2a3140);
+    border-radius: 0.5rem;
+    background: var(--color-surface, #12151c);
+    color: var(--color-fg, #edf2f8);
+    cursor: pointer;
+  }
+  .lightbox-close:hover {
+    background: var(--color-primary-dim, #253148);
+  }
+  /* A visible focus ring, because the close button is the first thing focused
+     when the dialog opens and a keyboard user needs to see where they are. */
+  .lightbox-close:focus-visible {
+    outline: 2px solid var(--color-primary-bright, #78a6e8);
+    outline-offset: 2px;
+  }
+
+  /* The trigger. Styled to look like the image it wraps, so adding the button
+     does not change the page's appearance -- only its behaviour. */
+  :global(.shot-open) {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: zoom-in;
+  }
+  :global(.shot-open:focus-visible) {
+    outline: 2px solid var(--color-primary-bright, #78a6e8);
+    outline-offset: 3px;
+    border-radius: 0.75rem;
+  }
+
+  /* OPEN AND CLOSE, not just open.
+     
+     A keyframe animation on [open] can only play forwards: the dialog leaves the
+     top layer the instant close() is called, so the picture vanishes while the
+     backdrop is still fading. `allow-discrete` is what makes the discrete
+     properties -- display, and the top-layer `overlay` -- animatable, so the
+     element stays visible for the length of the transition on the way out.
+     `@starting-style` supplies the "before it was open" values, which is
+     otherwise unexpressible for an element that did not previously render.
+     
+     Browsers without @starting-style skip straight to the end state, which is
+     exactly the previous behaviour: it appears and disappears. Nothing breaks. */
+  .lightbox {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+    transition:
+      opacity 220ms ease,
+      transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      overlay 220ms ease allow-discrete,
+      display 220ms ease allow-discrete;
+  }
+  .lightbox[open] {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  @starting-style {
+    .lightbox[open] {
+      opacity: 0;
+      transform: scale(0.97) translateY(6px);
+    }
+    .lightbox[open]::backdrop {
+      background: rgb(0 0 0 / 0);
+    }
+  }
+
+  /* A reader who has asked for less motion still gets the dimming, because that
+     is what communicates "the page behind is inert" -- it just arrives without
+     the scale and the travel. */
+  @media (prefers-reduced-motion: reduce) {
+    .lightbox,
+    .lightbox[open] {
+      transform: none;
+      transition:
+        opacity 1ms linear,
+        overlay 1ms allow-discrete,
+        display 1ms allow-discrete;
+    }
+    .lightbox::backdrop {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  const dialog = document.getElementById("lightbox") as HTMLDialogElement | null;
+  const img = document.getElementById("lightbox-img") as HTMLImageElement | null;
+  const caption = document.getElementById("lightbox-caption");
+
+  if (dialog && img) {
+    for (const trigger of document.querySelectorAll<HTMLElement>("[data-shot]")) {
+      trigger.addEventListener("click", () => {
+        img.src = trigger.dataset.shot ?? "";
+        img.alt = trigger.dataset.shotAlt ?? "";
+        if (caption) caption.textContent = trigger.dataset.shotAlt ?? "";
+        dialog.showModal();
+      });
+    }
+
+    // Clicking the backdrop closes. The dialog element itself fills the whole
+    // viewport as far as pointer events are concerned, so "was the click inside
+    // the visible box" has to be answered from the box's own rectangle rather
+    // than from event.target.
+    dialog.addEventListener("click", (event) => {
+      const box = dialog.getBoundingClientRect();
+      const outside =
+        event.clientX < box.left ||
+        event.clientX > box.right ||
+        event.clientY < box.top ||
+        event.clientY > box.bottom;
+      if (outside) dialog.close();
+    });
+
+    for (const closer of dialog.querySelectorAll("[data-lightbox-close]")) {
+      closer.addEventListener("click", () => dialog.close());
+    }
+
+    // Drop the source on close so a 2880x1800 decode is not held for a dialog
+    // nobody is looking at.
+    dialog.addEventListener("close", () => {
+      img.src = "";
+    });
+  }
+</script>
