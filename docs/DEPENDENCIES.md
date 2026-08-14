@@ -28,7 +28,7 @@ candidate library conflicts with one of them, the library loses.
    library. See [FFmpeg](#ffmpeg-a-subprocess-not-a-library) below — this one is
    a licensing decision as much as an architectural one.
 
-Go toolchain: **1.26.5**.
+Go toolchain: **1.26.6**.
 
 ## Direct Go dependencies
 

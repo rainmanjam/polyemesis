@@ -555,6 +555,33 @@ func waitUntil(t *testing.T, cond func() bool, what string) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// feedCrashed reports that a feed's process RAN AND COULD NOT STAY UP, which is
+// not the same fact as feedRunning saying no.
+//
+// THIS IS THE GATE, AND !feedRunning IS NOT. feedRunning maps StateStopped to
+// "not running", and a supervised process reads StateStopped in two entirely
+// different situations: supervisor.New sets it, and supervise sets it again on
+// the way out. Start() only spawns the goroutine -- the first thing that
+// goroutine does is setState(StateStarting) -- so between Start() returning and
+// that goroutine being scheduled, a process that has never run is
+// indistinguishable, through feedRunning, from one that has died. A test that
+// gates on !feedRunning therefore proceeds the instant the feed is started, and
+// then asserts on what the selector does about a feed it believes is dead while
+// the process is in fact on its way up. See issue #290, and
+// TestAFeedThatHasNotStartedYetIsNotAFeedThatHasGoneDown, which pins the
+// difference the two predicates report.
+//
+// StateFailed rather than "any terminal state", because these tests run
+// Engine.tools.FFmpeg = a binary that does not exist: runOnce returns the exec
+// error, the feed is not AutoRestart, so supervise sets StateFailed and stops.
+// A feed that reached StateStopped instead would mean the spawn SUCCEEDED,
+// which is a different premise from the one these tests are built on, and
+// waiting past it to a timeout says so rather than continuing on a false one.
+// Same idiom as dest_policy_test.go, which already waits on this state.
+func feedCrashed(f *sourceFeed) bool {
+	return f != nil && f.proc != nil && f.proc.Status().State == supervisor.StateFailed
+}
+
 // deliver marks one source as having just delivered bytes, by writing the
 // liveness the sweep would have sampled.
 //
@@ -722,7 +749,20 @@ func TestARespawnedFeedDoesNotRewindTheTimeline(t *testing.T) {
 	}
 	// The binary does not exist, so the spawn fails and leaves exactly the
 	// state a crashed feed leaves behind.
-	waitUntil(t, func() bool { return !feedRunning(first) }, "the feed to go down")
+	//
+	// feedCrashed, NOT !feedRunning. This gate used to be !feedRunning(first),
+	// and that is issue #290: it is satisfied by a feed whose supervise
+	// goroutine has not been scheduled yet -- supervisor.New leaves the process
+	// at StateStopped and Start() does not change it -- so on a loaded runner
+	// the wait returned about 0ms after the feed was started, and e.step below
+	// then read the process mid-StateStarting and held the feed it was supposed
+	// to rebuild. The state callback runs publishStatus synchronously, which is
+	// three database queries, so StateStarting lasts tens of milliseconds here:
+	// wide enough to lose. Measured: this test takes 20-55ms locally against
+	// 0-10ms for its siblings with the same setup, and that difference is this
+	// wait; the one CI failure ran the whole test in 10ms, having not waited at
+	// all.
+	waitUntil(t, func() bool { return feedCrashed(first) }, "the feed to go down")
 
 	later := t0.Add(time.Minute)
 	e.deliver(sourcePrimary, later)
@@ -737,6 +777,52 @@ func TestARespawnedFeedDoesNotRewindTheTimeline(t *testing.T) {
 	if second.offset <= first.offset {
 		t.Errorf("respawned feed offset = %v, want it ahead of the first feed's %v",
 			second.offset, first.offset)
+	}
+}
+
+// A feed that has not started yet and a feed that has died report the SAME
+// thing through feedRunning, and this is the test that says so out loud.
+//
+// It is the whole of issue #290 in one function, with the timing taken out of
+// it. The respawn test above gates on the feed being down and then asserts that
+// the selector rebuilds it; while that gate was spelled !feedRunning it was
+// satisfied by the state supervisor.New leaves behind, because Start() only
+// spawns the goroutine that sets StateStarting and does not set it itself. The
+// window is normally microseconds, which is why 310 local runs never showed it
+// and one loaded CI runner did -- so it is measured here where there is no
+// window at all: the process below is never started, and StateStopped is the
+// only state it can be in.
+//
+// MUTATION: define feedCrashed as `return !feedRunning(f)`. This test fails at
+// "the down gate accepts a process that has never run", and
+// TestARespawnedFeedDoesNotRewindTheTimeline goes back to passing for the wrong
+// reason. Restore feedCrashed and both are correct again.
+func TestAFeedThatHasNotStartedYetIsNotAFeedThatHasGoneDown(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	f := &sourceFeed{kind: sourcePrimary, proc: supervisor.New(log, supervisor.Spec{
+		Name: "source:primary", Kind: "source", Bin: "polyemesis-no-such-binary",
+		// As startFeed builds it: a respawn is rebuilt by the sweep with a
+		// current timestamp offset, so the supervisor never restarts a feed
+		// itself, and StateFailed is therefore terminal.
+		AutoRestart: false,
+	})}
+
+	// Nothing has been started, so nothing can have gone down.
+	if feedRunning(f) {
+		t.Fatal("a process that has never been started reports as running")
+	}
+	if feedCrashed(f) {
+		t.Fatal("the down gate accepts a process that has never run: a test that waits on it " +
+			"proceeds before the feed has started, and then measures the selector against a " +
+			"feed that is on its way up")
+	}
+
+	// And once it HAS run, the two agree again -- which is what makes the
+	// stricter gate a tightening rather than a different assertion.
+	f.proc.Start()
+	waitUntil(t, func() bool { return feedCrashed(f) }, "the feed to fail")
+	if feedRunning(f) {
+		t.Error("a failed feed still reports as running")
 	}
 }
 

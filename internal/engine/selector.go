@@ -1313,6 +1313,17 @@ func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64,
 // feedRunning reports whether the feed's process is still up. A feed is not
 // AutoRestart, so a process that has exited stays exited until the sweep
 // rebuilds it with a current timestamp offset.
+//
+// FALSE DOES NOT MEAN "HAS GONE DOWN". StateStopped is what supervisor.New
+// leaves a process in, and Start() does not change it -- the first thing the
+// supervise goroutine does is setState(StateStarting), so until that goroutine
+// is scheduled a feed that has never run reads exactly like a feed that has
+// died. The one caller below is unaffected: ensureFeed only ever asks about a
+// feed it started on an earlier sweep, 500ms ago at the very least, and a
+// respawn is gated behind feedRespawn on top of that, so it cannot reach the
+// window. A TEST can, and one did -- see issue #290 and feedCrashed in
+// failover_test.go, which is the predicate to wait on when what you mean is
+// that the child ran and could not stay up.
 func feedRunning(f *sourceFeed) bool {
 	if f == nil || f.proc == nil {
 		return false

@@ -1,12 +1,14 @@
 package supervisor
 
 // The termination class: the interval between asking a process to die and
-// observing it dead. Three properties live here, one per mechanism.
+// observing it dead. Four properties live here, one per mechanism.
 //
 //	terminate()'s escalation   -- must stop waiting when the child is reaped
 //	                              (#193), and must still fire when it is not
 //	runOnce()'s drain          -- must be bounded by the CHILD, not by whoever
 //	                              inherited the child's pipes (#194)
+//	terminate()'s REACH        -- must cover a child that is still being
+//	                              spawned when the stop arrives (#126)
 //
 // The deadline and reap arms of stop() itself are pinned in supervisor_test.go
 // by TestStopReportsWhenItHadToKillTheChild and
@@ -15,6 +17,7 @@ package supervisor
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -198,5 +201,127 @@ func TestRunOnceIsBoundedByTheChildNotByWhoeverInheritedItsPipes(t *testing.T) {
 		t.Errorf("LastError = %q, want it to contain the child's last stderr line %q. "+
 			"The drain bound was paid for with the diagnostic it exists to preserve.",
 			got, orphanLastWords)
+	}
+}
+
+// ------------------------------------------------------- the escalation's reach
+
+// TestAStopThatLandsWhileTheChildIsBeingSpawnedStillSignalsIt is #126's seam 6.
+//
+// Start() sets p.running under runMu and returns; p.cmd is not published until
+// runOnce has built the command, opened its pipes and had cmd.Start() return.
+// A Stop arriving between those two points takes its `p.running` arm -- so it
+// does not return early -- cancels the supervise context, and calls
+// terminate(), which finds p.cmd nil and returns having sent no signal and
+// armed no escalator.
+//
+// `p.cmd == nil` MEANS TWO DIFFERENT THINGS THERE: "no child yet" and "the
+// child is already reaped". terminate() could not tell them apart, and treated
+// both as nothing to do. This is #290's shape -- StateStopped meaning both
+// "never started" and "died" -- on the teardown path rather than the respawn
+// one.
+//
+// The consequence is not a missed signal, it is an unsignalled child. runOnce
+// uses exec.Command and not exec.CommandContext, so the cancelled context kills
+// nothing: the child is spawned BEHIND a stop that has already given up on it,
+// cmd.Wait() blocks on a process nobody has asked to leave, `done` never
+// closes, and Stop waits out its entire deadline. Swept on the machine this was
+// written on, a Stop landing 50µs to 2ms after Start reproduced it 25 times out
+// of 25. On the failover tier that is a twelve-second teardown -- issue #126's
+// seam 6, 12001.831ms against a 12s stopTimeout, whose predecessor's own 7.3s
+// teardown pushed the next 500ms sweep to within a millisecond of the
+// replacement feed's Start -- during which the outgoing feed goes on publishing
+// into the very hub the replacement is about to join. For a destination it is
+// worse: the SIGKILL that stop() issues on the way past is not preceded by the
+// SIGTERM FFmpeg needs to finalise its output, so the recording is a header and
+// nothing else.
+//
+// HOW THE WINDOW IS HELD OPEN. spec.NextArgs is called at the top of runOnce --
+// after supervise has passed its own ctx check, before p.cmd is published --
+// which is the window itself rather than a model of it. Blocking there and
+// releasing after the Stop has run makes a race that is real but sub-millisecond
+// into a sequence. The 250ms settle is what puts Stop past terminate(); it can
+// only err by releasing too EARLY, which lets terminate() see a non-nil cmd and
+// makes this test pass for the wrong reason -- and the mutation below is what
+// rules that out, because a vacuous test would survive it.
+//
+// THE ASSERTION IS THAT Stop RETURNS NIL. nil is reachable only through
+// `case <-done:`, which entails runOnce returned, which entails cmd.Wait()
+// reaped a child that something asked to leave. pid != 0 is the guard against
+// the other vacuous pass: a clean stop because nothing was ever spawned.
+//
+// Mutation: in runOnce, delete the `if ctx.Err() != nil { p.terminate() }`
+// block that follows the p.cmd publish. Observed to fail on the first
+// assertion -- Stop returned ErrStopDeadline after the full 3s.
+func TestAStopThatLandsWhileTheChildIsBeingSpawnedStillSignalsIt(t *testing.T) {
+	// Far above the cost of one spawn and one signal, far below the 60s the
+	// child sleeps for, so neither arm can be reached by accident.
+	const stopDeadline = 3 * time.Second
+
+	var mu sync.Mutex
+	var pid int
+
+	f := fakeSleep(60 * time.Second)
+	spawning := make(chan struct{})
+	release := make(chan struct{})
+	p := testProcess(t, f, Spec{
+		NextArgs: func() []string {
+			close(spawning)
+			<-release
+			return f.args
+		},
+		OnState: func(st Status) {
+			if st.State != StateRunning || st.PID == 0 {
+				return
+			}
+			mu.Lock()
+			pid = st.PID
+			mu.Unlock()
+		},
+	})
+
+	p.Start()
+	<-spawning // runOnce is inside the window: past its ctx check, p.cmd still nil
+
+	stopped := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), stopDeadline)
+		defer cancel()
+		stopped <- p.Stop(ctx)
+	}()
+	// p.running is cleared in stop()'s first critical section, so this says the
+	// stop has begun; the settle after it is what carries it through cancel()
+	// and terminate().
+	waitFor(t, "the stop to begin", func() bool {
+		p.runMu.Lock()
+		defer p.runMu.Unlock()
+		return !p.running
+	})
+	time.Sleep(250 * time.Millisecond)
+	close(release)
+
+	began := time.Now()
+	err := <-stopped
+	took := time.Since(began)
+
+	if err != nil {
+		t.Fatalf("Stop returned %v after %s. The stop arrived while the child was "+
+			"being spawned, so terminate() found p.cmd nil and signalled nothing -- "+
+			"and the child was then started behind it, unsignalled, on a context "+
+			"exec.Command does not honour. Nothing ends it inside the deadline, so "+
+			"Stop waits out all %s and SIGKILLs on the way past. The spawn has to "+
+			"check the context once p.cmd is published and terminate itself.",
+			err, took.Round(time.Millisecond), stopDeadline)
+	}
+	mu.Lock()
+	spawnedPID := pid
+	mu.Unlock()
+	if spawnedPID == 0 {
+		t.Fatal("no child was ever spawned, so the clean stop above proves nothing: " +
+			"this test asserts that a child started INSIDE the stop window is still " +
+			"signalled, and there was no such child")
+	}
+	if alive(spawnedPID) {
+		t.Errorf("pid %d is still alive after a Stop that reported a clean stop", spawnedPID)
 	}
 }

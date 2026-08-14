@@ -581,8 +581,34 @@ type DestSpec struct {
 	FilterComplex string
 	// AudioOutLabel is the graph's output label, normally "aout".
 	AudioOutLabel string
-	AudioBitrate  int // kbps
-	SampleRate    int
+	// SecondAudioOutLabel is a SECOND finished mix from the same filter graph,
+	// mapped and encoded as a second audio track on the same output.
+	//
+	// Empty for every destination that has not opted in, which is all of them
+	// today, and empty produces byte-for-byte the command it produced before this
+	// field existed. Egress was capped at one audio track until it was measured
+	// that two survive the wire -- see TestTwoDistinctMixesReachAnRTMPFarEnd,
+	// which publishes the argv built here through internal/rtmpserver and reads
+	// the tones back off both received tracks.
+	//
+	// TWO, NOT N. Two is what Enhanced Broadcasting needs (a live mix and a
+	// separate VOD mix) and two is what has been put on a wire and read back. A
+	// []string here would offer six and have measured none of them.
+	//
+	// THE CALLER OWNS THE GRAPH, and today no caller can build one: routing.Compile
+	// emits a single mix whose internal labels (a_t0, a_mix, aout) are fixed, so
+	// concatenating two compiled graphs collides on every one of them. Making a
+	// profile able to describe two mixes is the feature this field exists to be
+	// ready for, not a thing this field does.
+	//
+	// Ignored when it names the same label as AudioOutLabel: a filter output can
+	// be mapped once, FFmpeg refuses the second map outright, and "the same mix
+	// twice" is not a second track -- it is the exact failure mode a track COUNT
+	// cannot see. Ignored on DestAudio for the reason audio-only ignores video:
+	// an Icecast mount or an audio file is one stream.
+	SecondAudioOutLabel string
+	AudioBitrate        int // kbps
+	SampleRate          int
 	// CopyVideo is always true in v1 and is here to make the guarantee
 	// explicit and testable rather than implicit in the arg list.
 	CopyVideo bool
@@ -848,8 +874,12 @@ func StripExtraArgs(argv, in, out []string) []string {
 //
 // The central promise of polyemesis lives in two lines here: video is
 // `-c:v copy` (never re-encoded, never degraded, near-zero CPU) while audio is
-// decoded, re-mixed through the routing graph, and re-encoded to the single
-// stereo track the platform will accept.
+// decoded, re-mixed through the routing graph, and re-encoded to the stereo
+// track the platform will accept.
+//
+// ONE such track, unless SecondAudioOutLabel names a second mix. One remains the
+// default and the only shape any caller builds today; the second map is opt-in
+// per destination and is what an Enhanced Broadcasting live-plus-VOD pair needs.
 //
 // CopyAudio is the one destination that opts out of the audio half of that, for
 // the outputs where the platform is not the constraint: an SRT contribution feed
@@ -907,6 +937,7 @@ func DestinationArgs(s DestSpec) []string {
 		args = append(args, videoDelayArgs(s)...)
 	}
 	args = append(args, "-map", "["+s.AudioOutLabel+"]")
+	args = append(args, secondAudioMap(s)...)
 
 	if s.Kind == DestAudio {
 		return SpliceExtraArgs(append(args, audioOutputArgs(s)...),
@@ -925,6 +956,35 @@ func DestinationArgs(s DestSpec) []string {
 	}
 	args = append(args, s.Target)
 	return SpliceExtraArgs(args, s.ExtraInputArgs, s.ExtraOutputArgs)
+}
+
+// secondAudioMap renders the map for a destination carrying a second encoded
+// audio track. Empty for every destination that has not asked for one.
+//
+// WHAT LIFTING THIS DID NOT CHANGE. The encoder settings still come from
+// audioCodecArgs, which names no stream and therefore applies to BOTH tracks:
+// two tracks at the destination's bitrate cost twice the destination's audio
+// bitrate, and there is no per-track bitrate. That is a real limitation and it
+// is stated rather than hidden behind a field nobody set.
+//
+// The refusal of `-c:a copy` on an RTMP destination is untouched (see
+// db.AudioEncoding.copyProblems). That refusal is about forwarding the INGEST's
+// tracks unmixed to a platform, and its reason -- no mainstream ingest documents
+// accepting multitrack audio -- is a fact about platforms that this measured
+// nothing about. What was measured is the mechanical half: two mixes encoded
+// here do reach a real RTMP server as two distinct tracks.
+func secondAudioMap(s DestSpec) []string {
+	if s.SecondAudioOutLabel == "" || s.Kind == DestAudio {
+		return nil
+	}
+	// Mapping one filter output twice is refused by FFmpeg outright, and the
+	// intent behind it -- "send the mix twice" -- is the failure this feature
+	// must not produce, so it is dropped here rather than turned into an error
+	// this function has no way to return.
+	if s.SecondAudioOutLabel == s.AudioOutLabel {
+		return nil
+	}
+	return []string{"-map", "[" + s.SecondAudioOutLabel + "]"}
 }
 
 // copyAudioArgs finishes the command for a destination that forwards its audio

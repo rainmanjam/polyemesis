@@ -78,6 +78,25 @@ its first tagged release.
 
 ### Added
 
+- **RTMP egress can carry a second audio track, and it has been measured doing
+  it.** `ffmpeg.DestSpec.SecondAudioOutLabel` names a second finished mix from
+  the destination's filter graph; it is mapped and encoded as a second audio
+  track alongside the first. One track remains the default and every existing
+  destination emits byte-for-byte the command it emitted before — no caller sets
+  the field yet, because `routing.Compile` still describes one mix per
+  destination. What is new is that the capability is no longer a guess: FFmpeg
+  8.1 muxes two AAC tracks into FLV as Enhanced RTMP multitrack, this project's
+  own RTMP server carries them, and
+  `internal/ffmpeg.TestTwoDistinctMixesReachAnRTMPFarEnd` publishes the built
+  argv into that server and reads a 300 Hz tone off one received track and a
+  5000 Hz tone off the other. Tones rather than a track count, because two
+  tracks carrying the same audio is a failure a count cannot see — and the same
+  test proves it can tell, by publishing one mix twice and asserting the
+  difference is absent. Whether any PLATFORM accepts a second audio track is a
+  separate question this does not answer; the refusal of `-c:a copy` on an RTMP
+  destination, which rests on that question, is untouched.
+  ([#141](https://github.com/rainmanjam/polyemesis/issues/141))
+
 - **`internal/multitrack` speaks Twitch Enhanced Broadcasting**, the negotiated
   configuration behind what Amazon calls IVS Multitrack Video — the one path a
   platform has published that takes a *second* audio track and says what it is
