@@ -191,3 +191,55 @@ Transcribe's two were a different shape and worth naming separately: a magic
 constant spelled the wrong way round, and a checksum compared against the wrong
 header. Both were invisible offline because the fixtures were generated from the
 same wrong constants. A closed loop that agrees with itself.
+
+---
+
+## Unit coverage is not where the remaining gap is
+
+Measured 2026-08-14, because "raise test coverage" kept being proposed as though
+it were the same job as the one above. It is not, and the numbers say so rather
+than an argument.
+
+**43 packages. Zero with no tests at all.** Three sit under 60%:
+
+| Coverage | Package | Worth raising? |
+|---|---|---|
+| 8.5% | `scripts` | No. Build-ignored operational tools. |
+| 47.3% | `internal/testenv` | No. This is the guard harness itself. |
+| 54.3% | `cmd/polyemesis` | Marginal. Mostly `main()` and flag wiring. |
+
+Everything else is 70%+. A coverage-percentage push here would move a number and
+find nothing, which is the same conclusion this note reached from the other
+direction: the defects that matter are **composition** bugs, where both halves
+are individually correct and no unit test can reach the seam.
+
+## Which suites are automated, corrected
+
+A count taken by grepping `ci.yml` alone said seven suites were unautomated.
+That was wrong, and the correction is worth keeping because the mistake is easy
+to repeat: **`chat`, `oauth` and `automod` each run from their own workflow** —
+`chat-live.yml`, `oauth-live.yml`, `automod-live.yml` — on a weekly cron plus a
+`pull_request` trigger scoped to the paths they cover. Deliberate placement,
+argued in those files: a third-party network dependency on every push is a flake
+generator, and the failures they catch arrive with **no commit of ours at all**.
+
+Genuinely unautomated: **`install`** (now wired into `installer.yml`, #353),
+**`multistream`**, **`obs-multitrack`**, **`transcribe`**.
+
+## The chat gap is narrower and different than "no suite"
+
+`acceptance-chat.sh` is credential-free for 15 of its 17 checks, both skips state
+their reason, and its `EXPECTED_CHECKS=17` floor is what proves a run did not
+exit early. What it covers is **Twitch and Kick**. `internal/chat` ships five
+adapters — **YouTube, Facebook and Rumble have no live coverage anywhere**, and
+that is the untested half of the five-platform claim the website now makes.
+YouTube and Facebook will need credentials to read at all, so they land as
+justified skips like the authenticated Twitch step already does.
+
+## Decisions on record
+
+Owner, 2026-08-14: credentials are available and may be used; priority is
+features-the-site-claims first, then unautomated suites, then unit coverage; a
+**stack of PRs, one per area** rather than one large one; and the OVH staging box
+**may be disrupted** — that is what it is for.
+
