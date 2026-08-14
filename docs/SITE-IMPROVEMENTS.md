@@ -91,6 +91,9 @@ prescribes a fix for a cause that is not the actual one.
 | "Active nav links render in identical `rgb(155,169,186)`" | "Apply `aria-current` and high-contrast styling" | `aria-current` and `text-fg` were **already there**. The input was wrong: flat-file output makes `pathname` `/features.html`, so the comparison was false on every page. |
 | "Downscale screenshots to 1440px, 73.5% saving" | resize + quantise | Resizing makes PNG compression **worse** here. At 2304px the saving fell to 42.6% and `02-routing.png` came out **19% larger** than full-res. Quantise, do not resize. |
 | (my own first fix) sticky column with `var(--color-bg)` | — | That token does not exist in this theme. It resolved to transparent while `position: sticky` and `stayedPinned: true` both read as correct. The mechanism was right and the thing it exists to do was broken. |
+| "8 of 12 grids skip the tablet band" — add the missing step to each | `md:grid-cols-*` throughout | True for the count, wrong for the fix on most of them. Nine are a text column beside a screenshot, and there the **single column at 768 is the better layout**: stacked, the shot gets 726px; the desktop two-column arrangement gives it 688px. Only `/download` was changed. |
+| "Body measure exceeds 85ch — docs has 16 rows at 101ch" | narrow the reading column | **Zero** actual prose paragraphs exceed 85ch. The 101ch elements are `<li>`s wrapping card content — a title, a filename and a description stacked — not reading columns. The guideline does not apply to them. |
+| (my own tablet fix) wrap rule below a 40rem viewport | — | What decides whether a command fits is its **container**, not the window. The moment `/download` had two columns, the block sat in a 293px column at a 768px viewport: too wide for the query, far too narrow for the command. 265px hidden again, worse than before the fix. |
 
 ---
 
