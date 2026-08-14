@@ -602,6 +602,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // control is still rendered inside the Facebook box because Facebook is the
   // only platform that hands out a backup endpoint today.
   const [backupIngestWanted, setBackupIngestWanted] = useState(false);
+  // "Negotiate Enhanced Broadcasting with Twitch at go-live." Top-level and
+  // platform-neutral in the row, the same way backupIngestWanted is, but the
+  // control is rendered only in the Twitch box because Twitch is the one
+  // platform that publishes this negotiation today — see
+  // db.Destination.Multitrack.
+  const [multitrack, setMultitrack] = useState(false);
   const [accountId, setAccountId] = useState<string>("none");
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
@@ -686,6 +692,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setCompliance(destination.compliance ?? {});
       setFacebook(destination.facebook ?? {});
       setBackupIngestWanted(destination.backupIngestWanted ?? false);
+      setMultitrack(destination.multitrack ?? false);
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -697,6 +704,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setCompliance({});
       setFacebook({});
       setBackupIngestWanted(false);
+      setMultitrack(false);
       setName("");
       setPlatform("custom");
       setPresetId("");
@@ -859,6 +867,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         compliance,
         facebook,
         backupIngestWanted,
+        // The bare boolean, for the reason spelled out at the backup toggle
+        // below: the PUT is decoded OVER the stored row, so a key
+        // JSON.stringify omits is a key the server leaves alone. `false` has
+        // to travel or switching this off saves nothing.
+        multitrack,
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //
@@ -1836,6 +1849,45 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </span>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Gated the same way the Facebook box below is: by the selected
+              platform, not by whether an account is connected. Twitch is the
+              one platform that publishes this negotiation, and offering it
+              elsewhere would be a control that cannot do anything.
+
+              Copy is inline English rather than catalogue keys, following the
+              audio copy toggle and the Twitch content-labels help directly
+              above -- both are per-destination switches in this same dialog. */}
+          {platform === "twitch" && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="dest-multitrack">Enhanced Broadcasting (Twitch)</Label>
+              <div className="flex h-9 items-center gap-2">
+                <Switch
+                  id="dest-multitrack"
+                  checked={multitrack}
+                  // The bare setter, so `false` is a value this dialog can
+                  // actually send. See the payload note at `multitrack` above.
+                  onCheckedChange={setMultitrack}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {multitrack ? "Negotiate at go-live" : "Use the ordinary Twitch ingest"}
+                </span>
+              </div>
+              {/* Not a warning, and deliberately not styled as one. A
+                  negotiation that does not succeed is the EXPECTED outcome on
+                  the machine most operators run this on, so saying it in amber
+                  would train them to read a normal broadcast as broken. */}
+              <span className="text-[10px] text-muted-foreground">
+                Asks Twitch at go-live for an ingest endpoint, a stream key it mints for this
+                broadcast, and the audio tracks it will accept &mdash; which is what a second
+                (VOD) audio mix needs, because the ordinary Twitch ingest carries one track.
+                Twitch only grants this to a client with a supported GPU, and a rented server
+                usually has none: where it is not granted the destination simply publishes to
+                the ordinary Twitch ingest and says so once. Nothing is lost by leaving it on,
+                and nothing is wrong when it falls back.
+              </span>
             </div>
           )}
 
