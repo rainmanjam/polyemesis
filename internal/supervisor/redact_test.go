@@ -338,6 +338,77 @@ func TestTheProcessExitedLogLineCarriesNoStreamKey(t *testing.T) {
 	}
 }
 
+// The SECOND line that carries the same error, which the fix above missed.
+//
+// #311 scrubbed "process exited" and left "giving up on process" four lines
+// below it in the same function, reading the same `msg`. The test above could
+// not see it: it asserts on a supervisor that retries for ever, so the give-up
+// branch never ran. A leak was fixed, a test was written to pin the fix, and
+// the sibling path stayed open -- which is the shape this file already warns
+// about at the top of the test above ("the leak survived a check that only
+// looked at the sink that had already been fixed").
+//
+// This one is the worse of the two to leak on. It fires only after MaxRestarts
+// consecutive failures, so it marks the moment a destination has been refused
+// over and over -- which is precisely when an operator stops watching and
+// starts copying server.log into an issue.
+//
+// Proven able to fail against the committed tree by changing the Error call in
+// supervisor.go back to `"err", msg`: the key reappeared and the first
+// assertion below failed.
+func TestTheGivingUpLogLineCarriesNoStreamKey(t *testing.T) {
+	refusal := "[out#0/flv @ 0x65431867e200] Error opening output rtmps://" +
+		fbHost + ":443/rtmp/" + mainStreamKey + ": Connection refused"
+
+	var buf syncBuffer
+	f := fakeExitSaying(251, refusal)
+	spec := Spec{
+		Name:    "dest:5",
+		Kind:    "destination",
+		Secrets: []string{mainStreamKey},
+		Bin:     f.bin,
+		Args:    f.args,
+		// The three that make the give-up branch reachable at all. Without
+		// AutoRestart the process never retries and never gives up; without a
+		// low MaxRestarts and a short backoff the test outlives its deadline
+		// before the branch is entered.
+		AutoRestart: true,
+		MaxRestarts: 2,
+		MinBackoff:  10 * time.Millisecond,
+		MaxBackoff:  20 * time.Millisecond,
+	}
+	p := New(slog.New(slog.NewTextHandler(&buf, nil)), spec)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
+
+	p.Start()
+	waitFor(t, "the supervisor to give up", func() bool {
+		return strings.Contains(buf.String(), "giving up on process")
+	})
+
+	got := buf.String()
+	if strings.Contains(got, mainStreamKey) {
+		t.Errorf("the \"giving up on process\" log line carries the stream key.\n" +
+			"This fires after a destination has been refused repeatedly, which\n" +
+			"is exactly when server.log gets copied into a bug report.")
+	}
+	if !strings.Contains(got, alerts.Mask) {
+		t.Errorf("the key was neither present nor masked -- the error text has\n"+
+			"gone missing rather than been scrubbed.\ngot: %s", got)
+	}
+	// The diagnostic has to survive the scrub, or the fix has traded a leak
+	// for an unreadable failure.
+	for _, want := range []string{"Error opening output", fbHost, "Connection refused"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the give-up line has lost %q, which is what makes it worth\n"+
+				"logging at all.\ngot: %s", want, got)
+		}
+	}
+}
+
 // syncBuffer is a bytes.Buffer the run goroutine writes and the test reads.
 type syncBuffer struct {
 	mu  sync.Mutex
