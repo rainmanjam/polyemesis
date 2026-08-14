@@ -59,12 +59,23 @@ jobs:
   # three-OS builds, Docker and browser suites -- to validate files no job reads.
   # One of them was a single file. See #350.
   #
-  # WHY A JOB-LEVEL `if:` AND NOT A WORKFLOW-LEVEL `paths:` FILTER. Twelve of the
-  # acceptance suites are REQUIRED status checks. A workflow-level filter stops
-  # the workflow running at all, so a required check never reports, and the pull
-  # request stays pending forever with no way to merge it. A skipped job still
-  # reports, and a skip satisfies the requirement. The naive fix is worse than
-  # the problem it solves.
+  # WHY THIS GATES STEPS AND NOT JOBS. Twelve of the acceptance suites are
+  # REQUIRED status checks. A workflow-level `paths:` filter stops the workflow
+  # running at all, so a required check never reports and the pull request stays
+  # pending forever with no way to merge it.
+  #
+  # A JOB-LEVEL `if:` ON A MATRIX IS THE SAME BUG WEARING A DISGUISE, and #351
+  # shipped it. A skipped ordinary job does report, and a skip does satisfy the
+  # requirement -- but a skipped MATRIX job never expands its matrix, so the
+  # per-leg contexts are never created at all. The checks list showed one entry
+  # named literally `acceptance: ${{ matrix.suite }}`, the twelve required
+  # contexts were absent rather than skipped, and #349 -- a documentation-only
+  # pull request, the exact case this was built for -- was unmergeable. Fifteen
+  # green checks and no way in.
+  #
+  # So the matrix always expands and every leg reports. What is conditional is
+  # the WORK: each step carries the `if:`, the job costs a runner allocation and
+  # nothing else, and the required context reports success either way.
   #
   # IT FAILS TOWARD RUNNING. `code` is false only when EVERY changed path is
   # documentation; anything unrecognised makes it true. A new top-level directory
@@ -292,7 +303,26 @@ jobs:
       # package under three different selections and requires the numbers to
       # differ. ~60s, dominated by the unfiltered probe, which is the number
       # anybody would actually quote.
+      # THE STEP TIMEOUT THE FOUR BELOW GOT AND THIS ONE DID NOT, and on
+      # 2026-08-14 this is the step that hung: 24 minutes against a measured
+      # 98-114s, until the job's own ceiling cancelled it and named nothing.
+      #
+      # It can hang for a reason the note at :360 already gives about the
+      # watchdog -- "a background process holding the suite's stdout ... does
+      # not merely fail to report, it becomes the hang". The guard captures each
+      # probe with `out="$(go test ...)"`, and command substitution blocks until
+      # the pipe has no writers left, NOT until go test exits. A test that
+      # leaks a child holding inherited stdout hangs the capture after the test
+      # binary is gone and after Go's own timeout has already fired, so Go's
+      # diagnostic cannot be the backstop here. Only this can.
+      #
+      # 14 rather than something tighter, so the ordering the file argues for
+      # everywhere else holds: three probes at -timeout 4m is 12m of worst case,
+      # and Go has to be able to win that race and print the goroutine dump
+      # before this fires. Below the job's 25 either way, which is the property
+      # being claimed.
       - name: internal/api coverage measures the tests, not the preflight
+        timeout-minutes: 14
         run: make coverage-instrument-guard
 
       # -race because the engine reconciles from several goroutines and a data
@@ -1148,10 +1178,13 @@ jobs:
   acceptance:
     name: "acceptance: ${{ matrix.suite }}"
     runs-on: ubuntu-latest
-    # Skipped, not filtered out: these are required checks and a skip satisfies
-    # them where an absent report does not. See the changes job.
+    # NO JOB-LEVEL `if:` HERE, DELIBERATELY, and #351 is why. All twelve of
+    # these are required checks. A skipped matrix job never expands its matrix,
+    # so the per-leg contexts are not skipped -- they do not exist, and the
+    # pull request can never satisfy branch protection. The `if:` is on every
+    # step below instead: the matrix expands, all twelve report, and a
+    # documentation-only run costs a runner allocation rather than a suite.
     needs: changes
-    if: needs.changes.outputs.code == 'true'
     env:
       # See the deadline note on the suite step below. The library's 900s
       # default is for a laptop, where nothing outranks it; here it has to fire
@@ -1190,18 +1223,32 @@ jobs:
           # apt step of its own -- Docker is already present on ubuntu-latest.
           - acceptance-mqtt
     steps:
+      # EVERY STEP CARRIES THE GATE. There is no way to end a job early from a
+      # step without failing it, so "documentation only" has to be spelled out
+      # on each one rather than checked once at the top.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.code == 'true'
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      # Says out loud why a green check did no work, so a reader of the checks
+      # list is never left guessing whether the suite ran or silently no-opped.
+      - name: Documentation-only change, so this suite did not run
+        if: needs.changes.outputs.code != 'true'
+        run: |
+          echo "::notice title=${{ matrix.suite }} skipped::every changed path was documentation, so this suite could not be affected by it. See the 'which changes' job."
+
       - name: Install FFmpeg
+        if: needs.changes.outputs.code == 'true'
         # See the note on the go job's install step: a hung apt must fail with its
         # own name attached rather than eating this job's whole 20 minutes.
         timeout-minutes: 6
@@ -1235,6 +1282,7 @@ jobs:
       # The suites run the real binary with the UI embedded, so it has to be
       # the real build rather than `go build ./cmd/...`.
       - run: make build
+        if: needs.changes.outputs.code == 'true'
 
       # THE THREE DEADLINES, AND WHY THEY ARE IN THIS ORDER.
       #
@@ -1268,6 +1316,7 @@ jobs:
       # watchdog that itself wedges, and it still leaves the always() upload
       # below its chance to run, which a job-level cancel does not.
       - name: ./scripts/${{ matrix.suite }}.sh
+        if: needs.changes.outputs.code == 'true'
         timeout-minutes: 12
         run: ./scripts/${{ matrix.suite }}.sh
 
@@ -1366,7 +1415,9 @@ jobs:
       # for the next occurrence. Only that suite writes one; the others match
       # nothing here and if-no-files-found already covers it.
       - name: Upload logs
-        if: always()
+        # always(), but not when the suite never ran: a documentation-only job
+        # has no artifact to collect, only a warning about its absence.
+        if: always() && needs.changes.outputs.code == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.suite }}-logs
