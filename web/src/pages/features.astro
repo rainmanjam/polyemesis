@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import Lightbox from "../components/Lightbox.astro";
 
 /* Each section pairs a claim with the screenshot that evidences it. The
  * dashboard capture is deliberately absent: it currently photographs an ingest
@@ -120,15 +121,28 @@ const sections = [
             </div>
           </div>
           <figure data-reveal>
-            <img
-              src={`/shots/${s.shot}`}
-              alt={s.alt}
-              width="2880"
-              height="1800"
-              loading="lazy"
-              decoding="async"
-              class="w-full rounded-token border border-line"
-            />
+            {/* The button wraps the image rather than sitting beside it, so the
+                whole screenshot is the target -- a 12px magnifier icon on a
+                2880-wide image would be a worse hit area than the image itself.
+                Styled to look like nothing, so the page is unchanged until
+                clicked. */}
+            <button
+              type="button"
+              class="shot-open"
+              data-shot={`/shots/${s.shot}`}
+              data-shot-alt={s.alt}
+              aria-label={`Expand screenshot: ${s.alt}`}
+            >
+              <img
+                src={`/shots/${s.shot}`}
+                alt={s.alt}
+                width="2880"
+                height="1800"
+                loading="lazy"
+                decoding="async"
+                class="w-full rounded-token border border-line"
+              />
+            </button>
           </figure>
         </div>
       </section>
@@ -227,4 +241,7 @@ const sections = [
       <a href="/comparison" class="btn btn-ghost">How it compares</a>
     </div>
   </section>
+
+  {/* Last in the page, once, for every screenshot above. */}
+  <Lightbox />
 </Base>
