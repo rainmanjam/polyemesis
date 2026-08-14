@@ -56,6 +56,12 @@ drivers. Anything else means listed-but-unusable, and the rendition editor
 greys it out with the reason FFmpeg gave — before you go live, rather than
 after.
 
+The candidates are the **five H.264 hardware encoders plus `libx264`** — six
+probes, run concurrently. The HEVC encoder of each family is not probed: it
+opens the same device through the same driver as its H.264 sibling, so the
+sibling's exit status answers for it, and the editor marks that verdict as
+inferred rather than measured.
+
 Three consequences worth knowing:
 
 - **Detection never blocks startup.** A probe that fails, times out or finds

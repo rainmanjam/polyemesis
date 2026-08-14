@@ -48,10 +48,21 @@ ingests directly.
 - Two ingests each needing 1080p and 720p is four encodes. That is where a card
   stops being optional.
 
-Twelve hardware encoders are supported — NVENC, QSV, VAAPI, VideoToolbox and AMF
-in H.264 and HEVC — and each is **probed with a real test encode** before being
-offered, rather than assumed from the driver being present. A machine where every
-probe fails software-encodes; it does not refuse to boot.
+Twelve encoders are offered: `libx264` and `libx265` in software, plus **ten
+hardware** encoders — NVENC, QSV, VAAPI, VideoToolbox and AMF, each in H.264 and
+HEVC.
+
+**Six of the twelve are probed with a real test encode** before being offered:
+the five H.264 hardware encoders and `libx264`. The HEVC verdict is *inferred*
+from its H.264 sibling, which opens the same device through the same driver — if
+`h264_nvenc` cannot load libcuda then neither can `hevc_nvenc`, and there is no
+machine where one is true and the other is not. The editor labels an inferred
+verdict as inferred. That inference is good enough to stop offering a choice and
+deliberately not good enough to refuse a start, so a rendition already saved on
+`hevc_qsv` is never killed on a guess. Probing all twelve would double a cost
+paid on every startup to measure a thing the sibling already answers.
+
+A machine where every probe fails software-encodes; it does not refuse to boot.
 
 **A rendition does not touch your audio.** The argv carries `-map 0:a -c:a copy`,
 so every ingest track arrives bit-identical and per-destination routing
@@ -65,7 +76,7 @@ encode or a mixdown, the product's differentiator would be gone.
 | Mode | Live egress | How |
 |---|---|---|
 | **CBR** | **Yes, and the default** | `-b:v X -maxrate X -bufsize 2X`, and NVENC additionally gets `-rc cbr` |
-| **Capped VBR** | **Yes** | Set a ceiling above the target bitrate; see below |
+| **Capped VBR** | **Yes** | Set a ceiling above the target bitrate; NVENC additionally gets `-rc vbr`. See below |
 | **CRF / CQ** (quality-targeted) | **No** | Used only off the live path: the clipper, media proxies, and archive transcodes |
 | **ABR ladder to one destination** | **No** | One rendition per destination. The platform builds its own ladder from what you send. |
 | **Several resolutions at once** | **Yes** | Several renditions, ref-counted, each feeding the destinations that selected it |
@@ -95,15 +106,36 @@ argv builder, and were reachable from nowhere — so the code described a
 capability the product did not have. Leaving both at `0` emits byte-for-byte the
 command line it always did.
 
+**Only NVENC needs to be told which mode it is in.** `-rc cbr` *pins* NVENC to
+constant bitrate, so until #343 a ceiling above the target reached the command
+line and did nothing — the operator set a number that was silently ignored. A
+ceiling above the target now emits `-rc vbr`; an equal or unset ceiling keeps
+`-rc cbr`, which is the default every existing install already emits.
+
+The other four families were checked and need no such flag:
+
+| Family | Its rate-control lever | Why nothing changes |
+|---|---|---|
+| NVENC | `-rc cbr` / `-rc vbr` | **The one that needed fixing.** `-rc` overrides the preset's own choice, and `cbr` ignores the ceiling |
+| QSV | none | It has no `-rc` option at all; the bitrate-control mode is derived from `-b:v` against `-maxrate` |
+| VA-API | `-rc_mode` | Defaults to `auto`, documented as "choose mode automatically based on other parameters" |
+| VideoToolbox | `-constant_bit_rate` | Defaults to false, i.e. already capped VBR. `-realtime` is a latency hint, not rate control |
+| AMF | `-usage` | `transcoding` selects the streaming behaviour. Not verified against a binary — no Linux or macOS FFmpeg registers an `*_amf` encoder |
+
 ### Defaults
 
 | Setting | Default | Bounds |
 |---|---|---|
 | Video bitrate | 4500 kbps | 100 – 100 000 kbps |
-| Ceiling (maxrate) | = bitrate | 0, or ≥ the bitrate |
-| Rate window (bufsize) | 2 × ceiling | 0, or ≥ half the ceiling |
+| Ceiling (maxrate) | = bitrate | 0, or ≥ the bitrate, and ≤ 100 000 kbps |
+| Rate window (bufsize) | 2 × ceiling | 0, or ≥ half the ceiling, and ≤ 400 000 kbps |
+| Width, height | source dimension | 128 – 7680, and **even** — 4:2:0 chroma requires it |
+| Frame rate | source rate | ≤ 240 fps |
 | GOP | 2 s | 1 s – 10 s |
-| Encoder | `libx264` | any probed encoder |
+| Encoder | `libx264` | any of the twelve |
+
+The bounds are deliberately generous. They exist to catch a typo or a unit
+mix-up — `6` where `6000` was meant — not to express any platform's policy.
 
 ### Keyframes
 
@@ -120,11 +152,37 @@ interval breaks HLS and DASH packaging on the platform side.
 
 | Encoder | Adds |
 |---|---|
-| `libx264` | `-profile:v high -pix_fmt yuv420p` |
-| NVENC | `-rc cbr -profile:v high` |
-| QSV | `-profile:v high` |
-| VideoToolbox | `-realtime 1 -profile:v high` |
-| AMF | `-usage transcoding -profile:v high` |
+| `libx264` | `-preset veryfast -profile:v high -pix_fmt yuv420p` |
+| `libx265` | `-preset veryfast -profile:v main -pix_fmt yuv420p` |
+| `h264_nvenc` | `-preset p4 -rc cbr\|vbr -profile:v high` |
+| `hevc_nvenc` | `-preset p4 -rc cbr\|vbr` |
+| `h264_qsv` | `-preset veryfast -profile:v high` |
+| `hevc_qsv` | `-preset veryfast` |
+| `h264_videotoolbox` | `-realtime 1 -profile:v high` |
+| `hevc_videotoolbox` | `-realtime 1` |
+| `h264_vaapi` | `-vaapi_device <node>`, and `format=nv12,hwupload` on the filter chain |
+| `hevc_vaapi` | the same |
+| `h264_amf` | `-quality speed -usage transcoding -profile:v high` |
+| `hevc_amf` | `-quality speed -usage transcoding` |
+
+**`-profile:v high` is H.264-only.** HEVC's profiles are `main` / `main10` /
+`rext`, and every HEVC encoder *refuses to open* when handed `high` rather than
+ignoring it — `x265 [error]: unknown profile <high>`, `Unable to parse "profile"
+option value "high"`. That is why the HEVC rows above are not their H.264 rows
+with the name changed.
+
+A profile is pinned at all only to stop a 10-bit or 4:2:2 ingest producing a
+High10/422 stream that no platform will accept — and that is only safe to state
+where we also state the pixel format. We do for the two **software** encoders,
+so they pin one. We cannot for the **hardware** ones, which take whatever
+surface format the driver hands them, so the HEVC hardware rows let the encoder
+pick a profile that matches its own input. The H.264 hardware rows keep the
+`high` they have always sent, which is a valid value for every one of them.
+
+The VAAPI rows are the load-bearing ones: VAAPI encodes from GPU surfaces, so
+without **both** the device and the `hwupload` filter tail it cannot open at
+all. `hevc_vaapi` was missing both until #343 — it was selectable in the editor
+and structurally unable to start.
 
 ---
 
