@@ -1,0 +1,72 @@
+{
+    "meta": {
+        "schema_version": "2025-01-25",
+        "service": "IVS",
+        "config_id": "49456f79-a985-4011-941f-3cde9897a0c6",
+        "required_encode_resource_estimate_percent": 12
+    },
+    "ingest_endpoints": [
+        {
+            "protocol": "RTMP",
+            "url_template": "rtmp://ingest.global-contribute.live-video.net/app/{stream_key}"
+        },
+        {
+            "protocol": "RTMPS",
+            "url_template": "rtmps://ingest.global-contribute.live-video.net/app/{stream_key}"
+        }
+    ],
+    "encoder_configurations": [
+        {
+            "type": "obs_nvenc_h264_tex",
+            "bitrate_interpolation_points": [
+                0,
+                3960,
+                4800,
+                6000
+            ],
+            "framerate": {
+                "numerator": 30,
+                "denominator": 1
+            },
+            "gpu_scale_type": "OBS_SCALE_BICUBIC",
+            "width": 1920,
+            "height": 1080,
+            "canvas_index": 0,
+            "settings": {
+                "bitrate": 6000,
+                "bf": 3,
+                "keyint_sec": 2,
+                "lookahead": true,
+                "preset": "p6",
+                "profile": "high",
+                "adaptive_quantization": true,
+                "rate_control": "CBR",
+                "tune": "hq",
+                "multipass": "qres",
+                "opts": "lookaheadDepth=2"
+            }
+        }
+    ],
+    "audio_configurations": {
+        "live": [
+            {
+                "codec": "aac",
+                "track_id": 0,
+                "channels": 2,
+                "settings": {
+                    "bitrate": 160
+                }
+            }
+        ],
+        "vod": [
+            {
+                "codec": "aac",
+                "track_id": 1,
+                "channels": 2,
+                "settings": {
+                    "bitrate": 160
+                }
+            }
+        ]
+    }
+}
