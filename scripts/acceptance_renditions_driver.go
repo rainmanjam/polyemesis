@@ -44,6 +44,16 @@ var (
 // encode is shared rather than duplicated per destination.
 const encoderMark = "scale=1280:720"
 
+// cappedMark identifies the SECOND rendition -- the one carrying an explicit
+// maxrate/bufsize -- in the same process table.
+//
+// A different frame size from encoderMark, and that is not cosmetic: the count
+// above asserts there is exactly ONE encoder for the shared 720p30 tier, so a
+// second rendition at 1280x720 would be indistinguishable from a ref-counting
+// bug and would fail that assertion for a reason that has nothing to do with
+// ref counting.
+const cappedMark = "scale=854:480"
+
 func main() {
 	if len(os.Args) < 4 {
 		die("usage: acceptance_renditions_driver.go <http-port> <relay-port> <facts-file>")
@@ -173,25 +183,82 @@ func main() {
 	facts["FONT_COUNT"] = strconv.Itoa(len(nf))
 	fmt.Printf("  rendition %d created\n", rid)
 
+	fmt.Println("creating the 480p30 rendition with a capped rate control")
+	// A SECOND rendition whose only reason to exist is its rate control.
+	//
+	// 4500 target, 8000 ceiling, 12000 buffer -- a capped-VBR triple no default
+	// can produce. RenditionArgs reads a zero maxrate as "derive CBR", so an
+	// unset field yields 4500k/9000k; those two numbers are what this test is
+	// really about, because they are what the command line said before #341 no
+	// matter what the operator stored. The three numbers are deliberately all
+	// different from each other and from the derived pair, so no single wrong
+	// value can be mistaken for a right one.
+	//
+	// No overlay and no text: those compile the argv through -filter_complex
+	// instead of -vf, and the point here is the rate-control flags, not the
+	// filter graph the other rendition already covers.
+	capped := call("POST", "/renditions", map[string]any{
+		"name":         "480p30 capped",
+		"width":        854,
+		"height":       480,
+		"fps":          30,
+		"videoBitrate": 4500,
+		"maxrateKbps":  8000,
+		"bufsizeKbps":  12000,
+		"encoder":      "libx264",
+		"preset":       "veryfast",
+		"gopSeconds":   2,
+	})
+	cappedRend := mapOf(capped["rendition"])
+	cid := int64(intOf(cappedRend["id"]))
+	facts["CAPPED_RENDITION_ID"] = strconv.FormatInt(cid, 10)
+	// The stored value, read back. This alone proves nothing about the encoder
+	// -- it is here so a failure downstream can be located: a column the store
+	// dropped and a mapping that never read it look identical from the argv.
+	facts["CAPPED_MAXRATE_STORED"] = strconv.Itoa(intOf(cappedRend["maxrateKbps"]))
+	facts["CAPPED_BUFSIZE_STORED"] = strconv.Itoa(intOf(cappedRend["bufsizeKbps"]))
+	fmt.Printf("  rendition %d created (maxrate %s, bufsize %s)\n",
+		cid, facts["CAPPED_MAXRATE_STORED"], facts["CAPPED_BUFSIZE_STORED"])
+
 	// A brand-new rendition nothing selects must not be burning CPU.
 	facts["PROCS_BEFORE_SELECT"] = strconv.Itoa(countEncoders())
 
-	fmt.Println("creating destinations: 1 passthrough, 2 sharing the rendition")
+	fmt.Println("creating destinations: 1 passthrough, 2 sharing the rendition, 1 capped")
 	pass := call("POST", "/destinations", dest("Passthrough — tracks 1+2", "passthrough.mkv", []int{0, 1}, nil))
 	a := call("POST", "/destinations", dest("720p30 A — tracks 1+3", "rendition-a.mkv", []int{0, 2}, &rid))
 	b := call("POST", "/destinations", dest("720p30 B — tracks 2+3", "rendition-b.mkv", []int{1, 2}, &rid))
+	// The capped rendition needs a destination for the same reason the others
+	// do: an encode with no consumer is never started, so without this the
+	// stored rate control would have no process to be absent from.
+	c := call("POST", "/destinations", dest("480p30 capped — track 1", "capped.mkv", []int{0}, &cid))
 
 	facts["PASSTHROUGH_ID"] = destID(pass)
 	facts["REND_A_ID"] = destID(a)
 	facts["REND_B_ID"] = destID(b)
+	facts["CAPPED_DEST_ID"] = destID(c)
 
 	// R4's warning made concrete: a passthrough destination OMITS renditionId
 	// rather than sending null, so a client must read "absent" as passthrough.
 	_, present := pass["destination"].(map[string]any)["renditionId"]
 	facts["PASSTHROUGH_HAS_RENDITION_KEY"] = boolStr(present)
 
-	fmt.Println("waiting for all three destinations to run")
-	waitForRunning(3)
+	fmt.Println("waiting for all four destinations to run")
+	waitForRunning(4)
+
+	fmt.Println("reading the capped encoder's command line out of the process table")
+	// The whole reason this test exists, and the reason it is here rather than
+	// in a Go unit test: the value is read off a process the ENGINE started,
+	// from the row the API wrote. renditionSpecOf can be called directly and
+	// asserted on -- rendition_ratecontrol_test.go does exactly that -- but a
+	// spec built by hand cannot tell you whether the engine builds one the same
+	// way from a stored row, and #341 was precisely a mapping that did not.
+	argv := waitForCappedArgv(30 * time.Second)
+	facts["CAPPED_ARGV_FOUND"] = boolStr(argv != "")
+	facts["CAPPED_ARGV_BV"] = argAfter(argv, "-b:v")
+	facts["CAPPED_ARGV_MAXRATE"] = argAfter(argv, "-maxrate")
+	facts["CAPPED_ARGV_BUFSIZE"] = argAfter(argv, "-bufsize")
+	fmt.Printf("  -b:v %q  -maxrate %q  -bufsize %q\n",
+		facts["CAPPED_ARGV_BV"], facts["CAPPED_ARGV_MAXRATE"], facts["CAPPED_ARGV_BUFSIZE"])
 
 	fmt.Println("streaming for 20s, sampling the process table")
 	minProcs, maxProcs := sampleEncoders(20 * time.Second)
@@ -207,9 +274,13 @@ func main() {
 	facts["RELAY_PORT"] = strconv.Itoa(intOf(rend["relayPort"]))
 	facts["INGEST_RELAY_PORT"] = strconv.Itoa(intOf(mapOf(st["relay"])["port"]))
 
-	fmt.Println("stopping the two rendition destinations; the encode must be released")
+	fmt.Println("stopping the rendition destinations; the shared encode must be released")
 	call("POST", "/destinations/"+facts["REND_A_ID"]+"/stop", nil)
 	call("POST", "/destinations/"+facts["REND_B_ID"]+"/stop", nil)
+	// Stopped alongside them so its file is flushed and closed before the shell
+	// probes it. It plays no part in the ref-count assertions below -- those
+	// count encoderMark, and this encoder carries cappedMark.
+	call("POST", "/destinations/"+facts["CAPPED_DEST_ID"]+"/stop", nil)
 	// Long enough for the supervisor's stop to complete and the files to flush.
 	time.Sleep(6 * time.Second)
 
@@ -259,21 +330,63 @@ func destID(resp map[string]any) string {
 	return strconv.Itoa(intOf(d["id"]))
 }
 
-// countEncoders counts the rendition encoders in the process table. Reading the
-// real process table rather than the API is the point: the API could report one
-// rendition while the engine had spawned an encoder per destination.
-func countEncoders() int {
+// psLines returns every command line in the process table.
+//
+// Piped rather than printed to a terminal, which is what keeps the lines whole:
+// ps truncates to the terminal width only when its output IS a terminal, and a
+// truncated line here would drop the flags this file reads off the end of it.
+func psLines() []string {
 	out, err := exec.Command("ps", "-Ao", "args=").Output()
 	if err != nil {
 		die("ps: %v", err)
 	}
+	return strings.Split(string(out), "\n")
+}
+
+// countEncoders counts the rendition encoders in the process table. Reading the
+// real process table rather than the API is the point: the API could report one
+// rendition while the engine had spawned an encoder per destination.
+func countEncoders() int {
 	n := 0
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range psLines() {
 		if strings.Contains(line, encoderMark) && strings.Contains(line, "ffmpeg") {
 			n++
 		}
 	}
 	return n
+}
+
+// waitForCappedArgv returns the running capped encoder's command line.
+//
+// It polls rather than sampling once because /status reporting "running" and
+// the process appearing in the table are two different events, and a single
+// read that lost the race would report an empty argv -- which reads as "the
+// rate control never reached the encoder" and would be a lie. The shell
+// distinguishes the two outcomes for exactly this reason.
+func waitForCappedArgv(d time.Duration) string {
+	deadline := time.Now().Add(d)
+	for {
+		for _, line := range psLines() {
+			if strings.Contains(line, cappedMark) && strings.Contains(line, "ffmpeg") {
+				return line
+			}
+		}
+		if !time.Now().Before(deadline) {
+			return ""
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// argAfter returns the token following flag on a command line, or "".
+func argAfter(cmdline, flag string) string {
+	fields := strings.Fields(cmdline)
+	for i, f := range fields {
+		if f == flag && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return ""
 }
 
 func sampleEncoders(d time.Duration) (min, max int) {
