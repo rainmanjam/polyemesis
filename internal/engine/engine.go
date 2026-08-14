@@ -2301,6 +2301,13 @@ func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDe
 		FPS:         float64(r.FPS),
 		SourceFPS:   sourceFPS,
 		VideoKbps:   r.VideoBitrate,
+		// Both 0 unless somebody set them, and RenditionArgs reads 0 as "derive
+		// the CBR relationship" -- so an install that never touches these emits
+		// the command line it always did. Until this mapping existed the fields
+		// were on the spec, used by the argv builder, and reachable from
+		// nowhere. #341.
+		MaxrateKbps: r.MaxrateKbps,
+		BufsizeKbps: r.BufsizeKbps,
 		Encoder:     string(r.Encoder),
 		Preset:      r.Preset,
 		GOPSeconds:  r.GOPSeconds,

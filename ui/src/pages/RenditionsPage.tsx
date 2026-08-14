@@ -798,6 +798,9 @@ function emptyForm(defaultEncoder: string) {
     height: 1080,
     fps: 60,
     videoBitrate: 6000,
+    // 0 on both is the CBR relationship every rendition already had.
+    maxrateKbps: 0,
+    bufsizeKbps: 0,
     encoder: defaultEncoder,
     preset: "veryfast",
     gopSeconds: 2,
@@ -928,6 +931,8 @@ function RenditionDialog({
         height: rendition.height,
         fps: rendition.fps,
         videoBitrate: rendition.videoBitrate,
+        maxrateKbps: rendition.maxrateKbps ?? 0,
+        bufsizeKbps: rendition.bufsizeKbps ?? 0,
         encoder: rendition.encoder,
         preset: rendition.preset,
         gopSeconds: rendition.gopSeconds,
@@ -974,6 +979,8 @@ function RenditionDialog({
       height: t.height,
       fps: t.fps,
       videoBitrate: t.videoBitrate,
+      maxrateKbps: 0,
+      bufsizeKbps: 0,
       // The preset names a software encoder because that is the one every
       // build has. If this machine's default is something else, respect it.
       encoder: encoders.some((e) => e.name === t.encoder && e.works)
@@ -1038,6 +1045,11 @@ function RenditionDialog({
   const nameOk = form.name.trim().length > 0;
   const bitrateOk =
     form.videoBitrate >= bounds.minBitrate && form.videoBitrate <= bounds.maxBitrate;
+  // 0 is "derive it" and always valid. Anything else has to be a ceiling the
+  // encoder can actually sit under, so it may not be below the target.
+  const maxrateOk =
+    form.maxrateKbps === 0 ||
+    (form.maxrateKbps >= form.videoBitrate && form.maxrateKbps <= bounds.maxBitrate);
   // An aspect conversion is defined by the target shape, so it needs both axes.
   // With one free, the plain scale already preserves the aspect ratio and the
   // mode would be inert -- the server refuses the pair rather than storing a
@@ -1062,6 +1074,8 @@ function RenditionDialog({
         height: form.height,
         fps: form.fps,
         videoBitrate: form.videoBitrate,
+        maxrateKbps: form.maxrateKbps,
+        bufsizeKbps: form.bufsizeKbps,
         encoder: form.encoder,
         preset: form.preset.trim(),
         gopSeconds: form.gopSeconds,
@@ -1273,6 +1287,46 @@ function RenditionDialog({
               />
               <span className="text-[10px] text-muted-foreground">
                 seconds. Most live platforms want 1–4; 2 is the common answer.
+              </span>
+            </div>
+          </div>
+
+          {/* Rate control. Both default to 0, which is the CBR relationship
+              every rendition had before these were reachable — so a user who
+              never opens this row gets the command line they always got.
+              See #341 and docs/ENCODING.md. */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="rend-maxrate">Ceiling</Label>
+              <Input
+                id="rend-maxrate"
+                type="number"
+                min={0}
+                max={bounds.maxBitrate}
+                step={100}
+                value={form.maxrateKbps}
+                onChange={(e) => set("maxrateKbps", Number(e.target.value))}
+              />
+              <span className={`text-[10px] ${maxrateOk ? "text-muted-foreground" : "text-down"}`}>
+                {maxrateOk
+                  ? "kbps. 0 matches the target, which is CBR. Higher allows burst up to a platform's published maximum."
+                  : "must be 0, or at least the target bitrate — a ceiling below the target is a contradiction, not a preference."}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="rend-bufsize">Rate window</Label>
+              <Input
+                id="rend-bufsize"
+                type="number"
+                min={0}
+                step={100}
+                value={form.bufsizeKbps}
+                onChange={(e) => set("bufsizeKbps", Number(e.target.value))}
+              />
+              <span className="text-[10px] text-muted-foreground">
+                kbps. 0 is twice the ceiling. Smaller corrects faster and pumps
+                more visibly on a cut.
               </span>
             </div>
           </div>
@@ -1764,7 +1818,7 @@ function RenditionDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy || !nameOk || !bitrateOk}>
+          <Button onClick={save} disabled={busy || !nameOk || !bitrateOk || !maxrateOk}>
             {busy && <Loader2 className="animate-spin" />}
             {editing ? t("common.save") : t("hooks.create")}
           </Button>

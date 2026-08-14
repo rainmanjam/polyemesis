@@ -290,6 +290,14 @@ export interface Rendition {
   fps: number;
   /** Target video bitrate in kbps. */
   videoBitrate: number;
+  /** The ceiling, in kbps. 0 derives it from videoBitrate, which is CBR and is
+   *  what every rendition did before this field existed. Set it above the
+   *  target to allow burst up to a platform's published maximum; it may not be
+   *  set below the target, which is a contradiction rather than a preference. */
+  maxrateKbps: number;
+  /** The rate controller's window, in kbps. 0 derives it as twice the ceiling.
+   *  Smaller windows correct faster and pump more visibly on a scene cut. */
+  bufsizeKbps: number;
   /** An FFmpeg encoder name. Not a union: which encoders exist is a property
    *  of the running FFmpeg build, and GET /encoders is the only honest source
    *  for that. */

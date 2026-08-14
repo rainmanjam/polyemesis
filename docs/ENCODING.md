@@ -64,8 +64,8 @@ encode or a mixdown, the product's differentiator would be gone.
 
 | Mode | Live egress | How |
 |---|---|---|
-| **CBR** | **Yes — the only mode** | `-b:v X -maxrate X -bufsize 2X`, and NVENC additionally gets `-rc cbr` |
-| **Capped VBR** | **No** | See the note below — the plumbing exists and nothing can reach it |
+| **CBR** | **Yes, and the default** | `-b:v X -maxrate X -bufsize 2X`, and NVENC additionally gets `-rc cbr` |
+| **Capped VBR** | **Yes** | Set a ceiling above the target bitrate; see below |
 | **CRF / CQ** (quality-targeted) | **No** | Used only off the live path: the clipper, media proxies, and archive transcodes |
 | **ABR ladder to one destination** | **No** | One rendition per destination. The platform builds its own ladder from what you send. |
 | **Several resolutions at once** | **Yes** | Several renditions, ref-counted, each feeding the destinations that selected it |
@@ -74,19 +74,34 @@ CBR is the right default for live: every platform ingest documents a target and 
 ceiling, and a stream that undershoots its bitrate on a static scene and then
 overshoots on a cut is the one that buffers.
 
-**Capped VBR is half-built, on purpose or not.** `RenditionSpec` carries
-`MaxrateKbps` and `BufsizeKbps`, and `RenditionArgs` uses them — but neither
-field exists on the `Rendition` database model or in the API, so both always
-fall back to `maxrate == bitrate` and `bufsize == 2 × maxrate`. The capability is
-in the argv builder and unreachable from outside. Tracked in #341.
+### Setting a ceiling
+
+A rendition has two more fields, both `0` by default:
+
+- **Ceiling** (`maxrateKbps`) — `0` matches the target bitrate, which is CBR.
+  Set it higher to allow burst up to what a platform publishes as its maximum;
+  the services registry already carries a `MaxVideoKbps` per platform, read out
+  of OBS's own service list, and that number is what this is for.
+- **Rate window** (`bufsizeKbps`) — `0` is twice the ceiling. Smaller windows
+  correct faster and pump more visibly on a scene cut.
+
+A ceiling **below** the target bitrate is refused rather than clamped. There is
+no way to resolve `-b:v 6000 -maxrate 4000` without overriding one of the two
+numbers, and whichever is chosen the operator gets a stream at a bitrate they
+did not pick, with no sign that a field they filled in was ignored.
+
+Until #341 these fields existed on `RenditionSpec`, were used correctly by the
+argv builder, and were reachable from nowhere — so the code described a
+capability the product did not have. Leaving both at `0` emits byte-for-byte the
+command line it always did.
 
 ### Defaults
 
 | Setting | Default | Bounds |
 |---|---|---|
-| Video bitrate | 4500 kbps | — |
-| Maxrate | = bitrate | not settable |
-| Bufsize | 2 × maxrate | not settable |
+| Video bitrate | 4500 kbps | 100 – 100 000 kbps |
+| Ceiling (maxrate) | = bitrate | 0, or ≥ the bitrate |
+| Rate window (bufsize) | 2 × ceiling | 0, or ≥ half the ceiling |
 | GOP | 2 s | 1 s – 10 s |
 | Encoder | `libx264` | any probed encoder |
 
