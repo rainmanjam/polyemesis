@@ -954,8 +954,94 @@ configure_firewall() {
 
 # ------------------------------------------------------- helper scripts
 
+# The binary install's upgrade script, and the reason it exists is in
+# write_helper_scripts above.
+#
+# THE KEY FILE IS THE POINT. A count of files proves the backup is not empty; it
+# does not prove it holds the one file whose absence cannot be recovered from.
+# Since 0.7.0 seals destination stream keys at rest, a database restored WITHOUT
+# secret.key comes back with every destination disabled -- by design, because a
+# key that will not open disables its destination rather than failing open. That
+# restore looks completely successful until the moment someone goes live.
+write_binary_update_script() {
+  mkdir -p "$INSTALL_DIR"
+  cat > "$INSTALL_DIR/update.sh" <<EOF
+#!/usr/bin/env bash
+# Back up the data directory BEFORE replacing the binary: migrations run forward
+# only and there is no downgrade path. The backup is the only way back.
+set -euo pipefail
+
+DATA_DIR="$DATA_DIR"
+BIN_PATH="$BIN_PATH"
+SERVICE_NAME="$SERVICE_NAME"
+
+stamp="\$(date +%F-%H%M)"
+dest="\${DATA_DIR}.bak-\${stamp}"
+
+# A missing or empty data directory means the backup would archive nothing,
+# exit 0, and let the upgrade proceed with no way back. Refuse instead.
+if [ ! -d "\$DATA_DIR" ]; then
+  echo "ERROR: \$DATA_DIR does not exist. Refusing to upgrade." >&2
+  exit 1
+fi
+if [ -z "\$(ls -A "\$DATA_DIR" 2>/dev/null)" ]; then
+  echo "ERROR: \$DATA_DIR is empty. Refusing to upgrade: the backup would be empty" >&2
+  echo "and migrations do not roll back." >&2
+  exit 1
+fi
+
+if [ -e "\$dest" ]; then
+  echo "ERROR: \$dest already exists. Refusing to upgrade: cp would nest the copy" >&2
+  echo "inside it and the checks below would pass against the wrong directory." >&2
+  exit 1
+fi
+
+echo "backing up \$DATA_DIR to \$dest"
+cp -a "\$DATA_DIR" "\$dest"
+
+# THE CHECK THAT MATTERS. Not "is there a backup" but "does the backup hold the
+# file that makes the database usable". Without secret.key every destination
+# comes back disabled and the restore reads as successful until go-live.
+if [ ! -f "\$dest/secret.key" ]; then
+  echo "ERROR: the backup at \$dest has no secret.key." >&2
+  echo "Restoring a database without it leaves every destination disabled, because" >&2
+  echo "a stream key that will not open disables its destination rather than" >&2
+  echo "failing open. Refusing to upgrade." >&2
+  exit 1
+fi
+if [ ! -f "\$dest/polyemesis.db" ]; then
+  echo "ERROR: the backup at \$dest has no polyemesis.db. Refusing to upgrade." >&2
+  exit 1
+fi
+
+echo "backup verified: database and secret.key both present"
+echo
+echo "Now replace \$BIN_PATH with the new binary and restart:"
+echo
+echo "    sudo systemctl stop \$SERVICE_NAME"
+echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
+echo "    sudo systemctl start \$SERVICE_NAME"
+echo
+echo "If the upgrade goes wrong, the way back is:"
+echo
+echo "    sudo systemctl stop \$SERVICE_NAME"
+echo "    sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR"
+echo "    (then reinstall the previous binary)"
+EOF
+  chmod +x "$INSTALL_DIR/update.sh"
+}
+
 write_helper_scripts() {
-  [ "$MODE" = "docker" ] || return 0
+  # BINARY MODE GETS ONE TOO. It used to return here unless the mode was docker,
+  # which left the install that most needs a guard rail with the least: docker
+  # operators got a script that REFUSES to upgrade on an empty backup, and
+  # systemd operators got the same procedure written in UPGRADING.md, where
+  # nothing checks whether they ran it or whether it worked. Migrations are
+  # forward-only in both modes. See #347.
+  if [ "$MODE" != "docker" ]; then
+    write_binary_update_script
+    return 0
+  fi
 
   cat > "$INSTALL_DIR/update.sh" <<EOF
 #!/usr/bin/env bash
@@ -988,6 +1074,16 @@ if [ "\$entries" -lt 2 ]; then
   echo "ERROR: backup archive is empty (\${entries} entries). Refusing to upgrade." >&2
   exit 1
 fi
+  # AND THE ONE FILE THE COUNT CANNOT VOUCH FOR. A non-empty archive proves the
+  # volume held something, not that it held the file that makes the database
+  # usable. Restoring without secret.key brings every destination back DISABLED
+  # -- correctly, since a key that will not open disables its destination rather
+  # than failing open -- and that reads as a successful restore until go-live.
+  if ! tar tzf "$INSTALL_DIR/backup-\${stamp}.tar.gz" | grep -q "secret\.key"; then
+    echo "ERROR: the backup contains no secret.key. Restoring without it leaves" >&2
+    echo "every destination disabled. Refusing to upgrade." >&2
+    exit 1
+  fi
 echo "backup verified: \${entries} entries"
 $COMPOSE_CMD pull
 $COMPOSE_CMD up -d
