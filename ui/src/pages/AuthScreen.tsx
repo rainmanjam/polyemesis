@@ -146,9 +146,9 @@ export function AuthScreen({
                                 ? scorePassword(password).score <= 1
                                   ? "bg-down"
                                   : scorePassword(password).score === 2
-                                    ? "bg-cross"
+                                    ? "bg-warn"
                                     : "bg-live"
-                                : "bg-line"
+                                : "bg-border"
                             }`}
                           />
                         ))}
@@ -169,7 +169,7 @@ export function AuthScreen({
                           a database WITHOUT that key file leaves every destination
                           disabled -- which is by design, and is otherwise found
                           out during a restore, which is the worst moment. */}
-                      <p className="mt-2 rounded border border-line bg-raised/40 p-2 text-[10px] leading-relaxed text-muted-foreground">
+                      <p className="mt-2 rounded border border-border bg-card-raised/40 p-2 text-[10px] leading-relaxed text-muted-foreground">
                         This password protects the admin UI and API. Your stream keys
                         and OAuth tokens are encrypted separately, with a key file in
                         the data directory — back that up alongside the database, or
