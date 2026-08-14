@@ -42,3 +42,10 @@ compatibility_date = "2026-08-13"
 directory = "./dist"
 # A static site's 404 is a page, not an empty body. Astro emits 404.html.
 not_found_handling = "404-page"
+# MUST MATCH astro.config.mjs, and the default does not. Cloudflare defaults to
+# `auto-trailing-slash`, which answers /features with a redirect to /features/.
+# astro.config.mjs sets `build: { format: "file" }` and `trailingSlash: "never"`
+# precisely to avoid that -- its comment says directory output "costs every
+# internal navigation an extra round trip for nothing". Leaving the default here
+# would have reinstated the redirect the site is built to avoid, on every page.
+html_handling = "drop-trailing-slash"
