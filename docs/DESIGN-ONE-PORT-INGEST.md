@@ -138,7 +138,8 @@ a real SRT publisher and every SRT proof so far has had to run in Docker.
 
 ## Not doing (yet)
 
-- **RTMP on one port.** It stays per-source. RTMP is the single-track fallback,
+- **RTMP on one port.** It stays per-source. Classic RTMP is the single-track
+  fallback,
   so a port each costs little, and a Go RTMP server is a separate dependency
   decision — Core uses a joy4 fork; `mediamtx` is the better-maintained MIT
   option today.
