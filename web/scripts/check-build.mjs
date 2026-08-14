@@ -116,6 +116,32 @@ if (!meterKf) {
 }
 
 const pages = readdirSync(DIST).filter((f) => f.endsWith(".html"));
+
+/* Every nav page must mark ITSELF as the current one, in BOTH navs.
+ *
+ * This broke silently in the move to Cloudflare Workers. The build emits flat
+ * files, so Astro.url.pathname is "/features.html" while the link href is
+ * "/features" -- the comparison was false on every page and the nav marked
+ * nothing at all. No aria-current for a screen reader, and the link for the
+ * page you were already on painted the same muted grey as the others.
+ *
+ * It is checked here rather than trusted because of HOW it failed: a nav with
+ * no highlight looks like a design decision, not a bug, so nothing about the
+ * rendered page announces it. Two counts rather than one, because the desktop
+ * nav and the mobile menu are separate markup and the mobile one -- the only
+ * navigation a phone has -- was the half left behind when this was first fixed.
+ */
+for (const f of ["features", "comparison", "docs", "download"]) {
+  if (!pages.includes(`${f}.html`)) continue;
+  const html = readFileSync(join(DIST, `${f}.html`), "utf8");
+  const marked = [...html.matchAll(new RegExp(`<a href="/${f}"[^>]*aria-current="page"`, "g"))].length;
+  if (marked < 2) {
+    fail.push(
+      `${f}.html marks its own nav link as current ${marked} time(s), expected 2 ` +
+        `(desktop nav + mobile menu) — check Astro.url.pathname is normalised against the flat-file output`,
+    );
+  }
+}
 const built = new Set(pages.map((f) => "/" + f.replace(/\.html$/, "").replace(/^index$/, "")));
 for (const f of pages) {
   const html = readFileSync(join(DIST, f), "utf8");
