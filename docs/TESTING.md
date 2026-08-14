@@ -204,7 +204,7 @@ the copyrighted-music track really is absent from the YouTube feed.
 
 ## 5. RTMP fallback (single track)
 
-RTMP carries one audio track by protocol, so this exercises ingest, relay,
+Classic RTMP carries one audio track, so this exercises ingest, relay,
 supervision and destinations but not multitrack routing.
 
 Open the source under **Sources**, set `Ingest → Mode: RTMP`, and copy its app

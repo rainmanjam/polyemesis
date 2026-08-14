@@ -120,7 +120,7 @@ links **seven** further modules, including `logrus` (a second logging framework
 in a binary that uses `log/slog`), `pkg/errors` and `mapstructure` (both dead
 upstream). Writing one is the largest single piece of work in the repository.
 
-Neither is worth it *yet*, because **RTMP carries one stereo pair**. No amount
+Neither is worth it *yet*, because **classic RTMP carries one stereo pair**. No amount
 of RTMP work enables per-destination multitrack routing, which is the reason
 this product exists. Multi-source RTMP only matters to somebody running several
 independent single-track programmes, and nobody has asked.

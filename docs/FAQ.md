@@ -36,7 +36,10 @@ upstream bandwidth is the real constraint.
 
 ## Do I need SRT? Can I use RTMP?
 
-You can use RTMP, but **RTMP carries one stereo pair**. If you only have one
+You can use RTMP, but **classic RTMP carries one stereo pair**. Enhanced RTMP
+does carry multiple audio tracks and polyemesis ingests them, though that path
+is verified with FFmpeg 7.1+ as the publisher and has not been confirmed with
+OBS. If you only have one
 audio track there is nothing to route, and the main reason to use polyemesis
 disappears.
 

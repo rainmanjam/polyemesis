@@ -170,10 +170,17 @@ naming the binary and the version it found. The floor is 6.0 because multi-track
 MPEG-TS mapping, the channel-layout API behind the audio mix matrix, and the
 `-progress` fields the supervisor parses are only reliable from 6.x onwards.
 
-**SRT — needed for multitrack ingest, not enforced.** A build without libsrt
-starts fine and warns. You can reach the UI and switch ingest to RTMP, but RTMP
-carries a single stereo pair, so per-destination audio routing has nothing to
-route from. SRT is what makes this product work.
+**SRT — the reliable path to multitrack ingest, not enforced.** A build without
+libsrt starts fine and warns. You can reach the UI and switch ingest to RTMP,
+but *classic* RTMP carries a single stereo pair, so per-destination audio routing
+has nothing to route from.
+
+Enhanced RTMP is the exception, and it is a real one: it carries multiple audio
+tracks and polyemesis ingests them. It is not an equal substitute, though —
+that path is verified with FFmpeg 7.1+ as the publisher, does not work on 6.1.1,
+and has **not** been confirmed with OBS publishing. Since OBS is what most
+readers here are using, treat E-RTMP as a route worth trying rather than a
+replacement for SRT.
 
 Check both, on every platform:
 
@@ -203,10 +210,18 @@ published feature list — so run the check yourself rather than trusting the ro
 | [johnvansickle.com](https://johnvansickle.com/ffmpeg/) static builds | not advertised; run the check before relying on it |
 
 If your build has no SRT, polyemesis starts anyway and warns, so you can reach
-Settings and switch the ingest to RTMP. But RTMP carries a single stereo pair,
-so per-destination audio routing has nothing to route from. The ways out are a
-build configured with `--enable-libsrt`, one of the static builds above, or the
-Docker image — which bundles one and asserts it at build time.
+Settings and switch the ingest to RTMP. But *classic* RTMP carries a single
+stereo pair, so per-destination audio routing has nothing to route from.
+
+Three ways out, in the order most people should try them: a build configured
+with `--enable-libsrt`, one of the static builds above, or the Docker image —
+which bundles one and asserts it at build time.
+
+A fourth exists if your encoder speaks **Enhanced RTMP**, which does carry
+multiple audio tracks: polyemesis ingests those and the routing works normally,
+with no libsrt anywhere. The caveat is what keeps it fourth rather than first —
+verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and unconfirmed with OBS.
+If your encoder is OBS, fix the FFmpeg build instead.
 
 **Hardware encoders — nothing to install, nothing to configure.** Do *not* go
 looking for a build with NVENC or VA-API compiled in on the strength of

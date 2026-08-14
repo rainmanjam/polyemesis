@@ -143,7 +143,7 @@ its first tagged release.
   fit to print, and every error the client returns is scrubbed of the key.
   ([#326](https://github.com/rainmanjam/polyemesis/issues/326))
 
-## [0.7.0] — 2026-08-12
+## [0.7.0] — 2026-08-14
 
 ### Security
 
