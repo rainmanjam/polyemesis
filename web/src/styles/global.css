@@ -187,6 +187,60 @@
     border: 1px solid var(--color-line);
     background: var(--color-surface);
     border-radius: var(--radius-token);
+    /* THE WHOLE PAGE SCROLLED SIDEWAYS ON A PHONE WITHOUT THIS.
+
+       A grid or flex child defaults to `min-width: auto`, which means it will
+       not shrink below the intrinsic minimum width of its contents. Several
+       cards hold a <pre> with a long unbreakable command line, so that
+       minimum is far wider than a phone -- and the card, unable to shrink,
+       pushed the document out with it. Measured on the live site at a 375px
+       viewport: /download scrolled to 630px and /comparison to 570px.
+
+       The <pre> elements already carry `overflow-x: auto` and it was doing
+       nothing, because the overflow it was meant to absorb was being handed
+       upward to the page instead. This lets the card shrink so that scroll
+       container is the one that actually takes it. */
+    min-width: 0;
+  }
+
+  /* A COMPARISON TABLE WHOSE ROW LABEL SCROLLS AWAY IS NOT A COMPARISON.
+
+     These are 46rem wide by necessity -- four columns of prose -- so on a phone
+     they scroll horizontally inside their wrapper. That part is fine. What was
+     not fine is that swiping to reach the "restream.io" column took the
+     "Capability" cell off the left edge with it, leaving a grid of bare Yes and
+     No against nothing. The reader has to remember which row they are on, and
+     the answer to "does it do the thing" becomes unreadable exactly when they
+     have scrolled far enough to care.
+
+     Pinning the first column keeps the question on screen next to the answer.
+     An opaque background is required, not decorative: without it the scrolling
+     cells slide visibly underneath the label. */
+  .cmp :is(th, td):first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    /* --color-ink is what html and body actually paint. Named for the theme
+       rather than the role, so the obvious guess (--color-bg) does not exist
+       and silently resolves to transparent -- which still LOOKS like a working
+       sticky column until something scrolls underneath it. */
+    background: var(--color-ink);
+  }
+  /* The head row paints its own surface, so its pinned cell has to match that
+     rather than the page, or the corner reads as a hole in the header. */
+  .cmp thead :is(th, td):first-child {
+    background: var(--color-surface);
+  }
+  /* The edge that says "this column is pinned, the rest moved". Drawn with a
+     shadow rather than a border so it costs no layout width and cannot push the
+     table wider -- which is the problem one row up in this file. */
+  .cmp :is(th, td):first-child::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    width: 1px;
+    background: var(--color-line);
   }
 
   .chip {

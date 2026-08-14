@@ -43,6 +43,38 @@ if (!/@media\s*\(prefers-reduced-motion/.test(css)) {
   fail.push("reduced motion does not set `animation-name: none !important` — a scroll-driven reveal ignores animation-duration");
 }
 
+/* The two mobile-overflow fixes must still be IN the shipped CSS.
+ *
+ * These guard a fix, not a behaviour, and the distinction is worth stating: a
+ * static file cannot prove no page overflows on a phone -- that needs a browser
+ * and a real layout. What it can prove is that the two declarations that made
+ * the overflow go away are still present, and deleting one of them is the
+ * realistic way this regresses, because both look inert when you read them.
+ *
+ * Measured before the fix, at a 375px viewport: /download scrolled to 630px and
+ * /comparison to 570px. Both were the whole document moving sideways, not an
+ * element scrolling inside its own box.
+ */
+// `min-width: 0` lets a grid child shrink past its content's intrinsic minimum.
+// Without it a card holding a long <pre> pushes the document wider than the
+// screen, and the <pre>'s own overflow-x never engages.
+if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
+  fail.push(
+    "`.card` has no `min-width: 0` — a card containing a <pre> will push the whole page wider than a phone screen",
+  );
+}
+// A pinned first column with a transparent background still reports as sticky
+// and still looks broken: the scrolling cells slide visibly underneath it.
+// --color-bg does not exist in this theme; the page paints --color-ink.
+{
+  const flat = css.replace(/\s+/g, "");
+  if (!/\.cmp[^{]*first-child\)?\{[^}]*position:sticky/.test(flat)) {
+    fail.push("comparison tables have no sticky first column — the row label scrolls away from its Yes/No cells on mobile");
+  } else if (/\.cmp[^{]*first-child\)?\{[^}]*background:var\(--color-bg\)/.test(flat)) {
+    fail.push("sticky comparison column uses `--color-bg`, which this theme does not define — it resolves to transparent and cells scroll under the label");
+  }
+}
+
 // 3+4. Internal links and fragments must resolve to something that was built.
 /* The motion tokens have to survive minification as VARIABLES.
  *
