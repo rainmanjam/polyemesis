@@ -11,6 +11,102 @@ import (
 	"testing"
 )
 
+// stagePartialBind occupies the IPv6 half of one port and leaves the IPv4 half
+// free, then starts a server on it.
+//
+// WHY THE IPv4 HALF IS RESERVED FIRST AND THEN RELEASED. The obvious staging --
+// take an ephemeral port on udp6 and assume its IPv4 twin is free -- reserves
+// only one of the two halves and then depends on nothing else claiming the
+// other. That held almost always and failed in CI on 2026-08-14 with
+// `no address family could be bound`: between the port being chosen and Start
+// reaching it, something else took IPv4. `go test ./...` runs packages
+// concurrently and several of them bind ephemeral ports, so the window is real
+// even though it is small.
+//
+// Binding udp4 first pins the number in the IPv4 space while the udp6
+// reservation is made, so the pair is never assigned to anyone else while the
+// condition is being set up. The v4 socket is then closed immediately before
+// Start, which is the only moment the half has to be free.
+//
+// That still leaves a window, so the caller retries. It cannot be closed
+// entirely from user space -- the port has to be genuinely free for Start to
+// bind it, and "free" is exactly what another process may act on.
+//
+// Returns ok=false when the race was lost, so the caller can restage on a
+// different port rather than reporting a failure of the thing under test.
+func stagePartialBind(t *testing.T) (s *Server, held net.PacketConn, ok bool) {
+	t.Helper()
+
+	// Pin the port number in the IPv4 space first.
+	//
+	// FATAL RATHER THAN A SKIP, unlike the udp6 case below. A host with no IPv6
+	// is a legitimate deployment and the reason Start tolerates a partial bind
+	// at all, so failing to stage that is a skip. A host that cannot bind an
+	// ephemeral IPv4 port is not a deployment, it is a broken machine, and
+	// skipping there would quietly stop testing #105 on it.
+	v4, err := net.ListenPacket("udp4", "0.0.0.0:0")
+	if err != nil {
+		t.Fatalf("cannot bind an ephemeral udp4 port (%v); this is not a host "+
+			"configuration the server is expected to survive", err)
+	}
+	_, portStr, err := net.SplitHostPort(v4.LocalAddr().String())
+	if err != nil {
+		v4.Close()
+		t.Fatalf("SplitHostPort: %v", err)
+	}
+	if _, err := strconv.Atoi(portStr); err != nil {
+		v4.Close()
+		t.Fatalf("port %q is not a number: %v", portStr, err)
+	}
+
+	// Now the IPv6 half of that same port. gosrt sets IPV6_V6ONLY for a "udp6"
+	// address, so this occupies exactly one of the two families the wildcard
+	// splits into -- which is the shape of the bug.
+	v6, err := net.ListenPacket("udp6", "[::]:"+portStr)
+	if err != nil {
+		v4.Close()
+		// A host with no IPv6 at all cannot stage this. Logged rather than
+		// silently skipped: a skip nobody sees is how a whole fleet of CI
+		// runners quietly stops testing something.
+		t.Skipf("SKIPPING: this host cannot bind udp6 at all (%v), so the "+
+			"partial-bind condition cannot be staged here", err)
+	}
+
+	// Release the IPv4 half, and immediately ask the server for the port.
+	v4.Close()
+
+	s = New(slog.New(slog.NewTextHandler(io.Discard, nil)), ":"+portStr,
+		func(string) (Target, bool) { return Target{}, false })
+	if err := s.Start(); err != nil {
+		// WHICH OF THE TWO HAPPENED. A failure here is either the race this
+		// function exists to absorb, or the regression the test exists to
+		// catch, and retrying the second one eight times before reporting it
+		// would bury the real answer under the excuse.
+		//
+		// The server's OWN RECORD separates them, and re-binding the port does
+		// not: a Start that fails after binding one family still holds that
+		// socket, so probing the IPv4 half finds it occupied by the very
+		// listener under test. Asking the report is also free of any race,
+		// because it describes what happened rather than what is true now.
+		//
+		// Bound non-empty means Start got a family up and refused to run
+		// anyway -- which is #105 coming back. Bound empty means it really
+		// could not get either, and the IPv4 half was taken.
+		rep := s.Report()
+		s.Stop()
+		v6.Close() // or eight retries hold eight sockets
+		if len(rep.Bound) > 0 {
+			t.Fatalf("Start returned %v after successfully binding %v; one "+
+				"family failing must not stop the server, because the other "+
+				"family's encoders still work", err, rep.Bound)
+		}
+		t.Logf("restaging: Start on :%s bound nothing (%v) -- another process "+
+			"took the IPv4 half between releasing it and binding it", portStr, err)
+		return nil, nil, false
+	}
+	return s, v6, true
+}
+
 // A partial bind starts, and says so.
 //
 // This is #105. Start already survived one address family failing, on purpose:
@@ -25,34 +121,28 @@ import (
 // about bindAddrs, because the thing under test is what Start records, not what
 // it intended to try.
 func TestPartialBindStartsAndReportsDegraded(t *testing.T) {
-	// Hold the IPv6 wildcard on some port, then ask the server for that same
-	// port. gosrt sets IPV6_V6ONLY for a "udp6" address, so this occupies
-	// exactly one of the two families the wildcard splits into and leaves the
-	// IPv4 one free -- which is the shape of the bug.
-	occupied, err := net.ListenPacket("udp6", "[::]:0")
-	if err != nil {
-		// A host with no IPv6 at all cannot stage this. Logged rather than
-		// silently skipped: a skip nobody sees is how a whole fleet of CI
-		// runners quietly stops testing something.
-		t.Skipf("SKIPPING: this host cannot bind udp6 at all (%v), so the "+
-			"partial-bind condition cannot be staged here", err)
+	// Retried, because the condition is staged against the operating system's
+	// port table and another process can take the half this needs free. Eight
+	// attempts turns a rare flake into one that will not be seen again; a
+	// permanent failure still fails, because every attempt fails -- and a
+	// regression fails on the FIRST one, from inside stagePartialBind, rather
+	// than being retried seven more times and reported as bad luck.
+	var s *Server
+	var occupied net.PacketConn
+	const attempts = 8
+	for i := 0; i < attempts; i++ {
+		var ok bool
+		if s, occupied, ok = stagePartialBind(t); ok {
+			break
+		}
+		if i == attempts-1 {
+			t.Fatalf("could not stage a partial bind in %d attempts; either "+
+				"this host cannot leave an IPv4 half free, or Start no longer "+
+				"survives one address family failing -- which is the bug this "+
+				"test exists for", attempts)
+		}
 	}
 	defer occupied.Close()
-
-	_, portStr, err := net.SplitHostPort(occupied.LocalAddr().String())
-	if err != nil {
-		t.Fatalf("SplitHostPort: %v", err)
-	}
-	if _, err := strconv.Atoi(portStr); err != nil {
-		t.Fatalf("port %q is not a number: %v", portStr, err)
-	}
-
-	s := New(slog.New(slog.NewTextHandler(io.Discard, nil)), ":"+portStr,
-		func(string) (Target, bool) { return Target{}, false })
-	if err := s.Start(); err != nil {
-		t.Fatalf("Start returned %v; one family failing must not stop the "+
-			"server, because the other family's encoders still work", err)
-	}
 	defer s.Stop()
 
 	report := s.Report()
