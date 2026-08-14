@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.7.0] — 2026-08-14
+
 ### Security
 
 - **A destination's stream key could reach `data/logs/process.log` in the
@@ -76,76 +80,13 @@ its first tagged release.
   a rename, a routing change — deliberately leaves the sealed bytes alone
   rather than destroying a key the right key file would have recovered.
 
-### Added
+- **Go 1.26.6, for two standard-library advisories published that day.** A
+  toolchain bump rather than a defect in this code, recorded here because the
+  released binaries are statically linked: a stdlib advisory reaches an operator
+  only when a new binary is cut, so the version the release was built with is
+  part of what the release is.
+  ([#329](https://github.com/rainmanjam/polyemesis/pull/329))
 
-- **RTMP egress can carry a second audio track, and it has been measured doing
-  it.** `ffmpeg.DestSpec.SecondAudioOutLabel` names a second finished mix from
-  the destination's filter graph; it is mapped and encoded as a second audio
-  track alongside the first. One track remains the default and every existing
-  destination emits byte-for-byte the command it emitted before — no caller sets
-  the field yet, because `routing.Compile` still describes one mix per
-  destination. What is new is that the capability is no longer a guess: FFmpeg
-  8.1 muxes two AAC tracks into FLV as Enhanced RTMP multitrack, this project's
-  own RTMP server carries them, and
-  `internal/ffmpeg.TestTwoDistinctMixesReachAnRTMPFarEnd` publishes the built
-  argv into that server and reads a 300 Hz tone off one received track and a
-  5000 Hz tone off the other. Tones rather than a track count, because two
-  tracks carrying the same audio is a failure a count cannot see — and the same
-  test proves it can tell, by publishing one mix twice and asserting the
-  difference is absent. Whether any PLATFORM accepts a second audio track is a
-  separate question this does not answer; the refusal of `-c:a copy` on an RTMP
-  destination, which rests on that question, is untouched.
-  ([#141](https://github.com/rainmanjam/polyemesis/issues/141))
-
-- **`internal/multitrack` speaks Twitch Enhanced Broadcasting**, the negotiated
-  configuration behind what Amazon calls IVS Multitrack Video — the one path a
-  platform has published that takes a *second* audio track and says what it is
-  for. It fetches a configuration from Twitch, reads the verdict, and resolves
-  the ingest endpoint and stream key it hands back. Nothing publishes through it
-  yet; see below for what is deliberately not built.
-
-  Four things were measured against the live endpoint rather than assumed, and
-  each one changes what the code has to do:
-
-  - **A refusal arrives as HTTP 200.** Every response — valid, invalid,
-    unsupported hardware, unparseable schema version — was `200`, with the
-    verdict in `status.result`. A successful negotiation omits the `status`
-    object entirely rather than saying `"success"`, so a client that reads the
-    status code, or that treats an absent status as an error, has read the
-    wrong field.
-  - **`authentication` is the stream key, not an OAuth token.** This does not
-    depend on a connected account, which is what the issue expected. Better:
-    on a *successful* negotiation Twitch mints a new 312-character key that
-    carries the agreed ladder inside it, hex-encoded and signed, with the
-    operator's original key as its last segment. Publishing with the operator's
-    own key instead would connect and send a stream the ingest never agreed the
-    shape of.
-  - **A second audio track does not require a multi-rendition video ladder.**
-    Asking for `maximum_video_tracks: 1` returns exactly one rendition *and*
-    both audio tracks — live on track 0, VOD on track 1. That is what makes the
-    feature reachable at all for polyemesis, which publishes one video track to
-    an RTMP destination.
-  - **Twitch refuses a client with no supported GPU**, by name: no GPU
-    information, a vendor ID of zero, an unrecognised vendor, an out-of-date
-    driver. There is no software-encoder path through this endpoint, so on a
-    headless host encoding with libx264 the fallback to the ordinary ingest is
-    the *normal* outcome and not the exceptional one.
-
-  The operator's own settings are **the input to the negotiation, not something
-  it overrides** — the returned ladder is derived from the canvas the client
-  says it is producing, so an operator who picks 720p gets a 720p negotiation.
-  Where Twitch's answer differs anyway (a `maximum_aggregate_bitrate` ceiling
-  was simply ignored), the difference is reported and never silently applied,
-  following the rule already written into `services.URLProblem`.
-
-  Both the request and the response carry a credential, so neither may be
-  logged as it stands: `Config.Redacted` is the only shape of a configuration
-  fit to print, and every error the client returns is scrubbed of the key.
-  ([#326](https://github.com/rainmanjam/polyemesis/issues/326))
-
-## [0.7.0] — 2026-08-14
-
-### Security
 
 - **The route that decides what your ingest pulls had no upload check at all.**
   Saving a pull source that names an upload this server was never able to
@@ -302,6 +243,112 @@ its first tagged release.
   it.**
 
 ### Added
+- **A platform registry seeded from OBS's own service list**, carrying each
+  destination's ingest hosts, its maximum video bitrate and its capability row.
+  The Kick preset shipped with a real per-channel ingest host in a shape that
+  could not publish, and six presets had no capability row at all — both
+  invisible until something tried to use them.
+  ([#312](https://github.com/rainmanjam/polyemesis/issues/312))
+
+- **Rumble is a fifth chat platform.** Its live-stream API does carry chat,
+  which the previous survey had concluded it did not.
+  ([#321](https://github.com/rainmanjam/polyemesis/pull/321))
+
+
+- **RTMP egress can carry a second audio track, and it has been measured doing
+  it.** `ffmpeg.DestSpec.SecondAudioOutLabel` names a second finished mix from
+  the destination's filter graph; it is mapped and encoded as a second audio
+  track alongside the first. One track remains the default and every existing
+  destination emits byte-for-byte the command it emitted before — no caller sets
+  the field yet, because `routing.Compile` still describes one mix per
+  destination. What is new is that the capability is no longer a guess: FFmpeg
+  8.1 muxes two AAC tracks into FLV as Enhanced RTMP multitrack, this project's
+  own RTMP server carries them, and
+  `internal/ffmpeg.TestTwoDistinctMixesReachAnRTMPFarEnd` publishes the built
+  argv into that server and reads a 300 Hz tone off one received track and a
+  5000 Hz tone off the other. Tones rather than a track count, because two
+  tracks carrying the same audio is a failure a count cannot see — and the same
+  test proves it can tell, by publishing one mix twice and asserting the
+  difference is absent. Whether any PLATFORM accepts a second audio track is a
+  separate question this does not answer; the refusal of `-c:a copy` on an RTMP
+  destination, which rests on that question, is untouched.
+  ([#141](https://github.com/rainmanjam/polyemesis/issues/141))
+
+- **`internal/multitrack` speaks Twitch Enhanced Broadcasting**, the negotiated
+  configuration behind what Amazon calls IVS Multitrack Video — the one path a
+  platform has published that takes a *second* audio track and says what it is
+  for. It fetches a configuration from Twitch, reads the verdict, and resolves
+  the ingest endpoint and stream key it hands back. Nothing publishes through it
+  yet; see below for what is deliberately not built.
+
+  Four things were measured against the live endpoint rather than assumed, and
+  each one changes what the code has to do:
+
+  - **A refusal arrives as HTTP 200.** Every response — valid, invalid,
+    unsupported hardware, unparseable schema version — was `200`, with the
+    verdict in `status.result`. A successful negotiation omits the `status`
+    object entirely rather than saying `"success"`, so a client that reads the
+    status code, or that treats an absent status as an error, has read the
+    wrong field.
+  - **`authentication` is the stream key, not an OAuth token.** This does not
+    depend on a connected account, which is what the issue expected. Better:
+    on a *successful* negotiation Twitch mints a new 312-character key that
+    carries the agreed ladder inside it, hex-encoded and signed, with the
+    operator's original key as its last segment. Publishing with the operator's
+    own key instead would connect and send a stream the ingest never agreed the
+    shape of.
+  - **A second audio track does not require a multi-rendition video ladder.**
+    Asking for `maximum_video_tracks: 1` returns exactly one rendition *and*
+    both audio tracks — live on track 0, VOD on track 1. That is what makes the
+    feature reachable at all for polyemesis, which publishes one video track to
+    an RTMP destination.
+  - **Twitch refuses a client with no supported GPU**, by name: no GPU
+    information, a vendor ID of zero, an unrecognised vendor, an out-of-date
+    driver. There is no software-encoder path through this endpoint, so on a
+    headless host encoding with libx264 the fallback to the ordinary ingest is
+    the *normal* outcome and not the exceptional one.
+
+  The operator's own settings are **the input to the negotiation, not something
+  it overrides** — the returned ladder is derived from the canvas the client
+  says it is producing, so an operator who picks 720p gets a 720p negotiation.
+  Where Twitch's answer differs anyway (a `maximum_aggregate_bitrate` ceiling
+  was simply ignored), the difference is reported and never silently applied,
+  following the rule already written into `services.URLProblem`.
+
+  Both the request and the response carry a credential, so neither may be
+  logged as it stands: `Config.Redacted` is the only shape of a configuration
+  fit to print, and every error the client returns is scrubbed of the key.
+  ([#326](https://github.com/rainmanjam/polyemesis/issues/326))
+
+- **Capped VBR: a rendition can now set a bitrate ceiling and a rate window.**
+  `RenditionSpec` had carried `MaxrateKbps` and `BufsizeKbps` since it was
+  written, and `RenditionArgs` used both correctly — but nothing could set
+  them. `renditionSpecOf` mapped `VideoKbps` and stopped, so every install fell
+  through to the CBR relationship whatever the operator intended. Nothing was
+  broken; the code described a capability the product did not have, which is
+  the harder kind to notice because every individual piece passes its own test.
+
+  A ceiling **below** the target bitrate is refused rather than clamped. There
+  is no way to resolve `-b:v 6000 -maxrate 4000` without overriding one of the
+  two numbers, and whichever is chosen the operator gets a stream at a bitrate
+  they did not pick with no sign that a field they filled in was ignored. Both
+  fields default to `0`, which emits byte-for-byte the command line every
+  existing install already emits.
+  ([#341](https://github.com/rainmanjam/polyemesis/issues/341))
+
+- **The first-run screen states what the admin password does and does not
+  protect.** A strength meter now scores the password as it is typed, and the
+  notice beside it corrects an assumption the screen previously invited: this
+  password protects the admin UI and the API, and it is **not** what encrypts
+  your stream keys. Those are sealed with a key file in the data directory,
+  which must be backed up alongside the database or every destination comes
+  back disabled after a restore.
+
+  The key is deliberately not derived from the password, because the server
+  refreshes OAuth tokens while nobody is logged in. Deriving it would be
+  security theatre that also broke unattended restarts.
+  ([#346](https://github.com/rainmanjam/polyemesis/pull/346))
+
 
 - **An upload the server never managed to inspect can be re-checked in place,
   instead of being re-uploaded.** `POST /media/{name}/verify` queues a *Media
@@ -400,6 +447,50 @@ its first tagged release.
   different category of problem from one that can read a stream key.
 
 ### Changed
+- **Documentation-only pull requests no longer run the acceptance matrix.**
+  Three documentation PRs in one day each fired all 27 checks — the full
+  acceptance matrix, three-OS builds, Docker and browser suites — to validate
+  files no job reads. One of them was a single file. The gate fails toward
+  running: `code` is false only when every changed path is documentation, so a
+  new top-level directory gets the full matrix until somebody decides otherwise.
+
+  The first attempt at this made every documentation PR **unmergeable**, and the
+  mechanism is worth recording because it is not obvious. Twelve acceptance
+  suites are required status checks. A skipped *ordinary* job still reports, and
+  a skip satisfies the requirement — but a skipped **matrix** job never expands
+  its matrix, so the per-leg contexts are not skipped, they are never created.
+  The checks list showed one entry named literally `acceptance: ${{
+  matrix.suite }}` and twelve required contexts reported missing. The matrix now
+  always expands and the gate is on each step instead, so a documentation run
+  costs a runner allocation rather than a suite.
+  ([#350](https://github.com/rainmanjam/polyemesis/issues/350))
+
+- **The `internal/api` coverage guard could not fire before the ceiling above
+  it.** Its three probes carried no `-timeout`, so Go's ten-minute default
+  applied to each — thirty minutes of worst case behind a job ceiling of
+  twenty-five. It could never have reported; it could only ever have been
+  cancelled, which is what happened when it hung for twenty-four minutes against
+  a step measured at 98–114 s. Bounded now at four minutes per probe with a
+  step timeout above that, so Go's own panic still wins the race and names the
+  test that was running.
+  ([#357](https://github.com/rainmanjam/polyemesis/pull/357))
+
+- **The marketing site moved to Cloudflare Workers Static Assets**, because
+  Cloudflare stopped offering new Pages projects.
+  ([#332](https://github.com/rainmanjam/polyemesis/pull/332))
+
+- **The marketing site gained a screenshot lightbox, a version in the footer, a
+  "who this is not for" section, and touch affordances** for the scrollable
+  comparison table that previously only signalled to a cursor. Screenshots were
+  re-shot at 61% smaller with no loss of resolution — quantisation in the
+  capture pipeline rather than downscaling, which was measured making PNG
+  compression *worse*.
+  ([#335](https://github.com/rainmanjam/polyemesis/pull/335),
+  [#336](https://github.com/rainmanjam/polyemesis/pull/336),
+  [#337](https://github.com/rainmanjam/polyemesis/pull/337),
+  [#338](https://github.com/rainmanjam/polyemesis/pull/338),
+  [#345](https://github.com/rainmanjam/polyemesis/pull/345))
+
 
 - **BREAKING: a `read` API token gets metadata, not content.** Thirteen routes
   now answer `403` to a `read`-scoped token that previously served them: the
@@ -459,6 +550,63 @@ its first tagged release.
   leak — did not reach a live connection.
 
 ### Fixed
+- **A stop arriving mid-spawn signalled nothing, and the child ran on
+  unsignalled.** `Start()` publishes `p.running` and returns, but `p.cmd` is not
+  set until `runOnce` has built the command, opened its pipes and had
+  `cmd.Start()` return. A `Stop` landing between those two points took its
+  `p.running` arm, cancelled the supervise context, and called `terminate()` —
+  which found `p.cmd == nil` and returned having sent no signal and armed no
+  escalator.
+
+  `p.cmd == nil` meant two different things there, "no child yet" and "the child
+  is already reaped", and nothing could tell them apart. `runOnce` uses
+  `exec.Command` rather than `exec.CommandContext`, so the cancelled context
+  killed nothing: the child was spawned behind a stop that had already given up
+  on it, `cmd.Wait()` blocked on a process nobody had asked to leave, and `Stop`
+  waited out its entire deadline before a `SIGKILL` it did not wait for. Found
+  while investigating #126's one lead — a `teardown 12001.831ms STOP DEADLINE`
+  that turned out not to be a slow child but a child nobody ever asked to
+  leave. ([#126](https://github.com/rainmanjam/polyemesis/issues/126),
+  [#330](https://github.com/rainmanjam/polyemesis/pull/330))
+
+- **A binary or systemd install gets a guarded `update.sh` too, and both modes
+  now check for `secret.key`.** `write_helper_scripts` opened with
+  `[ "$MODE" = "docker" ] || return 0`, so the generated `update.sh` existed
+  only for Docker. Docker operators got a script that refuses to upgrade when
+  the backup would be a lie; systemd operators got the same procedure written in
+  `UPGRADING.md`, where nothing checks whether they ran it or whether it worked.
+  Migrations are forward-only in both modes, so the install that most needed the
+  guard rail had the least.
+
+  Neither mode checked for `secret.key`. Counting entries proves an archive is
+  not empty; it does not prove it holds the one file whose absence cannot be
+  recovered from. Now that destination stream keys are sealed at rest, a
+  database restored **without** `secret.key` comes back with every destination
+  disabled — correctly, but the restore reads as completely successful until
+  someone goes live.
+
+  Writing the test found a bug in the script itself: `cp -a src dest` **nests**
+  when `dest` exists, so a second run inside the same minute produced
+  `data.bak-<stamp>/data/` and then looked for `secret.key` in the wrong
+  directory. It now refuses when the destination exists rather than guessing
+  which of the two the operator meant — found by running the generated script
+  twice, which is what a real operator does after a failed upgrade.
+  ([#347](https://github.com/rainmanjam/polyemesis/issues/347))
+
+- **The first-run screen used four colour tokens from the marketing site's
+  palette, not the application's.** `border-border`, `bg-card-raised/40`,
+  `bg-warn` and `bg-border` exist in `web/src/styles/global.css` and not in
+  `ui/src/index.css`, so each resolved to nothing and the affected elements
+  rendered unstyled. Caught by a UI test that was twice misread as flaky before
+  it was believed.
+  ([#352](https://github.com/rainmanjam/polyemesis/pull/352))
+
+- **Cloudflare Workers appends header values rather than replacing them, so a
+  `no-cache` default defeated every immutable asset rule.** Every fingerprinted
+  bundle was being revalidated on each load despite carrying a correct
+  `immutable` directive of its own.
+  ([#334](https://github.com/rainmanjam/polyemesis/pull/334))
+
 
 - **A playlist item whose file was refused after the fact said "not yet queued
   for normalisation" for ever.** The *Media re-check* above is the first thing
@@ -665,6 +813,94 @@ its first tagged release.
   It now reads `pull (dials out; no inbound port)`.
 
 ### Testing
+- **Five acceptance suites that talk to a real far end**, where before this
+  release exactly one did. The argument for them is their hit rate rather than
+  their theory: each of the first three found a defect on its first live run,
+  and none was reachable by a unit test, because on each side of the boundary
+  both halves were individually correct. What was wrong was the composition, and
+  only a real far end refuses a bad composition.
+
+  What they settled, and what it cost:
+
+  | Suite | Needs a credential? | Found |
+  |---|---|---|
+  | `acceptance-chat.sh` | no | opens a real socket to each platform and asserts the specific refusal — DNS, TLS with the right SNI, and the line protocol, everything except a valid login ([#316](https://github.com/rainmanjam/polyemesis/pull/316)) |
+  | `acceptance-oauth.sh` | 28 of 46 checks, no | every provider's OAuth surface is public, so discovery documents, advertised grant types and PKCE methods are all comparable against what `internal/oauth` hardcodes ([#322](https://github.com/rainmanjam/polyemesis/pull/322)) |
+  | `acceptance-automod.sh` | no | the model endpoint's own key in `server.log` and in the operator's spend panel — `net/http` puts the request URL verbatim into `*url.Error`, and the redaction reasoning had been applied to the settings blob and nowhere else ([#324](https://github.com/rainmanjam/polyemesis/pull/324)) |
+  | `acceptance-transcribe.sh` | no | three defects against the real model host ([#323](https://github.com/rainmanjam/polyemesis/pull/323)) |
+  | `acceptance-hooks.sh` | no | needs a listener we control, not a platform account ([#325](https://github.com/rainmanjam/polyemesis/pull/325)) |
+
+  The rule this yielded, recorded because it overturned the plan that preceded
+  it: **ask what the far end will tell a stranger before assuming the test needs
+  an account.** The note had assumed chat and OAuth had to wait for a connected
+  account; between them forty-three checks run with no credential at all.
+
+  Still open, and honestly so: nothing proves an OAuth refresh **succeeds**, and
+  no chat suite performs a valid login. Both steps are written and skipping
+  until an account is connected, so the hour-four token failure remains bounded
+  from one side only.
+
+- **A variable-frame-rate source keeps its timing through a rendition, and now
+  fails the build if that changes.** `-fps_mode` and `-vsync` are deliberately
+  never set, so a VFR source — screen capture, some phone encoders — passes
+  through with its presentation timestamps intact. Measured on a fixture that is
+  30 fps nominal and about 18 fps actual: 72 frames over 3.967 s in, 72 frames
+  over 3.967 s out. Forcing CFR was measured too, and is worse: the same fixture
+  becomes 120 frames, 48 of them duplicates filling gaps where the source had
+  nothing to say.
+
+  One measurement trap is recorded with it, because it produced a false alarm
+  first: ffprobe reports a **uniform** `duration_time` for every frame of an
+  MPEG-TS, because the container does not store per-frame durations and ffprobe
+  derives them from `r_frame_rate`. Read that field and a VFR stream looks like
+  it was silently resampled and lost a fifth of its running time. It was not.
+  ([#342](https://github.com/rainmanjam/polyemesis/issues/342))
+
+- **Three suites that existed and ran nowhere are now scheduled**, which is the
+  gap this release keeps finding: a suite that is never executed is
+  indistinguishable from one that was never written, except that it reads as
+  covered.
+
+  `acceptance-obs-multitrack.sh` had already established that OBS 30.2.3 sends
+  no multitrack audio at all — a negative six documents now depend on — and
+  getting it onto a runner surfaced two defects of its own. **The observer had
+  no floor:** below FFmpeg 7.1 multitrack FLV does not demux, so on Ubuntu's
+  stock 6.1.1 the suite reported one track whatever OBS sent. A green run on a
+  host that could not have produced any other answer. It now proves the floor
+  with a two-track round trip rather than a version string. It was also the last
+  host suite not using the shared teardown, and running it twice back-to-back
+  bound `:1935` while the previous run still held it — reporting "the RTMP
+  listener never bound", a teardown bug wearing the costume of the product
+  failure the suite exists to detect.
+
+  `acceptance-transcribe.sh` checks twenty hardcoded claims about a model host
+  nobody here operates — ten filenames to URLs and ten byte counts gating
+  `VerifyModelFile`. Those can rot with no commit of ours, so they need a clock
+  rather than a push.
+  ([#355](https://github.com/rainmanjam/polyemesis/pull/355),
+  [#356](https://github.com/rainmanjam/polyemesis/pull/356))
+
+- **The rate-control test runs the whole path, because every individual piece
+  already worked.** Asserting on `RenditionSpec` alone would have passed before
+  #341 was fixed, so the test drives a stored row through the mapping and into
+  the argv the encoder is actually started with.
+  ([#354](https://github.com/rainmanjam/polyemesis/pull/354))
+
+- **The upgrade guard that stops an install eating `secret.key` had no test**,
+  and `acceptance-install.sh` turned out never to have run in CI at all.
+  ([#353](https://github.com/rainmanjam/polyemesis/pull/353))
+
+- **The partial-bind test reserved one half of a port and hoped for the other.**
+  It now reserves udp4 first and retries, and uses `s.Report()` to distinguish a
+  lost race from a real regression rather than reporting both as failure.
+  ([#339](https://github.com/rainmanjam/polyemesis/pull/339))
+
+- **A respawn gate that waited on a feed which had not started yet.**
+  `StateStopped` meant both "never started" and "died", so the gate could not
+  tell them apart — the same conflation that produced the mid-spawn stop above,
+  on the respawn path instead of the teardown one.
+  ([#290](https://github.com/rainmanjam/polyemesis/issues/290))
+
 
 - **Two guards that read `Dashboard.tsx` as text are now browser tests that
   drive it.** `internal/oauth/composer_tags_drift_test.go` proved that the
