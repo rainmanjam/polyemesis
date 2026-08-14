@@ -26,11 +26,28 @@ import (
 // Both feeds get the same set. The backup argv is built from the same row and
 // splices the same expert text, so a set that covered only the primary would
 // leave dest:N:backup leaking on exactly the routes dest:N no longer does.
-func destSecrets(row *db.Destination) []string {
+//
+// extra carries credentials that are NOT on the row because they did not exist
+// until go-live. Today that is the Twitch Enhanced Broadcasting minted key, and
+// it is a variadic rather than another row field because it is a fact about
+// this run of this process, not about the destination -- a new one is minted
+// per negotiation, and storing it would be storing a credential that is stale
+// by the next broadcast.
+//
+// THE MINTED KEY NEEDS ITS OWN ENTRY AND CANNOT INHERIT THE ORIGINAL'S.
+// SecretSet.Scrub is a substring replace, and the minted key ENDS WITH the
+// operator's original -- v1_<signature>_<manifest>_<original>. Registering only
+// the original therefore masks the last segment and leaves the signature and
+// the manifest standing, which is a partially redacted credential in a log
+// file: enough to identify the broadcast, and exactly the shape of half-fix
+// that reads as protection. Measured and pinned by
+// TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
+func destSecrets(row *db.Destination, extra ...string) []string {
 	if row == nil {
 		return nil
 	}
 	out := []string{row.StreamKey, row.BackupStreamKey}
+	out = append(out, extra...)
 	out = append(out, urlSecrets(row.URL)...)
 	out = append(out, urlSecrets(row.BackupURL)...)
 	out = append(out, expertArgsSecrets(row.ExtraInputArgs)...)

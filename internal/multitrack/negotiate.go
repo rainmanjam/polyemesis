@@ -24,6 +24,14 @@ type Outcome struct {
 	// Use reports whether the caller must publish to Target instead of the
 	// destination's stored URL.
 	//
+	// A TRUE HERE IS NOT EVIDENCE THE STREAM KEY IS VALID. Measured: the live
+	// endpoint returned a successful negotiation, with a full ladder and a
+	// minted key, for a plainly invalid stream key. Validation happens at
+	// PUBLISH, not at negotiation. So a caller must not read a successful
+	// Negotiate as "the credential works" -- the failure will arrive later, at
+	// the ingest, and anything that reported the key as verified here will have
+	// made it harder to diagnose rather than easier.
+	//
 	// WHEN THIS IS TRUE THE MINTED KEY IS MANDATORY, not preferred. Twitch
 	// answers a successful negotiation with a new 312-character stream key that
 	// carries the agreed ladder signed inside it, ending with the operator's
@@ -42,12 +50,10 @@ type Outcome struct {
 	// on the quiet success path, where it says nothing happened.
 	//
 	// IT CARRIES NO CREDENTIAL, and that is enforced here rather than inherited.
-	// The package doc says status.html_en_us "is scrubbed before it is shown
-	// anywhere"; it was not -- Config.explain returns the field verbatim, and
-	// only the errors Client.Fetch builds were ever scrubbed. Negotiate closes
-	// that gap for every path it can return through. See the comment on the
-	// scrubbing closure in Negotiate and
-	// TestNoOutcomeEverCarriesTheStreamKeyInItsNote.
+	// See the scrubbing closure in Negotiate for what is defence and what is a
+	// measurement -- the distinction matters, and an earlier version of this
+	// comment got it wrong in a way that would have sent a reader to the wrong
+	// field.
 	//
 	// It is a note rather than a warning on purpose. An operator on a GPU-less
 	// server has not misconfigured anything and must not be shown a fault.
@@ -86,18 +92,34 @@ const noteNoGPU = "Enhanced Broadcasting was not requested: it needs a supported
 // Nothing here measures hardware; Capabilities explains why not. The GPU facts
 // come from the operator's configuration, and their absence is the default.
 func Negotiate(ctx context.Context, c *Client, streamKey string, a Ask) Outcome {
-	// EVERY note leaves through here, scrubbed, and that is not belt and braces.
+	// EVERY note leaves through here, scrubbed. THIS IS DEFENCE, NOT A FIX FOR AN
+	// OBSERVED LEAK, and the difference is worth stating precisely because the
+	// first version of this comment claimed the latter and was wrong.
 	//
-	// Config.explain returns status.html_en_us verbatim, and that field is
-	// Twitch QUOTING THE REQUEST BACK -- the measured examples name the client
-	// software and the schema version, and the request that produced them also
-	// carried the stream key. Client.Fetch scrubs the errors IT builds, so the
-	// transport and decode paths were already safe; the verdict path was not,
-	// because it does not go through Fetch's error handling at all. This
-	// function is the one place that holds both the key and the finished
-	// sentence, so it is the one place that can close that gap for every path at
-	// once. See TestNoOutcomeEverCarriesTheStreamKeyInItsNote, which sweeps all
-	// of them rather than asserting on one.
+	// WHAT WAS MEASURED, against the live endpoint with a distinctive canary
+	// sent as `authentication`:
+	//
+	//   - status.html_en_us echoes client.name, NOT the stream key. A refusal
+	//     for missing canvases came back naming the broadcast software, and the
+	//     canary did not appear in it under any refusal that could be produced.
+	//   - The key that does come back is in ingest_endpoints[].authentication:
+	//     the 312-character MINTED key on the success path, which ends with the
+	//     original. That is the credential this response carries.
+	//
+	// So html_en_us is not a known key channel. It is scrubbed anyway because it
+	// is ATTACKER-INFLUENCED TEXT FROM A THIRD PARTY that polyemesis renders to
+	// an operator, and it is built by quoting request fields back -- a habit that
+	// needs only one more field to become a leak. Scrubbing text we do not
+	// control is cheap; discovering later that the habit grew is not.
+	//
+	// WHAT THIS CLOSURE DOES NOT PROTECT is the minted key, and nothing here
+	// could: it never appears in a Note, only in Outcome.Target.Key. Registering
+	// the original key as a secret does NOT cover the minted one either --
+	// SecretSet.Scrub is a substring replace, so the original masks only the
+	// minted key's last segment and leaves the signature and manifest in the
+	// clear. Whoever publishes with Target.Key must register that value in its
+	// own right; see engine.destSecrets and
+	// TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
 	out := func(o Outcome) Outcome {
 		o.Note = scrub(o.Note, streamKey)
 		return o
