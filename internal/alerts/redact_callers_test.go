@@ -116,6 +116,22 @@ func skipWalkDir(rel, name string) bool {
 	switch rel {
 	case "ui", "web", "deploy", "docs":
 		return true
+	// .claude holds git worktrees, which are FULL CHECKOUTS OF THIS SAME
+	// MODULE. Walking one scans every file of whatever branch is checked out
+	// there, under a path the allowlist cannot match -- so
+	// `internal/alerts/redact.go`, which is allowlisted and calls Redact by
+	// definition, reappears as
+	// `.claude/worktrees/agent-<id>/internal/alerts/redact.go` and fails the
+	// guard. Measured: with two agent worktrees open this reported four
+	// violations, none of them in the tree under test, and every one of them a
+	// file already on the allowlist at its real path.
+	//
+	// Root only, per the rule above: a future internal/.claude would be walked
+	// like anything else. This is the same class as the `web` hole that comment
+	// describes -- a directory-shaped blind spot -- except it fails LOUD rather
+	// than silent, which is why it is a nuisance and not a hazard.
+	case ".claude":
+		return true
 	}
 	switch name {
 	case ".git", "node_modules", "testdata":
