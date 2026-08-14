@@ -41,15 +41,12 @@ const SecondaryPrefix = "vod_"
 type Pair struct {
 	// Result is the PRIMARY mix -- its OutLabel, Tracks, Summary, Normalization
 	// and VideoDelayMS all describe the first track, exactly as a plain Compile
-	// would -- with ONE exception: FilterComplex carries BOTH halves, because
-	// that is the single string FFmpeg is handed. Callers that already know what
-	// to do with a Result therefore need to learn one new field, not a new type.
+	// would -- with TWO exceptions: FilterComplex carries BOTH halves, because
+	// that is the single string FFmpeg is handed, and SecondOutLabel names the
+	// second mix. Callers that already know what to do with a Result therefore
+	// need to learn one new field, not a new type -- which is what lets the
+	// engine carry a VOD track without changing a single signature.
 	Result
-
-	// SecondOutLabel is the label to -map for the second audio track, or "" when
-	// this pair has only one mix. It is what ffmpeg.DestSpec.SecondAudioOutLabel
-	// wants, and "" is exactly what that field means by "not opted in".
-	SecondOutLabel string
 
 	// Second describes the second mix on its own terms -- which tracks reached
 	// it, what it was normalized to, what it warns about. Nil when there is no

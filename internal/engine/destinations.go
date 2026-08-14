@@ -79,6 +79,26 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 			compile = routing.CompileProvisional
 		}
 		compiled, cerr := compile(row.Profile, src)
+		// The second (VOD) audio mix, when this destination asked for one.
+		//
+		// NOT on the provisional path. A provisional compile is already running
+		// on a guessed layout and saying so; adding a second guessed mix on top
+		// doubles what is approximate while the operator is being told the first
+		// one is unreliable. The VOD track comes back by itself on the next
+		// reconcile after a probe succeeds, which is the same moment the live
+		// mix stops being provisional.
+		if !provisional && cerr == nil && row.VODProfile != nil {
+			paired, perr := routing.CompilePair(row.Profile, row.VODProfile, src)
+			if perr != nil {
+				// CompilePair fails only where Compile just failed, so reaching
+				// here means the live mix is broken too and cerr would have been
+				// set. Belt and braces: report it rather than silently publish
+				// one track.
+				cerr = perr
+			} else {
+				compiled = paired.Result
+			}
+		}
 		if cerr != nil {
 			p.err = cerr.Error()
 		} else {
@@ -281,9 +301,16 @@ func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result,
 		RelayURL:      relayURL,
 		FilterComplex: compiled.FilterComplex,
 		AudioOutLabel: compiled.OutLabel,
-		AudioBitrate:  row.AudioBitrate,
-		SampleRate:    row.Profile.SampleRate,
-		CopyVideo:     true,
+		// The second (VOD) audio track. Empty for every destination that has
+		// not opted in, which is nearly all of them, and empty produces byte
+		// for byte the command it produced before this existed. It reaches the
+		// backup feed through the same struct, so a redundant feed carries the
+		// same two tracks as the primary rather than silently dropping one --
+		// which is the asymmetry this function's doc comment exists about.
+		SecondAudioOutLabel: compiled.SecondOutLabel,
+		AudioBitrate:        row.AudioBitrate,
+		SampleRate:          row.Profile.SampleRate,
+		CopyVideo:           true,
 		// A negative routing delay pulls audio ahead of picture, which no
 		// audio filter can do, so the compiler hands the amount over here
 		// and the video is held back instead.

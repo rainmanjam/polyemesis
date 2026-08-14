@@ -133,6 +133,40 @@ type Destination struct {
 	Enabled      bool            `json:"enabled"`
 	AudioBitrate int             `json:"audioBitrate"` // kbps
 	Profile      routing.Profile `json:"profile"`
+	// Multitrack opts this destination into Twitch Enhanced Broadcasting, which
+	// Amazon's IVS calls Multitrack Video: a negotiation at go-live that answers
+	// with an ingest endpoint, a minted stream key, and the audio tracks Twitch
+	// will accept. See internal/multitrack.
+	//
+	// FALSE IS THE RIGHT DEFAULT AND WILL STAY THE COMMON CASE. Twitch refuses
+	// any client without a supported GPU, by name, and polyemesis is built to be
+	// installed on the operator's own server -- a rented VPS has no GPU. Turning
+	// this on where negotiation cannot succeed is not a fault and is not
+	// punished: the destination falls back to the ordinary ingest and says so
+	// once. It is opt-in only because a network round trip at go-live should be
+	// something the operator asked for.
+	Multitrack bool `json:"multitrack,omitempty"`
+	// VODProfile is the SECOND audio mix -- the VOD track, separate from the
+	// live one, which is the whole ask of #141.
+	//
+	// Nil for every destination that has not opted in, which is nearly all of
+	// them, and nil produces byte for byte the filter graph and the argv the
+	// destination produced before this field existed. See routing.CompilePair,
+	// which compiles the pair, and ffmpeg.DestSpec.SecondAudioOutLabel, which
+	// maps and encodes it.
+	//
+	// A POINTER, NOT A VALUE, because "no second mix" and "a second mix that
+	// happens to be the zero profile" are different things and the zero profile
+	// is not valid anyway (Validate refuses it: no track enabled, no normalize
+	// mode, no sample rate). A value here would make every existing row look
+	// like it had asked for a broken second track.
+	//
+	// ON TWITCH THIS NEEDS Multitrack. The ordinary Twitch RTMP ingest takes one
+	// audio track; Enhanced Broadcasting is the only published path that takes
+	// two and says what the second is for. Nothing here enforces that pairing --
+	// the engine reports it, because a setting that silently undoes itself is
+	// worse than one that explains itself.
+	VODProfile *routing.Profile `json:"vodProfile,omitempty"`
 	// RenditionID selects the shared video encode this destination subscribes
 	// to. nil is passthrough: no encode, no process, straight off the ingest
 	// relay. Whatever the rendition, the destination still does -c:v copy plus
@@ -797,6 +831,25 @@ func (d *DB) openStreamKey(enc []byte, plain string) (string, error) {
 	return out, nil
 }
 
+// marshalVODProfile renders the second (VOD) audio mix for storage.
+//
+// NIL BECOMES THE EMPTY STRING, NOT "null" AND NOT "{}". The read side treats
+// empty as "no second track", so this is the half of that contract that has to
+// agree: json.Marshal of a nil pointer produces the four bytes `null`, which is
+// not empty, would take the decode branch, and would decode to a nil profile by
+// a route the reader cannot distinguish from a corrupt value. One spelling of
+// absence, checked at both ends. See TestADestinationWithNoVODMixStoresNoVODMix.
+func marshalVODProfile(p *routing.Profile) (string, error) {
+	if p == nil {
+		return "", nil
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		return "", fmt.Errorf("encode second (VOD) audio profile: %w", err)
+	}
+	return string(b), nil
+}
+
 func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, error) {
 	var (
 		dst        Destination
@@ -812,8 +865,13 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		// Same reasoning as complianceJSON: a row written before this column
 		// existed must decode to a zero FacebookSettings, not fail the scan.
 		facebookJSON = "{}"
-		created      int64
-		updated      int64
+		// The second (VOD) mix. Empty is "no second track" -- see the vod_profile
+		// migration for why empty and not "{}" -- so a row written before the
+		// column existed decodes to a nil VODProfile rather than to a profile
+		// that fails Validate.
+		vodProfileRaw = ""
+		created       int64
+		updated       int64
 	)
 	err := s.Scan(&dst.ID, &dst.Name, &dst.Kind, &dst.Platform, &acct, &dst.URL,
 		&dst.StreamKey, &streamEnc,
@@ -825,6 +883,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.MinBackoffSeconds, &dst.Resilience.MaxBackoffSeconds,
 		&dst.Resilience.GiveUpAfter,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
+		&dst.Multitrack, &vodProfileRaw,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -890,6 +949,16 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 	if err := json.Unmarshal([]byte(profileRaw), &dst.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", dst.ID, err)
 	}
+	if vodProfileRaw != "" {
+		// Named as the operator's setting, not as a column, because that is what
+		// the sentence has to mean to whoever reads it: "the VOD track on this
+		// destination is unreadable", not "column vod_profile failed to decode".
+		var vod routing.Profile
+		if err := json.Unmarshal([]byte(vodProfileRaw), &vod); err != nil {
+			return nil, fmt.Errorf("destination %d: decode second (VOD) audio profile: %w", dst.ID, err)
+		}
+		dst.VODProfile = &vod
+	}
 	dst.CreatedAt = time.Unix(created, 0)
 	dst.UpdatedAt = time.Unix(updated, 0)
 	return &dst, nil
@@ -903,6 +972,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 	au_codec, au_mono, au_copy, compliance, facebook,
+	multitrack, vod_profile,
 	position, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
@@ -936,6 +1006,7 @@ const (
 		tr_rw_timeout_seconds=?,
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
+		multitrack=?, vod_profile=?,
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
@@ -1085,6 +1156,10 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	vodProfile, err := marshalVODProfile(dst.VODProfile)
+	if err != nil {
+		return nil, err
+	}
 	keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
 	if err != nil {
 		return nil, fmt.Errorf("seal stream key: %w", err)
@@ -1111,8 +1186,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 		 au_codec, au_mono, au_copy, compliance, facebook,
+		 multitrack, vod_profile,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1123,6 +1199,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
+		dst.Multitrack, vodProfile,
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -1158,6 +1235,10 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	vodProfile, err := marshalVODProfile(dst.VODProfile)
+	if err != nil {
+		return nil, err
+	}
 	// The key columns first, so that the two statements below differ only by a
 	// prefix and the arguments line up with whichever one is used.
 	args := []any{
@@ -1170,6 +1251,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
+		dst.Multitrack, vodProfile,
 		time.Now().Unix(), dst.ID,
 	}
 	query := destUpdateQuery
@@ -1441,6 +1523,22 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		// row ran on, so an upgraded install emits the same command it did
 		// yesterday for every destination that has not opted in.
 		{"au_copy", `ALTER TABLE destinations ADD COLUMN au_copy INTEGER NOT NULL DEFAULT 0`},
+		// Twitch Enhanced Broadcasting. 0 is "do not negotiate", which is what
+		// every existing row did, and it stays the common case: Twitch refuses a
+		// host with no supported GPU and most polyemesis installs are exactly
+		// that. See Destination.Multitrack.
+		{"multitrack", `ALTER TABLE destinations ADD COLUMN multitrack INTEGER NOT NULL DEFAULT 0`},
+		// The second (VOD) audio mix, as one JSON blob for the reason compliance
+		// is one: it is the same shape as the `profile` column beside it and is
+		// edited as a unit.
+		//
+		// '' rather than '{}' is the no-op, and the difference matters. '{}'
+		// would decode to the zero routing.Profile -- no track enabled, no
+		// normalize mode, no sample rate -- which is a profile that fails
+		// Validate, so every upgraded row would carry a second mix that is
+		// broken rather than absent. '' decodes to nil, which is "no second
+		// track", which is what every existing row means.
+		{"vod_profile", `ALTER TABLE destinations ADD COLUMN vod_profile TEXT NOT NULL DEFAULT ''`},
 		// Compliance rides as one JSON blob rather than four columns: it is a
 		// map plus two scalars, edited as a unit, and '{}' is "touch nothing".
 		{"compliance", `ALTER TABLE destinations ADD COLUMN compliance TEXT NOT NULL DEFAULT '{}'`},

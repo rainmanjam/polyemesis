@@ -241,6 +241,31 @@ export interface Destination {
   enabled: boolean;
   audioBitrate: number;
   profile: RoutingProfile;
+  /** Opt into Twitch Enhanced Broadcasting — what Amazon's IVS calls Multitrack
+   *  Video: a negotiation at go-live that answers with an ingest endpoint, a
+   *  minted stream key, and the audio tracks Twitch will accept.
+   *
+   *  Absent or false on nearly every destination, and that stays the common
+   *  case rather than being a gap. Twitch refuses any client without a
+   *  supported GPU, and polyemesis is installed on the operator's own
+   *  server — a rented VPS has none. A negotiation that does not succeed is
+   *  not a fault: the destination falls back to the ordinary ingest and says
+   *  so once. Opt-in only because a network round trip at go-live should be
+   *  something the operator asked for. */
+  multitrack?: boolean;
+  /** The SECOND audio mix — the VOD track, separate from the live one. Same
+   *  shape as `profile`, because it is the same kind of thing.
+   *
+   *  Absent or null for every destination that has not opted in, which is
+   *  nearly all of them, and null produces exactly the filter graph the
+   *  destination produced before this field existed. Null rather than an empty
+   *  profile: "no second mix" and "a second mix that happens to be the zero
+   *  profile" are different, and the zero profile is not valid anyway.
+   *
+   *  On Twitch this needs `multitrack`. The ordinary Twitch RTMP ingest takes
+   *  one audio track; Enhanced Broadcasting is the only published path that
+   *  takes two. Nothing enforces that pairing — the engine reports it. */
+  vodProfile?: RoutingProfile | null;
   position: number;
   /** The shared video encode this destination reads. null or absent means
    *  passthrough: no encode, straight off the ingest relay. */

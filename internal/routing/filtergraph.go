@@ -34,6 +34,16 @@ type Result struct {
 	FilterComplex string `json:"filterComplex"`
 	// OutLabel is the label to -map for the destination's audio.
 	OutLabel string `json:"outLabel"`
+	// SecondOutLabel is the label to -map for a SECOND finished mix -- the VOD
+	// track -- or "" when this destination has only one, which is nearly all of
+	// them. Set only by CompilePair.
+	//
+	// It lives on Result rather than only on Pair so that the engine's one
+	// description of an output does not have to change type to carry it: every
+	// signature between the compiler and ffmpeg.DestSpec already passes a
+	// Result, and "" is exactly what DestSpec.SecondAudioOutLabel means by "not
+	// opted in".
+	SecondOutLabel string `json:"secondOutLabel,omitempty"`
 	// Summary is the human sentence shown on a destination card,
 	// e.g. "Tracks 1, 2, 4 → stereo".
 	Summary string `json:"summary"`
