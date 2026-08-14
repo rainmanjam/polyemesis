@@ -151,6 +151,35 @@ will tell a stranger before assuming the test needs an account.*
    that need an account connected. Both suites already have the step written and
    skipping.
 
+## A sixth kind of gap: a suite that runs nowhere
+
+`scripts/acceptance-obs-multitrack.sh` was not on the list above, because it
+already existed and had already found something — that OBS 30.2.3 sends no
+multitrack audio at all, which six documents now depend on. It ran nowhere. A
+suite that exists and is never executed is indistinguishable from one that was
+never written, except that it reads as covered.
+
+It is scheduled now (`.github/workflows/obs-multitrack.yml`), and getting it
+there surfaced two defects of its own, both of the kind this note keeps finding
+— composition, not logic:
+
+- **The observer had no floor.** The suite asserts OBS sends exactly ONE audio
+  track. Below FFmpeg 7.1 multitrack FLV does not demux, so on Ubuntu's stock
+  6.1.1 it would report one track whatever OBS sent — a green run on a host that
+  could not have produced any other answer. Both halves were correct: the
+  assertion was right, the FFmpeg was a supported version. The composition was
+  vacuous. It now refuses below 7.1, measured with a round trip.
+- **It was the last host suite not using the shared teardown.** Running it twice
+  back to back — which is the standard here, and the only reason this was seen —
+  bound `:1935` while the previous run still held it, and reported "the RTMP
+  listener never bound": a teardown bug wearing the costume of the product
+  failure the suite exists to detect. `lib-cleanup.sh` was written for exactly
+  this symptom and twelve suites had adopted it.
+
+The rule from the top of this note holds in a new direction. *Ask what the far
+end will tell a stranger* found coverage nobody expected; this one adds: **ask
+whether the thing doing the asking could have heard a different answer.**
+
 WHAT THE FIVE FOUND, since it was not what this note predicted. Two credential
 leaks (#310 in chat, and automod's endpoint in its own error text) sat in the
 same place: not in the request, not in the response, but in what an ERROR was

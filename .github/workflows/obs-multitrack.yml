@@ -1,0 +1,227 @@
+# OBS, headless, publishing into polyemesis's own RTMP listener.
+#
+# scripts/acceptance-obs-multitrack.sh builds a 1 GB Ubuntu image containing a
+# real OBS Studio, gives it a virtual display and a software OpenGL driver, and
+# has it publish into the shared listener on 1935. It is the only thing in this
+# repository that puts a real encoder — not FFmpeg standing in for one — on the
+# other end of that socket.
+#
+# WHAT THIS SUITE IS FOR, because it is not a happy path. It went looking for
+# confirmation that OBS 30.2+ sends multitrack audio over RTMP and established
+# the opposite: OBS 30.2.3 sends ONE audio track regardless of configuration,
+# because the `supports_additional_audio_track` gate is declared by no service
+# in services.json (0 of 91), custom RTMP included. The docs had claimed
+# otherwise, read out of OBS's muxer source rather than off the wire.
+#
+# THAT NEGATIVE IS LOAD-BEARING. docs/INSTALL.md and five other documents tell
+# operators Enhanced RTMP multitrack is "verified with FFmpeg 7.1+ publishing
+# and NOT confirmed with OBS". This suite is the only thing that establishes the
+# second half, and until this workflow it ran nowhere. A claim about somebody
+# else's software that nothing re-measures is a claim with a shelf life.
+#
+# THE SCHEDULE IS THE POINT, the same argument chat-live.yml and oauth-live.yml
+# make. What this measures is THEIR software, and the change it exists to catch
+# arrives with no commit of ours at all: OBS ships a release, or a service in
+# services.json finally declares the flag, and multitrack audio starts arriving
+# on a socket six documents say it never arrives on. Nothing under internal/
+# changes when that happens, so only a timer finds it. The suite already asserts
+# the negative and fails loudly on a third track (OBS_SENDS in the script) —
+# what it lacked was anything to run it.
+#
+# WHY ITS OWN WORKFLOW AND NOT ci.yml's ACCEPTANCE MATRIX. Measured, on an
+# Apple Silicon laptop:
+#
+#   cold `docker build` of the OBS image     88s, 1.03 GB
+#   suite wall clock with the image warm     41s and 44s over two runs
+#   OBS start to RTMP connect                26.8s of that
+#
+# Two minutes and a gigabyte on every push, to re-measure a third party that
+# ships a few times a year, is the wrong trade — and ci.yml's own header already
+# refuses it for the container suite on exactly this reasoning. But the matrix
+# is also the wrong SHAPE: it installs Ubuntu's FFmpeg 6.1.1, which cannot demux
+# multitrack FLV, and this suite would have reported its one track on a host
+# incapable of counting to two. See the FFmpeg step below.
+#
+# NO CACHE FOR THE IMAGE, and that is a measurement rather than an oversight.
+# actions/cache would spend ~1 GB of a 10 GB repository-wide budget that
+# cache-prune.yml already runs DAILY to defend — this repository reached 9.65 GB
+# — to avoid 88 seconds, before counting the save and restore of the tarball
+# itself, which is not free either. Caching here would evict live main-branch Go
+# module caches to save less time than it costs. Rebuilding is the cheap option;
+# it is only expensive if you never measured it.
+#
+# THE FFMPEG CACHE IS REUSED, not added. The key below is byte-identical to
+# ci.yml's, so this workflow restores an entry that already exists and creates
+# none. That is the whole reason it can have a 130 MB FFmpeg for free while
+# refusing a 1 GB image.
+name: obs multitrack (real OBS as publisher)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays, 06:00 UTC. Off the hour, and off chat-live's and oauth-live's
+    # minutes: GitHub queues everything submitted on the hour and runs it late,
+    # and three suites waking together on the same runner pool is a needless
+    # coincidence. This one is heaviest, so it goes last of the three.
+    - cron: "41 6 * * 1"
+  pull_request:
+    paths:
+      # The listener OBS's bytes actually land on. Its setup-cache path is where
+      # multitrack would break first — see internal/rtmpserver/setup.go, where
+      # AudioExMultitrack is unwrapped so a late subscriber gets every track's
+      # decoder config and not just track 0's.
+      - "internal/rtmpserver/**"
+      # The image, the entrypoint, and the stop path that has its own tests.
+      - "scripts/obs/**"
+      - "scripts/acceptance-obs-multitrack.sh"
+      - "scripts/acceptance_obs_driver.go"
+      # THIS FILE COUNTS. ci.yml learned that the hard way: a change to a
+      # suite's own CI setup matched no path, went green on its own pull
+      # request, and failed on somebody else's change afterwards.
+      - ".github/workflows/obs-multitrack.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time per ref. Each run gets its own runner, so there is no port to
+  # contend over — what a superseded push would otherwise hold is a runner
+  # building a 1 GB image and waiting 45 seconds on a stream nobody is reading.
+  group: obs-multitrack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  obs:
+    name: real OBS into the shared RTMP listener
+    runs-on: ubuntu-latest
+    # 88s image build + ~45s suite + setup, against a ceiling that assumes every
+    # one of those goes badly at once. Not GitHub's default of SIX HOURS: an OBS
+    # that never reaches its RTMP connect would otherwise hold a runner all day.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # THE HOST'S FFMPEG IS PART OF THE MEASUREMENT, not a dependency to get
+      # over. polyemesis's ingest child demuxes what OBS sent; if that FFmpeg
+      # cannot read multitrack FLV, this suite reports one audio track from a
+      # process that could not have reported two, and the assertion it exists to
+      # make becomes vacuous while staying green.
+      #
+      # Ubuntu's 6.1.1 is exactly that build — ci.yml says so in its own words,
+      # "6.1.1 cannot demux multitrack FLV at all" — so `apt-get install ffmpeg`
+      # is not an option here even though it is what the acceptance matrix uses.
+      # The suite refuses to run on it now, which turns this from a silent
+      # wrong answer into a red step; installing 8.1 is what keeps it green for
+      # the right reason.
+      #
+      # Same pinned artefact, same cache key, same retry shape as ci.yml. The
+      # key is copied deliberately: a matching key restores that cache instead
+      # of writing a second copy of a 130 MB download.
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ffmpeg-${{ runner.os }}-n8.1-latest-linux64-gpl-8.1-v1
+
+      - name: Install FFmpeg
+        timeout-minutes: 6
+        env:
+          FFCACHE: /tmp/ffcache
+        run: |
+          set -euo pipefail
+          cd /tmp
+          if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+            echo "ffmpeg restored from cache"
+          else
+            for attempt in 1 2 3; do
+              if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+                   --connect-timeout 20 --max-time 90 \
+                   -o /tmp/ff.tar.xz \
+                   "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
+                break
+              fi
+              echo "ffmpeg download attempt $attempt failed"
+              [ "$attempt" = 3 ] && exit 1
+              sleep 5
+            done
+            mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+            mkdir -p "$FFCACHE"
+            cp ffbuild/bin/ffmpeg ffbuild/bin/ffprobe "$FFCACHE/"
+          fi
+          sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+          sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
+          ffmpeg  -hide_banner -version | head -1
+          ffprobe -hide_banner -version | head -1
+
+      # lsof, and only lsof. poly_port_holders in lib-cleanup.sh reads it to
+      # answer "is anything actually listening on 1935 yet", which is the check
+      # standing between OBS and a connection-refused it would report as a
+      # refused handshake. Without lsof that helper returns nothing, the wait
+      # times out, and the suite fails for a reason that has nothing to do with
+      # OBS. ci.yml installs it beside FFmpeg for the same reason and says the
+      # suites "fail obscurely without it" — this one would fail loudly, which
+      # is better and still wrong.
+      #
+      # Named rather than assumed present on the runner image: a base image is
+      # somebody else's decision, and this is one small package.
+      - name: Install lsof
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          if command -v lsof >/dev/null; then
+            echo "lsof already present: $(lsof -v 2>&1 | head -1)"
+            exit 0
+          fi
+          # The same three apt options ci.yml settled on after three jobs hit
+          # their ceiling stalled mid-fetch against azure.archive.ubuntu.com.
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000"
+          sudo apt-get $APT_OPTS update -qq
+          sudo apt-get $APT_OPTS install -y --no-install-recommends lsof
+
+      - name: obs acceptance
+        # Above the suite's own internals, below the job ceiling, so a wedged
+        # step still leaves the diagnostics below their chance to run.
+        timeout-minutes: 15
+        env:
+          # 60 is 2.2x the 26.8s measured on an Apple Silicon laptop, which is
+          # the fastest hardware this runs on. A 4-vCPU hosted runner starting a
+          # GUI application and compositing a scene through llvmpipe in software
+          # has no reason to match that, and the failure would read as "OBS was
+          # refused" rather than "OBS was slow". Raised here rather than in the
+          # script, so the local run keeps the tighter number that would notice
+          # a real regression in startup time.
+          CONNECT_WAIT: "180"
+        run: ./scripts/acceptance-obs-multitrack.sh
+
+      # What did OBS itself think was happening?
+      #
+      # The suite prints OBS's log on the paths where it can — connect refused,
+      # nothing decodable — but not when it is killed from outside, which is
+      # what a step timeout does. The keysym/xkbcomp filter is the same one the
+      # suite uses: a headless X server complains about keyboard maps at length
+      # and none of it is about streaming.
+      - name: Diagnostics (what OBS was doing)
+        if: failure()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set +e
+          echo "=== OBS container ==="
+          docker logs polyemesis-obs-publisher 2>&1 \
+            | grep -viE 'keysym|xkbcomp' | tail -60
+          echo
+          echo "=== server.log ==="
+          tail -60 /tmp/polyemesis-acceptance-obs/server.log
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: failure()
+        with:
+          name: obs-multitrack-logs
+          path: /tmp/polyemesis-acceptance-obs/server.log
+          if-no-files-found: ignore
+          retention-days: 7

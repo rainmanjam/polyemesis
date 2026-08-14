@@ -136,6 +136,23 @@ read out of OBS's source". That was true and beside the point: the muxer
 implements multitrack correctly, and nothing reaches it. Reading an
 implementation tells you what the code would do, not whether it runs.
 
+**It now runs on a schedule**, which is the difference between a finding and a
+guarantee. `.github/workflows/obs-multitrack.yml` runs the suite weekly and on
+any pull request touching `internal/rtmpserver/**`, `scripts/obs/**` or the
+suite itself. The negative above is a claim about somebody else's software: OBS
+ships releases, and a service in `services.json` could declare
+`supports_additional_audio_track` at any time. Nothing in this repository
+changes on the day that happens, so only a timer finds it — the same argument
+`chat-live.yml` and `oauth-live.yml` make for their platforms.
+
+The suite already asserted the negative and failed loudly on a third track. What
+it lacked, and now has, is a floor under the observer: **it refuses to run below
+FFmpeg 7.1**. Multitrack FLV does not demux on 6.1.1, so on Ubuntu's stock build
+— which is what the acceptance matrix installs, and what the OVH deployment runs
+— the suite would have reported the one track it asserts no matter what OBS
+sent, and gone green on a host that could not count to two. Step 1 measures the
+capability with a two-track FLV round trip rather than parsing a version string.
+
 ### 2. Track identity — largely answered
 
 The original worry was that `ffprobe` exposes no `trackId`, only ordering, while
