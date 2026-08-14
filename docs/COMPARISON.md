@@ -108,6 +108,7 @@ but it is not zero, and a selector's is.
 | **Per-track stems** as 24-bit WAV or FLAC, segment-aligned to the master | No | No | No | No | No |
 | Track annotations — what each incoming track actually is | No | No | n/a | n/a | Unverified |
 | Typed SRT rejections — the publisher is told *why* it was refused | No | n/a | n/a | n/a | Unverified |
+| A second audio mix to the same destination, from one ingest | No | n/a | n/a | n/a | Twitch Enhanced Broadcasting only; competitors unverified |
 
 Two cells say **Unverified** rather than "No" on purpose. MistServer's own
 recording row is a loss and is marked as one: a recording target with

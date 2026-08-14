@@ -22,6 +22,19 @@ const sections = [
     alt: "polyemesis routing page: per-destination track selection with music policy and loudness target",
   },
   {
+    id: "vod",
+    eyebrow: "Two mixes, one connection",
+    title: "The broadcast keeps the music. The archive does not.",
+    body: [
+      "Twitch Enhanced Broadcasting negotiates a second audio track alongside the live one. polyemesis builds both from the same ingest, in one filter graph, and sends them over one connection — the live mix with the music bed, and a VOD track without it. No second upload, no second encode of the picture.",
+      "A single video rendition is enough. Multitrack video is not a precondition for the second audio track, which is the part most people expect to be required — the feature is named for it and does not need it.",
+      "It needs a GPU. Twitch refuses the negotiation outright if the encoder reports none, so this is the one thing here a headless server cannot use. Every other destination still receives its own single mix, exactly as before. The picture is still copied rather than re-encoded; the second track is a second AAC encode, which is cheap and is not free.",
+    ],
+    shot: "02-routing.png",
+    caption: "The archive mix is per destination, and off unless asked for.",
+    alt: "polyemesis routing page: per-destination track selection with music policy and loudness target",
+  },
+  {
     id: "matrix",
     eyebrow: "Mix matrix",
     title: "Channel-level control when the checkboxes are not enough",
@@ -73,9 +86,9 @@ const sections = [
   {
     id: "chat",
     eyebrow: "Chat",
-    title: "Four platforms in one timeline",
+    title: "Five platforms in one timeline",
     body: [
-      "One merged feed with one send box that fans out to YouTube, Twitch and Kick — Facebook is read and moderate only — with per-platform verdicts when half the fan-out fails, because partial delivery is the normal case.",
+      "One merged feed reading YouTube, Twitch, Kick, Facebook and Rumble. The send box fans out to YouTube, Twitch and Kick, with per-platform verdicts when half the fan-out fails, because partial delivery is the normal case. Facebook is read and moderate only; Rumble is read only, and polls, because its API offers no socket.",
       "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick — and a moderator card showing what one person has said across every platform at once.",
     ],
     shot: "09-chat.png",
