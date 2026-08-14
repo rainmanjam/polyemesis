@@ -34,8 +34,23 @@ the gap, and it is not a coverage percentage.
 
 ## A. The suite × environment matrix
 
-22 acceptance suites. **15 run in CI. 7 do not**, and the reason is always
-credentials or hardware rather than neglect.
+22 acceptance suites. **15 run in `ci.yml`. Four have no automation at all.**
+
+> **CORRECTION, added after a subagent checked this rather than trusting it.**
+> The first version of this document said "7 do not run in CI", derived by
+> grepping `ci.yml` alone. That was wrong. `chat`, `oauth` and `automod` each
+> have their **own workflow** — `chat-live.yml`, `oauth-live.yml`,
+> `automod-live.yml` — on a weekly cron plus a `pull_request` trigger scoped to
+> the paths they cover. That placement is deliberate and argued in the files: a
+> third-party network dependency on every push is a flake generator, and the
+> failures they catch (Twitch rewording a NOTICE, Kick moving a key URL, a cert
+> expiring) arrive with **no commit of ours at all**, which a schedule catches
+> and a per-push job does not.
+>
+> `acceptance-chat.sh` was also already credential-free for 15 of its 17 checks,
+> with the remaining two skipped and each skip stating its reason. Nothing to
+> do. The genuinely unautomated suites are **install, multistream,
+> obs-multitrack and transcribe**.
 
 | Suite | CI | Needs | Notes |
 |---|---|---|---|
@@ -76,9 +91,13 @@ Ranked by exposure — this is priority **C**, and it should be done first.
 2. **Capped VBR reaching a real encoder (#341).** Asserted through argv only.
    No test sets a ceiling above target and measures the resulting bitrate.
    `acceptance-renditions.sh` is the natural home.
-3. **Five-platform chat.** `acceptance-chat.sh` exists and is not in CI. Rumble
-   is read-only and its live payload fidelity is documented rather than
-   observed — the adapter says so itself.
+3. **Five-platform chat — but not the gap this document first named.**
+   `acceptance-chat.sh` is automated and credential-free, and it covers
+   **Twitch and Kick only**. `internal/chat` ships five adapters; **YouTube,
+   Facebook and Rumble have no live coverage in any suite.** That is the
+   untested half of the five-platform claim, and it is new checks to write
+   rather than CI to wire. YouTube and Facebook will need credentials to read
+   at all, so they land as justified skips.
 4. **Multistream to real platforms.** `acceptance-multistream.sh`, not in CI.
    The single most important claim the product makes.
 
