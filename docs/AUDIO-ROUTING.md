@@ -38,6 +38,90 @@ from 0.0 to 2.0.
 This subsumes simple mode and additionally lets you take only the rear channels
 of a 5.1 track, pan a mono mic hard left, or swap channels.
 
+## Two mixes to one destination
+
+A destination can receive a second audio track carrying a different mix. The
+live broadcast keeps the music bed; the archive track does not — from one
+ingest, one video encode, one connection.
+
+Today that means **Twitch Enhanced Broadcasting**, which is the only published
+ingest that takes two audio tracks and says what the second is for. polyemesis
+can emit a second track to any RTMP destination and its own RTMP server receives
+it as two distinct tracks, but no other platform has been measured accepting
+one, and the `-c:a copy` refusal for RTMP destinations still stands.
+
+### Turning it on
+
+Two fields on the destination, both off by default:
+
+| Field | What it does |
+|---|---|
+| `multitrack` | Opts into the Enhanced Broadcasting negotiation with Twitch. |
+| `vodProfile` | The second mix. A full routing profile — its own track selection, its own normalization, its own sample rate. |
+
+`vodProfile` is a complete profile rather than a track list, so the archive mix
+is built the same way the live one is: pick tracks in simple mode, or open the
+mix matrix and set gains per channel. The two are independent. Muting the music
+track in the VOD profile is the common case, and it is the only difference most
+setups need.
+
+With `vodProfile` unset the destination produces byte-for-byte the filter graph
+and the command line it produced before this existed.
+
+### On Twitch, `vodProfile` needs `multitrack`
+
+The ordinary Twitch RTMP ingest takes one audio track. Enhanced Broadcasting is
+what takes two.
+
+Nothing enforces the pairing. Setting `vodProfile` without `multitrack` is
+reported rather than corrected, because a setting that silently undoes itself is
+worse than one that explains itself — if the engine quietly cleared the VOD
+profile, the operator's evidence would be an archive track that never appears
+and a form that still says it should.
+
+### It needs a GPU
+
+Twitch's negotiation endpoint requires GPU information in the request and
+refuses a client that reports none:
+
+> Your broadcast software (polyemesis) did not send GPU Information which is
+> required by GetClientConfiguration
+
+The GPU is not doing the work — video is still copied and the second track is an
+audio encode. It is a precondition Twitch checks. A headless server with no GPU
+cannot negotiate Enhanced Broadcasting however much CPU it has, and the
+destination falls back to the ordinary ingest and says so once.
+
+Multitrack **video** is not required. A single video rendition is enough:
+`maximum_video_tracks: 1` returns one rendition and both audio tracks, which is
+what makes this reachable at all. The feature is named for multitrack video and
+does not need it.
+
+### What happens when the second mix will not compile
+
+A secondary that cannot be built is a **warning**, not an error. An optional
+archive track must never veto a working broadcast, so the destination goes live
+with its live mix and reports that the second one did not build.
+
+A primary that will not compile is still an error. There is no stream without
+it.
+
+### The live mix is not rewritten
+
+The primary is compiled in the empty namespace, so the first track's filter
+graph is byte-identical to what it would be with no second mix at all. That is
+asserted rather than assumed, by
+`TestTheEmptyNamespaceIsByteIdenticalToTheSingleMixGraph` — "ticking the VOD box
+does not change what my viewers hear" is the promise an operator is actually
+relying on, and a promise nothing checks is one that decays.
+
+### What it costs
+
+A second AAC encode. The picture is still copied, not re-encoded, so the video
+cost is unchanged — but two mixes are two audio encodes, and the "0 re-encodes"
+figure has always meant the video. Two taps of the same ingest track need no
+`asplit`; both halves read the same input pad directly.
+
 ## Clip protection
 
 Summing tracks can exceed full scale. The options:

@@ -18,7 +18,8 @@ ffmpeg -protocols | tr ' ' '\n' | grep -x srt      # must print: srt
 - **Older than 6.0** → polyemesis refuses to start. Ubuntu 22.04 (4.4) and
   Debian 12 (5.1) both ship too old.
 - **No `srt`** → it starts with a warning, but you are limited to RTMP, which
-  carries one stereo pair. Multitrack routing — the reason to use this — needs
+  carries one stereo pair, unless the encoder speaks Enhanced RTMP. Multitrack
+  routing — the reason to use this — needs
   SRT. Homebrew's FFmpeg on macOS has no SRT.
 
 If either check fails, use Docker. It bundles a known-good FFmpeg and sidesteps
