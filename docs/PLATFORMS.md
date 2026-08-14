@@ -345,8 +345,21 @@ categories by name rather than by numeric id), carries chat both ways, and
 reports viewer counts.
 
 Scopes requested: `user:read`, `channel:read`, `channel:write`, `chat:write`,
-`moderation:chat_message:manage`, `events:subscribe`, `streamkey:read`. `moderation:ban` is
-deliberately not requested: nothing in polyemesis bans or times out a viewer.
+`moderation:chat_message:manage`, `moderation:ban`, `events:subscribe`,
+`streamkey:read`.
+
+`moderation:ban` covers banning and timing out a viewer, and lifting either. It
+was deliberately omitted at first, on the grounds that nothing here banned
+anyone and that asking a restreamer's audience for the power to do so read as
+overreach. That was reversed when moderation shipped: automod's action matrix
+includes timeout and ban, so the scope is requested up front rather than asked
+for silently later. The original argument is kept in `internal/oauth/kick.go`
+rather than deleted, because it is what to re-read if the decision is revisited.
+
+Adding a scope later does **not** upgrade an existing connection — it forces
+every operator to disconnect and reconnect, and discovering that mid-broadcast
+is the worst possible moment. That is why the list is settled in one go rather
+than grown as features land.
 
 Kick delivers chat over a webhook rather than a socket, so the chat pane needs a
 public HTTPS URL Kick can reach. Without one it says so rather than sitting
