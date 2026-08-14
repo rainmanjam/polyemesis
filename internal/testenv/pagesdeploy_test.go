@@ -536,3 +536,72 @@ func TestTheDocumentedDNSRecordsNameTheHostsTheSiteIsBuiltFor(t *testing.T) {
 		}
 	}
 }
+
+// Cloudflare Workers Static Assets CONCATENATES header values across matching
+// _headers rules. Cloudflare Pages replaced them. This file was written for
+// Pages, and its own comment said so: "a later rule overrides an earlier one for
+// the same header name, which is why the cache rules come after the catch-all."
+//
+// After the migration to Workers that stopped being true, and the live site
+// served every content-hashed asset as
+//
+//	Cache-Control: no-cache, public, max-age=31536000, immutable
+//
+// where RFC 9111 gives `no-cache` the last word. Eleven of eleven assets
+// revalidated on every navigation, and the render-blocking stylesheet cost about
+// 588ms in front of first paint each time. Nothing failed; it was merely slow,
+// which is why it took a measurement rather than a test to find.
+//
+// The rule this enforces is narrow and mechanical: no two rules may set the same
+// header, because on Workers the second does not win -- it joins.
+//
+// Proven able to fail against the committed tree by adding `Cache-Control:
+// no-cache` back to the `/*` block: this reports /_astro/* and /* both setting
+// Cache-Control.
+func TestNoTwoHeaderRulesSetTheSameHeader(t *testing.T) {
+	raw := readRepoFile(t, "web", "public/_headers")
+
+	var path string
+	// header name -> the paths that set it
+	setters := map[string][]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			path = trimmed
+			continue
+		}
+		name, _, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		name = strings.ToLower(strings.TrimSpace(name))
+		setters[name] = append(setters[name], path)
+	}
+	if len(setters) == 0 {
+		t.Fatal("no header rules parsed out of web/public/_headers; this guard " +
+			"would pass just as happily on an empty file")
+	}
+
+	for name, paths := range setters {
+		// A header set by several DISJOINT path rules is fine -- /fonts/* and
+		// /shots/* both setting Cache-Control never match one request. What is
+		// not fine is a rule that also matches everything.
+		hasCatchAll := false
+		for _, p := range paths {
+			if p == "/*" {
+				hasCatchAll = true
+			}
+		}
+		if hasCatchAll && len(paths) > 1 {
+			t.Errorf("%q is set on /* AND on %v.\n"+
+				"On Workers Static Assets those values are CONCATENATED, not "+
+				"replaced, so the /* value survives into every more specific "+
+				"rule. For Cache-Control that means a `no-cache` on /* defeats "+
+				"every `immutable` below it.",
+				name, paths)
+		}
+	}
+}

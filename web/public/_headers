@@ -13,14 +13,34 @@
 # side only. While both files exist they must say the same thing.
 #
 # Astro copies public/ verbatim into dist/, so this lands at dist/_headers, which
-# is where Pages looks. Pages consumes it and does not serve it as an asset.
+# is where Cloudflare looks. It is consumed rather than served as an asset.
 #
-# Rules are applied in order and a later rule overrides an earlier one for the
-# same header name, which is why the cache rules come after the catch-all.
+# WORKERS APPENDS, PAGES OVERRODE, AND THAT DIFFERENCE WAS A LIVE BUG.
+#
+# This file used to set `Cache-Control: no-cache` on /* and rely on the later,
+# more specific rules replacing it. That is Pages behaviour. On Workers Static
+# Assets the values are CONCATENATED, so a hashed asset was served as
+#
+#   Cache-Control: no-cache, public, max-age=31536000, immutable
+#
+# and RFC 9111 gives `no-cache` the last word: revalidate before use. Every
+# immutable asset asked the origin again on every navigation. Measured on the
+# live site: 11 of 11 assets returning 304, and the render-blocking stylesheet
+# costing ~588ms in front of first paint on each internal navigation.
+#
+# So no rule may set a header that a later rule also sets. The security headers
+# stay on /* because they belong on everything; Cache-Control is now stated once
+# per path class, and the HTML rule is scoped to the HTML rather than to /*.
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'self'; frame-ancestors 'none'
+
+# HTML must revalidate, or a deploy is invisible until caches expire. Scoped to
+# the built pages rather than /*, so it cannot leak onto a hashed asset.
+/
+  Cache-Control: no-cache
+/*.html
   Cache-Control: no-cache
 
 # Content-hashed by the build, so it can be cached hard and forever. Same
