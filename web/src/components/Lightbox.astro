@@ -51,8 +51,18 @@
     color: var(--color-fg, #edf2f8);
     overflow: hidden;
   }
+  /* THE BACKDROP FADES TOO, and it has to be driven from the same [open] state
+     as the box or the dimming snaps on while the picture eases in -- which reads
+     as a flash rather than a transition. */
   .lightbox::backdrop {
-    background: rgb(0 0 0 / 0.78);
+    background: rgb(0 0 0 / 0);
+    transition:
+      background 220ms ease,
+      overlay 220ms ease allow-discrete,
+      display 220ms ease allow-discrete;
+  }
+  .lightbox[open]::backdrop {
+    background: rgb(0 0 0 / 0.8);
   }
   .lightbox img {
     display: block;
@@ -109,15 +119,55 @@
     border-radius: 0.75rem;
   }
 
-  @media (prefers-reduced-motion: no-preference) {
+  /* OPEN AND CLOSE, not just open.
+     
+     A keyframe animation on [open] can only play forwards: the dialog leaves the
+     top layer the instant close() is called, so the picture vanishes while the
+     backdrop is still fading. `allow-discrete` is what makes the discrete
+     properties -- display, and the top-layer `overlay` -- animatable, so the
+     element stays visible for the length of the transition on the way out.
+     `@starting-style` supplies the "before it was open" values, which is
+     otherwise unexpressible for an element that did not previously render.
+     
+     Browsers without @starting-style skip straight to the end state, which is
+     exactly the previous behaviour: it appears and disappears. Nothing breaks. */
+  .lightbox {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+    transition:
+      opacity 220ms ease,
+      transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      overlay 220ms ease allow-discrete,
+      display 220ms ease allow-discrete;
+  }
+  .lightbox[open] {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  @starting-style {
     .lightbox[open] {
-      animation: lightbox-in 140ms ease-out;
+      opacity: 0;
+      transform: scale(0.97) translateY(6px);
     }
-    @keyframes lightbox-in {
-      from {
-        opacity: 0;
-        transform: scale(0.985);
-      }
+    .lightbox[open]::backdrop {
+      background: rgb(0 0 0 / 0);
+    }
+  }
+
+  /* A reader who has asked for less motion still gets the dimming, because that
+     is what communicates "the page behind is inert" -- it just arrives without
+     the scale and the travel. */
+  @media (prefers-reduced-motion: reduce) {
+    .lightbox,
+    .lightbox[open] {
+      transform: none;
+      transition:
+        opacity 1ms linear,
+        overlay 1ms allow-discrete,
+        display 1ms allow-discrete;
+    }
+    .lightbox::backdrop {
+      transition: none;
     }
   }
 </style>
