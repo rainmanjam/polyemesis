@@ -102,7 +102,17 @@ func pagesDeploySteps(t *testing.T) ([]pagesStep, string) {
 
 // ---------------------------------------------------------------- rule one
 
-var pagesOutputDirRE = regexp.MustCompile(`(?m)^\s*pages_build_output_dir\s*=\s*"([^"]+)"`)
+// publishCommand is matched against the step body, and it is the full command
+// rather than the word "deploy" on purpose: the run block also CONTAINS the
+// string "wrangler pages deploy" inside a comment explaining why it no longer
+// uses it, and a looser match would find the comment and call it the publish
+// step.
+const publishCommand = "npx --no-install wrangler deploy"
+
+// The Workers form. This read `pages_build_output_dir` until Cloudflare stopped
+// offering Pages project creation; the field it replaces served the identical
+// purpose, so the assertions below are unchanged in substance.
+var pagesOutputDirRE = regexp.MustCompile(`(?ms)^\s*\[assets\].*?^\s*directory\s*=\s*"([^"]+)"`)
 
 // checkBuildDistRE finds the directory web/scripts/check-build.mjs asserts
 // against: `new URL("../dist/", import.meta.url)`.
@@ -139,7 +149,7 @@ func TestThePagesDeployPublishesTheDirectoryTheSiteBuildsInto(t *testing.T) {
 	wrangler := readRepoFile(t, "web", "wrangler.toml")
 	m := pagesOutputDirRE.FindStringSubmatch(wrangler)
 	if m == nil {
-		t.Fatalf("web/wrangler.toml declares no pages_build_output_dir. Without "+
+		t.Fatalf("web/wrangler.toml declares no [assets] directory. Without "+
 			"it wrangler treats the file as local-development configuration only, "+
 			"warns, and deploys nothing -- and this test would have nothing to "+
 			"compare.\n%s", wrangler)
@@ -212,9 +222,9 @@ func TestThePagesPublishIsGatedOnACredentialAndTheBuildIsNot(t *testing.T) {
 	for i := range steps {
 		s := &steps[i]
 		switch {
-		case strings.Contains(s.Run, "pages deploy"):
+		case strings.Contains(s.Run, publishCommand):
 			if publish != nil {
-				t.Fatalf("two steps run `pages deploy` (%q and %q); this rule "+
+				t.Fatalf("two steps run `"+publishCommand+"` (%q and %q); this rule "+
 					"checks one gate and would leave the other unexamined.",
 					publish.label(), s.label())
 			}
@@ -228,7 +238,7 @@ func TestThePagesPublishIsGatedOnACredentialAndTheBuildIsNot(t *testing.T) {
 	}
 
 	if publish == nil {
-		t.Fatalf("no step in %s runs `pages deploy`. A workflow that publishes "+
+		t.Fatalf("no step in %s runs `"+publishCommand+"`. A workflow that publishes "+
 			"nothing satisfies every gate trivially, which is precisely the "+
 			"vacuous pass this file is written against.", pagesWorkflowPath)
 	}

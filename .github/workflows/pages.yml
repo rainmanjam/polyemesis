@@ -123,9 +123,15 @@ jobs:
           # version from the network at deploy time. Same argument release.yml
           # makes for pinning syft by SHA-256 instead of by version tag.
           #
-          # No directory and no --project-name: both come from wrangler.toml, so
-          # there is one place to change them and a test can read it.
-          npx --no-install wrangler pages deploy --branch main
+          # No directory and no --name: both come from wrangler.toml, so there is
+          # one place to change them and a test can read it.
+          #
+          # `wrangler deploy`, not `wrangler pages deploy`. Cloudflare no longer
+          # offers Pages project creation in its dashboard -- its create flow
+          # builds a Worker -- and `pages deploy` refused with `The Pages project
+          # "polyemesis" does not exist` with no supported way to make one. See
+          # the header of web/wrangler.toml.
+          npx --no-install wrangler deploy
 
       - name: What is left to do
         if: steps.gate.outputs.ready != 'true'

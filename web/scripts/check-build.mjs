@@ -242,7 +242,7 @@ if (!recordingRowChecked) {
 
 /* 8. `_headers` has to reach the root of the UPLOADED directory.
  *
- * Cloudflare Pages reads exactly one path for response headers: `_headers` at
+ * Cloudflare reads exactly one path for response headers: `_headers` at
  * the top of the deployed output. Nothing else — not a subdirectory, not
  * public/_headers, which is a source path Pages never sees. Put it anywhere but
  * there and Pages ignores it in silence: no warning at deploy time, no error at
