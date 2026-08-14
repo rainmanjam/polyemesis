@@ -42,8 +42,20 @@
 # so every download in the shipped product was rejected. A weekly run that skips
 # the check that has already caught a shipped defect is not worth scheduling.
 #
-# COST PER RUN: one 74 MB model, one 9 MB whisper.cpp release, and the apt
-# ffmpeg. Under four minutes.
+# COST PER RUN, MEASURED rather than estimated: 37 seconds wall clock for the
+# whole job on ubuntu-latest -- 16s FFmpeg, 1s whisper.cpp, 5s for all nineteen
+# checks including the 74 MB transfer, and the rest checkout and Go. The first
+# estimate written here was "under four minutes"; the measurement is what
+# belongs in a comment somebody will plan against.
+#
+# THAT NUMBER IS NOT AN ARGUMENT FOR MOVING IT TO ci.yml, and it is worth saying
+# so where the next person will read it. What decides the home is not the cost
+# but WHOSE behaviour is being measured: on every push this would put twenty
+# catalogue probes and a 74 MB transfer against huggingface.co behind every
+# commit in the repository, which is the "network dependency on somebody else's
+# server, run on every push, is a flake generator" that chat-live, oauth-live
+# and automod-live each declined. The paths filter already covers the case where
+# our own code changed.
 #
 # THE MODEL IS NOT CACHED, AND MUST NOT BE. The driver deletes any cached copy
 # before it calls Download, and says why: Download returns immediately with
