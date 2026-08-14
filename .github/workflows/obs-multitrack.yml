@@ -28,12 +28,18 @@
 # the negative and fails loudly on a third track (OBS_SENDS in the script) —
 # what it lacked was anything to run it.
 #
-# WHY ITS OWN WORKFLOW AND NOT ci.yml's ACCEPTANCE MATRIX. Measured, on an
-# Apple Silicon laptop:
+# WHY ITS OWN WORKFLOW AND NOT ci.yml's ACCEPTANCE MATRIX. Measured on an Apple
+# Silicon laptop, and then again on ubuntu-latest by this workflow's first run:
 #
-#   cold `docker build` of the OBS image     88s, 1.03 GB
-#   suite wall clock with the image warm     41s and 44s over two runs
-#   OBS start to RTMP connect                26.8s of that
+#                                          laptop      hosted runner
+#   cold `docker build` of the OBS image   88s          46s, 1.03 GB
+#   suite wall clock                       41-46s       80s (cold image)
+#   OBS start to RTMP connect              26.8s        26.8s
+#
+# The runner builds the image FASTER than the laptop does — an amd64 archive
+# fetch on Azure's network against arm64 ports.ubuntu.com over domestic DNS.
+# Worth recording because the laptop number is the one that would have been
+# guessed from, and it is the pessimistic one.
 #
 # Two minutes and a gigabyte on every push, to re-measure a third party that
 # ships a few times a year, is the wrong trade — and ci.yml's own header already
@@ -45,10 +51,11 @@
 # NO CACHE FOR THE IMAGE, and that is a measurement rather than an oversight.
 # actions/cache would spend ~1 GB of a 10 GB repository-wide budget that
 # cache-prune.yml already runs DAILY to defend — this repository reached 9.65 GB
-# — to avoid 88 seconds, before counting the save and restore of the tarball
-# itself, which is not free either. Caching here would evict live main-branch Go
-# module caches to save less time than it costs. Rebuilding is the cheap option;
-# it is only expensive if you never measured it.
+# — to avoid FORTY-SIX SECONDS, before counting the save and restore of a
+# gigabyte tarball, which is not free and is plausibly slower than the build it
+# replaces. Caching here would evict live main-branch Go module caches to buy
+# negative time. Rebuilding is the cheap option; it is only expensive if you
+# never measured it.
 #
 # THE FFMPEG CACHE IS REUSED, not added. The key below is byte-identical to
 # ci.yml's, so this workflow restores an entry that already exists and creates
@@ -188,13 +195,19 @@ jobs:
         # step still leaves the diagnostics below their chance to run.
         timeout-minutes: 15
         env:
-          # 60 is 2.2x the 26.8s measured on an Apple Silicon laptop, which is
-          # the fastest hardware this runs on. A 4-vCPU hosted runner starting a
-          # GUI application and compositing a scene through llvmpipe in software
-          # has no reason to match that, and the failure would read as "OBS was
-          # refused" rather than "OBS was slow". Raised here rather than in the
-          # script, so the local run keeps the tighter number that would notice
-          # a real regression in startup time.
+          # The script's default is 60, against 26.8s measured locally. This
+          # workflow's first run measured the hosted runner at 26.8s TOO — the
+          # prediction that a 4-vCPU runner compositing through llvmpipe would
+          # be slower was simply wrong, and the honest thing is to say so rather
+          # than leave a number standing on a guess that did not survive.
+          #
+          # It is still raised, for a different and smaller reason: a runner
+          # having a bad day is the failure this hides, and it hides it badly —
+          # a timeout here reports "OBS never connected", which reads as a
+          # refused handshake and sends the next person to look at stream keys.
+          # 180 buys that misdiagnosis out for the price of nothing on a green
+          # run. The script keeps the tighter 60 locally, where a real
+          # regression in OBS startup time is worth hearing about.
           CONNECT_WAIT: "180"
         run: ./scripts/acceptance-obs-multitrack.sh
 
