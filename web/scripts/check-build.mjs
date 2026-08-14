@@ -68,10 +68,45 @@ if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
 // --color-bg does not exist in this theme; the page paints --color-ink.
 {
   const flat = css.replace(/\s+/g, "");
-  if (!/\.cmp[^{]*first-child\)?\{[^}]*position:sticky/.test(flat)) {
-    fail.push("comparison tables have no sticky first column — the row label scrolls away from its Yes/No cells on mobile");
-  } else if (/\.cmp[^{]*first-child\)?\{[^}]*background:var\(--color-bg\)/.test(flat)) {
-    fail.push("sticky comparison column uses `--color-bg`, which this theme does not define — it resolves to transparent and cells scroll under the label");
+  if (!/first-child\)?\{[^}]*position:sticky/.test(flat)) {
+    fail.push("wide tables have no sticky first column — the row label scrolls away from its cells on mobile");
+  } else if (/first-child\)?\{[^}]*background:var\(--color-bg\)/.test(flat)) {
+    fail.push("sticky column uses `--color-bg`, which this theme does not define — it resolves to transparent and cells scroll under the label");
+  }
+  /* BOTH class names, because the fix was applied to one and not the other.
+     .cmp got it; .patch -- the interactive routing matrix on the home page, the
+     worse case at 403px of 736 hidden -- was missed for a full commit. A check
+     naming only the class that was fixed would have passed throughout. */
+  for (const cls of ["cmp", "patch"]) {
+    if (!new RegExp(`\\.${cls}[,)][^{]*first-child`).test(flat)) {
+      fail.push(`.${cls} tables are not in the sticky-first-column rule — their label column scrolls away on mobile`);
+    }
+  }
+  /* TWO PSEUDO-ELEMENT AFFORDANCES, and both need a haystack wider than the
+     CSS bundle plus a pattern looser than the source spelling.
+
+     WHERE. Astro inlines a component's scoped styles into the pages that use
+     it, so `.shot-open`'s rule is in features.html and in NO file under
+     _astro/. A check reading only the bundle reports it missing on a build
+     where it is present and working -- which is how the first version of this
+     check failed, against a glyph already verified in a browser.
+
+     HOW SPELLED. Lightning CSS rewrites `::after` to the CSS2 `:after`, which
+     is two bytes shorter and identical in meaning. Matching the source
+     spelling finds nothing in the output. `::?after` accepts either. */
+  const built = flat + readdirSync(DIST)
+    .filter((f) => f.endsWith(".html"))
+    .map((f) => readFileSync(join(DIST, f), "utf8").replace(/\s+/g, ""))
+    .join("");
+
+  if (!/\.scroll-hint::?after\{/.test(built)) {
+    fail.push("no `.scroll-hint::after` in the built output — wide tables give no sign they scroll on mobile");
+  }
+  /* The lightbox expand glyph. `cursor: zoom-in` is the only other affordance
+     and it does not exist on a touch device -- which is the viewport where the
+     screenshots are smallest and expanding them matters most. */
+  if (!/\.shot-open::?after\{/.test(built)) {
+    fail.push("no `.shot-open::after` in the built output — the lightbox is undiscoverable on touch, where `cursor: zoom-in` means nothing");
   }
 }
 
