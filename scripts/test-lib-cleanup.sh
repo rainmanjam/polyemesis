@@ -323,14 +323,21 @@ rm -rf "$WORK9"
 
 step "10. Every suite installs that exact trap, not its own variant"
 # Case 9 proves the SHAPE works. This proves the shape is what the suites
-# actually carry -- twelve files is eleven chances to drift, and a suite that
+# actually carry -- thirteen files is twelve chances to drift, and a suite that
 # quietly reverted to `trap 'poly_watchdog_disarm; cleanup' EXIT` would go back
 # to discarding the verdict while every check above still passed.
+#
+# acceptance-obs-multitrack.sh was added here when it adopted the shared trap,
+# and the reason it had not is the reason this list matters: it was the only
+# host suite still signalling its server and returning, and running it twice
+# back to back bound :1935 twice and failed. A list that does not grow with the
+# suites is a list that stops being a census.
 #
 # Identity, not count: the offending files are named.
 SUITES="acceptance.sh acceptance-audio.sh acceptance-encoders.sh acceptance-failover.sh
 acceptance-mqtt.sh acceptance-playlist-phase0.sh acceptance-postprod.sh acceptance-pull.sh
-acceptance-recording-stop.sh acceptance-renditions.sh acceptance-synth.sh acceptance-tls.sh"
+acceptance-recording-stop.sh acceptance-renditions.sh acceptance-synth.sh acceptance-tls.sh
+acceptance-obs-multitrack.sh"
 missing=""
 checked=0
 for s in $SUITES; do
@@ -342,12 +349,12 @@ for s in $SUITES; do
 	grep -Fqx "$TRAP_SHAPE" "$SCRIPTS/$s" || missing="$missing $s"
 	grep -q "poly_cleanup_exit" "$SCRIPTS/$s" || missing="$missing $s(no-poly_cleanup_exit)"
 done
-if [[ "$checked" -ne 12 ]]; then
-	bad "only $checked of 12 named suites exist; a renamed suite would make this check pass by examining nothing"
+if [[ "$checked" -ne 13 ]]; then
+	bad "only $checked of 13 named suites exist; a renamed suite would make this check pass by examining nothing"
 elif [ -n "$missing" ]; then
 	bad "these suites do not carry the shared trap shape:$missing"
 else
-	ok "all 12 suites carry the shared trap and call poly_cleanup_exit"
+	ok "all 13 suites carry the shared trap and call poly_cleanup_exit"
 fi
 
 total=$((pass + fail))
