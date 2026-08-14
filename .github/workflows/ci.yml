@@ -303,7 +303,26 @@ jobs:
       # package under three different selections and requires the numbers to
       # differ. ~60s, dominated by the unfiltered probe, which is the number
       # anybody would actually quote.
+      # THE STEP TIMEOUT THE FOUR BELOW GOT AND THIS ONE DID NOT, and on
+      # 2026-08-14 this is the step that hung: 24 minutes against a measured
+      # 98-114s, until the job's own ceiling cancelled it and named nothing.
+      #
+      # It can hang for a reason the note at :360 already gives about the
+      # watchdog -- "a background process holding the suite's stdout ... does
+      # not merely fail to report, it becomes the hang". The guard captures each
+      # probe with `out="$(go test ...)"`, and command substitution blocks until
+      # the pipe has no writers left, NOT until go test exits. A test that
+      # leaks a child holding inherited stdout hangs the capture after the test
+      # binary is gone and after Go's own timeout has already fired, so Go's
+      # diagnostic cannot be the backstop here. Only this can.
+      #
+      # 14 rather than something tighter, so the ordering the file argues for
+      # everywhere else holds: three probes at -timeout 4m is 12m of worst case,
+      # and Go has to be able to win that race and print the goroutine dump
+      # before this fires. Below the job's 25 either way, which is the property
+      # being claimed.
       - name: internal/api coverage measures the tests, not the preflight
+        timeout-minutes: 14
         run: make coverage-instrument-guard
 
       # -race because the engine reconciles from several goroutines and a data

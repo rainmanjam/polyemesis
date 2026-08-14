@@ -43,7 +43,18 @@ pct() {
 	local label="$1"
 	shift
 	local out
-	if ! out="$(go test -count=1 -covermode=set "$@" ./internal/api 2>&1)"; then
+	# -timeout, because the default is 10 MINUTES PER PROBE and there are three
+	# of them. 30 minutes of worst case sat behind ci.yml's timeout-minutes: 25,
+	# so this guard could not fire before the ceiling above it -- the job died
+	# saying "cancelled" and naming nothing. Measured at 0.9s + 0.8s + 57.2s
+	# locally and 98-114s for the whole step on ubuntu-latest, so 4m per probe
+	# is ~3x the slowest real one and 12m worst case, which fits under the step
+	# timeout ci.yml now carries.
+	#
+	# Go's own timeout is the one worth having: it panics with a goroutine dump
+	# naming the test that was running, where a step timeout only names the
+	# step. That is why it is set here and set BELOW the step's.
+	if ! out="$(go test -count=1 -timeout 4m -covermode=set "$@" ./internal/api 2>&1)"; then
 		echo "coverage-instrument-guard: the probe '$label' did not pass:" >&2
 		echo "$out" >&2
 		exit 1
