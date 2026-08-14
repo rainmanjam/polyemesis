@@ -70,7 +70,7 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 94,
+  "total": 95,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
@@ -79,7 +79,7 @@
     "internal/config": 1,
     "internal/db": 3,
     "internal/engine": 6,
-    "internal/ffmpeg": 22,
+    "internal/ffmpeg": 23,
     "internal/media": 5,
     "internal/meters": 3,
     "internal/playlistmedia": 5,
@@ -118,6 +118,19 @@
       "notPaidDown": "#190's OTHER half is untouched and is not claimed here. internal/ffmpeg's TestProbeFileReturnsWhenItsContextIsCancelled stands a shell script in precisely BECAUSE the script leaves a grandchild holding the stdout pipe, which is what bounds cmd.WaitDelay; a single-process Go helper cannot produce that shape, and producing it on Windows is a statement about Windows process trees rather than about portable Go. internal/ffmpeg's TestACountThatWasCutShortIsNotAVerdictAboutTheFile and the Windows arm of TestARefusalNamesWhyTheCountFailedRatherThanNil are the same class. internal/ffmpeg stays at 22.",
       "handEditedRatherThanRegenerated": "For the reason every entry above records: `go test ./internal/testenv -run TestNoNewBareSkipCanLand -update-skips` produces exactly these two numbers and DELETES every reason in this file on the way past, because skipCensus has no field for them. Both were lowered by hand. Regeneration also still drops internal/supervisor, whose count remains 0 against a committed 1 -- left alone here for the reason PR 218's entry gives, that it is an unrelated change and sweeping it in would hide this one. The committed total is therefore 92 against a measured 91, and the difference is that one stale supervisor entry, not this change.",
       "notRewritten": "The raisedBy entry for PR 118 still says internal/api's fakeProbe is a shell script and still points at #190. It is left as written: it records what was true when it was written, and #265 was split out of #190 afterwards. This entry is the update."
+    }
+  ],
+  "raisedBy4": [
+    {
+      "pr": 343,
+      "from": 94,
+      "to": 95,
+      "packages": {
+        "internal/ffmpeg": "22 -> 23"
+      },
+      "why": "ONE site, for TestAVFRSourceKeepsItsTimingThroughARendition, which closes #342. The test measures real frame timing through a real encode, so it needs ffmpeg AND ffprobe on the machine and can do nothing useful with either alone. Written as a single skip rather than the two LookPath skips the neighbouring tests use, because the condition really is one condition -- the census should count what is true, not how many if-statements express it.",
+      "whyNotAvoidable": "The alternative is asserting on the argv instead of on an encode, and that is exactly what #342 said was missing: RenditionArgs was already readable and nobody could say what the frames did. A test that reads the same flags a second time would have added no information. Verified by mutation -- adding `-fps_mode cfr` takes the fixture from 72 frames to 120, and only a real encode can see that.",
+      "handEditedRatherThanRegenerated": "Same reason as every entry above: -update-skips only records a count that has FALLEN, so a deliberate raise has to be written down with its reason rather than absorbed."
     }
   ]
 }

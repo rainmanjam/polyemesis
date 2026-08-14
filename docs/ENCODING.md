@@ -134,13 +134,27 @@ interval breaks HLS and DASH packaging on the platform side.
 |---|---|---|
 | Constant, at a rate you choose | Yes | `-r` is emitted when a rendition sets FPS |
 | Source rate passed through | Yes | when FPS is unset, nothing is emitted |
-| Explicit VFR → CFR normalisation | **No** | `-fps_mode` and `-vsync` are never set; FFmpeg's default applies |
+| VFR → CFR normalisation | **Deliberately not done** | `-fps_mode` and `-vsync` are never set |
 
-A variable-frame-rate source — screen capture, some phone encoders — is not
-normalised. Under `-c:v copy` that is fine and the timing passes through
-untouched. Through a rendition the result depends on FFmpeg's default handling
-rather than on anything this project decided, and nothing tests it. Tracked
-in #342.
+A variable-frame-rate source — screen capture, some phone encoders — passes
+through a rendition with **its timing intact**. Measured on a fixture that is 30
+fps nominal and about 18 fps actual: 72 frames over 3.967 s in, 72 frames over
+3.967 s out. Nothing is dropped, nothing is duplicated, and the presentation
+timestamps are carried through unchanged. Under `-c:v copy` the same is true for
+the simpler reason that nothing touches the stream at all.
+
+**Forcing CFR would be worse, and this was measured too.** Adding
+`-fps_mode cfr` to the same fixture takes 72 frames to 120 — 48 duplicated
+frames filling the gaps where the source had nothing to say, 66% more encoded
+frames for no additional information. The default is the right behaviour, and
+`TestAVFRSourceKeepsItsTimingThroughARendition` now fails if it changes.
+
+One measurement trap, recorded because it produced a false alarm first: ffprobe
+reports a **uniform** `duration_time` for every frame of an MPEG-TS, because the
+container does not store per-frame durations and ffprobe derives them from
+`r_frame_rate`. Read that field and a VFR stream looks like it was silently
+resampled to CFR and lost a fifth of its running time. It was not. Presentation
+timestamps are the ground truth; `duration_time` on MPEG-TS is a guess. #342.
 
 ---
 
