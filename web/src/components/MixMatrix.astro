@@ -1,4 +1,5 @@
 ---
+import CodeBlock from "./CodeBlock.astro";
 /* The patchbay, playable.
  *
  * This is the whole product in one control. Every other restreamer sends the
@@ -133,19 +134,14 @@ const DESTS = [
     </button>
   </div>
 
-  <div class="mt-8 overflow-hidden rounded-token border border-line bg-ink">
-    <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
-      <span class="font-mono text-xs text-subtle">the routing you just built</span>
-      <button
-        type="button"
-        id="mm-copy"
-        class="rounded border border-line-strong px-2.5 py-1 font-mono text-[11px] text-muted transition-colors hover:border-primary hover:text-fg"
-      >
-        Copy
-      </button>
-    </div>
-    <pre class="overflow-x-auto px-4 py-4 font-mono text-xs leading-relaxed text-muted"><code id="mm-yaml"></code></pre>
-  </div>
+  {/* The third code treatment on the site, until this used the shared
+      component. Its Copy button was also a second implementation of the same
+      twenty lines -- read textContent, write clipboard, say "Copied", restore
+      after 1600ms -- which CodeBlock already does, and does slightly better:
+      when the clipboard is refused it selects the text instead of only saying
+      so. The content is written by the script below; textContent is read at
+      click time, so a block that is empty at build works unchanged. */}
+  <CodeBlock label="the routing you just built" code="" codeId="mm-yaml" class="mt-8" />
 </section>
 
 <script>
@@ -286,18 +282,6 @@ const DESTS = [
     render();
   });
 
-  document.getElementById("mm-copy")?.addEventListener("click", async (e) => {
-    const btn = e.currentTarget as HTMLButtonElement;
-    try {
-      await navigator.clipboard.writeText(yamlEl?.textContent ?? "");
-      btn.textContent = "Copied";
-    } catch {
-      // Clipboard is unavailable on an insecure origin — say so rather than
-      // reporting a success that did not happen.
-      btn.textContent = "Select and copy";
-    }
-    setTimeout(() => (btn.textContent = "Copy"), 1600);
-  });
 
   render();
 </script>

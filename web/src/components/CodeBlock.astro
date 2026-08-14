@@ -1,0 +1,209 @@
+---
+/* ONE code block, because there were three.
+ *
+ * Measured across the site before this existed: /download used radius 4px on
+ * --color-ink at 12px, /comparison radius 8px on surface/60 at 11px, and the
+ * matrix a third treatment again with a header bar. Three radii, three
+ * backgrounds, two type sizes, for the same kind of content on three pages of
+ * one site. Nobody chose that; it is what happens when the styling lives at
+ * each use site.
+ *
+ * COPY IS THE POINT, not decoration. The install command on /download measured
+ * 558px of content in a 283px box at a 390px viewport -- 49% of it off-screen
+ * behind an in-box scroll, with no way to copy it. That is the one string on
+ * the entire site that has to reach a terminal verbatim, and a reader on a
+ * phone could neither read it nor take it.
+ *
+ * WRAPPING RATHER THAN SCROLLING, below 40rem. A horizontally scrolling command
+ * hides its own tail; a wrapped one is fully visible and still copies as a
+ * single line, because the wrapping is presentational and the newlines in the
+ * source are the only ones in the text. `overflow-wrap: anywhere` is needed for
+ * the URL in the curl line, which has no break opportunity a normal wrap would
+ * take.
+ */
+interface Props {
+  /** Shown in the header bar. Omit for no bar. */
+  label?: string;
+  /** The literal text. Copied verbatim; whitespace is preserved. */
+  code: string;
+  /* A QUOTATION IS NOT AN INSTRUCTION, and this is where the review's
+   * recommendation is partly declined on purpose.
+   *
+   * The review counted three code-block treatments and asked for one. Two of
+   * them are commands a reader runs; the third is an excerpt quoted from a
+   * COMPETITOR'S configuration on /comparison, shown as evidence for a claim
+   * about what that product does. Giving it a Copy button would invite someone
+   * to paste a rival's config into their own terminal, and styling it
+   * identically to our install commands would say it is one.
+   *
+   * So the box, border, radius and type unify -- that part of the drift was
+   * accidental and is now gone -- and the difference that carries meaning is
+   * kept, declared, and explained rather than left to each use site. */
+  variant?: "command" | "quote";
+  /* An id on the <code>, for a block whose text is written by script rather
+   * than by the page. The routing matrix fills its own filtergraph in as you
+   * click crosspoints; it still wants this component's box and its Copy button,
+   * which reads textContent at click time and so needs no special handling for
+   * content that was not there at build. */
+  codeId?: string;
+  class?: string;
+}
+
+const { label, code, variant = "command", codeId, class: extra } = Astro.props;
+const copyable = variant === "command";
+---
+
+<div class:list={["code", variant === "quote" && "code-quote", extra]}>
+  {
+    label && copyable && (
+      <div class="code-bar">
+        <span class="code-label">{label}</span>
+        {/* "Copy: <label>" rather than "Copy the <label> command", which read as
+            "Copy the the routing you just built command" once a label was a
+            phrase rather than a single word -- and called a filtergraph a
+            command. The colon carries the relationship without assuming the
+            label's grammar. */}
+        <button type="button" class="code-copy" data-code-copy aria-label={`Copy: ${label}`}>
+          Copy
+        </button>
+      </div>
+    )
+  }
+  {
+    /* The button sits inside the box when there is no bar, so a block without a
+       label is still copyable rather than silently losing the affordance. */
+    !label && copyable && (
+      <button type="button" class="code-copy code-copy-float" data-code-copy aria-label="Copy this command">
+        Copy
+      </button>
+    )
+  }
+  <pre><code id={codeId}>{code}</code></pre>
+</div>
+
+<style>
+  .code {
+    position: relative;
+    margin-top: 1rem;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-token);
+    background: var(--color-ink);
+    overflow: hidden;
+  }
+  /* Quoted evidence, not an instruction. Same box and type as a command block
+     so the page stays coherent; a different ground so it does not read as
+     something to run. */
+  .code-quote {
+    background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+  }
+  .code-quote pre {
+    font-size: 0.6875rem;
+    color: var(--color-fg);
+  }
+  .code-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+    border-bottom: 1px solid var(--color-line);
+    background: var(--color-surface);
+  }
+  .code-label {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-subtle);
+  }
+  .code pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.75rem;
+    line-height: 1.65;
+    color: var(--color-muted);
+  }
+  /* WRAP INSTEAD OF SCROLL on a phone. See the note at the top: a command that
+     scrolls sideways inside its own box hides its own tail, and the tail of an
+     install command is where the flags are. */
+  @media (max-width: 40rem) {
+    .code pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  .code-copy {
+    flex-shrink: 0;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.375rem;
+    background: var(--color-ink);
+    color: var(--color-muted);
+    font-size: 0.6875rem;
+    cursor: pointer;
+    transition:
+      color 140ms ease,
+      border-color 140ms ease;
+  }
+  .code-copy:hover {
+    color: var(--color-fg);
+    border-color: var(--color-primary);
+  }
+  .code-copy:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+  /* Floating variant, for a block with no header bar. Top right, where it does
+     not sit over the beginning of the first line. */
+  .code-copy-float {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 1;
+    background: rgb(11 13 17 / 0.85);
+    backdrop-filter: blur(4px);
+  }
+  /* The confirmation. Text rather than a colour change alone, because a colour
+     shift on a small control is easy to miss and says nothing to a screen
+     reader -- the label itself changing is announced. */
+  .code-copy[data-copied="true"] {
+    color: var(--color-live);
+    border-color: var(--color-live);
+  }
+</style>
+
+<script>
+  for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-code-copy]")) {
+    btn.addEventListener("click", async () => {
+      const block = btn.closest(".code");
+      const text = block?.querySelector("code")?.textContent ?? "";
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Clipboard is refused on insecure origins and by some privacy settings.
+        // Selecting the text is the honest fallback: the reader still gets the
+        // command in one gesture, and nothing claims a copy that did not happen.
+        const code = block?.querySelector("code");
+        if (code) {
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
+        return;
+      }
+      const was = btn.textContent;
+      btn.textContent = "Copied";
+      btn.dataset.copied = "true";
+      window.setTimeout(() => {
+        btn.textContent = was;
+        delete btn.dataset.copied;
+      }, 1600);
+    });
+  }
+</script>

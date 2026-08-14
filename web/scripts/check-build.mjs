@@ -110,6 +110,29 @@ if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
   }
 }
 
+/* Code blocks go through the CodeBlock component, not hand-rolled <pre>.
+ *
+ * There were three treatments before it existed -- radius 0, 4 and 8, three
+ * backgrounds, two type sizes -- for the same kind of content on three pages of
+ * one site. Nobody chose that. It is what happens when the styling lives at each
+ * use site, and it will happen again the next time someone needs a code block
+ * in a hurry.
+ *
+ * Checked against the BUILT pages rather than the source, so it sees what a
+ * reader gets. The component emits `<pre>` inside `.code`; a hand-rolled one has
+ * no such ancestor, and the class attribute Tailwind leaves on it is the tell.
+ */
+for (const f of readdirSync(DIST).filter((n) => n.endsWith(".html"))) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  const handRolled = [...html.matchAll(/<pre\s+class="[^"]+"/g)];
+  if (handRolled.length) {
+    fail.push(
+      `${f}: ${handRolled.length} hand-styled <pre> — use the CodeBlock component so every code block shares one radius, ground and size\n` +
+        `    ${handRolled[0][0].slice(0, 100)}`,
+    );
+  }
+}
+
 // 3+4. Internal links and fragments must resolve to something that was built.
 /* The motion tokens have to survive minification as VARIABLES.
  *
