@@ -223,6 +223,47 @@ if [ -n "$VID" ]; then
 fi
 rm -rf "$OUT/.playwright"
 
+# Quantise to a 256-colour palette. HERE rather than as a hand-run afterthought,
+# because the shots are committed and shipped: a manual step gets skipped once
+# and every later capture is silently twice the size it needs to be.
+#
+# WHY IT WORKS SO WELL. A UI screenshot is mostly flat fills, one-pixel borders
+# and antialiased text over those fills, so it uses far fewer than 256 distinct
+# colours to begin with. Measured across the 17 shots: 61% smaller, RMSE 0.06%
+# to 0.15% of range.
+#
+# AND WHY NOT ALSO RESIZE. Downscaling makes the compression WORSE here, which
+# is the opposite of the intuition. Resampling invents intermediate colours
+# along every edge, which defeats both the palette and PNG's row filters: at
+# 2304px the same quantisation saved only 42.6%, and 02-routing.png came out
+# 19% LARGER than its full-resolution self. The site's lightbox also expands
+# these to 1152 CSS px, so at dpr 2 it wants 2304 anyway -- there is no width to
+# give back. Quantise, do not resize.
+#
+# Skipped rather than fatal if Pillow is absent: this runs on laptops, and a
+# missing optional dependency should cost bytes, not the whole capture.
+echo "==> compressing"
+if python3 -c "import PIL" 2>/dev/null; then
+  python3 - "$OUT" <<'PY'
+import glob, os, sys
+from PIL import Image
+
+before = after = 0
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.png"))):
+    was = os.path.getsize(path)
+    im = Image.open(path).convert("RGB")
+    im.quantize(colors=256, method=Image.MEDIANCUT,
+                dither=Image.FLOYDSTEINBERG).save(path, optimize=True)
+    now = os.path.getsize(path)
+    before, after = before + was, after + now
+if before:
+    print(f"    {before // 1024}K -> {after // 1024}K "
+          f"({100 - 100 * after / before:.0f}% smaller, resolution unchanged)")
+PY
+else
+  echo "    skipped: python3 with Pillow not found, shots left unquantised"
+fi
+
 echo
 echo "==> done"
 ls -la "$OUT"

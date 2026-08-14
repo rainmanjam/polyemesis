@@ -5,7 +5,23 @@ const links = [
   { href: "/docs", label: "Docs" },
   { href: "/download", label: "Install" },
 ];
-const here = Astro.url.pathname;
+/* NORMALISED, because this build emits FLAT FILES.
+ *
+ * Astro.url.pathname is "/features.html" here, not "/features" -- the site
+ * builds to dist/features.html and the Worker serves it at /features via
+ * html_handling. So the obvious comparison against the link href was false on
+ * every page, and the nav marked NOTHING as current: no aria-current for a
+ * screen reader, and every link painted text-muted including the one you were
+ * already on.
+ *
+ * It failed silently in the direction that looks fine. A nav where nothing is
+ * highlighted reads as a design choice rather than a broken comparison, which
+ * is why it survived the move to Workers.
+ *
+ * Both suffixes are stripped so this holds whichever way the output format is
+ * configured later, and "" collapses back to "/" for the home page.
+ */
+const here = Astro.url.pathname.replace(/\.html$/, "").replace(/\/+$/, "") || "/";
 const active = (href: string) => here === href || here.startsWith(href + "/");
 ---
 
@@ -73,8 +89,18 @@ const active = (href: string) => here === href || here.startsWith(href + "/");
     >
       <div class="wrap flex flex-col py-2">
         {
+          /* The same current-page treatment as the desktop nav. This menu is
+             the ONLY navigation on a phone, so leaving it unmarked is the case
+             that matters most, not the lesser one. */
           links.map((l) => (
-            <a href={l.href} class="rounded-md px-2 py-2.5 text-sm text-muted hover:text-fg">
+            <a
+              href={l.href}
+              aria-current={active(l.href) ? "page" : undefined}
+              class:list={[
+                "rounded-md px-2 py-2.5 text-sm",
+                active(l.href) ? "text-fg" : "text-muted hover:text-fg",
+              ]}
+            >
               {l.label}
             </a>
           ))

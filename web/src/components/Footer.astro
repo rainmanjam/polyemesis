@@ -1,4 +1,25 @@
 ---
+/* READ FROM GIT, NOT TYPED. A hand-written version in a marketing page is a
+ * claim that goes stale in silence, and a stale one is worse than none -- it
+ * says "last touched at 0.4" about a project on 0.6.
+ *
+ * The tag is resolved at build time from the repository the site is built in.
+ * If that fails -- a shallow clone, a tarball, no tags -- the whole line is
+ * omitted rather than a guess being printed. The build still succeeds; the
+ * footer just says less.
+ */
+import { execSync } from "node:child_process";
+
+let version = "";
+try {
+  version = execSync("git describe --tags --abbrev=0", {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+} catch {
+  version = "";
+}
+
 const cols = [
   {
     title: "Product",
@@ -46,11 +67,39 @@ const cols = [
         A self-hosted restreaming server with per-destination multichannel audio
         routing. One static binary, MIT licensed.
       </p>
+      {/* "IS THIS MAINTAINED" IS THE QUESTION THAT STOPS THE DOWNLOAD, and the
+          site answered it nowhere. Two reviews flagged it independently, from
+          different briefs: one as a trust signal, one as project-continuity
+          risk.
+
+          The version is read from the release at build time rather than typed,
+          because a hand-written version is a claim that goes stale silently --
+          and a stale one is worse than none. */}
+      {version && (
+      <p class="mt-4 text-sm text-subtle">
+        <a
+          href={`https://github.com/rainmanjam/polyemesis/releases/tag/${version}`}
+          class="font-mono text-muted transition-colors hover:text-fg"
+          rel="noopener"
+        >{version}</a>
+        <span class="mx-1.5 opacity-40">·</span>
+        <a
+          href="https://github.com/rainmanjam/polyemesis/blob/main/CHANGELOG.md"
+          class="text-muted transition-colors hover:text-fg"
+          rel="noopener"
+        >Changelog</a>
+      </p>
+      )}
     </div>
     {
       cols.map((c) => (
         <div>
-          <h2 class="font-mono text-[11px] uppercase tracking-wider text-subtle">{c.title}</h2>
+          {/* NOT <h2>. These are four-word column labels -- "Product", "Docs",
+              "Project" -- and as headings they landed in every page's outline
+              between the real content headings, so a screen-reader user
+              navigating by heading met three footer labels on every page. A
+              paragraph carries the same styling and no structural claim. */}
+          <p class="font-mono text-[11px] uppercase tracking-wider text-subtle">{c.title}</p>
           <ul class="mt-3 space-y-2">
             {c.links.map((l) => (
               <li>
