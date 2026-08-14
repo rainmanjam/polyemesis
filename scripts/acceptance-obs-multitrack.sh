@@ -117,7 +117,7 @@ ffmpeg -hide_banner -loglevel error \
   -map 0:a -map 1:a -c:a aac -f flv -y "$MT/mt.flv" > "$MT/err" 2>&1
 SEEN=$(ffprobe -hide_banner -loglevel error -select_streams a \
          -show_entries stream=index -of csv=p=0 "$MT/mt.flv" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$SEEN" = "2" ]; then
+if [[ "$SEEN" == "2" ]]; then
   ok "host FFmpeg can demux multitrack FLV — $(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3)"
 else
   bad "host FFmpeg cannot demux multitrack FLV: a 2-track round trip came back as $SEEN"
