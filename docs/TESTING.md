@@ -425,6 +425,18 @@ argv, log and artifact. See issue #141 for why the question it asks is
 "does each destination receive ITS mix" rather than "does a platform accept two
 audio tracks".
 
+The *other* half of that question — can a destination SEND two audio tracks at
+all — is measured in-process instead, by
+`internal/ffmpeg.TestTwoDistinctMixesReachAnRTMPFarEnd`. It publishes the argv
+`DestinationArgs` builds through a real FFmpeg into `internal/rtmpserver` (the
+listener this product ships, not a permissive `ffmpeg -listen 1`), records what
+arrives, and reads the 300 Hz / 5000 Hz tones off each received track — the same
+bandpass idiom the multistream suite uses on each platform's far end. It needs
+no credentials and runs in CI. What it establishes is mechanical: two distinct
+mixes survive polyemesis's own RTMP egress and arrive as two different tracks.
+Whether any PLATFORM accepts a second track is still the unanswered half, and
+still needs a real account to answer.
+
 Two more do **not** drive the built binary and need no `make build`. They drive
 one package against a socket, which is the gap `docs/notes/live-test-coverage-
 gaps.md` ranks: seventeen suites, and until these were written exactly one of
