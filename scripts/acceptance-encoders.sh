@@ -425,6 +425,51 @@ else
   fi
 fi
 
+# ============================================================== 5. an HEVC encode
+#
+# Every leg above encodes H.264, and H.264 cannot show the defect this step
+# exists for. `-profile:v high` is an H.264 profile name; the HEVC encoders
+# REFUSE it rather than ignoring it -- `x265 [error]: unknown profile <high>` --
+# so an HEVC row copied across from its H.264 sibling is a rendition that saves
+# fine and never starts. Six of the twelve encoders the editor offers are HEVC,
+# and before #343 all six were unconfigured; hevc_vaapi additionally lost the
+# device and hwupload it structurally cannot open without.
+#
+# libx265 is the HEVC encoder that needs no particular silicon, so this runs
+# wherever the suite runs. A build without it is an environment fact, not a
+# failure -- the same rule the videotoolbox assertions in step 1 follow.
+step "5. A real HEVC encode, on the encoder family no other step exercises"
+
+start_server hevc "$REAL_FFMPEG" && ok "server started for the HEVC leg" \
+                                 || bad "server did not start"
+run_driver hevc "$WORK/hevc.env"
+H="$WORK/hevc.env"
+stop_server
+
+if [ ! -s "$H" ]; then
+  bad "driver produced no facts for the HEVC case"
+elif [ "$(fact "$H" HEVC_REND_SKIPPED)" = "true" ]; then
+  note "this FFmpeg has no libx265; skipping the HEVC assertions"
+else
+  [ "$(fact "$H" HEVC_REND_RUNNING)" = "true" ] \
+    && ok "a libx265 rendition starts with the flags this build gives it" \
+    || bad "the HEVC rendition was refused: $(fact "$H" HEVC_REND_ERROR)"
+
+  out="hevc/data/recordings/hevc.mkv"
+  if [ -s "$out" ]; then
+    # The codec name is the assertion, not just the dimensions: a rendition that
+    # emitted H.264 under an hevc_* encoder name would be a different bug and
+    # this is the only step that could catch it.
+    got=$(ffprobe -v error -select_streams v:0 \
+                  -show_entries stream=codec_name,width,height -of csv=p=0 "$out")
+    [ "$got" = "hevc,1280,720" ] \
+      && ok "and it produced a real 720p HEVC encode ($got)" \
+      || bad "HEVC rendition output is $got, expected hevc,1280,720"
+  else
+    bad "the HEVC rendition produced no output file"
+  fi
+fi
+
 # ------------------------------------------------------------------ summary
 step "Summary"
 printf "  %d passed, %d failed\n\n" "$pass" "$fail"

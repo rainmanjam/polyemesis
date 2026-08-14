@@ -289,6 +289,7 @@ func SlateArgs(s SlateSpec) []string {
 		"-c:v", s.Encoder,
 	)
 	args = append(args, presetArgs(prof, s.Preset)...)
+	args = append(args, rateModeArgs(prof, s.VideoKbps, s.MaxrateKbps)...)
 	args = append(args, prof.rateControl...)
 	args = append(args,
 		"-b:v", strconv.Itoa(s.VideoKbps)+"k",

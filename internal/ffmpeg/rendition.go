@@ -12,6 +12,10 @@ import (
 // Video encoder names, spelled the way FFmpeg spells them, because these
 // strings are written straight into the command line and stored in the
 // database.
+// Every name here must also appear in db.KnownEncoders and in
+// encoderProfiles. TestEveryEncoderTheUIOffersCanActuallyStart enforces both
+// directions; see the note above encoderProfiles for why a missing entry is a
+// stream that will not start rather than a stream that is merely untuned.
 const (
 	EncoderX264         = "libx264"
 	EncoderNVENC        = "h264_nvenc"
@@ -19,6 +23,16 @@ const (
 	EncoderVideoToolbox = "h264_videotoolbox"
 	EncoderVAAPI        = "h264_vaapi"
 	EncoderAMF          = "h264_amf"
+
+	// The HEVC half of the same five families, plus x265. These were offered
+	// by db.KnownEncoders and had no profile here, which for hevc_vaapi meant
+	// a rendition that could be saved and could never start: see #343.
+	EncoderX265             = "libx265"
+	EncoderNVENCHEVC        = "hevc_nvenc"
+	EncoderQSVHEVC          = "hevc_qsv"
+	EncoderVideoToolboxHEVC = "hevc_videotoolbox"
+	EncoderVAAPIHEVC        = "hevc_vaapi"
+	EncoderAMFHEVC          = "hevc_amf"
 )
 
 // hwEncoders is the hardware-accelerated set, in the order we would offer them.
@@ -171,45 +185,146 @@ type encoderProfile struct {
 	defaultPreset string
 	// rateControl are flags this encoder needs before -b:v means what we mean.
 	rateControl []string
-	// vaapi marks the encoder that needs a device and a hwupload filter tail.
+	// cbr and vbr are the encoder's own rate-control MODE selector, for the
+	// encoders that have one and default to the wrong answer.
+	//
+	// Only NVENC needs this. It is the one encoder in the set that will not
+	// infer capped VBR from -b:v and a higher -maxrate: `-rc cbr` pins it to
+	// constant bitrate and the ceiling then does nothing, so an operator who
+	// set one got a number that was silently ignored (#341's other half).
+	// QSV derives its bitrate-control mode from the same two numbers and has
+	// no -rc option at all; VAAPI's -rc_mode defaults to `auto`, documented as
+	// "choose mode automatically based on other parameters"; VideoToolbox is
+	// capped-VBR unless -constant_bit_rate is asked for, and it is not asked
+	// for here. All three are already correct and are deliberately left alone.
+	//
+	// Both are emitted BEFORE rateControl, which is what keeps the default
+	// NVENC argv byte-identical to the one every existing install emits.
+	cbr []string
+	vbr []string
+	// vaapi marks the encoders that need a device and a hwupload filter tail.
 	vaapi bool
 }
 
+// encoderProfiles must have an entry for every encoder db.KnownEncoders
+// offers. An encoder with no entry is not merely untuned: it takes the unknown
+// branch in RenditionArgs, which cannot know that VAAPI needs a device and an
+// hwupload tail, so hevc_vaapi was selectable in the editor and structurally
+// unable to start. Nothing probes it — only the H.264 half of each family is
+// test-encoded — so it was never greyed out either, and the start gate only
+// refuses on MEASURED failures. #343.
+//
+// `-profile:v high` IS H.264-ONLY. It is not a spelling difference between the
+// two codecs: HEVC's profiles are main / main10 / rext, and every HEVC encoder
+// checked rejects `high` outright rather than ignoring it —
+//
+//	libx265           x265 [error]: unknown profile <high>
+//	hevc_videotoolbox Unable to parse "profile" option value "high"
+//
+// — which is a stream that does not start. Do not copy an H.264 row across to
+// its HEVC sibling.
+//
+// Where a profile is pinned at all it is pinned for one reason: a 10-bit or
+// 4:2:2 ingest would otherwise produce a High10/422 (or Main10) stream that no
+// streaming platform will accept. That is only safe to state where we also
+// state the pixel format, which is true of the SOFTWARE encoders and false of
+// the hardware ones — a hardware encoder takes whatever surface format the
+// driver hands it, and a profile that disagrees with the surface is the same
+// start failure in a different costume. So the HEVC hardware rows pin no
+// profile and let the encoder pick one that matches its input; the H.264
+// hardware rows keep the `high` they have always sent, which is a valid value
+// for every one of them.
+//
+// Verified by running `ffmpeg -h encoder=<name>` and a real one-frame encode.
+// See the PR for #343 for which binary answered for which encoder; the two
+// *_amf rows are the only ones no reachable build registers.
 var encoderProfiles = map[string]encoderProfile{
-	// yuv420p is forced because a 10-bit or 4:2:2 ingest would otherwise
-	// produce a High10/422 stream that no streaming platform will accept.
 	EncoderX264: {
 		presetFlag:    "-preset",
 		defaultPreset: "veryfast",
 		rateControl:   []string{"-profile:v", "high", "-pix_fmt", "yuv420p"},
 	},
+	// x265 takes the same -preset names as x264. `main` is x265's spelling of
+	// what `high` is for x264: the 8-bit 4:2:0 profile, which is the one a
+	// platform will take.
+	EncoderX265: {
+		presetFlag:    "-preset",
+		defaultPreset: "veryfast",
+		rateControl:   []string{"-profile:v", "main", "-pix_fmt", "yuv420p"},
+	},
 	// NVENC's p1..p7 presets replaced the named ones; p4 is the middle,
-	// "medium" equivalent and the honest default for a live encode.
+	// "medium" equivalent and the honest default for a live encode. Both
+	// NVENC encoders share one option table, so the preset list is the same.
 	EncoderNVENC: {
 		presetFlag:    "-preset",
 		defaultPreset: "p4",
-		rateControl:   []string{"-rc", "cbr", "-profile:v", "high"},
+		cbr:           []string{"-rc", "cbr"},
+		vbr:           []string{"-rc", "vbr"},
+		rateControl:   []string{"-profile:v", "high"},
+	},
+	EncoderNVENCHEVC: {
+		presetFlag:    "-preset",
+		defaultPreset: "p4",
+		cbr:           []string{"-rc", "cbr"},
+		vbr:           []string{"-rc", "vbr"},
 	},
 	EncoderQSV: {
 		presetFlag:    "-preset",
 		defaultPreset: "veryfast",
 		rateControl:   []string{"-profile:v", "high"},
 	},
-	// VideoToolbox has no preset at all; -realtime is its equivalent lever.
+	EncoderQSVHEVC: {
+		presetFlag:    "-preset",
+		defaultPreset: "veryfast",
+	},
+	// VideoToolbox has no preset at all; -realtime is its equivalent lever,
+	// and it is spelled the same on both codecs.
 	EncoderVideoToolbox: {
 		rateControl: []string{"-realtime", "1", "-profile:v", "high"},
 	},
+	EncoderVideoToolboxHEVC: {
+		rateControl: []string{"-realtime", "1"},
+	},
 	// VAAPI takes neither a preset nor a profile name; everything it needs
-	// comes from the device and the filter chain.
-	EncoderVAAPI: {vaapi: true},
+	// comes from the device and the filter chain. THE vaapi FLAG IS THE WHOLE
+	// FIX for hevc_vaapi -- without it the argv gets neither -vaapi_device nor
+	// format=nv12,hwupload, and VAAPI encodes from GPU surfaces, so it cannot
+	// open at all.
+	EncoderVAAPI:     {vaapi: true},
+	EncoderVAAPIHEVC: {vaapi: true},
 	// AMF spells its preset "-quality", and "-usage transcoding" is what
 	// selects the streaming rate-control behaviour rather than the low-latency
 	// screen-sharing one.
+	//
+	// These two rows are the only ones in this map not verified against a real
+	// binary: no Linux or macOS FFmpeg registers an *_amf encoder at all (the
+	// AMF path is Windows, which docs/HARDWARE.md already says). hevc_amf
+	// therefore carries the H.264 row's flags MINUS the profile -- dropping
+	// `high` removes the one failure mode that is fatal, since an option an
+	// encoder does not have is a warning while a bad VALUE for an option it
+	// does have refuses to open.
 	EncoderAMF: {
 		presetFlag:    "-quality",
 		defaultPreset: "speed",
 		rateControl:   []string{"-usage", "transcoding", "-profile:v", "high"},
 	},
+	EncoderAMFHEVC: {
+		presetFlag:    "-quality",
+		defaultPreset: "speed",
+		rateControl:   []string{"-usage", "transcoding"},
+	},
+}
+
+// EncoderIsConfigured reports whether this encoder has a tuning profile here,
+// rather than falling through to the flags every encoder understands.
+//
+// Exported for the meta-test in internal/db, which enumerates the encoders the
+// UI offers and asserts each one is configured. That direction is the one that
+// matters: db is where an encoder becomes selectable, and an encoder that is
+// selectable and unconfigured is the #343 defect exactly.
+func EncoderIsConfigured(name string) bool {
+	_, ok := encoderProfiles[name]
+	return ok
 }
 
 // RenditionArgs builds one shared video encode.
@@ -293,6 +408,7 @@ func RenditionArgs(s RenditionSpec) []string {
 		"-c:v", s.Encoder,
 	)
 	args = append(args, presetArgs(prof, s.Preset)...)
+	args = append(args, rateModeArgs(prof, s.VideoKbps, s.MaxrateKbps)...)
 	args = append(args, prof.rateControl...)
 	args = append(args,
 		"-b:v", strconv.Itoa(s.VideoKbps)+"k",
@@ -330,6 +446,27 @@ func RenditionArgs(s RenditionSpec) []string {
 		RelayOutputURL(s.OutRelayURL),
 	)
 	return args
+}
+
+// rateModeArgs picks the encoder's rate-control MODE from the two numbers the
+// operator actually set.
+//
+// A ceiling above the target is a request for capped VBR: average at the
+// target, burst to the ceiling, and let a static scene spend less than a busy
+// one. A ceiling equal to the target is CBR and is the default, because every
+// platform ingest documents a target and a ceiling and an undershoot-then-
+// overshoot stream is the one that buffers.
+//
+// maxrate arrives already defaulted to videoKbps by the caller, so the equal
+// case and the unset case are the same case, and both emit exactly what they
+// emitted before this existed. That is load-bearing: docs/ENCODING.md and
+// TestRateControlOnAStoredRenditionReachesTheArgv both pin that leaving the
+// fields at 0 changes nothing for any existing install.
+func rateModeArgs(prof encoderProfile, videoKbps, maxrateKbps int) []string {
+	if maxrateKbps > videoKbps {
+		return prof.vbr
+	}
+	return prof.cbr
 }
 
 func presetArgs(prof encoderProfile, want string) []string {
