@@ -18,7 +18,10 @@
 #     the same measurement acceptance.sh uses, because the whole risk of this
 #     feature is that a shared video encode quietly flattens the audio;
 #   - ONE encoder process served both rendition destinations (ref counting up),
-#     and it went away when the last one was stopped (ref counting down).
+#     and it went away when the last one was stopped (ref counting down);
+#   - a rendition storing an explicit maxrate/bufsize started an FFmpeg whose
+#     command line carries THOSE numbers rather than the CBR pair derived from
+#     the target bitrate. A second rendition exists solely to carry them.
 #
 # Usage:  ./scripts/acceptance-renditions.sh [workdir]
 set -uo pipefail
@@ -132,6 +135,7 @@ OUT=data/recordings
 check_video "$OUT/passthrough.mkv"  "passthrough"  1920 1080 60
 check_video "$OUT/rendition-a.mkv"  "720p30 dest A" 1280 720 30
 check_video "$OUT/rendition-b.mkv"  "720p30 dest B" 1280 720 30
+check_video "$OUT/capped.mkv"       "480p30 capped" 854 480 30
 
 step "3b. Verify burned-in text actually reached the pixels"
 
@@ -345,6 +349,59 @@ fi
 [ "${CONSUMERS_AFTER_RELEASE:-1}" = "0" ] && [ "${RENDITION_RUNNING_AFTER_RELEASE:-yes}" = "no" ] \
   && ok "the idle rendition reports 0 consumers and no process" \
   || bad "after release: consumers=${CONSUMERS_AFTER_RELEASE:-?} running=${RENDITION_RUNNING_AFTER_RELEASE:-?}"
+
+step "5b. Verify a capped rate control reaches the LIVE encoder"
+
+# #341 made maxrate and bufsize settable on a rendition. Nothing was broken when
+# it landed -- ffmpeg.RenditionSpec already had the fields and RenditionArgs
+# already emitted them -- what was missing was the two lines of renditionSpecOf
+# that read them off the stored row. A capability the code described and the
+# product did not have.
+#
+# internal/engine/rendition_ratecontrol_test.go covers that mapping, and it
+# cannot cover this: it calls renditionSpecOf directly with a db.Rendition it
+# built itself, so it proves the function maps what it is handed. It cannot
+# prove the API stored what was sent, that the engine read the row it stored,
+# or that the process the engine spawned was started from that spec. Those are
+# three separate joins, and a break in any of them looks exactly like #341 did
+# -- correct on both sides, wrong in the composition.
+#
+# So the numbers below are read off argv of a RUNNING FFmpeg, by the driver,
+# out of the process table.
+#
+# 4500/8000/12000 is chosen so no wrong answer can pass. RenditionArgs derives
+# maxrate=target and bufsize=2x when the fields are absent, which for a 4500
+# target is 4500k/9000k -- the exact pair the command line carried before #341
+# regardless of what the operator stored. Those two values are called out by
+# name below, because "the field never arrived" is a different bug from "the
+# field arrived wrong" and the operator needs to be told which.
+
+[ "${CAPPED_MAXRATE_STORED:-0}" = "8000" ] && [ "${CAPPED_BUFSIZE_STORED:-0}" = "12000" ] \
+  && ok "the rate-control pair round-tripped through the store (maxrate ${CAPPED_MAXRATE_STORED}, bufsize ${CAPPED_BUFSIZE_STORED})" \
+  || bad "the store returned maxrate='${CAPPED_MAXRATE_STORED:-}' bufsize='${CAPPED_BUFSIZE_STORED:-}', expected 8000 and 12000; the argv checks below cannot mean anything until this does"
+
+if [ "${CAPPED_ARGV_FOUND:-no}" != "yes" ]; then
+  # Named separately from a wrong value, and deliberately so. An unreadable
+  # process table is a broken MEASUREMENT; reporting it as "the rate control did
+  # not reach the encoder" would send someone to look at the wrong code.
+  bad "no running FFmpeg carried the capped rendition's scale filter, so its command line could not be read; the measurement is broken, not necessarily the rate control"
+else
+  [ "${CAPPED_ARGV_BV:-}" = "4500k" ] \
+    && ok "the live encoder targets -b:v 4500k" \
+    || bad "the live encoder targets -b:v '${CAPPED_ARGV_BV:-}', expected 4500k"
+
+  case "${CAPPED_ARGV_MAXRATE:-}" in
+    8000k) ok "the live encoder was started with -maxrate 8000k, the stored ceiling" ;;
+    4500k) bad "the live encoder was started with -maxrate 4500k -- the CBR value RenditionArgs derives from the target when the field is absent. The stored 8000 never reached the process" ;;
+    *)     bad "the live encoder was started with -maxrate '${CAPPED_ARGV_MAXRATE:-}', expected the stored 8000k" ;;
+  esac
+
+  case "${CAPPED_ARGV_BUFSIZE:-}" in
+    12000k) ok "the live encoder was started with -bufsize 12000k, the stored buffer" ;;
+    9000k)  bad "the live encoder was started with -bufsize 9000k -- twice the target, which is what RenditionArgs derives when the field is absent. The stored 12000 never reached the process" ;;
+    *)      bad "the live encoder was started with -bufsize '${CAPPED_ARGV_BUFSIZE:-}', expected the stored 12000k" ;;
+  esac
+fi
 
 step "6. Verify a passthrough destination is unchanged for existing installs"
 
