@@ -25,7 +25,17 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
     </p>
   </section>
 
-  <section class="wrap grid gap-6 pb-16 lg:grid-cols-2">
+  {/* md: as well as lg:, because the tablet band had nothing.
+
+      `md:` appears four times in this whole site and all four are the Nav
+      showing and hiding -- not one is a grid. So every layout here went from
+      one column straight to lg:, and 768px got the PHONE layout at desktop
+      type. Measured: this page is 3122px at 768 against 2294px at 1440, 36%
+      taller for the same content, with half the width unused.
+
+      Two install cards side by side at 768 gives each ~360px, which the
+      commands fit now that they wrap. */}
+  <section class="wrap grid gap-6 pb-16 md:grid-cols-2">
     <div class="card p-6" data-reveal>
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-lg font-medium">Docker</h2>

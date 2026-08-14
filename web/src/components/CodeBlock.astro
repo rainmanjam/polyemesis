@@ -125,14 +125,24 @@ const copyable = variant === "command";
     line-height: 1.65;
     color: var(--color-muted);
   }
-  /* WRAP INSTEAD OF SCROLL on a phone. See the note at the top: a command that
-     scrolls sideways inside its own box hides its own tail, and the tail of an
-     install command is where the flags are. */
-  @media (max-width: 40rem) {
-    .code pre {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
+  /* WRAP INSTEAD OF SCROLL, AT EVERY WIDTH. A command that scrolls sideways
+     inside its own box hides its own tail, and the tail of an install command
+     is where the flags are.
+
+     THIS WAS A VIEWPORT MEDIA QUERY FIRST, and that was wrong for a reason
+     worth recording: what determines whether a command fits is the width of its
+     CONTAINER, not the width of the window. The moment /download gained a
+     two-column tablet layout, the same block sat in a 293px column at a 768px
+     viewport -- too wide for the query to fire, far too narrow for the command.
+     Measured immediately after that change: 265px hidden again, worse than
+     before, because the column was narrower than the page had been.
+
+     Unconditional costs nothing where there is room. A command shorter than its
+     box does not wrap, so wide screens look exactly as they did; only the lines
+     that would otherwise have been hidden behave differently. */
+  .code pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .code-copy {
