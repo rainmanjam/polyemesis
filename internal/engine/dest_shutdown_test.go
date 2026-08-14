@@ -47,7 +47,7 @@ func TestStartingADestinationAfterShutdownLeavesNothingBehind(t *testing.T) {
 	row := &db.Destination{ID: 1, Name: "twitch", Kind: db.DestRTMP,
 		URL: "rtmp://live.example/app", StreamKey: "key"}
 
-	if err := e.startDest(row, routing.Result{}, "spec", hub, 0); err != nil {
+	if err := e.startDest(destPlan{row: row, spec: "spec"}, hub, 0); err != nil {
 		t.Fatalf("startDest: %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestAReconcileThatPublishesIntoAShutdownStartsNothing(t *testing.T) {
 		e.Stop()
 	}
 
-	if err := e.startDest(row, routing.Result{}, "spec", hub, 0); err != nil {
+	if err := e.startDest(destPlan{row: row, spec: "spec"}, hub, 0); err != nil {
 		t.Fatalf("startDest: %v", err)
 	}
 

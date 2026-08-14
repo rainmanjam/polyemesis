@@ -658,6 +658,34 @@ export interface DestStatus {
   backupProcess?: ProcessStatus | null;
   /** Why there is no backup, when one was asked for. */
   backupError?: string;
+  /** What the Twitch Enhanced Broadcasting negotiation for this destination's
+   *  CURRENT run decided, in one sentence. Absent for every destination that
+   *  did not ask, which is nearly all of them.
+   *
+   *  Deliberately NOT in `warnings`, which the card renders in amber behind an
+   *  alert triangle. Twitch grants this only to a client with a supported GPU
+   *  and a rented server has none, so a fallback is what happens every time on
+   *  most installs — rendering it as a warning would train the operator to read
+   *  a perfectly normal broadcast as broken. */
+  multitrackNote?: string;
+  /** "negotiated", "advisory" or "refused" — so the card can tell "we asked and
+   *  were turned down" from "we never asked". Absent when nothing asked. */
+  multitrackVerdict?: string;
+  /** Where Twitch's configuration departs from what this destination asked
+   *  for. ADVISORY ONLY: these annotate a destination that IS publishing and
+   *  must never be rendered as faults. */
+  multitrackDivergences?: Divergence[] | null;
+  /** Why this destination's second (VOD) audio mix is not on the wire. Empty
+   *  when there is no second mix, and empty when there is one and it is going
+   *  out. Not a warning: the destination is publishing correctly, one track
+   *  short of what was configured, and the fix is a toggle not a repair. */
+  vodAudioDropped?: string;
+}
+
+/** One advisory note about a negotiated Enhanced Broadcasting configuration. */
+export interface Divergence {
+  field: string;
+  detail: string;
 }
 
 /** One shared video encode's live state.
@@ -903,6 +931,9 @@ export interface Settings {
   mqtt?: MQTTSettings;
   /** Install-wide destination policy. Optional for the same reason. */
   destinations?: { staggerMs: number };
+  /** The hardware Twitch Enhanced Broadcasting is negotiated with. Optional for
+   *  the same reason, and absent on nearly every install. */
+  multitrack?: MultitrackSettings;
   /** How much chat scrollback is kept. Optional for the same reason.
    *
    *  This is the depth of the moderator's user card, not just a disk knob: that
@@ -917,6 +948,48 @@ export interface Settings {
   /** Alert delivery policy. Optional so a client that predates it can still
    *  PUT settings. See AlertSettings below. */
   alerts?: AlertSettings;
+}
+
+/** The GPU inventory Twitch Enhanced Broadcasting is negotiated with.
+ *
+ *  DECLARED, NOT DETECTED, and that is the design rather than a gap. Twitch
+ *  validates this inventory and refuses by name — a vendor ID of zero, a vendor
+ *  it does not recognise, an out-of-date driver — and polyemesis can measure
+ *  exactly one of these six fields on one platform (the PCI vendor ID, from
+ *  /sys/class/drm on Linux). Sending that one with zeros in the rest would be a
+ *  description of a machine that does not exist.
+ *
+ *  Empty is the default and is not a fault: with nothing declared, no
+ *  negotiation is attempted at all and every destination that opted in
+ *  publishes to the ordinary Twitch ingest and says so once.
+ *
+ *  The vendor ID does not have to be guessed. The hardware panel already
+ *  reports the PCI vendor ID of every render node found on this machine, and
+ *  the NVIDIA driver version where it could be read. */
+export interface MultitrackSettings {
+  gpus?: MultitrackGpu[];
+}
+
+export interface MultitrackGpu {
+  /** The adapter as its vendor names it, e.g. "NVIDIA GeForce RTX 4070".
+   *  Required: it is what an operator reads back to check they filled in the
+   *  right card. */
+  model: string;
+  /** PCI vendor ID as a DECIMAL integer — 4318 NVIDIA, 4098 AMD, 32902 Intel.
+   *  Zero is refused when saving, because Twitch refuses it by name and a
+   *  refusal three weeks later at go-live is not attached to the mistake. */
+  vendorId: number;
+  /** PCI device ID, decimal. Optional: an operator who cannot find it is
+   *  better off sending nothing than inventing a number. */
+  deviceId?: number;
+  /** In BYTES, which is the unit the wire format uses. Optional. */
+  dedicatedVideoMemory?: number;
+  sharedSystemMemory?: number;
+  /** The vendor's own driver version string. Optional — Twitch refuses an
+   *  out-of-date driver naming the version to upgrade to, so an empty one is a
+   *  refusal it cannot explain, but a wrong one invented to fill the box is
+   *  worse than a missing one. */
+  driverVersion?: string;
 }
 
 /** Bounds on the stored chat scrollback.

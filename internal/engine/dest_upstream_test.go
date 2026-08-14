@@ -5,7 +5,6 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/relay"
-	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
 // A9. startDest subscribes to the hub it was HANDED -- a rendition's, or a
@@ -31,7 +30,7 @@ func TestAFileDestinationThatCannotResolveUnsubscribesFromItsOwnHub(t *testing.T
 	// A separator in the name is refused by recording.Manager.Resolve, which is
 	// the failure this path exists for.
 	row := &db.Destination{ID: 3, Name: "archive", Kind: db.DestFile, URL: "sub/dir.mkv"}
-	if err := e.startDest(row, routing.Result{}, "spec", rendHub, 0); err == nil {
+	if err := e.startDest(destPlan{row: row, spec: "spec"}, rendHub, 0); err == nil {
 		t.Fatal("startDest accepted a file destination whose name escapes the recordings directory")
 	}
 

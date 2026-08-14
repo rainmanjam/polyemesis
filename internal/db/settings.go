@@ -863,6 +863,137 @@ func (d DestinationSettings) problems() []string {
 	return nil
 }
 
+// -------------------------------------------------------------- multitrack
+
+// MultitrackSettings is the hardware inventory Twitch Enhanced Broadcasting is
+// negotiated with. See internal/multitrack, and Destination.Multitrack, which
+// is the per-destination opt-in this block makes possible.
+//
+// IT IS DECLARED BY THE OPERATOR RATHER THAN MEASURED, and that is the decision
+// rather than an omission. multitrack.GPU carries six fields -- model, PCI
+// vendor id, PCI device id, dedicated video memory, shared system memory,
+// driver version -- and this repository can enumerate exactly one of them on
+// one platform: ffmpeg.GPUDevice.VendorID, read out of /sys/class/drm on Linux.
+// There is no model, no device id and no memory figure anywhere in
+// internal/ffmpeg, on any GOOS.
+//
+// Twitch VALIDATES this inventory and refuses by name: a vendor id of 0, a
+// vendor it does not recognise, and an out-of-date driver were each refused in
+// testing. So a request assembled from the one field that can be measured, with
+// zeros in the other five, would be a statement about this machine that is not
+// true -- and the refusal it earned would look like a platform problem rather
+// than like the missing information it is. multitrack.Capabilities draws the
+// same boundary in its own words: "The caller supplies it or the call is
+// refused."
+//
+// EMPTY IS THE DEFAULT AND IS NOT A FAULT. multitrack.Negotiate short-circuits
+// to Refused when no GPU is declared, without spending a network round trip at
+// go-live to be told what it already knows, and the destination publishes to
+// the ordinary Twitch ingest and says so once. Every install that never opens
+// this page behaves exactly as it did before this field existed.
+//
+// The operator does not have to guess the vendor id: GET
+// /api/v1/renditions/hardware already reports the PCI vendor id of every DRM
+// node it found and the NVIDIA driver version when it could be read cheaply,
+// which is what the settings form shows beside these boxes.
+type MultitrackSettings struct {
+	// GPUs is what this machine has. A list rather than one entry because
+	// multitrack.Capabilities.GPU is a list and a two-card machine is ordinary;
+	// order is the operator's, and Preferences.CompositionGPUIndex would index
+	// into it if polyemesis ever composited on a chosen card.
+	GPUs []MultitrackGPU `json:"gpus,omitempty"`
+}
+
+// Known PCI vendor ids, in the DECIMAL spelling Twitch's wire format uses.
+// internal/ffmpeg spells the same three in hex because sysfs does; both are
+// here rather than one converted into the other, because the two are read by
+// different audiences and a silent base change is how an id becomes wrong.
+const (
+	PCIVendorNVIDIA = 4318  // 0x10de
+	PCIVendorAMD    = 4098  // 0x1002
+	PCIVendorIntel  = 32902 // 0x8086
+)
+
+// MultitrackGPU is one declared adapter. The field names and units are
+// multitrack.GPU's, which is the wire format, so that nothing between this
+// struct and the request has to reinterpret them.
+type MultitrackGPU struct {
+	// Model is the adapter as its vendor names it, e.g. "NVIDIA GeForce RTX
+	// 4070". Twitch quotes nothing back from it, but it is the field an
+	// operator reads on the settings page to check they filled in the right
+	// card, so it is required rather than optional.
+	Model string `json:"model"`
+	// VendorID is the PCI vendor id as a DECIMAL integer: 4318 NVIDIA, 4098
+	// AMD, 32902 Intel. Zero is refused -- by Twitch, naming the value, and
+	// here, so the operator learns it on the settings page rather than as a
+	// fallback they cannot explain three weeks later.
+	VendorID uint32 `json:"vendorId"`
+	// DeviceID is the PCI device id, decimal. Optional: it is not something
+	// polyemesis can check, and an operator who cannot find it is better off
+	// sending zero than inventing one.
+	DeviceID uint32 `json:"deviceId,omitempty"`
+	// DedicatedVideoMemory and SharedSystemMemory are in BYTES, which is the
+	// unit obs-studio sends them in. Optional for the same reason as DeviceID.
+	DedicatedVideoMemory uint64 `json:"dedicatedVideoMemory,omitempty"`
+	SharedSystemMemory   uint64 `json:"sharedSystemMemory,omitempty"`
+	// DriverVersion is the vendor's own version string. Twitch refuses an
+	// out-of-date driver naming the version to upgrade to, so an empty one is
+	// simply a refusal it cannot explain -- but it is still left optional,
+	// because a wrong version invented to fill the box is worse than a missing
+	// one.
+	DriverVersion string `json:"driverVersion,omitempty"`
+}
+
+// Declared reports whether this machine has been told it has a GPU at all.
+// Nothing negotiates without it.
+func (m MultitrackSettings) Declared() bool { return len(m.GPUs) > 0 }
+
+// MaxMultitrackGPUs bounds the list. Eight is well past any machine that
+// encodes video and exists to catch a paste accident, not to express a view.
+const MaxMultitrackGPUs = 8
+
+// MaxMultitrackFieldLength bounds the two free-text fields. They land in a JSON
+// request body, so the limit is about a paste accident rather than about a
+// buffer.
+const MaxMultitrackFieldLength = 200
+
+// problems validates the declared inventory.
+//
+// A HALF-FILLED ENTRY IS AN ERROR HERE RATHER THAN A REFUSAL AT GO-LIVE. An
+// entry with no vendor id is one Twitch will refuse by name, and the operator
+// would meet that as a destination quietly publishing to the ordinary ingest
+// with a sentence about GPUs they had, they thought, just configured. Refusing
+// it on the settings page is the one place the mistake is still attached to the
+// thing that caused it.
+//
+// AN UNRECOGNISED VENDOR ID IS NOT REFUSED, only zero is. Twitch validates
+// against a list it does not publish, and a list guessed from three constants
+// would refuse whatever it adds next -- the failure this repo's services
+// registry exists to avoid. An unknown vendor gets a refusal from Twitch with
+// Twitch's own sentence, which is more accurate than anything asserted here.
+func (m MultitrackSettings) problems() []string {
+	var probs []string
+	if len(m.GPUs) > MaxMultitrackGPUs {
+		probs = append(probs, fmt.Sprintf("%d Enhanced Broadcasting GPUs declared (max %d)",
+			len(m.GPUs), MaxMultitrackGPUs))
+	}
+	for i, g := range m.GPUs {
+		if strings.TrimSpace(g.Model) == "" {
+			probs = append(probs, fmt.Sprintf("Enhanced Broadcasting GPU %d needs a model name", i+1))
+		}
+		if len(g.Model) > MaxMultitrackFieldLength || len(g.DriverVersion) > MaxMultitrackFieldLength {
+			probs = append(probs, fmt.Sprintf("Enhanced Broadcasting GPU %d has a field over %d characters",
+				i+1, MaxMultitrackFieldLength))
+		}
+		if g.VendorID == 0 {
+			probs = append(probs, fmt.Sprintf("Enhanced Broadcasting GPU %d needs a PCI vendor ID "+
+				"(decimal: %d NVIDIA, %d AMD, %d Intel) -- Twitch refuses a request that sends zero",
+				i+1, PCIVendorNVIDIA, PCIVendorAMD, PCIVendorIntel))
+		}
+	}
+	return probs
+}
+
 // ------------------------------------------------------------------- mqtt
 
 // MQTT bounds. The interval floor is 1s because the underlying state is
@@ -1338,9 +1469,13 @@ type Settings struct {
 	// Destinations is install-wide destination policy; per-destination
 	// settings live on the destination row.
 	Destinations DestinationSettings `json:"destinations"`
-	Chat         ChatSettings        `json:"chat"`
-	Automod      AutomodSettings     `json:"automod"`
-	Alerts       AlertSettings       `json:"alerts"`
+	// Multitrack is the hardware inventory Twitch Enhanced Broadcasting is
+	// negotiated with. Install-wide because it describes the machine, not a
+	// destination; the per-destination opt-in is Destination.Multitrack.
+	Multitrack MultitrackSettings `json:"multitrack"`
+	Chat       ChatSettings       `json:"chat"`
+	Automod    AutomodSettings    `json:"automod"`
+	Alerts     AlertSettings      `json:"alerts"`
 }
 
 // AutomodSettings is everything about automatic chat moderation except the
@@ -1799,6 +1934,9 @@ func (s Settings) Validate() error {
 		add("%s", p)
 	}
 	for _, p := range s.MQTT.problems() {
+		add("%s", p)
+	}
+	for _, p := range s.Multitrack.problems() {
 		add("%s", p)
 	}
 	for _, p := range s.Destinations.problems() {
